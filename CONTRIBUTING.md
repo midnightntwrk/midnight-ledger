@@ -4,9 +4,9 @@ We welcome your contributions to the Midnight network! By contributing, you'll p
 
 ## Getting Started
 
-* **Review Existing Contributions and Issues:** Before submitting, please check if a similar issue or feature request already exists by searching our issue tracker.
-* **Understand the Project:** Familiarize yourself with Midnight's architecture, technology, and coding standards. You can find relevant information in our litepaper. 
-* **Set up Your Development Environment:** Ensure you have the necessary tools and dependencies installed. See our developer [documentation](https://docs.midnight.network/) for detailed instructions. 
+- **Review Existing Contributions and Issues:** Before submitting, please check if a similar issue or feature request already exists by searching our issue tracker.
+- **Understand the Project:** Familiarize yourself with Midnight's architecture, technology, and coding standards. You can find relevant information in our litepaper.
+- **Set up Your Development Environment:** Ensure you have the necessary tools and dependencies installed. See our [README](./README.md) for detailed instructions.
 
 ## Submitting Issues
 
@@ -15,36 +15,37 @@ Ensure the title is a clear summary of the requirement and provides enough conte
 
 **Issue Types:**
 
-* **Bug Report:** Provide detailed information about the issue, including steps to reproduce it, expected behavior, and actual behavior, screenshots, or any other relevant information.
-* **Documentation Improvement:** Clearly describe the improvement requested for existing content and/or raise missing areas of documentation and provide details for what should be included.  
-* **Feature Request:** Clearly describe your feature, its benefits, and most importantly, the expected outcome. This helps us analyze the proposed solution and develop alternatives.
-* **Enhancement:** (WIP)
+- **Bug Report:** Provide detailed information about the issue, including steps to reproduce it, expected behavior, and actual behavior, screenshots, or any other relevant information.
+- **Documentation Improvement:** Clearly describe the improvement requested for existing content and/or raise missing areas of documentation and provide details for what should be included.
+- **Feature Request:** Clearly describe your feature, its benefits, and most importantly, the expected outcome. This helps us analyze the proposed solution and develop alternatives.
+- **Enhancement:** (WIP)
 
 ## Code Contribution Process
 
-* **Pull Requests:** Code contributions are submitted via Pull Requests.
-* **Fork the Repository:** Create your own fork of the Midnight repository.
-* **Create a Branch:** Make your changes in a separate branch,
+- **Pull Requests:** Code contributions are submitted via Pull Requests.
+- **Fork the Repository:** Create your own fork of the Midnight repository.
+- **Create a Branch:** Make your changes in a separate branch,
   prefixed with a short name moniker (e.g. `jill-my-feature`).
-* **Follow Coding Standards:** Adhere to the coding style guides specified in our documentation.
-* **Write Tests:** Include unit tests and integration tests to cover your changes.
-* **Commit Messages:** Write clear and concise commit messages.
-* **Submit Pull Request:** Submit your pull request to the appropriate branch in the main repository.
-* **Please do not `--force` pushes** - doing so means that reviewers will have to re-review all
+- **Follow Coding Standards:** Adhere to the coding style guides specified in our documentation.
+- **Write Tests:** Include unit tests and integration tests to cover your changes.
+- **Commit Messages:** Write clear and concise commit messages.
+- **Submit Pull Request:** Submit your pull request to the appropriate branch in the main repository.
+- **Please do not `--force` pushes** - doing so means that reviewers will have to re-review all
   commits in the PR rather than commits since last review.
-* **Code Review:** All pull requests undergo code review by project maintainers.
+- **Code Review:** All pull requests undergo code review by project maintainers.
   Be prepared to address feedback from reviewers.
 
 ## Requirements for Acceptable Contributions:
 
-* **Coding Standards:** Code must adhere to the coding style guides defined in our documentation
-* **Testing:** New functionality must include corresponding unit tests and integration tests.
-* **Documentation:** Code changes should be accompanied by proposed relevant documentation updates.
-* **License:** All contributions must be compatible with the project's license.
+- **Specification**: Code must conform to the [specified behavior](/spec). If deviating from this, a PR updating the specification should be made *first*, and in most cases, a MIP should precede specification changes.
+- **Coding Standards:** Code must adhere to the coding style guides defined in our documentation
+- **Testing:** New functionality must include corresponding unit tests and integration tests.
+- **Documentation:** Code changes should be accompanied by proposed relevant documentation updates.
+- **License:** All contributions must be compatible with the project's license.
   Where possible all files should have this license header:
 
 ```
-// This file is part of <REPLACE WITH REPOSITORY NAME>.
+// This file is part of midnight-ledger.
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");

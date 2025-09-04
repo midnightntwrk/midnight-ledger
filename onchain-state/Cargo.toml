@@ -1,0 +1,33 @@
+[package]
+name = "midnight-onchain-state"
+version = "1.0.0-alpha.2"
+edition = "2024"
+license.workspace = true
+
+[features]
+proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest"]
+
+[dependencies]
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+storage = { path = "../storage", package = "midnight-storage" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+
+hex = "^0.4.3"
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = { version = "^0.8.5", features = ["getrandom"] }
+
+fake = { version = "^2.10.0", features = ["derive"] }
+serde = { version = "^1.0.219", features = ["derive"] }
+serde_bytes = { version = "^0.11.17" }
+# proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
+proptest = { version = "~1.6.0", optional = true }
+proptest-derive = { version = "0.5", optional = true }
+derive-where = "^1.5.0"
+
+[dev-dependencies]
+midnight-onchain-state = { path = ".", features = ["proptest"] }
+rand = { version = "^0.8.5", features = ["getrandom"] }
+paste = "1.0.15"

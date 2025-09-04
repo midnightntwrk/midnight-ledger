@@ -1,0 +1,59 @@
+[package]
+name = "zkir"
+version = "2.0.0-alpha.4"
+edition = "2024"
+license.workspace = true
+
+[[bin]]
+name = "zkir"
+path = "src/main.rs"
+required-features = ["binary"]
+
+[features]
+binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
+proptest = [
+  "dep:paste",
+  "dep:proptest",
+  "dep:proptest-derive",
+  "base-crypto/proptest",
+  "transient-crypto/proptest",
+  "serialize/proptest",
+]
+
+[dependencies]
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+
+midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
+midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
+
+group = "^0.13.0"
+const-hex = "^1.14.0"
+serde = { version = "^1.0.0", features = ["derive", "rc"] }
+serde_bytes = { version = "^0.11.0" }
+serde_json = { version = "^1.0.0" }
+anyhow = "^1.0.98"
+hex = "^0.4.3"
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = "^0.8.0"
+rand_chacha = "^0.3.1"
+tracing = { version = "^0.1.41" }
+
+log = { version = "^0.4.27", optional = true }
+tracing-subscriber = { version = "^0.3.19", optional = true }
+clap = { version = "^4.5.40", features = ["derive"], optional = true }
+env_logger = { version = "^0.11.8", optional = true }
+tokio = { version = "^1.46.1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
+indicatif = { version = "^0.17.11", optional = true }
+console = { version = "^0.15.11", optional = true }
+futures-executor = { version = "^0.3.31", optional = true }
+
+paste = { version = "1.0.14", optional = true }
+proptest = { version = "1.4.0", optional = true }
+proptest-derive = { version = "0.5", optional = true }
+
+[dev-dependencies]
+zkir = { path = ".", features = ["proptest"] }
+actix-rt = "^2.9.0"

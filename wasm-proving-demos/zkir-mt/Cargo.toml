@@ -1,0 +1,18 @@
+[package]
+name = "midnight-zkir-wasm-mt"
+version = "2.0.0-alpha"
+edition = "2024"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+zkir = { path = "../../zkir-wasm", package = "midnight-zkir-wasm" }
+wasm-bindgen-rayon = "1.2"
+web-sys = "0.3.77"
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['-O', '--enable-reference-types', '-g']
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['-O', '--enable-reference-types']

@@ -1,0 +1,72 @@
+[package]
+name = "midnight-transient-crypto"
+version = "1.0.0-alpha.2"
+edition = "2024"
+license.workspace = true
+
+[features]
+default = []
+cli = ["base-crypto/cli"]
+proptest = [
+  "dep:proptest",
+  "dep:proptest-derive",
+  "base-crypto/proptest",
+  "serialize/proptest",
+  "storage/proptest",
+]
+mock-verify = []
+
+[dependencies]
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+storage = { path = "../storage", package = "midnight-storage" }
+
+ff = "^0.13.1"
+group = "^0.13.0"
+midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
+midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
+midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
+anyhow = { version = "^1.0.98" }
+lru = "0.16.0"
+
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = { version = "^0.8.4", features = ["getrandom"] }
+lazy_static = "^1.5.0"
+tracing = { version = "^0.1.41" }
+const-hex = "^1.14.1"
+sha2 = "^0.10.9"
+flate2 = "^1.1.2"
+k256 = "^0.13.4"
+signature = "^2.2.0"
+
+derive-where = "^1.5.0"
+serde = { version = "^1.0.219", features = ["derive", "rc"] }
+serde_bytes = { version = "^0.11.17" }
+serde_json = { version = "^1.0.140" }
+fake = { version = "^2.10.0", features = ["derive"] }
+paste = "1.0.15"
+# proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
+proptest = { version = "~1.6.0", optional = true }
+proptest-derive = { version = "0.5", optional = true }
+blake2b_simd = "1.0.3"
+
+futures = { version = "^0.3.31" }
+
+[dev-dependencies]
+midnight-transient-crypto = { path = ".", features = ["proptest"] }
+actix-rt = "^2.10.0"
+rand_chacha = "^0.3.1"
+tracing-subscriber = "0.3.19"
+criterion = { version = "^0.5.1" }
+rayon = "^1.10.0"
+
+[[bench]]
+name = "benchmarking"
+harness = false
+
+[[example]]
+name = "calibrate"
+path = "examples/calibrate.rs"
+required-features = ["mock-verify"]

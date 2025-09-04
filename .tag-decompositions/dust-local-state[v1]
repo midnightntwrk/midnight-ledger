@@ -1,0 +1,1 @@
+((merkle-tree[v1](dust-generation-info[v1]),u64,merkle-tree[v1](()),u64,hash-map(dust-initial-nonce[v1],u64,size-annotation),hash-map(dust-nullifier[v1],dust-wallet-utxo-state[v1],size-annotation),timestamp,dust-parameters[v1]))

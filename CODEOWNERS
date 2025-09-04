@@ -1,4 +1,4 @@
-* @midnightntwrk/mn-security
+* @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-qa
 /.github/ISSUE_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/PULL_REQUEST_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/workflows/checkmarx.yaml @midnightntwrk/mn-security @midnightntwrk/mn-sre
@@ -8,3 +8,4 @@ CODEOWNERS @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CONTRIBUTING.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
 LICENSE @midnightntwrk/mn-security @midnightntwrk/mn-sre
 SECURITY.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
+/spec/ @midnightntwrk/mn-architects

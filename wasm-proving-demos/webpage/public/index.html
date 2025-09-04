@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>DUST + WASM Proving Demo</title>
+    <style>
+      .progress {
+        margin: 0 1ex;
+        vertical-align: middle;
+        width: 1em;
+        height: 1em;
+        display: inline-block;
+      }
+    </style>
+  </head>
+  <body onload="document.getElementById('prove-button-mt').disabled = true;">
+    <script src="index.js"></script>
+    <h1>DUST + WASM Proving Demo</h1>
+    <button id="prove-button" onclick="goProve(false)">Start proving (Single threaded, stable)</button>
+    <button id="prove-button-mt" onclick="goProve(true)">Start proving (Multi threaded, unstable)</button>
+    <div id="container">
+    </div>
+  </body>
+</html>

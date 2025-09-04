@@ -7,6 +7,7 @@
 <!-- Please check all the boxes that apply to your pull request. -->
 
 - [ ] Useful pull request description
+- [ ] Change conforms to specification, if not open a PR to change spec first
 - [ ] Tests are provided (if possible)
 - [ ] Key commits have useful messages
 - [ ] All check jobs of the CI have succeeded

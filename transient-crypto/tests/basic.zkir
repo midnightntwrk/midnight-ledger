@@ -1,0 +1,8 @@
+{
+   "version": { "major": 2, "minor": 0 },
+   "num_inputs": 1,
+   "do_communications_commitment": false,
+   "instructions": [
+       { "op": "assert", "cond": 0 }
+   ]
+}

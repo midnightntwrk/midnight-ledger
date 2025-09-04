@@ -1,0 +1,24 @@
+{
+  // Documentation to using tasks https://go.microsoft.com/fwlink/?LinkId=733558
+  // JSON schema for task: https://code.visualstudio.com/docs/editor/tasks-appendix
+  // variables reference: https://code.visualstudio.com/docs/editor/variables-reference
+  "version": "2.0.0",
+  "tasks": [
+      {
+          "label": "Compile compact file to JS",
+          "type": "shell",
+          "command": "compactc ${file} ${relativeFileDirname}",
+          "group": "build",
+          "presentation": {
+              "echo": true,
+              "reveal": "never",
+              "focus": false,
+              "panel": "shared",
+              "showReuseMessage": false,
+              "clear": true,
+              "revealProblems": "onProblem"
+          },
+          "problemMatcher": ["$compact"]
+      }
+  ]
+}

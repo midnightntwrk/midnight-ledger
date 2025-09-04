@@ -1,0 +1,1 @@
+((string,#ledger-parameters[v2],u128,mpt-map(user-address[v1],u128,size-annotation),u128,u128,mpt-map(user-address[v1],u128,night-annotation),mpt-map(token-type[v1],u128,size-annotation),#zswap-ledger-state[v4],mpt-map(contract-address[v2],contract-state[v3],night-annotation),#unshielded-utxo-state[v2],replay-protection-state[v1],#dust-state[v1]))

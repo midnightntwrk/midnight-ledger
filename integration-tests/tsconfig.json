@@ -1,0 +1,36 @@
+{
+  "extends": "@tsconfig/node22/tsconfig.json",
+  "compilerOptions": {
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "importHelpers": true,
+    "composite": true,
+    "resolveJsonModule": true,
+    "noPropertyAccessFromIndexSignature": false,
+    "ignoreDeprecations": "5.0",
+    "rootDir": "./",
+    "outDir": "./dist",
+    "esModuleInterop": true,
+    "strictPropertyInitialization": false,
+    "noUnusedLocals": false,
+    "module": "ES2022",
+    "moduleResolution": "node",
+    "verbatimModuleSyntax": true,
+    "target": "ES2022",
+    "lib": [
+      "es2022", "dom"
+    ],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
+    "types": ["vitest/globals"]
+  },
+  "exclude": [
+    "node_modules", "lib-sources", "dist"
+  ],
+  "include": [
+    "global.d.ts", "src/**/*.ts", "*.ts"
+  ]
+}
