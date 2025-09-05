@@ -130,8 +130,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger@${{ env.LEDGER_WASM_VERSION }}
+            npm publish midnight-ledger-v"${SHORT_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/ledger-v"${SHORT_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
@@ -173,8 +173,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-onchain-runtime-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/onchain-runtime@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            npm publish midnight-onchain-runtime-v"${SHORT_VERSION}"-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/onchain-runtime-v"${SHORT_VERSION}"@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
