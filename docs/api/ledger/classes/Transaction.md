@@ -436,7 +436,7 @@ static fromParts(
    network_id, 
    guaranteed?, 
    fallible?, 
-intent?): Transaction<SignatureEnabled, PreProof, PreBinding>;
+   intent?): UnprovenTransaction;
 ```
 
 Creates a transaction from its parts.
@@ -449,19 +449,19 @@ Creates a transaction from its parts.
 
 ##### guaranteed?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### fallible?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### intent?
 
-[`Intent`](Intent.md)\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenIntent`](../type-aliases/UnprovenIntent.md)
 
 #### Returns
 
-`Transaction`\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenTransaction`](../type-aliases/UnprovenTransaction.md)
 
 ***
 
@@ -472,7 +472,7 @@ static fromPartsRandomized(
    network_id, 
    guaranteed?, 
    fallible?, 
-intent?): Transaction<SignatureEnabled, PreProof, PreBinding>;
+   intent?): UnprovenTransaction;
 ```
 
 Creates a transaction from its parts, randomizing the segment ID to better
@@ -486,19 +486,19 @@ allow merging.
 
 ##### guaranteed?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### fallible?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### intent?
 
-[`Intent`](Intent.md)\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenIntent`](../type-aliases/UnprovenIntent.md)
 
 #### Returns
 
-`Transaction`\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenTransaction`](../type-aliases/UnprovenTransaction.md)
 
 ***
 
