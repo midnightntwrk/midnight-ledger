@@ -67,7 +67,7 @@ jobs:
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
             cd "$project"
-            VERSION=$(grep '^version =' Cargo.toml | awk -F '"' '{print $2}')
+            VERSION=$((grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml)| awk -F '"' '{print $2}')
             echo "$project version: $VERSION"
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
             echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
@@ -105,9 +105,8 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "LEDGER_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="ledger-${VERSION}"
-          SHORT_TAG_NAME="ledger-${SHORT_VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
@@ -148,9 +147,8 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "ONCHAIN_RUNTIME_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
-          SHORT_TAG_NAME="onchain-runtime-${SHORT_VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
@@ -191,9 +189,7 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "ZKIR_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
           TAG_NAME="zkir-${VERSION}"
-          SHORT_TAG_NAME="zkir-${SHORT_VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
