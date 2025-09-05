@@ -1,0 +1,238 @@
+name: Publish Ledger Release
+
+on:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: full
+
+jobs:
+  build:
+    runs-on: ubuntu-latest-8-core-x64
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+
+      - name: Setup GitHub Credentials
+        uses: extractions/netrc@v2
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Setup API Credentials
+        uses: extractions/netrc@v2
+        with:
+          machine: api.github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update && sudo apt-get install -y cargo
+
+      - name: Configure Cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Set up Node.js
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # ratchet:actions/setup-node@v4
+        with:
+          always-auth: true
+          registry-url: https://npm.pkg.github.com/
+          scope: '@midnight-ntwrk'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@v30
+        with:
+          extra_nix_config: |
+            netrc-file = ~/.netrc
+            access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+            post-build-hook = ${{ runner.temp }}/post-build.sh
+
+      - name: Cache Nix
+        uses: input-output-hk/actions/attic@latest
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          endpoint: https://attic.ci.iog.io
+          cache: midnight
+          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+      
+      - name: Get project versions
+        run: |
+          for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
+            cd "$project"
+            VERSION=$(grep '^version =' Cargo.toml | awk -F '"' '{print $2}')
+            echo "$project version: $VERSION"
+            VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
+            echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
+            cd ..
+            done
+      
+      - name: Add tags for upstream crates
+        run: |
+          git config --global user.name 'MidnightCI'
+          git config --global user.email 'midnight-automation+midnightci@iohk.io'
+          projects=("coin-structure" "base-crypto" "serialize" "storage" "transient-crypto")
+          for project in "${projects[@]}"; do
+            VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
+            VERSION=${!VAR_NAME}
+            SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+            TAG_NAME="${project}-${VERSION}"
+            SHORT_TAG_NAME="${project}-${SHORT_VERSION}"
+
+            # Check if the long version tag exists on the remote
+            if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+              echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ${project}."
+              continue
+            fi
+
+            # Create and push the new tag
+            git tag "${TAG_NAME}"
+            git push origin "${TAG_NAME}"
+          done
+
+      - name: Build and Publish Ledger
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+        run: |
+          git config --global user.name 'MidnightCI'
+          git config --global user.email 'midnight-automation+midnightci@iohk.io'
+          VAR_NAME=$(echo "LEDGER_VERSION")
+          VERSION=${!VAR_NAME}
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          TAG_NAME="ledger-${VERSION}"
+          SHORT_TAG_NAME="ledger-${SHORT_VERSION}"
+
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          else
+            cd ledger-wasm 
+            cargo check
+            npm install
+            npm run build:markdown-docs
+
+            if git diff --quiet ../docs; then
+              echo "No changes to the docs"
+            else
+              git add ../docs
+              git commit -m "chore: update ledger-wasm docs"
+              git push
+            fi
+
+            cd ..
+            nix build .#ledger-wasm
+            cd result/lib
+            echo "Contents of result/lib:"
+            ls -lah
+            npm publish midnight-ledger-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/ledger@${{ env.LEDGER_WASM_VERSION }}
+            cd ../..
+
+            # Create and push the new tag
+            git tag "${TAG_NAME}"
+            git push origin "${TAG_NAME}"
+          fi
+
+
+      - name: Build and Publish Onchain Runtime
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+        run: |
+          git config --global user.name 'MidnightCI'
+          git config --global user.email 'midnight-automation+midnightci@iohk.io'
+          VAR_NAME=$(echo "ONCHAIN_RUNTIME_VERSION")
+          VERSION=${!VAR_NAME}
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          TAG_NAME="onchain-runtime-${VERSION}"
+          SHORT_TAG_NAME="onchain-runtime-${SHORT_VERSION}"
+
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          else
+            cd onchain-runtime-wasm
+            cargo check
+            npm install
+            npm run build:markdown-docs
+
+            if git diff --quiet ../docs; then
+              echo "No changes to the docs"
+            else
+              git add ../docs
+              git commit -m "chore: update onchain-runtime-wasm docs"
+              git push
+            fi
+
+            cd ..
+            nix build .#onchain-runtime-wasm
+            cd result/lib
+            echo "Contents of result/lib:"
+            ls -lah
+            npm publish midnight-onchain-runtime-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/onchain-runtime@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            cd ../..
+
+            # Create and push the new tag
+            git tag "${TAG_NAME}"
+            git push origin "${TAG_NAME}"
+          fi
+
+
+      - name: Build and Publish ZKIR
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+        run: |
+          git config --global user.name 'MidnightCI'
+          git config --global user.email 'midnight-automation+midnightci@iohk.io'
+          VAR_NAME=$(echo "ZKIR_VERSION")
+          VERSION=${!VAR_NAME}
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          TAG_NAME="zkir-${VERSION}"
+          SHORT_TAG_NAME="zkir-${SHORT_VERSION}"
+
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          else
+            cd zkir-wasm
+            cargo check
+            npm install
+            npm run build:markdown-docs
+
+            if git diff --quiet ../docs; then
+              echo "No changes to the docs"
+            else
+              git add ../docs
+              git commit -m "chore: update zkir-wasm docs"
+              git push
+            fi
+
+            cd ..
+            nix build .#zkir-wasm
+            cd result/lib
+            echo "Contents of result/lib:"
+            ls -lah
+            npm publish midnight-zkir-v2-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/zkir@${{ env.ZKIR_WASM_VERSION }}
+            cd ../..
+
+            # Create and push the new tag
+            git tag "${TAG_NAME}"
+            git push origin "${TAG_NAME}"
+          fi
+
+
+  docker-push:
+    needs: build
+    uses: ./.github/workflows/docker-push.yml
+    secrets:
+      MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
+      ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
+      GH_USERNAME: ${{ secrets.GH_USERNAME }}
+      GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+      
+  

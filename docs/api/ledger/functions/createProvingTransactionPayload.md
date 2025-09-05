@@ -1,0 +1,31 @@
+[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+
+***
+
+[@midnight/ledger](../globals.md) / createProvingTransactionPayload
+
+# Function: ~~createProvingTransactionPayload()~~
+
+```ts
+function createProvingTransactionPayload(transaction, proving_data): Uint8Array;
+```
+
+Creates a payload for proving a specific transaction through the proof server
+
+## Parameters
+
+### transaction
+
+[`Transaction`](../classes/Transaction.md)\<[`SignatureEnabled`](../classes/SignatureEnabled.md), [`PreProof`](../classes/PreProof.md), [`PreBinding`](../classes/PreBinding.md)\>
+
+### proving\_data
+
+`Map`\<`string`, [`ProvingKeyMaterial`](../type-aliases/ProvingKeyMaterial.md)\>
+
+## Returns
+
+`Uint8Array`
+
+## Deprecated
+
+Use `Transaction.prove` instead.
