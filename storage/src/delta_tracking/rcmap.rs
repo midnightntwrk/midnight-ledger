@@ -30,7 +30,7 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 /// A wrapper around `ArenaKey` that ensures the referenced node is persisted.
 ///
 /// When stored in the arena, `KeyRef` reports the wrapped key as its child,
-/// which causes the backend to keep the referenced node alive as long as the
+/// which causes the back-end to keep the referenced node alive as long as the
 /// `KeyRef`.
 #[derive_where(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -114,7 +114,7 @@ impl<D: DB> Tagged for KeyRef<D> {
 #[storable(db = D)]
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
-    /// Reference counts for keys with rc >= 1
+    /// Reference counts for keys with `rc >= 1`
     rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
@@ -131,7 +131,7 @@ impl<D: DB> RcMap<D> {
     }
 
     /// Get the current reference count for a key.
-    /// Returns Some(n) if key is charged (n >= 0), None if key is not in RcMap.
+    /// Returns Some(n) if key is charged (n >= 0), None if key is not in `RcMap`.
     pub(crate) fn get_rc(&self, key: &ArenaKey<D::Hasher>) -> Option<u64> {
         if let Some(count) = self.rc_ge_1.get(key) {
             Some(*count)
@@ -143,7 +143,7 @@ impl<D: DB> RcMap<D> {
     }
 
     /// Increment the reference count for a key.
-    /// Returns (new_rcmap, new_rc).
+    /// Returns `(new_rcmap, new_rc)`.
     #[must_use]
     pub(crate) fn modify_rc(&self, key: &ArenaKey<D::Hasher>, updated: u64) -> Self {
         let curr = self.rc_ge_1.get(key).copied().unwrap_or(0);
@@ -183,7 +183,7 @@ impl<D: DB> RcMap<D> {
         }
     }
 
-    /// Get all keys that are unreachable (have rc=0) and not in the provided set.
+    /// Get all keys that are unreachable (have `rc=0`) and not in the provided set.
     /// This is used to initialize garbage collection.
     pub(crate) fn get_unreachable_keys_not_in(
         &self,
@@ -193,7 +193,7 @@ impl<D: DB> RcMap<D> {
     }
 
     /// Remove a key from the unreachable set (used during garbage collection).
-    /// Returns `Some(updated rc map)` if key was present with rc == 0, and
+    /// Returns `Some(updated rc map)` if key was present with `rc == 0`, and
     /// `None` otherwise.
     #[must_use]
     pub(crate) fn remove_unreachable_key(&self, key: &ArenaKey<D::Hasher>) -> Option<Self> {

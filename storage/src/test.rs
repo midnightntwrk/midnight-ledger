@@ -25,7 +25,7 @@ impl Timer {
     /// Create a new Timer, initializing both start and last to the current
     /// instant
     ///
-    /// The prefix is added to `Self::delta` msgs.
+    /// The prefix is added to `Self::delta` messages.
     pub(crate) fn new<S: AsRef<str>>(prefix: S) -> Self {
         let now = Instant::now();
         Timer {
@@ -35,7 +35,7 @@ impl Timer {
         }
     }
 
-    /// Print "&lt;self.prefix&gt;: &lt;time since last delta&gt;/&lt;time since start&gt;: &lt;msg&gt;".
+    /// Print `"&lt;self.prefix&gt;: &lt;time since last delta&gt;/&lt;time since start&gt;: &lt;msg&gt;"`.
     ///
     /// Returns the time since the last call to `delta`, or since
     /// construction if this is the first call to `delta`.

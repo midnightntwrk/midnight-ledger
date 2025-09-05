@@ -146,7 +146,7 @@ impl Duration {
         Duration::from_secs(h * 60 * 60)
     }
 
-    /// Returns the durations raw value in seconds.
+    /// Returns the duration's raw value in seconds.
     pub fn as_seconds(self) -> i128 {
         self.0
     }

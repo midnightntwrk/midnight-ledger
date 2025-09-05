@@ -13,7 +13,7 @@
 
 //! Delta tracking module for write+delete costing
 //!
-//! This module provides the RcMap data structure and associated functions
+//! This module provides the `RcMap` data structure and associated functions
 //! for implementing write+delete costing in the Midnight ledger.
 
 mod rcmap;
@@ -33,19 +33,19 @@ pub struct WriteDeleteResults<D: DB> {
     pub bytes_deleted: u64,
     /// The amount of nodes created
     pub nodes_written: u64,
-    /// The amount of nodes delted
+    /// The amount of nodes deleted
     pub nodes_deleted: u64,
     /// The CPU cost of the write/delete processing
     pub processing_cost: RunningCost,
-    /// Updated charged keys map (K1) after write+delete computation
+    /// Updated charged keys map (`K1`) after write+delete computation
     pub updated_charged_keys: RcMap<D>,
 }
 
-/// Return costed initial RcMap (K0) for a root set `r0`.
+/// Return costed initial `RcMap` (`K0`) for a root set `r0`.
 ///
 /// For costing initial state of new contract.
 ///
-/// WARNING: this requires the keys in `r0` to be in the backend; see similar
+/// WARNING: this requires the keys in `r0` to be in the back-end; see similar
 /// warning in `incremental_write_delete_costs` for more details.
 pub fn initial_write_delete_costs<D: DB>(
     r0: &StdHashSet<ArenaKey<D::Hasher>>,
@@ -58,16 +58,16 @@ pub fn initial_write_delete_costs<D: DB>(
     WriteDeleteResults::new(keys_reachable_from_r0, keys_removed, k0, cpu_cost)
 }
 
-/// Compute write+delete costs from old charged keys `k0` and new rootset `r1`,
-/// returning costed updated charged keys (K1).
+/// Compute write+delete costs from old charged keys `k0` and new root set `r1`,
+/// returning costed updated charged keys (`K1`).
 ///
 /// For costing a call to an existing contract.
 ///
 /// This implements the complete costing algorithm from the spec.
 ///
-/// WARNING: this requires the keys in `r1` to be in the backend, which in turn
-/// requires them to be `persist()`ed or currently loaded in sps. The assumption
-/// is that callers of this function will do so while sps are in scope for the
+/// WARNING: this requires the keys in `r1` to be in the back-end, which in turn
+/// requires them to be `persist()`ed or currently loaded in `Sp`s. The assumption
+/// is that callers of this function will do so while `Sp`s are in scope for the
 /// `r1` keys, which happens naturally when calling this function on keys taken
 /// from the output `StateValue` of the VM.
 pub fn incremental_write_delete_costs<D: DB>(
@@ -109,7 +109,7 @@ fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64
 }
 
 impl<D: DB> WriteDeleteResults<D> {
-    /// Compute `WriteDeleteResults` for new rcmap and key deltas.
+    /// Compute `WriteDeleteResults` for new `RcMap` and key deltas.
     fn new(
         keys_added: StdHashSet<ArenaKey<D::Hasher>>,
         keys_removed: StdHashSet<ArenaKey<D::Hasher>>,
@@ -128,7 +128,7 @@ impl<D: DB> WriteDeleteResults<D> {
         }
     }
 
-    /// Get RunningCost of these results.
+    /// Get `RunningCost` of these results.
     pub fn running_cost(&self) -> RunningCost {
         RunningCost {
             read_time: CostDuration::ZERO,
@@ -140,7 +140,7 @@ impl<D: DB> WriteDeleteResults<D> {
 }
 
 /// Compute keys reachable from `roots` that are not currently charged in the
-/// RcMap.
+/// `RcMap`.
 ///
 /// Assumes: `rcmap` is child closed.
 ///
@@ -166,14 +166,14 @@ pub fn get_writes<D: DB>(
     keys_added
 }
 
-/// Update an RcMap by adding reference counts for the provided keys and all
-/// their children.  Returns a new RcMap with the updated reference counts.
+/// Update an `RcMap` by adding reference counts for the provided keys and all
+/// their children.  Returns a new `RcMap` with the updated reference counts.
 ///
 /// Assumes:
 /// - `rcmap` union `keys_added` is child closed.
 /// - `rcmap` has internally accurate reference counts.
 ///
-/// Ensures: the returned RcMap is child closed, and has internally accurate
+/// Ensures: the returned `RcMap` is child closed, and has internally accurate
 /// reference counts.
 #[must_use]
 pub fn update_rcmap<D: DB>(
@@ -207,7 +207,7 @@ pub fn update_rcmap<D: DB>(
 /// Perform garbage collection by removing keys with zero reference counts that
 /// are not in `roots`.
 ///
-/// Returns a tuple of (updated_rcmap, keys_removed).
+/// Returns a tuple of `(updated_rcmap, keys_removed)`.
 #[must_use]
 pub fn gc_rcmap<D: DB>(
     orig_rcmap: &RcMap<D>,

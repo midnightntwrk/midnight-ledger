@@ -16,7 +16,7 @@
 //!
 //! * A primary prime field [Fr].
 //! * Embedded elliptic curve points [EmbeddedGroupAffine].
-//! * An Embedded prime field [EmbeddedFr].
+//! * An Embedded prime field [`EmbeddedFr`].
 
 use crate::macros::{fr_display, wrap_display, wrap_field_arith, wrap_group_arith};
 use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment};
@@ -185,11 +185,11 @@ impl Distribution<Fr> for Standard {
     }
 }
 
-/// The number of bits required to represet [Fr].
+/// The number of bits required to represent [Fr].
 pub const FR_BITS: usize = <outer::Scalar as PrimeField>::NUM_BITS as usize;
 /// The number of bytes required to represent [Fr].
 pub const FR_BYTES: usize = FR_BITS.div_ceil(8);
-/// The number of bytes storable in an [Fr].
+/// The number of bytes which can fit in an [Fr].
 pub const FR_BYTES_STORED: usize = FR_BYTES - 1;
 
 impl Dummy<Faker> for Fr {
@@ -337,7 +337,7 @@ impl TryFrom<Fr> for EmbeddedFr {
 }
 
 impl Fr {
-    /// Interpret a little-endiang bytestring as an [Fr].
+    /// Interpret a little-endiang byte-string as an [Fr].
     pub fn from_le_bytes(bytes: &[u8]) -> Option<Self> {
         let mut repr = [0u8; FR_BYTES];
         if bytes.len() <= repr.len() {
@@ -348,7 +348,7 @@ impl Fr {
         outer::Scalar::from_repr(repr).map(Fr).into()
     }
 
-    /// Output an [Fr] as a little-endian bytesstring
+    /// Output an [Fr] as a little-endian bytes-string
     ///
     /// # Examples
     ///
@@ -362,7 +362,7 @@ impl Fr {
 }
 
 impl EmbeddedFr {
-    /// Interpret a little-endiang bytestring as an [EmbeddedFr].
+    /// Interpret a little-endiang byte-string as an [`EmbeddedFr`].
     pub fn from_le_bytes(bytes: &[u8]) -> Option<Self> {
         let mut repr = [0u8; FR_BYTES];
         if bytes.len() <= repr.len() {
@@ -373,7 +373,7 @@ impl EmbeddedFr {
         embedded::Scalar::from_repr(repr).map(EmbeddedFr).into()
     }
 
-    /// Output an [EmbeddedFr] as a little-endian bytesstring
+    /// Output an [`EmbeddedFr`] as a little-endian bytes-string
     pub fn as_le_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()
     }

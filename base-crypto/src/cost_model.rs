@@ -147,7 +147,7 @@ impl Div<u64> for CostDuration {
     Default,
 )]
 #[tag = "synthetic-cost[v1]"]
-/// The synthetic (modelled) cost of execution, typically over a transaction or
+/// The synthetic (modeled) cost of execution, typically over a transaction or
 /// block.
 pub struct SyntheticCost {
     #[serde(rename = "readTime")]
@@ -520,10 +520,10 @@ impl FixedPoint {
     /// The maximum representable fixed point number
     pub const MAX: FixedPoint = FixedPoint(i128::MAX);
 
-    /// Takes a [FixedPoint] denominated in a non-base token unit (for instance,
+    /// Takes a [`FixedPoint`] denominated in a non-base token unit (for instance,
     /// 1.0 representing DUST) to it's base unit.
     ///
-    /// Conceptually, acts as (self * base_unit) as u128 with smarter overflow
+    /// Conceptually, acts as `self * base_unit` as u128 with smarter overflow
     /// handling.
     ///
     /// Rounds up, and returns zero for negatives.
@@ -636,7 +636,7 @@ impl Div for FixedPoint {
     }
 }
 
-/// The raw price adjusment function from fullness, as specified in tokenomics
+/// The raw price adjustment function from fullness, as specified in tokenomics
 /// documents
 pub fn price_adjustment_function(usage: FixedPoint, a: FixedPoint) -> FixedPoint {
     // Points of the function to linearly interpolate between. 0 is point 0, the

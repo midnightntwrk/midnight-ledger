@@ -57,3 +57,6 @@ opt-level = "z"
 lto = true
 codegen-units = 1
 panic = "abort"
+
+[workspace.metadata.spellcheck]
+config = ".spellcheck/cargo-spellcheck.toml"

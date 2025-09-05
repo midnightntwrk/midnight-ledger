@@ -162,10 +162,10 @@ pub trait Zkir: Relation + Tagged + Deserializable + Any + Send + Sync + Debug {
     /// Currently, we handle this by grouping the statement vector into 'blocks'
     /// of public inputs, with each block corresponding to exactly one VM
     /// instruction, and running `check` to figure out which blocks were
-    /// ommitted due to untacken branches, and how many zeros to pad them with.
+    /// omitted due to untaken branches, and how many zeros to pad them with.
     ///
     /// Long-term, we probably want to move to make this obsolete, by having the
-    /// computer target gather information about untaken branches at runtime.
+    /// computer target gather information about untaken branches at run-time.
     fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, ProvingError>;
     /// Proves a circuit.
     /// Returns the proof, the statement vector, and the skips from `check`.
@@ -616,7 +616,7 @@ impl VerifierKey {
 /// A hint on where keys for a circuit can be found.
 ///
 /// Circuit keys are associated with a string name, and are resolved at proving
-/// time against a hashtable of provided keys.
+/// time against a hash table of provided keys.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct KeyLocation(pub Cow<'static, str>);
@@ -632,7 +632,7 @@ impl Tagged for KeyLocation {
 
 #[derive(Serializable)]
 #[tag = "wrapped-ir"]
-/// A container for just the IR part of [ProofData].
+/// A container for just the IR part of [`ProofData`].
 pub struct WrappedIr(pub Vec<u8>);
 tag_enforcement_test!(WrappedIr);
 

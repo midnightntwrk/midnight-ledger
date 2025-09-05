@@ -11,17 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Extension traits for specific [Rng]s.
+//! Extension traits for specific [`Rng`]s.
 
 use rand::rngs::{OsRng, StdRng};
 use rand::{Rng, RngCore, SeedableRng};
 
-/// A [Rng] that can be split. This is *not* the same as [Clone], as the
-/// resulting instance is guarnateed to produce independant random values from
+/// A [`Rng`] that can be split. This is *not* the same as [Clone], as the
+/// resulting instance is guaranteed to produce independent random values from
 /// `self`.
 ///
 /// Due to trait limitations, this does not have a blanket implementation for
-/// and [SeedableRng], but may be implemented for any as needed.
+/// and [`SeedableRng`], but may be implemented for any as needed.
 pub trait SplittableRng: Rng {
     /// Generates a separate instance of `Self` from a random number generator,
     /// which is guaranteed to produce data that is independent of the data

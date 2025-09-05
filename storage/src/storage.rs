@@ -44,13 +44,13 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 
-/// Storage backed by an in-memory hashmap, indexed by Sha256 hashes
+/// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
 /// The default size of the storage cache.
 ///
 /// This size is in number of cache objects, not megabytes consumed! This value
 /// is not well motivated, and we may want to change it later, or better yet,
-/// refactor the backend to track the memory size of the cache, instead of the
+/// refactor the back-end to track the memory size of the cache, instead of the
 /// number of cached objects.
 pub const DEFAULT_CACHE_SIZE: usize = 1024 * 1024;
 
@@ -310,7 +310,7 @@ impl<
         })
     }
 
-    /// Iterate over the key value pairs in the hashmap
+    /// Iterate over the key value pairs in the hash map
     #[allow(clippy::type_complexity)]
     pub fn iter(&self) -> impl Iterator<Item = Sp<(Sp<K, D>, Sp<V, D>), D>> + use<K, V, D, A> {
         self.0.iter().map(|(_, v)| v)
@@ -490,7 +490,7 @@ impl<V: Storable<D> + Serializable, D: DB, A: Storable<D> + Annotation<(Sp<V, D>
             .fold(self.clone(), |acc, x| acc.insert(x.deref().deref().clone()))
     }
 
-    /// Iterate over the key value pairs in the hashset
+    /// Iterate over the key value pairs in the hash set
     pub fn iter(&self) -> impl Iterator<Item = Arc<Sp<V, D>>> + '_
     where
         V: Clone,
@@ -846,7 +846,7 @@ impl<'de, V: Storable<D1> + serde::Deserialize<'de>, D1: DB> serde::Deserialize<
     }
 }
 
-/// An iterator over in_memory::Array
+/// An iterator over `in_memory::Array`
 pub struct ArrayIter<'a, V: Storable<D>, D: DB> {
     array: &'a Array<V, D>,
     next_index: usize,
@@ -885,14 +885,14 @@ pub struct MultiSet<V: Serializable + Storable<D>, D: DB> {
 tag_enforcement_test!(MultiSet<(), DefaultDB>);
 
 impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
-    /// Create a new, empty multiset
+    /// Create a new, empty `MultiSet`
     pub fn new() -> Self {
         MultiSet {
             elements: HashMap::new(),
         }
     }
 
-    /// Insert an element with a quantity of one or, if the element is already in the set, increate its quantity by one
+    /// Insert an element with a quantity of one or, if the element is already in the set, increase its quantity by one
     #[must_use]
     pub fn insert(&self, element: V) -> Self {
         // Add an `entry` fn for HashMap
@@ -1215,7 +1215,7 @@ where
     }
 }
 
-/// A persistently stored map, guaranteeing O(1) clones and logtime
+/// A persistently stored map, guaranteeing O(1) clones and log-time
 /// modifications.
 #[derive_where(PartialEq, Eq, PartialOrd, Ord; V, A)]
 #[derive_where(Hash, Clone)]
@@ -1473,7 +1473,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         }
     }
 
-    /// Insert a key-value pair into the map. Must be O(log(|self|)).
+    /// Insert a key-value pair into the map. Must be `O(log(|self|))`.
     #[must_use]
     pub fn insert(&self, key: K, value: V) -> Self {
         Map {
@@ -1482,7 +1482,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         }
     }
 
-    /// Remove a key from the map. Must be O(log(|self|))
+    /// Remove a key from the map. Must be `O(log(|self|))`
     #[must_use]
     pub fn remove(&self, key: &K) -> Self {
         Map {
@@ -1499,7 +1499,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
             .flat_map(MerklePatriciaTrie::into_inner_for_drop)
     }
 
-    /// Iterate over the key-value pairs in the map in a determinsitic, but unspecified order.
+    /// Iterate over the key-value pairs in the map in a deterministic, but unspecified order.
     pub fn iter(&self) -> impl Iterator<Item = (K, Sp<V, D>)> + use<K, V, D, A> {
         self.mpt.iter().filter_map(|(p, v)| {
             // The path should always decode as nibbles if the map is well
@@ -1515,7 +1515,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         self.iter().map(|(k, _)| k)
     }
 
-    /// Check if the map contains a key. Must be O(log(|self|)).
+    /// Check if the map contains a key. Must be `O(log(|self|))`.
     pub fn contains_key<Q>(&self, key: &Q) -> bool
     where
         K: Borrow<Q>,
@@ -1524,7 +1524,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         self.mpt.lookup(&to_nibbles(key)).is_some()
     }
 
-    /// Retrieve the value stored at a key, if applicable. Must be O(log(|self|)).
+    /// Retrieve the value stored at a key, if applicable. Must be `O(log(|self|))`.
     pub fn get<Q>(&self, key: &Q) -> Option<&V>
     where
         K: Borrow<Q>,
@@ -1575,7 +1575,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> Map<BigEndianU64, V,
     }
 
     /// Prunes all paths which are lexicographically less than or equal to `target_path`.
-    /// Returns the updated tree, and a vec of the removed leaves.
+    /// Returns the updated tree, and a vector of the removed leaves.
     ///
     /// # Panics
     ///
@@ -1707,9 +1707,9 @@ static STORAGES: LazyLock<Mutex<StorageMap>> =
 /// instead of crashing we initialize it implicitly using
 /// `InMemoryDB::default`. This is to avoid needing to write boilerplate storage
 /// initialization code in tests, and is not expected to be used in production,
-/// where other, actually persistent dbs are used to back the storage.
+/// where other, actually persistent `DB`s are used to back the storage.
 ///
-/// # Footgun
+/// # Foot-gun
 ///
 /// The default storage is defined per process, so in particular all threads in
 /// a process share the same default storage at each storage type.
@@ -1719,7 +1719,7 @@ static STORAGES: LazyLock<Mutex<StorageMap>> =
 /// most tests this probably doesn't matter, but for tests of the storage
 /// itself, we need isolation.
 ///
-/// See [`WrappedDB`] for creating disjoint default storages for the same DB
+/// See [`WrappedDB`] for creating disjoint default `Storage`s for the same DB
 /// type, e.g. for test isolation.
 pub fn default_storage<D: DB + Any>() -> Arc<Storage<D>> {
     match try_get_default_storage() {
@@ -1819,8 +1819,8 @@ pub fn unsafe_drop_default_storage<D: DB + Any>() {
     STORAGES.lock().remove(&TypeId::of::<Storage<D>>());
 }
 
-/// A tagged newtype wrapper for DBs, to support creating disjoint [default
-/// storage]([`default_storage`]) DBs of the same type, concurrently.
+/// A tagged newtype wrapper for `DB`s, to support creating disjoint [default
+/// storage]([`default_storage`]) `DB`s of the same type, concurrently.
 ///
 /// Disjoint default storage for the same DB type are needed, for example, when
 /// writing tests that need to run in isolation.
@@ -1855,7 +1855,7 @@ impl<D: Default + DB, T> Default for WrappedDB<D, T> {
 
 /// A pass-thru implementation of `DB`.
 ///
-/// # Footgun
+/// # Foot-gun
 ///
 /// If the `DB` trait ever grows another method with a default implementation,
 /// we'll need to be sure to add the pass-thru here, to preserve any possibly

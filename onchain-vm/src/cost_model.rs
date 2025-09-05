@@ -37,7 +37,7 @@ use transient_crypto::curve::FR_BYTES;
 /// depends on the type of one of the arguments, these are captured as `<op>_<type>`.
 ///
 /// For ops with constant pricing, the constant cost is given by the `<op>`
-/// field. These ops are priced indep of any args (stack args or args built into
+/// field. These ops are priced independent of any arguments (stack arguments or arguments built into
 /// the op). For example, the `size` op is priced constant, and the cost is
 /// given by the `size` field.
 ///
@@ -54,7 +54,7 @@ use transient_crypto::curve::FR_BYTES;
 /// ```
 ///
 /// Note in particular that this `rem` cost function does *not* take the type of
-/// container into account, altho that could change in the future.
+/// container into account, although that could change in the future.
 ///
 /// These pricing functions are defined by the VM implementation itself, in
 /// `midnight-onchain-vm::vm::run_program_internal`. The concrete cost model values used in

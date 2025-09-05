@@ -35,7 +35,7 @@ const GC_ROOT_COLUMN: u8 = 1;
 // Column to track which nodes have a ref count of zero
 const REF_COUNT_ZERO: u8 = 2;
 
-/// A database backend using the ParityDB library.
+/// A database back-end using the `ParityDB` library.
 pub struct ParityDb<H: WellBehavedHasher = DefaultHasher> {
     db: parity_db::Db,
     _phantom: std::marker::PhantomData<H>,
@@ -75,7 +75,7 @@ fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaKey<H> {
 }
 
 impl<H: WellBehavedHasher> ParityDb<H> {
-    /// Open a new ParityDB at the given *directory* path.
+    /// Open a new `ParityDB` at the given *directory* path.
     ///
     /// The on-disk representation of the database is a collection of files, so
     /// `path`, if it already exists, must be a directory, not a file. If the
@@ -113,7 +113,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
 }
 
 #[cfg(feature = "proptest")]
-/// A dummy Arbitrary impl for ParityDb to allow for deriving Arbitrary on Sp<T, D>
+/// A dummy Arbitrary impl for `ParityDb` to allow for deriving Arbitrary on Sp<T, D>
 impl<H: WellBehavedHasher> Arbitrary for ParityDb<H> {
     type Parameters = ();
     type Strategy = DummyDBStrategy<Self>;

@@ -133,7 +133,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     }
 
     /// Prunes all paths which are lexicographically less than the `target_path`.
-    /// Returns the updated tree, and a vec of the removed leaves.
+    /// Returns the updated tree, and a vector of the removed leaves.
     pub(crate) fn prune(
         &self,
         target_path: &[u8],
@@ -169,7 +169,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
             .flat_map(Node::into_inner_for_drop)
     }
 
-    /// Generate iterator over leaves, (path, &value)
+    /// Generate iterator over leaves, `(path, &value)`
     pub fn iter(&self) -> MPTIter<V, D> {
         MPTIter(self.0.leaves(&[]).into_iter())
     }
@@ -225,7 +225,7 @@ impl<V: Storable<D> + PartialOrd, D: DB, A: Storable<D> + PartialOrd + Annotatio
     }
 }
 
-/// Iterator over (path, value) pairs in MerklePatriciaTrie
+/// Iterator over (path, value) pairs in `MerklePatriciaTrie`
 pub struct MPTIter<T: Storable<D> + 'static, D: DB>(
     std::vec::IntoIter<(std::vec::Vec<u8>, Sp<T, D>)>,
 );
@@ -547,7 +547,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
     }
 
     /// Prunes all paths which are lexicographically less than the `target_path`.
-    /// Returns the updated tree, and a vec of the removed leaves.
+    /// Returns the updated tree, and a vector of the removed leaves.
     ///
     /// # Panics
     ///
