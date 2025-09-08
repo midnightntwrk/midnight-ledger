@@ -1857,12 +1857,12 @@ pub mod stress_tests {
     ///   97.10s user 18.82s system 99% cpu 1:56.56 total
     /// ```
     ///
-    /// Note that tree creation takes 20s here, vs 4 s for parity-db, even tho
+    /// Note that tree creation takes 20 s here, vs 4 s for parity-db, even tho
     /// naively, creation should have no interaction with the db: turns out the
     /// hidden db interaction on creation happens in `StorageBackend::cache`,
     /// which checks the db to see if the to-be-cached key is already in the db
     /// or not, which is used for ref-counting. If I comment that check out,
-    /// which is irrelevant for this test, then creation time drops to 3.5 s, an 80%+
+    /// which is irrelevant for this test, then creation time drops to 3.5 s, larger than an 80 %
     /// improvement.
     #[cfg(feature = "sqlite")]
     pub fn load_large_tree_sqldb(args: &[String]) {
@@ -2038,32 +2038,32 @@ pub mod stress_tests {
     ///
     /// Parameters:
     ///
-    /// - `num_operations`: total number of reads+writes to perform.
+    /// - `num_operations`: total number of reads and writes to perform.
     ///
     /// - `flush_interval`: how many operations to do between each flush.
     ///
     /// # Summary of performance of `SqlDB` for various SQLite configurations
     ///
-    /// For the 1_000_000 operation, 1000 flush interval read_write_map_loop
+    /// For the 1000000 operation, 1000 flush interval `read_write_map_loop`
     /// stress test, we see the following total db flush times:
     ///
-    /// - original settings: 2860s
+    /// - original settings: 2860 s
     ///
-    /// - with synchronous=0, but original journal mode: 466s
+    /// - with synchronous = 0, but original journal mode: 466 s
     ///
-    /// - with synchronous=0, and WAL journal: 442s
+    /// - with synchronous = 0, and WAL journal: 442 s
     ///
     /// I.e. speedup factor is 2860/442 ~ 6.5 times.
     ///
     /// The time spent on in-memory storage::Map updates in this stress test
-    /// don't depend on the db settings (of course), and are about 175s, so with
+    /// don't depend on the db settings (of course), and are about 175 s, so with
     /// the DB optimizations we have a ratio of ~ 2.5 times for in-memory updates vs
     /// disk writes for map inserts, which seems pretty good from the point of
     /// view of db traffic, but may indicate there's room to improve the
     /// implementation of the in-memory part.
     ///
-    /// Of the db flush time, it seems about 7% is devoted to preparing the data
-    /// to be flushed, and the other 93% is the time our `db::sql::SqlDB` takes to
+    /// Of the db flush time, it seems about `7%` is devoted to preparing the data
+    /// to be flushed, and the other `93%` is the time our `db::sql::SqlDB` takes to
     /// do the actual flushing.
     fn read_write_map_loop_inner<D: DB>(num_operations: usize, flush_interval: usize) {
         use crate::storage::{Map, Storage, WrappedDB, set_default_storage};
@@ -2937,7 +2937,7 @@ mod tests {
     /// key from the metadata when dropping an Sp, and removing its Arc from the
     /// `sp_cache`. In between, another thread could read the Arc from the `sp_cache`
     /// and assume the key was still in the metadata, an invariant violation that
-    /// caused increment_ref_locked to panic.
+    /// caused `increment_ref_locked` to panic.
     #[test]
     fn metadata_sp_cache_race() {
         use std::thread;

@@ -515,7 +515,7 @@ fn learn_model(
     Ok(op_model)
 }
 
-/// Format (adj) R^2 value, showing "N/A" for zero-parameter models.
+/// Format (adj) `R^2` value, showing "N/A" for zero-parameter models.
 ///
 /// See discussion at `run_zero_dimensional_regression`.
 fn format_r_squared(value: f64, has_model_params: bool) -> String {
@@ -919,7 +919,7 @@ fn run_linear_regression(
 ///
 /// The linear regression library won't compute regressions for a single data point, and for
 /// zero-dimensional data with multiple data points (i.e., opcodes without model parameters but
-/// with multiple container types), the standard R² is always 0 by definition, since the
+/// with multiple container types), the standard `R²` is always 0 by definition, since the
 /// least squares model is just the mean:
 ///
 /// ```text
@@ -937,7 +937,7 @@ fn run_linear_regression(
 /// fit = 1 - Σ(yᵢ - μ)² / Σ(yᵢ)²
 /// ```
 ///
-/// This equals 1 when all yᵢ = μ, and is small when data points are close to μ
+/// This equals 1 when all `yᵢ = μ`, and is small when data points are close to `μ`
 /// relative to their magnitude.  WARNING: Nathan made this alternative fit
 /// measure up, and there might be a better one ...
 fn run_zero_dimensional_regression(
@@ -1017,7 +1017,7 @@ struct Extractor<'a> {
     filename_fragment: String,
     /// Label for the plot's x-axis
     x_axis_name: String,
-    /// Function that transforms ModeledDataPoint to `ScatterDataPoint`
+    /// Function that transforms `ModeledDataPoint` to `ScatterDataPoint`
     extract_fn: ExtractFn,
     /// Optional additional text for plot title (e.g., `"key_size=32"`)
     title_suffix: Option<String>,
@@ -1142,7 +1142,7 @@ impl<'a> Extractor<'a> {
 /// Creates a scatter plot showing measured vs. predicted execution times with:
 /// - Scatter points grouped by container type (different colors/symbols)
 /// - Regression line showing the model's predictions
-/// - R² values and optional context in the title
+/// - `R²` values and optional context in the title
 ///
 /// # Arguments
 /// * `plot_file` - Output path for the HTML plot file

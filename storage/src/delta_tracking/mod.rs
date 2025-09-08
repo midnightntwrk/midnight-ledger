@@ -11,10 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Delta tracking module for write+delete costing
+//! Delta tracking module for write and delete costing
 //!
 //! This module provides the `RcMap` data structure and associated functions
-//! for implementing write+delete costing in the Midnight ledger.
+//! for implementing write and delete costing in the Midnight ledger.
 
 mod rcmap;
 
@@ -25,7 +25,7 @@ use crate::db::DB;
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
 
-/// Result of write+delete cost computation
+/// Result of write and delete cost computation
 pub struct WriteDeleteResults<D: DB> {
     /// Total bytes that would be written to storage
     pub bytes_written: u64,
@@ -37,7 +37,7 @@ pub struct WriteDeleteResults<D: DB> {
     pub nodes_deleted: u64,
     /// The CPU cost of the write/delete processing
     pub processing_cost: RunningCost,
-    /// Updated charged keys map (`K1`) after write+delete computation
+    /// Updated charged keys map (`K1`) after write and delete computation
     pub updated_charged_keys: RcMap<D>,
 }
 
@@ -58,7 +58,7 @@ pub fn initial_write_delete_costs<D: DB>(
     WriteDeleteResults::new(keys_reachable_from_r0, keys_removed, k0, cpu_cost)
 }
 
-/// Compute write+delete costs from old charged keys `k0` and new root set `r1`,
+/// Compute write and delete costs from old charged keys `k0` and new root set `r1`,
 /// returning costed updated charged keys (`K1`).
 ///
 /// For costing a call to an existing contract.

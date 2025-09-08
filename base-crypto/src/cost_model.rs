@@ -523,7 +523,7 @@ impl FixedPoint {
     /// Takes a [`FixedPoint`] denominated in a non-base token unit (for instance,
     /// 1.0 representing DUST) to it's base unit.
     ///
-    /// Conceptually, acts as `self * base_unit` as u128 with smarter overflow
+    /// Conceptually, acts as `self * base_unit` as `u128` with smarter overflow
     /// handling.
     ///
     /// Rounds up, and returns zero for negatives.

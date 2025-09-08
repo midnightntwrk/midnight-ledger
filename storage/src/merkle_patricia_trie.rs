@@ -337,7 +337,7 @@ impl<T> Annotation<T> for SizeAnn {
 ///
 /// Implementations are responsible for satisfying the law:
 ///
-/// ∀ a b c. (a.append(b)).append(c) == a.append(b.append(c))
+/// `∀ a b c. (a.append(b)).append(c) == a.append(b.append(c))`
 pub trait Semigroup {
     /// The associative binary operator
     fn append(&self, other: &Self) -> Self;
@@ -352,8 +352,8 @@ pub trait Semigroup {
 ///
 /// Implementations are responsible for satisfying the laws:
 ///
-/// Right identity: ∀ a. a.append(Self::empty()) == a
-/// Left identity: ∀ a. Self::empty().append(a) == a
+/// Right identity: `∀ a. a.append(Self::empty()) == a`
+/// Left identity: `∀ a. Self::empty().append(a) == a`
 pub trait Monoid: Semigroup {
     /// Returns the identity element
     fn empty() -> Self;

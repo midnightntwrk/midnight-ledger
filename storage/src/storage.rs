@@ -949,7 +949,7 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
     }
 }
 
-/// A one-element “collection”.
+/// A one-element collection.
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serializable)]
 pub struct Identity<V>(pub V);
 

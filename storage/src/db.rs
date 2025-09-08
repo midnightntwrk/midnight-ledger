@@ -530,7 +530,7 @@ mod tests {
     /// This is very surprising: performance is *worse* with bulk reads!?
     /// FIGURED IT OUT: `ParityDB` is using the default implementation of
     /// `DB::batch_get_nodes`, which is just a loop over `DB::get_node`. TODO: add a
-    /// proper batch_get_nodes implementation to `ParityDB` and see if this
+    /// proper `batch_get_nodes` implementation to `ParityDB` and see if this
     /// improves ...
     ///
     /// The above is for tests compiled with optimization, e.g.
@@ -644,7 +644,7 @@ mod tests {
         // Turning on WAL reduces test time from 9s to 3.2s.
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
-    /// Run time, 3 runs, 10,000 kvs: 0.33s, 0.39s, 0.35s
+    /// Run time, 3 runs, 10,000 kvs: 0.33 s, 0.39 s, 0.35 s
     #[cfg(feature = "parity-db")]
     #[test]
     fn all_ops_paritydb() {

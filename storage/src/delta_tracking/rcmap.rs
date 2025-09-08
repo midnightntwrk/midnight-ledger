@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Reference count map for tracking charged keys in write+delete costing
+//! Reference count map for tracking charged keys in write and delete costing
 use crate::Storable;
 use crate::arena::ArenaKey;
 use crate::db::DB;
@@ -104,7 +104,7 @@ impl<D: DB> Tagged for KeyRef<D> {
     }
 }
 
-/// Reference count map for tracking charged keys in write+delete costing.
+/// Reference count map for tracking charged keys in write and delete costing.
 ///
 /// Internally we use `KeyRef` to ensure that nodes for all keys in the `RcMap`
 /// will be persisted as long a the `RcMap` itself is.

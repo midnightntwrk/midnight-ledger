@@ -34,7 +34,7 @@ use ValueStrength::*;
 // Maps initial stack positions to which parts of those stack objects are currently cached.
 struct Cache(Vec<InnerCache>);
 
-/// The size limit of the argument of the `log` instruction. Currently 512kb
+/// The size limit of the argument of the `log` instruction. Currently 512 kb
 pub const MAX_LOG_SIZE: u64 = 1 << 19;
 
 impl Cache {

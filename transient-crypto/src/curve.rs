@@ -14,8 +14,8 @@
 //! Curve selection for Midnight. This may change over time, but we are likely
 //! to keep:
 //!
-//! * A primary prime field [Fr].
-//! * Embedded elliptic curve points [EmbeddedGroupAffine].
+//! * A primary prime field [`Fr`].
+//! * Embedded elliptic curve points [`EmbeddedGroupAffine`].
 //! * An Embedded prime field [`EmbeddedFr`].
 
 use crate::macros::{fr_display, wrap_display, wrap_field_arith, wrap_group_arith};
