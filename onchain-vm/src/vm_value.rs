@@ -69,8 +69,8 @@ impl<D: DB> VmValue<D> {
     ///
     /// Panics if the underlying value is not a cell.
     ///
-    /// This function is used by vm op benchmarking to calculate parameter sizes
-    /// the same way the vm does.
+    /// This function is used by VM op benchmarking to calculate parameter sizes
+    /// the same way the VM does.
     pub fn serialized_size_as_cell(&self) -> usize {
         <AlignedValue as Serializable>::serialized_size(
             self.value.as_cell_ref().expect("must be a cell"),
@@ -79,8 +79,8 @@ impl<D: DB> VmValue<D> {
 
     /// The log size of this value.
     ///
-    /// This function is used by vm op benchmarking to calculate parameter sizes
-    /// the same way the vm does.
+    /// This function is used by VM op benchmarking to calculate parameter sizes
+    /// the same way the VM does.
     pub fn log_size(&self) -> usize {
         self.value.log_size()
     }

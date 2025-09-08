@@ -14,13 +14,13 @@
 //! # VM Cost Model
 //!
 //! A tool for analyzing VM operation benchmark results and generating cost
-//! models using linear regression. See ../README.md.
+//! models using linear regression. See `../README.md`.
 //!
 //! ## Architecture
 //!
 //! The tool is organized into three main phases:
 //!
-//! 1. Parsing Phase: parse time measurements and input params from benchmark JSON files.
+//! 1. Parsing Phase: parse time measurements and input parameters from benchmark JSON files.
 //! 2. Regression Phase: learn linear models of measured times using linear regression.
 //! 3. Optional Plotting Phase: plot measured data along with learned predictions.
 
@@ -50,9 +50,9 @@ use std::{
 // e.g. ["key_size", "log_container_size"]
 type ModelParams = Vec<String>;
 
-/// Description of benchmark params, to help with parsing benchmark .json files.
+/// Description of benchmark parameters, to help with parsing benchmark JSON files.
 struct BenchmarkSchema {
-    /// Compute model params based on container type.
+    /// Compute model parameters based on container type.
     ///
     /// The "all" container as input is a sort of default and is used in
     /// "combined" container contexts (combined modeling, combined plotting, and
@@ -266,7 +266,7 @@ fn dbg_indent<T: std::fmt::Debug>(n: usize, t: &T) {
 
 /// Parse plot restrictions from command line argument.
 ///
-/// Parses strings like "key_size=32,key_size=64,container_log_size=10" into a HashMap.
+/// Parses strings like `"key_size=32,key_size=64,container_log_size=10"` into `HashMap`ap.
 /// Empty string triggers automatic min/mid/max slicing in 2D models.
 fn parse_plot_restrictions(
     plot_arg: &str,
@@ -477,7 +477,7 @@ fn run_main() -> Result<(), Box<dyn Error>> {
 
 /// Learn cost model for a single operation.
 ///
-/// Writes json file for op and returns learned model.
+/// Writes JSON file for op and returns learned model.
 fn learn_model(
     op_name: &str,
     criterion_dir: &Path,
@@ -515,7 +515,7 @@ fn learn_model(
     Ok(op_model)
 }
 
-/// Format (adj) R^2 value, showing "N/A" for zero-parameter models.
+/// Format (adj) `R^2` value, showing "N/A" for zero-parameter models.
 ///
 /// See discussion at `run_zero_dimensional_regression`.
 fn format_r_squared(value: f64, has_model_params: bool) -> String {
@@ -589,7 +589,7 @@ fn print_quality_table(successful_results: &[(String, OpModel)]) {
 /// Collect benchmark data points from Criterion output files.
 ///
 /// This function recursively searches the criterion directory for benchmark results,
-/// parsing both benchmark.json (for parameters) and estimates.json (for timing data).
+/// parsing both `benchmark.json` (for parameters) and `estimates.json` (for timing data).
 ///
 /// # Returns
 /// Vector of parsed benchmark data points, each containing parameters and measured time
@@ -649,10 +649,10 @@ fn collect_data_points(
     Ok(data_points)
 }
 
-/// Parse benchmark parameters from a Criterion benchmark.json file.
+/// Parse benchmark parameters from a Criterion `benchmark.json` file.
 ///
-/// Extracts operation parameters and container type from the JSON-encoded function_id field.
-/// The function_id contains a JSON string with the benchmark configuration.
+/// Extracts operation parameters and container type from the JSON-encoded `function_id` field.
+/// The `function_id` contains a JSON string with the benchmark configuration.
 ///
 /// # Arguments
 /// * `measured_time` - Pre-parsed timing measurement to include in the result
@@ -712,7 +712,7 @@ fn parse_benchmark(
     })
 }
 
-/// Parse timing estimate from a Criterion estimates.json file.
+/// Parse timing estimate from a Criterion `estimates.json` file.
 ///
 /// # Expected JSON Format
 /// ```json
@@ -918,8 +918,8 @@ fn run_linear_regression(
 /// # Explanation
 ///
 /// The linear regression library won't compute regressions for a single data point, and for
-/// zero-dimensional data with multiple data points (i.e., opcodes without model params but
-/// with multiple container types), the standard R² is always 0 by definition, since the
+/// zero-dimensional data with multiple data points (i.e., opcodes without model parameters but
+/// with multiple container types), the standard `R²` is always 0 by definition, since the
 /// least squares model is just the mean:
 ///
 /// ```text
@@ -937,7 +937,7 @@ fn run_linear_regression(
 /// fit = 1 - Σ(yᵢ - μ)² / Σ(yᵢ)²
 /// ```
 ///
-/// This equals 1 when all yᵢ = μ, and is small when data points are close to μ
+/// This equals 1 when all `yᵢ = μ`, and is small when data points are close to `μ`
 /// relative to their magnitude.  WARNING: Nathan made this alternative fit
 /// measure up, and there might be a better one ...
 fn run_zero_dimensional_regression(
@@ -1010,16 +1010,16 @@ type ExtractFn = Box<dyn Fn(&ModeledDataPoint) -> Option<ScatterDataPoint>>;
 /// Each extractor encapsulates:
 /// - **Data source**: Reference to regression results
 /// - **Extraction logic**: Function to filter/transform data points
-/// - **Plot metadata**: Axis labels, filename fragments, titles
+/// - **Plot metadata**: Axis labels, file-name fragments, titles
 struct Extractor<'a> {
     reg_and_data: &'a RegressionAndModeledData,
-    /// Fragment used in output filename generation
+    /// Fragment used in output file-name generation
     filename_fragment: String,
     /// Label for the plot's x-axis
     x_axis_name: String,
-    /// Function that transforms ModeledDataPoint to ScatterDataPoint
+    /// Function that transforms `ModeledDataPoint` to `ScatterDataPoint`
     extract_fn: ExtractFn,
-    /// Optional additional text for plot title (e.g., "key_size=32")
+    /// Optional additional text for plot title (e.g., `"key_size=32"`)
     title_suffix: Option<String>,
 }
 
@@ -1095,9 +1095,9 @@ impl<'a> Extractor<'a> {
     ///
     /// # Example
     /// For `new_two_param(data, "key_size", "container_log_size", 10)`:
-    /// - x-axis: key_size values
-    /// - Only includes points where container_log_size = 10
-    /// - Title includes "container_log_size=10"
+    /// - x-axis: `key_size` values
+    /// - Only includes points where `container_log_size` = 10
+    /// - Title includes `"container_log_size=10"`
     fn new_two_param(
         reg_and_data: &'a RegressionAndModeledData,
         var_param: &str,
@@ -1142,7 +1142,7 @@ impl<'a> Extractor<'a> {
 /// Creates a scatter plot showing measured vs. predicted execution times with:
 /// - Scatter points grouped by container type (different colors/symbols)
 /// - Regression line showing the model's predictions
-/// - R² values and optional context in the title
+/// - `R²` values and optional context in the title
 ///
 /// # Arguments
 /// * `plot_file` - Output path for the HTML plot file
@@ -1334,7 +1334,7 @@ fn compute_auto_restrictions(
 /// This function creates visualization plots based on the number of model parameters:
 /// - **0 parameters**: Single dummy plot showing constant behavior
 /// - **1 parameter**: Single scatter plot with parameter on x-axis
-/// - **2 parameters**: Multiple 2D slice plots, filtering based on param=value restrictions
+/// - **2 parameters**: Multiple 2D slice plots, filtering based on `param=value` restrictions
 fn plot_for_container_types(
     reg_and_data: &RegressionAndModeledData,
     types_str: String,
@@ -1430,7 +1430,7 @@ Possible plot slice params and values for '{op}@{types_str}':
 /// 1. **Individual container types** (if multiple types exist)
 /// 2. **Combined analysis** across all container types
 ///
-/// All plots are saved as HTML and SVG files in the `/plot` subdirectory of the output dir argument.
+/// All plots are saved as HTML and SVG files in the `/plot` sub-directory of the output directory argument.
 fn generate_plots(
     op: &str,
     results: &OpModel,

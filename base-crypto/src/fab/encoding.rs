@@ -127,7 +127,7 @@ impl ToOwned for ValueSlice {
 }
 
 impl Value {
-    /// Concatinates an iterator of values.
+    /// Concatenates an iterator of values.
     pub fn concat<'a, V: Borrow<ValueSlice> + 'a + ?Sized, I: IntoIterator<Item = &'a V>>(
         iter: I,
     ) -> Value {
@@ -179,7 +179,7 @@ impl ValueSlice {
 }
 
 /// Encodes an alignment in the field-aligned binary encoding, as a sequence of
-/// [AlignmentSegment]s.
+/// [`AlignmentSegment`]s.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Dummy)]
 #[serde(transparent)]
 pub struct Alignment(pub Vec<AlignmentSegment>);
@@ -274,7 +274,7 @@ pub enum AlignmentSegment {
     ///
     /// In the context of defaults, the first option is chosen.
     /// If there are no options, the empty value is used. As a result, a default
-    /// need not typecheck.
+    /// need not type-check.
     Option(Vec<Alignment>),
 }
 
@@ -419,7 +419,7 @@ impl Alignment {
         ))
     }
 
-    /// Concatinates multiple alignments.
+    /// Concatenates multiple alignments.
     pub fn concat<'a, I: IntoIterator<Item = &'a Alignment>>(iter: I) -> Alignment {
         Alignment(iter.into_iter().flat_map(|a| a.0.clone()).collect())
     }
@@ -480,7 +480,7 @@ impl From<AlignedValue> for AlignedValueUnchecked {
     }
 }
 
-/// A field-aligned binary value, annotated with its instanciated alignment.
+/// A field-aligned binary value, annotated with its instantiated alignment.
 #[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(
     rename_all = "camelCase",
@@ -490,7 +490,7 @@ impl From<AlignedValue> for AlignedValueUnchecked {
 pub struct AlignedValue {
     /// A field-aligned binary value.
     pub value: Value,
-    /// A field-aligned instanciated alignment.
+    /// A field-aligned instantiated alignment.
     pub alignment: Alignment,
 }
 
@@ -531,7 +531,7 @@ impl AlignedValue {
         }
     }
 
-    /// Concatinates two aligned values.
+    /// Concatenates two aligned values.
     pub fn concat<'a, I: IntoIterator<Item = &'a AlignedValue>>(iter: I) -> AlignedValue {
         let mut val = Vec::new();
         let mut align = Vec::new();
@@ -569,7 +569,7 @@ impl AsRef<Value> for Arc<AlignedValue> {
     }
 }
 
-/// The borrowed form of [AlignedValue].
+/// The borrowed form of [`AlignedValue`].
 #[derive(Clone, Serialize)]
 #[serde(into = "Value")]
 pub struct AlignedValueSlice<'a>(pub(crate) &'a ValueSlice, pub(crate) &'a Alignment);
@@ -597,7 +597,7 @@ impl Deref for AlignedValueSlice<'_> {
 }
 
 /// A single part of a field-aligned binary value, corresponding to a single
-/// [AlignmentAtom].
+/// [`AlignmentAtom`].
 #[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Dummy)]
 #[serde(transparent)]
 pub struct ValueAtom(#[serde(with = "serde_bytes")] pub Vec<u8>);
@@ -636,7 +636,7 @@ pub enum AlignmentAtom {
     /// This atom should be represented by its hash in a field representation.
     Compress,
     /// This atom has a known binary size of `length` bytes. Note that the value
-    /// may be encoded with less, due to ommitting trailing zeros.
+    /// may be encoded with less, due to omitting trailing zeros.
     Bytes {
         /// The length of the atom in bytes.
         length: u32,
@@ -702,7 +702,7 @@ impl BinaryHashRepr for AlignmentAtom {
 pub const FIELD_BYTE_LIMIT: usize = 64;
 
 impl AlignmentAtom {
-    /// Tests if a [ValueAtom] fits within the alignment.
+    /// Tests if a [`ValueAtom`] fits within the alignment.
     pub fn fits(&self, value: &ValueAtom) -> bool {
         match self {
             AlignmentAtom::Compress => true,

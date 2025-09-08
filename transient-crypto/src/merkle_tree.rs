@@ -44,7 +44,7 @@ use storage::db::DB;
 use storage::db::InMemoryDB;
 use storage::storable::Loader;
 
-/// A Storable wrapper around HashOutput
+/// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]
 pub struct MerkleTreeHash(HashOutput);
 
@@ -157,7 +157,7 @@ pub struct MerklePathEntry {
     pub goes_left: bool,
 }
 
-/// A part descripting a specific tree insertion, together with intermediate hashes.
+/// A part describing a specific tree insertion, together with intermediate hashes.
 /// This allows replaying this insertion, even against collapsed trees.
 /// The intermediate hashes may be missing, in case the tree was not fully
 /// rehashed, in which case its success depends on the non-rehashed parts not
@@ -176,7 +176,7 @@ where
 }
 tag_enforcement_test!(TreeInsertionPath<()>);
 
-/// An item in [TreeInsertionPath].
+/// An item in [`TreeInsertionPath`].
 #[derive(Debug, Clone, PartialEq, Eq, Serializable)]
 #[tag = "tree-insertion-path-entry[v1]"]
 pub struct TreeInsertionPathEntry {
@@ -344,7 +344,7 @@ impl MerkleTreeCollapsedUpdate {
 /// serialization. All operations are safe, unless parts of the tree are
 /// collapsed.
 ///
-/// The tree is indexed as if it were an array of length 2^height: data leaves
+/// The tree is indexed as if it were an array of length `2^height`: data leaves
 /// only occur at the end of paths of length `height` bits.
 #[derive_where(Clone, PartialOrd, PartialEq, Ord, Eq; A)]
 #[derive(Storable)]
@@ -395,7 +395,7 @@ impl<'de, A: Deserialize<'de> + Storable<D>, D: DB> Deserialize<'de> for MerkleT
     }
 }
 
-/// Inner merkle tree node type
+/// Inner Merkle tree node type
 #[derive_where(Clone, Hash, Ord, PartialOrd, Eq, PartialEq; A)]
 #[derive(Storable)]
 #[storable(db = D, invariant = MerkleTreeNode::invariant)]
@@ -405,7 +405,7 @@ pub enum MerkleTreeNode<A: Storable<D>, D: DB> {
     Leaf {
         /// Stored hash
         hash: HashOutput,
-        /// Auxilary data
+        /// Auxiliary data
         aux: A,
     },
     /// Collapsed
@@ -908,7 +908,7 @@ impl Iterator for MerkleTreeIter {
     }
 }
 
-/// An iterator over Merkle tree leaf indices, hashes, and auxilary data
+/// An iterator over Merkle tree leaf indices, hashes, and auxiliary data
 pub struct MerkleTreeIterAux<A>(std::vec::IntoIter<(u64, (HashOutput, A))>);
 
 impl<A> Iterator for MerkleTreeIterAux<A> {
@@ -997,7 +997,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
 
     /// Rehashes the Merkle tree, computing the new root and intermediate hashes.
     /// This is a separate operation as it amortizes costs across sequential
-    /// insertions to O(n + h) instead of O(nh).
+    /// insertions to `O(n + h)` instead of `O(nh)`.
     pub fn rehash(&self) -> Self {
         MerkleTree(Sp::new(self.0.rehash()))
     }
@@ -1023,7 +1023,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         )
     }
 
-    /// Iterate over the leaves and leaf indices of the tree, inclues aux data
+    /// Iterate over the leaves and leaf indices of the tree, includes aux data
     pub fn iter_aux(&self) -> MerkleTreeIterAux<A> {
         MerkleTreeIterAux(
             self.0
@@ -1040,10 +1040,10 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         )
     }
 
-    /// Generate an interator over leaves, including indices, hashes, and auxilary data
+    /// Generate an iterator over leaves, including indices, hashes, and auxiliary data
     /// Does a linear search for a given leaf.
     ///
-    /// O(2^height) worst-case behaviour, this should only be used for small trees.
+    /// `O(2^height)` worst-case behavior, this should only be used for small trees.
     ///
     /// May panic if the Merkle tree has not been rehashed.
     pub fn find_path_for_leaf<T: BinaryHashRepr>(&self, leaf: T) -> Option<MerklePath<T>> {
@@ -1102,7 +1102,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         })
     }
 
-    /// Given a leaf at a specific index, produces a [MerklePath] for it.
+    /// Given a leaf at a specific index, produces a [`MerklePath`] for it.
     ///
     /// May panic if the Merkle tree has not been rehashed.
     pub fn path_for_leaf<T: BinaryHashRepr>(

@@ -66,7 +66,7 @@ fn proptest_valid<D: DB>(value: &StateValue<D>) -> bool {
     }
 }
 
-/// The size limit for Cell's. Currently 32kiB
+/// The size limit for Cell's. Currently 32 kiB
 pub const CELL_BOUND: usize = 1 << 15;
 
 #[derive(Default, Storable)]

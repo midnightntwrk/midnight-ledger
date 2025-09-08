@@ -18,7 +18,7 @@
 //! Arena objects are content-addressed by [`ArenaKey`] hashes, and managed via
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
-//! the arena and backend.
+//! the arena and back-end.
 use crate::storable::Loader;
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{DefaultDB, DefaultHasher, backend::StorageBackend, db::DB, storable::Storable};
@@ -96,7 +96,7 @@ impl<T: Tagged, H: Digest> Tagged for TypedArenaKey<T, H> {
     }
 }
 
-/// The key used in the HashMap in the Arena. Parameterised on the hash function
+/// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
 pub struct ArenaKey<H: Digest = DefaultHasher>(
@@ -237,9 +237,9 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaKey<H> {
 }
 
 impl<H: Digest> ArenaKey<H> {
-    /// Create an ArenaKey from bytes.
+    /// Create an `ArenaKey` from bytes.
     ///
-    /// Useful for printf debugging of tests.
+    /// Useful for `printf` debugging of tests.
     ///
     /// The bytes don't need to be as long as the key's internal byte array; the
     /// unspecified values will be filled in with zeros.
@@ -289,7 +289,7 @@ pub struct Arena<D: DB = DefaultDB> {
     /// Cache of `Sp` data `Arc`s for sharing.
     ///
     /// Stored as weak references, so that data drops automatically when all
-    /// referencing sps go out of scope or unload their data.
+    /// referencing `Sp`s go out of scope or unload their data.
     ///
     /// # Invariant
     ///
@@ -362,10 +362,10 @@ impl<D: DB> Arena<D> {
         }
     }
 
-    /// Apply a function to the backend.
+    /// Apply a function to the back-end.
     ///
-    /// This is the only `pub` way to access the backend, since safe use of the
-    /// backend requires locking.
+    /// This is the only `pub` way to access the back-end, since safe use of the
+    /// back-end requires locking.
     pub fn with_backend<R>(&self, f: impl FnOnce(&mut StorageBackend<D>) -> R) -> R {
         f(&mut RefCell::borrow_mut(&self.lock_backend()))
     }
@@ -384,7 +384,7 @@ impl<D: DB> Arena<D> {
         self.new_sp_locked(metadata, value, root_hash, bytes, children)
     }
 
-    /// Insert `value` into the arena, and cache its data in the backend until
+    /// Insert `value` into the arena, and cache its data in the back-end until
     /// all `Sp`s for this data are dropped.
     pub fn alloc<T: Storable<D>>(&self, value: T) -> Sp<T, D> {
         let children = value.children();
@@ -497,7 +497,7 @@ impl<D: DB> Arena<D> {
     ///
     /// This attempts to load the value eagerly, but will fall back on any
     /// existing cached value if available, regardless of whether that value is
-    /// fully forced or not. Will return an Err if the protocol_version in the key
+    /// fully forced or not. Will return an Err if the `protocol_version` in the key
     /// does not match that of the Arena.
     ///
     /// # Warning
@@ -542,7 +542,7 @@ impl<D: DB> Arena<D> {
     ///
     /// This attempts to load the value lazily, but will fall back on any
     /// existing cached value if available, regardless of whether that value is
-    /// fully forced or not. Will return an Err if the protocol_version in the key
+    /// fully forced or not. Will return an Err if the `protocol_version` in the key
     /// does not match that of the Arena.
     pub fn get_lazy<T: Storable<D> + Tagged>(
         &self,
@@ -560,7 +560,7 @@ impl<D: DB> Arena<D> {
     }
 
     /// Here "tracked" means that the node is in the metadata map, and has been
-    /// `cache`d into the backend. It's up to `Sp::drop` to
+    /// `cache`d into the back-end. It's up to `Sp::drop` to
     /// `StorageBackend::uncache` tracked objects when the last `Sp` pointing to
     /// them goes out of scope.
     ///
@@ -578,7 +578,7 @@ impl<D: DB> Arena<D> {
         }
     }
 
-    /// Removes an object from the in-memory arena, remaining in backend
+    /// Removes an object from the in-memory arena, remaining in back-end
     /// database if persisted or referenced.
     fn remove_locked(
         &self,
@@ -708,7 +708,7 @@ impl<D: DB> Arena<D> {
     }
 }
 
-/// A `Loader` that loads by deserializing binary data from the backend, with an
+/// A `Loader` that loads by deserializing binary data from the back-end, with an
 /// optional depth bound that allows for lazy loading of nested `Sp`s.
 ///
 /// Note that the `max_depth` is only a limit on recursion, but there is no
@@ -723,7 +723,7 @@ pub struct BackendLoader<'a, D: DB> {
 
 #[cfg(feature = "proptest")]
 impl<'a, D: DB> BackendLoader<'a, D> {
-    /// Construct a new BackendLoader
+    /// Construct a new `BackendLoader`
     pub fn new(arena: &'a Arena<D>, max_depth: Option<usize>) -> Self {
         BackendLoader {
             arena,
@@ -850,7 +850,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
     /// that `Sp` deserialization does not depend on the `Arena` state before
     /// this `IrLoader` was constructed.
     ///
-    /// This loader always returns eager Sps.
+    /// This loader always returns eager `Sp`s.
     fn get<T: Storable<D>>(
         &self,
         key: &ArenaKey<<D as DB>::Hasher>,
@@ -921,7 +921,7 @@ pub struct IntermediateRepr<D: DB> {
 }
 
 impl<D: DB> IntermediateRepr<D> {
-    /// Constructs an intermediate repr from a storable reference.
+    /// Constructs an intermediate repr from a `Storable` reference.
     #[cfg(test)]
     pub fn from_storable<S: Storable<D>>(s: &S) -> Self {
         let mut binary_repr: std::vec::Vec<u8> = vec![];
@@ -944,15 +944,15 @@ struct Node {
     /// No relation to `crate::backend::OnDiskObject::ref_count`! That other ref
     /// count is concerned with parent-child relationships in the Merkle DAG.
     ///
-    /// Note: since the backend is untyped, whereas `Sp`s are typed, this
+    /// Note: since the back-end is untyped, whereas `Sp`s are typed, this
     /// `Self::ref_count` can account for `Sp`s of *distinct* types, when those
     /// differently typed `Sp`s have the same hash (easy way to get such hash
     /// collisions: enums with no children and no data, whose hashes are just
     /// the hash of their discriminant tags). So, in particular, knowing that
     /// the last `sp: Sp<T>` for a specific type `T` has gone out of scope,
-    /// doesn't tell us that the backend data for `sp.root` can be uncached,
+    /// doesn't tell us that the back-end data for `sp.root` can be uncached,
     /// since some other `Sp<U>` with the same hash could still be referencing
-    /// that backend data.
+    /// that back-end data.
     ref_count: u32,
 }
 
@@ -1037,10 +1037,10 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// arena data cache if it should be. We don't try to handle that logic
     /// here, since it's not uniform:
     ///
-    /// - when creating a non-derived sp in `Arena::new_sp_locked`, we need to
-    ///   check the arena cache, and otherwise create and cache a new sp.
+    /// - when creating a non-derived `Sp`s in `Arena::new_sp_locked`, we need to
+    ///   check the arena cache, and otherwise create and cache a new `Sp`s.
     ///
-    /// - when forcing a lazy sp in `Sp::force_as_arc`, we need to look in the
+    /// - when forcing a lazy `Sp`s in `Sp::force_as_arc`, we need to look in the
     ///   arena cache, and then fall back on deserialization.
     fn eager(arena: Arena<D>, root: ArenaKey<D::Hasher>, arc: Arc<T>) -> Self {
         let sp = Sp::lazy(arena, root);
@@ -1066,7 +1066,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
 
 impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Get Sp based on value from arena cache, falling back on deserializing
-    /// object from backend if necessary.
+    /// object from back-end if necessary.
     ///
     /// Deserialize object for `key`, recursively deserializing any children,
     /// and updating `already_deserialized` to include all child values
@@ -1083,7 +1083,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// uninitialized `Sp`s.
     ///
     /// Note: the `max_depth` is only advisory, since if we already have a value
-    /// cached, we'll just return that, indep of how deep it hasx been forced.
+    /// cached, we'll just return that, independent of how deep it has been forced.
     fn from_arena(
         arena: &Arena<D>,
         key: &ArenaKey<D::Hasher>,
@@ -1127,7 +1127,7 @@ impl<T, D: DB> Sp<T, D> {
         self.data.get().is_none()
     }
 
-    /// Return hash of self and all children, cached from &lt;T as Storable&gt;::hash().
+    /// Return hash of self and all children, cached from `&lt;T as Storable&gt;::hash()`.
     ///
     /// This is the root key of `self`, as a content-addressed Merkle node.
     pub fn hash(&self) -> TypedArenaKey<T, D::Hasher> {
@@ -1137,7 +1137,7 @@ impl<T, D: DB> Sp<T, D> {
         }
     }
 
-    /// Notify the storage backend to increment the persist count on this object.
+    /// Notify the storage back-end to increment the persist count on this object.
     ///
     /// See `[StorageBackend::persist]`.
     pub fn persist(&self) {
@@ -1145,7 +1145,7 @@ impl<T, D: DB> Sp<T, D> {
             .with_backend(|backend| backend.persist(&self.root))
     }
 
-    /// Notify the storage backend to decrement the persist count on this
+    /// Notify the storage back-end to decrement the persist count on this
     /// object.
     ///
     /// See `[StorageBackend::unpersist]`.
@@ -1257,17 +1257,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         self.data.get().unwrap()
     }
 
-    /// Topologically sort a subgraph of storage into a sequence of nodes.
+    /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
-    /// This will force and load all nodes in this subgraph.
+    /// This will force and load all nodes in this sub-graph.
     pub fn serialize_to_node_list(&self) -> TopoSortedNodes {
         self.serialize_to_node_list_bounded(u64::MAX)
             .expect("unbounded serialization must succeed")
     }
 
-    /// Topologically sort a subgraph of storage into a sequence of nodes.
+    /// Topologically sort a sub-graph of storage into a sequence of nodes.
     ///
-    /// This will force and load all nodes in this subgraph.
+    /// This will force and load all nodes in this sub-graph.
     ///
     /// The size limit stops serialization if a specified serialized size limit is overstepped.
     ///
@@ -1399,10 +1399,10 @@ impl<T: Ord + Storable<D>, D: DB> Ord for Sp<T, D> {
     }
 }
 
-/// A topologically sorted subgraph of the storage graph.
+/// A topologically sorted sub-graph of the storage graph.
 ///
 /// Stored as a sequence of nodes, each referencing their children as indices in this sequence.
-/// The final entry in this is the root of the subgraph (which is assumed to have only one root).
+/// The final entry in this is the root of the sub-graph (which is assumed to have only one root).
 /// Each node in the graph should have its children *preceding* it in the graph, allowing the graph
 /// to be restored from this representation in a single in-order iteration.
 #[derive(Clone, PartialEq, Eq, Debug, Serializable)]
@@ -1509,7 +1509,7 @@ pub(crate) mod bin_tree {
     }
 
     /// Here `counting_tree(n)` computes a `BinTree` of height `n` with
-    /// left-to-right bfs node values `[1, 2, .., 2^n - 1]`.
+    /// left-to-right BFS node values `[1, 2, .., 2^n - 1]`.
     ///
     /// For example, `counting_tree(3)` computes the tree
     ///
@@ -1562,7 +1562,7 @@ pub mod test_helpers {
     /// # Safety
     ///
     /// The `Arc` returned here *must* be dropped before the `Sp` itself is to ensure proper cache
-    /// cleanup. A failure to do so could lead to the deallocation of the value *not* leading to
+    /// cleanup. A failure to do so could lead to the de-allocation of the value *not* leading to
     /// the value being removed from the cache, as `Sp`'s rely on the `Arc` reference count to
     /// determine if this cleanup should be performed. This requires the last drop to be an `Sp`
     /// drop, not just an `Arc` drop.
@@ -1737,8 +1737,8 @@ pub mod stress_tests {
     ///
     /// Parity-db beats SQLite here, but by how much varies a lot:
     ///
-    /// - for p = 0.5, SQLite takes about 4x as long
-    /// - for p = 0.8, SQLite takes 1.5x to 2.5x as long, doing better for
+    /// - for p = 0.5, SQLite takes about 4 times as long
+    /// - for p = 0.8, SQLite takes 1.5 times to 2.5 times as long, doing better for
     ///   larger `num_values`.
     #[cfg(any(feature = "parity-db", feature = "sqlite"))]
     fn thrash_the_cache<D: DB>(
@@ -1857,12 +1857,12 @@ pub mod stress_tests {
     ///   97.10s user 18.82s system 99% cpu 1:56.56 total
     /// ```
     ///
-    /// Note that tree creation takes 20s here, vs 4s for parity-db, even tho
+    /// Note that tree creation takes 20 s here, vs 4 s for parity-db, even tho
     /// naively, creation should have no interaction with the db: turns out the
     /// hidden db interaction on creation happens in `StorageBackend::cache`,
     /// which checks the db to see if the to-be-cached key is already in the db
     /// or not, which is used for ref-counting. If I comment that check out,
-    /// which is irrel for this test, then creation time drops to 3.5s, an 80%+
+    /// which is irrelevant for this test, then creation time drops to 3.5 s, larger than an 80 %
     /// improvement.
     #[cfg(feature = "sqlite")]
     pub fn load_large_tree_sqldb(args: &[String]) {
@@ -2038,32 +2038,32 @@ pub mod stress_tests {
     ///
     /// Parameters:
     ///
-    /// - `num_operations`: total number of reads+writes to perform.
+    /// - `num_operations`: total number of reads and writes to perform.
     ///
     /// - `flush_interval`: how many operations to do between each flush.
     ///
-    /// # Summary of performance of SqlDB for various SQLite configurations
+    /// # Summary of performance of `SqlDB` for various SQLite configurations
     ///
-    /// For the 1_000_000 operation, 1000 flush interval read_write_map_loop
+    /// For the 1000000 operation, 1000 flush interval `read_write_map_loop`
     /// stress test, we see the following total db flush times:
     ///
-    /// - original settings: 2860s
+    /// - original settings: 2860 s
     ///
-    /// - with synchronous=0, but original journal mode: 466s
+    /// - with synchronous = 0, but original journal mode: 466 s
     ///
-    /// - with synchronous=0, and WAL journal: 442s
+    /// - with synchronous = 0, and WAL journal: 442 s
     ///
-    /// I.e. speedup factor is 2860/442 ~ 6.5x.
+    /// I.e. speedup factor is 2860/442 ~ 6.5 times.
     ///
     /// The time spent on in-memory storage::Map updates in this stress test
-    /// don't depend on the db settings (of course), and are about 175s, so with
-    /// the DB optimizations we have a ratio of ~ 2.5x for in-memory updates vs
+    /// don't depend on the db settings (of course), and are about 175 s, so with
+    /// the DB optimizations we have a ratio of ~ 2.5 times for in-memory updates vs
     /// disk writes for map inserts, which seems pretty good from the point of
     /// view of db traffic, but may indicate there's room to improve the
     /// implementation of the in-memory part.
     ///
-    /// Of the db flush time, it seems about 7% is devoted to preparing the data
-    /// to be flushed, and the other 93% is the time our db::sql::SqlDB takes to
+    /// Of the db flush time, it seems about `7%` is devoted to preparing the data
+    /// to be flushed, and the other `93%` is the time our `db::sql::SqlDB` takes to
     /// do the actual flushing.
     fn read_write_map_loop_inner<D: DB>(num_operations: usize, flush_interval: usize) {
         use crate::storage::{Map, Storage, WrappedDB, set_default_storage};
@@ -2873,15 +2873,15 @@ mod tests {
     /// Test that we can deserialize data that contains the same key multiple
     /// times at distinct types.
     ///
-    /// Altho our underlying Merkle dags are untyped, our Sps are typed, and so
-    /// two Sps with different types can have the same key, if their underlying
+    /// Although our underlying Merkle dags are un-typed, our `Sp`s are typed, and so
+    /// two `Sp`s with different types can have the same key, if their underlying
     /// binary representation as a Merkle node are the same. This test builds a
-    /// structure containing two Sps with different types but the same keys, and
+    /// structure containing two `Sp`s with different types but the same keys, and
     /// checks that it can be round tripped through serialization.
     ///
     /// This test was created to illustrate bug
     /// https://shielded.atlassian.net/browse/PM-16347, where deserialization
-    /// was crashing because it was conflating Sps with the same key but
+    /// was crashing because it was conflating `Sp`s with the same key but
     /// different types.
     #[test]
     fn deserialize_same_key_at_two_different_types() {
@@ -2931,13 +2931,13 @@ mod tests {
         assert!(arena.get::<u32>(&key).is_err());
     }
 
-    /// Test intensive concurrent manipulation of Sps for the same key.
+    /// Test intensive concurrent manipulation of `Sp`s for the same key.
     ///
     /// When originally written, this test exercised a race between removing a
     /// key from the metadata when dropping an Sp, and removing its Arc from the
-    /// sp_cache. In between, another thread could read the Arc from the sp_cache
+    /// `sp_cache`. In between, another thread could read the Arc from the `sp_cache`
     /// and assume the key was still in the metadata, an invariant violation that
-    /// caused increment_ref_locked to panic.
+    /// caused `increment_ref_locked` to panic.
     #[test]
     fn metadata_sp_cache_race() {
         use std::thread;

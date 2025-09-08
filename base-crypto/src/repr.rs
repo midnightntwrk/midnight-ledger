@@ -49,9 +49,9 @@ impl<W: MemWrite<u8>> io::Write for IoWrite<W> {
     }
 }
 
-/// An object that can be represented as a sequence of hashable chunks.
+/// An object that can be represented as a sequence of hash-able chunks.
 pub trait BinaryHashRepr {
-    /// Writes out the binary represenation of this value into a writer.
+    /// Writes out the binary representation of this value into a writer.
     fn binary_repr<W: MemWrite<u8>>(&self, writer: &mut W);
     /// The size of an object's binary representation.
     fn binary_len(&self) -> usize;

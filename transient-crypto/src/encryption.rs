@@ -140,24 +140,24 @@ impl SecretKey {
     /// Number of bytes needed to represent a secret key in memory
     pub const BYTES: usize = FR_BYTES;
 
-    /// Initializes a keypair.
+    /// Initializes a key-pair.
     pub fn new<R: Rng + CryptoRng + ?Sized>(rng: &mut R) -> Self {
         SecretKey(rng.r#gen())
     }
 
-    /// Initialize a keypair from arbitrary 64 bytes (little-endian) ensuring the result falls into the space by taking modulo
+    /// Initialize a key-pair from arbitrary 64 bytes (little-endian) ensuring the result falls into the space by taking modulo
     pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
         let value = embedded::Scalar::from_bytes_wide(bytes);
         SecretKey(EmbeddedFr(value))
     }
 
-    /// Initialize a keypair from repr bytes
+    /// Initialize a key-pair from repr bytes
     pub fn from_repr(bytes: &[u8; Self::BYTES]) -> CtOption<Self> {
         let val = embedded::Scalar::from_bytes(bytes);
         val.map(|scalar| SecretKey(EmbeddedFr(scalar)))
     }
 
-    /// Converts a SecretKey into a raw bytes representation
+    /// Converts a `SecretKey` into a raw bytes representation
     pub fn repr(&self) -> [u8; Self::BYTES] {
         self.0.0.to_bytes()
     }
