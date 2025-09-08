@@ -72,7 +72,7 @@ pub fn degrade_to_transient(persistent: HashOutput) -> Fr {
     persistent.field_vec()[1]
 }
 
-/// An efficient hash function that may be changed on hardforks.
+/// An efficient hash function that may be changed on hard-forks.
 pub fn transient_hash(elems: &[Fr]) -> Fr {
     let h = <PoseidonChip<outer::Scalar> as HashCPU<outer::Scalar, outer::Scalar>>::hash(
         &elems.iter().map(|x| x.0).collect::<Vec<_>>(),

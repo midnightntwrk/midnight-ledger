@@ -32,11 +32,11 @@
 //! `fn()` which is registered with the stress test binary `stress` defined in
 //! `:storage/bin/stress.rs`. For an example, see this module:
 //!
-//! - the `pub` submodule `stress_tests` defines the `fn()`s which are
+//! - the `pub` sub-module `stress_tests` defines the `fn()`s which are
 //!   registered with the `stresss` binary. See `:storage/bin/stress.rs` for how
 //!   that is done.
 //!
-//! - the `#[cfg(test)]` submodule `tests` defines the actual stress tests,
+//! - the `#[cfg(test)]` sub-module `tests` defines the actual stress tests,
 //!   which run the `fn()`s from `stress_tests` inside the `stress` binary using
 //!   the `runner::StressTest::run`
 
@@ -91,7 +91,7 @@ pub(crate) mod runner {
             self
         }
 
-        /// Set max runtime in seconds.
+        /// Set max run-time in seconds.
         ///
         /// Whole seconds only, because the underlying `sysinfo` lib we use for
         /// timing only supported full-second resolution.
@@ -100,7 +100,7 @@ pub(crate) mod runner {
             self
         }
 
-        /// Call `run_with_args` with empty args.
+        /// Call `run_with_args` with empty arguments.
         pub(crate) fn run(&self, test_name: &str) {
             self.run_with_args(test_name, &[]);
         }

@@ -453,6 +453,7 @@
               pkgs.cargo-hack
               pkgs.wasm-pack
               pkgs.git
+              pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];
             MIDNIGHT_PP = "${packages.local-params}";
@@ -490,6 +491,7 @@
               pkgs.cargo-hack
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_100
+              pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];
 

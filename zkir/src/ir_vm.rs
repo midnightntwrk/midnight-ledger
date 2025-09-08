@@ -42,7 +42,7 @@ use transient_crypto::repr::FieldRepr;
 
 /// The raw data prior to proving. Note that this should *not* be considered part of the public
 /// API, and is subject to change at any time. It may be used in combination with
-/// [`IrSource::prove_unchecked`] to test malicious prover behaviour.
+/// [`IrSource::prove_unchecked`] to test malicious prover behavior.
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct Preprocessed {

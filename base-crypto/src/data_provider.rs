@@ -33,11 +33,11 @@ use std::time::Instant;
 use tracing::{info, warn};
 
 /// Retrieves various static cryptographic artifacts from a data server.
-/// This keeps a local filesystem cache of the parameters, prover keys, verifier keys, and IR, that
+/// This keeps a local file system cache of the parameters, prover keys, verifier keys, and IR, that
 /// can also be fetched remotely.
 ///
-/// The local cache is located at: $MIDNIGHT_PP / $XDG_CACHE_HOME/midnight/zk-params /
-/// $HOME/.cache/midnight/zk-params in that order of fallbacks.
+/// The local cache is located at: `$MIDNIGHT_PP` / `$XDG_CACHE_HOME/midnight/zk-params` /
+/// `$HOME/.cache/midnight/zk-params` in that order of fall-backs.
 ///
 /// The provider knows which data is in scope, and the SHA-256 hashes of each of these. When
 /// reading one of the values from cache, or fetching them, the SHA-256 hash is verified for

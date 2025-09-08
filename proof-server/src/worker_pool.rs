@@ -318,7 +318,7 @@ impl WorkerPool {
     }
 
     /// Cancels a job with the given ID
-    /// Returns the job if it was found and cancelled, None otherwise
+    /// Returns the job if it was found and canceled, None otherwise
     pub async fn cancel(&self, id: Uuid) -> Result<(), WorkerPoolError> {
         match self.requests.get(id).await {
             Some(job) => {

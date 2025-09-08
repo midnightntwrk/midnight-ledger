@@ -324,7 +324,7 @@ pub enum Instruction {
         /// The value to negate
         a: Index,
     },
-    /// Checks if `a` < `b`, intepreting both as `bits`-bit unsigned
+    /// Checks if `a` < `b`, interpreting both as `bits`-bit unsigned
     /// integers. UB if `a` or `b` exceed `bits`.
     ///
     /// One boolean output `a < b`
@@ -431,7 +431,7 @@ impl IrSource {
     }
 
     /// Intended for testing only. This method enables fully controlling the inputs passed to
-    /// proving, to test malicious prover behaviour.
+    /// proving, to test malicious prover behavior.
     pub async fn prove_unchecked<R: Rng + CryptoRng>(
         &self,
         rng: R,
