@@ -1,0 +1,23 @@
+{
+  "name": "dust-browser-proving-demo",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "serve": "webpack serve"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "webpack": "^5.100.1",
+    "webpack-cli": "^6.0.1",
+    "webpack-dev-server": "^5.2.2"
+  },
+  "dependencies": {
+    "progressbar.js": "^1.1.1",
+    "@midnight-ntwrk/ledger": "link:../../result/lib/node_modules/@midnight-ntwrk/ledger",
+    "@midnight-ntwrk/zkir-v2": "link:../../result/lib/node_modules/@midnight-ntwrk/zkir-v2",
+    "@midnight-ntwrk/zkir-v2-mt": "link:../zkir-mt/pkg"
+  }
+}

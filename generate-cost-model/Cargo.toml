@@ -1,0 +1,28 @@
+[package]
+name = "generate-cost-model"
+version = "1.0.0-alpha.1"
+edition = "2024"
+license.workspace = true
+
+[lints.rust]
+warnings = "deny"
+
+[[bin]]
+name = "generate-cost-model"
+path = "src/vm-cost-model.rs"
+
+[features]
+default = []
+# Enable server-side rendering for svg output, which requires v8/deno, which
+# won't build on nix due to this issue:
+# https://github.com/denoland/rusty_v8/issues/49
+svg = ["charming/ssr"]
+
+[dependencies]
+serde = { version = "^1.0.219", features = ["derive"] }
+serde_json = { version = "^1.0", features = ["std"] }
+linregress = { version = "0.5" }
+clap = { version = "4.5", features = ["derive"] }
+charming = { version = "0.5" }
+itertools = { version = "0.14" }
+indexmap = { version = "2.10" }

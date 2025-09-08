@@ -1,0 +1,97 @@
+name: Hard-Fork-Test Patcher
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag (e.g. `ledger-4.0.0`). A new tag with the same name prefixed with `hard-fork-test-` will be created.'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE : full
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup api.github.com credentials
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        with:
+          machine: api.github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Setup github.com credentials
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Configure git rewrite
+        run: |
+          mkdir -p $HOME/.config/git
+          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
+          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        with:
+          ref: ${{ github.event.inputs.tag }}
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Get the rust toolchain
+        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
+        with:
+          components: rustfmt
+
+      - name: Build the patch tool
+        run: |
+          # TODO: Checkout the patch tool from the branch this workflow is run from
+          cd ./scripts/hardfork_version_patch/
+          cargo build --release
+
+      - name: Patch the sources
+        run: |
+          # The ledger isn't in a state right now where hard-forking can be tested, due to recent changes in seralization.
+          # TODO: uncomment the line below once hard-forking is ready for testing again
+          # ./scripts/hardfork_version_patch/target/release/hardfork_version_patch
+          sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
+
+      - name: Format the source code
+        run: |
+          # Uses unstable features, and will lead to build failures later on
+          echo > rustfmt.toml
+          cargo fmt
+          cargo generate-lockfile
+
+      - name: Show changes
+        run: |
+          rm -rf .cargo
+          git status
+
+      - name: Sanitize branch name
+        id: name-sanitizer
+        run: |
+          name="hard-fork-test-${{ inputs.tag }}"
+          sname="${name// /-}"
+          echo "tag_name=$sname" >> "$GITHUB_OUTPUT"
+          echo "Sanitized branch name: $sname"
+
+      - name: Commit and push changes to a new branch and tag
+        env:
+          tag_name: ${{ steps.name-sanitizer.outputs.tag_name }}
+        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5
+        with:
+          message: 'hard-fork-test: original tag ${{ github.event.inputs.tag }}'
+          new_branch: hard-fork-test/${{ env.tag_name }}
+          tag: ${{ env.tag_name }}

@@ -1,0 +1,1 @@
+((merkle-tree[v1](option(contract-address[v2])),hash-map(zswap-coin-commitment[v1],(),size-annotation),u64,hash-map(zswap-nullifier[v1],(),size-annotation),time-filter-map[v1](merkle-tree-digest[v1])))

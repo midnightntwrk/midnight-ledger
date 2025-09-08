@@ -1,0 +1,19 @@
+services:
+  proof-server:
+    image: "ghcr.io/midnight-ntwrk/proof-server:latest"
+    container_name: "proof-server_$TESTCONTAINERS_UID"
+    command: ["midnight-proof-server"]
+    ports:
+      - "127.0.0.1:49152-65535:6300"
+    environment:
+      RUST_BACKTRACE: "full"
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:6300/version" ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true

@@ -1,0 +1,17 @@
+target
+.build
+result
+*.node
+node_modules
+reports
+dist
+.idea/
+.direnv/
+.env
+lib-sources
+coverage
+*.tsbuildinfo
+logs
+**/.yarn/install-state.gz
+**/.yarn/cache
+vendor
