@@ -1,0 +1,27 @@
+[package]
+name = "midnight-serialize"
+version = "1.0.0-alpha.1"
+edition = "2024"
+license.workspace = true
+
+[features]
+proptest = ["dep:proptest", "dep:proptest-derive", "dep:rand"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[dependencies]
+macros = { path = "../serialize-macros", package = "midnight-serialize-macros" }
+lazy_static = "^1.5.0"
+konst = { version = "0.3.16", features = ["cmp"] }
+crypto = { version = "0.5.1", features = ["digest"] }
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = { version = "^0.8.4", features = ["getrandom"], optional = true }
+# proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
+proptest = { version = "~1.6.0", optional = true }
+proptest-derive = { version = "0.5", optional = true }
+serde = { version = "^1.0.219", features = ["derive"] }
+serde_bytes = { version = "^0.11.17" }
+
+[dev-dependencies]
+serialize = { path = ".", package = "midnight-serialize", features = ["proptest"] }
+paste = "1.0.15"

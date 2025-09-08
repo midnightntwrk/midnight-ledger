@@ -1,0 +1,85 @@
+name: Ledger Build and Test All
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * *"
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE : full
+
+jobs:
+  build-all:
+    runs-on: ubuntu-latest-8-core-x64
+    steps:
+      - name: Setup api.github.com credentials
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        with:
+          machine: api.github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Setup github.com credentials
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        with:
+          machine: github.com
+          username: ${{ secrets.GH_USERNAME }}
+          password: ${{ secrets.GH_PASSWORD }}
+
+      - name: Configure git rewrite
+        run: |
+          mkdir -p $HOME/.config/git
+          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
+          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            netrc-file = ~/.netrc
+            access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Cache Nix
+        uses: input-output-hk/actions/attic@latest
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          endpoint: https://attic.ci.iog.io
+          cache: midnight
+          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+
+      - name: Build and Test
+        run: |
+          # Fail pipelines if any component fails, to avoid `tee` below hiding
+          # failures in `nix develop` command.
+          set -o pipefail
+          nix develop -c cargo config -Z unstable-options get net.git-fetch-with-cli
+          nix develop -c cargo test --workspace --all-features --release  --no-fail-fast -- --nocapture --test-threads=1 | tee test-output.log
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        with:
+          name: Test results
+          path: test-output.log

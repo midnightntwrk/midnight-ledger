@@ -1,0 +1,1 @@
+[(ledger-parameters[v3]),(claim-kind[v1],vec(output-instruction-unshielded[v1])),(u128),(vec(output-instruction-shielded[v1]),array(u8,32),shielded-token-type[v1]),(vec(output-instruction-unshielded[v1]),unshielded-token-type[v1]),(u128),(vec(cnight-generates-dust-event[v1]))]

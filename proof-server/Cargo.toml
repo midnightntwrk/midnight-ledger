@@ -1,0 +1,52 @@
+[package]
+name = "midnight-proof-server"
+edition = "2024"
+license.workspace = true
+version.workspace = true
+
+[features]
+default = []
+
+[dependencies]
+ledger = { path = "../ledger", package = "midnight-ledger", default-features = false, features = ["proving"] }
+zswap = { path = "../zswap", package = "midnight-zswap" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+storage = { path = "../storage", package = "midnight-storage" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+
+zkir_v2 = { path = "../zkir", package = "zkir" }
+
+introspection = "0.1.0"
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = { version = "^0.8.4", features = ["getrandom"] }
+actix-web = { version = "^4.11.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies", "http2"] }
+actix-cors = "^0.7.1"
+futures = "^0.3.31"
+futures-util = "0.3.31"
+clap = { version = "^4.5.40", features = ["derive", "env"] }
+tracing = "^0.1.41"
+tracing-subscriber = "^0.3.19"
+lazy_static = "^1.5.0"
+regex = "1.11.1"
+hex = "^0.4.3"
+uuid = { version = "1.17.0", features = ["v4"] }
+thiserror = "2.0.12"
+tokio = "1.46.1"
+async-channel = "2.5.0"
+time = { version = "0.3.41", features = ["serde-human-readable"] }
+serde = "1.0.219"
+
+[dev-dependencies]
+ledger = { path = "../ledger", package = "midnight-ledger", features = ["test-utilities", "proving"] }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+env_logger = "^0.11"
+log = "^0.4.27"
+function_name = "^0.3.0"
+tokio = { version = "^1.46.1", features = ["full"] }
+rustls = "0.23.28"
+reqwest = { version = "^0.12.22", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+serde_json = "1.0.140"

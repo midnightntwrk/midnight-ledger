@@ -1,0 +1,62 @@
+[workspace]
+package.license = "Apache-2.0"
+package.version = "6.1.0-alpha.2"
+members = [
+    "zswap",
+    "ledger",
+    "ledger-wasm",
+    "proof-server",
+    "onchain-runtime",
+    "onchain-runtime-wasm",
+    "onchain-state",
+    "onchain-vm",
+    "storage",
+    "zkir",
+    "zkir-wasm",
+    "transient-crypto",
+    "base-crypto",
+    "base-crypto-derive",
+    "coin-structure",
+    "serialize",
+    "serialize-macros",
+    "generate-cost-model",
+    "wasm-proving-demos/zkir-mt",
+]
+default-members = [
+    "zswap",
+    "ledger",
+    "onchain-runtime",
+    "onchain-state",
+    "onchain-vm",
+    "storage",
+    "zkir",
+    "base-crypto",
+    "base-crypto-derive",
+    "transient-crypto",
+    "coin-structure",
+    "serialize",
+    "serialize-macros",
+    "generate-cost-model",
+]
+resolver = "2"
+exclude = [
+    "scripts/hardfork_version_patch"
+]
+
+# Pretty much every dependency is crypto.
+# If there's one thing I know about it, it's that we don't want the molasses
+# of unoptimized crypto.
+[profile.dev.package."*"]
+opt-level = 2
+[profile.test.package."*"]
+opt-level = 2
+
+[profile.wasm]
+inherits = "release"
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+
+[workspace.metadata.spellcheck]
+config = ".spellcheck/cargo-spellcheck.toml"
