@@ -23,9 +23,9 @@ use std::ops::Deref;
 
 use crate::DefaultDB;
 use crate::Storable;
-use crate::arena::{ArenaKey, Sp};
+use crate::arena::Sp;
 use crate::db::DB;
-use crate::storable::{Loader, SizeAnn};
+use crate::storable::{Loader, SizeAnn, ChildNode};
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 
@@ -1301,14 +1301,14 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
 impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D>
     for Node<T, D, A>
 {
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
         match self {
             Node::Empty => std::vec::Vec::new(),
-            Node::Leaf { value, .. } => vec![value.root.clone()],
-            Node::Branch { children, .. } => children.iter().map(|sp| sp.root.clone()).collect(),
-            Node::Extension { child, .. } => vec![child.root.clone()],
+            Node::Leaf { value, .. } => vec![value.as_child()],
+            Node::Branch { children, .. } => children.iter().map(Sp::as_child).collect(),
+            Node::Extension { child, .. } => vec![child.as_child()],
             Node::MidBranchLeaf { child, value, .. } => {
-                vec![value.root.clone(), child.root.clone()]
+                vec![value.as_child(), child.as_child()]
             }
         }
     }
@@ -1426,7 +1426,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
     #[inline(always)]
     fn from_binary_repr<R: Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Node<T, D, A>, std::io::Error> {
         let disc = u8::deserialize(reader, 0)?;

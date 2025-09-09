@@ -20,7 +20,7 @@ mod rcmap;
 
 pub use rcmap::RcMap;
 
-use crate::arena::ArenaKey;
+use crate::{arena::ArenaKey, storable::ChildNode};
 use crate::db::DB;
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
@@ -159,7 +159,7 @@ pub fn get_writes<D: DB>(
             let children = arena
                 .children(&key)
                 .expect("children for write update should be loadable");
-            queue.extend(children);
+            queue.extend(children.iter().filter_map(ChildNode::into_ref).cloned());
             keys_added.insert(key);
         }
     }
@@ -192,7 +192,7 @@ pub fn update_rcmap<D: DB>(
     // Update reference counts for all edges from new keys
     for key in keys_added {
         let children = arena.children(key).expect("children should be loadable");
-        for child in children {
+        for child in children.iter().filter_map(ChildNode::into_ref).cloned() {
             *inc_map.entry(child).or_default() += 1;
         }
     }
@@ -233,7 +233,7 @@ pub fn gc_rcmap<D: DB>(
 
         // Decrement reference counts of key's children
         let children = arena.children(&key).expect("children should be loadable");
-        for child in children {
+        for child in children.iter().filter_map(ChildNode::into_ref) {
             let existing = rc_cache
                 .entry(child.clone())
                 .or_insert_with(|| rcmap.get_rc(&child).unwrap_or(0));
@@ -241,7 +241,7 @@ pub fn gc_rcmap<D: DB>(
             *sub += 1;
             // If child's rc became 0 and it's not in roots, add it to the gc queue
             if *sub >= *existing && !roots.contains(&child) {
-                queue.push(child);
+                queue.push(child.clone());
             }
         }
         keys_removed.insert(key);

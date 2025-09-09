@@ -15,7 +15,7 @@
 use crate::Storable;
 use crate::arena::ArenaKey;
 use crate::db::DB;
-use crate::storable::Loader;
+use crate::storable::{Loader, ChildNode};
 use crate::storage::Map;
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
@@ -46,8 +46,8 @@ impl<D: DB> KeyRef<D> {
 }
 
 impl<D: DB> Storable<D> for KeyRef<D> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        vec![self.key.clone()]
+    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+        vec![ChildNode::Ref(self.key.clone())]
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
@@ -60,15 +60,16 @@ impl<D: DB> Storable<D> for KeyRef<D> {
 
     fn from_binary_repr<R: std::io::Read>(
         _reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         _loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized,
     {
-        child_hashes.next().map(KeyRef::new).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "KeyRef missing child key")
-        })
+        match child_hashes.next() {
+            Some(ChildNode::Ref(key)) => Ok(KeyRef::new(key)),
+            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "KeyRef missing child key")),
+        }
     }
 }
 
@@ -297,7 +298,7 @@ pub(crate) mod tests {
         rcmap: &RcMap<D>,
     ) -> std::collections::HashSet<ArenaKey<D::Hasher>> {
         let mut visited = std::collections::HashSet::new();
-        let mut to_visit = rcmap.children();
+        let mut to_visit = rcmap.children().into_iter().filter_map(|c| c.into_ref().cloned()).collect::<Vec<_>>();
         let arena = &crate::storage::default_storage::<D>().arena;
         while let Some(current) = to_visit.pop() {
             if !visited.insert(current.clone()) {
@@ -305,7 +306,7 @@ pub(crate) mod tests {
             }
             arena.with_backend(|backend| {
                 let disk_obj = backend.get(&current).expect("Key should exist in backend");
-                to_visit.extend(disk_obj.children.clone());
+                to_visit.extend(disk_obj.children.iter().filter_map(ChildNode::into_ref).cloned());
             });
         }
         visited

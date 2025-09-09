@@ -20,8 +20,7 @@ use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::MerklePatriciaTrie;
 use crate::merkle_patricia_trie::Semigroup;
-use crate::storable::Loader;
-use crate::storable::SizeAnn;
+use crate::storable::{Loader, SizeAnn, ChildNode};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
 use crypto::digest::Digest;
@@ -954,12 +953,12 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
 pub struct Identity<V>(pub V);
 
 impl<V: Storable<D>, D: DB> Storable<D> for Identity<V> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
         self.0.children()
     }
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -1245,8 +1244,8 @@ impl<
 {
     /// Rather than in-lining the wrapped MPT it is a child such that we know the public Map has
     /// only a single child element (rather than up to 16)
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        vec![Sp::hash(&self.mpt).into()]
+    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+        vec![Sp::as_child(&self.mpt)]
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
@@ -1258,7 +1257,7 @@ impl<
 
     fn from_binary_repr<R: std::io::Read>(
         _reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
