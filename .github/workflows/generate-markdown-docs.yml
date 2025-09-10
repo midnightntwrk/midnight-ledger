@@ -28,16 +28,16 @@ jobs:
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          
+
           BRANCH=${{ github.event.inputs.branch || github.ref_name }}
           NEW_BRANCH=doc-generation
-          
+
           git checkout -B $NEW_BRANCH
-          
+
           cd ledger-wasm && npm run build:markdown-docs
           cd ../onchain-runtime-wasm && npm run build:markdown-docs
           cd ../zswap-wasm && npm run build:markdown-docs
-          
+
           cd ..
           git add docs/
           git commit -m 'Generated documentation'
@@ -56,7 +56,7 @@ jobs:
           if [[ "$PR_EXISTS" -eq "0" ]]; then
             echo "create_pr=true" >> $GITHUB_ENV
           fi
-      
+
       - name: Create PR via GitHub API
         if: env.create_pr == 'true'
         run: |
@@ -64,7 +64,7 @@ jobs:
           PR_TITLE="Automated Documentation Update"
           PR_BODY="This PR contains the latest generated markdown documentation."
           API_URL="https://api.github.com/repos/${{ github.repository }}/pulls"
-          
+
           curl -X POST "$API_URL" \
             -H "Authorization: token ${{ secrets.GH_PASSWORD }}" \
             -H "Accept: application/vnd.github.v3+json" \
