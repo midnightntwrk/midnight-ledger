@@ -38,7 +38,7 @@ jobs:
           # Remove all contents, including hidden files
           sudo rm -rf "$WORKSPACE_PATH"/* "$WORKSPACE_PATH"/.[!.]* || true
           echo "Workspace cleaning attempted."
-        shell: bash   
+        shell: bash
 
       - name: Setup api.github.com credentials
         uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
@@ -66,7 +66,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v7be5dee1421f63d07e71ce6e0a9f8a4b07c2a487 # v31.6.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -88,7 +88,7 @@ jobs:
         run: |
           sudo mkdir -m 0755 -p /nix/var/nix/{profiles,gcroots}/per-user/$USER
           sudo chown -R $USER:nixbld /nix/var/nix/{profiles,gcroots}/per-user/$USER
-        shell: bash # Ensure bash is used for these commands  
+        shell: bash # Ensure bash is used for these commands
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -104,13 +104,13 @@ jobs:
 
       - name: Add Homebrew and git bin to PATH for Yarn, verify git is installed
         run: |
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH   
-          echo "/usr/bin" >> $GITHUB_PATH 
+          echo "/opt/homebrew/bin" >> $GITHUB_PATH
+          echo "/usr/bin" >> $GITHUB_PATH
           which git
           git --version
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
          always-auth: true
          registry-url: https://npm.pkg.github.com/
@@ -142,8 +142,8 @@ jobs:
         if: success() || failure()
         with:
           check_name: 'IT Test Report - ${{ matrix.runner }}'
-          report_paths: '**/reports/test-*.xml' 
- 
+          report_paths: '**/reports/test-*.xml'
+
       - name: Publish Test Coverage
         uses: MishaKav/jest-coverage-comment@d74238813c33e6ea20530ff91b5ea37953d11c91
         with:
@@ -170,7 +170,7 @@ jobs:
            **/reports/test-*.xml
 
       - name: Publish Test Report CTRF
-        uses: ctrf-io/github-test-reporter@v1
+        uses: ctrf-io/github-test-reporter@646f98cfc16c6f7a0e1f6100cabe2deb95dd2eef # v1.0.22
         if: always()
         with:
           title: Ledger WASM - Integration test results - ${{ matrix.runner }}
@@ -246,7 +246,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix (2)
-        uses: cachix/install-nix-action@v31
+        uses: cachix/install-nix-action@v7be5dee1421f63d07e71ce6e0a9f8a4b07c2a487 # v31.6.1
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
@@ -268,7 +268,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@v1
+        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
         with:
           toolchain: stable # Or 'nightly', 'beta', or a specific version like '1.70.0'
           override: true
@@ -285,11 +285,11 @@ jobs:
 
       - name: Add Homebrew and git bin to PATH for Yarn, verify git is installed
         run: |
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH   
-          echo "/usr/bin" >> $GITHUB_PATH 
+          echo "/opt/homebrew/bin" >> $GITHUB_PATH
+          echo "/usr/bin" >> $GITHUB_PATH
           which git
           git --version
-        
+
 
       # Cargo check the whole workspace with all features. This is important to
       # avoid bitrot of code that is feature gated behind non-default features
@@ -349,4 +349,4 @@ jobs:
         uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
         with:
           name: 'proof-server-test-results-${{ matrix.runner }}'
-          path: target/test-* 
+          path: target/test-*

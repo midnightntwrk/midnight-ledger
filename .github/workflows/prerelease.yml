@@ -15,14 +15,14 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Setup GitHub Credentials
-        uses: extractions/netrc@v2
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
         with:
           machine: github.com
           username: ${{ secrets.GH_USERNAME }}
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Setup API Credentials
-        uses: extractions/netrc@v2
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
         with:
           machine: api.github.com
           username: ${{ secrets.GH_USERNAME }}
@@ -45,7 +45,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@v7be5dee1421f63d07e71ce6e0a9f8a4b07c2a487 # v31.6.1
         with:
           extra_nix_config: |
             netrc-file = ~/.netrc
@@ -62,7 +62,7 @@ jobs:
           endpoint: https://attic.ci.iog.io
           cache: midnight
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
-      
+
       - name: Get project versions
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
@@ -73,7 +73,7 @@ jobs:
             echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
             cd ..
             done
-      
+
       - name: Add tags for upstream crates
         run: |
           git config --global user.name 'MidnightCI'
@@ -112,7 +112,7 @@ jobs:
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
           else
-            cd ledger-wasm 
+            cd ledger-wasm
             cargo check
             npm install
             npm run build:markdown-docs
@@ -234,5 +234,3 @@ jobs:
       ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
-      
-  
