@@ -29,7 +29,7 @@ to constrain values of this map to `0`.
 
   Also extended `Effects` to contain unshielded token information, and
   added `CallContext` struct.
-  
+
 - Made `Op` and `Key` `Storable`
 - Reexported breaking changes in `midnight-coin-structure`
 
