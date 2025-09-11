@@ -44,7 +44,7 @@ coin-structure = { path = "../coin-structure", package = "midnight-coin-structur
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 env_logger = "^0.11"
-log = "^0.4.27"
+log = "^0.4.28"
 function_name = "^0.3.0"
 tokio = { version = "^1.46.1", features = ["full"] }
 rustls = "0.23.28"
