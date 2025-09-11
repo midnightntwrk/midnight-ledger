@@ -27,7 +27,7 @@ group = "^0.13.0"
 midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
 midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
 midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v4.0.0" }
-anyhow = { version = "^1.0.98" }
+anyhow = { version = "^1.0.99" }
 lru = "0.16.0"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
