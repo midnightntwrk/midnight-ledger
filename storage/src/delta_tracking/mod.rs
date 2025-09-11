@@ -19,9 +19,10 @@
 mod rcmap;
 
 pub use rcmap::RcMap;
+use serialize::Serializable;
 
-use crate::{arena::ArenaKey, storable::ChildNode};
 use crate::db::DB;
+use crate::{arena::ArenaKey, storable::ChildNode};
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
 
@@ -48,7 +49,7 @@ pub struct WriteDeleteResults<D: DB> {
 /// WARNING: this requires the keys in `r0` to be in the back-end; see similar
 /// warning in `incremental_write_delete_costs` for more details.
 pub fn initial_write_delete_costs<D: DB>(
-    r0: &StdHashSet<ArenaKey<D::Hasher>>,
+    r0: &StdHashSet<ChildNode<D::Hasher>>,
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
 ) -> WriteDeleteResults<D> {
     let rcmap = RcMap::default();
@@ -72,7 +73,7 @@ pub fn initial_write_delete_costs<D: DB>(
 /// from the output `StateValue` of the VM.
 pub fn incremental_write_delete_costs<D: DB>(
     k0: &RcMap<D>,
-    r1: &StdHashSet<ArenaKey<D::Hasher>>,
+    r1: &StdHashSet<ChildNode<D::Hasher>>,
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
     gc_limit: impl FnOnce(RunningCost) -> usize,
 ) -> WriteDeleteResults<D> {
@@ -87,22 +88,28 @@ pub fn incremental_write_delete_costs<D: DB>(
 }
 
 /// Compute total bytes from a set of keys by summing their node sizes.
-fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64 {
+fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ChildNode<D::Hasher>>) -> u64 {
     let arena = &crate::storage::default_storage::<D>().arena;
     arena.with_backend(|backend| {
         keys.iter()
             .map(|key| {
-                backend
-                    .get(key)
-                    // WARNING: this requires the keys to be in the backend,
-                    // which in turn requires them to be `persist()`ed or
-                    // currently loaded in sps. We ensure this by storing refs
-                    // to charged keys in the RcMap, which itself gets persisted
-                    // as part of the ContractState's ChargedState.
-                    .expect("key should exist in arena when computing bytes")
-                    .size() as u64
-                    // Overhead of storing the refcount itself
-                    + 32 + 4
+                match key {
+                    ChildNode::Ref(key) => {
+                        backend
+                        .get(key)
+                        // WARNING: this requires the keys to be in the backend,
+                        // which in turn requires them to be `persist()`ed or
+                        // currently loaded in sps. We ensure this by storing refs
+                        // to charged keys in the RcMap, which itself gets persisted
+                        // as part of the ContractState's ChargedState.
+                        .expect("key should exist in arena when computing bytes")
+                        .size() as u64
+                        // Overhead of storing the refcount itself
+                        + 32 + 4
+                    }
+                    // Direct children *must* be in rc_0, where they are both key and value
+                    ChildNode::Direct(_) => key.serialized_size() as u64 * 2,
+                }
             })
             .sum()
     })
@@ -111,8 +118,8 @@ fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64
 impl<D: DB> WriteDeleteResults<D> {
     /// Compute `WriteDeleteResults` for new `RcMap` and key deltas.
     fn new(
-        keys_added: StdHashSet<ArenaKey<D::Hasher>>,
-        keys_removed: StdHashSet<ArenaKey<D::Hasher>>,
+        keys_added: StdHashSet<ChildNode<D::Hasher>>,
+        keys_removed: StdHashSet<ChildNode<D::Hasher>>,
         new_charged_keys: RcMap<D>,
         cpu_cost: impl Fn(u64, u64) -> RunningCost,
     ) -> Self {
@@ -148,18 +155,30 @@ impl<D: DB> WriteDeleteResults<D> {
 /// keys in `roots`.
 pub fn get_writes<D: DB>(
     rcmap: &RcMap<D>,
-    roots: &StdHashSet<ArenaKey<D::Hasher>>,
-) -> StdHashSet<ArenaKey<D::Hasher>> {
+    roots: &StdHashSet<ChildNode<D::Hasher>>,
+) -> StdHashSet<ChildNode<D::Hasher>> {
     let arena = &crate::storage::default_storage::<D>().arena;
-    let mut queue: Vec<ArenaKey<D::Hasher>> = roots.iter().cloned().collect();
+    let mut queue: Vec<ChildNode<D::Hasher>> = roots.iter().cloned().collect();
     let mut keys_added = StdHashSet::new();
 
     while let Some(key) = queue.pop() {
         if !rcmap.contains(&key) && !keys_added.contains(&key) {
-            let children = arena
-                .children(&key)
-                .expect("children for write update should be loadable");
-            queue.extend(children.iter().filter_map(ChildNode::into_ref).cloned());
+            match &key {
+                ChildNode::Ref(key) => {
+                    let children = arena
+                        .children(key)
+                        .expect("children for write update should be loadable");
+                    queue.extend(
+                        children
+                            .iter()
+                            .flat_map(ChildNode::refs)
+                            .map(|r| ChildNode::Ref(r.clone())),
+                    );
+                }
+                ChildNode::Direct(_) => {
+                    queue.extend(key.refs().into_iter().map(|r| ChildNode::Ref(r.clone())))
+                }
+            }
             keys_added.insert(key);
         }
     }
@@ -178,7 +197,7 @@ pub fn get_writes<D: DB>(
 #[must_use]
 pub fn update_rcmap<D: DB>(
     rcmap: &RcMap<D>,
-    keys_added: &StdHashSet<ArenaKey<D::Hasher>>,
+    keys_added: &StdHashSet<ChildNode<D::Hasher>>,
 ) -> RcMap<D> {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut rcmap = rcmap.clone();
@@ -191,14 +210,32 @@ pub fn update_rcmap<D: DB>(
     // Initialize all new keys with rc = 0
     // Update reference counts for all edges from new keys
     for key in keys_added {
-        let children = arena.children(key).expect("children should be loadable");
-        for child in children.iter().filter_map(ChildNode::into_ref).cloned() {
-            *inc_map.entry(child).or_default() += 1;
+        match key {
+            ChildNode::Ref(key) => {
+                let children = arena.children(key).expect("children should be loadable");
+                for child in children
+                    .iter()
+                    .flat_map(ChildNode::refs)
+                    .map(|r| ChildNode::Ref(r.clone()))
+                {
+                    *inc_map.entry(child).or_default() += 1;
+                }
+            }
+            ChildNode::Direct(_) => {
+                for child in key.refs().into_iter().map(|r| ChildNode::Ref(r.clone())) {
+                    *inc_map.entry(child).or_default() += 1;
+                }
+            }
         }
     }
     for (k, by) in inc_map.into_iter() {
-        let old_rc = rcmap.get_rc(&k).unwrap_or(0);
-        rcmap = rcmap.modify_rc(&k, old_rc + by);
+        match &k {
+            ChildNode::Ref(r) => {
+                let old_rc = rcmap.get_rc(&k).unwrap_or(0);
+                rcmap = rcmap.modify_rc(&r, old_rc + by);
+            }
+            ChildNode::Direct(_) => rcmap = rcmap.ins_root(k),
+        }
     }
 
     rcmap
@@ -211,16 +248,16 @@ pub fn update_rcmap<D: DB>(
 #[must_use]
 pub fn gc_rcmap<D: DB>(
     orig_rcmap: &RcMap<D>,
-    roots: &StdHashSet<ArenaKey<D::Hasher>>,
+    roots: &StdHashSet<ChildNode<D::Hasher>>,
     step_limit: usize,
-) -> (RcMap<D>, StdHashSet<ArenaKey<D::Hasher>>) {
+) -> (RcMap<D>, StdHashSet<ChildNode<D::Hasher>>) {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut rcmap = orig_rcmap.clone();
     let mut keys_removed = StdHashSet::new();
     let mut step = 0;
     let mut storage_queue = orig_rcmap.get_unreachable_keys_not_in(roots);
     // Invariant: keys in queue have rc == 0 and aren't in r1.
-    let mut queue: Vec<ArenaKey<D::Hasher>> = Vec::new();
+    let mut queue: Vec<ChildNode<D::Hasher>> = Vec::new();
     let mut rc_cache = std::collections::HashMap::new();
     let mut update_queue = std::collections::HashMap::new();
 
@@ -232,8 +269,23 @@ pub fn gc_rcmap<D: DB>(
         step += 1;
 
         // Decrement reference counts of key's children
-        let children = arena.children(&key).expect("children should be loadable");
-        for child in children.iter().filter_map(ChildNode::into_ref) {
+        let children_refs: Box<dyn Iterator<Item = _>> = match &key {
+            ChildNode::Ref(key) => Box::new(
+                arena
+                    .children(&key)
+                    .expect("children should be loadable")
+                    .into_iter()
+                    .flat_map(|c| {
+                        c.refs()
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                    }),
+            ),
+            ChildNode::Direct(_) => Box::new(key.refs().into_iter().cloned()),
+        };
+        for child in children_refs.map(|r| ChildNode::Ref(r.clone())) {
             let existing = rc_cache
                 .entry(child.clone())
                 .or_insert_with(|| rcmap.get_rc(&child).unwrap_or(0));
@@ -249,11 +301,16 @@ pub fn gc_rcmap<D: DB>(
 
     // Execute on the update information
     for (key, update) in update_queue.into_iter() {
-        let original = rc_cache
-            .get(&key)
-            .expect("must have cached decremented key");
-        let updated = original.saturating_sub(update);
-        rcmap = rcmap.modify_rc(&key, updated);
+        match &key {
+            ChildNode::Ref(r) => {
+                let original = rc_cache
+                    .get(&key)
+                    .expect("must have cached decremented key");
+                let updated = original.saturating_sub(update);
+                rcmap = rcmap.modify_rc(r, updated);
+            }
+            ChildNode::Direct(_) => rcmap = rcmap.rm_root(&key),
+        }
     }
 
     for key in keys_removed.iter() {

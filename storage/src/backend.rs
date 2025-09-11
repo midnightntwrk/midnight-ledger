@@ -20,7 +20,11 @@
 //! See [`StorageBackend`] for a detailed overview and the public API.
 
 use crate::{
-    arena::ArenaKey, cache::Cache, db::{Update, DB}, storable::ChildNode, WellBehavedHasher
+    WellBehavedHasher,
+    arena::ArenaKey,
+    cache::Cache,
+    db::{DB, Update},
+    storable::ChildNode,
 };
 use rand::distributions::{Distribution, Standard};
 use serialize::{Deserializable, Serializable};
@@ -808,7 +812,7 @@ impl<D: DB> StorageBackend<D> {
             // Decrement child ref counts, and mark unreachable any children
             // whose ref count goes to zero.
             self.update_counts(&node.children, Delta::new_ref_delta(-1));
-            for child_key in node.children.iter().filter_map(ChildNode::into_ref) {
+            for child_key in node.children.iter().flat_map(ChildNode::refs) {
                 // Unless the cache is unreasonably small, all of the children
                 // will already be in memory from the `pre_fetch` above, so this
                 // `get` won't trigger any full pre-fetches.
@@ -868,7 +872,7 @@ impl<D: DB> StorageBackend<D> {
     /// Update ref and root counts for `children`, e.g. for `children = obj.children` when `obj`
     /// is created or destroyed.
     fn update_counts(&mut self, children: &[ChildNode<D::Hasher>], delta: Delta) {
-        for key in children.iter().filter_map(ChildNode::into_ref) {
+        for key in children.iter().flat_map(ChildNode::refs) {
             if let Some(cache_val) = self.peek_mut_from_memory(key) {
                 // Safe because we will only use this is get an owned copy of cache_val before
                 // overwriting it.
@@ -1113,8 +1117,10 @@ impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
     /// Generate a random `OnDiskObject` with small internal vectors.
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> OnDiskObject<H> {
         // Generate a vector of length at most 10.
-        fn rand_vec<T, R: rand::prelude::Rng + ?Sized>(rng: &mut R, f: impl Fn(&mut R) -> T) -> std::vec::Vec<T>
-        {
+        fn rand_vec<T, R: rand::prelude::Rng + ?Sized>(
+            rng: &mut R,
+            f: impl Fn(&mut R) -> T,
+        ) -> std::vec::Vec<T> {
             const MAX_LEN: usize = 10;
             let len = rng.gen_range(0..MAX_LEN);
             let mut v = std::vec::Vec::with_capacity(len);
@@ -1158,7 +1164,10 @@ pub(crate) mod raw_node {
         ) -> Self {
             let data = key.to_vec();
             let key = ArenaKey::_from_bytes(key);
-            let children = children.into_iter().map(|n| ChildNode::Ref(n.key.clone())).collect();
+            let children = children
+                .into_iter()
+                .map(|n| ChildNode::Ref(n.key.clone()))
+                .collect();
             RawNode {
                 key,
                 data,
@@ -1435,7 +1444,11 @@ mod tests {
         ]);
         let gp_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut gp_bytes.clone().as_slice(),
-            &mut vec![ChildNode::Ref(parent_key.clone()), ChildNode::Ref(child_key.clone())].into_iter(),
+            &mut vec![
+                ChildNode::Ref(parent_key.clone()),
+                ChildNode::Ref(child_key.clone()),
+            ]
+            .into_iter(),
             &IrLoader::new(arena, &all),
         )
         .unwrap();

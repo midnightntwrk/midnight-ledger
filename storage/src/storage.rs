@@ -20,7 +20,7 @@ use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::MerklePatriciaTrie;
 use crate::merkle_patricia_trie::Semigroup;
-use crate::storable::{Loader, SizeAnn, ChildNode};
+use crate::storable::{ChildNode, Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
 use crypto::digest::Digest;

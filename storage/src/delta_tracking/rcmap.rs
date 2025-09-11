@@ -15,7 +15,7 @@
 use crate::Storable;
 use crate::arena::ArenaKey;
 use crate::db::DB;
-use crate::storable::{Loader, ChildNode};
+use crate::storable::{ChildNode, Loader};
 use crate::storage::Map;
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
@@ -32,22 +32,20 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 /// When stored in the arena, `KeyRef` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
 /// `KeyRef`.
-#[derive_where(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-struct KeyRef<D: DB> {
-    key: ArenaKey<D::Hasher>,
+#[derive_where(Clone, Debug, PartialEq, Eq)]
+struct ChildRef<D: DB> {
+    child: ChildNode<D::Hasher>,
 }
 
-impl<D: DB> KeyRef<D> {
-    fn new(key: ArenaKey<D::Hasher>) -> Self {
-        Self { key }
+impl<D: DB> ChildRef<D> {
+    fn new(child: ChildNode<D::Hasher>) -> Self {
+        Self { child }
     }
 }
 
-impl<D: DB> Storable<D> for KeyRef<D> {
+impl<D: DB> Storable<D> for ChildRef<D> {
     fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
-        vec![ChildNode::Ref(self.key.clone())]
+        vec![self.child.clone()]
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
@@ -60,48 +58,51 @@ impl<D: DB> Storable<D> for KeyRef<D> {
 
     fn from_binary_repr<R: std::io::Read>(
         _reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
+        children: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         _loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized,
     {
-        match child_hashes.next() {
-            Some(ChildNode::Ref(key)) => Ok(KeyRef::new(key)),
-            _ => Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "KeyRef missing child key")),
+        match children.next() {
+            Some(child) => Ok(ChildRef::new(child)),
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "KeyRef missing child key",
+            )),
         }
     }
 }
 
-impl<D: DB> Serializable for KeyRef<D> {
+impl<D: DB> Serializable for ChildRef<D> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        self.key.serialize(writer)
+        self.child.serialize(writer)
     }
 
     fn serialized_size(&self) -> usize {
-        self.key.serialized_size()
+        self.child.serialized_size()
     }
 }
 
-impl<D: DB> Deserializable for KeyRef<D> {
+impl<D: DB> Deserializable for ChildRef<D> {
     fn deserialize(reader: &mut impl std::io::Read, recursive_depth: u32) -> std::io::Result<Self> {
-        ArenaKey::deserialize(reader, recursive_depth).map(KeyRef::new)
+        ChildNode::<D::Hasher>::deserialize(reader, recursive_depth).map(ChildRef::new)
     }
 }
 
-impl<D: DB> Distribution<KeyRef<D>> for Standard {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> KeyRef<D> {
-        KeyRef::new(rng.r#gen())
+impl<D: DB> Distribution<ChildRef<D>> for Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChildRef<D> {
+        ChildRef::new(ChildNode::Ref(rng.r#gen()))
     }
 }
 
 // Manual impl because we don't derive Storable
-impl<D: DB> Tagged for KeyRef<D> {
+impl<D: DB> Tagged for ChildRef<D> {
     fn tag() -> std::borrow::Cow<'static, str> {
-        "keyref[v1]".into()
+        "childref[v1]".into()
     }
     fn tag_unique_factor() -> String {
-        "keyref[v1]".into()
+        "children[v1]".into()
     }
 }
 
@@ -109,9 +110,10 @@ impl<D: DB> Tagged for KeyRef<D> {
 ///
 /// Internally we use `KeyRef` to ensure that nodes for all keys in the `RcMap`
 /// will be persisted as long a the `RcMap` itself is.
-#[derive_where(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Serialize, serde::Deserialize, Storable)]
-#[serde(bound(serialize = "", deserialize = ""))]
+#[derive_where(Debug, Clone, PartialEq, Eq)]
+#[derive(Storable)]
+//#[derive(serde::Serialize, serde::Deserialize, Storable)]
+//#[serde(bound(serialize = "", deserialize = ""))]
 #[storable(db = D)]
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
@@ -119,27 +121,45 @@ pub struct RcMap<D: DB = DefaultDB> {
     rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
-    /// The `KeyRef` here creates storage overhead -- an additional dag node for
+    /// The `ChildRef` here creates storage overhead -- an additional dag node for
     /// each key -- but the `rc_0` map is expected to be small, so this
     /// shouldn't matter.
-    rc_0: Map<ArenaKey<D::Hasher>, KeyRef<D>, D>,
+    rc_0: Map<ChildNode<D::Hasher>, ChildRef<D>, D>,
 }
 
 impl<D: DB> RcMap<D> {
     /// Returns true iff the key is charged.
-    pub(crate) fn contains(&self, key: &ArenaKey<D::Hasher>) -> bool {
+    pub(crate) fn contains(&self, key: &ChildNode<D::Hasher>) -> bool {
         self.get_rc(key).is_some()
     }
 
     /// Get the current reference count for a key.
     /// Returns Some(n) if key is charged (n >= 0), None if key is not in `RcMap`.
-    pub(crate) fn get_rc(&self, key: &ArenaKey<D::Hasher>) -> Option<u64> {
-        if let Some(count) = self.rc_ge_1.get(key) {
+    pub(crate) fn get_rc(&self, key: &ChildNode<D::Hasher>) -> Option<u64> {
+        if let ChildNode::Ref(key) = key
+            && let Some(count) = self.rc_ge_1.get(key)
+        {
             Some(*count)
         } else if self.rc_0.contains_key(key) {
             Some(0)
         } else {
             None // Key not charged at all
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn ins_root(&self, key: ChildNode<D::Hasher>) -> Self {
+        RcMap {
+            rc_ge_1: self.rc_ge_1.clone(),
+            rc_0: self.rc_0.insert(key.clone(), ChildRef::new(key.clone())),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn rm_root(&self, key: &ChildNode<D::Hasher>) -> Self {
+        RcMap {
+            rc_ge_1: self.rc_ge_1.clone(),
+            rc_0: self.rc_0.remove(key),
         }
     }
 
@@ -154,7 +174,10 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.clone(),
-                    rc_0: self.rc_0.insert(key.clone(), KeyRef::new(key.clone())),
+                    rc_0: self.rc_0.insert(
+                        ChildNode::Ref(key.clone()),
+                        ChildRef::new(ChildNode::Ref(key.clone())),
+                    ),
                 }
             }
             (0, 1..) =>
@@ -162,7 +185,7 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.insert(key.clone(), updated),
-                    rc_0: self.rc_0.remove(key),
+                    rc_0: self.rc_0.remove(&ChildNode::Ref(key.clone())),
                 }
             }
             (1.., 1..) =>
@@ -178,7 +201,10 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.remove(key),
-                    rc_0: self.rc_0.insert(key.clone(), KeyRef::new(key.clone())),
+                    rc_0: self.rc_0.insert(
+                        ChildNode::Ref(key.clone()),
+                        ChildRef::new(ChildNode::Ref(key.clone())),
+                    ),
                 }
             }
         }
@@ -188,8 +214,8 @@ impl<D: DB> RcMap<D> {
     /// This is used to initialize garbage collection.
     pub(crate) fn get_unreachable_keys_not_in(
         &self,
-        roots: &StdHashSet<ArenaKey<D::Hasher>>,
-    ) -> impl Iterator<Item = ArenaKey<D::Hasher>> {
+        roots: &StdHashSet<ChildNode<D::Hasher>>,
+    ) -> impl Iterator<Item = ChildNode<D::Hasher>> {
         self.rc_0.keys().filter(|key| !roots.contains(key))
     }
 
@@ -197,7 +223,7 @@ impl<D: DB> RcMap<D> {
     /// Returns `Some(updated rc map)` if key was present with `rc == 0`, and
     /// `None` otherwise.
     #[must_use]
-    pub(crate) fn remove_unreachable_key(&self, key: &ArenaKey<D::Hasher>) -> Option<Self> {
+    pub(crate) fn remove_unreachable_key(&self, key: &ChildNode<D::Hasher>) -> Option<Self> {
         if self.rc_0.contains_key(key) {
             Some(RcMap {
                 rc_ge_1: self.rc_ge_1.clone(),
@@ -298,7 +324,11 @@ pub(crate) mod tests {
         rcmap: &RcMap<D>,
     ) -> std::collections::HashSet<ArenaKey<D::Hasher>> {
         let mut visited = std::collections::HashSet::new();
-        let mut to_visit = rcmap.children().into_iter().filter_map(|c| c.into_ref().cloned()).collect::<Vec<_>>();
+        let mut to_visit = rcmap
+            .children()
+            .into_iter()
+            .filter_map(|c| c.into_ref().cloned())
+            .collect::<Vec<_>>();
         let arena = &crate::storage::default_storage::<D>().arena;
         while let Some(current) = to_visit.pop() {
             if !visited.insert(current.clone()) {
@@ -306,7 +336,13 @@ pub(crate) mod tests {
             }
             arena.with_backend(|backend| {
                 let disk_obj = backend.get(&current).expect("Key should exist in backend");
-                to_visit.extend(disk_obj.children.iter().filter_map(ChildNode::into_ref).cloned());
+                to_visit.extend(
+                    disk_obj
+                        .children
+                        .iter()
+                        .filter_map(ChildNode::into_ref)
+                        .cloned(),
+                );
             });
         }
         visited

@@ -13,6 +13,7 @@
 
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
+use crate::DefaultHasher;
 use crate::arena::{ArenaKey, Sp};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
@@ -23,15 +24,20 @@ use base_crypto::{
     hash::HashOutput,
 };
 use crypto::digest::Digest;
+use derive_where::derive_where;
+use macros::Storable;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use rand::distributions::Standard;
+use rand::prelude::Distribution;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -81,27 +87,24 @@ pub trait Loader<D: DB> {
     }
 }
 
-#[derive(Serializable, Debug, Clone)]
+#[derive(Debug, Clone, Storable, Serializable)]
+#[derive_where(Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[storable(base)]
+#[tag = "storage-child-node[v1]"]
 #[phantom(H)]
 /// A representataion of an individual child of a [Storable] object.
-pub enum ChildNode<H: WellBehavedHasher> {
+pub enum ChildNode<H: WellBehavedHasher = DefaultHasher> {
     /// A by-reference child, which can be looked up in the storage arena.
     Ref(ArenaKey<H>),
     /// A direct child, typically reserved for small children, represented as its raw data.
     Direct(DirectChildNode<H>),
 }
 
-impl<H: WellBehavedHasher> PartialEq for ChildNode<H> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (ChildNode::Ref(r1), ChildNode::Ref(r2)) => r1 == r2,
-            (ChildNode::Direct(d1), ChildNode::Direct(d2)) => d1 == d2,
-            _ => false,
-        }
+impl<H: WellBehavedHasher> Distribution<ChildNode<H>> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ChildNode<H> {
+        ChildNode::Ref(rng.r#gen())
     }
 }
-
-impl<H: WellBehavedHasher> Eq for ChildNode<H> {}
 
 impl<H: WellBehavedHasher> ChildNode<H> {
     /// Returns the hash of this child.
@@ -112,16 +115,23 @@ impl<H: WellBehavedHasher> ChildNode<H> {
         }
     }
 
-    /// Returns the hash of this child if and only if it is a direct reference.
-    pub fn into_ref(&self) -> Option<&ArenaKey<H>> {
-        match self {
-            ChildNode::Ref(h) => Some(h),
-            ChildNode::Direct(_) => None,
+    /// Returns the referenced children that are *not* directly embedded in this node.
+    pub fn refs(&self) -> Vec<&ArenaKey<H>> {
+        let mut res = Vec::with_capacity(32);
+        let mut frontier = Vec::with_capacity(32);
+        frontier.push(self);
+        while let Some(node) = frontier.pop() {
+            match node {
+                ChildNode::Ref(n) => res.push(n),
+                ChildNode::Direct(d) => frontier.extend(d.children.iter()),
+            }
         }
+        res
     }
 }
 
 #[derive(Debug, Clone)]
+#[derive_where(PartialOrd, Ord, Hash)]
 /// The raw data of a child object
 pub struct DirectChildNode<H: WellBehavedHasher> {
     /// The data label of this node
@@ -132,9 +142,16 @@ pub struct DirectChildNode<H: WellBehavedHasher> {
     pub(crate) serialized_size: usize,
 }
 
+impl<H: WellBehavedHasher> PartialEq for DirectChildNode<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+impl<H: WellBehavedHasher> Eq for DirectChildNode<H> {}
+
 impl<H: WellBehavedHasher> DirectChildNode<H> {
     /// Create a new direct child object from its parts
-    pub fn new(data: Vec<u8>, children: Vec<ChildNode<H>>) -> Self {
+    pub(crate) fn new(data: Vec<u8>, children: Vec<ChildNode<H>>) -> Self {
         let hash = crate::arena::hash(&data, children.iter().map(|c| c.hash()));
         let serialized_size = data.serialized_size() + children.serialized_size();
         DirectChildNode {
@@ -146,7 +163,6 @@ impl<H: WellBehavedHasher> DirectChildNode<H> {
     }
 }
 
-
 impl<H: WellBehavedHasher> Serializable for DirectChildNode<H> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         self.data.serialize(writer)?;
@@ -156,6 +172,16 @@ impl<H: WellBehavedHasher> Serializable for DirectChildNode<H> {
         self.serialized_size
     }
 }
+
+impl<H: WellBehavedHasher> Tagged for DirectChildNode<H> {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("storage-direct-child-node[v1]")
+    }
+    fn tag_unique_factor() -> String {
+        "(vec(u8),vec(storage-child-node[v1]))".to_owned()
+    }
+}
+
 impl<H: WellBehavedHasher> Deserializable for DirectChildNode<H> {
     fn deserialize(reader: &mut impl std::io::Read, recursion_depth: u32) -> std::io::Result<Self> {
         let data: Vec<u8> = Deserializable::deserialize(reader, recursion_depth + 1)?;
@@ -163,14 +189,6 @@ impl<H: WellBehavedHasher> Deserializable for DirectChildNode<H> {
         Ok(DirectChildNode::new(data, children))
     }
 }
-
-impl<H: WellBehavedHasher> PartialEq for DirectChildNode<H> {
-    fn eq(&self, other: &Self) -> bool {
-        self.hash == other.hash
-    }
-}
-
-impl<H: WellBehavedHasher> Eq for DirectChildNode<H> { }
 
 /// A `Storable` object.
 ///

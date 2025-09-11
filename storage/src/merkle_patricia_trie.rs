@@ -25,7 +25,7 @@ use crate::DefaultDB;
 use crate::Storable;
 use crate::arena::Sp;
 use crate::db::DB;
-use crate::storable::{Loader, SizeAnn, ChildNode};
+use crate::storable::{ChildNode, Loader, SizeAnn};
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 

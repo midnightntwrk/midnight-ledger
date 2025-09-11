@@ -19,9 +19,9 @@
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
+use crate::WellBehavedHasher;
 use crate::storable::{ChildNode, DirectChildNode, Loader};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
-use crate::WellBehavedHasher;
 use crate::{DefaultDB, DefaultHasher, backend::StorageBackend, db::DB, storable::Storable};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
@@ -388,7 +388,14 @@ impl<D: DB> Arena<D> {
         let child_repr = child_from(&data, &children);
         let root_hash = child_repr.hash().clone();
         if let ChildNode::Ref(_) = &child_repr {
-            self.new_sp_locked(&mut self.lock_metadata(), value, root_hash.clone(), data, children)
+            self.new_sp_locked(
+                &mut self.lock_metadata(),
+                value,
+                root_hash.clone(),
+                data,
+                children,
+                child_repr,
+            )
         } else {
             Sp {
                 arena: self.clone(),
@@ -407,9 +414,9 @@ impl<D: DB> Arena<D> {
         key: ArenaKey<D::Hasher>,
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ChildNode<D::Hasher>>,
+        child_repr: ChildNode<D::Hasher>,
     ) -> Sp<T, D> {
-        let child_node = child_from(&data, &children);
-        self.track_locked(metadata, key.clone(), data, children, &child_node);
+        self.track_locked(metadata, key.clone(), data, children, &child_repr);
         // Try to reuse any existing cached `Arc` for `value`, creating and
         // caching a new `Arc` if necessary.
         let arc = {
@@ -423,7 +430,7 @@ impl<D: DB> Arena<D> {
                 }
             }
         };
-        Sp::eager(self.clone(), key, arc, child_node)
+        Sp::eager(self.clone(), key, arc, child_repr)
     }
 
     fn new_sp<T: Storable<D>>(
@@ -433,7 +440,15 @@ impl<D: DB> Arena<D> {
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ChildNode<D::Hasher>>,
     ) -> Sp<T, D> {
-        self.new_sp_locked(&mut self.lock_metadata(), value, key, data, children)
+        let child_node = child_from(&data, &children);
+        self.new_sp_locked(
+            &mut self.lock_metadata(),
+            value,
+            key,
+            data,
+            children,
+            child_node,
+        )
     }
 
     /// Invariant: any `key` that returns `Some` here must also be present in
@@ -699,7 +714,12 @@ impl<D: DB> Arena<D> {
             arena: self,
             all: &existing_nodes
                 .into_iter()
-                .map(|node| (hash::<D::Hasher>(&node.binary_repr, node.children.iter()), node))
+                .map(|node| {
+                    (
+                        hash::<D::Hasher>(&node.binary_repr, node.children.iter()),
+                        node,
+                    )
+                })
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
@@ -750,7 +770,11 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     ) -> Result<Sp<T, D>, std::io::Error> {
         let key = match child {
             ChildNode::Direct(direct_node) => {
-                let value = T::from_binary_repr(&mut &direct_node.data[..], &mut direct_node.children.iter().cloned(), self)?;
+                let value = T::from_binary_repr(
+                    &mut &direct_node.data[..],
+                    &mut direct_node.children.iter().cloned(),
+                    self,
+                )?;
                 return Ok(Sp::new(value));
             }
             ChildNode::Ref(key) => key,
@@ -872,7 +896,11 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
     ) -> Result<Sp<T, D>, std::io::Error> {
         let key = match child {
             ChildNode::Direct(child) => {
-                let value = T::from_binary_repr(&mut &child.data[..], &mut child.children.iter().map(|child| child.clone()), self)?;
+                let value = T::from_binary_repr(
+                    &mut &child.data[..],
+                    &mut child.children.iter().map(|child| child.clone()),
+                    self,
+                )?;
                 return Ok(Sp::new(value));
             }
             ChildNode::Ref(key) => key,
@@ -1068,10 +1096,43 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     ///
     /// - when forcing a lazy `Sp`s in `Sp::force_as_arc`, we need to look in the
     ///   arena cache, and then fall back on deserialization.
-    fn eager(arena: Arena<D>, root: ArenaKey<D::Hasher>, arc: Arc<T>, child_repr: ChildNode<D::Hasher>) -> Self {
+    fn eager(
+        arena: Arena<D>,
+        root: ArenaKey<D::Hasher>,
+        arc: Arc<T>,
+        child_repr: ChildNode<D::Hasher>,
+    ) -> Self {
         let sp = Sp::lazy(arena, root, child_repr);
         let _ = sp.data.set(arc);
         sp
+    }
+
+    /// Converts this Sp into one that is tracked directly, making it possible
+    /// to lookup by its hash.
+    ///
+    /// This forces the Sp to be considered a reference when used as a child of
+    /// other Sps, and places it into internal caches, and eventually the
+    /// database if persisted or a parent is persisted.
+    pub fn into_tracked(&self) -> Self {
+        match &self.child_repr {
+            ChildNode::Direct(dcn) => {
+                let child_repr = ChildNode::Ref(self.root.clone());
+                self.arena.track_locked(
+                    &self.arena.lock_metadata(),
+                    self.root.clone(),
+                    (*dcn.data).clone(),
+                    (*dcn.children).clone(),
+                    &child_repr,
+                );
+                Sp {
+                    data: self.data.clone(),
+                    child_repr,
+                    arena: self.arena.clone(),
+                    root: self.root.clone(),
+                }
+            }
+            ChildNode::Ref(_) => self.clone(),
+        }
     }
 
     /// Create a new `Sp` with an uninitialized data payload.
@@ -1086,7 +1147,12 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // This `increment_ref` will panic if `root` is not in `metadata`.
         arena.increment_ref(&root);
         let data = OnceLock::new();
-        Sp { data, arena, root, child_repr }
+        Sp {
+            data,
+            arena,
+            root,
+            child_repr,
+        }
     }
 }
 
@@ -1168,26 +1234,20 @@ impl<T, D: DB> Sp<T, D> {
 }
 
 fn is_in_small_object_limit<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> bool {
-    const SMALL_OBJECT_LIMIT: usize = 128;
+    const SMALL_OBJECT_LIMIT: usize = 1024;
     let mut size = 2 + data.len();
     for child in children.iter() {
-        match child {
-            ChildNode::Ref(_) => return false,
-            ChildNode::Direct(n) => size += n.serialized_size,
-        }
+        size += child.serialized_size();
         if size > SMALL_OBJECT_LIMIT {
-            return false
+            return false;
         }
     }
-    true
+    size <= SMALL_OBJECT_LIMIT
 }
 
 fn child_from<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> ChildNode<H> {
     if is_in_small_object_limit(data, children) {
-        ChildNode::Direct(DirectChildNode::new(data.to_vec(), children.iter().map(|n| match n {
-            ChildNode::Direct(_) => n.clone(),
-            _ => unreachable!("small object limit should only allow direct nodes"),
-        }).collect()))
+        ChildNode::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
     } else {
         ChildNode::Ref(hash(&data, children.iter().map(ChildNode::hash)))
     }
