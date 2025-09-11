@@ -9,7 +9,7 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -356,3 +356,4 @@ jobs:
         with:
           name: 'proof-server-test-results-${{ matrix.runner }}'
           path: target/test-*
+
