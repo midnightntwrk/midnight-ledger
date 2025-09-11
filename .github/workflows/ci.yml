@@ -264,6 +264,12 @@ jobs:
           cache: midnight
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
+      - name: Setup tmate session
+        uses: mxschmitt/action-tmate@v3
+        if: ${{ failure() }}
+        with:
+          limit-access-to-actor: true
+
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
