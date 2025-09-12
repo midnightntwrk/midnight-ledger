@@ -23,6 +23,7 @@ use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::{Digest, Sha256};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::io;
+use zeroize::Zeroize;
 
 /// The number of bytes output by [`persistent_hash`].
 pub const PERSISTENT_HASH_BYTES: usize = 32;
@@ -42,6 +43,7 @@ pub const PERSISTENT_HASH_BYTES: usize = 32;
     Serialize,
     Deserialize,
     Dummy,
+    Zeroize,
 )]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct HashOutput(pub [u8; PERSISTENT_HASH_BYTES]);

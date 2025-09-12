@@ -2788,6 +2788,7 @@ dependencies = [
  "sha2",
  "signature",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -2841,6 +2842,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "serde",
+ "zeroize",
 ]
 
 [[package]]
@@ -3201,6 +3203,7 @@ dependencies = [
  "signature",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -3253,6 +3256,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 

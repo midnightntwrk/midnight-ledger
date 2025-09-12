@@ -32,6 +32,7 @@ use transient_crypto::repr::FieldRepr;
 use crate::ZSWAP_TREE_HEIGHT;
 use crate::error::OfferCreationFailed;
 use crate::structure::*;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 pub struct Seed([u8; 32]);
 
@@ -93,7 +94,7 @@ impl Seed {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Zeroize, ZeroizeOnDrop)]
 pub struct SecretKeys {
     pub coin_secret_key: coin::SecretKey,
     pub encryption_secret_key: encryption::SecretKey,

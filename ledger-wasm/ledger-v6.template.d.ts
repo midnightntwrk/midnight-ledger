@@ -1146,6 +1146,10 @@ export type TransactionId = string;
  * An encryption public key, used to inform users of new coins sent to them
  */
 export type EncPublicKey = string;
+/**
+ * A coin public key, used to determine if a given coin is owned by a specific user
+ */
+export type CoinPublicKey = string;
 
 /**
  * Samples a dummy user coin public key, for use in testing
@@ -1278,11 +1282,32 @@ export class MerkleTreeCollapsedUpdate {
 export class EncryptionSecretKey {
   private constructor();
 
+  /**
+   * Clears the encryption secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+
   test<P extends Proofish>(offer: ZswapOffer<P>): boolean;
 
   yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
 
   static deserialize(raw: Uint8Array): EncryptionSecretKey
+}
+
+/**
+ * Holds the coin secret key of a user
+ */
+export class CoinSecretKey {
+  private constructor();
+
+  /**
+   * Clears the coin secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+
+  yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
+
+  static deserialize(raw: Uint8Array): CoinSecretKey
 }
 
 export class ZswapSecretKeys {
@@ -1298,6 +1323,14 @@ export class ZswapSecretKeys {
    * Use only for compatibility purposes
    */
   static fromSeedRng(seed: Uint8Array): ZswapSecretKeys;
+
+
+  /**
+   * Clears the secret keys, so that they are no longer usable nor held in memory
+   * Note: it does not clear copies of the keys - which is particularly relevant for proof preimages
+   * Note: this will cause all other operations to fail
+   */
+  clear(): void;
 
   readonly coinPublicKey: CoinPublicKey;
   readonly coinSecretKey: CoinSecretKey;

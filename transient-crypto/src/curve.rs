@@ -45,7 +45,7 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::Mul;
 use storage::{Storable, arena::ArenaKey, db::DB, storable::Loader};
-
+use zeroize::DefaultIsZeroes;
 /// The outer, main curve
 pub mod outer {
     /// The base prime field, used to represent curve points
@@ -219,6 +219,8 @@ impl Tagged for EmbeddedFr {
     }
 }
 tag_enforcement_test!(EmbeddedFr);
+
+impl DefaultIsZeroes for EmbeddedFr {}
 
 impl Distribution<EmbeddedFr> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> EmbeddedFr {
