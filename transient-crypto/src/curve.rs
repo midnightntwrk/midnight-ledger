@@ -163,6 +163,8 @@ randomised_serialization_test!(Fr);
 #[cfg(feature = "proptest")]
 simple_arbitrary!(Fr);
 
+impl DefaultIsZeroes for Fr {}
+
 impl Tagged for Fr {
     fn tag() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("fr-bls")

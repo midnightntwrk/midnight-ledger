@@ -207,8 +207,27 @@ export class Event {
   toString(compact?: boolean): string;
 }
 
+/**
+ * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
+ */
+export class DustSecretKey {
+  /**
+   * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
+   * @param bigint 
+   */
+  static fromBigint(bigint: bigint): DustSecretKey;
+
+  private constructor();
+  
+  publicKey: DustPublicKey;
+
+  /**
+   * Clears the dust secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+}
+
 // TODO: Doc comments
-export type DustSecretKey = bigint;
 export type DustPublicKey = bigint;
 export type DustInitialNonce = string;
 export type DustNonce = bigint;
@@ -216,8 +235,6 @@ export type DustCommitment = bigint;
 export type DustNullifier = bigint;
 
 export function sampleDustSecretKey(): DustSecretKey;
-
-export function dustPublicKeyFromSecret(sk: DustSecretKey): DustPublicKey;
 
 export function updatedValue(ctime: Date, initialValue: bigint, genInfo: DustGenerationInfo, now: Date, params: DustParameters): bigint;
 

@@ -2897,6 +2897,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 

@@ -48,6 +48,7 @@ futures = { version = "^0.3.31" }
 serde = { version = "^1.0.219", features = ["derive"] }
 reqwest = { version = "^0.12.22", default-features = false, features = ["rustls-tls-native-roots"], optional = true }
 rayon = "^1.10.0"
+zeroize = "^1.8.0"
 
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = { version = "~1.6.0", optional = true }

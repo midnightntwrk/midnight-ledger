@@ -71,6 +71,7 @@ use transient_crypto::{
     proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
     repr::FieldRepr,
 };
+use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
 #[cfg(feature = "proof-verifying")]
@@ -166,7 +167,7 @@ impl From<HashOutput> for DustCommitment {
 pub struct DustPublicKey(pub Fr);
 tag_enforcement_test!(DustPublicKey);
 
-#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
+#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
 #[storable(base)]
 #[tag = "dust-secret-key[v1]"]
 pub struct DustSecretKey(pub Fr);
