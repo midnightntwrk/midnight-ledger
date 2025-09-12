@@ -42,7 +42,7 @@ rand_chacha = "^0.3.1"
 tracing = { version = "^0.1.41" }
 
 log = { version = "^0.4.28", optional = true }
-tracing-subscriber = { version = "^0.3.19", optional = true }
+tracing-subscriber = { version = "^0.3.20", optional = true }
 clap = { version = "^4.5.40", features = ["derive"], optional = true }
 env_logger = { version = "^0.11.8", optional = true }
 tokio = { version = "^1.46.1", features = ["rt", "macros", "rt-multi-thread"], optional = true }
