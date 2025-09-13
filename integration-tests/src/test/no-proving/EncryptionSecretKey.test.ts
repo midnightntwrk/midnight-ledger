@@ -20,7 +20,7 @@ import {
   sampleCoinPublicKey,
   sampleEncryptionPublicKey
 } from '@midnight-ntwrk/ledger';
-import { Random } from '@/test-objects';
+import { ESK_CLEAR_MESSAGE, Random } from '@/test-objects';
 
 describe('Ledger API - EncryptionSecretKey', () => {
   /**
@@ -63,5 +63,32 @@ describe('Ledger API - EncryptionSecretKey', () => {
 
     expect(typeof result).toBe('boolean');
     expect(result).toBe(false);
+  });
+
+  /**
+   * Test clearing functionality.
+   *
+   * @given An encryption secret key and a ZswapOffer
+   * @when Clearing the key
+   * @then Should throw an error on testing the offer or trying to serialize the key
+   */
+  test('should be unusable after clear', () => {
+    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    const { encryptionSecretKey } = secretKeys;
+    const unprovenOffer = ZswapOffer.fromOutput(
+      ZswapOutput.new(
+        createShieldedCoinInfo(Random.shieldedTokenType().raw, 10_000n),
+        0,
+        sampleCoinPublicKey(),
+        sampleEncryptionPublicKey()
+      ),
+      Random.shieldedTokenType().raw,
+      10_000n
+    );
+
+    encryptionSecretKey.clear();
+
+    expect(() => encryptionSecretKey.test(unprovenOffer)).toThrow(ESK_CLEAR_MESSAGE);
+    expect(() => encryptionSecretKey.yesIKnowTheSecurityImplicationsOfThis_serialize()).toThrow(ESK_CLEAR_MESSAGE);
   });
 });

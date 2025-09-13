@@ -11,8 +11,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ZswapSecretKeys } from '@midnight-ntwrk/ledger';
-import { HEX_64_REGEX } from '@/test-objects';
+import {
+  coinNullifier,
+  createShieldedCoinInfo,
+  sampleCoinPublicKey,
+  sampleEncryptionPublicKey,
+  ZswapLocalState,
+  ZswapOffer,
+  ZswapOutput,
+  ZswapSecretKeys
+} from '@midnight-ntwrk/ledger';
+import { ESK_CLEAR_MESSAGE, CSK_CLEAR_MESSAGE, HEX_64_REGEX, Random, ZSWAP_SK_CLEAR_MESSAGE } from '@/test-objects';
 
 describe('Ledger API - ZswapSecretKeys', () => {
   /**
@@ -64,5 +73,68 @@ describe('Ledger API - ZswapSecretKeys', () => {
     const secretKeys = ZswapSecretKeys.fromSeedRng(new Uint8Array(32).fill(1));
     expect(secretKeys.encryptionSecretKey).not.toEqual(secretKeys.encryptionPublicKey);
     expect(secretKeys.coinSecretKey).not.toEqual(secretKeys.coinPublicKey);
+  });
+
+  /**
+   * Test that secret keys are unusable after clear
+   *
+   * @given ZswapSecretKeys, an offer and a ZswapLocalState with the offer applied
+   * @when Clearing the secret keys
+   * @then Should throw an error on attempt to use the keys:
+   * - accessing any of the keys
+   * - trying to make a spend
+   * - trying to apply an offer
+   */
+  test('should be unusable after clear', () => {
+    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    const unprovenOffer = ZswapOffer.fromOutput(
+      ZswapOutput.new(
+        createShieldedCoinInfo(Random.shieldedTokenType().raw, 10_000n),
+        0,
+        secretKeys.coinPublicKey,
+        secretKeys.encryptionPublicKey
+      ),
+      Random.shieldedTokenType().raw,
+      10_000n
+    );
+    const zswapLocalState = new ZswapLocalState().apply(secretKeys, unprovenOffer);
+    const firstCoin = [...zswapLocalState.coins.values()][0];
+
+    secretKeys.clear();
+
+    expect(() => secretKeys.coinPublicKey).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+    expect(() => secretKeys.encryptionPublicKey).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+    expect(() => secretKeys.coinSecretKey).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+    expect(() => secretKeys.encryptionSecretKey).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+    expect(() => zswapLocalState.apply(secretKeys, unprovenOffer)).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+    expect(() => zswapLocalState.spend(secretKeys, firstCoin, 0)).toThrow(ZSWAP_SK_CLEAR_MESSAGE);
+  });
+
+  /**
+   * Test that coin and encryption secret keys do not outlive the wrapper
+   * it is to ensure there is no possibility of dangling references being usable after the wrapper is cleared
+   * 
+   * @given ZswapSecretKeys and its component secret keys, a zswap offfer, and a coin info
+   * @when Clearing the secret keys
+   * @then Should throw an error on attempt to use the component keys: serialization, testing an offer and nullifier computation
+   
+   */
+  test('component secret keys should not outlive the wrapper', () => {
+    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    const { coinSecretKey, encryptionSecretKey } = secretKeys;
+
+    const coinInfo = createShieldedCoinInfo(Random.shieldedTokenType().raw, 10_000n);
+    const unprovenOffer = ZswapOffer.fromOutput(
+      ZswapOutput.new(coinInfo, 0, sampleCoinPublicKey(), sampleEncryptionPublicKey()),
+      Random.shieldedTokenType().raw,
+      10_000n
+    );
+
+    secretKeys.clear();
+
+    expect(() => coinSecretKey.yesIKnowTheSecurityImplicationsOfThis_serialize()).toThrow(CSK_CLEAR_MESSAGE);
+    expect(() => encryptionSecretKey.yesIKnowTheSecurityImplicationsOfThis_serialize()).toThrow(ESK_CLEAR_MESSAGE);
+    expect(() => encryptionSecretKey.test(unprovenOffer)).toThrow(ESK_CLEAR_MESSAGE);
+    expect(() => coinNullifier(coinInfo, coinSecretKey)).toThrow(CSK_CLEAR_MESSAGE);
   });
 });

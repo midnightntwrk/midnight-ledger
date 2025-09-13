@@ -1311,22 +1311,6 @@ export class EncryptionSecretKey {
   static deserialize(raw: Uint8Array): EncryptionSecretKey
 }
 
-/**
- * Holds the coin secret key of a user
- */
-export class CoinSecretKey {
-  private constructor();
-
-  /**
-   * Clears the coin secret key, so that it is no longer usable nor held in memory
-   */
-  clear(): void;
-
-  yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
-
-  static deserialize(raw: Uint8Array): CoinSecretKey
-}
-
 export class ZswapSecretKeys {
   private constructor();
 

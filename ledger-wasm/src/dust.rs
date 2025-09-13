@@ -29,7 +29,9 @@ use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxo
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
 use rand::rngs::OsRng;
 use serialize::tagged_serialize;
+use std::cell::RefCell;
 use std::ops::Deref;
+use std::rc::Rc;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use wasm_bindgen::JsError;
@@ -1191,17 +1193,21 @@ impl DustState {
 }
 
 #[wasm_bindgen]
-pub struct DustSecretKey(pub(crate) Option<LedgerDustSecretKey>);
+pub struct DustSecretKey(pub(crate) Rc<RefCell<Option<LedgerDustSecretKey>>>);
+
+const DUST_SK_CLEAR_MSG: &str = "Dust secret key was cleared";
 
 impl DustSecretKey {
     pub fn wrap(key: LedgerDustSecretKey) -> Self {
-        DustSecretKey(Some(key))
+        DustSecretKey(Rc::new(RefCell::new(Some(key))))
     }
 
-    pub fn try_unwrap(&self) -> Result<&LedgerDustSecretKey, JsError> {
+    pub fn try_unwrap(&self) -> Result<LedgerDustSecretKey, JsError> {
         self.0
+            .borrow()
             .as_ref()
-            .ok_or(JsError::new("Dust secret key was cleared"))
+            .cloned()
+            .ok_or(JsError::new(DUST_SK_CLEAR_MSG))
     }
 }
 
@@ -1221,12 +1227,13 @@ impl DustSecretKey {
     }
 
     pub fn clear(&mut self) {
-        self.0 = None;
+        self.0.borrow_mut().take();
     }
 
     #[wasm_bindgen(getter, js_name = "publicKey")]
     pub fn public_key(&self) -> Result<BigInt, JsError> {
-        let sk = self.try_unwrap()?;
+        let sk_wrap = self.0.borrow();
+        let sk = sk_wrap.as_ref().ok_or(JsError::new(DUST_SK_CLEAR_MSG))?;
         Ok(fr_to_bigint(DustPublicKey::from(sk.clone()).0))
     }
 }
@@ -1262,7 +1269,7 @@ impl DustLocalState {
 
     pub fn spend(
         &self,
-        sk: DustSecretKey,
+        sk: &DustSecretKey,
         utxo: JsValue,
         v_fee: BigInt,
         ctime: &Date,
@@ -1291,7 +1298,7 @@ impl DustLocalState {
     #[wasm_bindgen(js_name = "replayEvents")]
     pub fn replay_events(
         &self,
-        sk: DustSecretKey,
+        sk: &DustSecretKey,
         events: Vec<Event>,
     ) -> Result<DustLocalState, JsError> {
         let sk = sk.try_unwrap()?;

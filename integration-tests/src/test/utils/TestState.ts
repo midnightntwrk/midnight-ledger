@@ -21,7 +21,6 @@ import {
   type DustOutput,
   DustParameters,
   type DustPublicKey,
-  dustPublicKeyFromSecret,
   type DustSecretKey,
   Intent,
   LedgerParameters,
@@ -55,12 +54,13 @@ import {
 } from '@/test-objects';
 
 class DustKey {
-  secretKey: DustSecretKey;
+  readonly secretKey: DustSecretKey;
+
   constructor(secretKey: DustSecretKey) {
     this.secretKey = secretKey;
   }
   publicKey(): DustPublicKey {
-    return dustPublicKeyFromSecret(this.secretKey);
+    return this.secretKey.publicKey;
   }
 }
 
