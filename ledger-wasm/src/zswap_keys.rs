@@ -122,24 +122,39 @@ impl ZswapSecretKeys {
 
     #[wasm_bindgen(getter, js_name = "coinPublicKey")]
     pub fn coin_public_key(&self) -> Result<String, JsError> {
-        let value = self.0.as_ref().map(|wrapper| &wrapper.coin_secret_key).ok_or(JsError::new("Secret keys were cleared"))?;
+        let value = self
+            .0
+            .as_ref()
+            .map(|wrapper| &wrapper.coin_secret_key)
+            .ok_or(JsError::new("Secret keys were cleared"))?;
         value.public_key()
     }
 
     #[wasm_bindgen(getter, js_name = "encryptionPublicKey")]
     pub fn encryption_public_key(&self) -> Result<String, JsError> {
-        let value = self.0.as_ref().map(|wrapper| &wrapper.encryption_secret_key).ok_or(JsError::new("Secret keys were cleared"))?;
+        let value = self
+            .0
+            .as_ref()
+            .map(|wrapper| &wrapper.encryption_secret_key)
+            .ok_or(JsError::new("Secret keys were cleared"))?;
         value.public_key()
     }
 
     #[wasm_bindgen(getter, js_name = "encryptionSecretKey")]
     pub fn encryption_secret_key(&self) -> Result<EncryptionSecretKey, JsError> {
-        return self.0.as_ref().map(|wrapper| wrapper.encryption_secret_key.clone()).ok_or(JsError::new("Secret keys were cleared"))
+        return self
+            .0
+            .as_ref()
+            .map(|wrapper| wrapper.encryption_secret_key.clone())
+            .ok_or(JsError::new("Secret keys were cleared"));
     }
 
     #[wasm_bindgen(getter, js_name = "coinSecretKey")]
     pub fn coin_secret_key(&self) -> Result<CoinSecretKey, JsError> {
-        self.0.as_ref().map(|wrapper| wrapper.coin_secret_key.clone()).ok_or(JsError::new("Secret keys were cleared"))
+        self.0
+            .as_ref()
+            .map(|wrapper| wrapper.coin_secret_key.clone())
+            .ok_or(JsError::new("Secret keys were cleared"))
     }
 }
 
@@ -154,7 +169,11 @@ impl CoinSecretKey {
     }
 
     pub fn try_unwrap(&self) -> Result<coin::SecretKey, JsError> {
-        self.0.borrow().as_ref().cloned().ok_or(JsError::new(CSK_CLEAR_MSG))
+        self.0
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(JsError::new(CSK_CLEAR_MSG))
     }
 }
 
@@ -180,7 +199,12 @@ impl CoinSecretKey {
     }
 
     pub fn public_key(&self) -> Result<String, JsError> {
-        let pk = self.0.borrow().as_ref().ok_or(JsError::new(CSK_CLEAR_MSG))?.public_key();
+        let pk = self
+            .0
+            .borrow()
+            .as_ref()
+            .ok_or(JsError::new(CSK_CLEAR_MSG))?
+            .public_key();
         to_value_hex_ser(&pk)
     }
 
@@ -191,14 +215,22 @@ impl CoinSecretKey {
     #[wasm_bindgen(js_name = "yesIKnowTheSecurityImplicationsOfThis_serialize")]
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
-        tagged_serialize(self.0.borrow().as_ref().ok_or(JsError::new(CSK_CLEAR_MSG))?, &mut res)?;
+        tagged_serialize(
+            self.0
+                .borrow()
+                .as_ref()
+                .ok_or(JsError::new(CSK_CLEAR_MSG))?,
+            &mut res,
+        )?;
         Ok(Uint8Array::from(&res[..]))
     }
 }
 
 #[wasm_bindgen]
 #[derive(Clone)]
-pub struct EncryptionSecretKey(pub(crate) Rc<RefCell<Option<transient_crypto::encryption::SecretKey>>>);
+pub struct EncryptionSecretKey(
+    pub(crate) Rc<RefCell<Option<transient_crypto::encryption::SecretKey>>>,
+);
 
 const ESK_CLEAR_MSG: &str = "Encryption secret key was cleared";
 
@@ -220,7 +252,8 @@ impl EncryptionSecretKey {
     }
 
     pub fn try_unwrap(&self) -> Result<transient_crypto::encryption::SecretKey, JsError> {
-        self.0.borrow()
+        self.0
+            .borrow()
             .as_ref()
             .cloned()
             .ok_or(JsError::new(ESK_CLEAR_MSG))
@@ -241,7 +274,12 @@ impl EncryptionSecretKey {
     }
 
     pub fn public_key(&self) -> Result<String, JsError> {
-        let pk = self.0.borrow().as_ref().ok_or(JsError::new(ESK_CLEAR_MSG))?.public_key();
+        let pk = self
+            .0
+            .borrow()
+            .as_ref()
+            .ok_or(JsError::new(ESK_CLEAR_MSG))?
+            .public_key();
         to_value_hex_ser(&pk)
     }
 
@@ -298,7 +336,13 @@ impl EncryptionSecretKey {
     #[wasm_bindgen(js_name = "yesIKnowTheSecurityImplicationsOfThis_serialize")]
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
-        tagged_serialize(self.0.borrow().as_ref().ok_or(JsError::new(ESK_CLEAR_MSG))?, &mut res)?;
+        tagged_serialize(
+            self.0
+                .borrow()
+                .as_ref()
+                .ok_or(JsError::new(ESK_CLEAR_MSG))?,
+            &mut res,
+        )?;
         Ok(Uint8Array::from(&res[..]))
     }
 
