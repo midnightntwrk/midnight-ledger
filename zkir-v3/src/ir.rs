@@ -217,10 +217,8 @@ pub enum Instruction {
         b_x: Identifier,
         /// The affine y coordinate of `b`
         b_y: Identifier,
-        /// The output x coordinate variable name
-        output_x: Identifier,
-        /// The output y coordinate variable name
-        output_y: Identifier,
+        /// The output coordinates: [x, y]
+        outputs: Vec<Identifier>,
     },
     /// Multiplies an elliptic curve point by a scalar. UB if it is not a valid
     /// curve point.
@@ -233,10 +231,8 @@ pub enum Instruction {
         a_y: Identifier,
         /// The scalar to multiply by
         scalar: Identifier,
-        /// The output x coordinate variable name
-        output_x: Identifier,
-        /// The output y coordinate variable name
-        output_y: Identifier,
+        /// The output coordinates: [x, y]
+        outputs: Vec<Identifier>,
     },
     /// Multiplies the group generator by a scalar.
     ///
@@ -244,10 +240,8 @@ pub enum Instruction {
     EcMulGenerator {
         /// The scalar to multiply by
         scalar: Identifier,
-        /// The output x coordinate variable name
-        output_x: Identifier,
-        /// The output y coordinate variable name
-        output_y: Identifier,
+        /// The output coordinates: [x, y]
+        outputs: Vec<Identifier>,
     },
     /// Hashes a sequence of field elements to an embedded curve point.
     ///
@@ -255,10 +249,8 @@ pub enum Instruction {
     HashToCurve {
         /// The values to hash to a curve point
         inputs: Vec<Identifier>,
-        /// The output x coordinate variable name
-        output_x: Identifier,
-        /// The output y coordinate variable name
-        output_y: Identifier,
+        /// The output coordinates: [x, y]
+        outputs: Vec<Identifier>,
     },
     /// Loads a constant into the circuit.
     ///
@@ -278,10 +270,8 @@ pub enum Instruction {
         var: Identifier,
         /// The number of bits to divide by
         bits: u32,
-        /// The output for the division result
-        output1: Identifier,
-        /// The output for the modulus result
-        output2: Identifier,
+        /// The outputs: [division result, modulus result]
+        outputs: Vec<Identifier>,
     },
     /// Takes two inputs, `divisor` and `modulus`, and outputs
     /// `divisor << bits | modulus`, guaranteeing that the result does not
@@ -323,10 +313,8 @@ pub enum Instruction {
         alignment: Alignment,
         /// The inputs to hash
         inputs: Vec<Identifier>,
-        /// The first output variable name
-        output1: Identifier,
-        /// The second output variable name
-        output2: Identifier,
+        /// The output variable names
+        outputs: Vec<Identifier>,
     },
     /// Tests if `a` and `b` are equal.
     ///
@@ -477,7 +465,7 @@ impl IrSource {
                         .clone(),
                 )?;
                 match ver {
-                    SerdeVersion { major: 2, minor: 0 } => Ok(serde_json::from_value(value)?),
+                    SerdeVersion { major: 3, minor: 0 } => Ok(serde_json::from_value(value)?),
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Unhandled version: {major}.{minor}"),

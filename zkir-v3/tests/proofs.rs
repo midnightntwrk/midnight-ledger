@@ -13,7 +13,8 @@
 
 #[cfg(test)]
 mod proof_tests {
-    use rand::SeedableRng;
+    use std::collections::HashMap;
+use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
@@ -29,7 +30,7 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use zkir::{IrSource, Preprocessed};
+    use zkir_v3::{Identifier, IrSource, Preprocessed};
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
 
@@ -72,11 +73,11 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_extension_attack() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "assert", "cond": 0 }
+               { "op": "assert", "cond": "v_0" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -89,7 +90,7 @@ mod proof_tests {
                 &TestParams,
                 pk,
                 Preprocessed {
-                    memory: vec![1.into()],
+                    memory: HashMap::from([(Identifier::from_index(0), 1.into())]),
                     pis: (0..N).map(Into::into).collect(),
                     pi_skips: vec![],
                     binding_input: 0.into(),
@@ -106,11 +107,11 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_minimal_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "assert", "cond": 0 }
+               { "op": "assert", "cond": "v_0" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -160,11 +161,11 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_htc_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 3,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "hash_to_curve", "inputs": [0, 1, 2] }
+               { "op": "hash_to_curve", "inputs": ["v_0", "v_1", "v_2"], "outputs": ["v_3", "v_4"] }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -206,13 +207,13 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_hash_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 3,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "transient_hash", "inputs": [0, 1, 2] },
-               { "op": "declare_pub_input", "var": 3 },
-               { "op": "pi_skip", "guard": null, "count": 1}
+               { "op": "transient_hash", "inputs": ["v_0", "v_1", "v_2"], "output": "v_3" },
+               { "op": "declare_pub_input", "var": "v_3" },
+               { "op": "pi_skip", "guard": null, "count": 1 }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -255,11 +256,11 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_persistent_hash_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": [0] }
+               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["v_0"], "outputs": ["v_1", "v_2"] }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -301,13 +302,13 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_ec_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 4,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "ec_mul", "a_x": 0, "a_y": 1, "scalar": 2 },
-               { "op": "ec_mul_generator", "scalar": 3 },
-               { "op": "ec_add", "a_x": 4, "a_y": 5, "b_x": 6, "b_y": 7 }
+               { "op": "ec_mul", "a_x": "v_0", "a_y": "v_1", "scalar": "v_2", "outputs": ["v_4", "v_5"] },
+               { "op": "ec_mul_generator", "scalar": "v_3", "outputs": ["v_6", "v_7"] },
+               { "op": "ec_add", "a_x": "v_4", "a_y": "v_5", "b_x": "v_6", "b_y": "v_7", "outputs": ["v_8", "v_9"] }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -358,17 +359,17 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_divmod_proof() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "div_mod_power_of_two", "var": 0, "bits": 3 },
-               { "op": "private_input", "guard": null },
-               { "op": "private_input", "guard": null },
-               { "op": "constrain_eq", "a": 1, "b": 3 },
-               { "op": "constrain_eq", "a": 2, "b": 4 },
-               { "op": "reconstitute_field", "divisor": 1, "modulus": 2, "bits": 3 },
-               { "op": "constrain_eq", "a": 5, "b": 0 }
+               { "op": "div_mod_power_of_two", "var": "v_0", "bits": 3, "outputs": ["v_1", "v_2"] },
+               { "op": "private_input", "guard": null, "output": "v_3" },
+               { "op": "private_input", "guard": null, "output": "v_4" },
+               { "op": "constrain_eq", "a": "v_1", "b": "v_3" },
+               { "op": "constrain_eq", "a": "v_2", "b": "v_4" },
+               { "op": "reconstitute_field", "divisor": "v_1", "modulus": "v_2", "bits": 3, "output": "v_5" },
+               { "op": "constrain_eq", "a": "v_5", "b": "v_0" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -414,11 +415,11 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_keygen_and_serialize_eq() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 3, "minor": 0 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "assert", "cond": 0 }
+               { "op": "assert", "cond": "v_0" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
