@@ -13,7 +13,6 @@
 
 import {
   type AlignedValue,
-  type AlignmentSegment,
   bigIntToValue,
   ChargedState,
   CostModel,
@@ -33,6 +32,7 @@ import {
 
 import { addressToPublic, Random, Static } from '@/test-objects';
 import { mapFindByKey } from '@/test-utils';
+import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, EMPTY_VALUE, ONE_VALUE } from '@/test/utils/value-alignment';
 
 describe('Ledger API - QueryContext', () => {
   /**
@@ -42,10 +42,6 @@ describe('Ledger API - QueryContext', () => {
    * @when Creating a QueryContext with a map StateValue
    * @then The context should be created with correct address and state
    */
-  const ATOM_BYTES_1: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 1 } };
-  const ATOM_BYTES_16: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 16 } };
-  const ATOM_BYTES_32: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 32 } };
-
   test('should create context - map', () => {
     const contractAddress = Random.contractAddress();
     let stateMap = new StateMap();
@@ -361,9 +357,8 @@ describe('Ledger API - QueryContext', () => {
    */
   test('should allow claiming unshielded spends', () => {
     const amount = 100n;
-    const color = encodeRawTokenType(createRawTokenType(Random.domainSep(), sampleContractAddress()));
+    const color = encodeRawTokenType(createRawTokenType(Random.generate32Bytes(), sampleContractAddress()));
     const recipient = encodeContractAddress(sampleContractAddress());
-    const emptyBytes = new Uint8Array(0);
 
     const stateValue = new ChargedState(StateValue.newArray());
     const queryContext = new QueryContext(stateValue, sampleContractAddress());
@@ -389,7 +384,7 @@ describe('Ledger API - QueryContext', () => {
         push: {
           storage: false,
           value: StateValue.newCell({
-            value: [new Uint8Array([1]), color, emptyBytes, new Uint8Array([1]), recipient, emptyBytes],
+            value: [ONE_VALUE, color, EMPTY_VALUE, ONE_VALUE, recipient, EMPTY_VALUE],
             alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
           }).encode()
         }
@@ -439,7 +434,7 @@ describe('Ledger API - QueryContext', () => {
     const stateValue = new ChargedState(StateValue.newArray());
     const queryContext = new QueryContext(stateValue, selfRawAddress);
 
-    const domainSep = Random.domainSep();
+    const domainSep = Random.generate32Bytes();
     const rawTokenType = createRawTokenType(domainSep, selfRawAddress);
 
     const queryResult = queryContext.query(
@@ -465,12 +460,12 @@ describe('Ledger API - QueryContext', () => {
             storage: false,
             value: StateValue.newCell({
               value: [
-                new Uint8Array([1]),
+                ONE_VALUE,
                 encodeRawTokenType(rawTokenType),
-                new Uint8Array(0),
-                new Uint8Array([1]),
+                EMPTY_VALUE,
+                ONE_VALUE,
                 encodeContractAddress(selfRawAddress),
-                new Uint8Array(0)
+                EMPTY_VALUE
               ],
               alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
             }).encode()
