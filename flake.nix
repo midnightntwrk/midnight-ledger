@@ -13,6 +13,7 @@
 
 {
   description = "Midnight ledger prototype";
+  # testing external contributions
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
