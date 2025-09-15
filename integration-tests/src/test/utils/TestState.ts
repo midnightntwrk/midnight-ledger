@@ -276,23 +276,23 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
-  static nextDust(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
+  static getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
     const guaranteesSegment = 0;
     const fees = mergedTx.fees(LedgerParameters.initialParameters());
-    const balances = mergedTx.imbalances(guaranteesSegment, fees);
-    if (!balances) return undefined;
-    const hit = Array.from(balances.entries()).find(([tt, bal]) => tt.tag === 'dust' && bal < 0n);
+    const imbalances = mergedTx.imbalances(guaranteesSegment, fees);
+    if (!imbalances) return undefined;
+    const dustImbalance = Array.from(imbalances.entries()).find(([tt, bal]) => tt.tag === 'dust' && bal < 0n);
 
-    return hit ? -hit[1] : undefined;
+    return dustImbalance ? -dustImbalance[1] : undefined;
   }
   balanceTx(txi: Transaction<Signaturish, Proofish, Bindingish>): Transaction<Signaturish, Proofish, Bindingish> {
     let tx = txi;
     const fees = undefined;
     const zswapToBalance: Transaction<Signaturish, Proofish, Bindingish>[] = [];
     [0, 1].forEach((segmentId) => {
-      let balance;
+      let imbalance;
       try {
-        balance = tx.imbalances(segmentId, fees);
+        imbalance = tx.imbalances(segmentId, fees);
       } catch (err: unknown) {
         if (err instanceof Error && err.message.includes("segment doesn't exist")) {
           return;
@@ -300,8 +300,8 @@ export class TestState {
         throw err;
       }
 
-      if (balance.size === 0) return;
-      (balance as Map<TokenType, bigint>).forEach((val, tt) => {
+      if (imbalance.size === 0) return;
+      (imbalance as Map<TokenType, bigint>).forEach((val, tt) => {
         if (tt.tag === 'dust') {
           throw new Error('should never happen');
         }
@@ -356,8 +356,7 @@ export class TestState {
       });
 
       zswapToBalance.forEach((txb) => {
-        const tmp = txb.eraseProofs();
-        tx = tx.merge(tmp);
+        tx = tx.merge(txb.eraseProofs());
       });
     });
 
@@ -366,7 +365,7 @@ export class TestState {
     const oldDust = this.dust;
     let lastDust = 0n;
 
-    let dust = TestState.nextDust(mergedTx);
+    let dust = TestState.getDustImbalance(mergedTx);
     while (dust !== undefined) {
       dust += lastDust;
       lastDust = dust;
@@ -415,16 +414,15 @@ export class TestState {
       const intent = Intent.new(this.time);
       intent.dustActions = new DustActions(SignatureMarker.signature, ProofMarker.preProof, this.time, spends, []);
       intent.signatureData(0xfeed);
+
       const tx2Unproven = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
-      const tx2Mock = tx2Unproven.eraseProofs();
-      mergedTx = tx.merge(tx2Mock);
+      mergedTx = tx.merge(tx2Unproven.eraseProofs());
       unprovenBal = tx2Unproven;
 
-      dust = TestState.nextDust(mergedTx);
+      dust = TestState.getDustImbalance(mergedTx);
     }
     if (unprovenBal) {
-      const proven = unprovenBal.eraseProofs();
-      mergedTx = tx.merge(proven);
+      mergedTx = tx.merge(unprovenBal.eraseProofs());
     }
     return mergedTx;
   }

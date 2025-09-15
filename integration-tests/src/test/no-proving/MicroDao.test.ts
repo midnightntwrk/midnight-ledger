@@ -127,12 +127,18 @@ describe('Ledger API - MicroDao', () => {
     unbalancedStrictness.enforceBalancing = false;
     const balancedStrictness = new WellFormedStrictness();
 
-    const fundsBefore = Array.from(state.zswap.coins)
-      .filter((c) => c.type === token.raw)
-      .map((c) => c.value)
-      .reduce((acc, val) => acc + val, 0n);
+    const partSks = [Random.generate32Bytes(), Random.generate32Bytes()];
+    const partPks = [
+      persistentCommit([ATOM_BYTES_32], sep, [partSks[0]]),
+      persistentCommit([ATOM_BYTES_32], sep, [partSks[1]])
+    ];
+    const partNames = ['red', 'blue'];
+    const partVotes = [true, false];
 
-    const { addr, encodedAddr } = part1Deploy({
+    const fundsBefore = getCurrentFunds(state.zswap.coins, token);
+
+    // part 1
+    const { addr, encodedAddr } = deployPhase({
       state,
       orgPk,
       ops,
@@ -140,7 +146,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    part2SetTopic({
+    // part 2
+    setTopicPhase({
       state,
       addr,
       orgSk,
@@ -150,14 +157,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    const partSks = [Random.generate32Bytes(), Random.generate32Bytes()];
-    const partPks = [
-      persistentCommit([ATOM_BYTES_32], sep, [partSks[0]]),
-      persistentCommit([ATOM_BYTES_32], sep, [partSks[1]])
-    ];
-    const partNames = ['red', 'blue'];
-
-    part3BuyIn({
+    // part 3
+    buyInPhase({
       state,
       addr,
       encodedAddr,
@@ -170,8 +171,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    const partVotes = [true, false];
-    part4VoteCommitment({
+    // part 4
+    voteCommitmentPhase({
       state,
       addr,
       partSks,
@@ -183,7 +184,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    part5AdvanceToReveal({
+    // part 5
+    advanceToRevealPhase({
       state,
       addr,
       orgSk,
@@ -193,7 +195,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    part6VoteRevealPhase({
+    // part 6
+    voteRevealPhase({
       state,
       addr,
       partSks,
@@ -204,7 +207,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    part7AdvanceToFinalPhase({
+    // part 7
+    advanceToFinalPhase({
       state,
       addr,
       orgSk,
@@ -214,7 +218,8 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    part8CashOut({
+    // part 8
+    cashOutPhase({
       state,
       addr,
       encodedAddr,
@@ -225,16 +230,20 @@ describe('Ledger API - MicroDao', () => {
       balancedStrictness
     });
 
-    const fundsAfter = Array.from(state.zswap.coins)
-      .filter((c) => c.type === token.raw)
-      .map((c) => c.value)
-      .reduce((acc, val) => acc + val, 0n);
+    const fundsAfter = getCurrentFunds(state.zswap.coins, token);
 
     console.log(
       `We started with ${fundsBefore} tokens, and ended with ${fundsAfter}. ${fundsBefore - fundsAfter} lost to fees, and hopefully not the contract`
     );
     expect(fundsBefore - fundsAfter).toBe(0n);
   });
+
+  function getCurrentFunds(coins: Set<QualifiedShieldedCoinInfo>, token: ShieldedTokenType) {
+    return Array.from(coins)
+      .filter((c) => c.type === token.raw)
+      .map((c) => c.value)
+      .reduce((acc, val) => acc + val, 0n);
+  }
 
   function setupOperations() {
     const advanceOp = new ContractOperation();
@@ -258,7 +267,7 @@ describe('Ledger API - MicroDao', () => {
     return { advanceOp, buyInOp, cashOutOp, setTopicOp, voteCommitOp, voteRevealOp };
   }
 
-  function part1Deploy({
+  function deployPhase({
     state,
     orgPk,
     ops,
@@ -285,18 +294,18 @@ describe('Ledger API - MicroDao', () => {
     contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
 
     const deploy = new ContractDeploy(contract);
-    const tx0 = Transaction.fromParts(
+    const tx = Transaction.fromParts(
       LOCAL_TEST_NETWORK_ID,
       undefined,
       undefined,
       testIntents([], [], [deploy], state.time)
     );
 
-    const addr: ContractAddress = tx0.intents!.get(1)!.actions[0].address;
+    const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
     const encodedAddr = encodeContractAddress(addr);
 
-    tx0.wellFormed(state.ledger, unbalancedStrictness, state.time);
-    const balanced = state.balanceTx(tx0.eraseProofs());
+    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
+    const balanced = state.balanceTx(tx.eraseProofs());
     const proved = balanced.eraseProofs();
     proved.wellFormed(state.ledger, balancedStrictness, state.time);
     state.assertApply(proved, balancedStrictness);
@@ -304,7 +313,7 @@ describe('Ledger API - MicroDao', () => {
     return { addr, encodedAddr };
   }
 
-  function part2SetTopic({
+  function setTopicPhase({
     state,
     addr,
     orgSk,
@@ -388,7 +397,7 @@ describe('Ledger API - MicroDao', () => {
     state.assertApply(balanced, balancedStrictness);
   }
 
-  function part3BuyIn({
+  function buyInPhase({
     state,
     addr,
     encodedAddr,
@@ -464,28 +473,21 @@ describe('Ledger API - MicroDao', () => {
       if (potHasCoin) {
         const cstate: ContractState = state.ledger.index(addr)!;
         const arr = cstate.data.state;
-        let potCell;
-        if (arr.type() === 'array') {
-          // eslint-disable-next-line prefer-destructuring
-          potCell = arr.asArray()![11];
-        } else {
-          throw new Error('unreachable');
-        }
-        let pot: QualifiedShieldedCoinInfo;
-        if (potCell.type() === 'cell') {
-          const { value } = potCell.asCell();
-          const valueAsBigInt = valueToBigInt([value[2]]);
-          const mtIndexAsBigInt = valueToBigInt([value[3]]);
+        expect(arr.type()).toBe('array');
 
-          pot = decodeQualifiedShieldedCoinInfo({
-            nonce: Static.trimTrailingZeros(value[0]),
-            color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
-            value: valueAsBigInt,
-            mt_index: mtIndexAsBigInt
-          });
-        } else {
-          throw new Error('unreachable');
-        }
+        const potCell = arr.asArray()![11];
+        expect(potCell.type()).toBe('cell');
+
+        const { value } = potCell.asCell();
+        const valueAsBigInt = valueToBigInt([value[2]]);
+        const mtIndexAsBigInt = valueToBigInt([value[3]]);
+
+        const pot: QualifiedShieldedCoinInfo = decodeQualifiedShieldedCoinInfo({
+          nonce: Static.trimTrailingZeros(value[0]),
+          color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
+          value: valueAsBigInt,
+          mt_index: mtIndexAsBigInt
+        });
 
         const encodedPot = encodeQualifiedShieldedCoinInfo(pot);
         const potNull = runtimeCoinNullifier(
@@ -665,7 +667,7 @@ describe('Ledger API - MicroDao', () => {
     }
   }
 
-  function part4VoteCommitment({
+  function voteCommitmentPhase({
     state,
     addr,
     partSks,
@@ -696,36 +698,20 @@ describe('Ledger API - MicroDao', () => {
       console.log(`  :: ${name}`);
 
       const contract = state.ledger.index(addr)!;
-      let eligibleVoters;
-      if (contract.data.state.type() === 'array') {
-        const arr = contract.data.state.asArray()!;
-        // eslint-disable-next-line prefer-destructuring
-        eligibleVoters = arr[8];
-      } else {
-        throw new Error('unreachable');
-      }
+      expect(contract.data.state.type()).toBe('array');
 
-      let mtreeVal;
-      if (eligibleVoters.type() === 'array') {
-        const arr = eligibleVoters.asArray()!;
-        // eslint-disable-next-line prefer-destructuring
-        mtreeVal = arr[0];
-      } else {
-        throw new Error('unreachable');
-      }
+      let arr = contract.data.state.asArray()!;
+      const eligibleVoters = arr[8];
 
-      let path: AlignedValue | undefined;
-      let pathRoot: AlignedValue | undefined;
-      if (mtreeVal.type() === 'boundedMerkleTree') {
-        const tree = mtreeVal.asBoundedMerkleTree()!;
-        pathRoot = tree.root();
-        path = tree.findPathForLeaf({ value: pk, alignment: [ATOM_BYTES_32] });
-        if (!path) {
-          throw new Error('unreachable');
-        }
-      } else {
-        throw new Error('unreachable');
-      }
+      expect(eligibleVoters.type()).toBe('array');
+      arr = eligibleVoters.asArray()!;
+      const mtreeVal = arr[0];
+
+      expect(mtreeVal.type()).toBe('boundedMerkleTree');
+      const tree = mtreeVal.asBoundedMerkleTree()!;
+      const pathRoot = tree.root();
+      const path = tree.findPathForLeaf({ value: pk, alignment: [ATOM_BYTES_32] });
+      expect(path).toBeDefined();
 
       const nul = persistentCommit(
         [ATOM_BYTES_32],
@@ -809,7 +795,7 @@ describe('Ledger API - MicroDao', () => {
     }
   }
 
-  function part5AdvanceToReveal({
+  function advanceToRevealPhase({
     state,
     addr,
     orgSk,
@@ -875,7 +861,7 @@ describe('Ledger API - MicroDao', () => {
     state.assertApply(balanced, balancedStrictness);
   }
 
-  function part6VoteRevealPhase({
+  function voteRevealPhase({
     state,
     addr,
     partSks,
@@ -914,33 +900,20 @@ describe('Ledger API - MicroDao', () => {
       );
 
       const contract = state.ledger.index(addr)!;
-      let commitedVotes;
-      if (contract.data.state.type() === 'array') {
-        const arr = contract.data.state.asArray()!;
-        // eslint-disable-next-line prefer-destructuring
-        commitedVotes = arr[7];
-      } else {
-        throw new Error('unreachable');
-      }
+      expect(contract.data.state.type()).toBe('array');
 
-      let mtreeValue;
-      if (commitedVotes.type() === 'array') {
-        const arr = commitedVotes.asArray()!;
-        // eslint-disable-next-line prefer-destructuring
-        mtreeValue = arr[0];
-      } else {
-        throw new Error('unreachable');
-      }
+      let arr = contract.data.state.asArray()!;
+      const commitedVotes = arr[7];
 
-      let path;
-      let pathRoot;
-      if (mtreeValue.type() === 'boundedMerkleTree') {
-        const tree = mtreeValue.asBoundedMerkleTree()!;
-        pathRoot = tree.root();
-        path = tree.findPathForLeaf({ value: cm, alignment: [ATOM_BYTES_32] });
-      } else {
-        throw new Error('unreachable');
-      }
+      expect(commitedVotes.type(), 'array');
+      arr = commitedVotes.asArray()!;
+      const mtreeValue = arr[0];
+
+      expect(mtreeValue.type(), 'boundedMerkleTree');
+      const tree = mtreeValue.asBoundedMerkleTree()!;
+      const pathRoot = tree.root();
+      const path = tree.findPathForLeaf({ value: cm, alignment: [ATOM_BYTES_32] });
+      expect(path).toBeDefined();
 
       const nul = persistentCommit(
         [ATOM_BYTES_32],
@@ -1004,7 +977,7 @@ describe('Ledger API - MicroDao', () => {
     }
   }
 
-  function part7AdvanceToFinalPhase({
+  function advanceToFinalPhase({
     state,
     addr,
     orgSk,
@@ -1071,7 +1044,7 @@ describe('Ledger API - MicroDao', () => {
     state.assertApply(balanced, balancedStrictness);
   }
 
-  function part8CashOut({
+  function cashOutPhase({
     state,
     addr,
     encodedAddr,
@@ -1093,34 +1066,26 @@ describe('Ledger API - MicroDao', () => {
     console.log(':: Part 8: Cash Out');
 
     const contract = state.ledger.index(addr)!;
-    let potVal;
-    if (contract.data.state.type() === 'array') {
-      const arr = contract.data.state.asArray()!;
-      // eslint-disable-next-line prefer-destructuring
-      potVal = arr[11];
-    } else {
-      throw new Error('unreachable');
-    }
+    expect(contract.data.state.type(), 'array');
 
-    let pot: QualifiedShieldedCoinInfo;
-    if (potVal.type() === 'cell') {
-      const { value } = potVal.asCell();
-      const valueAsBigInt = valueToBigInt([value[2]]);
-      const mtIndexAsBigInt = valueToBigInt([value[3]]);
-      const nonceWithoutZeroAtTheEnd = value[0];
-      const nonce = new Uint8Array(nonceWithoutZeroAtTheEnd.length + 1);
-      nonce.set(nonceWithoutZeroAtTheEnd, 0);
-      nonce[nonceWithoutZeroAtTheEnd.length] = 0;
+    const arr = contract.data.state.asArray()!;
+    const potVal = arr[11];
+    expect(potVal.type(), 'cell');
 
-      pot = decodeQualifiedShieldedCoinInfo({
-        nonce,
-        color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
-        value: valueAsBigInt,
-        mt_index: mtIndexAsBigInt
-      });
-    } else {
-      throw new Error('unreachable');
-    }
+    const { value } = potVal.asCell();
+    const valueAsBigInt = valueToBigInt([value[2]]);
+    const mtIndexAsBigInt = valueToBigInt([value[3]]);
+    const nonceWithoutZeroAtTheEnd = value[0];
+    const nonce = new Uint8Array(nonceWithoutZeroAtTheEnd.length + 1);
+    nonce.set(nonceWithoutZeroAtTheEnd, 0);
+    nonce[nonceWithoutZeroAtTheEnd.length] = 0;
+
+    const pot: QualifiedShieldedCoinInfo = decodeQualifiedShieldedCoinInfo({
+      nonce,
+      color: value[1].length === 0 ? Static.encodeFromHex(token.raw) : value[1],
+      value: valueAsBigInt,
+      mt_index: mtIndexAsBigInt
+    });
 
     const newCoin = evolveFrom(Static.encodeFromText('midnight:kernel:nonce_evolve'), pot.value, pot.type, pot.nonce);
     const encodedNewCoin = encodeShieldedCoinInfo(newCoin);
