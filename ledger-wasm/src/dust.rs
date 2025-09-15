@@ -1226,6 +1226,15 @@ impl DustSecretKey {
         Ok(DustSecretKey::wrap(LedgerDustSecretKey(sk)))
     }
 
+    #[wasm_bindgen(js_name = "fromSeed")]
+    pub fn from_seed(seed: Uint8Array) -> Result<DustSecretKey, JsError> {
+        let bytes: [u8; 32] = seed
+            .to_vec()
+            .try_into()
+            .map_err(|_| JsError::new("Expected 32-byte seed"))?;
+        Ok(DustSecretKey::wrap(LedgerDustSecretKey::derive_secret_key(&bytes)))
+    }
+
     pub fn clear(&mut self) {
         self.0.borrow_mut().take();
     }

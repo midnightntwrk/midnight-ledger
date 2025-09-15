@@ -21,7 +21,7 @@
 use crate::macros::{fr_display, wrap_display, wrap_field_arith, wrap_group_arith};
 use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment};
 use fake::{Dummy, Faker};
-use ff::{Field, PrimeField};
+use ff::{Field, FromUniformBytes, PrimeField};
 use group::Group;
 use group::GroupEncoding;
 use midnight_circuits::ecc::curves::CircuitCurve;
@@ -350,6 +350,12 @@ impl Fr {
             return None;
         }
         outer::Scalar::from_repr(repr).map(Fr).into()
+    }
+
+    /// Initialize an [Fr] from arbitrary 64 bytes (little-endian)
+    /// ensuring the result falls into the space by taking modulo.
+    pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
+        Fr(outer::Scalar::from_uniform_bytes(&bytes))
     }
 
     /// Output an [Fr] as a little-endian bytes-string

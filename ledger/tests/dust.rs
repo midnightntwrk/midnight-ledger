@@ -272,3 +272,4 @@ async fn test_cycle_transfers() {
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
 }
+
