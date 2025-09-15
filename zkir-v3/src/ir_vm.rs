@@ -371,13 +371,16 @@ impl IrSource {
                 }
                 I::ConstrainToBoolean { var } => drop(idx_bool(&memory, var)?),
                 I::ConstrainBits { var, bits } => drop(idx_bits(&memory, var, Some(*bits))?),
-                I::DivModPowerOfTwo { var, bits, output1, output2 } => {
+                I::DivModPowerOfTwo { var, bits, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("DivModPowerOfTwo requires exactly 2 outputs");
+                    }
                     if *bits as usize > FR_BYTES_STORED * 8 {
                         bail!("Excessive bit count");
                     }
                     let var_bits = idx_bits(&memory, var, None)?;
-                    memory.insert(output1.clone(), from_bits(var_bits[*bits as usize..].iter().copied()));
-                    memory.insert(output2.clone(), from_bits(var_bits[..*bits as usize].iter().copied()));
+                    memory.insert(outputs[0].clone(), from_bits(var_bits[*bits as usize..].iter().copied()));
+                    memory.insert(outputs[1].clone(), from_bits(var_bits[..*bits as usize].iter().copied()));
                 }
                 I::ReconstituteField {
                     divisor,
@@ -426,7 +429,10 @@ impl IrSource {
                     );
                     memory.insert(output.clone(), result);
                 }
-                I::PersistentHash { alignment, inputs, output1, output2 } => {
+                I::PersistentHash { alignment, inputs, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("PersistentHash requires exactly 2 outputs");
+                    }
                     let inputs = inputs
                         .iter()
                         .map(|i| idx(&memory, i))
@@ -441,8 +447,8 @@ impl IrSource {
                     let hash = persistent_hash(&repr);
                     let hash_fields = hash.field_vec();
                     if hash_fields.len() >= 2 {
-                        memory.insert(output1.clone(), hash_fields[0]);
-                        memory.insert(output2.clone(), hash_fields[1]);
+                        memory.insert(outputs[0].clone(), hash_fields[0]);
+                        memory.insert(outputs[1].clone(), hash_fields[1]);
                     } else {
                         bail!("PersistentHash did not produce expected output");
                     }
@@ -478,33 +484,45 @@ impl IrSource {
                     memory.insert(output.clone(), *imm);
                 }
                 I::Output { var } => outputs.push(idx(&memory, var)?),
-                I::EcAdd { a_x, a_y, b_x, b_y, output_x, output_y } => {
+                I::EcAdd { a_x, a_y, b_x, b_y, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("EcAdd requires exactly 2 outputs");
+                    }
                     let point = idx_point(&memory, a_x, a_y)? + idx_point(&memory, b_x, b_y)?;
                     let [x, y] = from_point(point);
-                    memory.insert(output_x.clone(), x);
-                    memory.insert(output_y.clone(), y);
+                    memory.insert(outputs[0].clone(), x);
+                    memory.insert(outputs[1].clone(), y);
                 }
-                I::HashToCurve { inputs, output_x, output_y } => {
+                I::HashToCurve { inputs, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("HashToCurve requires exactly 2 outputs");
+                    }
                     let inputs = inputs
                         .iter()
                         .map(|var| idx(&memory, var))
                         .collect::<Result<Vec<_>, _>>()?;
                     let point = hash_to_curve(&inputs);
                     let [x, y] = from_point(point);
-                    memory.insert(output_x.clone(), x);
-                    memory.insert(output_y.clone(), y);
+                    memory.insert(outputs[0].clone(), x);
+                    memory.insert(outputs[1].clone(), y);
                 }
-                I::EcMul { a_x, a_y, scalar, output_x, output_y } => {
+                I::EcMul { a_x, a_y, scalar, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("EcMul requires exactly 2 outputs");
+                    }
                     let point = idx_point(&memory, a_x, a_y)? * idx(&memory, scalar)?;
                     let [x, y] = from_point(point);
-                    memory.insert(output_x.clone(), x);
-                    memory.insert(output_y.clone(), y);
+                    memory.insert(outputs[0].clone(), x);
+                    memory.insert(outputs[1].clone(), y);
                 }
-                I::EcMulGenerator { scalar, output_x, output_y } => {
+                I::EcMulGenerator { scalar, outputs } => {
+                    if outputs.len() != 2 {
+                        bail!("EcMulGenerator requires exactly 2 outputs");
+                    }
                     let point = EmbeddedGroupAffine::generator() * idx(&memory, scalar)?;
                     let [x, y] = from_point(point);
-                    memory.insert(output_x.clone(), x);
-                    memory.insert(output_y.clone(), y);
+                    memory.insert(outputs[0].clone(), x);
+                    memory.insert(outputs[1].clone(), y);
                 }
             }
         }
@@ -598,10 +616,10 @@ impl Relation for IrSource {
             memory.get(id).ok_or(Error::Synthesis)
         }
 
-        let mem_push = |id: Identifier,
-                        cell: AssignedNative<outer::Scalar>,
-                        mem: &mut HashMap<Identifier, AssignedNative<outer::Scalar>>|
-         -> Result<(), Error> {
+        let mem_insert = |id: Identifier,
+                          cell: AssignedNative<outer::Scalar>,
+                          mem: &mut HashMap<Identifier, AssignedNative<outer::Scalar>>|
+                          -> Result<(), Error> {
             // Verify consistency with witness if available
             witness.as_ref()
                 .zip(cell.value())
@@ -662,7 +680,7 @@ impl Relation for IrSource {
                     // excessive, but user input could violate it otherwise.
                     let result =
                         std.select(layouter, &bit, idx(&memory, b)?, idx(&memory, a)?)?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { var, bits } => drop(std.assigned_to_le_bits(
                     layouter,
@@ -677,12 +695,12 @@ impl Relation for IrSource {
                     // Yes, this does insert a constraint.
                     let _: AssignedBit<_> = std.convert(layouter, idx(&memory, var)?)?;
                 }
-                I::Copy { var, output } => mem_push(output.clone(), idx(&memory, var)?.clone(), &mut memory)?,
+                I::Copy { var, output } => mem_insert(output.clone(), idx(&memory, var)?.clone(), &mut memory)?,
                 I::DeclarePubInput { var } => {
                     pi_push(idx(&memory, var)?.clone(), &mut public_inputs)?
                 }
                 I::PiSkip { .. } => {}
-                I::LoadImm { imm, output } => mem_push(output.clone(), std.assign_fixed(layouter, imm.0)?, &mut memory)?,
+                I::LoadImm { imm, output } => mem_insert(output.clone(), std.assign_fixed(layouter, imm.0)?, &mut memory)?,
                 I::Output { var } => outputs.push(idx(&memory, var)?.clone()),
                 I::TransientHash { inputs, output } => {
                     let result = std.poseidon(
@@ -692,41 +710,44 @@ impl Relation for IrSource {
                             .map(|inp| idx(&memory, inp).cloned())
                             .collect::<Result<Vec<_>, _>>()?,
                     )?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::PersistentHash { alignment, inputs, output1, output2 } => {
+                I::PersistentHash { alignment, inputs, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let inputs = inputs
                         .iter()
                         .map(|i| idx(&memory, i).cloned())
                         .collect::<Result<Vec<_>, _>>()?;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
                     let res_bytes = std.sha256(layouter, &bytes)?;
-                    mem_push(output1.clone(), std.convert(layouter, &res_bytes[31])?, &mut memory)?;
-                    mem_push(
-                        output2.clone(),
+                    mem_insert(outputs[0].clone(), std.convert(layouter, &res_bytes[31])?, &mut memory)?;
+                    mem_insert(
+                        outputs[1].clone(),
                         assemble_bytes(std, layouter, &res_bytes[..31])?,
                         &mut memory,
                     )?;
                 }
                 I::TestEq { a, b, output } => {
                     let bit = std.is_equal(layouter, idx(&memory, a)?, idx(&memory, b)?)?;
-                    mem_push(output.clone(), std.convert(layouter, &bit)?, &mut memory)?;
+                    mem_insert(output.clone(), std.convert(layouter, &bit)?, &mut memory)?;
                 }
                 I::Add { a, b, output } => {
                     let result = std.add(layouter, idx(&memory, a)?, idx(&memory, b)?)?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Mul { a, b, output } => {
                     let result = std.mul(layouter, idx(&memory, a)?, idx(&memory, b)?, None)?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
                     let result = std.neg(layouter, idx(&memory, a)?)?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
                     let result = lnot(std, layouter, idx(&memory, a)?)?;
-                    mem_push(output.clone(), result, &mut memory)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::LessThan { a, b, bits, output } => {
                     // Adding mod 2 to meet library constraint that this is even
@@ -737,7 +758,7 @@ impl Relation for IrSource {
                         idx(&memory, b)?,
                         u32::max(*bits + *bits % 2, 4),
                     )?;
-                    mem_push(output.clone(), std.convert(layouter, &bit)?, &mut memory)?;
+                    mem_insert(output.clone(), std.convert(layouter, &bit)?, &mut memory)?;
                 }
                 I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
                     let guard = guard.as_ref().map(|g| idx(&memory, g)).transpose()?;
@@ -756,9 +777,12 @@ impl Relation for IrSource {
                         let is_ok_field = std.convert(layouter, &is_ok)?;
                         std.assert_non_zero(layouter, &is_ok_field)?;
                     }
-                    mem_push(output.clone(), value_cell, &mut memory)?;
+                    mem_insert(output.clone(), value_cell, &mut memory)?;
                 }
-                I::DivModPowerOfTwo { var, bits, output1, output2 } => {
+                I::DivModPowerOfTwo { var, bits, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let var = idx(&memory, var)?;
                     let var_bits = std.assigned_to_le_bits(layouter, var, None, true)?;
                     let modulus =
@@ -767,8 +791,8 @@ impl Relation for IrSource {
                     let divisor =
                         std.assigned_from_le_bits(layouter, &var_bits[*bits as usize..])?;
 
-                    mem_push(output1.clone(), divisor, &mut memory)?;
-                    mem_push(output2.clone(), modulus, &mut memory)?;
+                    mem_insert(outputs[0].clone(), divisor, &mut memory)?;
+                    mem_insert(outputs[1].clone(), modulus, &mut memory)?;
                 }
                 I::ReconstituteField {
                     divisor,
@@ -790,42 +814,54 @@ impl Relation for IrSource {
                     )?;
                     let reconstituted = std
                         .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
-                    mem_push(output.clone(), reconstituted, &mut memory)?;
+                    mem_insert(output.clone(), reconstituted, &mut memory)?;
                 }
-                I::EcAdd { a_x, a_y, b_x, b_y, output_x, output_y } => {
+                I::EcAdd { a_x, a_y, b_x, b_y, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let a =
                         ecc_from_parts(std, layouter, idx(&memory, a_x)?, idx(&memory, a_y)?)?;
                     let b =
                         ecc_from_parts(std, layouter, idx(&memory, b_x)?, idx(&memory, b_y)?)?;
                     let c = std.jubjub().add(layouter, &a, &b)?;
-                    mem_push(output_x.clone(), std.jubjub().x_coordinate(&c), &mut memory)?;
-                    mem_push(output_y.clone(), std.jubjub().y_coordinate(&c), &mut memory)?;
+                    mem_insert(outputs[0].clone(), std.jubjub().x_coordinate(&c), &mut memory)?;
+                    mem_insert(outputs[1].clone(), std.jubjub().y_coordinate(&c), &mut memory)?;
                 }
-                I::EcMul { a_x, a_y, scalar, output_x, output_y } => {
+                I::EcMul { a_x, a_y, scalar, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let a =
                         ecc_from_parts(std, layouter, idx(&memory, a_x)?, idx(&memory, a_y)?)?;
                     let scalar = std.jubjub().convert(layouter, idx(&memory, scalar)?)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
-                    mem_push(output_x.clone(), std.jubjub().x_coordinate(&b), &mut memory)?;
-                    mem_push(output_y.clone(), std.jubjub().y_coordinate(&b), &mut memory)?;
+                    mem_insert(outputs[0].clone(), std.jubjub().x_coordinate(&b), &mut memory)?;
+                    mem_insert(outputs[1].clone(), std.jubjub().y_coordinate(&b), &mut memory)?;
                 }
-                I::EcMulGenerator { scalar, output_x, output_y } => {
+                I::EcMulGenerator { scalar, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let g: AssignedNativePoint<embedded::AffineExtended> = std
                         .jubjub()
                         .assign_fixed(layouter, embedded::Affine::generator())?;
                     let scalar = std.jubjub().convert(layouter, idx(&memory, scalar)?)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
-                    mem_push(output_x.clone(), std.jubjub().x_coordinate(&b), &mut memory)?;
-                    mem_push(output_y.clone(), std.jubjub().y_coordinate(&b), &mut memory)?;
+                    mem_insert(outputs[0].clone(), std.jubjub().x_coordinate(&b), &mut memory)?;
+                    mem_insert(outputs[1].clone(), std.jubjub().y_coordinate(&b), &mut memory)?;
                 }
-                I::HashToCurve { inputs, output_x, output_y } => {
+                I::HashToCurve { inputs, outputs } => {
+                    if outputs.len() != 2 {
+                        return Err(Error::Synthesis);
+                    }
                     let inputs = inputs
                         .iter()
                         .map(|input| idx(&memory, input).cloned())
                         .collect::<Result<Vec<_>, _>>()?;
                     let point = std.hash_to_curve(layouter, &inputs)?;
-                    mem_push(output_x.clone(), std.jubjub().x_coordinate(&point), &mut memory)?;
-                    mem_push(output_y.clone(), std.jubjub().y_coordinate(&point), &mut memory)?;
+                    mem_insert(outputs[0].clone(), std.jubjub().x_coordinate(&point), &mut memory)?;
+                    mem_insert(outputs[1].clone(), std.jubjub().y_coordinate(&point), &mut memory)?;
                 }
             }
         }
