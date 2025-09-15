@@ -363,7 +363,7 @@ describe('Ledger API - QueryContext', () => {
     const amount = 100n;
     const color = encodeRawTokenType(createRawTokenType(Random.domainSep(), sampleContractAddress()));
     const recipient = encodeContractAddress(sampleContractAddress());
-    const bytes32Empty = new Uint8Array(0);
+    const empty = new Uint8Array(0);
 
     const stateValue = new ChargedState(StateValue.newArray());
     const queryContext = new QueryContext(stateValue, sampleContractAddress());
@@ -389,7 +389,7 @@ describe('Ledger API - QueryContext', () => {
         push: {
           storage: false,
           value: StateValue.newCell({
-            value: [new Uint8Array([1]), color, bytes32Empty, new Uint8Array([1]), recipient, bytes32Empty],
+            value: [new Uint8Array([1]), color, empty, new Uint8Array([1]), recipient, empty],
             alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
           }).encode()
         }
