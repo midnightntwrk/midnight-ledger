@@ -123,8 +123,6 @@ jobs:
         run: |
           export MN_AXIOS=true
           cd integration-tests
-          yarn config set 'npmScopes.midnight-ntwrk.npmAuthToken' "$(echo "${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}" | tr -d '\r\n[:blank:]')"
-          echo 'checksumBehavior: update' >> ./.yarnrc.yml
           yarn
           yarn lint
           yarn build

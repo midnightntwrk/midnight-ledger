@@ -12,30 +12,24 @@
 // limitations under the License.
 
 import {
+  type AlignedValue,
+  type AlignmentSegment,
+  bigIntToValue,
   ChargedState,
   CostModel,
-  QueryContext,
-  StateMap,
-  StateValue,
   createShieldedCoinInfo,
-  ZswapOutput,
-  type AlignedValue,
-  type Transcript,
   type Effects,
-  type Op,
+  encodeContractAddress,
   encodeRawTokenType,
+  type Op,
+  QueryContext,
   rawTokenType as createRawTokenType,
   sampleContractAddress,
-  encodeContractAddress
+  StateMap,
+  StateValue,
+  type Transcript,
+  ZswapOutput
 } from '@midnight-ntwrk/ledger';
-import {
-  alignedConcat,
-  type Alignment,
-  CompactTypeBoolean,
-  CompactTypeBytes,
-  CompactTypeUnsignedInteger,
-  type Value
-} from '@midnight-ntwrk/compact-runtime';
 
 import { addressToPublic, Random, Static } from '@/test-objects';
 import { mapFindByKey } from '@/test-utils';
@@ -48,6 +42,10 @@ describe('Ledger API - QueryContext', () => {
    * @when Creating a QueryContext with a map StateValue
    * @then The context should be created with correct address and state
    */
+  const ATOM_BYTES_1: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 1 } };
+  const ATOM_BYTES_16: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 16 } };
+  const ATOM_BYTES_32: AlignmentSegment = { tag: 'atom', value: { tag: 'bytes', length: 32 } };
+
   test('should create context - map', () => {
     const contractAddress = Random.contractAddress();
     let stateMap = new StateMap();
@@ -362,20 +360,15 @@ describe('Ledger API - QueryContext', () => {
    * @and Should properly handle color encoding and recipient addressing
    */
   test('should allow claiming unshielded spends', () => {
-    const booleanDescriptor = new CompactTypeBoolean();
-    const bytesDescriptor = new CompactTypeBytes(32);
-    const uint1Descriptor = new CompactTypeUnsignedInteger(255n, 1);
-    const uint16Descriptor = new CompactTypeUnsignedInteger(340282366920938463463374607431768211455n, 16);
-
     const amount = 100n;
     const color = encodeRawTokenType(createRawTokenType(Random.domainSep(), sampleContractAddress()));
     const recipient = encodeContractAddress(sampleContractAddress());
-    const bytes32Empty = new Uint8Array(32);
+    const emptyBytes = new Uint8Array(0);
 
     const stateValue = new ChargedState(StateValue.newArray());
     const queryContext = new QueryContext(stateValue, sampleContractAddress());
 
-    const ops = [
+    const ops: Op<null>[] = [
       { swap: { n: 0 } },
       {
         idx: {
@@ -385,8 +378,8 @@ describe('Ledger API - QueryContext', () => {
             {
               tag: 'value',
               value: {
-                value: uint1Descriptor.toValue(8n),
-                alignment: uint1Descriptor.alignment()
+                value: [new Uint8Array([8])],
+                alignment: [ATOM_BYTES_1]
               }
             }
           ]
@@ -395,34 +388,10 @@ describe('Ledger API - QueryContext', () => {
       {
         push: {
           storage: false,
-          value: StateValue.newCell(
-            alignedConcat(
-              {
-                value: booleanDescriptor.toValue(true),
-                alignment: booleanDescriptor.alignment()
-              },
-              {
-                value: bytesDescriptor.toValue(color),
-                alignment: bytesDescriptor.alignment()
-              },
-              {
-                value: bytesDescriptor.toValue(bytes32Empty),
-                alignment: bytesDescriptor.alignment()
-              },
-              {
-                value: booleanDescriptor.toValue(true),
-                alignment: booleanDescriptor.alignment()
-              },
-              {
-                value: bytesDescriptor.toValue(recipient),
-                alignment: bytesDescriptor.alignment()
-              },
-              {
-                value: bytesDescriptor.toValue(bytes32Empty),
-                alignment: bytesDescriptor.alignment()
-              }
-            )
-          ).encode()
+          value: StateValue.newCell({
+            value: [new Uint8Array([1]), color, emptyBytes, new Uint8Array([1]), recipient, emptyBytes],
+            alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
+          }).encode()
         }
       },
       { dup: { n: 1 } },
@@ -432,8 +401,8 @@ describe('Ledger API - QueryContext', () => {
         push: {
           storage: false,
           value: StateValue.newCell({
-            value: uint16Descriptor.toValue(amount),
-            alignment: uint16Descriptor.alignment()
+            value: bigIntToValue(amount),
+            alignment: [ATOM_BYTES_16]
           }).encode()
         }
       },
@@ -448,7 +417,7 @@ describe('Ledger API - QueryContext', () => {
       { swap: { n: 0 } }
     ];
 
-    const res = queryContext.query(ops as Op<null>[], CostModel.initialCostModel());
+    const res = queryContext.query(ops, CostModel.initialCostModel());
     const { effects } = res.context;
     expect([...effects.claimedUnshieldedSpends.values()]).toEqual([amount]);
   });
@@ -464,55 +433,6 @@ describe('Ledger API - QueryContext', () => {
    * @and Should handle complex nested data structure encodings correctly
    */
   test("'get' should work for 'claimedUnshieldedSpends'", () => {
-    const Uint1Descriptor = new CompactTypeUnsignedInteger(255n, 1);
-    const Uint16Descriptor = new CompactTypeUnsignedInteger(340282366920938463463374607431768211455n, 16);
-    const BooleanDescriptor = new CompactTypeBoolean();
-    const Bytes32Descriptor = new CompactTypeBytes(32);
-
-    const TokenTypeDescriptor = {
-      alignment() {
-        return BooleanDescriptor.alignment().concat(
-          Bytes32Descriptor.alignment().concat(Bytes32Descriptor.alignment())
-        );
-      },
-      toValue(rawValue: { is_left: boolean; left: Uint8Array; right: Uint8Array }) {
-        return BooleanDescriptor.toValue(rawValue.is_left).concat(
-          Bytes32Descriptor.toValue(rawValue.left).concat(Bytes32Descriptor.toValue(rawValue.right))
-        );
-      }
-    };
-
-    const ContractAddressDescriptor = {
-      alignment(): Alignment {
-        return Bytes32Descriptor.alignment();
-      },
-      toValue(value: { bytes: Uint8Array }): Value {
-        return Bytes32Descriptor.toValue(value.bytes);
-      }
-    };
-
-    const UserAddressDescriptor = {
-      alignment() {
-        return Bytes32Descriptor.alignment();
-      },
-      toValue(value: { bytes: Uint8Array }) {
-        return Bytes32Descriptor.toValue(value.bytes);
-      }
-    };
-
-    const RecipientDescriptor = {
-      alignment() {
-        return BooleanDescriptor.alignment().concat(
-          ContractAddressDescriptor.alignment().concat(UserAddressDescriptor.alignment())
-        );
-      },
-      toValue(rawValue: { is_left: boolean; left: { bytes: Uint8Array }; right: { bytes: Uint8Array } }) {
-        return BooleanDescriptor.toValue(rawValue.is_left).concat(
-          ContractAddressDescriptor.toValue(rawValue.left).concat(UserAddressDescriptor.toValue(rawValue.right))
-        );
-      }
-    };
-
     const amount = 100n;
 
     const selfRawAddress = sampleContractAddress();
@@ -521,16 +441,6 @@ describe('Ledger API - QueryContext', () => {
 
     const domainSep = Random.domainSep();
     const rawTokenType = createRawTokenType(domainSep, selfRawAddress);
-    const tokenType = {
-      is_left: true,
-      left: encodeRawTokenType(rawTokenType),
-      right: new Uint8Array(32)
-    };
-    const recipient = {
-      is_left: true,
-      left: { bytes: encodeContractAddress(selfRawAddress) },
-      right: { bytes: new Uint8Array(32) }
-    };
 
     const queryResult = queryContext.query(
       [
@@ -543,8 +453,8 @@ describe('Ledger API - QueryContext', () => {
               {
                 tag: 'value',
                 value: {
-                  value: Uint1Descriptor.toValue(8n),
-                  alignment: Uint1Descriptor.alignment()
+                  value: [new Uint8Array([8])],
+                  alignment: [ATOM_BYTES_1]
                 }
               }
             ]
@@ -553,18 +463,17 @@ describe('Ledger API - QueryContext', () => {
         {
           push: {
             storage: false,
-            value: StateValue.newCell(
-              alignedConcat(
-                {
-                  value: TokenTypeDescriptor.toValue(tokenType),
-                  alignment: TokenTypeDescriptor.alignment()
-                },
-                {
-                  value: RecipientDescriptor.toValue(recipient),
-                  alignment: RecipientDescriptor.alignment()
-                }
-              )
-            ).encode()
+            value: StateValue.newCell({
+              value: [
+                new Uint8Array([1]),
+                encodeRawTokenType(rawTokenType),
+                new Uint8Array(0),
+                new Uint8Array([1]),
+                encodeContractAddress(selfRawAddress),
+                new Uint8Array(0)
+              ],
+              alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
+            }).encode()
           }
         },
         { dup: { n: 1 } },
@@ -574,8 +483,8 @@ describe('Ledger API - QueryContext', () => {
           push: {
             storage: false,
             value: StateValue.newCell({
-              value: Uint16Descriptor.toValue(amount),
-              alignment: Uint16Descriptor.alignment()
+              value: bigIntToValue(amount),
+              alignment: [ATOM_BYTES_16]
             }).encode()
           }
         },
