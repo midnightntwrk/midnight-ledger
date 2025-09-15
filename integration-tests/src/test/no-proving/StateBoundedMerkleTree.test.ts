@@ -11,9 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { StateBoundedMerkleTree } from '@midnight-ntwrk/ledger';
+import { StateBoundedMerkleTree, valueToBigInt } from '@midnight-ntwrk/ledger';
 import { Static } from '@/test-objects';
-import { valueToBigInt } from '@midnight-ntwrk/compact-runtime';
 
 describe('Ledger API - StateBoundedMerkleTree', () => {
   /**
