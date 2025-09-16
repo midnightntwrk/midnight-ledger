@@ -211,13 +211,13 @@ export class Event {
  * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
  */
 export class DustSecretKey {
+  private constructor();
+
   /**
    * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
    * @param bigint 
    */
   static fromBigint(bigint: bigint): DustSecretKey;
-
-  private constructor();
   
   publicKey: DustPublicKey;
 

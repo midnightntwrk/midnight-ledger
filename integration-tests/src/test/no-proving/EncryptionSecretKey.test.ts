@@ -20,7 +20,8 @@ import {
   sampleCoinPublicKey,
   sampleEncryptionPublicKey
 } from '@midnight-ntwrk/ledger';
-import { ESK_CLEAR_MESSAGE, Random } from '@/test-objects';
+import { ESK_CLEAR_MESSAGE } from '@/test-constants';
+import { Random } from '@/test-objects';
 
 describe('Ledger API - EncryptionSecretKey', () => {
   /**

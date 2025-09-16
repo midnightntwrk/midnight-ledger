@@ -12,7 +12,8 @@
 // limitations under the License.
 
 import { ZswapSecretKeys, createShieldedCoinInfo, coinNullifier } from '@midnight-ntwrk/ledger';
-import { CSK_CLEAR_MESSAGE, Random } from '@/test-objects';
+import { CSK_CLEAR_MESSAGE } from '@/test-constants';
+import { Random } from '@/test-objects';
 
 describe('Ledger API - CoinSecretKey', () => {
   /**
