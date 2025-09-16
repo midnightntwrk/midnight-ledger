@@ -1118,6 +1118,8 @@ export class PreTranscript {
   toString(compact?: boolean): string;
 }
 
+export type PartitionedTranscript = [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined];
+
 /**
  * Computes the communication commitment corresponding to an input/output pair and randomness.
  */
@@ -1128,7 +1130,7 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
  * resulting in guaranteed and fallible {@link Transcript}s, optimally
  * allocated, and heuristically covered for gas fees.
  */
-export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined][];
+export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): PartitionedTranscript[];
 
 /**
  * The hash of a transaction, as a hex-encoded 256-bit bytestring
