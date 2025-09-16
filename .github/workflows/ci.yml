@@ -100,6 +100,7 @@ jobs:
       - name: Run integration tests
         run: |
           export MN_AXIOS=true
+          set -o pipefail
           cd integration-tests
           yarn
           yarn lint
@@ -226,13 +227,6 @@ jobs:
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
-
-      - name: Install Rust Toolchain
-        uses: actions-rs/toolchain@b2417cde72dcf67f306c0ae8e0828a81bf0b189f # v1.0.6
-        with:
-          toolchain: stable # Or 'nightly', 'beta', or a specific version like '1.70.0'
-          override: true
-          profile: minimal # Installs rustc, cargo, and rust-std. Use 'default' for rustfmt, clippy, etc.
 
       - name: Cache dependencies
         uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
