@@ -520,6 +520,12 @@ export function dummyUserAddress(): UserAddress;
 export function runtimeCoinCommitment(coin: AlignedValue, recipient: AlignedValue): AlignedValue;
 
 /**
+ * Internal implementation of the runtime's coin nullifier primitive.
+ * @internal
+ */
+export function runtimeCoinNullifier(coin: AlignedValue, sender_evidence: AlignedValue): AlignedValue;
+
+/**
  * Internal implementation of the Merkle tree leaf hash primitive.
  * @internal
  */
