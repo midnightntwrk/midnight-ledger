@@ -36,14 +36,14 @@ import {
 import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {
-  LOCAL_TEST_NETWORK_ID,
-  NIGHT_TOKEN_TYPE,
+  BALANCING_OVERHEAD,
   DUST_GRACE_PERIOD_IN_SECONDS,
   GENERATION_DECAY_RATE,
-  NIGHT_DUST_RATIO,
-  BALANCING_OVERHEAD,
   INITIAL_NIGHT_AMOUNT,
-  initialParameters
+  initialParameters,
+  LOCAL_TEST_NETWORK_ID,
+  NIGHT_DUST_RATIO,
+  NIGHT_TOKEN_TYPE
 } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
 import { assertSerializationSuccess } from '@/test-utils';
@@ -387,7 +387,7 @@ describe('Ledger API - DustLocalState', () => {
     state.fastForward(initialParameters.timeToCapSeconds);
 
     const emptyTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    const balancedTx = state.balanceTx(emptyTx);
-    state.assertApply(balancedTx.eraseProofs(), new WellFormedStrictness());
+    const balancedTx = state.balanceTx(emptyTx.eraseProofs());
+    state.assertApply(balancedTx, new WellFormedStrictness());
   });
 });

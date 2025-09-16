@@ -11,7 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { DUST_SK_CLEAR_MESSAGE, INITIAL_NIGHT_AMOUNT } from '@/test-objects';
+import { DUST_SK_CLEAR_MESSAGE } from '@/test-constants';
+import { INITIAL_NIGHT_AMOUNT } from '@/test-objects';
 import { generateSampleDust } from '@/test/utils/dust';
 
 describe('Ledger API - DustSecretKey', () => {

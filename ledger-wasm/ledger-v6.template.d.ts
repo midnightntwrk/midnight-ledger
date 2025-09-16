@@ -211,6 +211,8 @@ export class Event {
  * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
  */
 export class DustSecretKey {
+  private constructor();
+
   /**
    * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
    * @param bigint 
@@ -223,8 +225,6 @@ export class DustSecretKey {
    */
   static fromSeed(seed: Uint8Array): DustSecretKey;
 
-  private constructor();
-  
   publicKey: DustPublicKey;
 
   /**
@@ -1169,10 +1169,6 @@ export type TransactionId = string;
  * An encryption public key, used to inform users of new coins sent to them
  */
 export type EncPublicKey = string;
-/**
- * A coin public key, used to determine if a given coin is owned by a specific user
- */
-export type CoinPublicKey = string;
 
 /**
  * Samples a dummy user coin public key, for use in testing
