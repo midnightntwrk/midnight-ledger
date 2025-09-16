@@ -1232,7 +1232,9 @@ impl DustSecretKey {
             .to_vec()
             .try_into()
             .map_err(|_| JsError::new("Expected 32-byte seed"))?;
-        Ok(DustSecretKey::wrap(LedgerDustSecretKey::derive_secret_key(&bytes)))
+        Ok(DustSecretKey::wrap(LedgerDustSecretKey::derive_secret_key(
+            &bytes,
+        )))
     }
 
     pub fn clear(&mut self) {
