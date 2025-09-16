@@ -1163,10 +1163,6 @@ export type TransactionId = string;
  * An encryption public key, used to inform users of new coins sent to them
  */
 export type EncPublicKey = string;
-/**
- * A coin public key, used to determine if a given coin is owned by a specific user
- */
-export type CoinPublicKey = string;
 
 /**
  * Samples a dummy user coin public key, for use in testing
