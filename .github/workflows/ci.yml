@@ -152,7 +152,7 @@ jobs:
           coverage-path: ./integration-tests/coverage.txt
 
       - name: Publish ITest Summary
-        uses: EnricoMi/publish-unit-test-result-action@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action@3a74b2957438d0b6e2e61d67b05318aa25c9e6c6
         if: always() && matrix.runner != 'self-hosted'
         with:
          check_name: 'Test Results - ${{ matrix.runner }}'
@@ -160,7 +160,7 @@ jobs:
            **/reports/test-*.xml
 
       - name: Publish ITest Summary
-        uses: EnricoMi/publish-unit-test-result-action/macos@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action/macos@3a74b2957438d0b6e2e61d67b05318aa25c9e6c6
         if: always() && matrix.runner == 'self-hosted'
         with:
          check_name: 'Test Results - ${{ matrix.runner }}'
@@ -328,7 +328,7 @@ jobs:
           report_paths: '**/target/test-*.xml'
 
       - name: Publish Test Summary
-        uses: EnricoMi/publish-unit-test-result-action@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action@3a74b2957438d0b6e2e61d67b05318aa25c9e6c6
         if: always() && matrix.runner != 'self-hosted'
         with:
           check_name: 'Proof Server - Test Results - ${{ matrix.runner }}'
@@ -336,7 +336,7 @@ jobs:
             **/target/test-*.xml
 
       - name: Publish Test Summary
-        uses: EnricoMi/publish-unit-test-result-action/macos@170bf24d20d201b842d7a52403b73ed297e6645b
+        uses: EnricoMi/publish-unit-test-result-action/macos@3a74b2957438d0b6e2e61d67b05318aa25c9e6c6
         if: always() && matrix.runner == 'self-hosted'
         with:
           check_name: 'Proof Server - Test Results - ${{ matrix.runner }}'
