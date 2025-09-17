@@ -26,7 +26,7 @@ A canonical ordering is imposed on the set of dust payments, with only this
 order being considered valid. One offer, call, or dust payment must be present
 for the intent to be valid.
 
-The transaction is only valid if the TTL is a) not in the past, and b) to too
+The transaction is only valid if the TTL is a) not in the past, and b) not too
 far in the future (by the ledger parameter `global_ttl`).
 
 ```rust
