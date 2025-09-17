@@ -726,6 +726,64 @@ describe('Ledger API - functions', () => {
     RuntimeCoinCommitmentUtils.assertOutcomes(coin, recipient);
   });
 
+  test('checks the runtime coin commitment length is correct', () => {
+    const coin: AlignedValue = {
+      value: [
+        Static.encodeFromHex('e3c66471299ae4a1a6d18b9b645f4938c368f80ca9a3a5f6cfd748ccb2f0f1f0'),
+        Uint8Array.from([]),
+        Uint8Array.from([16, 39])
+      ],
+      alignment: [
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 16 } }
+      ]
+    };
+    const recipient: AlignedValue = {
+      value: [
+        Uint8Array.from([1]),
+        Static.encodeFromHex('f8ae9817853990a741dbe948f500c43cacb5c6cc60073b556a2792d840a4752d'),
+        Uint8Array.from([])
+      ],
+      alignment: [
+        { tag: 'atom', value: { tag: 'bytes', length: 1 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } }
+      ]
+    };
+    const commitment = runtimeCoinCommitment(coin, recipient);
+    expect(commitment.value[0].length).toEqual(PERSISTENT_HASH_BYTES);
+  });
+
+  test('AlignedValue handles the trailing zeros', () => {
+    const coin: AlignedValue = {
+      value: [
+        Static.encodeFromHex('274af112a6cdb72175067b2e5b9921622265b54ca083b287498b1baf0673d806'),
+        Uint8Array.from([]),
+        Uint8Array.from([16, 39])
+      ],
+      alignment: [
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 16 } }
+      ]
+    };
+    const recipient: AlignedValue = {
+      value: [
+        Uint8Array.from([1]),
+        Static.encodeFromHex('32afbc49874c910f0df7d48198607e2d13946cdd77b0d97e6eb83cb6a0328900'),
+        Uint8Array.from([])
+      ],
+      alignment: [
+        { tag: 'atom', value: { tag: 'bytes', length: 1 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } },
+        { tag: 'atom', value: { tag: 'bytes', length: 32 } }
+      ]
+    };
+    const commitment = runtimeCoinCommitment(coin, recipient);
+    expect(commitment).toBeDefined();
+  });
+
   /**
    * Test for generating a runtime coin commitment for a user address
    *
