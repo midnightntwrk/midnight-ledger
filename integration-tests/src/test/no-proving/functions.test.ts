@@ -752,6 +752,9 @@ describe('Ledger API - functions', () => {
       ]
     };
     const commitment = runtimeCoinCommitment(coin, recipient);
+    expect(Buffer.from(commitment.value[0]).toString('hex')).toEqual(
+      'e5b99c814053184ad9d37d03fc4558d03982c418681561d1f0c2c76bd4a624'
+    );
     expect(commitment.value[0].length).toEqual(PERSISTENT_HASH_BYTES);
   });
 
