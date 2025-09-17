@@ -26,7 +26,7 @@ A canonical ordering is imposed on the set of dust payments, with only this
 order being considered valid. One offer, call, or dust payment must be present
 for the intent to be valid.
 
-The transaction is only valid if the TTL is a) not in the past, and b) to too
+The transaction is only valid if the TTL is a) not in the past, and b) not too
 far in the future (by the ledger parameter `global_ttl`).
 
 ```rust
@@ -173,8 +173,8 @@ are:
 
 Balancing is done on a per-segment-id basis, where segment ID `0` encompasses
 the guaranteed section. Balancing also includes fee payments, which are
-denominated in `DUST`. The fee payment required is subtracted from the Dust
-balance of segment 0.
+denominated in `DUST`. Fees and Dust actions across all segments are
+accumulated when applying segment 0.
 
 It's also during this time that contract interactions, both with tokens and
 with other contracts are enforced. These are enforced as static 1-to-1
