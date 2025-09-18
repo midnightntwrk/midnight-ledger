@@ -43,7 +43,11 @@ export class RuntimeCoinCommitmentUtils {
     const isUserAddress = false;
 
     return {
-      value: [RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress), new Uint8Array([]), Static.trimTrailingZeros(encodedContractAddress)],
+      value: [
+        RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress),
+        new Uint8Array([]),
+        Static.trimTrailingZeros(encodedContractAddress)
+      ],
       alignment: [
         { tag: 'atom', value: { tag: 'bytes', length: BOOLEAN_HASH_BYTES } },
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },

@@ -741,7 +741,11 @@ describe('Ledger API - functions', () => {
     const isUserAddress = true;
 
     const recipient: AlignedValue = {
-      value: [RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress), Static.trimTrailingZeros(encodedUserAddress), new Uint8Array([])],
+      value: [
+        RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress),
+        Static.trimTrailingZeros(encodedUserAddress),
+        new Uint8Array([])
+      ],
       alignment: [
         { tag: 'atom', value: { tag: 'bytes', length: BOOLEAN_HASH_BYTES } },
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },
@@ -832,7 +836,11 @@ describe('Ledger API - functions', () => {
     const isUserAddress = false;
 
     const recipient: AlignedValue = {
-      value: [RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress), new Uint8Array(), Static.trimTrailingZeros(encodedContractAddress)],
+      value: [
+        RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress),
+        new Uint8Array(),
+        Static.trimTrailingZeros(encodedContractAddress)
+      ],
       alignment: [
         { tag: 'atom', value: { tag: 'bytes', length: BOOLEAN_HASH_BYTES } },
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },
