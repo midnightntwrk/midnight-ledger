@@ -19,29 +19,9 @@ jobs:
   nix-build:
     strategy:
       matrix:
-        os: [ubuntu-latest-8-core-x64, macOSTestRunner, macos-latest]
-        include:
-          - os: ubuntu-latest-8-core-x64
-            runner: ubuntu-latest-8-core-x64
-          - os: macOSTestRunner
-            runner: self-hosted
-          - os: macos-latest
-            runner: macos-latest
-    runs-on: ${{ matrix.runner }}
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-13]
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Force clean workspace before checkout (Self-hosted macOS only)
-        if: runner.os == 'macOS' # Or matrix.os == 'macOSTestRunner'
-        run: |
-          WORKSPACE_PATH="${{ github.workspace }}"
-          echo "Attempting to forcefully clean workspace: $WORKSPACE_PATH"
-          # Ensure current user owns the directory
-          sudo chown -R $(whoami):$(id -gn) "$WORKSPACE_PATH" || true
-          sudo chown -R $(whoami) /nix/var/log/ || true
-          # Remove all contents, including hidden files
-          sudo rm -rf "$WORKSPACE_PATH"/* "$WORKSPACE_PATH"/.[!.]* || true
-          echo "Workspace cleaning attempted."
-        shell: bash
-
       - name: Configure git rewrite
         run: |
           mkdir -p $HOME/.config/git
@@ -62,14 +42,13 @@ jobs:
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
-      # FIXME: temp disable to torture-test the macos-latest runner.
-      #- name: Cache Nix
-      #  uses: input-output-hk/actions/attic@latest
-      #  with:
-      #    nix_path: nixpkgs=channel:nixos-unstable
-      #    endpoint: https://attic.ci.iog.io
-      #    cache: midnight-public
-      #    access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+      - name: Cache Nix
+        uses: input-output-hk/actions/attic@latest
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          endpoint: https://attic.ci.iog.io
+          cache: midnight-public
+          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -178,28 +157,9 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest-8-core-x64, macOSTestRunner]
-        include:
-          # Configuration for the GitHub-hosted Linux runner
-          - os: ubuntu-latest-8-core-x64
-            runner: ubuntu-latest-8-core-x64
-          # Configuration for your self-hosted macOS runner
-          - os: macOSTestRunner
-            runner: self-hosted
-    runs-on: ${{ matrix.runner }}
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-13]
+    runs-on: ${{ matrix.os }}
     steps:
-      - name: Force clean workspace before checkout (Self-hosted macOS only)
-        if: runner.os == 'macOS' # Or matrix.os == 'macOSTestRunner'
-        run: |
-          WORKSPACE_PATH="${{ github.workspace }}"
-          echo "Attempting to forcefully clean workspace: $WORKSPACE_PATH"
-          # Ensure current user owns the directory
-          sudo chown -R $(whoami):$(id -gn) "$WORKSPACE_PATH" || true
-          # Remove all contents, including hidden files
-          sudo rm -rf "$WORKSPACE_PATH"/* "$WORKSPACE_PATH"/.[!.]* || true
-          echo "Workspace cleaning attempted."
-        shell: bash
-
       - name: Configure git rewrite
         run: |
           mkdir -p $HOME/.config/git
