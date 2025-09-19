@@ -456,12 +456,15 @@ struct AlignedValueUnchecked {
 }
 
 impl TryFrom<AlignedValueUnchecked> for AlignedValue {
-    type Error = &'static str;
+    type Error = String;
     fn try_from(unchecked: AlignedValueUnchecked) -> Result<AlignedValue, Self::Error> {
         if !unchecked.alignment.fits(&unchecked.value) {
-            Err("value deserialized as aligned failed alignment check")
+            Err(format!(
+                "value deserialized as aligned failed alignment check (value: {:?}; alignment: {:?})",
+                &unchecked.value, &unchecked.alignment
+            ))
         } else if !unchecked.value.0.iter().all(ValueAtom::is_in_normal_form) {
-            Err("aligned value is not in normal form (has trailing zero bytes)")
+            Err("aligned value is not in normal form (has trailing zero bytes)".into())
         } else {
             Ok(AlignedValue {
                 value: unchecked.value,
