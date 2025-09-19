@@ -10,19 +10,12 @@ specification](./spec/).
 
 ## Quick Start
 
-> [!WARNING]
->
-> We are in the process of open-sourcing. During this process, some of our
-> internal dependencies might not yet be public, and some of the build plumbing
-> may be broken. Please be patient while we iron things out; if you hit
-> authentication issues these should be resolved soon.
->
-> This message will be removed once this repository can be built without
-> additional credentials.
-
 The ledger currently requires [Nix](https://nixos.org/) to build and bootstrap.
-Once nix is installed, the development shell of the ledger can be entered
-simply with:
+We use the [flakes](https://nixos.wiki/wiki/Flakes) experimental features for
+nix, which can be enable as part of the nix configuration, or by adding
+`--extra-experimental-features 'nix-command flakes'` to the below `nix`
+commands. Once nix is installed, the development shell of the ledger can be
+entered simply with:
 
 ```console
 $ nix develop
