@@ -24,6 +24,7 @@ pub use paritydb::ParityDb;
 
 use crate::DefaultHasher;
 use crate::backend::OnDiskObject;
+use crate::storable::ChildNode;
 use crate::{WellBehavedHasher, arena::ArenaKey};
 #[cfg(feature = "proptest")]
 use proptest::{
@@ -218,7 +219,9 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
                     match cache_get(&k) {
                         Some(node) => {
                             if !truncate {
-                                next_keys.extend(node.children.into_iter());
+                                next_keys.extend(
+                                    node.children.iter().flat_map(ChildNode::refs).cloned(),
+                                );
                             }
                         }
                         _ => {
@@ -237,7 +240,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
             for (k, v) in self.batch_get_nodes(unknown_keys.into_iter()) {
                 match v {
                     Some(node) => {
-                        next_keys.extend(node.children.clone());
+                        next_keys.extend(node.children.iter().flat_map(ChildNode::refs).cloned());
                         kvs.push((k, node));
                     }
                     None => {

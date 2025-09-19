@@ -42,7 +42,7 @@ use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
-use storage::storable::Loader;
+use storage::storable::{Loader, ChildNode};
 
 /// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]
