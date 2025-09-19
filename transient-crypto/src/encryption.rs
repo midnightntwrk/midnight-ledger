@@ -40,6 +40,7 @@ use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
+use zeroize::Zeroize;
 
 /// A public key, consisting of a group element `g^x`
 #[derive(Copy, Clone, Debug, Eq, Serializable)]
@@ -81,7 +82,7 @@ impl<'de> Deserialize<'de> for PublicKey {
 
 /// A secret key, the discrete logarithm of the corresponding [`PublicKey`].
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Copy, Clone, Eq, Serializable)]
+#[derive(Copy, Clone, Eq, Serializable, Zeroize)]
 #[tag = "encryption-secret-key[v1]"]
 pub struct SecretKey(EmbeddedFr);
 

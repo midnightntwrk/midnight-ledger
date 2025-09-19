@@ -150,17 +150,22 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalState, JsError> {
         let events = events.iter().map(|event| &event.0);
         Ok(ZswapLocalState(
-            self.0.replay_events(&secret_keys.unwrap(), events)?,
+            self.0.replay_events(&secret_keys.try_into()?, events)?,
         ))
     }
 
-    pub fn apply(&self, secret_keys: &ZswapSecretKeys, offer: &ZswapOffer) -> ZswapLocalState {
+    pub fn apply(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        offer: &ZswapOffer,
+    ) -> Result<ZswapLocalState, JsError> {
         use ZswapOfferTypes::*;
-        ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&secret_keys.unwrap(), &val),
-            UnprovenOffer(val) => self.0.apply(&secret_keys.unwrap(), &val),
-            ProofErasedOffer(val) => self.0.apply(&secret_keys.unwrap(), &val),
-        })
+        let sk_unwrapped = secret_keys.try_into()?;
+        Ok(ZswapLocalState(match &offer.0 {
+            ProvenOffer(val) => self.0.apply(&sk_unwrapped, &val),
+            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, &val),
+            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, &val),
+        }))
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]
@@ -190,7 +195,7 @@ impl ZswapLocalState {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
         let (succ, inp) = self
             .0
-            .spend(&mut OsRng, &secret_keys.unwrap(), &coin, segment)?;
+            .spend(&mut OsRng, &secret_keys.try_into()?, &coin, segment)?;
         let succ = JsValue::from(ZswapLocalState(succ));
         let inp = JsValue::from(ZswapInput::from(inp));
         let res = Array::new();
@@ -211,7 +216,7 @@ impl ZswapLocalState {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
         let (succ, tra) = self.0.spend_from_output(
             &mut OsRng,
-            &secret_keys.unwrap(),
+            &secret_keys.try_into()?,
             &coin,
             segment,
             output.clone().try_into()?,

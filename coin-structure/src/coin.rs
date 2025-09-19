@@ -33,6 +33,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;
 use transient_crypto::hash::{degrade_to_transient, transient_hash, upgrade_from_transient};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
+use zeroize::Zeroize;
 
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
@@ -147,6 +148,7 @@ impl rand::distributions::Distribution<Nonce> for rand::distributions::Standard 
     BinaryHashRepr,
     Serializable,
     Dummy,
+    Zeroize,
 )]
 #[tag = "zswap-coin-secret-key[v1]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]

@@ -2788,6 +2788,7 @@ dependencies = [
  "sha2",
  "signature",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
@@ -2841,6 +2842,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "serde",
+ "zeroize",
 ]
 
 [[package]]
@@ -2871,6 +2873,7 @@ dependencies = [
  "derive-where",
  "fake",
  "futures",
+ "hex",
  "introspection",
  "introspection-derive",
  "is_sorted",
@@ -2891,10 +2894,12 @@ dependencies = [
  "rayon",
  "reqwest",
  "serde",
+ "serde_json",
  "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 
@@ -2923,6 +2928,7 @@ dependencies = [
  "serde_bytes",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "zeroize",
 ]
 
 [[package]]
@@ -3201,6 +3207,7 @@ dependencies = [
  "signature",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -3253,6 +3260,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 

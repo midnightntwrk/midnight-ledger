@@ -20,15 +20,18 @@ use ledger::dust::{
     DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
     DustLocalState as LedgerDustLocalState, DustOutput as LedgerDustOutput,
     DustParameters as LedgerDustParameters, DustPublicKey,
-    DustRegistration as LedgerDustRegistration, DustSecretKey, DustSpend as LedgerDustSpend,
-    DustState as LedgerDustState, DustUtxoState as LedgerDustUtxoState,
+    DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
+    DustSpend as LedgerDustSpend, DustState as LedgerDustState,
+    DustUtxoState as LedgerDustUtxoState,
 };
 use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
 use rand::rngs::OsRng;
 use serialize::tagged_serialize;
+use std::cell::RefCell;
 use std::ops::Deref;
+use std::rc::Rc;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use wasm_bindgen::JsError;
@@ -1190,6 +1193,63 @@ impl DustState {
 }
 
 #[wasm_bindgen]
+pub struct DustSecretKey(pub(crate) Rc<RefCell<Option<LedgerDustSecretKey>>>);
+
+const DUST_SK_CLEAR_MSG: &str = "Dust secret key was cleared";
+
+impl DustSecretKey {
+    pub fn wrap(key: LedgerDustSecretKey) -> Self {
+        DustSecretKey(Rc::new(RefCell::new(Some(key))))
+    }
+
+    pub fn try_unwrap(&self) -> Result<LedgerDustSecretKey, JsError> {
+        self.0
+            .borrow()
+            .as_ref()
+            .cloned()
+            .ok_or(JsError::new(DUST_SK_CLEAR_MSG))
+    }
+}
+
+#[wasm_bindgen]
+impl DustSecretKey {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<DustSecretKey, JsError> {
+        Err(JsError::new(
+            "DustSecretKey cannot be constructed directly through the WASM API.",
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "fromBigint")]
+    pub fn from_bigint(bigint: BigInt) -> Result<DustSecretKey, JsError> {
+        let sk = bigint_to_fr(bigint)?;
+        Ok(DustSecretKey::wrap(LedgerDustSecretKey(sk)))
+    }
+
+    #[wasm_bindgen(js_name = "fromSeed")]
+    pub fn from_seed(seed: Uint8Array) -> Result<DustSecretKey, JsError> {
+        let bytes: [u8; 32] = seed
+            .to_vec()
+            .try_into()
+            .map_err(|_| JsError::new("Expected 32-byte seed"))?;
+        Ok(DustSecretKey::wrap(LedgerDustSecretKey::derive_secret_key(
+            &bytes,
+        )))
+    }
+
+    pub fn clear(&mut self) {
+        self.0.borrow_mut().take();
+    }
+
+    #[wasm_bindgen(getter, js_name = "publicKey")]
+    pub fn public_key(&self) -> Result<BigInt, JsError> {
+        let sk_wrap = self.0.borrow();
+        let sk = sk_wrap.as_ref().ok_or(JsError::new(DUST_SK_CLEAR_MSG))?;
+        Ok(fr_to_bigint(DustPublicKey::from(sk.clone()).0))
+    }
+}
+
+#[wasm_bindgen]
 #[derive(Debug)]
 pub struct DustLocalState(pub(crate) LedgerDustLocalState<InMemoryDB>);
 
@@ -1220,13 +1280,13 @@ impl DustLocalState {
 
     pub fn spend(
         &self,
-        sk: BigInt,
+        sk: &DustSecretKey,
         utxo: JsValue,
         v_fee: BigInt,
         ctime: &Date,
     ) -> Result<Array, JsError> {
         let qdo = value_to_qdo(utxo)?;
-        let sk = DustSecretKey(bigint_to_fr(sk)?);
+        let sk = sk.try_unwrap()?;
         let ctime = Timestamp::from_secs(js_date_to_seconds(ctime));
         let v_fee = u128::try_from(v_fee).map_err(|_| JsError::new("v_fee is out of range"))?;
         let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee.into(), ctime)?;
@@ -1247,8 +1307,12 @@ impl DustLocalState {
     }
 
     #[wasm_bindgen(js_name = "replayEvents")]
-    pub fn replay_events(&self, sk: BigInt, events: Vec<Event>) -> Result<DustLocalState, JsError> {
-        let sk = DustSecretKey(bigint_to_fr(sk)?);
+    pub fn replay_events(
+        &self,
+        sk: &DustSecretKey,
+        events: Vec<Event>,
+    ) -> Result<DustLocalState, JsError> {
+        let sk = sk.try_unwrap()?;
         let events = events.iter().map(|event| &event.0);
         Ok(DustLocalState(self.0.replay_events(&sk, events)?))
     }
@@ -1332,12 +1396,6 @@ pub fn updated_value(
 }
 
 #[wasm_bindgen(js_name = "sampleDustSecretKey")]
-pub fn sample_dust_secret_key() -> BigInt {
-    fr_to_bigint(DustSecretKey::sample(&mut OsRng).0)
-}
-
-#[wasm_bindgen(js_name = "dustPublicKeyFromSecret")]
-pub fn dust_public_key_from_secret(sk: BigInt) -> Result<BigInt, JsError> {
-    let sk = DustSecretKey(bigint_to_fr(sk)?);
-    Ok(fr_to_bigint(DustPublicKey::from(sk).0))
+pub fn sample_dust_secret_key() -> DustSecretKey {
+    DustSecretKey::wrap(LedgerDustSecretKey::sample(&mut OsRng))
 }
