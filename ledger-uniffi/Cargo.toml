@@ -1,0 +1,38 @@
+[package]
+name = "ledger-uniffi"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0 OR MIT"
+description = "UniFFI bindings for the ledger crate"
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+
+[dependencies]
+uniffi = "0.29"
+anyhow = "1"
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serialize = { path = "../serialize", package = "midnight-serialize" }
+ledger = { path = "../ledger", package = "midnight-ledger" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+rand = { version = "^0.8.4", features = ["getrandom"] }
+hex = "^0.4.3"
+
+[dev-dependencies]
+uniffi = { version = "0.29", features = ["bindgen-tests"] }
+
+[build-dependencies]
+uniffi = { version = "0.29", features = ["build"] }
+
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "uniffi-bindgen.rs"
+required-features = ["uniffi/cli"]
