@@ -15,7 +15,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
-anyhow = { version = "^1.0.98" }
+anyhow = { version = "^1.0.100" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
