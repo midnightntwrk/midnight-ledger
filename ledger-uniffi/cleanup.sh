@@ -41,6 +41,7 @@ rm -rf target/release/libledger_uniffi.dylib
 rm -rf target/debug/libledger_uniffi.dylib
 rm -rf target/debug/libledger_uniffi.a
 rm -rf target/release/libledger_uniffi.a
+rm -rf ./react-native-ledger-ffi/android/src/main/resources/libledger_uniffi.dylib
 
 # Clean up React Native build artifacts
 echo "📱 Cleaning React Native build artifacts..."

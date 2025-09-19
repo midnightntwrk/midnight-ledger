@@ -211,6 +211,10 @@ if [ "$PLATFORM" = "android" ] || [ "$PLATFORM" = "both" ]; then
     echo "✅ Kotlin bindings generated successfully!"
 fi
 
+
+mkdir -p ./react-native-ledger-ffi/android/src/main/resources/
+cp ./target/release/libledger_uniffi.dylib ./react-native-ledger-ffi/android/src/main/resources/libledger_uniffi.dylib
+
 # Generate Swift bindings for iOS
 if [ "$PLATFORM" = "ios" ] || [ "$PLATFORM" = "both" ]; then
     echo "🔧 Generating Swift bindings for iOS..."
