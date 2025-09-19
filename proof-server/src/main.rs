@@ -15,15 +15,17 @@
 #![deny(warnings)]
 use clap::Parser;
 
-use base_crypto::data_provider;
+use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use futures::future::join;
+use ledger::dust::DustResolver;
+use ledger::prove::Resolver;
 use midnight_proof_server::{PUBLIC_PARAMS, server, worker_pool::WorkerPool};
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{Layer, Registry};
-use transient_crypto::proofs::{KeyLocation, Resolver};
+use transient_crypto::proofs::{KeyLocation, Resolver as ResolverT};
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -60,14 +62,27 @@ async fn main() -> std::io::Result<()> {
     init_logging(args.verbose);
     if !args.no_fetch_params {
         info!("Ensuring zswap key material is available...");
-        let mut resolver = PUBLIC_PARAMS.clone();
-        resolver.0.fetch_mode = data_provider::FetchMode::OnDemand;
+        let resolver = Resolver::new(
+            PUBLIC_PARAMS.clone(),
+            DustResolver(
+                MidnightDataProvider::new(
+                    FetchMode::OnDemand,
+                    OutputMode::Log,
+                    ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+                )
+                .expect("data provider initialization failed"),
+            ),
+            Box::new(move |loc: KeyLocation| match &*loc.0 {
+                _ => Box::pin(std::future::ready(Ok(None))),
+            }),
+        );
         let ks = futures::future::join_all((10..=15).map(|k| PUBLIC_PARAMS.0.fetch_k(k)));
         let keys = futures::future::join_all(
             [
                 "midnight/zswap/spend",
                 "midnight/zswap/output",
                 "midnight/zswap/sign",
+                "midnight/dust/spend",
             ]
             .into_iter()
             .map(|k| resolver.resolve_key(KeyLocation(k.into()))),

@@ -53,7 +53,7 @@ pub mod worker_pool;
 lazy_static! {
     pub static ref PUBLIC_PARAMS: ZswapResolver = ZswapResolver(
         MidnightDataProvider::new(
-            data_provider::FetchMode::Synchronous,
+            data_provider::FetchMode::OnDemand,
             data_provider::OutputMode::Log,
             zswap::ZSWAP_EXPECTED_FILES.to_vec(),
         )
@@ -191,7 +191,21 @@ async fn check(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 let ir = match ir {
                     Some(ir) => ir.0,
                     None => {
-                        let proof_data = PUBLIC_PARAMS
+                        let resolver = Resolver::new(
+                            PUBLIC_PARAMS.clone(),
+                            DustResolver(
+                                MidnightDataProvider::new(
+                                    FetchMode::OnDemand,
+                                    OutputMode::Log,
+                                    ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+                                )
+                                .expect("data provider initialization failed"),
+                            ),
+                            Box::new(move |loc: KeyLocation| match &*loc.0 {
+                                _ => Box::pin(std::future::ready(Ok(None))),
+                            }),
+                        );
+                        let proof_data = resolver
                             .resolve_key(ppi.key_location().clone())
                             .await
                             .map_err(|e| WorkError::BadInput(e.to_string()))?;
@@ -249,6 +263,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {
