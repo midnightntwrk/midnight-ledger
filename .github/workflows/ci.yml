@@ -19,7 +19,7 @@ jobs:
   nix-build:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-13]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
@@ -49,12 +49,6 @@ jobs:
           endpoint: https://attic.ci.iog.io
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
-
-      - name: Fix Nix permissions (needed on macos self hosted runner)
-        run: |
-          sudo mkdir -m 0755 -p /nix/var/nix/{profiles,gcroots}/per-user/$USER
-          sudo chown -R $USER:nixbld /nix/var/nix/{profiles,gcroots}/per-user/$USER
-        shell: bash # Ensure bash is used for these commands
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -157,7 +151,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-13]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - name: Configure git rewrite
