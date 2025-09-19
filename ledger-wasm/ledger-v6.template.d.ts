@@ -218,7 +218,13 @@ export class DustSecretKey {
    * @param bigint 
    */
   static fromBigint(bigint: bigint): DustSecretKey;
-  
+
+  /**
+   * Create an instance of {@link DustSecretKey} from a seed.
+   * @param Uint8Array
+   */
+  static fromSeed(seed: Uint8Array): DustSecretKey;
+
   publicKey: DustPublicKey;
 
   /**

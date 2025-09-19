@@ -58,6 +58,8 @@ proptest-derive = { version = "0.5", optional = true }
 midnight-ledger = { path = ".", features = ["test-utilities", "proptest"] }
 criterion = { version = "^0.5.1" }
 paste = "1.0.15"
+serde_json = "^1.0.140"
+hex = "^0.4.3"
 
 [[bench]]
 name = "benchmarking"
