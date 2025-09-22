@@ -240,8 +240,8 @@ impl<D: DB> RcMap<D> {
         let mut result = HashMap::new();
 
         // Add all keys with rc = 0
-        for key in self.rc_0.keys() {
-            result.insert(key.clone(), 0);
+        for child in self.rc_0.keys() {
+            result.insert(child.hash().clone(), 0);
         }
 
         // Add all keys with rc >= 1
@@ -296,7 +296,7 @@ pub(crate) mod tests {
         // Create a dummy value to get an arena key
         let val = Sp::<_, InMemoryDB>::new(42u64);
         let key = val.root.clone();
-        let keyref = ChildRef::<InMemoryDB>::new(key);
+        let keyref = ChildRef::<InMemoryDB>::new(val.child_repr);
 
         // Create a vector with 3 of the same ChildRef
         let keyrefs = vec![
