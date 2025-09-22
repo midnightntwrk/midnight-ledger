@@ -1101,6 +1101,16 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    */
   fees(params: LedgerParameters): bigint;
 
+  /**
+   * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
+   *
+   * As with {@link fees}, this is only accurate for proven transactions.
+   *
+   * Warning: `n` must be a non-negative integer, and it is an exponent, it is
+   * very easy to get a completely unreasonable margin here!
+   */
+  feesWithMargin(params: LedgerParameters, margin: number): bigint;
+
   toString(compact?: boolean): string;
 
   /**
@@ -1240,6 +1250,15 @@ export class LedgerParameters {
    * The parameters associated with DUST.
    */
   readonly dust: DustParameters;
+
+  /**
+   * The maximum price adjustment per block with the current parameters, as a multiplicative
+   * factor (that is: 1.1 would indicate a 10% adjustment). Will always return the positive (>1)
+   * adjustment factor. Note that negative adjustments are the additive inverse (1.1 has a
+   * corresponding 0.9 downward adjustment), *not* the multiplicative as might reasonably be
+   * assumed.
+   */
+  maxPriceAdjustment(): number;
 
   serialize(): Uint8Array;
 
