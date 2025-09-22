@@ -68,7 +68,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
 
       - name: Build and Test
         run: |
