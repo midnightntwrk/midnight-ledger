@@ -22,7 +22,6 @@ import {
   type Signaturish,
   signatureVerifyingKey,
   sampleDustSecretKey,
-  dustPublicKeyFromSecret,
   SignatureEnabled
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
@@ -41,7 +40,7 @@ describe('Ledger API - DustActions', () => {
   test('should print out information as string', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
     const dustRegistration = new DustRegistration(
@@ -69,7 +68,7 @@ describe('Ledger API - DustActions', () => {
   test('should serialize and deserialize', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
     const dustRegistration = new DustRegistration(
@@ -96,7 +95,7 @@ describe('Ledger API - DustActions', () => {
   test('should have all getters valid', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
     const cTime = new Date(0);
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
@@ -127,7 +126,7 @@ describe('Ledger API - DustActions', () => {
   test('should have all getters valid', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
     const cTime = new Date(0);
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
