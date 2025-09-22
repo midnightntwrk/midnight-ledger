@@ -16,7 +16,6 @@ import {
   DustActions,
   DustLocalState,
   type DustPublicKey,
-  dustPublicKeyFromSecret,
   DustRegistration,
   Intent,
   type IntentHash,
@@ -294,7 +293,7 @@ describe('Ledger API - DustLocalState', () => {
       const sk = sampleSigningKey();
       const vk = signatureVerifyingKey(sk);
       const addr: UserAddress = addressFromKey(vk);
-      const dust: DustPublicKey = dustPublicKeyFromSecret(sampleDustSecretKey());
+      const dust: DustPublicKey = sampleDustSecretKey().publicKey;
       cycle.push([vk, addr, dust]);
     }
 

@@ -207,8 +207,33 @@ export class Event {
   toString(compact?: boolean): string;
 }
 
+/**
+ * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
+ */
+export class DustSecretKey {
+  private constructor();
+
+  /**
+   * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
+   * @param bigint 
+   */
+  static fromBigint(bigint: bigint): DustSecretKey;
+
+  /**
+   * Create an instance of {@link DustSecretKey} from a seed.
+   * @param Uint8Array
+   */
+  static fromSeed(seed: Uint8Array): DustSecretKey;
+
+  publicKey: DustPublicKey;
+
+  /**
+   * Clears the dust secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+}
+
 // TODO: Doc comments
-export type DustSecretKey = bigint;
 export type DustPublicKey = bigint;
 export type DustInitialNonce = string;
 export type DustNonce = bigint;
@@ -216,8 +241,6 @@ export type DustCommitment = bigint;
 export type DustNullifier = bigint;
 
 export function sampleDustSecretKey(): DustSecretKey;
-
-export function dustPublicKeyFromSecret(sk: DustSecretKey): DustPublicKey;
 
 export function updatedValue(ctime: Date, initialValue: bigint, genInfo: DustGenerationInfo, now: Date, params: DustParameters): bigint;
 
@@ -1278,6 +1301,11 @@ export class MerkleTreeCollapsedUpdate {
 export class EncryptionSecretKey {
   private constructor();
 
+  /**
+   * Clears the encryption secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+
   test<P extends Proofish>(offer: ZswapOffer<P>): boolean;
 
   yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
@@ -1298,6 +1326,14 @@ export class ZswapSecretKeys {
    * Use only for compatibility purposes
    */
   static fromSeedRng(seed: Uint8Array): ZswapSecretKeys;
+
+
+  /**
+   * Clears the secret keys, so that they are no longer usable nor held in memory
+   * Note: it does not clear copies of the keys - which is particularly relevant for proof preimages
+   * Note: this will cause all other operations to fail
+   */
+  clear(): void;
 
   readonly coinPublicKey: CoinPublicKey;
   readonly coinSecretKey: CoinSecretKey;
