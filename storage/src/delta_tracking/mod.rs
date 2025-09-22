@@ -22,7 +22,7 @@ pub use rcmap::RcMap;
 use serialize::Serializable;
 
 use crate::db::DB;
-use crate::{arena::ArenaKey, storable::ChildNode};
+use crate::storable::ChildNode;
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
 
@@ -341,7 +341,7 @@ pub fn gc_rcmap<D: DB>(
 mod tests {
     use super::*;
     use crate as storage;
-    use crate::arena::Sp;
+    use crate::arena::{ArenaKey, Sp};
     use crate::db::DB;
     use crate::storable::Loader;
     use crate::storage::set_default_storage;

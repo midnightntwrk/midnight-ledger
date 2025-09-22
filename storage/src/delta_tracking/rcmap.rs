@@ -29,9 +29,9 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 
 /// A wrapper around `ArenaKey` that ensures the referenced node is persisted.
 ///
-/// When stored in the arena, `KeyRef` reports the wrapped key as its child,
+/// When stored in the arena, `ChildRef` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
-/// `KeyRef`.
+/// `ChildRef`.
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 struct ChildRef<D: DB> {
     child: ChildNode<D::Hasher>,
@@ -68,7 +68,7 @@ impl<D: DB> Storable<D> for ChildRef<D> {
             Some(child) => Ok(ChildRef::new(child)),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "KeyRef missing child key",
+                "ChildRef missing child key",
             )),
         }
     }
@@ -108,7 +108,7 @@ impl<D: DB> Tagged for ChildRef<D> {
 
 /// Reference count map for tracking charged keys in write and delete costing.
 ///
-/// Internally we use `KeyRef` to ensure that nodes for all keys in the `RcMap`
+/// Internally we use `ChildRef` to ensure that nodes for all keys in the `RcMap`
 /// will be persisted as long a the `RcMap` itself is.
 #[derive_where(Debug, Clone, PartialEq, Eq)]
 #[derive(Storable)]
@@ -286,19 +286,19 @@ impl<D: DB> Distribution<RcMap<D>> for Standard {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::arena::Sp;
+    use crate::arena::{ArenaKey, Sp};
     use crate::db::InMemoryDB;
 
-    // Test Storable serialization of vector of KeyRefs, to be sure the manual
+    // Test Storable serialization of vector of ChildRef, to be sure the manual
     // Storable impl makes sense.
     #[test]
     fn keyref_round_trip_storable() {
         // Create a dummy value to get an arena key
         let val = Sp::<_, InMemoryDB>::new(42u64);
         let key = val.root.clone();
-        let keyref = KeyRef::<InMemoryDB>::new(key);
+        let keyref = ChildRef::<InMemoryDB>::new(key);
 
-        // Create a vector with 3 of the same KeyRef
+        // Create a vector with 3 of the same ChildRef
         let keyrefs = vec![
             Sp::new(keyref.clone()),
             Sp::new(keyref.clone()),
@@ -312,7 +312,7 @@ pub(crate) mod tests {
         let mut child_iter = keyrefs.children().into_iter();
         let arena = &crate::storage::default_storage().arena;
         let loader = crate::arena::BackendLoader::new(arena, None);
-        let deserialized: Vec<Sp<KeyRef<InMemoryDB>, InMemoryDB>> =
+        let deserialized: Vec<Sp<ChildRef<InMemoryDB>, InMemoryDB>> =
             Storable::from_binary_repr(&mut reader, &mut child_iter, &loader).unwrap();
 
         assert_eq!(keyrefs, deserialized);
@@ -348,7 +348,7 @@ pub(crate) mod tests {
         visited
     }
 
-    // Test that keys in rc_0 are descendants of RcMap via KeyRef storage.
+    // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.
     #[test]
     fn rc_0_keys_are_descendants() {
         let val = Sp::<_, InMemoryDB>::new(42u64);
