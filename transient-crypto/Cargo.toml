@@ -24,9 +24,9 @@ storage = { path = "../storage", package = "midnight-storage" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
-midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.0" }
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.0" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.0" }
+midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
+midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
+midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 
@@ -54,6 +54,7 @@ proptest-derive = { version = "0.5", optional = true }
 blake2b_simd = "1.0.3"
 
 futures = { version = "^0.3.31" }
+tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 
 [dev-dependencies]
 midnight-transient-crypto = { path = ".", features = ["proptest"] }

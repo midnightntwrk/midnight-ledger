@@ -481,7 +481,7 @@ checksum = "89e25b6adfb930f02d1981565a6e5d9c547ac15a96606256d3b59040e5cd4ca3"
 [[package]]
 name = "bench_macros"
 version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.0#8fe1bf4d452dc34b2de367a4461660c4199c7774"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
 dependencies = [
  "quote 1.0.40",
  "syn 2.0.101",
@@ -2762,8 +2762,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "5.0.0"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.0#8fe1bf4d452dc34b2de367a4461660c4199c7774"
+version = "5.0.1"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
 dependencies = [
  "base64 0.13.1",
  "bench_macros",
@@ -2806,7 +2806,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.1.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.0#8fe1bf4d452dc34b2de367a4461660c4199c7774"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
 dependencies = [
  "bitvec",
  "blst",
@@ -3026,8 +3026,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-proofs"
-version = "0.5.0"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.0#8fe1bf4d452dc34b2de367a4461660c4199c7774"
+version = "0.5.1"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
 dependencies = [
  "bench_macros",
  "blake2b_simd",
@@ -3163,6 +3163,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "signature",
+ "tokio",
  "tracing",
  "tracing-subscriber",
  "zeroize",

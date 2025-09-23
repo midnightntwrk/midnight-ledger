@@ -62,8 +62,32 @@ pub trait ParamsProverProvider {
 /// The hash used during proof transcript processing
 pub type TranscriptHash = blake2b_simd::State;
 
+#[tokio::test]
+async fn extract_params() {
+    let provider = base_crypto::data_provider::MidnightDataProvider::new(base_crypto::data_provider::FetchMode::OnDemand, base_crypto::data_provider::OutputMode::Log, vec![]).unwrap();
+    provider.get_params(0).await.unwrap();
+    provider.get_params(1).await.unwrap();
+    provider.get_params(2).await.unwrap();
+    provider.get_params(3).await.unwrap();
+    provider.get_params(4).await.unwrap();
+    provider.get_params(5).await.unwrap();
+    provider.get_params(6).await.unwrap();
+    provider.get_params(7).await.unwrap();
+    provider.get_params(8).await.unwrap();
+    provider.get_params(9).await.unwrap();
+}
+
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
+        if k < 10 {
+            let pp10 = Box::pin(self.get_params(10)).await?;
+            let mut pp = (*pp10.0).clone();
+            pp.downsize(k as u32);
+            let res = ParamsProver(Arc::new(pp));
+            let mut f = std::fs::File::create(format!("bls_filecoin_2p{k}"))?;
+            res.0.write_custom(&mut f, SerdeFormat::RawBytesUnchecked)?;
+            return Ok(res);
+        }
         let name = Self::name_k(k);
         let reader = self
             .get_file(
@@ -77,7 +101,7 @@ impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
 
 /// A specific instance of the prover parameters.
 #[derive(Clone)]
-pub struct ParamsProver(Arc<ParamsKZG<Bls12>>);
+pub struct ParamsProver(pub Arc<ParamsKZG<Bls12>>);
 
 impl AsRef<ParamsKZG<Bls12>> for ParamsProver {
     fn as_ref(&self) -> &ParamsKZG<Bls12> {
