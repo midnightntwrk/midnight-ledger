@@ -546,12 +546,17 @@ export function maxField(): bigint;
 /**
  * Converts input, output, and transcript information into a proof preimage
  * suitable to pass to a `ProvingProvider`.
+ *
+ * The `key_location` parameter is a string used to identify the circuit by
+ * proving machinery, for backwards-compatibility, if unset it defaults to
+ * `'dummy'`.
  */
 export function proofDataIntoSerializedPreimage(
   input: AlignedValue,
   output: AlignedValue,
   public_transcript: Op<AlignedValue>[],
-  private_transcript_outputs: AlignedValue[]
+  private_transcript_outputs: AlignedValue[],
+  key_location?: string,
 ): Uint8Array;
 
 /**
