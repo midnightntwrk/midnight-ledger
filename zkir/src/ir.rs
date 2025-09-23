@@ -15,7 +15,7 @@
 
 use anyhow::Result;
 use base_crypto::fab::Alignment;
-use midnight_proofs::dev::cost_model::{CircuitModel, from_circuit_to_circuit_model};
+use midnight_proofs::dev::cost_model::{CircuitModel, circuit_model};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -383,20 +383,14 @@ impl Model {
 
 impl IrSource {
     /// Retrieves a model representation of this circuit.
-    pub fn model(&self, k: Option<u8>) -> Model {
+    pub fn model(&self) -> Model {
         use midnight_circuits::compact_std_lib::MidnightCircuit;
-        let model = from_circuit_to_circuit_model::<
+        let model = circuit_model::<
             outer::Scalar,
-            MidnightCircuit<Self>,
             POINT_BYTES,
             FR_BYTES,
         >(
-            k.map(|k| k as u32),
             &MidnightCircuit::from_relation(self),
-            self.instructions
-                .iter()
-                .filter(|op| matches!(op, Instruction::DeclarePubInput { .. }))
-                .count(),
         );
 
         Model { model }

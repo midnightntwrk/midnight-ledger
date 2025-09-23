@@ -550,7 +550,7 @@ impl VerifierKey {
         let vk = self.force_init()?;
         let pi = statement.map(|f| f.0).collect::<Vec<_>>();
         trace!(statement = ?pi, "verifying proof against statement");
-        compact_std_lib::verify::<DummyRelation, TranscriptHash>(&params.0, &vk, &pi, &proof.0)
+        compact_std_lib::verify::<DummyRelation, TranscriptHash>(&params.0, &vk, &pi, None, &proof.0)
             .map_err(|_| anyhow::anyhow!("Invalid proof"))
     }
 
@@ -575,7 +575,6 @@ impl VerifierKey {
     ) -> Result<(), VerifyingError> {
         use midnight_circuits::compact_std_lib::batch_verify;
 
-        let mut params_verifier = vec![];
         let mut vks = vec![];
         let mut pis = vec![];
         let mut proofs = vec![];
@@ -583,13 +582,12 @@ impl VerifierKey {
         for (vk, proof, stmt) in parts.into_iter() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
             let vk = vk.force_init()?;
-            params_verifier.push((*params.0).clone());
             vks.push(vk);
             pis.push(pi);
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params_verifier, &vks, &pis, &proofs)
+        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
             .map_err(|_| anyhow::anyhow!("Invalid proof"))
     }
 
