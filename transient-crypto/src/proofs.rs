@@ -62,21 +62,6 @@ pub trait ParamsProverProvider {
 /// The hash used during proof transcript processing
 pub type TranscriptHash = blake2b_simd::State;
 
-#[tokio::test]
-async fn extract_params() {
-    let provider = base_crypto::data_provider::MidnightDataProvider::new(base_crypto::data_provider::FetchMode::OnDemand, base_crypto::data_provider::OutputMode::Log, vec![]).unwrap();
-    provider.get_params(0).await.unwrap();
-    provider.get_params(1).await.unwrap();
-    provider.get_params(2).await.unwrap();
-    provider.get_params(3).await.unwrap();
-    provider.get_params(4).await.unwrap();
-    provider.get_params(5).await.unwrap();
-    provider.get_params(6).await.unwrap();
-    provider.get_params(7).await.unwrap();
-    provider.get_params(8).await.unwrap();
-    provider.get_params(9).await.unwrap();
-}
-
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
         if k < 10 {

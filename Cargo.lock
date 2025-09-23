@@ -3163,7 +3163,6 @@ dependencies = [
  "serde_json",
  "sha2",
  "signature",
- "tokio",
  "tracing",
  "tracing-subscriber",
  "zeroize",
