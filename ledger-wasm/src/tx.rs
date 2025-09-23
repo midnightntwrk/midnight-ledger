@@ -693,6 +693,7 @@ impl Transaction {
         get_dyn_transaction(self.0.clone()).fees(params)
     }
 
+    #[wasm_bindgen(js_name = "feesWithMargin")]
     pub fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
         get_dyn_transaction(self.0.clone()).fees_with_margin(params, n)
     }
