@@ -559,8 +559,10 @@ impl VerifierKey {
         let vk = self.force_init()?;
         let pi = statement.map(|f| f.0).collect::<Vec<_>>();
         trace!(statement = ?pi, "verifying proof against statement");
-        compact_std_lib::verify::<DummyRelation, TranscriptHash>(&params.0, &vk, &pi, None, &proof.0)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        compact_std_lib::verify::<DummyRelation, TranscriptHash>(
+            &params.0, &vk, &pi, None, &proof.0,
+        )
+        .map_err(|_| anyhow::anyhow!("Invalid proof"))
     }
 
     /// Mocks the checking of a proof against a statement
