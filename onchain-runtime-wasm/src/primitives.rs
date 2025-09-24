@@ -186,6 +186,7 @@ pub fn proof_data_into_serialized_preimage(
     output: JsValue,
     public_transcript: JsValue,
     private_transcript_outputs: JsValue,
+    key_location: Option<String>,
 ) -> Result<Uint8Array, JsError> {
     let input: AlignedValue = from_value(input)?;
     let output: AlignedValue = from_value(output)?;
@@ -215,7 +216,11 @@ pub fn proof_data_into_serialized_preimage(
         private_transcript,
         public_transcript_inputs,
         public_transcript_outputs,
-        key_location: transient_crypto::proofs::KeyLocation(Cow::Borrowed("dummy")),
+        key_location: transient_crypto::proofs::KeyLocation(
+            key_location
+                .map(Cow::Owned)
+                .unwrap_or(Cow::Borrowed("dummy")),
+        ),
         communications_commitment: Some((
             transient_crypto::hash::transient_hash(&comm_comm_preimage),
             0.into(),

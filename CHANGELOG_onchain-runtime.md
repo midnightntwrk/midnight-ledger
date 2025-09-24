@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- feat: add `key_location` parameter to proof data serializer.
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
