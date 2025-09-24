@@ -835,6 +835,11 @@ impl LedgerParameters {
         ))
     }
 
+    #[wasm_bindgen(js_name = "maxPriceAdjustment")]
+    pub fn max_price_adjustment(&self) -> f64 {
+        self.0.max_price_adjustment().into()
+    }
+
     #[wasm_bindgen(js_name = "initialParameters")]
     pub fn initial_parameters() -> LedgerParameters {
         LedgerParameters(ledger::structure::INITIAL_PARAMETERS)
