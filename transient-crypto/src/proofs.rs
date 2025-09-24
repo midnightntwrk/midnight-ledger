@@ -64,15 +64,6 @@ pub type TranscriptHash = blake2b_simd::State;
 
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
-        if k < 10 {
-            let pp10 = Box::pin(self.get_params(10)).await?;
-            let mut pp = (*pp10.0).clone();
-            pp.downsize(k as u32);
-            let res = ParamsProver(Arc::new(pp));
-            let mut f = std::fs::File::create(format!("bls_filecoin_2p{k}"))?;
-            res.0.write_custom(&mut f, SerdeFormat::RawBytesUnchecked)?;
-            return Ok(res);
-        }
         let name = Self::name_k(k);
         let reader = self
             .get_file(
@@ -247,10 +238,10 @@ pub(crate) enum InnerProverKey<T: Zkir> {
 
 impl<T: Zkir> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
-        Cow::Owned(format!("prover-key[v5]({})", T::tag()))
+        Cow::Owned(format!("prover-key[v6]({})", T::tag()))
     }
     fn tag_unique_factor() -> String {
-        format!("prover-key[v5]({})", T::tag())
+        format!("prover-key[v6]({})", T::tag())
     }
 }
 
@@ -381,10 +372,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v4]")
+        Cow::Borrowed("verifier-key[v5]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v4]".into()
+        "verifier-key[v5]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);

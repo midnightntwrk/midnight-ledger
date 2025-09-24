@@ -384,12 +384,9 @@ impl Model {
 impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
-        use midnight_circuits::compact_std_lib::MidnightCircuit;
-        let model = circuit_model::<outer::Scalar, POINT_BYTES, FR_BYTES>(
-            &MidnightCircuit::from_relation(self),
-        );
-
-        Model { model }
+        Model {
+            model: midnight_circuits::compact_std_lib::cost_model(self),
+        }
     }
 
     /// Attempts to parse an arbitrary input as IR.
