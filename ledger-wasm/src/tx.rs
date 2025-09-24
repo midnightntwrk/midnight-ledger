@@ -693,6 +693,11 @@ impl Transaction {
         get_dyn_transaction(self.0.clone()).fees(params)
     }
 
+    #[wasm_bindgen(js_name = "feesWithMargin")]
+    pub fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
+        get_dyn_transaction(self.0.clone()).fees_with_margin(params, n)
+    }
+
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         get_dyn_transaction(self.0.clone()).to_string(compact)
@@ -934,6 +939,7 @@ trait Transactionable {
     fn imbalances(&self, segment: u16, fees: Option<BigInt>) -> Result<Map, JsError>;
     fn cost(&self, params: &LedgerParameters) -> Result<JsValue, JsError>;
     fn fees(&self, params: &LedgerParameters) -> Result<BigInt, JsError>;
+    fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError>;
     fn to_string(&self, compact: Option<bool>) -> String;
     fn rewards(&self) -> Option<ClaimRewardsTransaction>;
     fn binding_randomness(&self) -> Result<BigInt, JsError>;
@@ -996,7 +1002,15 @@ where
     }
 
     fn fees(&self, params: &LedgerParameters) -> Result<BigInt, JsError> {
-        Ok(BigInt::from(self.fees(&params)?))
+        Ok(BigInt::from(ledger::structure::Transaction::fees(
+            self, &params,
+        )?))
+    }
+
+    fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
+        Ok(BigInt::from(
+            ledger::structure::Transaction::fees_with_margin(self, &params, n)?,
+        ))
     }
 
     fn to_string(&self, compact: Option<bool>) -> String {

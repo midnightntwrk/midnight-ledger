@@ -9,6 +9,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: proof server now correctly fetches Dust keys on startup
 - fix: proof server no longer crashes if trying to fetch keys from within a worker thread
 - feat: proof server now fetches missing artifacts on demand
+- feat: add endpoints for estimating fees with a margin depending on allowed
+  block adjustment
 
 ## 6.1.0
 
