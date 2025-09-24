@@ -15,7 +15,7 @@
 
 use anyhow::Result;
 use base_crypto::fab::Alignment;
-use midnight_proofs::dev::cost_model::{CircuitModel, circuit_model};
+use midnight_proofs::dev::cost_model::CircuitModel;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -25,10 +25,7 @@ use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::io::{self, Read};
 use std::sync::Arc;
-use transient_crypto::curve::{
-    FR_BYTES, Fr,
-    outer::{self, POINT_BYTES},
-};
+use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash, Zkir,
 };
