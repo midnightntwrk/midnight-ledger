@@ -12,8 +12,9 @@
 // limitations under the License.
 
 //! Merkle Patricia Tries.
-
+#![allow(missing_docs)]
 use crate as storage;
+use crate::dag_type::{ResumeError, WalkOutcome};
 use std::cmp::Ordering;
 use std::fmt::Debug;
 use std::hash::Hash;
@@ -23,9 +24,10 @@ use std::ops::Deref;
 
 use crate::DefaultDB;
 use crate::Storable;
-use crate::arena::{ArenaKey, Sp};
+use crate::arena::{ArenaKey, Sp, TypedArenaKey};
 use crate::db::DB;
 use crate::storable::{Loader, SizeAnn};
+use crypto::digest::Digest;
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 
@@ -38,7 +40,7 @@ pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<V> = SizeAnn,
->(pub(crate) Sp<Node<V, D, A>, D>);
+>(pub Sp<Node<V, D, A>, D>);
 
 impl<V: Storable<D> + Tagged, D: DB, A: Storable<D> + Annotation<V> + Tagged> Tagged
     for MerklePatriciaTrie<V, D, A>
@@ -188,6 +190,26 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     pub fn ann(&self) -> A {
         self.0.ann()
     }
+
+    /// TODO
+    // Example: Main public entry point. What we'd use to write our translations.
+    // Walkthrough 8.5
+    pub fn resumable_map<F>(
+        &self,
+        prior_snapshot: Option<&ResumeToken>,
+        budget: usize,
+        on_value: F,
+    ) -> Result<WalkOutcome<ResumeToken>, ResumeError<D>>
+    where
+        F: FnMut(&Sp<V, D>),
+    {
+        let mut w = match prior_snapshot {
+            Some(rt) => SuspendableWalker::from_resume_token(rt, self)?,
+            None => SuspendableWalker::new(self),
+        };
+
+        w.run_for_budget(budget, on_value)
+    }
 }
 
 impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> Hash for MerklePatriciaTrie<V, D, A> {
@@ -254,11 +276,8 @@ where
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
 #[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
 #[derive_where(Ord; T: Ord, A: Ord)]
-pub(crate) enum Node<
-    T: Storable<D> + 'static,
-    D: DB = DefaultDB,
-    A: Storable<D> + Annotation<T> = SizeAnn,
-> {
+pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Annotation<T> = SizeAnn>
+{
     #[default]
     Empty,
     Leaf {
@@ -547,52 +566,86 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
     }
 
     /// Prunes all paths which are lexicographically less than the `target_path`.
-    /// Returns the updated tree, and a vector of the removed leaves.
+    /// Returns the updated tree, and, if `COLLECT` true, a vector of the removed leaves.
     ///
     /// # Panics
     ///
     /// If any values in `target_path` are not `u4` nibbles, i.e. larger than
     /// 15.
-    pub fn prune(
+    pub fn prune_generic<const COLLECT: bool>(
         &self,
         target_path: &[u8],
         // Returns "is this node empty?" so we can collapse parts of the tree as we go
     ) -> (Self, Vec<Sp<T, D>>) {
         if target_path.is_empty() {
-            return (self.clone(), vec![]);
+            return match &**self {
+                Node::Leaf { value, .. } => {
+                    let removed = if COLLECT { vec![value.clone()] } else { vec![] };
+                    (Sp::new(Node::Empty), removed)
+                }
+                Node::MidBranchLeaf { value, child, .. } => {
+                    let removed = if COLLECT { vec![value.clone()] } else { vec![] };
+                    (child.clone(), removed)
+                }
+                _ => (self.clone(), vec![]),
+            };
         }
 
         match &**self {
             Node::Empty => (Sp::new(Node::Empty), vec![]),
             Node::Leaf { value, .. } => {
                 // We've not matched exactly, but we've ended up at a leaf, which means the leaf is less than the cutoff, so we need to remove it
-                (Sp::new(Node::Empty), vec![value.clone()])
+                let removed = if COLLECT {
+                    vec![value.clone()]
+                } else {
+                    Vec::new()
+                };
+                (Sp::new(Node::Empty), removed)
             }
             Node::Branch { children, ann, .. } => {
                 // All children indexed prior to the head of `path_remaining` are guaranteed to be earlier than the cutoff
                 let path_head = target_path[0];
+
                 if path_head >= 16 {
                     panic!("Invalid path nibble: {}", path_head);
                 }
-                let mut pruned = (0..path_head as usize)
-                    .flat_map(|i| children[i].iter())
-                    .collect::<Vec<_>>();
+
+                let mut pruned = if COLLECT {
+                    (0..path_head as usize)
+                        .flat_map(|i| children[i].iter())
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                };
+
                 let mut children = children.clone();
+
                 for child in children.iter_mut().take(path_head as usize) {
                     *child = Sp::new(Node::Empty);
                 }
 
+                let mut did_prune = path_head > 0;
+
                 // The child at the `path_head` contains the exact point referenced by the `original_target_path`.
                 // As such, we need to `prune` it.
-                let (child, pruned_2) = children[path_head as usize].prune(&target_path[1..]);
-                children[path_head as usize] = child;
-                pruned.extend(pruned_2);
+                let old_child = children[path_head as usize].clone();
+                let (new_child, pruned_2) =
+                    children[path_head as usize].prune_generic::<COLLECT>(&target_path[1..]);
+
+                if COLLECT {
+                    pruned.extend(pruned_2);
+                }
+
+                if old_child.hash() != new_child.hash() {
+                    did_prune = true;
+                }
+                children[path_head as usize] = new_child;
 
                 // If ALL of a branch's children are empty, that makes the branch also empty.
                 // If only one is left filled, this branch becomes an extension.
-                let no_filled = children.iter().filter(|c| !c.is_empty()).count();
+                let num_filled = children.iter().filter(|c| !c.is_empty()).count();
 
-                let ann = if pruned.is_empty() {
+                let ann = if !did_prune {
                     ann.clone()
                 } else {
                     children
@@ -600,7 +653,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                         .fold(A::empty(), |acc, x| acc.append(&x.ann()))
                 };
 
-                match no_filled {
+                match num_filled {
                     0 => (Sp::new(Node::Empty), pruned),
                     1 => {
                         let (path_head, child) = children
@@ -646,10 +699,19 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                 match compressed_path[..].cmp(relevant_target_path) {
                     // The extension is entirely smaller than the path to prune, and is removed
                     // entirely.
-                    Ordering::Less => (Sp::new(Node::Empty), child.iter().collect()),
+                    Ordering::Less => {
+                        let removed = if COLLECT {
+                            child.iter().collect()
+                        } else {
+                            Vec::new()
+                        };
+                        (Sp::new(Node::Empty), removed)
+                    }
                     // The extension matches the path to prune, and we recurse into the child
                     Ordering::Equal => {
-                        let (child, pruned) = child.prune(&target_path[compressed_path.len()..]);
+                        let old_child = child.clone();
+                        let (child, pruned) =
+                            child.prune_generic::<COLLECT>(&target_path[compressed_path.len()..]);
                         match &*child {
                             Node::Empty => (Sp::new(Node::Empty), pruned),
                             Node::Extension {
@@ -670,7 +732,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                             ),
                             _ => (
                                 Sp::new(Node::Extension {
-                                    ann: if pruned.is_empty() {
+                                    ann: if old_child.hash() == child.hash() {
                                         ann.clone()
                                     } else {
                                         child.ann()
@@ -691,10 +753,38 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                 // Because we know `path_remaining` isn't empty, we know we this node's value is
                 // definitely being removed, but we don't know if its child needs to be removed yet.
                 // As such, we need to `prune` it.
-                let (child, pruned) = child.prune(target_path);
-                (child, once(value.clone()).chain(pruned).collect())
+                let (child, pruned) = child.prune_generic::<COLLECT>(target_path);
+                let removed = if COLLECT {
+                    once(value.clone()).chain(pruned).collect()
+                } else {
+                    Vec::new()
+                };
+                (child, removed)
             }
         }
+    }
+
+    /// Prunes all paths which are lexicographically less than or equal to `target_path`.
+    /// Returns the updated tree, and a vec of the removed leaves.
+    ///
+    /// # Panics
+    ///
+    /// If any values in `target_path` are not `u4` nibbles, i.e. larger than
+    /// 15.
+    pub fn prune(&self, target_path: &[u8]) -> (Self, Vec<Sp<T, D>>) {
+        self.prune_generic::<true>(target_path)
+    }
+
+    /// Prunes all paths which are lexicographically less than or equal to `target_path`.
+    /// Returns the updated tree.
+    ///
+    /// # Panics
+    ///
+    /// If any values in `target_path` are not `u4` nibbles, i.e. larger than
+    /// 15.
+    #[must_use]
+    pub(crate) fn prune_view(&self, target_path: &[u8]) -> Self {
+        self.prune_generic::<false>(target_path).0
     }
 
     // Apply a function to all values in a node
@@ -1475,6 +1565,380 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 "Unrecognised discriminant",
             )),
         }
+    }
+}
+
+////
+/// LIVE WALKER
+////
+
+#[derive(Debug)]
+// Walkthrough
+/// The state of a live MPT-walk
+///
+/// Composed of:
+/// * The root node
+/// * A stack of node frames
+/// * The root hash
+/// * The last visited path
+pub struct SuspendableWalker<V, D, A>
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    state: WalkerState<V, D, A>,
+}
+
+#[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
+struct WalkerState<V, D, A>
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    root: Sp<Node<V, D, A>, D>,
+    stack: Vec<Frame<V, D, A>>,
+    source_root_hash: TypedArenaKey<Node<V, D, A>, <D as DB>::Hasher>,
+    last_path: Vec<u8>,
+}
+
+#[derive_where(Debug, Eq, Clone, PartialEq; V, A)]
+enum Frame<V, D, A>
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    Branch {
+        node: Sp<Node<V, D, A>, D>,
+        child_idx: u8,
+    },
+    Extension {
+        node: Sp<Node<V, D, A>, D>,
+        done: bool,
+    },
+    MidBranchLeaf {
+        node: Sp<Node<V, D, A>, D>,
+        child_done: bool,
+    },
+    Leaf {
+        node: Sp<Node<V, D, A>, D>,
+    },
+}
+
+// Pushes a non-empty node's initial frame onto the stack
+fn schedule<V, D, A>(stack: &mut Vec<Frame<V, D, A>>, node: &Sp<Node<V, D, A>, D>)
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    match &**node {
+        Node::Branch { .. } => stack.push(Frame::Branch {
+            node: node.clone(),
+            child_idx: 0,
+        }),
+        Node::Extension { .. } => stack.push(Frame::Extension {
+            node: node.clone(),
+            done: false,
+        }),
+        Node::MidBranchLeaf { .. } => stack.push(Frame::MidBranchLeaf {
+            node: node.clone(),
+            child_done: false,
+        }),
+        Node::Leaf { .. } => stack.push(Frame::Leaf { node: node.clone() }),
+        Node::Empty => {}
+    }
+}
+
+impl<V, D, A> SuspendableWalker<V, D, A>
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    /// Start a new walk
+    pub(crate) fn new(trie: &MerklePatriciaTrie<V, D, A>) -> Self {
+        let mut stack = Vec::new();
+        schedule(&mut stack, &trie.0);
+
+        Self {
+            state: WalkerState {
+                root: trie.0.clone(),
+                stack,
+                source_root_hash: trie.0.hash(),
+                last_path: Vec::new(),
+            },
+        }
+    }
+
+    /// Run until we've processed `budget` leaf values (or the trie ends).
+    /// Call `to_bytes()` after this returns to persist the continuation.
+    pub(crate) fn run_for_budget<F>(
+        &mut self,
+        mut budget: usize,
+        mut on_value: F,
+    ) -> Result<WalkOutcome<ResumeToken>, ResumeError<D>>
+    where
+        V: Storable<D> + 'static,
+        F: FnMut(&Sp<V, D>),
+    {
+        if budget == 0 {
+            let snapshot = self.to_resume_token()?;
+            return Ok(WalkOutcome::<ResumeToken>::Suspended {
+                visited: 0,
+                snapshot,
+            });
+        }
+
+        let mut visited = 0usize;
+        while budget > 0 {
+            match self.next_with_path() {
+                Some((node_sp, path)) => match &*node_sp {
+                    Node::Leaf { value, .. } | Node::MidBranchLeaf { value, .. } => {
+                        self.state.last_path = path;
+                        on_value(value);
+                        visited += 1;
+                        budget -= 1;
+                    }
+                    _ => {}
+                },
+                None => return Ok(WalkOutcome::<ResumeToken>::Finished { visited }),
+            }
+        }
+
+        // Budget exhausted: emit a resume token
+        let snapshot = self.to_resume_token()?;
+        Ok(WalkOutcome::<ResumeToken>::Suspended { visited, snapshot })
+    }
+
+    /// Snapshot just the cutoff path (last yielded key).
+    pub(crate) fn to_resume_token(&self) -> std::io::Result<ResumeToken> {
+        let snap = ResumeTokenInner::<D::Hasher> {
+            version: CUT_VERSION,
+            source_root_hash: ArenaKey::<D::Hasher>::from(self.state.source_root_hash.clone()),
+            cutoff_path: self.state.last_path.clone(),
+        };
+        let mut bytes = Vec::with_capacity(snap.serialized_size());
+        snap.serialize(&mut bytes)?;
+        Ok(ResumeToken::from_bytes(bytes))
+    }
+
+    /// Resume using `prune(cutoff_path)` to skip everything <= cutoff.
+    pub(crate) fn from_resume_token(
+        rt: &ResumeToken,
+        trie: &MerklePatriciaTrie<V, D, A>,
+    ) -> Result<Self, ResumeError<D>> {
+        let mut bytes = rt.as_bytes();
+        let snap: ResumeTokenInner<<D as DB>::Hasher> = Deserializable::deserialize(&mut bytes, 0)?;
+
+        let found: ArenaKey<<D as DB>::Hasher> = ArenaKey::from(trie.0.hash());
+        if snap.source_root_hash != found {
+            return Err(ResumeError::WrongSourceRoot {
+                expected: snap.source_root_hash.clone(),
+                found,
+            });
+        }
+
+        // Walkthrough: This is a key point. Instead of needing to store the walker's stack to resume, we just
+        //              seek to where we know we left off.
+        let pruned_root = if snap.cutoff_path.is_empty() {
+            trie.0.clone()
+        } else {
+            trie.0.prune_view(&snap.cutoff_path)
+        };
+
+        let mut stack = Vec::new();
+        schedule(&mut stack, &pruned_root);
+
+        Ok(Self {
+            state: WalkerState {
+                root: pruned_root,
+                stack,
+                source_root_hash: TypedArenaKey::<Node<V, D, A>, D::Hasher>::from(found),
+                last_path: snap.cutoff_path,
+            },
+        })
+    }
+
+    // Like `next()`, but also returns the path to that node
+    fn next_with_path(&mut self) -> Option<(Sp<Node<V, D, A>, D>, Vec<u8>)> {
+        while let Some(frame) = self.state.stack.pop() {
+            match frame {
+                Frame::Leaf { node } => {
+                    let path = collect_path_from_stack(&self.state.stack);
+                    return Some((node, path));
+                }
+                Frame::Extension { node, done } => {
+                    if !done {
+                        self.state.stack.push(Frame::Extension {
+                            node: node.clone(),
+                            done: true,
+                        });
+                        if let Node::Extension { child, .. } = &*node {
+                            schedule(&mut self.state.stack, child);
+                        }
+                    }
+                }
+                Frame::MidBranchLeaf { node, child_done } => {
+                    if !child_done {
+                        let path = collect_path_from_stack(&self.state.stack);
+                        self.state.stack.push(Frame::MidBranchLeaf {
+                            node: node.clone(),
+                            child_done: true,
+                        });
+                        if let Node::MidBranchLeaf { child, .. } = &*node {
+                            schedule(&mut self.state.stack, child);
+                        }
+                        return Some((node, path));
+                    }
+                }
+                Frame::Branch {
+                    node,
+                    mut child_idx,
+                } => {
+                    while child_idx < 16 {
+                        self.state.stack.push(Frame::Branch {
+                            node: node.clone(),
+                            child_idx: child_idx + 1,
+                        });
+
+                        if let Node::Branch { children, .. } = &*node {
+                            let child = &children[child_idx as usize];
+                            if !child.is_empty() {
+                                schedule(&mut self.state.stack, child);
+                                break;
+                            }
+                        }
+                        self.state.stack.pop();
+                        child_idx += 1;
+                    }
+                }
+            }
+        }
+        None
+    }
+}
+
+fn collect_path_from_stack<V, D, A>(stack: &[Frame<V, D, A>]) -> Vec<u8>
+where
+    V: Storable<D> + 'static,
+    D: DB,
+    A: Storable<D> + Annotation<V>,
+{
+    let mut path = Vec::with_capacity(64);
+    for frame in stack.iter() {
+        match frame {
+            Frame::Extension { node, done } if *done => {
+                if let Node::Extension {
+                    compressed_path, ..
+                } = &**node
+                {
+                    path.extend_from_slice(compressed_path);
+                }
+            }
+            Frame::Branch { child_idx, .. } => {
+                if *child_idx > 0 {
+                    path.push(child_idx - 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    path
+}
+
+////
+/// SNAPSHOT
+////
+
+const CUT_VERSION: u16 = 1; // Example versioning system, I guess this'd be per-HF, to avoid trying to resume the wrong HF translation
+
+/// The typed hash of a resume token
+///
+/// The token is composed of:
+/// * A version
+/// * A root hash to identify a tree
+/// * The already explored path
+// Walkthrough 4:
+// DiscoveryToken: Cursor over the dag during discovery
+// PlanToken: Cursor over the ordered vec of discovered roots
+// ResumeToken: Cursor over a specific MPT
+pub struct ResumeToken(Vec<u8>);
+
+impl ResumeToken {
+    /// To a slice
+    pub fn as_bytes(&self) -> &[u8] {
+        &self.0
+    }
+    /// From a vec
+    pub fn from_bytes(b: Vec<u8>) -> Self {
+        Self(b)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+// Walkthrough: This is a key point. Instead of needing to store the walker's stack to resume, we just
+//          seek to where we know we left off.
+//
+// Walkthrough:
+// DiscoveryToken: Cursor over the dag during discovery
+// PlanToken: Cursor over the ordered vec of discovered roots
+// ResumeToken: Cursor over a specific MPT
+struct ResumeTokenInner<H: Digest> {
+    version: u16,
+    source_root_hash: ArenaKey<H>,
+    cutoff_path: Vec<u8>,
+}
+
+impl<H: Digest> Serializable for ResumeTokenInner<H>
+where
+    ArenaKey<H>: Serializable,
+{
+    fn serialize(&self, w: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.version.serialize(w)?;
+        self.source_root_hash.serialize(w)?;
+        let len = u32::try_from(self.cutoff_path.len()).map_err(|_| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "resume token cutoff too long",
+            )
+        })?;
+        len.serialize(w)?;
+        w.write_all(&self.cutoff_path)?;
+        Ok(())
+    }
+
+    fn serialized_size(&self) -> usize {
+        2 + self.source_root_hash.serialized_size() + 4 + self.cutoff_path.len()
+    }
+}
+
+impl<H: Digest> Deserializable for ResumeTokenInner<H>
+where
+    ArenaKey<H>: Deserializable,
+{
+    fn deserialize(r: &mut impl std::io::Read, depth: u32) -> std::io::Result<Self> {
+        let version = u16::deserialize(r, depth)?;
+        if version != CUT_VERSION {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "unsupported resume token version",
+            ));
+        }
+
+        let source_root_hash = ArenaKey::<H>::deserialize(r, depth)?;
+
+        let len = u32::deserialize(r, depth)? as usize;
+        let mut cutoff_path = vec![0u8; len];
+        r.read_exact(&mut cutoff_path)?;
+
+        Ok(ResumeTokenInner {
+            version,
+            source_root_hash,
+            cutoff_path,
+        })
     }
 }
 

@@ -22,9 +22,12 @@
 
 pub mod arena;
 pub mod backend;
+pub mod dag_type;
 pub mod db;
 pub mod delta_tracking;
+pub mod discovery;
 pub mod merkle_patricia_trie;
+pub mod migration_plan;
 pub mod storable;
 pub mod storage;
 

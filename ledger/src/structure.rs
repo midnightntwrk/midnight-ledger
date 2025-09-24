@@ -1149,6 +1149,24 @@ impl LedgerParameters {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
+#[tag = "ledger-parameters[v2]"]
+#[storable(base)]
+pub struct LedgerParameters2 {
+    pub cost_model: TransactionCostModel,
+    pub limits: TransactionLimits,
+    pub dust: DustParameters,
+    pub ticket_cost_multiplier: u64,
+    pub ticket_cost_divisor: u64,
+    pub global_ttl: Duration,
+    // Note: This is equivalent to `c_to_m_bridge_fee_percent` in the spec
+    // Valid range of 0..10_000
+    pub cardano_to_midnight_bridge_fee_basis_points: u32,
+    // Note: This is denominated in STARs (atomic night units)
+    pub c_to_m_bridge_min_amount: u128,
+    pub an_extra_field: u32,
+}
+
 pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
     cost_model: INITIAL_TRANSACTION_COST_MODEL,
     limits: INITIAL_LIMITS,

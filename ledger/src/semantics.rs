@@ -2019,3 +2019,335 @@ mod tests {
         assert!(state.utxos.contains_key(&b));
     }
 }
+
+#[cfg(test)]
+mod multi_discovery_plan_domain_tests {
+    // Walkthrough 8:
+    use super::*;
+    use std::ops::Deref;
+    use std::sync::{Arc, Mutex};
+
+    use storage::Storable;
+    use storage::arena::{ArenaKey, Sp};
+    use storage::dag_type::WalkOutcome;
+    use storage::dag_type::{DagHandler, MptHandler, TypeRep, TypedSubtrieRoot};
+    use storage::db::InMemoryDB;
+    use storage::discovery::{Discovery, DiscoveryToken, DiscoveryYield};
+    use storage::migration_plan::{Plan, PlanToken};
+    use storage::storable::{Loader, SizeAnn};
+    use storage::storage::HashMap;
+
+    use crate::annotation::NightAnn;
+
+    type DB = InMemoryDB;
+
+    // "Global" type representations (as in, should be global in real usage, I think)
+    const REP_UTXO: TypeRep = TypeRep(0); // Utxo
+    const REP_BAL: TypeRep = TypeRep(1); // Balance
+
+    /// This would be a vec of `ArenaKey`s in reality
+    #[derive(Clone)]
+    struct RootWithTwo {
+        left: ArenaKey<<DB as storage::db::DB>::Hasher>,
+        right: ArenaKey<<DB as storage::db::DB>::Hasher>,
+    }
+
+    impl Storable<DB> for RootWithTwo {
+        fn children(&self) -> Vec<ArenaKey<<DB as storage::db::DB>::Hasher>> {
+            vec![self.left.clone(), self.right.clone()]
+        }
+        fn to_binary_repr<W: std::io::Write>(&self, _w: &mut W) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn from_binary_repr<R: std::io::Read>(
+            _r: &mut R,
+            child_hashes: &mut impl Iterator<Item = ArenaKey<<DB as storage::db::DB>::Hasher>>,
+            _loader: &impl Loader<DB>,
+        ) -> std::io::Result<Self> {
+            let left = child_hashes.next().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "missing left")
+            })?;
+            let right = child_hashes.next().ok_or_else(|| {
+                std::io::Error::new(std::io::ErrorKind::InvalidData, "missing right")
+            })?;
+            Ok(RootWithTwo { left, right })
+        }
+    }
+
+    #[test]
+    // Walkthrough 8:
+    fn discovery_finds_utxo_and_balances_then_plan_migrates() {
+        let utxo_state: UtxoState<DB> = UtxoState {
+            utxos: HashMap::<Utxo, UtxoMeta, DB, NightAnn>::new(),
+        };
+        let utxo_state_sp: Sp<UtxoState<DB>, DB> = Sp::new(utxo_state);
+
+        let mut balances = HashMap::<u64, u64, DB, SizeAnn>::new();
+        for i in 0..10 {
+            balances = balances.insert(1000 + i, i * 2);
+        }
+
+        let utxo_root = ArenaKey::from(utxo_state_sp.utxos.0.mpt.0.hash());
+        let bal_root = ArenaKey::from(balances.0.mpt.0.hash());
+
+        // Walkthrough 1.5: We'd need to wrap everything in typed headers
+        let utxo_hdr_sp: Sp<TypedSubtrieRoot<DB>, DB> = Sp::new(TypedSubtrieRoot {
+            rep: REP_UTXO,
+            root: utxo_root.clone(),
+        });
+        let bal_hdr_sp: Sp<TypedSubtrieRoot<DB>, DB> = Sp::new(TypedSubtrieRoot {
+            rep: REP_BAL,
+            root: bal_root.clone(),
+        });
+
+        let typed_utxo = ArenaKey::from(utxo_hdr_sp.hash());
+        let typed_bal = ArenaKey::from(bal_hdr_sp.hash());
+
+        let dag_root_sp: Sp<RootWithTwo, DB> = Sp::new(RootWithTwo {
+            left: typed_utxo.clone(),
+            right: typed_bal.clone(),
+        });
+
+        let mut mpt_types: Vec<Box<dyn DagHandler<DB>>> = Vec::new();
+        mpt_types.push(Box::new(MptHandler::<
+            (Sp<Utxo, DB>, Sp<UtxoMeta, DB>),
+            NightAnn,
+            DB,
+            _,
+        >::new(
+            REP_UTXO,
+            |_pair_sp| {}, // No-op during discovery
+        )));
+        mpt_types.push(Box::new(MptHandler::<
+            (Sp<u64, DB>, Sp<u64, DB>),
+            SizeAnn,
+            DB,
+            _,
+        >::new(
+            REP_BAL,
+            |_pair_sp| {}, // No-op during discovery
+        )));
+
+        let discovery = Discovery::new(
+            dag_root_sp.arena.clone(),
+            ArenaKey::from(dag_root_sp.hash()),
+            mpt_types,
+        );
+        let mut disc_tok: Option<DiscoveryToken<DB>> = None;
+        let mut found_utxo = None;
+        let mut found_bal = None;
+
+        loop {
+            let (yields, tok) = discovery
+                .step(disc_tok.as_ref(), 1) // Walkthrough 8.5: Progresses via updating disc_tok
+                .expect("discovery step");
+            disc_tok = Some(tok);
+
+            for DiscoveryYield { root, rep } in yields {
+                match rep {
+                    REP_UTXO => {
+                        if found_utxo.is_none() {
+                            found_utxo = Some(root);
+                        }
+                    }
+                    REP_BAL => {
+                        if found_bal.is_none() {
+                            found_bal = Some(root);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            if found_utxo.is_some() && found_bal.is_some() {
+                break;
+            }
+        }
+
+        let found_utxo = found_utxo.expect("UTXO root should be discovered");
+        let found_bal = found_bal.expect("balances root should be discovered");
+
+        // Destination for the modified UTXO
+        let dst_utxos = Arc::new(Mutex::new(Map::<IntentHash, UtxoMeta, DB, SizeAnn>::new()));
+        // Destination for the modified balance
+        let dst_bal = Arc::new(Mutex::new(HashMap::<u64, u64, DB, SizeAnn>::new()));
+
+        let mut plan = Plan::<DB>::new();
+        let dst = Arc::clone(&dst_utxos);
+        plan = plan.register_mpt_kv_handler::<Utxo, UtxoMeta, NightAnn, _>(
+            found_utxo.clone(),
+            REP_UTXO,
+            // Walkthrough: Maps utxos to `IntentHash` and puts them in a `Map` rather than a `HashMap`
+            move |pair_sp| {
+                let (k_sp, v_sp) = &**pair_sp;
+                let mut m = dst.lock().unwrap();
+                *m = m.insert(k_sp.deref().clone().intent_hash, v_sp.deref().clone());
+            },
+        );
+        let dst = Arc::clone(&dst_bal);
+        plan = plan.register_mpt_kv_handler::<u64, u64, SizeAnn, _>(
+            found_bal.clone(),
+            REP_BAL,
+            // Walkthrough: Doubles all balance values
+            move |pair_sp| {
+                let (k_sp, v_sp) = &**pair_sp;
+                let mut m = dst.lock().unwrap();
+                *m = m.insert(*k_sp.deref(), *v_sp.deref() * 2);
+            },
+        );
+
+        let mut plan_tok: Option<PlanToken<<DB as storage::db::DB>::Hasher>> = None;
+        loop {
+            match plan
+                .step(dag_root_sp.arena.clone(), plan_tok.as_ref(), 1) // Walkthrough 8.5
+                .expect("plan step")
+            {
+                WalkOutcome::Finished { .. } => break,
+                WalkOutcome::Suspended { snapshot, .. } => {
+                    plan_tok = Some(snapshot);
+                }
+            }
+        }
+
+        assert_eq!((dst_utxos.lock().unwrap()).iter().count(), 0);
+        let m = dst_bal.lock().unwrap();
+        for i in 0..10 {
+            assert_eq!(m.get(&(1000 + i)).map(|sp| *sp), Some(i * 4));
+        }
+        assert_eq!((1000..1010).filter(|k| m.get(k).is_some()).count(), 10);
+    }
+}
+
+#[cfg(test)]
+mod ledger_params_discovery_plan_tests {
+    use crate::structure::{INITIAL_PARAMETERS, LedgerParameters, LedgerParameters2};
+
+    use std::sync::{Arc, Mutex};
+
+    use storage::Storable;
+    use storage::arena::{ArenaKey, Sp};
+    use storage::dag_type::{DagHandler, ObjectHandler, TypeRep, TypedSubtrieRoot};
+    use storage::db::InMemoryDB;
+    use storage::discovery::{Discovery, DiscoveryToken, DiscoveryYield};
+    use storage::migration_plan::{Plan, PlanToken};
+
+    type DB = InMemoryDB;
+
+    const REP_LEDGER_PARAMS: TypeRep = TypeRep(1);
+
+    #[derive(Clone)]
+    struct Root {
+        child: ArenaKey<<DB as storage::db::DB>::Hasher>,
+    }
+    impl Storable<DB> for Root {
+        fn children(&self) -> Vec<ArenaKey<<DB as storage::db::DB>::Hasher>> {
+            vec![self.child.clone()]
+        }
+        fn to_binary_repr<W: std::io::Write>(&self, _w: &mut W) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn from_binary_repr<R: std::io::Read>(
+            _r: &mut R,
+            child_hashes: &mut impl Iterator<Item = ArenaKey<<DB as storage::db::DB>::Hasher>>,
+            _loader: &impl storage::storable::Loader<DB>,
+        ) -> std::io::Result<Self> {
+            let child = child_hashes
+                .next()
+                .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "todo"))?;
+            Ok(Root { child })
+        }
+    }
+
+    #[test]
+    // @Thomas
+    fn discovery_finds_ledger_params_then_plan_transforms_them() {
+        let original_params = INITIAL_PARAMETERS;
+        let params_sp: Sp<LedgerParameters, DB> = Sp::new(original_params.clone());
+        let params_key: ArenaKey<<DB as storage::db::DB>::Hasher> =
+            ArenaKey::from(params_sp.hash());
+
+        let hdr_sp: Sp<TypedSubtrieRoot<DB>, DB> = Sp::new(TypedSubtrieRoot {
+            rep: REP_LEDGER_PARAMS,
+            root: params_key.clone(),
+        });
+        let header_key = ArenaKey::from(hdr_sp.hash());
+
+        let root_sp: Sp<Root, DB> = Sp::new(Root {
+            child: header_key.clone(),
+        });
+        let dag_root = ArenaKey::from(root_sp.hash());
+        let arena = root_sp.arena.clone();
+
+        let flavours: Vec<Box<dyn DagHandler<DB>>> =
+            vec![Box::new(ObjectHandler::<LedgerParameters, DB, _>::new(
+                REP_LEDGER_PARAMS,
+                |_sp| {},
+            ))];
+
+        let discovery = Discovery::new(arena.clone(), dag_root.clone(), flavours);
+        let mut tok: Option<DiscoveryToken<DB>> = None;
+        let mut found_params: Option<ArenaKey<<DB as storage::db::DB>::Hasher>> = None;
+
+        loop {
+            let (yields, t) = discovery.step(tok.as_ref(), 1).expect("todo");
+            tok = Some(t);
+            for DiscoveryYield { root, rep } in yields {
+                if rep == REP_LEDGER_PARAMS && found_params.is_none() {
+                    found_params = Some(root);
+                }
+            }
+            if found_params.is_some() {
+                break;
+            }
+        }
+        let params_root = found_params.expect("todo");
+
+        let out: Arc<Mutex<Option<LedgerParameters2>>> = Arc::new(Mutex::new(None));
+        let mut plan = Plan::<DB>::new();
+
+        {
+            let out = Arc::clone(&out);
+            plan = plan.register_object_handler::<LedgerParameters, _>(
+                params_root.clone(),
+                REP_LEDGER_PARAMS,
+                // Example of adding a field to `LedgerParameters` and modifying another field's value
+                move |sp| {
+                    let lp = (&**sp).clone();
+                    let lp_2 = LedgerParameters2 {
+                        cost_model: lp.cost_model,
+                        limits: lp.limits,
+                        dust: lp.dust,
+                        ticket_cost_multiplier: 200,
+                        ticket_cost_divisor: 200,
+                        global_ttl: lp.global_ttl,
+                        cardano_to_midnight_bridge_fee_basis_points: lp
+                            .cardano_to_midnight_bridge_fee_basis_points,
+                        c_to_m_bridge_min_amount: lp.c_to_m_bridge_min_amount * 2,
+                        an_extra_field: 5,
+                    };
+                    *out.lock().unwrap() = Some(lp_2);
+                },
+            );
+        }
+
+        let mut ptoken: Option<PlanToken<<DB as storage::db::DB>::Hasher>> = None;
+
+        loop {
+            match plan.step(arena.clone(), ptoken.as_ref(), 1).expect("todo") {
+                storage::dag_type::WalkOutcome::Finished { .. } => break,
+                storage::dag_type::WalkOutcome::Suspended { snapshot, .. } => {
+                    ptoken = Some(snapshot);
+                }
+            }
+        }
+
+        let params = out.lock().unwrap().clone().expect("todo");
+
+        assert_eq!(
+            params.c_to_m_bridge_min_amount,
+            original_params.c_to_m_bridge_min_amount * 2
+        );
+
+        assert_eq!(params.an_extra_field, 5);
+    }
+}

@@ -16,10 +16,11 @@
 use crate as storage;
 use crate::arena::{Arena, ArenaKey, Sp};
 use crate::backend::StorageBackend;
+use crate::dag_type::{ResumeError, WalkOutcome};
 use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
-use crate::merkle_patricia_trie::MerklePatriciaTrie;
 use crate::merkle_patricia_trie::Semigroup;
+use crate::merkle_patricia_trie::{MerklePatriciaTrie, ResumeToken};
 use crate::storable::Loader;
 use crate::storable::SizeAnn;
 use crate::{DefaultDB, Storable};
@@ -63,7 +64,7 @@ pub struct HashMap<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<(Sp<K, D>, Sp<V, D>)> = SizeAnn,
->(#[allow(clippy::type_complexity)] Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
+>(#[allow(clippy::type_complexity)] pub Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
 
 impl<
     K: Serializable + Storable<D> + Tagged,
@@ -1220,7 +1221,8 @@ where
 #[derive_where(PartialEq, Eq, PartialOrd, Ord; V, A)]
 #[derive_where(Hash, Clone)]
 pub struct Map<K, V: Storable<D>, D: DB = DefaultDB, A: Storable<D> + Annotation<V> = SizeAnn> {
-    pub(crate) mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
+    /// TODO
+    pub mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
     key_type: PhantomData<K>,
 }
 

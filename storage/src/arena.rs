@@ -335,6 +335,17 @@ type SpCache<D> =
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
+    /// TODO
+    pub fn children_of(
+        &self,
+        key: &ArenaKey<D::Hasher>,
+    ) -> std::io::Result<Vec<ArenaKey<D::Hasher>>> {
+        let obj = self
+            .with_backend(|be| be.get(key).cloned())
+            .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::Other, "missing object"))?;
+        Ok(obj.children.clone())
+    }
+
     #[allow(clippy::type_complexity)]
     fn lock_metadata(&self) -> MutexGuard<'_, RefCell<MetaData<D>>> {
         self.metadata.lock()
@@ -980,7 +991,7 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     /// y.data.get().unwrap())` is true.
     data: OnceLock<Arc<T>>,
     /// The arena this Sp points into
-    pub(crate) arena: Arena<D>,
+    pub arena: Arena<D>,
     /// The persistent hash of data.
     pub(crate) root: ArenaKey<D::Hasher>,
 }
