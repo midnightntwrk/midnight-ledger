@@ -242,14 +242,14 @@ pub(crate) fn initial_nonce(output_no: u32, intent_hash: IntentHash) -> InitialN
 }
 
 impl UtxoSpend {
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
 
 impl Utxo {
     #[allow(unused)]
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
