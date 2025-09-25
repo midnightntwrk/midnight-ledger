@@ -23,24 +23,38 @@ pub enum FfiError {
     UnsupportedVariant { details: String },
     #[error("Segment mismatch: {details}")]
     SegmentMismatch { details: String },
-    #[error("Already proof-erased")] 
+    #[error("Already proof-erased")]
     AlreadyProofErased,
     #[error("Internal error: {details}")]
     Internal { details: String },
 }
 
 impl From<std::io::Error> for FfiError {
-    fn from(e: std::io::Error) -> Self { Self::DeserializeError { details: e.to_string() } }
+    fn from(e: std::io::Error) -> Self {
+        Self::DeserializeError {
+            details: e.to_string(),
+        }
+    }
 }
 
 impl From<serde_json::Error> for FfiError {
-    fn from(e: serde_json::Error) -> Self { Self::DeserializeError { details: e.to_string() } }
+    fn from(e: serde_json::Error) -> Self {
+        Self::DeserializeError {
+            details: e.to_string(),
+        }
+    }
 }
 
 impl From<anyhow::Error> for FfiError {
-    fn from(e: anyhow::Error) -> Self { Self::Internal { details: e.to_string() } }
+    fn from(e: anyhow::Error) -> Self {
+        Self::Internal {
+            details: e.to_string(),
+        }
+    }
 }
 
 impl From<String> for FfiError {
-    fn from(e: String) -> Self { Self::InvalidInput { details: e } }
+    fn from(e: String) -> Self {
+        Self::InvalidInput { details: e }
+    }
 }

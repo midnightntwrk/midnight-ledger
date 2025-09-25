@@ -12,4 +12,3 @@
 // limitations under the License
 
 // Basic transcript module structure
-

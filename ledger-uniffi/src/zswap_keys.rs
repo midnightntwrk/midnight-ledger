@@ -11,8 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License
 
-use transient_crypto::encryption::SecretKey;
 use ledger::dust::DustSecretKey;
+use transient_crypto::encryption::SecretKey;
 
 #[derive(Clone)]
 pub struct CoinSecretKey(pub SecretKey);

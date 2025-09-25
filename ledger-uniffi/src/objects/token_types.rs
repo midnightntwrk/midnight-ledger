@@ -37,10 +37,10 @@ impl From<TokenType> for coin_structure::coin::TokenType {
     fn from(tt: TokenType) -> Self {
         match tt {
             TokenType::Unshielded => coin_structure::coin::TokenType::Unshielded(
-                coin_structure::coin::UnshieldedTokenType(HashOutput([0u8; 32]))
+                coin_structure::coin::UnshieldedTokenType(HashOutput([0u8; 32])),
             ),
             TokenType::Shielded => coin_structure::coin::TokenType::Shielded(
-                coin_structure::coin::ShieldedTokenType(HashOutput([0u8; 32]))
+                coin_structure::coin::ShieldedTokenType(HashOutput([0u8; 32])),
             ),
             TokenType::Dust => coin_structure::coin::TokenType::Dust,
         }
@@ -55,7 +55,9 @@ pub struct HashOutputWrapper {
 
 impl From<HashOutput> for HashOutputWrapper {
     fn from(hash: HashOutput) -> Self {
-        Self { bytes: hash.0.to_vec() }
+        Self {
+            bytes: hash.0.to_vec(),
+        }
     }
 }
 
@@ -225,98 +227,112 @@ impl From<ShieldedCoinInfo> for coin_structure::coin::Info {
 #[uniffi::export]
 pub fn shielded_token_type_from_bytes(bytes: Vec<u8>) -> Result<ShieldedTokenType, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(ShieldedTokenType { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(ShieldedTokenType {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn unshielded_token_type_from_bytes(bytes: Vec<u8>) -> Result<UnshieldedTokenType, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(UnshieldedTokenType { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(UnshieldedTokenType {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn public_key_from_bytes(bytes: Vec<u8>) -> Result<PublicKey, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(PublicKey { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(PublicKey {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn user_address_from_bytes(bytes: Vec<u8>) -> Result<UserAddress, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(UserAddress { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(UserAddress {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn commitment_from_bytes(bytes: Vec<u8>) -> Result<Commitment, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(Commitment { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(Commitment {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn nullifier_from_bytes(bytes: Vec<u8>) -> Result<Nullifier, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(Nullifier { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(Nullifier {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 
 #[uniffi::export]
 pub fn nonce_from_bytes(bytes: Vec<u8>) -> Result<Nonce, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     let mut hash_bytes = [0u8; 32];
     hash_bytes.copy_from_slice(&bytes);
-    Ok(Nonce { 
-        hash: HashOutputWrapper { bytes: hash_bytes.to_vec() } 
+    Ok(Nonce {
+        hash: HashOutputWrapper {
+            bytes: hash_bytes.to_vec(),
+        },
     })
 }
 

@@ -27,7 +27,9 @@ pub struct TransactionCostModel {
 impl TransactionCostModel {
     pub fn serialize(&self) -> Result<Vec<u8>, FfiError> {
         let mut buf = Vec::new();
-        tagged_serialize(&*self.inner, &mut buf).map_err(|e| FfiError::DeserializeError { details: e.to_string() })?;
+        tagged_serialize(&*self.inner, &mut buf).map_err(|e| FfiError::DeserializeError {
+            details: e.to_string(),
+        })?;
         Ok(buf)
     }
 
@@ -42,19 +44,29 @@ impl TransactionCostModel {
 
 #[uniffi::export]
 pub fn transaction_cost_model_dummy() -> Result<Arc<TransactionCostModel>, FfiError> {
-    Ok(Arc::new(TransactionCostModel { inner: Arc::new(ledger::structure::INITIAL_TRANSACTION_COST_MODEL) }))
+    Ok(Arc::new(TransactionCostModel {
+        inner: Arc::new(ledger::structure::INITIAL_TRANSACTION_COST_MODEL),
+    }))
 }
 
 #[uniffi::export]
-pub fn transaction_cost_model_deserialize(raw: Vec<u8>) -> Result<Arc<TransactionCostModel>, FfiError> {
+pub fn transaction_cost_model_deserialize(
+    raw: Vec<u8>,
+) -> Result<Arc<TransactionCostModel>, FfiError> {
     let cursor = Cursor::new(raw);
     let val: ledger::structure::TransactionCostModel = tagged_deserialize(cursor)?;
-    Ok(Arc::new(TransactionCostModel { inner: Arc::new(val) }))
+    Ok(Arc::new(TransactionCostModel {
+        inner: Arc::new(val),
+    }))
 }
 
 impl TransactionCostModel {
     pub(crate) fn from_inner(inner: ledger::structure::TransactionCostModel) -> Self {
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
-    pub fn inner(&self) -> &ledger::structure::TransactionCostModel { &self.inner }
+    pub fn inner(&self) -> &ledger::structure::TransactionCostModel {
+        &self.inner
+    }
 }

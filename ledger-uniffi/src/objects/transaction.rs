@@ -24,7 +24,9 @@ pub struct TransactionHash {
 
 impl From<ledger::structure::TransactionHash> for TransactionHash {
     fn from(th: ledger::structure::TransactionHash) -> Self {
-        Self { hash: th.0.0.to_vec() }
+        Self {
+            hash: th.0.0.to_vec(),
+        }
     }
 }
 
@@ -44,7 +46,9 @@ pub struct IntentHash {
 
 impl From<ledger::structure::IntentHash> for IntentHash {
     fn from(ih: ledger::structure::IntentHash) -> Self {
-        Self { hash: ih.0.0.to_vec() }
+        Self {
+            hash: ih.0.0.to_vec(),
+        }
     }
 }
 
@@ -87,7 +91,7 @@ impl From<UtxoOutput> for ledger::structure::UtxoOutput {
 // UtxoSpend
 #[derive(uniffi::Record, Debug, Clone, PartialEq, Eq)]
 pub struct UtxoSpend {
-    pub value: i64, // Using i64 instead of u128 for UniFFI compatibility
+    pub value: i64,     // Using i64 instead of u128 for UniFFI compatibility
     pub owner: Vec<u8>, // VerifyingKey as bytes
     pub token_type: crate::objects::token_types::UnshieldedTokenType,
     pub intent_hash: IntentHash,
@@ -110,11 +114,11 @@ impl From<UtxoSpend> for ledger::structure::UtxoSpend {
     fn from(utxo: UtxoSpend) -> Self {
         use base_crypto::signatures::VerifyingKey;
         use rand::Rng;
-        
+
         // For now, we'll create a random VerifyingKey since we can't easily deserialize from bytes
         // In a real implementation, you'd need proper deserialization
         let verifying_key: VerifyingKey = rand::thread_rng().r#gen();
-        
+
         Self {
             value: utxo.value as u128, // Convert i64 to u128
             owner: verifying_key,
@@ -207,8 +211,8 @@ impl From<ClaimKind> for ledger::structure::ClaimKind {
 #[uniffi::export]
 pub fn transaction_hash_from_bytes(bytes: Vec<u8>) -> Result<TransactionHash, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     Ok(TransactionHash { hash: bytes })
@@ -217,8 +221,8 @@ pub fn transaction_hash_from_bytes(bytes: Vec<u8>) -> Result<TransactionHash, Ff
 #[uniffi::export]
 pub fn intent_hash_from_bytes(bytes: Vec<u8>) -> Result<IntentHash, FfiError> {
     if bytes.len() != 32 {
-        return Err(FfiError::InvalidInput { 
-            details: format!("Expected 32 bytes, got {}", bytes.len()) 
+        return Err(FfiError::InvalidInput {
+            details: format!("Expected 32 bytes, got {}", bytes.len()),
         });
     }
     Ok(IntentHash { hash: bytes })

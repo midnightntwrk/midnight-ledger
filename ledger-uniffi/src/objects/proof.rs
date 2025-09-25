@@ -72,8 +72,9 @@ impl ProofPreimageVersioned {
     pub fn serialize(&self) -> Result<Vec<u8>, FfiError> {
         use serialize::tagged_serialize;
         let mut buf = Vec::new();
-        tagged_serialize(&*self.inner, &mut buf)
-            .map_err(|e| FfiError::DeserializeError { details: e.to_string() })?;
+        tagged_serialize(&*self.inner, &mut buf).map_err(|e| FfiError::DeserializeError {
+            details: e.to_string(),
+        })?;
         Ok(buf)
     }
 }
@@ -81,12 +82,14 @@ impl ProofPreimageVersioned {
 impl ProofPreimageVersioned {
     #[allow(dead_code)]
     pub(crate) fn from_inner(inner: ledger::structure::ProofPreimageVersioned) -> Self {
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
-    
+
     #[allow(dead_code)]
-    pub fn inner(&self) -> &ledger::structure::ProofPreimageVersioned { 
-        &self.inner 
+    pub fn inner(&self) -> &ledger::structure::ProofPreimageVersioned {
+        &self.inner
     }
 }
 
@@ -101,8 +104,9 @@ impl ProofVersioned {
     pub fn serialize(&self) -> Result<Vec<u8>, FfiError> {
         use serialize::tagged_serialize;
         let mut buf = Vec::new();
-        tagged_serialize(&*self.inner, &mut buf)
-            .map_err(|e| FfiError::DeserializeError { details: e.to_string() })?;
+        tagged_serialize(&*self.inner, &mut buf).map_err(|e| FfiError::DeserializeError {
+            details: e.to_string(),
+        })?;
         Ok(buf)
     }
 }
@@ -110,12 +114,14 @@ impl ProofVersioned {
 impl ProofVersioned {
     #[allow(dead_code)]
     pub(crate) fn from_inner(inner: ledger::structure::ProofVersioned) -> Self {
-        Self { inner: Arc::new(inner) }
+        Self {
+            inner: Arc::new(inner),
+        }
     }
-    
+
     #[allow(dead_code)]
-    pub fn inner(&self) -> &ledger::structure::ProofVersioned { 
-        &self.inner 
+    pub fn inner(&self) -> &ledger::structure::ProofVersioned {
+        &self.inner
     }
 }
 
@@ -139,19 +145,25 @@ pub fn wrapped_ir_new(data: Vec<u8>) -> WrappedIr {
 }
 
 #[uniffi::export]
-pub fn proof_preimage_versioned_deserialize(data: Vec<u8>) -> Result<Arc<ProofPreimageVersioned>, FfiError> {
-    use std::io::Cursor;
+pub fn proof_preimage_versioned_deserialize(
+    data: Vec<u8>,
+) -> Result<Arc<ProofPreimageVersioned>, FfiError> {
     use serialize::tagged_deserialize;
+    use std::io::Cursor;
     let cursor = Cursor::new(data);
     let val: ledger::structure::ProofPreimageVersioned = tagged_deserialize(cursor)?;
-    Ok(Arc::new(ProofPreimageVersioned { inner: Arc::new(val) }))
+    Ok(Arc::new(ProofPreimageVersioned {
+        inner: Arc::new(val),
+    }))
 }
 
 #[uniffi::export]
 pub fn proof_versioned_deserialize(data: Vec<u8>) -> Result<Arc<ProofVersioned>, FfiError> {
-    use std::io::Cursor;
     use serialize::tagged_deserialize;
+    use std::io::Cursor;
     let cursor = Cursor::new(data);
     let val: ledger::structure::ProofVersioned = tagged_deserialize(cursor)?;
-    Ok(Arc::new(ProofVersioned { inner: Arc::new(val) }))
+    Ok(Arc::new(ProofVersioned {
+        inner: Arc::new(val),
+    }))
 }

@@ -12,4 +12,3 @@
 // limitations under the License
 
 // Basic zswap_state module structure
-
