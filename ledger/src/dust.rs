@@ -248,7 +248,6 @@ impl UtxoSpend {
 }
 
 impl Utxo {
-    #[allow(unused)]
     pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
