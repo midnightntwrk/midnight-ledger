@@ -22,6 +22,15 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Maximize build space
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - name: Configure git rewrite
         run: |
           mkdir -p $HOME/.config/git
@@ -43,12 +52,12 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@e0990284d4e88052ddc376519731419354851a42
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
           cache: midnight-public
-          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+          #access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
