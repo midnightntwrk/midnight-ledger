@@ -404,11 +404,11 @@ impl<D: DB> TestState<D> {
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters)).ok();
+        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
         dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
         dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
         dbg!(
-            tx.cost(&self.ledger.parameters)
+            tx.cost(&self.ledger.parameters, false)
                 .ok()
                 .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
         );
@@ -516,7 +516,7 @@ impl<D: DB> TestState<D> {
         let old_dust = self.dust.clone();
         let mut last_dust = 0;
         while let Some(mut dust) = merged_tx
-            .balance(Some(merged_tx.fees(&self.ledger.parameters)?))?
+            .balance(Some(merged_tx.fees(&self.ledger.parameters, false)?))?
             .get(&(TokenType::Dust, 0))
             .and_then(|bal| (*bal < 0).then_some((-*bal) as u128))
         {
@@ -710,8 +710,8 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                         .into_atomic_units(SPECKS_PER_DUST)
                 })
                 .unwrap_or(u128::MAX);
-                let mocked_fees = mocked.fees(&INITIAL_PARAMETERS);
-                let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS);
+                let mocked_fees = mocked.fees(&INITIAL_PARAMETERS, false);
+                let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
                     assert!(real_fees <= mocked_fees);
                     assert!(mocked_fees <= real_fees + allowed_error_margin);
