@@ -1697,7 +1697,11 @@ where
         Ok(margin_fees.into_atomic_units(SPECKS_PER_DUST))
     }
 
-    pub fn fees(&self, params: &LedgerParameters, enforce_time_to_dismiss: bool) -> Result<u128, FeeCalculationError> {
+    pub fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
         let synthetic = self.cost(params, enforce_time_to_dismiss)?;
         let normalized = synthetic
             .normalize(params.limits.block_limits)
@@ -2038,7 +2042,11 @@ where
         return CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time);
     }
 
-    pub fn cost(&self, params: &LedgerParameters, enforce_time_to_dismiss: bool) -> Result<SyntheticCost, FeeCalculationError> {
+    pub fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
         let mut validation_cost = self.validation_cost(&params.cost_model);
         validation_cost.compute_time =
             validation_cost.compute_time / params.cost_model.parallelism_factor;
