@@ -215,7 +215,7 @@ export class DustSecretKey {
 
   /**
    * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
-   * @param bigint 
+   * @param bigint
    */
   static fromBigint(bigint: bigint): DustSecretKey;
 
@@ -1092,14 +1092,14 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * The underlying resource cost of this transaction.
    */
-  cost(params: LedgerParameters): SyntheticCost;
+  cost(params: LedgerParameters, enforce_time_to_dismiss?: bool): SyntheticCost;
 
   /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
    */
-  fees(params: LedgerParameters): bigint;
+  fees(params: LedgerParameters, enforce_time_to_dismiss?: bool): bigint;
 
   /**
    * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
