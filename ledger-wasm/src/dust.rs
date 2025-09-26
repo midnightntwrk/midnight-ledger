@@ -1344,6 +1344,11 @@ impl DustLocalState {
             .map(|qdo| qdo_to_value(&qdo))
             .collect::<Result<_, _>>()?)
     }
+
+    #[wasm_bindgen(getter)]
+    pub fn params(&self) -> Result<DustParameters, JsError> {
+        Ok(DustParameters(self.0.params))
+    }
 }
 
 #[wasm_bindgen]
