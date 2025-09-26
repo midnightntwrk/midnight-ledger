@@ -1328,8 +1328,10 @@ export class EncryptionSecretKey {
   test<P extends Proofish>(offer: ZswapOffer<P>): boolean;
 
   yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
+  yesIKnowTheSecurityImplicationsOfThis_taggedSerialize(): Uint8Array;
 
   static deserialize(raw: Uint8Array): EncryptionSecretKey
+  static taggedDeserialize(raw: Uint8Array): EncryptionSecretKey
 }
 
 export class ZswapSecretKeys {
