@@ -604,7 +604,7 @@ where
                 })?;
 
                 ref_state.param_check(false, |params| {
-                    let fees = match self.fees(params) {
+                    let fees = match self.fees(params, true) {
                         Ok(fees) => fees,
                         Err(e) => {
                             if strictness.enforce_balancing {

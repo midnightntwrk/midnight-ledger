@@ -701,7 +701,9 @@ async fn balanced_utxos_1_intent() {
     let res_unbalanced: Result<_, midnight_ledger::error::MalformedTransaction<InMemoryDB>> =
         proven_unbalanced_tx.well_formed(&state.ledger, strictness, state.time);
 
-    let fees = proven_unbalanced_tx.fees(&state.ledger.parameters).unwrap();
+    let fees = proven_unbalanced_tx
+        .fees(&state.ledger.parameters, false)
+        .unwrap();
 
     match res_unbalanced {
         Ok(_) => panic!(
