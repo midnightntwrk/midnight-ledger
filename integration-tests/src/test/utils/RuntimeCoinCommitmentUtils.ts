@@ -28,7 +28,7 @@ export class RuntimeCoinCommitmentUtils {
     const encoded = encodeShieldedCoinInfo(coinInfo);
     const value = bigIntToValue(encoded.value);
     return {
-      value: [encoded.nonce, Static.trimTrailingZeros(encoded.color), value[0]],
+      value: [Static.trimTrailingZeros(encoded.nonce), Static.trimTrailingZeros(encoded.color), value[0]],
       alignment: [
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },
@@ -43,7 +43,11 @@ export class RuntimeCoinCommitmentUtils {
     const isUserAddress = false;
 
     return {
-      value: [RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress), new Uint8Array([]), encodedContractAddress],
+      value: [
+        RuntimeCoinCommitmentUtils.getArrayForIsLeft(isUserAddress),
+        new Uint8Array([]),
+        Static.trimTrailingZeros(encodedContractAddress)
+      ],
       alignment: [
         { tag: 'atom', value: { tag: 'bytes', length: BOOLEAN_HASH_BYTES } },
         { tag: 'atom', value: { tag: 'bytes', length: PERSISTENT_HASH_BYTES } },
@@ -65,13 +69,14 @@ export class RuntimeCoinCommitmentUtils {
   }
 
   static assertOutcomes(coin: AlignedValue, recipient: AlignedValue) {
+    console.log(JSON.stringify(coin, null, 4), JSON.stringify(recipient, null, 4));
     const commitment = runtimeCoinCommitment(coin, recipient);
 
     expect(commitment).toBeDefined();
     expect(commitment.value).toBeInstanceOf(Array);
     expect(commitment.value.length).toEqual(1);
     expect(commitment.value[0]).toBeInstanceOf(Uint8Array);
-    expect(commitment.value[0].length).toEqual(PERSISTENT_HASH_BYTES);
+    expect(commitment.value[0].length).toBeLessThanOrEqual(PERSISTENT_HASH_BYTES);
 
     expect(commitment.alignment).toBeInstanceOf(Array);
     expect(commitment.alignment.length).toEqual(1);

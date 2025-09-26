@@ -16,7 +16,6 @@ import {
   DustActions,
   DustLocalState,
   type DustPublicKey,
-  dustPublicKeyFromSecret,
   DustRegistration,
   Intent,
   type IntentHash,
@@ -82,6 +81,20 @@ describe('Ledger API - DustLocalState', () => {
 )`;
 
     expect(localState.toString()).toEqual(expected);
+  });
+
+  /**
+   * Test dust parameters getter of LocalDustState.
+   *
+   * @given A new LocalDustState instance
+   * @when Calling params attribute
+   * @then Should return the initial dust params values
+   */
+  test('should return dust parameters', () => {
+    const localState = new DustLocalState(initialParameters);
+    expect(localState.params.nightDustRatio).toEqual(NIGHT_DUST_RATIO);
+    expect(localState.params.generationDecayRate).toEqual(GENERATION_DECAY_RATE);
+    expect(localState.params.dustGracePeriodSeconds).toEqual(DUST_GRACE_PERIOD_IN_SECONDS);
   });
 
   /**
@@ -294,7 +307,7 @@ describe('Ledger API - DustLocalState', () => {
       const sk = sampleSigningKey();
       const vk = signatureVerifyingKey(sk);
       const addr: UserAddress = addressFromKey(vk);
-      const dust: DustPublicKey = dustPublicKeyFromSecret(sampleDustSecretKey());
+      const dust: DustPublicKey = sampleDustSecretKey().publicKey;
       cycle.push([vk, addr, dust]);
     }
 
