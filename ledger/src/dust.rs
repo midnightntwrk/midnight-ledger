@@ -1301,7 +1301,7 @@ pub struct DustLocalState<D: DB> {
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     sync_time: Timestamp,
-    params: DustParameters,
+    pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 

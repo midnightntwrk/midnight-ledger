@@ -353,6 +353,7 @@ export class DustLocalState {
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
+  readonly params: DustParameters;
 }
 
 /**
