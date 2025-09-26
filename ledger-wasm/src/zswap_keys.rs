@@ -369,7 +369,6 @@ impl EncryptionSecretKey {
         )?))
     }
 
-    #[wasm_bindgen(js_name = "deserialize")]
     pub fn deserialize(raw: Uint8Array) -> Result<EncryptionSecretKey, JsError> {
         use std::io::{Error, ErrorKind};
         let deserialized: transient_crypto::encryption::SecretKey =
