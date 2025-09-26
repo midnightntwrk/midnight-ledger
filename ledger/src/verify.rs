@@ -27,15 +27,11 @@ use crate::structure::{
 use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
-use base_crypto::BinaryHashRepr;
 use base_crypto::hash::HashOutput;
-use base_crypto::hash::persistent_hash;
 use base_crypto::signatures::VerifyingKey;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::PublicAddress;
-use coin_structure::coin::{
-    Commitment, Nullifier, ShieldedTokenType, TokenType, UnshieldedTokenType,
-};
+use coin_structure::coin::{Commitment, Nullifier, TokenType};
 use coin_structure::contract::ContractAddress;
 use onchain_runtime::ops::Op;
 use onchain_runtime::state::{
@@ -794,9 +790,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
 
                 for (segment, transcript) in transcripts {
                     for (pre_token, val) in transcript.effects.shielded_mints.clone() {
-                        let tt = ShieldedTokenType(persistent_hash(
-                            (call.address, pre_token).binary_vec().as_slice(),
-                        ));
+                        let tt = call.address.custom_shielded_token_type(pre_token);
                         update_balance(
                             &mut res,
                             TokenType::Shielded(tt),
@@ -807,9 +801,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
                     }
 
                     for (pre_token, val) in transcript.effects.unshielded_mints.clone() {
-                        let tt = UnshieldedTokenType(persistent_hash(
-                            (call.address, pre_token).binary_vec().as_slice(),
-                        ));
+                        let tt = call.address.custom_unshielded_token_type(pre_token);
                         update_balance(
                             &mut res,
                             TokenType::Unshielded(tt),

@@ -18,6 +18,8 @@ use js_sys::Uint8Array;
 use onchain_runtime_wasm::from_value_ser;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
+use serialize::Deserializable;
+use serialize::Serializable;
 use serialize::tagged_serialize;
 use std::cell::RefCell;
 use std::ops::Deref;
@@ -333,8 +335,8 @@ impl EncryptionSecretKey {
         })
     }
 
-    #[wasm_bindgen(js_name = "yesIKnowTheSecurityImplicationsOfThis_serialize")]
-    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+    #[wasm_bindgen(js_name = "yesIKnowTheSecurityImplicationsOfThis_taggedSerialize")]
+    pub fn tagged_serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
         tagged_serialize(
             self.0
@@ -346,10 +348,40 @@ impl EncryptionSecretKey {
         Ok(Uint8Array::from(&res[..]))
     }
 
-    pub fn deserialize(raw: Uint8Array) -> Result<EncryptionSecretKey, JsError> {
+    #[wasm_bindgen(js_name = "yesIKnowTheSecurityImplicationsOfThis_serialize")]
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        Serializable::serialize(
+            self.0
+                .borrow()
+                .as_ref()
+                .ok_or(JsError::new(ESK_CLEAR_MSG))?,
+            &mut res,
+        )?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    #[wasm_bindgen(js_name = "taggedDeserialize")]
+    pub fn tagged_deserialize(raw: Uint8Array) -> Result<EncryptionSecretKey, JsError> {
         Ok(EncryptionSecretKey::wrap(from_value_ser(
             raw,
             "EncryptionSecretKey",
         )?))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<EncryptionSecretKey, JsError> {
+        use std::io::{Error, ErrorKind};
+        let deserialized: transient_crypto::encryption::SecretKey =
+            Deserializable::deserialize(&mut raw.to_vec().as_slice(), 0).map_err(|e| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Unable to deserialize {}. Error: {}",
+                        "EncryptionSecretKey",
+                        e.to_string()
+                    ),
+                )
+            })?;
+        Ok(EncryptionSecretKey::wrap(deserialized))
     }
 }
