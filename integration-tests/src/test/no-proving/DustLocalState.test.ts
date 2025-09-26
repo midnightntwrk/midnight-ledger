@@ -84,6 +84,20 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
+   * Test dust parameters getter of LocalDustState.
+   *
+   * @given A new LocalDustState instance
+   * @when Calling params attribute
+   * @then Should return the initial dust params values
+   */
+  test('should return dust parameters', () => {
+    const localState = new DustLocalState(initialParameters);
+    expect(localState.params.nightDustRatio).toEqual(NIGHT_DUST_RATIO);
+    expect(localState.params.generationDecayRate).toEqual(GENERATION_DECAY_RATE);
+    expect(localState.params.dustGracePeriodSeconds).toEqual(DUST_GRACE_PERIOD_IN_SECONDS);
+  });
+
+  /**
    * Test serialization and deserialization of LocalDustState.
    *
    * @given A new LocalDustState instance
