@@ -236,7 +236,7 @@ impl<D: DB> RcMap<D> {
 
     /// Get all charged keys and their reference counts (for testing).
     #[cfg(test)]
-    pub(crate) fn get_rcs(&self) -> HashMap<ArenaKey<D::Hasher>, u64> {
+    pub(crate) fn get_rcs(&self) -> HashMap<ChildNode<D::Hasher>, u64> {
         let mut result = HashMap::new();
 
         // Add all keys with rc = 0
@@ -246,7 +246,7 @@ impl<D: DB> RcMap<D> {
 
         // Add all keys with rc >= 1
         for (key, count) in self.rc_ge_1.iter() {
-            result.insert(key.clone(), *count);
+            result.insert(ChildNode::Ref(key.clone()), *count);
         }
 
         result
@@ -296,7 +296,7 @@ pub(crate) mod tests {
         // Create a dummy value to get an arena key
         let val = Sp::<_, InMemoryDB>::new(42u64);
         let key = val.root.clone();
-        let keyref = ChildRef::<InMemoryDB>::new(key);
+        let keyref = ChildRef::<InMemoryDB>::new(ChildNode::Ref(key));
 
         // Create a vector with 3 of the same ChildRef
         let keyrefs = vec![
@@ -327,7 +327,7 @@ pub(crate) mod tests {
         let mut to_visit = rcmap
             .children()
             .into_iter()
-            .filter_map(|c| c.into_ref().cloned())
+            .filter_map(|c| c.into_ref().cloned() )
             .collect::<Vec<_>>();
         let arena = &crate::storage::default_storage::<D>().arena;
         while let Some(current) = to_visit.pop() {
@@ -356,7 +356,7 @@ pub(crate) mod tests {
 
         // Create RcMap with key in rc_0
         let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key, 0);
-        assert!(rcmap.rc_0.contains_key(&key));
+        assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key.clone())));
 
         let descendants = get_rcmap_descendants(&rcmap);
         assert!(
@@ -379,8 +379,8 @@ pub(crate) mod tests {
         let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key1, 0);
 
         // Test initialize_key sets rc=0
-        assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
-        assert!(rcmap.rc_0.contains_key(&key1), "key1 should be in rc_0 map");
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(0), "get_rc should return 0");
+        assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())), "key1 should be in rc_0 map");
         assert!(
             !rcmap.rc_ge_1.contains_key(&key1),
             "key1 should not be in rc_ge_1 map"
@@ -388,9 +388,9 @@ pub(crate) mod tests {
 
         // Test increment_rc from 0 to 1 moves to rc_ge_1
         let rcmap = rcmap.modify_rc(&key1, 1);
-        assert_eq!(rcmap.get_rc(&key1), Some(1), "get_rc should return 1");
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(1), "get_rc should return 1");
         assert!(
-            !rcmap.rc_0.contains_key(&key1),
+            !rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())),
             "key1 should not be in rc_0 map"
         );
         assert!(
@@ -401,7 +401,7 @@ pub(crate) mod tests {
         // Test increment_rc multiple times
         let rcmap = rcmap.modify_rc(&key1, 2);
         let rcmap = rcmap.modify_rc(&key1, 3);
-        assert_eq!(rcmap.get_rc(&key1), Some(3), "get_rc should return 3");
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(3), "get_rc should return 3");
         assert!(
             rcmap.rc_ge_1.contains_key(&key1),
             "key1 should remain in rc_ge_1 map"
@@ -417,9 +417,9 @@ pub(crate) mod tests {
 
         // Test decrement_rc from 1 to 0 moves back to rc_0
         let rcmap = rcmap.modify_rc(&key1, 0);
-        assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(0), "get_rc should return 0");
         assert!(
-            rcmap.rc_0.contains_key(&key1),
+            rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())),
             "key1 should be back in rc_0 map"
         );
         assert!(
@@ -429,7 +429,7 @@ pub(crate) mod tests {
 
         // Test get_rc on nonexistent key returns None
         assert_eq!(
-            rcmap.get_rc(&key2),
+            rcmap.get_rc(&ChildNode::Ref(key2.clone())),
             None,
             "get_rc on nonexistent key should return None"
         );
@@ -439,39 +439,39 @@ pub(crate) mod tests {
         let rcmap = rcmap.modify_rc(&key3, 2);
 
         // Verify all keys have correct reference counts
-        assert_eq!(rcmap.get_rc(&key1), Some(0));
-        assert_eq!(rcmap.get_rc(&key2), Some(1));
-        assert_eq!(rcmap.get_rc(&key3), Some(2));
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(0));
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key2.clone())), Some(1));
+        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key3.clone())), Some(2));
 
         // Verify correct map placement
-        assert!(rcmap.rc_0.contains_key(&key1));
+        assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())));
         assert!(rcmap.rc_ge_1.contains_key(&key2));
         assert!(rcmap.rc_ge_1.contains_key(&key3));
 
         // Test remove_unreachable_key functionality
         // Remove key1 (rc=0) should succeed
-        let rcmap_new = rcmap.remove_unreachable_key(&key1);
+        let rcmap_new = rcmap.remove_unreachable_key(&ChildNode::Ref(key1.clone()));
         assert!(
             rcmap_new.is_some(),
             "remove_unreachable_key should succeed for rc=0 key"
         );
         let rcmap = rcmap_new.unwrap();
-        assert!(!rcmap.contains(&key1), "key1 should no longer be in rcmap");
+        assert!(!rcmap.contains(&ChildNode::Ref(key1.clone())), "key1 should no longer be in rcmap");
         assert_eq!(
-            rcmap.get_rc(&key1),
+            rcmap.get_rc(&ChildNode::Ref(key1.clone())),
             None,
             "get_rc should return None for removed key"
         );
 
         // Remove key2 (rc=1) should fail
-        let rcmap_new = rcmap.remove_unreachable_key(&key2);
+        let rcmap_new = rcmap.remove_unreachable_key(&ChildNode::Ref(key2.clone()));
         assert!(
             rcmap_new.is_none(),
             "remove_unreachable_key should fail for rc>0 key"
         );
 
         // Remove nonexistent key should fail
-        let rcmap_new = rcmap.remove_unreachable_key(&key1);
+        let rcmap_new = rcmap.remove_unreachable_key(&ChildNode::Ref(key1.clone()));
         assert!(
             rcmap_new.is_none(),
             "remove_unreachable_key should fail for nonexistent key"

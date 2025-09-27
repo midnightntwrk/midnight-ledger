@@ -990,7 +990,7 @@ impl<D: DB> IntermediateRepr<D> {
         s.to_binary_repr(&mut binary_repr).unwrap();
         IntermediateRepr {
             binary_repr,
-            children: s.children().into_iter().map(|n| n.hash()).collect(),
+            children: s.children().into_iter().map(|n| n.hash().clone()).collect(),
             db_type: PhantomData,
         }
     }

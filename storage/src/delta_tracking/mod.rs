@@ -509,12 +509,13 @@ mod tests {
         let roots = [(0, 1)];
         let r1 = to_keys(roots.iter());
 
-        let writes = super::get_writes(&k0, &r1);
+        let writes = super::get_writes(&k0, &r1.clone().into_iter().map(Into::into).collect());
         let expected_reachable = compute_reachable_nodes(&roots);
         let expected_keys = to_keys(expected_reachable.iter());
 
         assert_eq!(
-            writes, expected_keys,
+            writes,
+            expected_keys.into_iter().map(Into::into).collect(),
             "Write set should contain exactly the reachable nodes"
         );
 
@@ -526,10 +527,13 @@ mod tests {
             .filter(|(layer, _)| *layer >= 3 && *layer <= 5)
             .collect();
         let k0_keys = to_keys(k0_node_ids.iter());
-        let k0_writes = super::get_writes::<DefaultDB>(&RcMap::default(), &k0_keys);
+        let k0_writes = super::get_writes::<DefaultDB>(
+            &RcMap::default(),
+            &k0_keys.into_iter().map(Into::into).collect(),
+        );
         let k0: RcMap<DefaultDB> = super::update_rcmap(&RcMap::default(), &k0_writes);
 
-        let writes = super::get_writes(&k0, &r1);
+        let writes = super::get_writes(&k0, &r1.into_iter().map(Into::into).collect());
 
         // Compute what should be written: reachable from roots minus what's in K0
         let reachable_from_r1 = compute_reachable_nodes(&roots);
@@ -538,19 +542,24 @@ mod tests {
         let expected_writes_keys = to_keys(expected_writes.iter());
 
         assert_eq!(
-            writes, expected_writes_keys,
+            writes,
+            expected_writes_keys.into_iter().map(Into::into).collect(),
             "Write set should exclude K0 nodes"
         );
 
         // Test 3: Multiple roots
         let multi_roots = [(0, 1), (0, 2)];
         let r1_multi = to_keys(multi_roots.iter());
-        let writes_multi = super::get_writes::<DefaultDB>(&RcMap::default(), &r1_multi);
+        let writes_multi = super::get_writes::<DefaultDB>(
+            &RcMap::default(),
+            &r1_multi.into_iter().map(Into::into).collect(),
+        );
         let expected_multi = compute_reachable_nodes(&multi_roots);
         let expected_multi_keys = to_keys(expected_multi.iter());
 
         assert_eq!(
-            writes_multi, expected_multi_keys,
+            writes_multi,
+            expected_multi_keys.into_iter().map(Into::into).collect(),
             "Multiple roots should give union of reachable sets"
         );
     }
@@ -566,14 +575,14 @@ mod tests {
         let k0: RcMap<DefaultDB> = RcMap::default();
         let writes = to_keys(reachable.iter());
 
-        let k1 = super::update_rcmap(&k0, &writes);
+        let k1 = super::update_rcmap(&k0, &writes.into_iter().map(Into::into).collect());
 
         // Compute expected reference counts based on adjacency
         let expected_rcs = get_subgraph_rcs(&roots);
 
         // Verify reference counts match expectations
         for (node_id, expected_rc) in expected_rcs {
-            let actual_rc = k1.get_rc(&dag.nodes[&node_id]).unwrap();
+            let actual_rc = k1.get_rc(&dag.nodes[&node_id].clone().into()).unwrap();
             assert_eq!(
                 actual_rc, expected_rc,
                 "Node {:?} should have rc={}, got {}",
@@ -590,14 +599,21 @@ mod tests {
         let full_roots = [(0, 1), (0, 2)];
         let full_reachable = compute_reachable_nodes(&full_roots);
         let all_writes = to_keys(full_reachable.iter());
-        let k0: RcMap<DefaultDB> = super::update_rcmap(&RcMap::default(), &all_writes);
+        let k0: RcMap<DefaultDB> = super::update_rcmap(
+            &RcMap::default(),
+            &all_writes.into_iter().map(Into::into).collect(),
+        );
 
         // Test GC with limited root set: only one root type
         let limited_roots = [(0, 1)];
         let roots = to_keys(limited_roots.iter());
 
         let step_limit = 1000;
-        let (k1, removed) = super::gc_rcmap(&k0, &roots, step_limit);
+        let (k1, removed) = super::gc_rcmap(
+            &k0,
+            &roots.clone().into_iter().map(Into::into).collect(),
+            step_limit,
+        );
 
         // Compute what should remain vs be removed
         let kept_nodes = compute_reachable_nodes(&limited_roots);
@@ -612,12 +628,12 @@ mod tests {
 
         for node_id in &expected_removed {
             assert!(
-                removed.contains(&dag.nodes[node_id]),
+                removed.contains(&dag.nodes[node_id.into()].clone().into()),
                 "Node {:?} should be removed as unreachable",
                 node_id
             );
             assert_eq!(
-                k1.get_rc(&dag.nodes[node_id]),
+                k1.get_rc(&dag.nodes[node_id.into()].clone().into()),
                 None,
                 "Removed node {:?} should not have rc in new map",
                 node_id
@@ -627,26 +643,31 @@ mod tests {
         // Verify kept nodes
         for node_id in &kept_nodes {
             assert!(
-                !removed.contains(&dag.nodes[node_id]),
+                !removed.contains(&dag.nodes[node_id].clone().into()),
                 "Node {:?} should not be removed as it's reachable",
                 node_id
             );
             assert!(
-                k1.get_rc(&dag.nodes[node_id]).is_some(),
+                k1.get_rc(&dag.nodes[node_id].clone().into()).is_some(),
                 "Remaining node {:?} should have rc in new map",
                 node_id
             );
         }
 
         // Test step limit: should stop GC early with limited steps
-        let (k2, removed2) = super::gc_rcmap(&k0, &roots, 2);
+        let (k2, removed2) =
+            super::gc_rcmap(&k0, &roots.clone().into_iter().map(Into::into).collect(), 2);
         assert!(
             removed2.len() == 2,
             "With step_limit=2, should remove 2 nodes"
         );
 
         // Test resuming GC
-        let (_k3, removed3) = super::gc_rcmap(&k2, &roots, expected_removed.len());
+        let (_k3, removed3) = super::gc_rcmap(
+            &k2,
+            &roots.into_iter().map(Into::into).collect(),
+            expected_removed.len(),
+        );
         let total_removed: StdHashSet<_> = removed2.union(&removed3).cloned().collect();
         assert!(
             total_removed.len() == expected_removed.len(),
@@ -694,7 +715,10 @@ mod tests {
                 .iter()
                 .map(|id| dag.nodes[id].clone())
                 .collect();
-            super::update_rcmap(&RcMap::default(), &all_writes)
+            super::update_rcmap(
+                &RcMap::default(),
+                &all_writes.into_iter().map(Into::into).collect(),
+            )
         };
 
         // Run GC from empty root set - should GC everything but not crash
@@ -758,10 +782,14 @@ mod tests {
 
         // Compute initial_write_delete_costs for each root set.
         for i in 0..root_sets.len() {
-            let results =
-                super::initial_write_delete_costs::<DefaultDB>(&root_sets_as_keys[i], |_, _| {
-                    Default::default()
-                });
+            let results = super::initial_write_delete_costs::<DefaultDB>(
+                &root_sets_as_keys[i]
+                    .clone()
+                    .into_iter()
+                    .map(Into::into)
+                    .collect(),
+                |_, _| Default::default(),
+            );
 
             // Verify the RcMap matches what get_subgraph_rcs predicts
             let expected_rcs = get_subgraph_rcs(&root_sets[i]);
@@ -770,7 +798,7 @@ mod tests {
             // Convert expected_rcs node IDs to ArenaKeys for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
-                .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
+                .map(|(node_id, rc)| (ChildNode::Ref(dag.nodes[&node_id].clone()), rc))
                 .collect();
 
             assert_eq!(
@@ -793,14 +821,22 @@ mod tests {
         // Initialize from the first root set, and then iterate over each
         // subsequent root set and compute incremental_write_delete_costs.
         let initial_roots = &root_sets_as_keys[0];
-        let initial_results =
-            super::initial_write_delete_costs(initial_roots, |_, _| Default::default());
+        let initial_results = super::initial_write_delete_costs(
+            &initial_roots
+                .into_iter()
+                .map(|k| ChildNode::Ref(k.clone()))
+                .collect(),
+            |_, _| Default::default(),
+        );
         let mut current_charged_keys = initial_results.updated_charged_keys;
         for i in 1..root_sets.len() {
             let next_roots = &root_sets_as_keys[i];
             let results = super::incremental_write_delete_costs::<DefaultDB>(
                 &current_charged_keys,
-                next_roots,
+                &next_roots
+                    .into_iter()
+                    .map(|k| ChildNode::Ref(k.clone()))
+                    .collect(),
                 |_, _| Default::default(),
                 |_| 1000, // High step limit for complete GC
             );
@@ -812,7 +848,7 @@ mod tests {
             // Convert expected_rcs node IDs to ArenaKeys for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
-                .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
+                .map(|(node_id, rc)| (dag.nodes[&node_id].clone().into(), rc))
                 .collect();
 
             assert_eq!(

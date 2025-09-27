@@ -134,6 +134,15 @@ impl<H: WellBehavedHasher> ChildNode<H> {
         }
         res
     }
+
+    /// Returns Some(key) if Ref, None otherwise
+    #[cfg(test)]
+    pub fn into_ref(&self) -> Option<&ArenaKey<H>> {
+        match self {
+            ChildNode::Ref(key) => Some(key),
+            ChildNode::Direct(..) => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
