@@ -20,7 +20,7 @@
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
 use crate::WellBehavedHasher;
-use crate::storable::{ChildNode, DirectChildNode, Loader};
+use crate::storable::{ChildNode, DirectChildNode, Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{DefaultDB, DefaultHasher, backend::StorageBackend, db::DB, storable::Storable};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
@@ -508,7 +508,10 @@ impl<D: DB> Arena<D> {
         let _metadata_lock = self.lock_metadata();
         let sp_cache_lock = self.lock_sp_cache();
         self.read_sp_cache_locked::<T>(&sp_cache_lock, key)
-            .map(|arc| Sp::eager(self.clone(), key.clone(), arc, todo!()))
+            .map(|arc| {
+                let child_repr = arc.as_child();
+                Sp::eager(self.clone(), key.clone(), arc, child_repr)
+            })
     }
 
     /// Get a pointer into the arena.
@@ -787,9 +790,10 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         let metadata_lock = self.arena.lock_metadata();
         let maybe_arc = self
             .arena
-            .read_sp_cache_locked(&self.arena.lock_sp_cache(), key);
+            .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
         if let Some(arc) = maybe_arc {
-            return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, todo!()));
+            let child_repr = arc.as_child();
+            return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
         }
         drop(metadata_lock);
 
@@ -812,8 +816,14 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             // that the `track_locked` call here has been superseded by a
             // possible `Sp::drop`.
             let metadata_lock = self.arena.lock_metadata();
-            self.arena
-                .track_locked(&metadata_lock, key.clone(), obj.data, obj.children, todo!());
+            let child_repr = child_from(&obj.data, &obj.children);
+            self.arena.track_locked(
+                &metadata_lock,
+                key.clone(),
+                obj.data,
+                obj.children,
+                &child_repr,
+            );
             return Ok(Sp::lazy(self.arena.clone(), key.clone(), todo!()));
         }
         // If not at max depth, then deserialize recursively.
@@ -1230,26 +1240,6 @@ impl<T, D: DB> Sp<T, D> {
             key: self.root.clone(),
             _phantom: PhantomData,
         }
-    }
-}
-
-fn is_in_small_object_limit<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> bool {
-    const SMALL_OBJECT_LIMIT: usize = 1024;
-    let mut size = 2 + data.len();
-    for child in children.iter() {
-        size += child.serialized_size();
-        if size > SMALL_OBJECT_LIMIT {
-            return false;
-        }
-    }
-    size <= SMALL_OBJECT_LIMIT
-}
-
-fn child_from<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> ChildNode<H> {
-    if is_in_small_object_limit(data, children) {
-        ChildNode::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
-    } else {
-        ChildNode::Ref(hash(&data, children.iter().map(ChildNode::hash)))
     }
 }
 

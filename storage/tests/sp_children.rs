@@ -17,7 +17,7 @@ use derive_where::derive_where;
 use midnight_storage as storage;
 use midnight_storage::*;
 use serialize::Serializable;
-use storable::Loader;
+use storable::{ChildNode, Loader};
 
 #[derive(Debug, Storable)]
 #[storable(db = D)]

@@ -14,7 +14,7 @@
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::DefaultHasher;
-use crate::arena::{ArenaKey, Sp};
+use crate::arena::{ArenaKey, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -32,8 +32,8 @@ use proptest::{
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use rand::distributions::Standard;
 use rand::prelude::Distribution;
+use rand::{Rng, distributions::Standard};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::fmt::Debug;
@@ -98,6 +98,12 @@ pub enum ChildNode<H: WellBehavedHasher = DefaultHasher> {
     Ref(ArenaKey<H>),
     /// A direct child, typically reserved for small children, represented as its raw data.
     Direct(DirectChildNode<H>),
+}
+
+impl<H: WellBehavedHasher> From<ArenaKey<H>> for ChildNode<H> {
+    fn from(value: ArenaKey<H>) -> Self {
+        ChildNode::Ref(value)
+    }
 }
 
 impl<H: WellBehavedHasher> Distribution<ChildNode<H>> for Standard {
@@ -222,6 +228,44 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         Ok(())
     }
+
+    /// Represents self as a `ChildNode`
+    fn as_child(&self) -> ChildNode<D::Hasher> {
+        let children = self.children();
+        assert!(
+            children.len() <= 16,
+            "In order to represent the arena as an MPT Storable values must have no more than 16 children (found: {} on type {})",
+            children.len(),
+            std::any::type_name::<Self>(),
+        );
+        let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+        self.to_binary_repr(&mut data)
+            .expect("Storable data should be able to be represented in binary");
+        child_from(&data, &children)
+    }
+}
+
+pub(crate) fn child_from<H: WellBehavedHasher>(
+    data: &[u8],
+    children: &[ChildNode<H>],
+) -> ChildNode<H> {
+    if is_in_small_object_limit(data, children) {
+        ChildNode::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
+    } else {
+        ChildNode::Ref(hash(&data, children.iter().map(ChildNode::hash)))
+    }
+}
+
+fn is_in_small_object_limit<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> bool {
+    const SMALL_OBJECT_LIMIT: usize = 1024;
+    let mut size = 2 + data.len();
+    for child in children.iter() {
+        size += child.serialized_size();
+        if size > SMALL_OBJECT_LIMIT {
+            return false;
+        }
+    }
+    size <= SMALL_OBJECT_LIMIT
 }
 
 /// Helper function, producing an error when an unrecognized discriminant is
