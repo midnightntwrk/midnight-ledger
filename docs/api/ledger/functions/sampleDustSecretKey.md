@@ -7,9 +7,9 @@
 # Function: sampleDustSecretKey()
 
 ```ts
-function sampleDustSecretKey(): bigint;
+function sampleDustSecretKey(): DustSecretKey;
 ```
 
 ## Returns
 
-`bigint`
+[`DustSecretKey`](../classes/DustSecretKey.md)
