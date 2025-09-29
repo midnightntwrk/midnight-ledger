@@ -1,8 +1,8 @@
-[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.1**](README.md)
+[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.3**](README.md)
 
 ***
 
-# @midnight-ntwrk/onchain-runtime v1.0.0-alpha.1
+# @midnight-ntwrk/onchain-runtime v1.0.0-alpha.3
 
 ## Classes
 
@@ -93,6 +93,7 @@
 - [rawTokenType](functions/rawTokenType.md)
 - [runProgram](functions/runProgram.md)
 - [runtimeCoinCommitment](functions/runtimeCoinCommitment.md)
+- [runtimeCoinNullifier](functions/runtimeCoinNullifier.md)
 - [sampleContractAddress](functions/sampleContractAddress.md)
 - [sampleRawTokenType](functions/sampleRawTokenType.md)
 - [sampleSigningKey](functions/sampleSigningKey.md)
