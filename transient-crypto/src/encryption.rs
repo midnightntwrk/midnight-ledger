@@ -204,6 +204,8 @@ impl SecretKey {
 
 #[cfg(test)]
 mod tests {
+    use crate::curve::outer;
+    use midnight_curves::JubjubSubgroup;
     #[cfg(feature = "proptest")]
     use proptest::prelude::*;
     #[cfg(feature = "proptest")]
@@ -235,5 +237,18 @@ mod tests {
             let from_repr = SecretKey::from_repr(&repr).unwrap();
             assert_eq!(from_repr.repr(), repr);
         }
+    }
+
+    #[test]
+    fn no_canonical_repr() {
+        let key1 = PublicKey(EmbeddedGroupAffine::identity());
+        let key2 = {
+            let jubjub = JubjubSubgroup::from_raw_unchecked(outer::Scalar::ZERO, outer::Scalar::ZERO - outer::Scalar::ONE);
+            let affine: embedded::Affine = jubjub.into();
+            PublicKey(EmbeddedGroupAffine(affine))
+        };
+
+        assert!(key1.no_canonical_repr());
+        assert!(key2.no_canonical_repr());
     }
 }
