@@ -105,7 +105,7 @@ impl<T: Aligned> Aligned for Option<T> {
 }
 
 impl Alignment {
-    /// The alignment of `Option<T>` for this `T`. Unseful if an `Alignment` is
+    /// The alignment of `Option<T>` for this `T`. Useful if an `Alignment` is
     /// known, but a corresponding rust type *isn't*.
     pub fn option_of(&self) -> Alignment {
         Alignment::concat([&bool::alignment(), self])

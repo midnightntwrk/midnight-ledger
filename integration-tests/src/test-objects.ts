@@ -14,46 +14,47 @@
 import {
   type AlignedValue,
   type BlockContext,
-  type ShieldedCoinInfo,
-  type RawTokenType,
   type CoinPublicKey,
   type ContractAddress,
-  type EncPublicKey,
-  shieldedToken,
-  type Nonce,
-  type Op,
-  type QualifiedShieldedCoinInfo,
-  Transaction,
-  sampleCoinPublicKey,
-  sampleEncryptionPublicKey,
-  sampleSigningKey,
-  sampleContractAddress,
-  sampleUserAddress,
-  type SigningKey,
-  type TokenType,
-  ZswapOffer,
+  ContractDeploy,
+  ContractState,
   createShieldedCoinInfo,
-  ZswapOutput,
   dummyContractAddress,
   dummyUserAddress,
-  ContractState,
-  ContractDeploy,
+  DustParameters,
+  type EncPublicKey,
   Intent,
-  ZswapSecretKeys,
-  type PreProof,
-  type PreBinding,
-  type SignatureEnabled,
-  type PublicAddress,
   type IntentHash,
-  UnshieldedOffer,
-  signData,
-  signatureVerifyingKey,
+  type Nonce,
+  type Op,
+  type PreBinding,
+  type PreProof,
+  type PublicAddress,
+  type QualifiedShieldedCoinInfo,
+  type RawTokenType,
+  sampleCoinPublicKey,
+  sampleContractAddress,
+  sampleEncryptionPublicKey,
   sampleIntentHash,
-  DustParameters
+  sampleSigningKey,
+  sampleUserAddress,
+  type ShieldedCoinInfo,
+  shieldedToken,
+  type SignatureEnabled,
+  signatureVerifyingKey,
+  signData,
+  type SigningKey,
+  type TokenType,
+  Transaction,
+  UnshieldedOffer,
+  ZswapOffer,
+  ZswapOutput,
+  ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import crypto from 'node:crypto';
 import { generateHex, loadBinaryFile } from './test-utils';
 
+export const STARS_PER_NIGHT = 1_000_000n;
 export const VERSION_HEADER = '0200';
 export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
 export const PERSISTENT_HASH_BYTES = 32;
@@ -110,11 +111,16 @@ export class Random {
     raw: Random.hex(64)
   });
 
-  static domainSep = (): Buffer => {
+  static generate32Bytes = (): Buffer => {
     const bytes = new Uint8Array(32);
     crypto.getRandomValues(bytes);
     return Buffer.from(bytes);
   };
+
+  static defaultShieldedTokenType = (): ShieldedTokenType => ({
+    tag: 'shielded',
+    raw: NIGHT_TOKEN_TYPE
+  });
 
   static shieldedTokenType = (): ShieldedTokenType => ({
     tag: 'shielded',
@@ -141,6 +147,10 @@ export class Random {
 }
 
 export class Static {
+  static encodeFromHex = (hex: string) => Buffer.from(hex, 'hex');
+
+  static encodeFromText = (text: string) => new TextEncoder().encode(text);
+
   static hex = (length: number = 64, seed: number = 42) =>
     Array.from({ length }, (_, i) => ((seed + i) % 16).toString(16)).join('');
 

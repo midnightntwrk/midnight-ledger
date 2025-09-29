@@ -141,6 +141,19 @@ pub fn runtime_coin_commitment(coin: JsValue, recipient: JsValue) -> Result<JsVa
     Ok(to_value(&AlignedValue::from(coin.commitment(&recipient)))?)
 }
 
+#[wasm_bindgen(js_name = "runtimeCoinNullifier")]
+pub fn runtime_coin_nullifier(coin: JsValue, sender_evidence: JsValue) -> Result<JsValue, JsError> {
+    let coin: AlignedValue = from_value(coin)?;
+    let sender_evidence: AlignedValue = from_value(sender_evidence)?;
+    let coin = coin_structure::coin::Info::try_from(&**(AsRef::<Value>::as_ref(&coin)))?;
+    let sender_evidence = coin_structure::transfer::SenderEvidence::try_from(
+        &**(AsRef::<Value>::as_ref(&sender_evidence)),
+    )?;
+    Ok(to_value(&AlignedValue::from(
+        coin.nullifier(&sender_evidence),
+    ))?)
+}
+
 #[wasm_bindgen(js_name = "leafHash")]
 pub fn leaf_hash(value: JsValue) -> Result<JsValue, JsError> {
     let value: AlignedValue = from_value(value)?;
@@ -173,6 +186,7 @@ pub fn proof_data_into_serialized_preimage(
     output: JsValue,
     public_transcript: JsValue,
     private_transcript_outputs: JsValue,
+    key_location: Option<String>,
 ) -> Result<Uint8Array, JsError> {
     let input: AlignedValue = from_value(input)?;
     let output: AlignedValue = from_value(output)?;
@@ -202,7 +216,11 @@ pub fn proof_data_into_serialized_preimage(
         private_transcript,
         public_transcript_inputs,
         public_transcript_outputs,
-        key_location: transient_crypto::proofs::KeyLocation(Cow::Borrowed("dummy")),
+        key_location: transient_crypto::proofs::KeyLocation(
+            key_location
+                .map(Cow::Owned)
+                .unwrap_or(Cow::Borrowed("dummy")),
+        ),
         communications_commitment: Some((
             transient_crypto::hash::transient_hash(&comm_comm_preimage),
             0.into(),

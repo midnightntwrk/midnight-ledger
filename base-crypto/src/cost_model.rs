@@ -147,7 +147,7 @@ impl Div<u64> for CostDuration {
     Default,
 )]
 #[tag = "synthetic-cost[v1]"]
-/// The synthetic (modelled) cost of execution, typically over a transaction or
+/// The synthetic (modeled) cost of execution, typically over a transaction or
 /// block.
 pub struct SyntheticCost {
     #[serde(rename = "readTime")]
@@ -520,10 +520,10 @@ impl FixedPoint {
     /// The maximum representable fixed point number
     pub const MAX: FixedPoint = FixedPoint(i128::MAX);
 
-    /// Takes a [FixedPoint] denominated in a non-base token unit (for instance,
+    /// Takes a [`FixedPoint`] denominated in a non-base token unit (for instance,
     /// 1.0 representing DUST) to it's base unit.
     ///
-    /// Conceptually, acts as (self * base_unit) as u128 with smarter overflow
+    /// Conceptually, acts as `self * base_unit` as `u128` with smarter overflow
     /// handling.
     ///
     /// Rounds up, and returns zero for negatives.
@@ -537,6 +537,26 @@ impl FixedPoint {
             u128::MAX
         } else {
             res.as_u128()
+        }
+    }
+
+    /// Raises the number to an integer power.
+    pub fn powi(self, mut exp: i32) -> Self {
+        match exp {
+            i32::MIN..=-1 => dbg!(FixedPoint::ONE / self).powi(dbg!(-exp)),
+            0 => FixedPoint::ONE,
+            1..=i32::MAX => {
+                let mut acc = FixedPoint::ONE;
+                let mut cur = self;
+                while exp >= 1 {
+                    if exp & 0b1 != 0 {
+                        acc = acc * cur;
+                    }
+                    cur = cur * cur;
+                    exp >>= 1;
+                }
+                acc
+            }
         }
     }
 
@@ -636,7 +656,7 @@ impl Div for FixedPoint {
     }
 }
 
-/// The raw price adjusment function from fullness, as specified in tokenomics
+/// The raw price adjustment function from fullness, as specified in tokenomics
 /// documents
 pub fn price_adjustment_function(usage: FixedPoint, a: FixedPoint) -> FixedPoint {
     // Points of the function to linearly interpolate between. 0 is point 0, the
@@ -873,6 +893,14 @@ mod tests {
             within_permissible_error(
                 a, b, epsilon
             );
+        }
+        #[test]
+        fn fixed_point_powi(a in (1e-1f64..1e1f64), b in (-15..15)) {
+            if a != 0.0 {
+                let pure_error_factor = a.powi(b) / f64::from(FixedPoint::from(a).powi(b));
+                let non_compounded_error_factor = pure_error_factor.powi(-b.abs());
+                within_permissible_error(1.0, non_compounded_error_factor, 0.001);
+            }
         }
         #[test]
         fn fixed_point_addition(a in (-1e18f64..1e18f64), b in (-1e18f64..1e18f64)) {

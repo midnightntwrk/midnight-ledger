@@ -72,7 +72,7 @@ impl FieldRepr for Pedersen {
 
 impl Pedersen {
     /// Create a Pedersen commitment purely for randomizing powers of
-    /// independant generators.
+    /// independent generators.
     ///
     /// Returns a random `(g^r, r)`.
     pub fn blinding_component<R: Rng + CryptoRng + ?Sized>(
@@ -123,7 +123,7 @@ impl Pedersen {
     }
 }
 
-/// A commitment of type PedersenCom, with only the randomization part (of base `g`),
+/// A commitment of type `PedersenCom`, with only the randomization part (of base `g`),
 /// and *not* the value part (of base `H(ty)`). To ensure this, a Fiat-Shamir proof of knowledge of
 /// exponent is used, guaranteeing that only an exponent of `g` is known.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Serialize, Storable)]
@@ -157,7 +157,7 @@ impl PureGeneratorPedersen {
         }
     }
 
-    /// Creates a new, Fiat-Shamir evidenced Pederson commitment with no second bases.
+    /// Creates a new, Fiat-Shamir evidenced Pedersen commitment with no second bases.
     /// Takes `wit`, the preimage of the commitment, and `challenge_pre`,
     /// arbitrary data that is bound in the Fiat-Shamir.
     pub fn new_from<R: Rng>(rng: &mut R, wit: &PedersenRandomness, challenge_pre: &[u8]) -> Self {

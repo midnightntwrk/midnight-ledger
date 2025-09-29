@@ -14,14 +14,14 @@
 //! Curve selection for Midnight. This may change over time, but we are likely
 //! to keep:
 //!
-//! * A primary prime field [Fr].
-//! * Embedded elliptic curve points [EmbeddedGroupAffine].
-//! * An Embedded prime field [EmbeddedFr].
+//! * A primary prime field [`Fr`].
+//! * Embedded elliptic curve points [`EmbeddedGroupAffine`].
+//! * An Embedded prime field [`EmbeddedFr`].
 
 use crate::macros::{fr_display, wrap_display, wrap_field_arith, wrap_group_arith};
 use base_crypto::fab::{Aligned, Alignment, AlignmentAtom, AlignmentSegment};
 use fake::{Dummy, Faker};
-use ff::{Field, PrimeField};
+use ff::{Field, FromUniformBytes, PrimeField};
 use group::Group;
 use group::GroupEncoding;
 use midnight_circuits::ecc::curves::CircuitCurve;
@@ -45,7 +45,7 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::Mul;
 use storage::{Storable, arena::ArenaKey, db::DB, storable::Loader};
-
+use zeroize::DefaultIsZeroes;
 /// The outer, main curve
 pub mod outer {
     /// The base prime field, used to represent curve points
@@ -163,6 +163,8 @@ randomised_serialization_test!(Fr);
 #[cfg(feature = "proptest")]
 simple_arbitrary!(Fr);
 
+impl DefaultIsZeroes for Fr {}
+
 impl Tagged for Fr {
     fn tag() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Borrowed("fr-bls")
@@ -185,11 +187,11 @@ impl Distribution<Fr> for Standard {
     }
 }
 
-/// The number of bits required to represet [Fr].
+/// The number of bits required to represent [Fr].
 pub const FR_BITS: usize = <outer::Scalar as PrimeField>::NUM_BITS as usize;
 /// The number of bytes required to represent [Fr].
 pub const FR_BYTES: usize = FR_BITS.div_ceil(8);
-/// The number of bytes storable in an [Fr].
+/// The number of bytes which can fit in an [Fr].
 pub const FR_BYTES_STORED: usize = FR_BYTES - 1;
 
 impl Dummy<Faker> for Fr {
@@ -219,6 +221,8 @@ impl Tagged for EmbeddedFr {
     }
 }
 tag_enforcement_test!(EmbeddedFr);
+
+impl DefaultIsZeroes for EmbeddedFr {}
 
 impl Distribution<EmbeddedFr> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> EmbeddedFr {
@@ -337,7 +341,7 @@ impl TryFrom<Fr> for EmbeddedFr {
 }
 
 impl Fr {
-    /// Interpret a little-endiang bytestring as an [Fr].
+    /// Interpret a little-endiang byte-string as an [Fr].
     pub fn from_le_bytes(bytes: &[u8]) -> Option<Self> {
         let mut repr = [0u8; FR_BYTES];
         if bytes.len() <= repr.len() {
@@ -348,7 +352,13 @@ impl Fr {
         outer::Scalar::from_repr(repr).map(Fr).into()
     }
 
-    /// Output an [Fr] as a little-endian bytesstring
+    /// Initialize an [Fr] from arbitrary 64 bytes (little-endian)
+    /// ensuring the result falls into the space by taking modulo.
+    pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
+        Fr(outer::Scalar::from_uniform_bytes(&bytes))
+    }
+
+    /// Output an [Fr] as a little-endian bytes-string
     ///
     /// # Examples
     ///
@@ -362,7 +372,7 @@ impl Fr {
 }
 
 impl EmbeddedFr {
-    /// Interpret a little-endiang bytestring as an [EmbeddedFr].
+    /// Interpret a little-endiang byte-string as an [`EmbeddedFr`].
     pub fn from_le_bytes(bytes: &[u8]) -> Option<Self> {
         let mut repr = [0u8; FR_BYTES];
         if bytes.len() <= repr.len() {
@@ -373,7 +383,7 @@ impl EmbeddedFr {
         embedded::Scalar::from_repr(repr).map(EmbeddedFr).into()
     }
 
-    /// Output an [EmbeddedFr] as a little-endian bytesstring
+    /// Output an [`EmbeddedFr`] as a little-endian bytes-string
     pub fn as_le_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()
     }

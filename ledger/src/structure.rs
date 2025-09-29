@@ -21,6 +21,7 @@ use crate::error::MalformedTransaction;
 use crate::verify::ProofVerificationMode;
 use base_crypto::BinaryHashRepr;
 use base_crypto::cost_model::RunningCost;
+use base_crypto::cost_model::price_adjustment_function;
 use base_crypto::cost_model::{CostDuration, FeePrices, FixedPoint, SyntheticCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
@@ -299,7 +300,7 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
-    /// estiamted for unproven.
+    /// estimated for unproven.
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -1108,6 +1109,16 @@ pub struct LedgerParameters {
 tag_enforcement_test!(LedgerParameters);
 
 impl LedgerParameters {
+    /// The maximum price adjustment per block with the current parameters, as a multiplicative
+    /// factor (that is: 1.1 would indicate a 10% adjustment). Will always return the positive (>1)
+    /// adjustment factor. Note that negative adjustments are the additive inverse (1.1 has a
+    /// corresponding 0.9 downward adjustment), *not* the multiplicative as might reasonably be
+    /// assumed.
+    pub fn max_price_adjustment(&self) -> FixedPoint {
+        price_adjustment_function(FixedPoint::ONE, self.price_adjustment_a_parameter)
+            + FixedPoint::ONE
+    }
+
     pub fn min_claimable_rewards(&self) -> u128 {
         let Ok(synthetic_fee) =
             Transaction::ClaimRewards::<Signature, ProofMarker, PureGeneratorPedersen, InMemoryDB>(
@@ -1120,7 +1131,7 @@ impl LedgerParameters {
                     kind: ClaimKind::Reward,
                 },
             )
-            .cost(self)
+            .cost(self, true)
         else {
             return u128::MAX;
         };
@@ -1672,8 +1683,26 @@ impl<
 where
     Transaction<S, P, B, D>: Serializable,
 {
-    pub fn fees(&self, params: &LedgerParameters) -> Result<u128, FeeCalculationError> {
-        let synthetic = self.cost(params)?;
+    pub fn fees_with_margin(
+        &self,
+        params: &LedgerParameters,
+        margin: usize,
+    ) -> Result<u128, FeeCalculationError> {
+        let synthetic = self.cost(params, false)?;
+        let normalized = synthetic
+            .normalize(params.limits.block_limits)
+            .ok_or(FeeCalculationError::BlockLimitExceeded)?;
+        let fees_fixed_point = params.fee_prices.overall_cost(&normalized);
+        let margin_fees = fees_fixed_point * params.max_price_adjustment().powi(margin as i32);
+        Ok(margin_fees.into_atomic_units(SPECKS_PER_DUST))
+    }
+
+    pub fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
+        let synthetic = self.cost(params, enforce_time_to_dismiss)?;
         let normalized = synthetic
             .normalize(params.limits.block_limits)
             .ok_or(FeeCalculationError::BlockLimitExceeded)?;
@@ -2013,7 +2042,11 @@ where
         return CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time);
     }
 
-    pub fn cost(&self, params: &LedgerParameters) -> Result<SyntheticCost, FeeCalculationError> {
+    pub fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
         let mut validation_cost = self.validation_cost(&params.cost_model);
         validation_cost.compute_time =
             validation_cost.compute_time / params.cost_model.parallelism_factor;
@@ -2023,7 +2056,7 @@ where
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
         );
-        if cost_to_dismiss.max_time() > time_to_dismiss {
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
             return Err(FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss: cost_to_dismiss.max_time(),
                 allowed_time_to_dismiss: time_to_dismiss,
@@ -2914,6 +2947,13 @@ mod tests {
     use storage::db::InMemoryDB;
 
     use super::*;
+
+    #[test]
+    fn test_max_price_adjustment() {
+        let adj = f64::from(INITIAL_PARAMETERS.max_price_adjustment());
+        assert!(1.045 <= adj);
+        assert!(adj <= 1.047);
+    }
 
     #[test]
     fn test_state_serialized() {

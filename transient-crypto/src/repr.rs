@@ -26,7 +26,7 @@ use storage::Storable;
 use storage::db::DB;
 use storage::storage::Map;
 
-/// A type this implements this can be transformed into an iterator of [Fr]s.
+/// A type this implements this can be transformed into an iterator of [`Fr`]s.
 pub trait FieldRepr {
     /// Writes out `self` as a sequence of [Fr] elements.
     /// As a general rule of thumb, this should usually produces a known number of elements.
@@ -41,7 +41,7 @@ pub trait FieldRepr {
     }
 }
 
-/// A type than can be parsed from a sequence of [Fr]s.
+/// A type than can be parsed from a sequence of [`Fr`]s.
 pub trait FromFieldRepr: Sized {
     /// The number of elements this type can be reconstructed from.
     const FIELD_SIZE: usize;
@@ -132,7 +132,7 @@ impl FromFieldRepr for [u8; 32] {
 }
 
 /// Converts a sequence of field elements into a corresponding byte vector.
-/// Guarantees that the results [FieldRepr] matches the input.
+/// Guarantees that the results [`FieldRepr`] matches the input.
 pub fn bytes_from_field_repr(repr: &mut &[Fr], n: usize) -> Option<Vec<u8>> {
     let stray = n % FR_BYTES_STORED;
     let chunks = n / FR_BYTES_STORED;

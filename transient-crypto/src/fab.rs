@@ -381,7 +381,7 @@ impl FieldRepr for AlignedValue {
     }
 }
 
-/// An extension for the AlignedValue.
+/// An extension for the `AlignedValue`.
 pub trait AlignedValueExt {
     /// Iterate over the field elements in this value, not encoding the alignment itself.
     fn value_only_field_repr<W: MemWrite<Fr>>(&self, writer: &mut W);
@@ -400,8 +400,8 @@ impl AlignedValueExt for AlignedValue {
     }
 }
 
-/// Wrapper around [AlignedValue] whose [FieldRepr] implementation uses
-/// [AlignedValue::value_only_field_repr].
+/// Wrapper around [`AlignedValue`] whose [`FieldRepr`] implementation uses
+/// [`AlignedValue::value_only_field_repr`].
 pub struct ValueReprAlignedValue(pub AlignedValue);
 
 impl From<ValueReprAlignedValue> for Value {
@@ -437,7 +437,7 @@ impl DynAligned for ValueReprAlignedValue {
     }
 }
 
-/// An extension for the ValueAtom.
+/// An extension for the `ValueAtom`.
 pub(crate) trait ValueAtomExt {
     /// The field representation of this atom, against a matching alignment
     /// atom. Returns `false` if the value does not fit.
@@ -514,7 +514,7 @@ impl ValueAtomExt for ValueAtom {
     }
 }
 
-/// An extension for the AlignmentAtom.
+/// An extension for the `AlignmentAtom`.
 pub(crate) trait AlignmentAtomExt {
     fn parse_field_repr(&self, repr: &mut &[Fr]) -> Option<ValueAtom>;
     #[allow(dead_code)]
@@ -593,7 +593,7 @@ impl FieldRepr for AlignmentAtom {
     }
 }
 
-/// An extension for the AlignmentSegmentExt.
+/// An extension for the `AlignmentSegmentExt`.
 pub(crate) trait AlignmentSegmentExt {
     fn max_aligned_size(&self) -> usize;
     fn field_len(&self) -> usize;

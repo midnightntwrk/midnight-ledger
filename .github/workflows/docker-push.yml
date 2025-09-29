@@ -12,8 +12,6 @@ on:
         required: true
       GH_PASSWORD:
         required: true
-      
-
 
 jobs:
   docker:
@@ -34,7 +32,7 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@465a07811f14bebb1938fbed4728c6a1ff8901fc
+        uses: docker/login-action@184bdaa0721073962dff0199f1fb9940f07167d1
         with:
           registry: ghcr.io
           username: ntwrk-bot
@@ -52,7 +50,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -67,7 +65,7 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
-          cache: midnight
+          cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
       - name: Create proof-server images

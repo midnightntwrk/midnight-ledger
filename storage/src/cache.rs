@@ -209,7 +209,7 @@ mod tests {
 
     /// Test that cache allocates backing storage lazily.
     ///
-    /// Assumes we don't have 2^50 bytes of RAM available 🥲
+    /// Assumes we don't have `2^50` bytes of RAM available 🥲
     #[test]
     fn lazy_allocation() {
         let mut cache = Cache::<u32, u32>::new(1 << 50);

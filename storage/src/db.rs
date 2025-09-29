@@ -85,7 +85,7 @@ pub trait DummyArbitrary {}
 ///
 /// # Warning: DB implementations must not enforce logical consistency
 ///
-/// Database impls should be "dumb", in that they just track state computed by
+/// Database implementations should be "dumb", in that they just track state computed by
 /// the `StorageBackend` layer above, which is responsible for logical
 /// consistency concerns (see examples below). There is no expectation that the
 /// `StorageBackend` will write updates to the db in a logically consistent
@@ -112,7 +112,7 @@ pub trait DummyArbitrary {}
 /// - a non-zero gc-root-count may be set on a node that is not present in the
 ///   DB
 ///
-/// # Warning: Footgun
+/// # Warning: Foot-gun
 ///
 /// If adding a method with a default implementation, be sure to add a pass-thru
 /// in the `DB` impl for [`crate::storage::WrappedDB`].
@@ -135,7 +135,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Batch update the database.
     ///
-    /// For DBs that use expensive write transactions, implementors should
+    /// For `DB`s that use expensive write transactions, implementors should
     /// combine many updates in a single transaction.
     fn batch_update<I>(&mut self, iter: I)
     where
@@ -143,7 +143,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Batch get nodes.
     ///
-    /// For DBs that use expensive transactions, implementors should combine
+    /// For `DB`s that use expensive transactions, implementors should combine
     /// many gets into a single transaction.
     #[allow(clippy::type_complexity)]
     fn batch_get_nodes<I>(
@@ -179,7 +179,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// combining all the lookups in a single transaction. How much this buys us
     /// depends on how many nodes we see at each level -- see the
     /// `db::sql::tests::bulk_read_file` test for details -- but a potential way
-    /// to avoid having to reimplement from scratch, would be to expose a way to
+    /// to avoid having to re-implement from scratch, would be to expose a way to
     /// manually manage the transactions for `SqlDB`s.
     #[allow(clippy::type_complexity)]
     fn bfs_get_nodes<C>(
@@ -275,7 +275,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
 /// A dubious default implementation of `DB::batch_update`.
 ///
-/// Note: this implementation is super slow in the case of DBs which
+/// Note: this implementation is super slow in the case of `DB`s which
 /// use expensive write transactions behind the scenes.
 pub fn dubious_batch_update<D: DB, I>(db: &mut D, iter: I)
 where
@@ -293,7 +293,7 @@ where
 
 /// A dubious default implementation of `DB::batch_get_nodes`.
 ///
-/// Note: this implementation is probably slow for DBs which use a
+/// Note: this implementation is probably slow for `DB`s which use a
 /// separate transaction for each read.
 #[allow(clippy::type_complexity)]
 pub fn dubious_batch_get_nodes<D: DB, I>(
@@ -352,7 +352,7 @@ impl<D: DB> Strategy for DummyDBStrategy<D> {
 }
 
 #[cfg(feature = "proptest")]
-/// A dummy Arbitrary impl for InMemoryDB to allow for deriving Arbitrary on Sp<T, D>
+/// A dummy Arbitrary impl for `InMemoryDB` to allow for deriving Arbitrary on Sp<T, D>
 impl<H: WellBehavedHasher> Arbitrary for InMemoryDB<H> {
     type Parameters = ();
     type Strategy = DummyDBStrategy<Self>;
@@ -479,9 +479,9 @@ mod tests {
     }
     /// Speedups for various chunk sizes, for 100,000 keys, 3 runs:
     ///
-    /// 10: 3.2x, 2.9x, 3.1x
-    /// 100: 4.5x, 3.7x, 4.3x
-    /// 1000: 4.8x, 4.6x, 5.3x
+    /// 10: 3.2 times, 2.9 times, 3.1 times
+    /// 100: 4.5 times, 3.7 times, 4.3 times
+    /// 1000: 4.8 times, 4.6 times, 5.3 times
     ///
     /// The above is for tests compiled with optimization, e.g.
     ///
@@ -500,9 +500,9 @@ mod tests {
     }
     /// Speedups for various chunk sizes, for 100,000 keys, 3 runs:
     ///
-    /// 10: 3.2x, 3.2x, 3.0x
-    /// 100: 4.2x, 4.4x, 4.4x
-    /// 1000: 4.6x, 4.8x, 4.3x
+    /// 10: 3.2 times, 3.2 times, 3.0 times
+    /// 100: 4.2 times, 4.4 times, 4.4 times
+    /// 1000: 4.6 times, 4.8 times, 4.3 times
     ///
     /// Total time for each test is about 3.5 seconds.
     ///
@@ -521,16 +521,16 @@ mod tests {
     }
     /// Speedups for various chunk sizes, for 100,000 keys, 3 runs:
     ///
-    /// 10: 1.0x, 1.0x, 0.9x
-    /// 100: 0.9x, 0.9x, 0.9x
-    /// 1000: 0.9x, 0.8x, 1.0x
+    /// 10: 1.0 times, 1.0 times, 0.9 times
+    /// 100: 0.9 times, 0.9 times, 0.9 times
+    /// 1000: 0.9 times, 0.8 times, 1.0 times
     ///
     /// Total time for each test is about 3.5 seconds.
     ///
     /// This is very surprising: performance is *worse* with bulk reads!?
-    /// FIGURED IT OUT: ParityDB is using the default implementation of
-    /// DB::batch_get_nodes, which is just a loop over DB::get_node. TODO: add a
-    /// proper batch_get_nodes implementation to ParityDB and see if this
+    /// FIGURED IT OUT: `ParityDB` is using the default implementation of
+    /// `DB::batch_get_nodes`, which is just a loop over `DB::get_node`. TODO: add a
+    /// proper `batch_get_nodes` implementation to `ParityDB` and see if this
     /// improves ...
     ///
     /// The above is for tests compiled with optimization, e.g.
@@ -553,13 +553,13 @@ mod tests {
     ///
     /// To get a more reliable result from this, it should be a proper
     /// benchmark, but the speedups observed here are already good enough to
-    /// justify implementing the bulk read functionality for SqlDB. However, for
-    /// ParityDb, we actually see *worse* performance with batched reads!
+    /// justify implementing the bulk read functionality for `SqlDB`. However, for
+    /// `ParityDb`, we actually see *worse* performance with batched reads!
     ///
     /// Naively, we might be concerned about the order in which the bulk and
     /// one-by-one lookups are performed, because of caching. But changing the
     /// order of the steps, or running the first step multiple times, doesn't
-    /// noticeably change how long each step takes for SqlDB.
+    /// noticeably change how long each step takes for `SqlDB`.
     fn test_bulk_read<D: DB, F: Fn() -> D>(num_kvs: usize, chunk_size: usize, open_db: F) {
         let mut db = open_db();
         let mut rng = rand::thread_rng();
@@ -615,20 +615,20 @@ mod tests {
 
     const ALL_OPS_NUM_KVS: usize = 100;
 
-    /// Run time, 3 runs, 10,000 kvs: 0.04s, 0.04s, 0.05s
+    /// Run time, 3 runs, 10,000 kvs: 0.04 s, 0.04 s, 0.05 s
     #[test]
     fn all_ops_inmemorydb() {
         let mut db = InMemoryDB::<DefaultHasher>::default();
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
-    /// Run time, 3 runs, 10,000 kvs: 1.73s, 1.78s, 1.76s
+    /// Run time, 3 runs, 10,000 kvs: 1.73 s, 1.78 s, 1.76 s
     #[cfg(feature = "sqlite")]
     #[test]
     fn all_ops_sqldb_memory() {
         let mut db = crate::db::SqlDB::<DefaultHasher>::memory();
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
-    /// Run time, 3 runs, 10,000 kvs: 2.51s, 2.52s, 2.62s
+    /// Run time, 3 runs, 10,000 kvs: 2.51 s, 2.52 s, 2.62 s
     #[cfg(feature = "sqlite")]
     #[test]
     fn all_ops_sqldb_file() {
@@ -644,7 +644,7 @@ mod tests {
         // Turning on WAL reduces test time from 9s to 3.2s.
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
-    /// Run time, 3 runs, 10,000 kvs: 0.33s, 0.39s, 0.35s
+    /// Run time, 3 runs, 10,000 kvs: 0.33 s, 0.39 s, 0.35 s
     #[cfg(feature = "parity-db")]
     #[test]
     fn all_ops_paritydb() {

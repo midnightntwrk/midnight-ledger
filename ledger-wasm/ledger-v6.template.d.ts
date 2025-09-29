@@ -207,8 +207,33 @@ export class Event {
   toString(compact?: boolean): string;
 }
 
+/**
+ * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
+ */
+export class DustSecretKey {
+  private constructor();
+
+  /**
+   * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
+   * @param bigint
+   */
+  static fromBigint(bigint: bigint): DustSecretKey;
+
+  /**
+   * Create an instance of {@link DustSecretKey} from a seed.
+   * @param Uint8Array
+   */
+  static fromSeed(seed: Uint8Array): DustSecretKey;
+
+  publicKey: DustPublicKey;
+
+  /**
+   * Clears the dust secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+}
+
 // TODO: Doc comments
-export type DustSecretKey = bigint;
 export type DustPublicKey = bigint;
 export type DustInitialNonce = string;
 export type DustNonce = bigint;
@@ -216,8 +241,6 @@ export type DustCommitment = bigint;
 export type DustNullifier = bigint;
 
 export function sampleDustSecretKey(): DustSecretKey;
-
-export function dustPublicKeyFromSecret(sk: DustSecretKey): DustPublicKey;
 
 export function updatedValue(ctime: Date, initialValue: bigint, genInfo: DustGenerationInfo, now: Date, params: DustParameters): bigint;
 
@@ -330,6 +353,7 @@ export class DustLocalState {
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
+  readonly params: DustParameters;
 }
 
 /**
@@ -1069,14 +1093,24 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * The underlying resource cost of this transaction.
    */
-  cost(params: LedgerParameters): SyntheticCost;
+  cost(params: LedgerParameters, enforceTimeToDismiss?: bool): SyntheticCost;
 
   /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
    */
-  fees(params: LedgerParameters): bigint;
+  fees(params: LedgerParameters, enforceTimeToDismiss?: bool): bigint;
+
+  /**
+   * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
+   *
+   * As with {@link fees}, this is only accurate for proven transactions.
+   *
+   * Warning: `n` must be a non-negative integer, and it is an exponent, it is
+   * very easy to get a completely unreasonable margin here!
+   */
+  feesWithMargin(params: LedgerParameters, margin: number): bigint;
 
   toString(compact?: boolean): string;
 
@@ -1118,6 +1152,8 @@ export class PreTranscript {
   toString(compact?: boolean): string;
 }
 
+export type PartitionedTranscript = [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined];
+
 /**
  * Computes the communication commitment corresponding to an input/output pair and randomness.
  */
@@ -1128,7 +1164,7 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
  * resulting in guaranteed and fallible {@link Transcript}s, optimally
  * allocated, and heuristically covered for gas fees.
  */
-export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined][];
+export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): PartitionedTranscript[];
 
 /**
  * The hash of a transaction, as a hex-encoded 256-bit bytestring
@@ -1218,6 +1254,15 @@ export class LedgerParameters {
    */
   readonly dust: DustParameters;
 
+  /**
+   * The maximum price adjustment per block with the current parameters, as a multiplicative
+   * factor (that is: 1.1 would indicate a 10% adjustment). Will always return the positive (>1)
+   * adjustment factor. Note that negative adjustments are the additive inverse (1.1 has a
+   * corresponding 0.9 downward adjustment), *not* the multiplicative as might reasonably be
+   * assumed.
+   */
+  maxPriceAdjustment(): number;
+
   serialize(): Uint8Array;
 
   static deserialize(raw: Uint8Array): LedgerParameters;
@@ -1278,11 +1323,18 @@ export class MerkleTreeCollapsedUpdate {
 export class EncryptionSecretKey {
   private constructor();
 
+  /**
+   * Clears the encryption secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+
   test<P extends Proofish>(offer: ZswapOffer<P>): boolean;
 
   yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
+  yesIKnowTheSecurityImplicationsOfThis_taggedSerialize(): Uint8Array;
 
   static deserialize(raw: Uint8Array): EncryptionSecretKey
+  static taggedDeserialize(raw: Uint8Array): EncryptionSecretKey
 }
 
 export class ZswapSecretKeys {
@@ -1298,6 +1350,14 @@ export class ZswapSecretKeys {
    * Use only for compatibility purposes
    */
   static fromSeedRng(seed: Uint8Array): ZswapSecretKeys;
+
+
+  /**
+   * Clears the secret keys, so that they are no longer usable nor held in memory
+   * Note: it does not clear copies of the keys - which is particularly relevant for proof preimages
+   * Note: this will cause all other operations to fail
+   */
+  clear(): void;
 
   readonly coinPublicKey: CoinPublicKey;
   readonly coinSecretKey: CoinSecretKey;

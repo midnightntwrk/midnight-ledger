@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! A trait defining a Storable object, which can be assembled into a tree.
+//! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::arena::{ArenaKey, Sp};
 use crate::db::DB;
@@ -34,7 +34,7 @@ use sha2::Sha256;
 use std::fmt::Debug;
 use std::marker::PhantomData;
 
-/// Supertrait containing all requirements for Hashers
+/// Super-trait containing all requirements for a Hasher
 pub trait WellBehavedHasher: Digest + Send + Sync + Default + Debug + Clone + 'static {}
 
 impl WellBehavedHasher for Sha256 {}
@@ -42,7 +42,7 @@ impl WellBehavedHasher for Sha256 {}
 /// A loader for objects, for use in [`Storable::from_binary_repr`].
 ///
 /// The intent is to instantiate this in different ways for deserializing
-/// objects from the wire, vs deserializing them from the backend.
+/// objects from the wire, vs deserializing them from the back-end.
 pub trait Loader<D: DB> {
     /// Whether to check invariants for this loader.
     ///
@@ -67,7 +67,7 @@ pub trait Loader<D: DB> {
         Ok(obj)
     }
 
-    /// Convience function that takes an iterator over `ArenaKey`s, and returns `Sp<T>` keyed by
+    /// Convenience function that takes an iterator over `ArenaKey`s, and returns `Sp<T>` keyed by
     /// `iter.next()`.
     fn get_next<T: Storable<D>>(
         &self,
@@ -80,13 +80,13 @@ pub trait Loader<D: DB> {
     }
 }
 
-/// A Storable object.
+/// A `Storable` object.
 ///
 /// Some methods have `where Self: Sized` to mark them as "explicitly non
 /// dispatchable", so that `Storable` can be object safe.
 ///
 /// Assertions:
-/// * To maintain an injective relationship between `Arena` and a merkle patricia trie a `Storable`
+/// * To maintain an injective relationship between `Arena` and a Merkle Patricia trie a `Storable`
 ///   object can have no more than 16 children.
 pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     /// Provides an iterator over hashes of child `Sp`s, if any. These hashes
@@ -114,7 +114,7 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     }
 }
 
-/// Helper function for erroring when an unrecognized discriminant is
+/// Helper function, producing an error when an unrecognized discriminant is
 /// encountered in implementing `Storable::from_binary_repr`.
 fn bad_discriminant_error<A>() -> Result<A, std::io::Error> {
     Err(std::io::Error::new(
@@ -123,7 +123,7 @@ fn bad_discriminant_error<A>() -> Result<A, std::io::Error> {
     ))
 }
 
-/// Implements Storable for a type with no children
+/// Implements `Storable` for a type with no children
 macro_rules! base_storable {
     ($val:ty) => {
         impl<D: DB> Storable<D> for $val {
@@ -131,7 +131,7 @@ macro_rules! base_storable {
                 std::vec::Vec::new()
             }
 
-            /// Serializes self, ommitting any children
+            /// Serializes self, omitting any children
             fn to_binary_repr<W: std::io::Write>(
                 &self,
                 writer: &mut W,
@@ -241,7 +241,7 @@ impl<T: Storable<D>, D: DB> Storable<D> for Option<Sp<T, D>> {
         self.clone().map_or(vec![], |sp| vec![sp.root.clone()])
     }
 
-    /// Serializes self, ommitting any children
+    /// Serializes self, omitting any children
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
         match self {
             Some(_) => <u8 as Serializable>::serialize(&0, writer),
@@ -273,7 +273,7 @@ macro_rules! tuple_storable {
                 vec![self.$aidx.hash().clone().into() $(, self.$asidx.hash().clone().into())*]
             }
 
-            /// Serializes self, ommitting any children
+            /// Serializes self, omitting any children
             fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error> {
                 Ok(())
             }
@@ -425,7 +425,7 @@ tuple_storable!(
 
 #[macro_export]
 #[cfg(feature = "proptest")]
-/// Proptests for asserting storable properties
+/// Proptests for asserting `Storable` properties
 macro_rules! randomised_storable_test {
     ($type:ty) => {
         #[cfg(test)]

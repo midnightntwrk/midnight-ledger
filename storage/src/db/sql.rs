@@ -13,7 +13,7 @@
 
 //! An implementation of `super::DB` backed by an SQLite database.
 //!
-//! Because our needs are very simple, we use the barebones `rusqlite` crate,
+//! Because our needs are very simple, we use the bare-bones `rusqlite` crate,
 //! instead of something fancier like `diesel` (a full-on ORM, which seems like
 //! overkill) or `sqlx` (a db agnostic, async-first SQL toolkit, but claimed to
 //! be "7-70x slower" than `rusqlite` and `diesel`).
@@ -113,7 +113,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     /// # Note
     ///
     /// Nothing is stopping someone else from opening the same DB via some other
-    /// means, e.g. the command line Sqlite client. Here we just prevent
+    /// means, e.g. the command line SQLite client. Here we just prevent
     /// creating another `SqlDB` instance.
     pub fn exclusive_file<P: AsRef<Path>>(path: P) -> Self {
         Self::file(path, true)
@@ -273,11 +273,11 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     ///
     /// Note: If `closure` does any DB modification, then it must use `behavior
     /// = Immediate` to start a write transaction right away, otherwise we may
-    /// get a non-timeout SQL_BUSY error with concurrency: with `behavior =
+    /// get a non-timeout `SQL_BUSY` error with concurrency: with `behavior =
     /// Deferred`, a read transaction is started, and then SQLite attempts to
     /// upgrade it to a write transaction on the first mutating SQL
     /// statement. However, if upgrading to a write transaction is not possible,
-    /// the mutating SQL statement will fail immediately with SQL_BUSY. Otoh, if
+    /// the mutating SQL statement will fail immediately with `SQL_BUSY`. On the other hand, if
     /// we start with a write transaction immediately, and there is a conflict,
     /// we'll block for the SQLite busy timeout before failing.
     ///
@@ -315,13 +315,13 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     ///
     /// # Note
     ///
-    /// This version of GC assumes that the backend has no pending writes, and
+    /// This version of GC assumes that the back-end has no pending writes, and
     /// so would require a flush before calling it. A backend-aware GC
     /// implementation is provided by [`crate::backend::StorageBackend::gc`].
     ///
     /// # Note
     ///
-    /// This gc implementation assumes the correctness of the reference counts
+    /// This GC implementation assumes the correctness of the reference counts
     /// stored in the db, and doesn't actually do a reachability search from the
     /// roots. This is much faster than searching the entire db from the roots,
     /// but means this function is not sufficient to clean up the db after a
@@ -385,7 +385,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
         })
     }
 
-    /// Implementation of `Clone::clone` for testing `SqlDB::memory` DBs concurrently.
+    /// Implementation of `Clone::clone` for testing `SqlDB::memory` `DB`s concurrently.
     #[cfg(test)]
     pub(crate) fn clone_memory_db(&self) -> Self {
         match self.lock_file {
@@ -666,7 +666,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
 impl<H: WellBehavedHasher> DummyArbitrary for SqlDB<H> {}
 
 #[cfg(feature = "proptest")]
-/// A dummy Arbitrary impl for SqlDB to allow for deriving Arbitrary on Sp<T, D>
+/// A dummy Arbitrary impl for `SqlDB` to allow for deriving Arbitrary on Sp<T, D>
 impl<H: WellBehavedHasher> Arbitrary for SqlDB<H> {
     type Parameters = ();
     type Strategy = DummyDBStrategy<Self>;
@@ -686,7 +686,7 @@ mod tests {
     use std::collections::HashSet;
 
     /// This test always fails due to db locking errors. Since we don't intend
-    /// to use the memory backend anyway, not going to fix this.
+    /// to use the memory back-end anyway, not going to fix this.
     #[test]
     #[ignore = "always fails, indep of busy timeout"]
     fn concurrent_access_memory() {
@@ -770,9 +770,9 @@ mod tests {
     }
 
     /// Test the db-level garbage collection. Note this is not the same as the
-    /// backend-level gc, which is what we actually use in practice. This
-    /// db-level gc can only be run when the db is in a logically consistent
-    /// state, i.e. when there are no pending writes in the backend.
+    /// backend-level GC, which is what we actually use in practice. This
+    /// db-level GC can only be run when the db is in a logically consistent
+    /// state, i.e. when there are no pending writes in the back-end.
     #[test]
     fn db_level_gc() {
         use crate::backend::raw_node::RawNode;
@@ -847,10 +847,10 @@ mod tests {
     ////////////////////////////////////////////////////////////////
     // Tests for exclusive and shared locking.
 
-    /// Helper trait for reusing the same test code for both local and multi
-    /// thread testing. In Haskell we'd just make `test_exclusivity` take an
-    /// `(() -> IO ()) -> IO ()` arg, but in Rust I couldn't figure out how to
-    /// make an analog of that typecheck without introducing indirection via
+    /// Helper trait for reusing the same test code for both local and multi-thread
+    /// testing. In Haskell we'd just make `test_exclusivity` take an
+    /// `(() -> IO ()) -> IO ()` argument, but in Rust I couldn't figure out how to
+    /// make an analog of that type-check without introducing indirection via
     /// this `Runner` trait 🤷 Yes, this is probably overkill compared to
     /// copy-pasting the test once ...
     trait Runner {

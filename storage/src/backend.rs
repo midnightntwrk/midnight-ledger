@@ -94,7 +94,7 @@ enum CacheValue<H: WellBehavedHasher> {
     ///
     /// Possible optimization: we could avoid storing the `obj` here, and so
     /// also avoid looking it up in the DB until we were ready to apply the
-    /// update (which will be never for temp updates). However, the tradeoff is
+    /// update (which will be never for temp updates). However, the trade-off is
     /// that this would prevent us from failing fast if there was a bug whereby
     /// a non-existent object was referenced via a child key, or a ref count
     /// became negative. I.e. by having the object here, we're able to do sanity
@@ -152,7 +152,7 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 }
 
 #[derive(Debug)]
-/// A storage backend, that wraps interactions with the database and provides
+/// A storage back-end, that wraps interactions with the database and provides
 /// in-memory caching. Its public API provides a mapping from `ArenaKey` keys
 /// to `OnDiskObject` objects, and a way to persist such objects to the DB,
 /// taking care of reference counting along the way.
@@ -175,13 +175,13 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 ///
 /// 2) reducing disk writes: the arena creates a lot of *temporary* data
 ///    structures that will never be persisted -- i.e. be marked as a gc-root or
-///    be in the transitive closure of a gc root -- and so instead of eagerly
+///    be in the transitive closure of a GC root -- and so instead of eagerly
 ///    writing these data to disk, we keep them in memory in case they get
 ///    dropped right away. Also, we track reference counts in the DB, and so by
 ///    doing reference count updates only in cache where possible, we avoid
 ///    having to write intermediate states to disk.
 ///
-/// 3) bulking disk writes: transactions in Sqlite (used by
+/// 3) bulking disk writes: transactions in SQLite (used by
 ///    [`crate::db::SqlDB`]) are very expensive, and so we want to do many
 ///    writes at once when possible. By collecting the potential writes in
 ///    memory in the cache, we can then flush them periodically en masse.
@@ -218,20 +218,20 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// # Assumptions
 ///
 /// - the database is not changing under our feet, meaning in particular that
-///   there is only one backend. When an object `obj` is `cache`d into the
-///   backend, what happens depends on whether `obj` is already in the
+///   there is only one back-end. When an object `obj` is `cache`d into the
+///   back-end, what happens depends on whether `obj` is already in the
 ///   database. To support the database changing under our feet, we would need
 ///   to handle the case where `obj` was in the database when it was `cache`d,
 ///   but was then removed from or modified in the database by another thread
 ///   before `obj` was `uncache`d.
 ///
 /// - there is only one "logical" arena calling into / manipulating the
-///   backend. Here "one logical arena" includes multiple clones of a single
+///   back-end. Here "one logical arena" includes multiple clones of a single
 ///   initial arena, since cloned arenas share their metadata structures and
 ///   avoid `cache`ing the same object more than once. Indeed, the key
 ///   assumption we make here is that no object will be `cache`ed more than
 ///   once, independently. It would be possibly to support multiple, distinct
-///   arenas -- non-clones, with distinct metadata -- manipulating the backend,
+///   arenas -- non-clones, with distinct metadata -- manipulating the back-end,
 ///   but would require more careful tracking of `cache` calls, to handle the case
 ///   where two different arenas `cache` the same object, and we need to be
 ///   careful to keep it around until all these arena's are done using it.
@@ -239,11 +239,11 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// - objects are `cache`d only after all of their children have been `cache`d
 ///   or are already in the db. In particular, this means the arena is
 ///   responsible for sanitizing user controlled inputs before passing them to
-///   the backend, to make sure they are well formed, in terms of children
+///   the back-end, to make sure they are well formed, in terms of children
 ///   references.
 ///
 /// - if the caller `cache`s an object `obj`, and wants
-///   `obj` to continue to exist in the backend, then before `uncache`ing `obj`,
+///   `obj` to continue to exist in the back-end, then before `uncache`ing `obj`,
 ///   the user needs to first do either of:
 ///
 ///   - `cache` but not `uncache` another object which has `obj` in its
@@ -263,12 +263,12 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// value stored in memory under that key describes the canonical version of the
 /// object.
 ///
-/// The backend provides various public APIs related to manipulating in-memory
+/// The back-end provides various public APIs related to manipulating in-memory
 /// representations of objects. The `get` API brings an object into memory from
 /// the database. The `cache` API attempts to create a new object in memory,
 /// but falls back on any existing version already in memory or the DB. The
-/// `uncache` API informs the backend that an object is no longer of interest to
-/// the caller, which allows the backend to remove it from memory if it has no
+/// `uncache` API informs the back-end that an object is no longer of interest to
+/// the caller, which allows the back-end to remove it from memory if it has no
 /// references or pending updates in memory. These APIs act on `ArenaKey` keys
 /// and `OnDiskObject` values, but internally manipulate more complex states, in
 /// the form of `CacheValue` values.
@@ -280,12 +280,12 @@ pub struct StorageBackend<D: DB> {
     ///
     /// This is the *number* of cached objects, not the memory consumed by them.
     cache_size: usize,
-    /// Bounded, in-memory lru read cache. Objects automatically fall off the
+    /// Bounded, in-memory LRU read cache. Objects automatically fall off the
     /// end when the cache is at capacity.
     ///
     /// This cache *only* contains `CacheValue::Read` values.
     read_cache: Cache<ArenaKey<D::Hasher>, CacheValue<D::Hasher>>,
-    /// Un-bounded, in-memory lru write cache. The place where new in-memory
+    /// Un-bounded, in-memory LRU write cache. The place where new in-memory
     /// objects go initially. This cache is brought down to `self.cache_size`
     /// when a `self.flush_*` operation is run, and we refer to objects flushed
     /// this way as "evictions".
@@ -307,12 +307,12 @@ pub struct StorageBackendStats {
     /// memory.
     pub get_cache_hits: usize,
     /// Number of times `get` was called, the requested object was not found in
-    /// memory, and the backend attempted to read it from the DB.
+    /// memory, and the back-end attempted to read it from the DB.
     pub get_cache_misses: usize,
 }
 
 impl<D: DB> StorageBackend<D> {
-    /// Create a new StorageBackend with cache bound `cache_size` and optional
+    /// Create a new `StorageBackend` with cache bound `cache_size` and optional
     /// database.
     ///
     /// If `cache_size` is 0, then the read cache is unbounded.
@@ -443,7 +443,7 @@ impl<D: DB> StorageBackend<D> {
     /// have already been `cache`d, or are already in the DB.
     ///
     /// If the object is not in the DB, then it will continue to exist at least
-    /// until `uncache`d, altho it may get written to disk if evicted from the
+    /// until `uncache`d, although it may get written to disk if evicted from the
     /// write cache.
     ///
     /// In all cases, `cache`ing an object moves it to the front of the cache.
@@ -580,13 +580,13 @@ impl<D: DB> StorageBackend<D> {
         }
     }
 
-    /// Unmark `key` as GC root. See [`Self::persist`].
+    /// Un-mark `key` as GC root. See [`Self::persist`].
     pub fn unpersist(&mut self, key: &ArenaKey<D::Hasher>) {
         self.update_counts(&[key.clone()], Delta::new_root_delta(-1));
     }
 
     /// Mark `key` as a GC root, meaning it will be persisted across GC runs,
-    /// even if no other data references it. Use `unpersist` to unmark.
+    /// even if no other data references it. Use `unpersist` to un-mark.
     ///
     /// NOTE: The same `key` can be `persist`ed multiple times, in which case it
     /// needs to be `unpersist`ed the same number of times to stop being treated as
@@ -601,7 +601,7 @@ impl<D: DB> StorageBackend<D> {
     /// Nodes up to and including 0-indexed depth `depth`, i.e. where `key` is
     /// for node at depth 0.
     ///
-    /// The `truncate` argument, if true, means the pre fetch bfs will be
+    /// The `truncate` argument, if true, means the pre-fetch BFS will be
     /// truncated at nodes that are already in memory. Note that if using
     /// `truncate == false`, and calling `pre_fetch` many times, you can end
     /// up doing `O(n^2)` work when getting `n` nodes, if the nodes are pre-fetched
@@ -746,7 +746,7 @@ impl<D: DB> StorageBackend<D> {
     ///
     /// # Note
     ///
-    /// This gc implementation assumes the correctness of the reference counts
+    /// This GC implementation assumes the correctness of the reference counts
     /// stored in the db and memory, and doesn't actually do a reachability
     /// search from the roots. This is much faster than searching the entire db
     /// from the roots, but means this function is not sufficient to clean up
@@ -1112,7 +1112,7 @@ impl<H: WellBehavedHasher> PartialEq for OnDiskObject<H> {
 }
 
 impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
-    /// Generate a random OnDiskObject with small internal vectors.
+    /// Generate a random `OnDiskObject` with small internal vectors.
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> OnDiskObject<H> {
         // Generate a vector of length at most 10.
         fn rand_vec<T, R: rand::prelude::Rng + ?Sized>(rng: &mut R) -> std::vec::Vec<T>
@@ -1171,7 +1171,7 @@ pub(crate) mod raw_node {
             }
         }
 
-        /// Cache insert node into backend, which will calculate correct ref counts.
+        /// Cache insert node into back-end, which will calculate correct ref counts.
         pub(crate) fn cache_into_backend<D: DB<Hasher = H>>(
             &self,
             backend: &mut StorageBackend<D>,
@@ -1745,7 +1745,7 @@ mod tests {
         assert_eq!(backend.get_roots(), HashMap::new());
     }
 
-    /// Test that pre_fetch via get fill the cache in traversal order, taking
+    /// Test that `pre_fetch` via get fill the cache in traversal order, taking
     /// into account cache size limitations.
     #[test]
     fn pre_fetch_inmemorydb() {
