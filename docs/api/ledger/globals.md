@@ -109,6 +109,7 @@
 - [Nonce](type-aliases/Nonce.md)
 - [Nullifier](type-aliases/Nullifier.md)
 - [Op](type-aliases/Op.md)
+- [PartitionedTranscript](type-aliases/PartitionedTranscript.md)
 - [ProofErasedTransaction](type-aliases/ProofErasedTransaction.md)
 - [Proofish](type-aliases/Proofish.md)
 - [ProvingKeyMaterial](type-aliases/ProvingKeyMaterial.md)
