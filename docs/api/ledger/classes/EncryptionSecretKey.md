@@ -11,6 +11,20 @@ a given offer contains outputs addressed to this user
 
 ## Methods
 
+### clear()
+
+```ts
+clear(): void;
+```
+
+Clears the encryption secret key, so that it is no longer usable nor held in memory
+
+#### Returns
+
+`void`
+
+***
+
 ### test()
 
 ```ts
@@ -47,10 +61,40 @@ yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
 
 ***
 
+### yesIKnowTheSecurityImplicationsOfThis\_taggedSerialize()
+
+```ts
+yesIKnowTheSecurityImplicationsOfThis_taggedSerialize(): Uint8Array;
+```
+
+#### Returns
+
+`Uint8Array`
+
+***
+
 ### deserialize()
 
 ```ts
 static deserialize(raw): EncryptionSecretKey;
+```
+
+#### Parameters
+
+##### raw
+
+`Uint8Array`
+
+#### Returns
+
+`EncryptionSecretKey`
+
+***
+
+### taggedDeserialize()
+
+```ts
+static taggedDeserialize(raw): EncryptionSecretKey;
 ```
 
 #### Parameters
