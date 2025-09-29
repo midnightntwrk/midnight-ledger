@@ -1093,14 +1093,14 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * The underlying resource cost of this transaction.
    */
-  cost(params: LedgerParameters, enforceTimeToDismiss?: boolean): SyntheticCost;
+  cost(params: LedgerParameters, enforceTimeToDismiss?: bool): SyntheticCost;
 
   /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
    */
-  fees(params: LedgerParameters, enforceTimeToDismiss?: boolean): bigint;
+  fees(params: LedgerParameters, enforceTimeToDismiss?: bool): bigint;
 
   /**
    * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
