@@ -111,7 +111,7 @@ static newContractOwned(
    coin, 
    segment, 
    contract, 
-state): ZswapInput<PreProof>;
+   state): UnprovenInput;
 ```
 
 #### Parameters
@@ -134,4 +134,4 @@ state): ZswapInput<PreProof>;
 
 #### Returns
 
-`ZswapInput`\<[`PreProof`](PreProof.md)\>
+[`UnprovenInput`](../type-aliases/UnprovenInput.md)

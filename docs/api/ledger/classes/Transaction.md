@@ -112,7 +112,7 @@ Enforces binding for this transaction. This is irreversible.
 ### cost()
 
 ```ts
-cost(params): SyntheticCost;
+cost(params, enforceTimeToDismiss?): SyntheticCost;
 ```
 
 The underlying resource cost of this transaction.
@@ -122,6 +122,10 @@ The underlying resource cost of this transaction.
 ##### params
 
 [`LedgerParameters`](LedgerParameters.md)
+
+##### enforceTimeToDismiss?
+
+`boolean`
 
 #### Returns
 
@@ -160,7 +164,7 @@ Removes signatures from this transaction.
 ### fees()
 
 ```ts
-fees(params): bigint;
+fees(params, enforceTimeToDismiss?): bigint;
 ```
 
 The cost of this transaction, in SPECKs.
@@ -172,6 +176,39 @@ Note that this is *only* accurate when called with proven transactions.
 ##### params
 
 [`LedgerParameters`](LedgerParameters.md)
+
+##### enforceTimeToDismiss?
+
+`boolean`
+
+#### Returns
+
+`bigint`
+
+***
+
+### feesWithMargin()
+
+```ts
+feesWithMargin(params, margin): bigint;
+```
+
+The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
+
+As with [fees](#fees), this is only accurate for proven transactions.
+
+Warning: `n` must be a non-negative integer, and it is an exponent, it is
+very easy to get a completely unreasonable margin here!
+
+#### Parameters
+
+##### params
+
+[`LedgerParameters`](LedgerParameters.md)
+
+##### margin
+
+`number`
 
 #### Returns
 
@@ -436,7 +473,7 @@ static fromParts(
    network_id, 
    guaranteed?, 
    fallible?, 
-intent?): Transaction<SignatureEnabled, PreProof, PreBinding>;
+   intent?): UnprovenTransaction;
 ```
 
 Creates a transaction from its parts.
@@ -449,19 +486,19 @@ Creates a transaction from its parts.
 
 ##### guaranteed?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### fallible?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### intent?
 
-[`Intent`](Intent.md)\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenIntent`](../type-aliases/UnprovenIntent.md)
 
 #### Returns
 
-`Transaction`\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenTransaction`](../type-aliases/UnprovenTransaction.md)
 
 ***
 
@@ -472,7 +509,7 @@ static fromPartsRandomized(
    network_id, 
    guaranteed?, 
    fallible?, 
-intent?): Transaction<SignatureEnabled, PreProof, PreBinding>;
+   intent?): UnprovenTransaction;
 ```
 
 Creates a transaction from its parts, randomizing the segment ID to better
@@ -486,19 +523,19 @@ allow merging.
 
 ##### guaranteed?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### fallible?
 
-[`ZswapOffer`](ZswapOffer.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
 
 ##### intent?
 
-[`Intent`](Intent.md)\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenIntent`](../type-aliases/UnprovenIntent.md)
 
 #### Returns
 
-`Transaction`\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenTransaction`](../type-aliases/UnprovenTransaction.md)
 
 ***
 

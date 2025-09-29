@@ -338,7 +338,7 @@ raw): Intent<S, P, B>;
 ### new()
 
 ```ts
-static new(ttl): Intent<SignatureEnabled, PreProof, PreBinding>;
+static new(ttl): UnprovenIntent;
 ```
 
 #### Parameters
@@ -349,4 +349,4 @@ static new(ttl): Intent<SignatureEnabled, PreProof, PreBinding>;
 
 #### Returns
 
-`Intent`\<[`SignatureEnabled`](SignatureEnabled.md), [`PreProof`](PreProof.md), [`PreBinding`](PreBinding.md)\>
+[`UnprovenIntent`](../type-aliases/UnprovenIntent.md)

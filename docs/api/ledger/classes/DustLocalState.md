@@ -26,6 +26,14 @@ new DustLocalState(params): DustLocalState;
 
 ## Properties
 
+### params
+
+```ts
+readonly params: DustParameters;
+```
+
+***
+
 ### utxos
 
 ```ts
@@ -83,7 +91,7 @@ replayEvents(sk, events): DustLocalState;
 
 ##### sk
 
-`bigint`
+[`DustSecretKey`](DustSecretKey.md)
 
 ##### events
 
@@ -121,7 +129,7 @@ spend(
 
 ##### sk
 
-`bigint`
+[`DustSecretKey`](DustSecretKey.md)
 
 ##### utxo
 
