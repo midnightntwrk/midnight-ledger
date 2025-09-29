@@ -1131,7 +1131,7 @@ impl LedgerParameters {
                     kind: ClaimKind::Reward,
                 },
             )
-            .cost(self)
+            .cost(self, true)
         else {
             return u128::MAX;
         };
@@ -1688,7 +1688,7 @@ where
         params: &LedgerParameters,
         margin: usize,
     ) -> Result<u128, FeeCalculationError> {
-        let synthetic = self.cost(params)?;
+        let synthetic = self.cost(params, false)?;
         let normalized = synthetic
             .normalize(params.limits.block_limits)
             .ok_or(FeeCalculationError::BlockLimitExceeded)?;
@@ -1697,8 +1697,12 @@ where
         Ok(margin_fees.into_atomic_units(SPECKS_PER_DUST))
     }
 
-    pub fn fees(&self, params: &LedgerParameters) -> Result<u128, FeeCalculationError> {
-        let synthetic = self.cost(params)?;
+    pub fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
+        let synthetic = self.cost(params, enforce_time_to_dismiss)?;
         let normalized = synthetic
             .normalize(params.limits.block_limits)
             .ok_or(FeeCalculationError::BlockLimitExceeded)?;
@@ -2038,7 +2042,11 @@ where
         return CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time);
     }
 
-    pub fn cost(&self, params: &LedgerParameters) -> Result<SyntheticCost, FeeCalculationError> {
+    pub fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
         let mut validation_cost = self.validation_cost(&params.cost_model);
         validation_cost.compute_time =
             validation_cost.compute_time / params.cost_model.parallelism_factor;
@@ -2048,7 +2056,7 @@ where
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
         );
-        if cost_to_dismiss.max_time() > time_to_dismiss {
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
             return Err(FeeCalculationError::OutsideTimeToDismiss {
                 time_to_dismiss: cost_to_dismiss.max_time(),
                 allowed_time_to_dismiss: time_to_dismiss,
