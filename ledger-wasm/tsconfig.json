@@ -11,5 +11,5 @@
     "rootDir": "."
   },
   "include": ["."],
-  "exclude": ["node_modules", "ledger.template.d.ts"]
+  "exclude": ["node_modules", "ledger-v6.template.d.ts"]
 }
