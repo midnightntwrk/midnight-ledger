@@ -45,7 +45,7 @@ fn sync_prove(
 pub fn zswap_ledger(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut zswap_local_state = ZswapLocalState::<InMemoryDB>::new();
-    let keys = SecretKeys::from_rng_seed(&mut rng);
+    let keys = SecretKeys::from_rng_seed(&mut rng).unwrap();
     let zswap_state: ZswapLedgerState<InMemoryDB> = ZswapLedgerState::new();
     let coin = CoinInfo {
         nonce: OsRng.r#gen(),
@@ -104,7 +104,7 @@ pub fn zswap_ledger(c: &mut Criterion) {
 pub fn zswap_local(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut zswap_state = ZswapLocalState::<InMemoryDB>::new();
-    let keys = SecretKeys::from_rng_seed(&mut rng);
+    let keys = SecretKeys::from_rng_seed(&mut rng).unwrap();
     let resolver = ZswapResolver(
         MidnightDataProvider::new(
             data_provider::FetchMode::Synchronous,
