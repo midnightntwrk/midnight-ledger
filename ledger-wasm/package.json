@@ -1,5 +1,5 @@
 {
-  "name": "@midnight/ledger",
+  "name": "@midnight/ledger-v6",
   "license": "Apache-2.0",
   "version": "6.1.0-alpha.3",
   "devDependencies": {
