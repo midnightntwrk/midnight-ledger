@@ -22,7 +22,6 @@ import {
   type DustOutput,
   DustParameters,
   type DustPublicKey,
-  dustPublicKeyFromSecret,
   DustRegistration,
   type DustSecretKey,
   Intent,
@@ -69,12 +68,13 @@ import {
 } from '@/test-objects';
 
 class DustKey {
-  secretKey: DustSecretKey;
+  readonly secretKey: DustSecretKey;
+
   constructor(secretKey: DustSecretKey) {
     this.secretKey = secretKey;
   }
   publicKey(): DustPublicKey {
-    return dustPublicKeyFromSecret(this.secretKey);
+    return this.secretKey.publicKey;
   }
 }
 
@@ -214,7 +214,7 @@ export class TestState {
     const reg = new DustRegistration<SignatureEnabled>(
       SignatureMarker.signature,
       this.nightKey.verifyingKey(),
-      dustPublicKeyFromSecret(this.dustKey.secretKey),
+      this.dustKey.publicKey(),
       0n
     );
     const actions: DustActions<SignatureEnabled, PreProof> = new DustActions<SignatureEnabled, PreProof>(

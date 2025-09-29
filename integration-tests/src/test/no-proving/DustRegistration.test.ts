@@ -13,7 +13,6 @@
 
 import { expect } from 'vitest';
 import {
-  dustPublicKeyFromSecret,
   DustRegistration,
   sampleDustSecretKey,
   sampleSigningKey,
@@ -36,7 +35,7 @@ describe('Ledger API - DustRegistration', () => {
   test('should print out information as string', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
     const dustRegistration = new DustRegistration(
@@ -61,7 +60,7 @@ describe('Ledger API - DustRegistration', () => {
   test('should serialize and deserialize', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
 
@@ -85,7 +84,7 @@ describe('Ledger API - DustRegistration', () => {
   test('should have all getters valid', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
 
@@ -113,7 +112,7 @@ describe('Ledger API - DustRegistration', () => {
   test('should have all setters valid', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signature = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
 
@@ -127,7 +126,7 @@ describe('Ledger API - DustRegistration', () => {
 
     const signingKeyUpdated = sampleSigningKey();
     const nightKeyUpdated = signatureVerifyingKey(signingKeyUpdated);
-    const dustAddressUpdated = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddressUpdated = sampleDustSecretKey().publicKey;
     const allowFeePaymentUpdated = 0n;
     const signatureUpdated = new SignatureEnabled(signData(signingKeyUpdated, new Uint8Array(32)));
 
@@ -153,7 +152,7 @@ describe('Ledger API - DustRegistration', () => {
   test('should accept only signature or signature-erased as signature marker', () => {
     const signingKey = sampleSigningKey();
     const nightKey = signatureVerifyingKey(signingKey);
-    const dustAddress = dustPublicKeyFromSecret(sampleDustSecretKey());
+    const dustAddress = sampleDustSecretKey().publicKey;
 
     const signatureEnabled = new SignatureEnabled(signData(signingKey, new Uint8Array(32)));
     const signatureErased = undefined;

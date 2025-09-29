@@ -88,13 +88,19 @@ export type RunningCost = {
 };
 
 /**
- * A user secret key capable of sending Zswap coins, as a hex-encoded 35-byte
- * string
+ * Holds the coin secret key of a user, serialized as a hex-encoded 32-byte string
  */
 export class CoinSecretKey {
   private constructor();
 
+  /**
+   * Clears the coin secret key, so that it is no longer usable nor held in memory
+   */
+  clear(): void;
+
   yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array;
+
+  static deserialize(raw: Uint8Array): CoinSecretKey
 }
 
 /**
@@ -540,12 +546,17 @@ export function maxField(): bigint;
 /**
  * Converts input, output, and transcript information into a proof preimage
  * suitable to pass to a `ProvingProvider`.
+ *
+ * The `key_location` parameter is a string used to identify the circuit by
+ * proving machinery, for backwards-compatibility, if unset it defaults to
+ * `'dummy'`.
  */
 export function proofDataIntoSerializedPreimage(
   input: AlignedValue,
   output: AlignedValue,
   public_transcript: Op<AlignedValue>[],
-  private_transcript_outputs: AlignedValue[]
+  private_transcript_outputs: AlignedValue[],
+  key_location?: string,
 ): Uint8Array;
 
 /**

@@ -47,7 +47,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@08dcb3a5e62fa31e2da3d490afc4176ef55ecd72
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -62,11 +62,11 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
-          cache: midnight
+          cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f0deed1e0edfc6a9be95417288c0e1099b1eeec3
+        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -93,14 +93,14 @@ jobs:
           grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
 
       - name: Upload test report artifact
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: success() || failure()
         with:
           name: Coverage Report
           path: target/coverage/html
 
       - name: Upload lcov test report artifact
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: success() || failure()
         with:
           name: Lcov Coverage Report

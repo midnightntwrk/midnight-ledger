@@ -119,6 +119,6 @@ describe.concurrent('Ledger API - TransactionBig [@slow][@proving]', () => {
 
       assertSerializationSuccess(transaction, SignatureMarker.signature, ProofMarker.proof, BindingMarker.preBinding);
     },
-    5 * 60000
+    15 * 60000
   );
 });

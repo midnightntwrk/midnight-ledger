@@ -21,10 +21,9 @@ use crate::structure::{
     STARS_PER_NIGHT, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
-use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::{
     MemWrite,
-    hash::{HashOutput, persistent_commit},
+    hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
     signatures::VerifyingKey,
     time::{Duration, Timestamp},
 };
@@ -71,6 +70,7 @@ use transient_crypto::{
     proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
     repr::FieldRepr,
 };
+use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
 #[cfg(feature = "proof-verifying")]
@@ -160,13 +160,15 @@ impl From<HashOutput> for DustCommitment {
     }
 }
 
+pub type Seed = [u8; 32];
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
 #[storable(base)]
 #[tag = "dust-public-key[v1]"]
 pub struct DustPublicKey(pub Fr);
 tag_enforcement_test!(DustPublicKey);
 
-#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
+#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
 #[storable(base)]
 #[tag = "dust-secret-key[v1]"]
 pub struct DustSecretKey(pub Fr);
@@ -195,6 +197,38 @@ impl DustSecretKey {
             transient_hash(&(initial_nonce, seq, if seq == 0 { pk.0 } else { self.0 }).field_vec())
         })
     }
+
+    pub fn derive_secret_key(seed: &Seed) -> Self {
+        const DOMAIN_SEPARATOR: &[u8; 12] = b"midnight:dsk";
+        const NUMBER_OF_BYTES: usize = 64;
+        let raw_bytes = DustSecretKey::sample_bytes(seed, NUMBER_OF_BYTES, DOMAIN_SEPARATOR);
+        let raw_bytes_arr: [u8; 64] = raw_bytes.clone().try_into().unwrap();
+        DustSecretKey(Fr::from_uniform_bytes(&raw_bytes_arr))
+    }
+
+    pub fn sample_bytes(seed: &Seed, no_of_bytes: usize, domain_separator: &[u8]) -> Vec<u8> {
+        let hash_bytes = PERSISTENT_HASH_BYTES;
+        let rounds = no_of_bytes.div_ceil(hash_bytes);
+        let mut res: Vec<u8> = Vec::new();
+        for round in 0..rounds {
+            let mut outer_writer = PersistentHashWriter::new();
+            MemWrite::write(&mut outer_writer, domain_separator);
+            MemWrite::write(&mut outer_writer, &{
+                let mut inner_writer = PersistentHashWriter::new();
+                MemWrite::write(&mut inner_writer, &((round as u64).to_le_bytes()));
+                MemWrite::write(&mut inner_writer, seed);
+                inner_writer.finalize().0
+            });
+            let round_hash = outer_writer.finalize();
+            let bytes_to_add = hash_bytes.min(no_of_bytes - round * 32);
+            res.extend_from_slice(&round_hash.0[0..bytes_to_add])
+        }
+        res
+    }
+
+    pub fn repr(&self) -> Vec<u8> {
+        self.0.as_le_bytes()
+    }
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
@@ -208,14 +242,13 @@ pub(crate) fn initial_nonce(output_no: u32, intent_hash: IntentHash) -> InitialN
 }
 
 impl UtxoSpend {
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
 
 impl Utxo {
-    #[allow(unused)]
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
@@ -1268,7 +1301,7 @@ pub struct DustLocalState<D: DB> {
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     sync_time: Timestamp,
-    params: DustParameters,
+    pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 
@@ -1686,6 +1719,12 @@ pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]
 mod tests {
+    use super::{DustSecretKey, Seed};
+    use hex::FromHex;
+    use serde::de::{Error, Unexpected};
+    use serde::{Deserialize, Deserializer};
+    use std::fs;
+
     #[cfg(feature = "proving")]
     #[tokio::test]
     async fn test_proof_size() {
@@ -1718,5 +1757,128 @@ mod tests {
         let binding = Pedersen::from(rng.r#gen::<PedersenRandomness>());
         let proven_dust_spend = dust_spend.prove(prover, 0, binding).await.unwrap();
         assert_eq!(proven_dust_spend.proof.0.len(), DUST_SPEND_PROOF_SIZE);
+    }
+
+    struct WrappedSeed(pub Seed);
+    impl<'de> Deserialize<'de> for WrappedSeed {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = <String as Deserialize>::deserialize(deserializer)?;
+            let as_arr: [u8; 32] = <[u8; 32]>::from_hex(s.clone())
+                .map_err(|_err| Error::invalid_value(Unexpected::Str(&s), &"hex string"))?;
+            Ok(WrappedSeed(as_arr))
+        }
+    }
+
+    struct HexArr64([u8; 64]);
+    impl<'de> Deserialize<'de> for HexArr64 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = <String as Deserialize>::deserialize(deserializer)?;
+            let arr: [u8; 64] = <[u8; 64]>::from_hex(s.clone()).map_err(|_err| {
+                println!("{}", _err);
+                Error::invalid_value(Unexpected::Str(&s), &"hex string")
+            })?;
+            Ok(HexArr64(arr))
+        }
+    }
+
+    struct HexArr32([u8; 32]);
+    impl<'de> Deserialize<'de> for HexArr32 {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = <String as Deserialize>::deserialize(deserializer)?;
+            let arr: [u8; 32] = <[u8; 32]>::from_hex(s.clone()).map_err(|_err| {
+                println!("{}", _err);
+                Error::invalid_value(Unexpected::Str(&s), &"hex string")
+            })?;
+            Ok(HexArr32(arr))
+        }
+    }
+
+    #[allow(non_snake_case, dead_code)]
+    #[derive(Deserialize)]
+    struct EncryptionVectorEntry {
+        secretKeyRepr: HexArr32,
+        secretKeyDecimal: String,
+        secretKeyIntermediateBytes: HexArr64,
+    }
+
+    #[allow(non_snake_case)]
+    #[derive(Deserialize)]
+    struct VectorEntry {
+        seed: WrappedSeed,
+        dust: EncryptionVectorEntry,
+    }
+
+    struct TestVectors(Vec<VectorEntry>);
+    impl TestVectors {
+        fn load() -> TestVectors {
+            let raw = fs::read("key-derivation-test-vectors.json").unwrap();
+            let parsed: Vec<VectorEntry> = serde_json::from_slice(raw.as_slice()).unwrap();
+            TestVectors(parsed)
+        }
+    }
+
+    #[test]
+    fn encryption_key_derivation_matches_test_vectors() {
+        use transient_crypto::curve::Fr;
+        let test_vectors = TestVectors::load();
+
+        for entry in test_vectors.0 {
+            let dsk_computed = DustSecretKey::derive_secret_key(&entry.seed.0);
+            let dsk_reference =
+                DustSecretKey(Fr::from_le_bytes(&entry.dust.secretKeyRepr.0).unwrap());
+            let intermediate_computed =
+                DustSecretKey::sample_bytes(&entry.seed.0, 64, b"midnight:dsk");
+            let dsk_from_intermediate = DustSecretKey(Fr::from_uniform_bytes(
+                &entry.dust.secretKeyIntermediateBytes.0,
+            ));
+
+            println!("Encryption Keys:");
+            println!("  seed:                  {:?}", entry.seed.0);
+            println!(
+                "  intermediate bytes:    {:?}",
+                &entry.dust.secretKeyIntermediateBytes.0
+            );
+            println!(
+                "  intermediate computed: {:?}",
+                intermediate_computed.as_slice()
+            );
+            println!("  computed:              {:?}", dsk_computed.repr());
+            println!("  reference:             {:?}", dsk_reference.repr());
+            println!("  reference raw:         {:?}", entry.dust.secretKeyRepr.0);
+            println!(
+                "  from intermediate:     {:?}",
+                dsk_from_intermediate.repr()
+            );
+
+            assert_eq!(
+                intermediate_computed.as_slice(),
+                entry.dust.secretKeyIntermediateBytes.0.as_slice(),
+                "Intermediate bytes do not match"
+            );
+            assert_eq!(
+                dsk_computed.repr(),
+                dsk_from_intermediate.repr(),
+                "Key computed from seed does not match key computed from intermediate bytes"
+            );
+            assert_eq!(
+                dsk_computed.repr(),
+                dsk_reference.repr(),
+                "Key computed from seed does not match reference"
+            );
+            assert_eq!(
+                dsk_reference.repr(),
+                dsk_from_intermediate.repr(),
+                "Key computed from intermediate bytes does not match reference"
+            );
+        }
     }
 }
