@@ -290,7 +290,7 @@ mod tests {
     fn coin_encryption_succeeds() {
         // Just tries to encrypt a dummy coin. This mainly tests that
         // COIN_CIPHERTEXT_LEN is accurate.
-        let keys: SecretKeys = Seed::random(&mut OsRng).into();
+        let keys: SecretKeys = Seed::random(&mut OsRng).try_into().unwrap();
         let coin = CoinInfo {
             nonce: OsRng.r#gen(),
             type_: ShieldedTokenType(OsRng.r#gen()),

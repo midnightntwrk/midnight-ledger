@@ -25,7 +25,9 @@ use crate::curve::{EmbeddedFr, EmbeddedGroupAffine, embedded};
 use crate::curve::{FR_BYTES, Fr};
 use crate::hash::transient_hash;
 use crate::repr::{FieldRepr, FromFieldRepr};
+use ff::Field;
 use k256::elliptic_curve::subtle::CtOption;
+use midnight_curves::{JubjubAffine, JubjubExtended};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::distributions::Standard;
@@ -134,6 +136,15 @@ impl PublicKey {
             .map(|(ctr, msg)| transient_hash(&[k, (ctr as u64).into()]) + msg)
             .collect();
         Ciphertext { c, ciph }
+    }
+
+    /// Checks if the public key has no canonical representation
+    /// This is direct consequence of the point encoding used
+    /// see: https://zips.z.cash/zip-0216
+    pub fn no_canonical_repr(&self) -> bool {
+        let jubjub: JubjubExtended = self.0.0.into();
+        let affine: JubjubAffine = jubjub.into();
+        affine.get_u().is_zero().into()
     }
 }
 

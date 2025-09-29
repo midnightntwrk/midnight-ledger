@@ -28,7 +28,7 @@ use transient_crypto::proofs::ProofPreimage;
 fn coin_receiving() {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut state = local::State::<InMemoryDB>::new();
-    let keys = SecretKeys::from_rng_seed(&mut rng);
+    let keys = SecretKeys::from_rng_seed(&mut rng).unwrap();
     let coin = CoinInfo {
         nonce: OsRng.r#gen(),
         type_: ShieldedTokenType(OsRng.r#gen()),

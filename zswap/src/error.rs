@@ -112,3 +112,17 @@ impl Error for OfferCreationFailed {
         }
     }
 }
+
+#[derive(Debug)]
+pub struct SeedToDiscard;
+
+impl Display for SeedToDiscard {
+    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
+        write!(
+            formatter,
+            "seed needs to be discarded - leads to derivation of invalid keys"
+        )
+    }
+}
+
+impl Error for SeedToDiscard {}

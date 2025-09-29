@@ -131,7 +131,7 @@ fn valid_unbalanced_zswap(
 
     for _i in 0..num_outputs {
         let coin = coin::Info::new(&mut rng, claim_amount, Default::default());
-        let sks = zswap::keys::SecretKeys::from_rng_seed(&mut rng);
+        let sks = zswap::keys::SecretKeys::from_rng_seed(&mut rng).unwrap();
         let out = zswap::Output::new::<_>(
             &mut rng,
             &coin,

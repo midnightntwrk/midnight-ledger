@@ -137,7 +137,7 @@ impl<D: DB> TestState<D> {
 
             time: Timestamp::from_secs(0),
 
-            zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
+            zswap_keys: SecretKeys::from_rng_seed(&mut *rng).unwrap(),
             night_key: SigningKey::sample(&mut *rng),
             dust_key: DustSecretKey::sample(&mut *rng),
         }

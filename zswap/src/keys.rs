@@ -31,6 +31,7 @@ use transient_crypto::repr::FieldRepr;
 
 use crate::ZSWAP_TREE_HEIGHT;
 use crate::error::OfferCreationFailed;
+use crate::error::SeedToDiscard;
 use crate::structure::*;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
@@ -106,23 +107,37 @@ impl Debug for SecretKeys {
     }
 }
 
-impl From<Seed> for SecretKeys {
-    fn from(seed: Seed) -> Self {
-        SecretKeys {
-            coin_secret_key: seed.derive_coin_secret_key(),
-            encryption_secret_key: seed.derive_encryption_secret_key(),
+impl TryFrom<Seed> for SecretKeys {
+    type Error = SeedToDiscard;
+
+    fn try_from(seed: Seed) -> Result<Self, SeedToDiscard> {
+        let coin_secret_key = seed.derive_coin_secret_key();
+        let encryption_secret_key = seed.derive_encryption_secret_key();
+
+        if encryption_secret_key.public_key().no_canonical_repr() {
+            return Err(SeedToDiscard);
         }
+
+        Ok(SecretKeys {
+            coin_secret_key,
+            encryption_secret_key,
+        })
     }
 }
 
 impl SecretKeys {
-    pub fn from_rng_seed<R: Rng + CryptoRng + ?Sized>(rng: &mut R) -> Self {
+    pub fn from_rng_seed<R: Rng + CryptoRng + ?Sized>(rng: &mut R) -> Result<Self, SeedToDiscard> {
         let enc_sk = encryption::SecretKey::new(rng);
         let coin_sk = coin::SecretKey(rng.r#gen());
-        SecretKeys {
+
+        if enc_sk.public_key().no_canonical_repr() {
+            return Err(SeedToDiscard);
+        }
+
+        Ok(SecretKeys {
             coin_secret_key: coin_sk,
             encryption_secret_key: enc_sk,
-        }
+        })
     }
 
     pub fn coin_public_key(&self) -> coin::PublicKey {

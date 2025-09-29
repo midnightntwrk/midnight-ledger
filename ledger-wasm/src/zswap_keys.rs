@@ -100,7 +100,7 @@ impl ZswapSecretKeys {
             .try_into()
             .map_err(|_| JsError::new("Expected 32-byte seed"))?;
         let seed_parsed = zswap::keys::Seed::from(bytes);
-        let keys = zswap::keys::SecretKeys::from(seed_parsed);
+        let keys = zswap::keys::SecretKeys::try_from(seed_parsed)?;
         Ok(ZswapSecretKeys::wrap(keys))
     }
 
@@ -112,7 +112,7 @@ impl ZswapSecretKeys {
                 .try_into()
                 .map_err(|_| JsError::new("Expected 32-byte seed"))?,
         );
-        let keys = zswap::keys::SecretKeys::from_rng_seed(&mut rng);
+        let keys = zswap::keys::SecretKeys::from_rng_seed(&mut rng)?;
         Ok(ZswapSecretKeys::wrap(keys))
     }
 
