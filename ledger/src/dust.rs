@@ -1714,7 +1714,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 3_616;
+pub const DUST_SPEND_PROOF_SIZE: usize = 3_888;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]
