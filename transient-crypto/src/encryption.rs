@@ -243,7 +243,10 @@ mod tests {
     fn no_canonical_repr() {
         let key1 = PublicKey(EmbeddedGroupAffine::identity());
         let key2 = {
-            let jubjub = JubjubSubgroup::from_raw_unchecked(outer::Scalar::ZERO, outer::Scalar::ZERO - outer::Scalar::ONE);
+            let jubjub = JubjubSubgroup::from_raw_unchecked(
+                outer::Scalar::ZERO,
+                outer::Scalar::ZERO - outer::Scalar::ONE,
+            );
             let affine: embedded::Affine = jubjub.into();
             PublicKey(EmbeddedGroupAffine(affine))
         };
