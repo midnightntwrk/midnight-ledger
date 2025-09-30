@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2964,7 +2964,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2984,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "derive-where",
  "fake",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.3"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3236,7 +3236,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.3"
 dependencies = [
  "criterion",
  "derive-where",

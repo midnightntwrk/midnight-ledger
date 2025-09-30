@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.3**](../README.md)
 
 ***
 
@@ -16,7 +16,7 @@ Creates a payload for proving a specific transaction through the proof server
 
 ### transaction
 
-[`Transaction`](../classes/Transaction.md)\<[`SignatureEnabled`](../classes/SignatureEnabled.md), [`PreProof`](../classes/PreProof.md), [`PreBinding`](../classes/PreBinding.md)\>
+[`UnprovenTransaction`](../type-aliases/UnprovenTransaction.md)
 
 ### proving\_data
 

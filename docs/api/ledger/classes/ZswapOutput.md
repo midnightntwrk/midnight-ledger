@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.3**](../README.md)
 
 ***
 
@@ -111,7 +111,7 @@ static new(
    coin, 
    segment, 
    target_cpk, 
-target_epk): ZswapOutput<PreProof>;
+   target_epk): UnprovenOutput;
 ```
 
 Creates a new output, targeted to a user's coin public key.
@@ -140,7 +140,7 @@ is transferred to the recipient another way
 
 #### Returns
 
-`ZswapOutput`\<[`PreProof`](PreProof.md)\>
+[`UnprovenOutput`](../type-aliases/UnprovenOutput.md)
 
 ***
 
@@ -150,7 +150,7 @@ is transferred to the recipient another way
 static newContractOwned(
    coin, 
    segment, 
-contract): ZswapOutput<PreProof>;
+   contract): UnprovenOutput;
 ```
 
 Creates a new output, targeted to a smart contract
@@ -174,4 +174,4 @@ the output to be valid
 
 #### Returns
 
-`ZswapOutput`\<[`PreProof`](PreProof.md)\>
+[`UnprovenOutput`](../type-aliases/UnprovenOutput.md)
