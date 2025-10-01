@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-runtime"
-version = "1.0.0-alpha.3"
+version = "1.0.0-alpha.3-hard-fork-test"
 edition = "2024"
 license.workspace = true
 
