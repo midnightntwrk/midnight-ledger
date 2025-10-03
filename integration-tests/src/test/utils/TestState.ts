@@ -38,6 +38,7 @@ import {
   signatureVerifyingKey,
   type Signaturish,
   type SigningKey,
+  type SyntheticCost,
   type TokenType,
   Transaction,
   TransactionContext,
@@ -55,15 +56,14 @@ import {
 } from '@midnight-ntwrk/ledger';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {
+  DEFAULT_TOKEN_TYPE,
   DUST_GRACE_PERIOD_IN_SECONDS,
   GENERATION_DECAY_RATE,
   initialParameters,
   LOCAL_TEST_NETWORK_ID,
   NIGHT_DUST_RATIO,
-  NIGHT_TOKEN_TYPE,
   Random,
   type ShieldedTokenType,
-  STARS_PER_NIGHT,
   type UnshieldedTokenType
 } from '@/test-objects';
 
@@ -152,26 +152,34 @@ export class TestState {
     return new TransactionContext(this.ledger, block);
   }
 
-  assertApply(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness) {
-    const result = this.apply(tx, strictness);
+  assertApply(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    strictness: WellFormedStrictness,
+    blockFullness?: SyntheticCost
+  ) {
+    const result = this.apply(tx, strictness, blockFullness);
     expect(result.type, `result type was: ${result.type}, and error: ${result.error}`).toEqual('success');
   }
 
-  fastForward(dur: bigint) {
+  fastForward(dur: bigint, blockFullness?: SyntheticCost) {
     const currSeconds = BigInt(Math.floor(this.time.getTime() / 1000)) + dur;
     const ttl = new Date(Number(currSeconds) * 1000);
     this.time = ttl;
 
-    this.ledger = this.ledger.postBlockUpdate(ttl);
+    this.ledger = this.ledger.postBlockUpdate(ttl, blockFullness);
     this.dust = this.dust.processTtls(ttl);
   }
 
-  step() {
+  step(blockFullness?: SyntheticCost) {
     const tenSeconds = 10n;
-    this.fastForward(tenSeconds);
+    this.fastForward(tenSeconds, blockFullness);
   }
 
-  apply(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness): TransactionResult {
+  apply(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    strictness: WellFormedStrictness,
+    blockFullness?: SyntheticCost
+  ): TransactionResult {
     const context = this.context();
     const vtx = tx.wellFormed(this.ledger, strictness, this.time);
     const [newSt, result] = this.ledger.apply(vtx, context);
@@ -184,7 +192,7 @@ export class TestState {
         .map((utxo) => structuredClone(utxo))
         .filter((utxo) => utxo.owner === pk)
     );
-    this.step();
+    this.step(blockFullness);
     return result;
   }
 
@@ -202,10 +210,10 @@ export class TestState {
     this.step();
   }
 
-  giveFeeToken(utxos: number) {
+  giveFeeToken(utxos: number, amount: bigint) {
     this.dustGenerationRegister();
     for (let i = 0; i < utxos; i++) {
-      this.rewardNight(5n * STARS_PER_NIGHT);
+      this.rewardNight(amount);
     }
     this.fastForward(initialParameters.timeToCapSeconds);
   }
@@ -258,8 +266,9 @@ export class TestState {
   }
 
   rewardsUnshielded(token: UnshieldedTokenType, amount: bigint) {
-    if (token.raw === NIGHT_TOKEN_TYPE) {
+    if (token.raw === DEFAULT_TOKEN_TYPE) {
       this.rewardNight(amount);
+      return;
     }
     const utxo: UtxoOutput = {
       owner: addressFromKey(this.nightKey.verifyingKey()),
@@ -303,7 +312,7 @@ export class TestState {
       if (imbalance.size === 0) return;
       (imbalance as Map<TokenType, bigint>).forEach((val, tt) => {
         if (tt.tag === 'dust') {
-          throw new Error('should never happen');
+          return;
         }
         const target = -val;
         let totalInp = 0n;

@@ -54,14 +54,13 @@ import {
 import crypto from 'node:crypto';
 import { generateHex, loadBinaryFile } from './test-utils';
 
-export const STARS_PER_NIGHT = 1_000_000n;
 export const VERSION_HEADER = '0200';
 export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
 export const PERSISTENT_HASH_BYTES = 32;
 export const BOOLEAN_HASH_BYTES = 1;
 export const U128_HASH_BYTES = 16;
 export const LOCAL_TEST_NETWORK_ID = 'local-test';
-export const NIGHT_TOKEN_TYPE = Buffer.from(new Uint8Array(32)).toString('hex');
+export const DEFAULT_TOKEN_TYPE = Buffer.from(new Uint8Array(32)).toString('hex');
 export const NIGHT_DUST_RATIO = 5_000_000_000n;
 export const GENERATION_DECAY_RATE = 8_267n;
 export const DUST_GRACE_PERIOD_IN_SECONDS = 3n * 60n * 60n;
@@ -116,11 +115,6 @@ export class Random {
     crypto.getRandomValues(bytes);
     return Buffer.from(bytes);
   };
-
-  static defaultShieldedTokenType = (): ShieldedTokenType => ({
-    tag: 'shielded',
-    raw: NIGHT_TOKEN_TYPE
-  });
 
   static shieldedTokenType = (): ShieldedTokenType => ({
     tag: 'shielded',
@@ -295,6 +289,16 @@ export class Static {
     }
     return value.slice(0, end);
   }
+
+  static defaultShieldedTokenType = (): ShieldedTokenType => ({
+    tag: 'shielded',
+    raw: DEFAULT_TOKEN_TYPE
+  });
+
+  static defaultUnshieldedTokenType = (): UnshieldedTokenType => ({
+    tag: 'unshielded',
+    raw: DEFAULT_TOKEN_TYPE
+  });
 }
 
 export const addressToPublic = (address: string, tag: 'user' | 'contract'): PublicAddress => ({
