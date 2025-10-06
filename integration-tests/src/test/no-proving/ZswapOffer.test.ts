@@ -136,6 +136,82 @@ describe('Ledger API - ZswapOffer', () => {
     assertSerializationSuccess(unprovenOffer2, undefined, ProofMarker.preProof);
   });
 
+  test('send token', () => {
+    const localStateAlice = new ZswapLocalState();
+    const localStateBob = new ZswapLocalState();
+    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const secretKeysAlice = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    const secretKeysBob = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(2));
+
+    // step 1: preload Alice's account with a shielded coin
+    const coinInfo = Static.shieldedCoinInfo(10n);
+    const unprovenOffer = ZswapOffer.fromOutput(
+      ZswapOutput.new(coinInfo, 0, secretKeysAlice.coinPublicKey, secretKeysAlice.encryptionPublicKey),
+      coinInfo.type,
+      coinInfo.value
+    );
+    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+
+    expect(ledgerState.zswap.firstFree).toEqual(0n);
+    const verifiedTransaction = unprovenTransaction.wellFormed(ledgerState, strictness, new Date(0));
+    const [afterTxLegerState, { events }] = ledgerState.apply(verifiedTransaction, transactionContext);
+    const newLegerState = afterTxLegerState.postBlockUpdate(new Date(0));
+    expect(newLegerState.zswap.firstFree).toEqual(1n);
+
+    const updatedLocalStateAlice = localStateAlice.replayEvents(secretKeysAlice, events);
+    expect(updatedLocalStateAlice.coins.size).toEqual(1);
+    expect(updatedLocalStateAlice.pendingSpends.size).toEqual(0);
+
+    // step 2: select a token to send
+    const sendValue = 5n;
+    const qualifiedCoinInfoToSpend = getQualifiedShieldedCoinInfo(coinInfo, 0n);
+    const [updatedLocalState2Alice, unprovenInput] = updatedLocalStateAlice.spend(
+      secretKeysAlice,
+      qualifiedCoinInfoToSpend,
+      0
+    );
+    expect(updatedLocalState2Alice.pendingSpends.size).toEqual(1);
+
+    // step 3: create a transfer tx
+    const unprovenOutput1 = ZswapOutput.new(
+      Static.shieldedCoinInfo(sendValue),
+      0,
+      secretKeysBob.coinPublicKey,
+      secretKeysBob.encryptionPublicKey
+    );
+    // return the change back to Alice
+    const unprovenOutput2 = ZswapOutput.new(
+      Static.shieldedCoinInfo(sendValue),
+      0,
+      secretKeysAlice.coinPublicKey,
+      secretKeysAlice.encryptionPublicKey
+    );
+    const sendOffer = ZswapOffer.fromInput(unprovenInput, coinInfo.type, coinInfo.value)
+      .merge(ZswapOffer.fromOutput(unprovenOutput1, coinInfo.type, sendValue))
+      .merge(ZswapOffer.fromOutput(unprovenOutput2, coinInfo.type, sendValue));
+
+    const transferTransaction = Transaction.fromParts('local-test', sendOffer);
+    const transactionContext2 = new TransactionContext(newLegerState, Static.blockContext(new Date(1)));
+    const verifiedTransaction2 = transferTransaction.wellFormed(newLegerState, strictness, new Date(1));
+
+    // step 4: apply tx
+    const [afterTxLegerState2, { events: events2 }] = newLegerState.apply(verifiedTransaction2, transactionContext2);
+    const newLegerState2 = afterTxLegerState2.postBlockUpdate(new Date(1));
+    expect(newLegerState2.zswap.firstFree).toEqual(3n);
+
+    // step 5: replay events and check the state
+    const updatedLocalState3Alice = updatedLocalState2Alice
+      .replayEvents(secretKeysAlice, events2)
+      .clearPending(new Date(1));
+    expect(updatedLocalState3Alice.coins.size).toEqual(1);
+    const newCoin = [...updatedLocalState3Alice.coins.values()][0];
+    expect(newCoin.mt_index).toEqual(2n);
+    expect(newCoin.value).toEqual(sendValue);
+  });
+
   test('merge - cannot merge to itself', () => {
     const tokenType = Random.shieldedTokenType();
     const unprovenOffer1 = ZswapOffer.fromOutput(
