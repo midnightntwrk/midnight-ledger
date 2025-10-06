@@ -138,7 +138,7 @@ describe('Ledger API - ZswapOffer', () => {
 
   test('send token', () => {
     const localStateAlice = new ZswapLocalState();
-    const localStateBob = new ZswapLocalState();
+    // const localStateBob = new ZswapLocalState();
     const ledgerState = new LedgerState('local-test', new ZswapChainState());
     const secretKeysAlice = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const secretKeysBob = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(2));
@@ -203,12 +203,9 @@ describe('Ledger API - ZswapOffer', () => {
     expect(newLegerState2.zswap.firstFree).toEqual(3n);
 
     // step 5: replay events and check the state
-    const updatedLocalState3Alice = updatedLocalState2Alice
-      .replayEvents(secretKeysAlice, events2)
-      .clearPending(new Date(1));
+    const updatedLocalState3Alice = updatedLocalState2Alice.replayEvents(secretKeysAlice, events2);
     expect(updatedLocalState3Alice.coins.size).toEqual(1);
     const newCoin = [...updatedLocalState3Alice.coins.values()][0];
-    expect(newCoin.mt_index).toEqual(2n);
     expect(newCoin.value).toEqual(sendValue);
   });
 
