@@ -2380,7 +2380,8 @@ mod tests {
     #[test]
     fn clone_increment_refcount() {
         let map = new_arena();
-        let malloc_a = map.alloc::<u8>(6);
+        let payload = "A".repeat(1024); // must be larger than SMALL_OBJECT_LIMIT
+        let malloc_a = map.alloc::<String>(payload);
         let malloc_b = malloc_a.clone();
         let ref_count = map
             .lock_metadata()
