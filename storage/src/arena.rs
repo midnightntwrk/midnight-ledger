@@ -3111,4 +3111,14 @@ mod tests {
         let sp = arena.get::<u32>(&key).unwrap();
         assert!(!sp.is_lazy());
     }
+
+    #[test]
+    fn serialize_small_sp() {
+        let arena = new_arena();
+        let mut sp = arena.alloc(42u32);
+        let mut bytes: Vec<u8> = vec![];
+        Sp::serialize(&sp, &mut bytes).unwrap();
+        let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();
+        assert_eq!(sp, other_sp);
+    }
 }
