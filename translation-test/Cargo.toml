@@ -7,5 +7,5 @@ license.workspace = true
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage" }
+storage = { path = "../storage", package = "midnight-storage", features = ["public-internal-structure"] }
 derive-where = "^1.5.0"

@@ -18,7 +18,7 @@
 
 mod rcmap;
 
-pub use rcmap::RcMap;
+pub use rcmap::{RcMap, KeyRef};
 
 use crate::arena::ArenaKey;
 use crate::db::DB;

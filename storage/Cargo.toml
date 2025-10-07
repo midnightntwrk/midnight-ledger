@@ -10,6 +10,7 @@ sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]
 parity-db = ["dep:parity-db"]
 stress-test = ["dep:serde_json", "dep:os_pipe"]
 bench = ["dep:criterion", "dep:pprof"]
+public-internal-structure = []
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }

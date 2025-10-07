@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.3"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -3005,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "derive-where",
  "fake",
@@ -3115,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "archery",
  "criterion",
@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.3"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3208,6 +3208,16 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
+]
+
+[[package]]
+name = "midnight-translation-test"
+version = "0.1.0"
+dependencies = [
+ "derive-where",
+ "midnight-base-crypto",
+ "midnight-serialize",
+ "midnight-storage",
 ]
 
 [[package]]
