@@ -1,0 +1,1 @@
+This folder can hold app assets like icons/splash screens if needed.
