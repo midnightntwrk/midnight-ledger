@@ -22,7 +22,12 @@
 use crate::WellBehavedHasher;
 use crate::storable::{ChildNode, DirectChildNode, Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
-use crate::{DefaultDB, DefaultHasher, backend::StorageBackend, db::DB, storable::Storable};
+use crate::{
+    DefaultDB, DefaultHasher,
+    backend::{OnDiskObject, StorageBackend},
+    db::DB,
+    storable::Storable,
+};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
@@ -1390,7 +1395,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         mut raw_size_limit: u64,
     ) -> Option<TopoSortedNodes> {
         let arena = self.arena.clone();
-        let root = self.hash().key;
+        let root = self.child_repr.clone();
         // Topological sort using Kahn's algorithm.
         // However, we need to know the incoming vertices of a given node, so to start, we just walk
         // the graph to get a better representation:
@@ -1400,23 +1405,30 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         let mut incoming_vertices: HashMap<_, usize> = HashMap::new();
         let mut disk_objects = HashMap::new();
         let mut frontier = vec![root.clone()];
-        while let Some(key) = frontier.pop() {
-            if disk_objects.contains_key(&key) {
+        while let Some(child) = frontier.pop() {
+            if disk_objects.contains_key(child.hash()) {
                 continue;
             }
-            let node = arena
-                .lock_backend()
-                .borrow_mut()
-                .get(&key)
-                .expect("Arena should contain current serialization target")
-                .clone();
+            let node = match child {
+                ChildNode::Ref(ref key) => arena
+                    .lock_backend()
+                    .borrow_mut()
+                    .get(&key)
+                    .expect("Arena should contain current serialization target")
+                    .clone(),
+                ChildNode::Direct(ref d) => OnDiskObject {
+                    data: d.data.as_ref().clone(),
+                    ref_count: 0,
+                    children: d.children.as_ref().clone(),
+                },
+            };
             for child in node.children.iter().map(ChildNode::hash) {
                 *incoming_vertices.entry(child.clone()).or_default() += 1;
-                frontier.push(child.clone());
+                frontier.push(ChildNode::Ref(child.clone()));
             }
             raw_size_limit = raw_size_limit
                 .checked_sub(PERSISTENT_HASH_BYTES as u64 + node.data.len() as u64)?;
-            disk_objects.insert(key, node);
+            disk_objects.insert(child.hash().clone(), node);
         }
         // now we can use Kahn's algorithm as specified
         let mut list_indices = HashMap::new();
@@ -1426,7 +1438,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             if list_indices.contains_key(&node) {
                 continue;
             }
-            let disk = disk_objects.get(&node).expect("node must be present");
+            let disk = disk_objects.get(node.hash()).expect("node must be present");
             list_indices.insert(node.clone(), list_indices.len() as u64);
             for child in disk.children.iter().map(ChildNode::hash) {
                 let incoming = incoming_vertices
@@ -1434,7 +1446,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
-                    empty_incoming_nodes.push(child.clone());
+                    empty_incoming_nodes.push(ChildNode::Ref(child.clone()));
                 }
             }
         }
@@ -1442,15 +1454,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         let mut list = TopoSortedNodes {
             nodes: vec![TopoSortedNode::default(); len],
         };
-        for (hash, idx) in list_indices.iter() {
-            let disk = disk_objects.remove(hash).expect("node must be present");
+        for (child_node, idx) in list_indices.iter() {
+            let disk = disk_objects
+                .remove(child_node.hash())
+                .expect("node must be present");
             // We flip the index ordering, as it a) makes deserialization easier, and b) makes leaf
             // nodes have smaller indexes, which is usually more sensible.
             list.nodes[len - 1 - *idx as usize] = TopoSortedNode {
                 child_indices: disk
                     .children
                     .iter()
-                    .map(|child| len as u64 - 1 - list_indices[&child.hash()])
+                    .map(|child| len as u64 - 1 - list_indices[&child])
                     .collect(),
                 data: disk.data,
             };
