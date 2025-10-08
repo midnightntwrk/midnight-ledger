@@ -24,7 +24,7 @@ import {
   ZswapChainState,
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { getQualifiedShieldedCoinInfo, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -65,7 +65,11 @@ describe('Ledger API - ZswapOffer', () => {
     expect(unprovenOfferFallible.outputs).toHaveLength(1);
     expect(unprovenOfferFallible.transients).toHaveLength(0);
 
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOfferGuaranteed, unprovenOfferFallible);
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      unprovenOfferGuaranteed,
+      unprovenOfferFallible
+    );
     expect(unprovenTransaction.fallibleOffer?.get(1)?.outputs).toHaveLength(1);
     expect(unprovenTransaction.guaranteedOffer?.outputs).toHaveLength(1);
     expect(unprovenTransaction.fallibleOffer?.get(1)?.inputs).toHaveLength(0);
@@ -84,7 +88,7 @@ describe('Ledger API - ZswapOffer', () => {
   test('fromOutput - fails on invalid segment', () => {
     const guaranteedOffer = Static.unprovenOfferFromOutput(0);
     const fallibleOffer = Static.unprovenOfferFromOutput(0);
-    expect(() => Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer)).toThrow(
+    expect(() => Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer)).toThrow(
       'Segment ID cannot be 0 in a fallible offer'
     );
   });
@@ -108,7 +112,7 @@ describe('Ledger API - ZswapOffer', () => {
 
   test('fromInput - should create from UnprovenInput', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfoToSpend = getQualifiedShieldedCoinInfo(Static.shieldedCoinInfo(5n), 0n);
@@ -117,7 +121,7 @@ describe('Ledger API - ZswapOffer', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -137,9 +141,8 @@ describe('Ledger API - ZswapOffer', () => {
   });
 
   test('send token', () => {
-    const localStateAlice = new ZswapLocalState();
-    // const localStateBob = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    let localStateAlice = new ZswapLocalState();
+    let ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeysAlice = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const secretKeysBob = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(2));
 
@@ -150,7 +153,7 @@ describe('Ledger API - ZswapOffer', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -158,22 +161,19 @@ describe('Ledger API - ZswapOffer', () => {
     expect(ledgerState.zswap.firstFree).toEqual(0n);
     const verifiedTransaction = unprovenTransaction.wellFormed(ledgerState, strictness, new Date(0));
     const [afterTxLegerState, { events }] = ledgerState.apply(verifiedTransaction, transactionContext);
-    const newLegerState = afterTxLegerState.postBlockUpdate(new Date(0));
-    expect(newLegerState.zswap.firstFree).toEqual(1n);
+    ledgerState = afterTxLegerState.postBlockUpdate(new Date(0));
+    expect(ledgerState.zswap.firstFree).toEqual(1n);
 
-    const updatedLocalStateAlice = localStateAlice.replayEvents(secretKeysAlice, events);
-    expect(updatedLocalStateAlice.coins.size).toEqual(1);
-    expect(updatedLocalStateAlice.pendingSpends.size).toEqual(0);
+    localStateAlice = localStateAlice.replayEvents(secretKeysAlice, events);
+    expect(localStateAlice.coins.size).toEqual(1);
+    expect(localStateAlice.pendingSpends.size).toEqual(0);
 
     // step 2: select a token to send
     const sendValue = 5n;
     const qualifiedCoinInfoToSpend = getQualifiedShieldedCoinInfo(coinInfo, 0n);
-    const [updatedLocalState2Alice, unprovenInput] = updatedLocalStateAlice.spend(
-      secretKeysAlice,
-      qualifiedCoinInfoToSpend,
-      0
-    );
-    expect(updatedLocalState2Alice.pendingSpends.size).toEqual(1);
+    const [updatedLocalState, unprovenInput] = localStateAlice.spend(secretKeysAlice, qualifiedCoinInfoToSpend, 0);
+    expect(updatedLocalState.pendingSpends.size).toEqual(1);
+    localStateAlice = updatedLocalState;
 
     // step 3: create a transfer tx
     const unprovenOutput1 = ZswapOutput.new(
@@ -193,19 +193,19 @@ describe('Ledger API - ZswapOffer', () => {
       .merge(ZswapOffer.fromOutput(unprovenOutput1, coinInfo.type, sendValue))
       .merge(ZswapOffer.fromOutput(unprovenOutput2, coinInfo.type, sendValue));
 
-    const transferTransaction = Transaction.fromParts('local-test', sendOffer);
-    const transactionContext2 = new TransactionContext(newLegerState, Static.blockContext(new Date(1)));
-    const verifiedTransaction2 = transferTransaction.wellFormed(newLegerState, strictness, new Date(1));
+    const transferTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, sendOffer);
+    const transactionContext2 = new TransactionContext(ledgerState, Static.blockContext(new Date(1)));
+    const verifiedTransaction2 = transferTransaction.wellFormed(ledgerState, strictness, new Date(1));
 
     // step 4: apply tx
-    const [afterTxLegerState2, { events: events2 }] = newLegerState.apply(verifiedTransaction2, transactionContext2);
-    const newLegerState2 = afterTxLegerState2.postBlockUpdate(new Date(1));
-    expect(newLegerState2.zswap.firstFree).toEqual(3n);
+    const [afterTx2LedgerState, { events: events2 }] = ledgerState.apply(verifiedTransaction2, transactionContext2);
+    ledgerState = afterTx2LedgerState.postBlockUpdate(new Date(1));
+    expect(ledgerState.zswap.firstFree).toEqual(3n);
 
     // step 5: replay events and check the state
-    const updatedLocalState3Alice = updatedLocalState2Alice.replayEvents(secretKeysAlice, events2);
-    expect(updatedLocalState3Alice.coins.size).toEqual(1);
-    const newCoin = [...updatedLocalState3Alice.coins.values()][0];
+    localStateAlice = localStateAlice.replayEvents(secretKeysAlice, events2);
+    expect(localStateAlice.coins.size).toEqual(1);
+    const newCoin = [...localStateAlice.coins.values()][0];
     expect(newCoin.value).toEqual(sendValue);
   });
 
