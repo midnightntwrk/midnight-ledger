@@ -35,12 +35,15 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 #[derive_where(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(transparent)]
-struct KeyRef<D: DB> {
-    key: ArenaKey<D::Hasher>,
+pub struct KeyRef<D: DB> {
+    /// The key being tracked
+    pub key: ArenaKey<D::Hasher>,
 }
 
 impl<D: DB> KeyRef<D> {
-    fn new(key: ArenaKey<D::Hasher>) -> Self {
+    /// Wraps an arena key as a keyref. Note that this is only safe if the key
+    /// would currently resolve.
+    pub fn new(key: ArenaKey<D::Hasher>) -> Self {
         Self { key }
     }
 }
@@ -115,12 +118,18 @@ impl<D: DB> Tagged for KeyRef<D> {
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
     /// Reference counts for keys with `rc >= 1`
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
     /// The `KeyRef` here creates storage overhead -- an additional dag node for
     /// each key -- but the `rc_0` map is expected to be small, so this
     /// shouldn't matter.
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_0: Map<ArenaKey<D::Hasher>, KeyRef<D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     rc_0: Map<ArenaKey<D::Hasher>, KeyRef<D>, D>,
 }
 

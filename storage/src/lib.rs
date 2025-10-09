@@ -13,7 +13,7 @@
 
 #![deny(unreachable_pub)]
 //#![deny(warnings)]
-#![deny(missing_docs)]
+#![cfg_attr(not(feature = "public-internal-structure"), deny(missing_docs))]
 //! Merkle-ized data structures and persistent disk storage.
 //!
 //! This crate provides storage primitives, primarily maps, for use

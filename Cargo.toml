@@ -21,6 +21,7 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
+    "translation-test",
 ]
 default-members = [
     "zswap",
@@ -37,6 +38,7 @@ default-members = [
     "serialize",
     "serialize-macros",
     "generate-cost-model",
+    "translation-test",
 ]
 resolver = "2"
 exclude = [
