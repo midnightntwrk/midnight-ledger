@@ -1,49 +1,52 @@
 use base_crypto::cost_model::CostDuration;
-use storage::db::{InMemoryDB, DB};
-use storage::arena::{ArenaKey, BackendLoader, Sp};
-use storage::Storable;
-use storage::storable::Loader;
-use storage::storage::{default_storage, HashMap, Map};
-use serialize::{Tagged, Serializable, Deserializable};
 use derive_where::derive_where;
-use std::io;
+use serialize::{Deserializable, Serializable, Tagged};
 use std::borrow::Cow;
+use std::io;
 use std::marker::PhantomData;
+use storage::Storable;
+use storage::arena::{ArenaKey, BackendLoader, Sp};
+use storage::db::{DB, InMemoryDB};
+use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie, Monoid, Semigroup};
+use storage::storable::{Loader, SizeAnn};
+use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
 use mechanism::*;
 
 #[derive(Storable)]
-#[derive_where(Clone)]
+#[derive_where(Clone, Debug)]
 #[storable(db = D)]
 #[tag = "foo"]
 pub struct Foo<D: DB> {
-    foo: HashMap<FooKey, (), D>,
-    baz: Baz<D>,
+    foo: HashMap<u64, FooEntry, D>,
+    #[storable(child)]
+    baz: Sp<Baz<D>, D>,
 }
 
 #[derive(Storable)]
-#[derive_where(Clone)]
+#[derive_where(Clone, Debug)]
 #[storable(db = D)]
 #[tag = "bar"]
 pub struct Bar<D: DB> {
-    bar: HashMap<BarKey, (), D>,
-    baz: Baz<D>,
+    bar: HashMap<u64, BarEntry, D>,
+    #[storable(child)]
+    baz: Sp<Baz<D>, D>,
 }
 
-#[derive(Serializable, Storable, Clone)]
+#[derive(Serializable, Storable, Clone, Debug)]
 #[storable(base)]
-#[tag = "foo-key"]
-pub struct FooKey(u64);
+#[tag = "foo-entry"]
+pub struct FooEntry(u64);
 
-#[derive(Serializable, Storable, Clone)]
+#[derive(Serializable, Storable, Clone, Debug)]
 #[storable(base)]
-#[tag = "bar-key"]
-pub struct BarKey(u64);
+#[tag = "bar-entry"]
+pub struct BarEntry(u64);
 
 #[derive(Storable)]
-#[derive_where(Clone)]
+#[derive_where(Clone, Debug)]
 #[storable(db = D)]
 #[tag = "baz"]
 pub struct Baz<D: DB> {
@@ -70,7 +73,11 @@ mod rl {
     #[tag = "nesty-rl"]
     pub enum Nesty<D: DB> {
         Empty,
-        Node(u32, #[storable(child)] Sp<Nesty<D>, D>, #[storable(child)] Sp<Nesty<D>, D>),
+        Node(
+            u32,
+            #[storable(child)] Sp<Nesty<D>, D>,
+            #[storable(child)] Sp<Nesty<D>, D>,
+        ),
     }
 }
 
@@ -84,22 +91,246 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
             lr::Nesty::Node(_, a, b) => vec![(tlid(), a.hash().into()), (tlid(), b.hash().into())],
         }
     }
-    fn finalize(source: &lr::Nesty<D>, limit: &mut CostDuration, cache: &TranslationCache<D>) -> io::Result<Option<rl::Nesty<D>>> {
+    fn finalize(
+        source: &lr::Nesty<D>,
+        limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<Option<rl::Nesty<D>>> {
         let tlid = TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
         let storage = default_storage::<D>();
         // TODO: adjust limit
         match source {
             lr::Nesty::Empty => Ok(Some(rl::Nesty::Empty)),
             lr::Nesty::Node(n, a, b) => {
-                let Some(atrans) = cache.lookup(&tlid, a.hash().into()) else { return Ok(None); };
-                let Some(btrans) = cache.lookup(&tlid, b.hash().into()) else { return Ok(None); };
+                let Some(atrans) = cache.lookup(&tlid, a.hash().into()) else {
+                    return Ok(None);
+                };
+                let Some(btrans) = cache.lookup(&tlid, b.hash().into()) else {
+                    return Ok(None);
+                };
                 Ok(Some(rl::Nesty::Node(
                     *n,
-                    storage.get_lazy(&btrans.key.into()).expect("translated node must be in storage"),
-                    storage.get_lazy(&atrans.key.into()).expect("translated node must be in storage"),
+                    storage
+                        .get_lazy(&btrans.key.into())
+                        .expect("translated node must be in storage"),
+                    storage
+                        .get_lazy(&atrans.key.into())
+                        .expect("translated node must be in storage"),
                 )))
             }
         }
+    }
+}
+
+struct FooToBarTranslation;
+
+impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
+    fn child_translations(source: &Foo<D>) -> Vec<(TranslationId, RawNode<D>)> {
+        vec![
+            // HashMap<u64, FooEntry, D> -> HashMap<u64, BarEntry, D>
+            // => Map(ArenaKey<D::Hasher>, (Sp<u64, D>, Sp<FooEntry, D>)) -> Map(ArenaKey<D::Hasher>, (Sp<u64, D>, Sp<BarEntry, D>)) ->
+            // => Sp<MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), SizeAnn>, D> -> Sp<MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), SizeAnn>, D>
+            (
+                TranslationId(
+                    MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
+                    MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+                ),
+                source.foo.0.mpt.hash().into(),
+            ),
+        ]
+    }
+    fn finalize(
+        source: &Foo<D>,
+        _limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<Option<Bar<D>>> {
+        let foo_tlid = TranslationId(
+            MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+        );
+        let Some(footl) = cache.lookup(&foo_tlid, source.foo.0.mpt.hash().into()) else {
+            return Ok(None);
+        };
+        let bar = HashMap(Map {
+            mpt: default_storage::<D>().get_lazy(&footl.key.clone().into())?,
+            key_type: PhantomData,
+        });
+        Ok(Some(Bar {
+            bar,
+            baz: source.baz.clone(),
+        }))
+    }
+}
+
+struct MptFooToBarTranslation;
+
+impl<D: DB>
+    DirectTranslation<
+        MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), D>,
+        D,
+    > for MptFooToBarTranslation
+{
+    fn child_translations(
+        source: &MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+    ) -> Vec<(TranslationId, RawNode<D>)> {
+        vec![(
+            TranslationId(
+                merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+                merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            ),
+            source.0.hash().into(),
+        )]
+    }
+    fn finalize(
+        source: &MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        _limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<Option<MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), D>>> {
+        let tlid = TranslationId(
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+        );
+        let Some(tl) = cache.lookup(&tlid, source.0.hash().into()) else {
+            return Ok(None);
+        };
+        Ok(Some(MerklePatriciaTrie(
+            default_storage::<D>().get_lazy(&tl.key.clone().into())?,
+        )))
+    }
+}
+
+struct MptNodeFooToBarTranslation;
+
+impl<D: DB>
+    DirectTranslation<
+        merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>,
+        D,
+    > for MptNodeFooToBarTranslation
+{
+    fn child_translations(
+        source: &merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+    ) -> Vec<(TranslationId, RawNode<D>)> {
+        let entry_tl = TranslationId(
+            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
+            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+        );
+        let self_tl = TranslationId(
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+        );
+        match source {
+            merkle_patricia_trie::Node::Empty => vec![],
+            merkle_patricia_trie::Node::Branch { children, .. } => children
+                .iter()
+                .map(|child| (self_tl.clone(), child.hash().into()))
+                .collect(),
+            merkle_patricia_trie::Node::Extension { child, .. } => {
+                vec![(self_tl, child.hash().into())]
+            }
+            merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => vec![
+                (entry_tl, value.hash().into()),
+                (self_tl, child.hash().into()),
+            ],
+            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.hash().into())],
+        }
+    }
+    fn finalize(
+        source: &merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        _limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<Option<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>>> {
+        let entry_tl = TranslationId(
+            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
+            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+        );
+        let self_tl = TranslationId(
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+        );
+        Ok(Some(match source {
+            merkle_patricia_trie::Node::Empty => merkle_patricia_trie::Node::Empty,
+            merkle_patricia_trie::Node::Branch { ann, children } => {
+                let mut new_children =
+                    core::array::from_fn(|_| Sp::new(merkle_patricia_trie::Node::Empty));
+                for (child, new_child) in children.iter().zip(new_children.iter_mut()) {
+                    let Some(entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                        return Ok(None);
+                    };
+                    *new_child = default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                }
+                let ann = new_children
+                    .iter()
+                    .fold(SizeAnn::empty(), |acc, x| acc.append(&x.ann()));
+                merkle_patricia_trie::Node::Branch {
+                    ann,
+                    children: new_children,
+                }
+            }
+            merkle_patricia_trie::Node::Extension {
+                ann,
+                compressed_path,
+                child,
+            } => {
+                let Some(entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                    return Ok(None);
+                };
+                let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
+                    default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                let ann = child.ann();
+                merkle_patricia_trie::Node::Extension {
+                    ann,
+                    compressed_path: compressed_path.clone(),
+                    child,
+                }
+            }
+            merkle_patricia_trie::Node::Leaf { ann, value } => {
+                let Some(entry) = cache.lookup(&entry_tl, value.hash().into()) else {
+                    return Ok(None);
+                };
+                let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
+                    default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                let ann = SizeAnn::from_value(&value);
+                merkle_patricia_trie::Node::Leaf { ann, value }
+            }
+            merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child } => {
+                let Some(value_entry) = cache.lookup(&entry_tl, value.hash().into()) else {
+                    return Ok(None);
+                };
+                let Some(child_entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                    return Ok(None);
+                };
+                let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
+                    default_storage::<D>().get_lazy(&value_entry.key.clone().into())?;
+                let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
+                    default_storage::<D>().get_lazy(&child_entry.key.clone().into())?;
+                let ann = SizeAnn::from_value(&value).append(&child.ann());
+                merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
+            }
+        }))
+    }
+}
+
+struct FooEntryToBarEntryTranslation;
+
+impl<D: DB> DirectTranslation<(Sp<u64, D>, Sp<FooEntry, D>), (Sp<u64, D>, Sp<BarEntry, D>), D>
+    for FooEntryToBarEntryTranslation
+{
+    fn child_translations(
+        source: &(Sp<u64, D>, Sp<FooEntry, D>),
+    ) -> Vec<(TranslationId, RawNode<D>)> {
+        vec![]
+    }
+    fn finalize(
+        source: &(Sp<u64, D>, Sp<FooEntry, D>),
+        _limit: &mut CostDuration,
+        _cache: &TranslationCache<D>,
+    ) -> io::Result<Option<(Sp<u64, D>, Sp<BarEntry, D>)>> {
+        Ok(Some((
+            source.0.clone(),
+            Sp::new(BarEntry(source.1.0.wrapping_mul(42))),
+        )))
     }
 }
 
@@ -107,15 +338,43 @@ struct TestTable;
 
 impl<D: DB> TranslationTable<D> for TestTable {
     const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)] = &[
-        (TranslationId(Cow::Borrowed("nesty-lr"), Cow::Borrowed("nesty-rl")), &DirectSpTranslation::<_, _, NestyLrToRlTranslation, _>(PhantomData)),
+        (
+            TranslationId(Cow::Borrowed("nesty-lr"), Cow::Borrowed("nesty-rl")),
+            &DirectSpTranslation::<_, _, NestyLrToRlTranslation, _>(PhantomData),
+        ),
+        (
+            TranslationId(Cow::Borrowed("foo"), Cow::Borrowed("bar")),
+            &DirectSpTranslation::<_, _, FooToBarTranslation, _>(PhantomData),
+        ),
+        (
+            TranslationId(
+                Cow::Borrowed("mpt((u64,foo-entry),size-annotation)"),
+                Cow::Borrowed("mpt((u64,bar-entry),size-annotation)"),
+            ),
+            &DirectSpTranslation::<_, _, MptFooToBarTranslation, _>(PhantomData),
+        ),
+        (
+            TranslationId(
+                Cow::Borrowed("mpt-node((u64,foo-entry),size-annotation)"),
+                Cow::Borrowed("mpt-node((u64,bar-entry),size-annotation)"),
+            ),
+            &DirectSpTranslation::<_, _, MptNodeFooToBarTranslation, _>(PhantomData),
+        ),
+        (
+            TranslationId(
+                Cow::Borrowed("(u64,foo-entry)"),
+                Cow::Borrowed("(u64,bar-entry)"),
+            ),
+            &DirectSpTranslation::<_, _, FooEntryToBarEntryTranslation, _>(PhantomData),
+        ),
     ];
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serialize::Tagged;
     use storage::{arena::Sp, db::InMemoryDB};
-    use super::*;
 
     fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<InMemoryDB>> {
         if depth == 0 {
@@ -126,21 +385,43 @@ mod tests {
         Sp::new(lr::Nesty::Node(offset, left, right))
     }
 
+    fn mk_foo(depth: usize) -> Sp<Foo<InMemoryDB>> {
+        let baz = Sp::new(Baz {
+            baz: (0..(1 << depth)).map(|i| (i * 4, ())).collect(),
+        });
+        let foo = (0..(1 << depth)).map(|i| (i * 8, FooEntry(i))).collect();
+        Sp::new(Foo { foo, baz })
+    }
+
     #[test]
-    fn test_tl() {
-        let before = mk_nesty(20, 0);
-        let tlid = TranslationId(lr::Nesty::<InMemoryDB>::tag(), rl::Nesty::<InMemoryDB>::tag());
-        let mut tl_state = TranslationState::<TestTable, InMemoryDB>::start(&tlid, before.hash().into()).unwrap();
-        let mut cost = CostDuration::from_picoseconds(1_000_000_000_000);
-        let after = loop {
-            match tl_state.step(&mut cost).unwrap() {
-                Either::Left(next) => tl_state = next,
-                Either::Right(res) => break res,
-            }
+    fn test_nesty_tl() {
+        let before = mk_nesty(10, 0);
+        let tl_state = TypedTranslationState::<
+            lr::Nesty<InMemoryDB>,
+            rl::Nesty<InMemoryDB>,
+            TestTable,
+            InMemoryDB,
+        >::start(before)
+        .unwrap();
+        let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+        let Either::Right(_after) = tl_state.run(cost).unwrap() else {
+            panic!("didn't finish");
         };
-        let _after = default_storage::<InMemoryDB>().get::<rl::Nesty<InMemoryDB>>(&after.key.clone().into()).unwrap();
-        //dbg!(before);
-        //dbg!(after);
-        //assert!(false);
+    }
+
+    #[test]
+    fn test_foo_tl() {
+        let before = mk_foo(10);
+        let tl_state = TypedTranslationState::<
+            Foo<InMemoryDB>,
+            Bar<InMemoryDB>,
+            TestTable,
+            InMemoryDB,
+        >::start(before)
+        .unwrap();
+        let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+        let Either::Right(_after) = tl_state.run(cost).unwrap() else {
+            panic!("didn't finish");
+        };
     }
 }

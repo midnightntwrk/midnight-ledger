@@ -1,20 +1,21 @@
 use base_crypto::cost_model::CostDuration;
-use storage::db::{InMemoryDB, DB};
-use storage::arena::{ArenaKey, BackendLoader, Sp};
-use storage::Storable;
-use storage::storable::Loader;
-use storage::storage::{default_storage, HashMap, Map};
-use storage::delta_tracking::KeyRef;
-use serialize::{Tagged, Serializable, Deserializable};
 use derive_where::derive_where;
-use std::io;
+use serialize::{Deserializable, Serializable, Tagged};
 use std::borrow::Cow;
+use std::io;
 use std::marker::PhantomData;
+use storage::Storable;
+use storage::arena::{ArenaKey, BackendLoader, Sp};
+use storage::db::{DB, InMemoryDB};
+use storage::delta_tracking::KeyRef;
+use storage::storable::Loader;
+use storage::storage::{HashMap, Map, default_storage};
 
 pub type RawNode<D> = ArenaKey<<D as DB>::Hasher>;
 
 pub enum StepResult<D: DB> {
     Finished(Sp<KeyRef<D>, D>),
+    NotEnoughTime,
     Suspended,
     Depends {
         id: TranslationId,
@@ -37,7 +38,9 @@ pub struct TranslationCache<D: DB> {
 
 impl<D: DB> TranslationCache<D> {
     fn new() -> Self {
-        TranslationCache { map: HashMap::new() }
+        TranslationCache {
+            map: HashMap::new(),
+        }
     }
     fn insert(&self, id: TranslationId, from: RawNode<D>, to: KeyRef<D>) -> Self {
         Self {
@@ -45,7 +48,9 @@ impl<D: DB> TranslationCache<D> {
         }
     }
     pub fn lookup(&self, id: &TranslationId, child: RawNode<D>) -> Option<KeyRef<D>> {
-        self.map.get(&TranslationCacheKey(id.clone(), child)).map(|v| (&*v).clone())
+        self.map
+            .get(&TranslationCacheKey(id.clone(), child))
+            .map(|v| (&*v).clone())
     }
 }
 trait AsBackendLoader<D: DB> {
@@ -64,11 +69,12 @@ impl<T: Loader<D>, D: DB> AsBackendLoader<D> for T {
         // That said, we have a limited set of loaders, defined by us, and there
         // is no danger that this will be abused.
         if std::any::type_name::<Self>() == std::any::type_name::<BackendLoader<D>>() {
-            Ok(unsafe {
-                &*(self as *const Self as *const BackendLoader<D>)
-            })
+            Ok(unsafe { &*(self as *const Self as *const BackendLoader<D>) })
         } else {
-            Err(io::Error::new(io::ErrorKind::Other, "requiered backend loader for translation machinery due to dyn trait shenanigans"))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "requiered backend loader for translation machinery due to dyn trait shenanigans",
+            ))
         }
     }
 }
@@ -85,7 +91,11 @@ pub trait TypelessTranslation<D: DB> {
 
 pub trait TypelessTranslationState<D: DB>: Send + Sync + std::fmt::Debug {
     fn boxed_clone(&self) -> Box<dyn TypelessTranslationState<D>>;
-    fn step(&mut self, limit: &mut CostDuration, cache: &TranslationCache<D>) -> io::Result<StepResult<D>>;
+    fn step(
+        &mut self,
+        limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<StepResult<D>>;
 
     fn children(&self) -> std::vec::Vec<RawNode<D>>;
     fn to_binary_repr(&self, writer: &mut dyn std::io::Write) -> Result<(), std::io::Error>;
@@ -93,10 +103,16 @@ pub trait TypelessTranslationState<D: DB>: Send + Sync + std::fmt::Debug {
 
 pub trait DirectTranslation<A: Storable<D>, B: Storable<D>, D: DB>: Send + Sync + 'static {
     fn child_translations(source: &A) -> Vec<(TranslationId, RawNode<D>)>;
-    fn finalize(source: &A, limit: &mut CostDuration, cache: &TranslationCache<D>) -> io::Result<Option<B>>;
+    fn finalize(
+        source: &A,
+        limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<Option<B>>;
 }
 
-pub struct DirectSpTranslation<A: Storable<D>, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB>(pub PhantomData<(A, B, T, D)>);
+pub struct DirectSpTranslation<A: Storable<D>, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB>(
+    pub PhantomData<(A, B, T, D)>,
+);
 
 #[derive(Storable)]
 #[storable(db = D)]
@@ -104,18 +120,27 @@ pub struct DirectSpTranslation<A: Storable<D>, B: Storable<D>, T: DirectTranslat
 #[derive_where(Debug; A)]
 #[phantom(T)]
 #[tag = "direct-sp-translation-state"]
-pub struct DirectSpTranslationState<A: Storable<D>, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB> {
+pub struct DirectSpTranslationState<
+    A: Storable<D>,
+    B: Storable<D>,
+    T: DirectTranslation<A, B, D>,
+    D: DB,
+> {
     children_processed: u32,
     value: Sp<A, D>,
     _phantom1: PhantomData<B>,
     _phantom2: PhantomData<T>,
 }
 
-impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB> TypelessTranslation<D> for DirectSpTranslation<A, B, T, D> {
+impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB>
+    TypelessTranslation<D> for DirectSpTranslation<A, B, T, D>
+{
     fn start(&self, raw: RawNode<D>) -> Box<dyn TypelessTranslationState<D>> {
         let state: DirectSpTranslationState<A, B, T, D> = DirectSpTranslationState {
             children_processed: 0,
-            value: default_storage().get(&raw.into()).expect("translation target must be present"),
+            value: default_storage()
+                .get(&raw.into())
+                .expect("translation target must be present"),
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         };
@@ -127,20 +152,35 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         mut child_hashes: &mut dyn Iterator<Item = RawNode<D>>,
         loader: &BackendLoader<D>,
     ) -> Result<Box<dyn TypelessTranslationState<D>>, std::io::Error> {
-        Ok(Box::new(DirectSpTranslationState::<A, B, T, D>::from_binary_repr(&mut reader, &mut child_hashes, loader)?))
+        Ok(Box::new(
+            DirectSpTranslationState::<A, B, T, D>::from_binary_repr(
+                &mut reader,
+                &mut child_hashes,
+                loader,
+            )?,
+        ))
     }
 }
 
-impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB> TypelessTranslationState<D> for DirectSpTranslationState<A, B, T, D> {
+impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB>
+    TypelessTranslationState<D> for DirectSpTranslationState<A, B, T, D>
+{
     fn boxed_clone(&self) -> Box<dyn TypelessTranslationState<D>> {
         Box::new(self.clone())
     }
-    fn step(&mut self, limit: &mut CostDuration, cache: &TranslationCache<D>) -> io::Result<StepResult<D>> {
+    fn step(
+        &mut self,
+        limit: &mut CostDuration,
+        cache: &TranslationCache<D>,
+    ) -> io::Result<StepResult<D>> {
         let mut proc_children = T::child_translations(&self.value);
         if (self.children_processed as usize) < proc_children.len() {
             let child = proc_children.swap_remove(self.children_processed as usize);
             self.children_processed += 1;
-            Ok(StepResult::Depends { id: child.0, child: child.1 })
+            Ok(StepResult::Depends {
+                id: child.0,
+                child: child.1,
+            })
         } else {
             let res = T::finalize(&self.value, limit, cache)?;
             match res {
@@ -250,11 +290,28 @@ impl<T: Storable<D>, D: DB> Queue<T, D> {
 pub trait TranslationTable<D: DB>: Send + Sync + 'static {
     const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)];
     fn get(id: &TranslationId) -> io::Result<&'static dyn TypelessTranslation<D>> {
-        Self::TABLE.iter().find(|(id2, _)| id == id2).ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, format!("unknown translation ID: {id:?}"))).map(|tl| tl.1)
+        Self::TABLE
+            .iter()
+            .find(|(id2, _)| id == id2)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("unknown translation ID: {id:?}"),
+                )
+            })
+            .map(|tl| tl.1)
     }
-    fn start(id: &TranslationId, raw: RawNode<D>) -> io::Result<TaggedTranslationState<Self, D>> where Self: Sized {
+    fn start(id: &TranslationId, raw: RawNode<D>) -> io::Result<TaggedTranslationState<Self, D>>
+    where
+        Self: Sized,
+    {
         let tl = Self::get(id)?;
-        Ok(TaggedTranslationState { id: id.clone(), from: raw.clone(), typeless_state: tl.start(raw), _phantom: PhantomData })
+        Ok(TaggedTranslationState {
+            id: id.clone(),
+            from: raw.clone(),
+            typeless_state: tl.start(raw),
+            _phantom: PhantomData,
+        })
     }
 }
 
@@ -280,7 +337,8 @@ impl<TABLE: TranslationTable<D>, D: DB> Clone for TaggedTranslationState<TABLE, 
 impl<TABLE: TranslationTable<D>, D: DB> Storable<D> for TaggedTranslationState<TABLE, D> {
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         self.id.serialize(writer)?;
         self.from.serialize(writer)?;
         self.typeless_state.to_binary_repr(writer)
@@ -294,12 +352,19 @@ impl<TABLE: TranslationTable<D>, D: DB> Storable<D> for TaggedTranslationState<T
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         let id = TranslationId::deserialize(reader, 0)?;
         let from = RawNode::<D>::deserialize(reader, 0)?;
         let tl = TABLE::get(&id)?;
-        let typeless_state = tl.from_binary_repr(reader, child_hashes, loader.as_backend_loader()?)?;
-        Ok(TaggedTranslationState { id, from, typeless_state, _phantom: PhantomData })
+        let typeless_state =
+            tl.from_binary_repr(reader, child_hashes, loader.as_backend_loader()?)?;
+        Ok(TaggedTranslationState {
+            id,
+            from,
+            typeless_state,
+            _phantom: PhantomData,
+        })
     }
 }
 
@@ -332,14 +397,37 @@ impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
         let work_queue = self.work_queue.push_back(tl);
         Ok(TranslationState {
             work_queue,
-            cache: self.cache.clone()
+            cache: self.cache.clone(),
         })
     }
 
-    pub fn step(&self, limit: &mut CostDuration) -> io::Result<Either<Self, Sp<KeyRef<D>, D>>> {
-        let mut cur = self.work_queue.front().expect("work queue must not be empty").clone();
+    pub fn run(&self, mut limit: CostDuration) -> io::Result<Either<Self, Sp<KeyRef<D>, D>>> {
+        let mut cur = self.clone();
+        let result = loop {
+            match cur.step(&mut limit)? {
+                Either::Left((true, state)) => {
+                    cur = state;
+                    break None;
+                }
+                Either::Left((false, state)) => cur = state,
+                Either::Right(res) => break Some(res),
+            }
+        };
+        match result {
+            Some(res) => Ok(Either::Right(res)),
+            None => Ok(Either::Left(cur)),
+        }
+    }
+
+    fn step(&self, limit: &mut CostDuration) -> io::Result<Either<(bool, Self), Sp<KeyRef<D>, D>>> {
+        let mut cur = self
+            .work_queue
+            .front()
+            .expect("work queue must not be empty")
+            .clone();
         let mut work_queue = self.work_queue.remove_front();
         let mut cache = self.cache.clone();
+        let mut finished = false;
         match cur.typeless_state.as_mut().step(limit, &self.cache)? {
             StepResult::Suspended => work_queue = work_queue.push_front(cur),
             StepResult::Depends { id, child } => {
@@ -353,10 +441,65 @@ impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
                     cache = cache.insert(cur.id, cur.from, (&*res).clone());
                 }
             }
+            StepResult::NotEnoughTime => finished = true,
         }
-        Ok(Either::Left(Self {
-            work_queue,
-            cache,
-        }))
+        Ok(Either::Left((finished, Self { work_queue, cache })))
+    }
+}
+
+#[derive(Storable)]
+#[derive_where(Clone, Debug)]
+#[storable(db = D)]
+#[phantom(A, B, TABLE)]
+pub struct TypedTranslationState<A: Storable<D>, B: Storable<D>, TABLE: TranslationTable<D>, D: DB>
+{
+    pub state: TranslationState<TABLE, D>,
+    _phantom1: PhantomData<A>,
+    _phantom2: PhantomData<B>,
+}
+
+impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D>, D: DB>
+    TypedTranslationState<A, B, TABLE, D>
+{
+    pub fn start(input: Sp<A, D>) -> io::Result<Self> {
+        let tlid = TranslationId(A::tag(), B::tag());
+        Ok(TypedTranslationState {
+            state: TranslationState::start(&tlid, input.hash().into())?,
+            _phantom1: PhantomData,
+            _phantom2: PhantomData,
+        })
+    }
+
+    pub fn change_target(&self, target: Sp<A, D>) -> io::Result<Self> {
+        let tlid = TranslationId(A::tag(), B::tag());
+        Ok(TypedTranslationState {
+            state: self.state.change_target(&tlid, target.hash().into())?,
+            _phantom1: PhantomData,
+            _phantom2: PhantomData,
+        })
+    }
+
+    pub fn last_state(&self) -> io::Result<Sp<A, D>> {
+        let hash = self
+            .state
+            .work_queue
+            .back()
+            .expect("last state must exist")
+            .from
+            .clone();
+        default_storage::<D>().get_lazy(&hash.into())
+    }
+
+    pub fn run(&self, limit: CostDuration) -> io::Result<Either<Self, Sp<B, D>>> {
+        match self.state.run(limit)? {
+            Either::Left(state) => Ok(Either::Left(TypedTranslationState {
+                state,
+                _phantom1: PhantomData,
+                _phantom2: PhantomData,
+            })),
+            Either::Right(hash) => Ok(Either::Right(
+                default_storage::<D>().get_lazy(&hash.key.clone().into())?,
+            )),
+        }
     }
 }
