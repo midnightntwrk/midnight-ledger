@@ -711,7 +711,7 @@ impl Default for ContractMaintenanceAuthority {
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[serde(bound(serialize = "", deserialize = ""))]
 #[serde(rename_all = "camelCase")]
-#[tag = "contract-state[v4]"]
+#[tag = "contract-state[v5]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -846,7 +846,7 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v2]"]
+#[tag = "contract-operation[v3]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
