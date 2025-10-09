@@ -861,7 +861,7 @@ impl From<DustParameters> for Value {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "dust-utxo-state[v1]"]
+#[tag = "dust-utxo-state[v2]"]
 #[must_use]
 pub struct DustUtxoState<D: DB> {
     pub commitments: MerkleTree<(), D>,
@@ -885,7 +885,7 @@ impl<D: DB> Default for DustUtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "dust-generation-state[v1]"]
+#[tag = "dust-generation-state[v2]"]
 #[must_use]
 pub struct DustGenerationState<D: DB> {
     pub address_delegation: Map<UserAddress, DustPublicKey, D>,
@@ -913,7 +913,7 @@ impl<D: DB> Default for DustGenerationState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq, Default)]
 #[storable(db = D)]
-#[tag = "dust-state[v1]"]
+#[tag = "dust-state[v2]"]
 #[must_use]
 pub struct DustState<D: DB> {
     pub utxo: DustUtxoState<D>,
@@ -1292,7 +1292,7 @@ impl Error for DustSpendError {}
 #[derive(Debug, Storable)]
 #[derive_where(Clone)]
 #[storable(db = D)]
-#[tag = "dust-local-state[v1]"]
+#[tag = "dust-local-state[v2]"]
 pub struct DustLocalState<D: DB> {
     generating_tree: MerkleTree<DustGenerationInfo, D>,
     generating_tree_first_free: u64,

@@ -349,7 +349,7 @@ impl MerkleTreeCollapsedUpdate {
 #[derive_where(Clone, PartialOrd, PartialEq, Ord, Eq; A)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "merkle-tree[v1]"]
+#[tag = "merkle-tree[v2]"]
 pub struct MerkleTree<A: Storable<D>, D: DB = DefaultDB>(Sp<MerkleTreeNode<A, D>, D>);
 tag_enforcement_test!(MerkleTree<(), InMemoryDB>);
 
@@ -399,7 +399,7 @@ impl<'de, A: Deserialize<'de> + Storable<D>, D: DB> Deserialize<'de> for MerkleT
 #[derive_where(Clone, Hash, Ord, PartialOrd, Eq, PartialEq; A)]
 #[derive(Storable)]
 #[storable(db = D, invariant = MerkleTreeNode::invariant)]
-#[tag = "merkle-tree-node[v1]"]
+#[tag = "merkle-tree-node[v2]"]
 pub enum MerkleTreeNode<A: Storable<D>, D: DB> {
     /// Leaf node
     Leaf {
@@ -762,8 +762,8 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
                 let left = Sp::new(left.rehash());
                 let right = Sp::new(right.rehash());
                 let hash = Some(Sp::new(transient_hash(&[
-                    left.root().expect("rehashed tree must have root"),
                     right.root().expect("rehashed tree must have root"),
+                    left.root().expect("rehashed tree must have root"),
                 ])));
                 Node {
                     hash,

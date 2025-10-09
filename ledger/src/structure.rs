@@ -747,7 +747,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v3]"]
+#[tag = "intent[v4]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1169,7 +1169,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v6]"]
+#[tag = "transaction[v7]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1443,7 +1443,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v6]"]
+#[tag = "standard-transaction[v7]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
@@ -2255,7 +2255,7 @@ impl rand::distributions::Distribution<ContractCall<(), InMemoryDB>>
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; P)]
 #[storable(db = D)]
-#[tag = "contract-call[v2]"]
+#[tag = "contract-call[v3]"]
 pub struct ContractCall<P: ProofKind<D>, D: DB> {
     pub address: ContractAddress,
     pub entry_point: EntryPointBuf,
@@ -2371,7 +2371,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v2]"]
+#[tag = "contract-deploy[v3]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2601,7 +2601,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v3]"]
+#[tag = "contract-action[v4]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -2763,16 +2763,17 @@ tag_enforcement_test!(UtxoSpend);
 
 #[derive(PartialOrd, Ord, Debug, Clone, PartialEq, Eq, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "utxo-metadata[v1]"]
+#[tag = "utxo-metadata[v2]"]
 pub struct UtxoMeta {
     pub ctime: Timestamp,
+    pub source: Option<PublicAddress>,
 }
 tag_enforcement_test!(UtxoMeta);
 
 #[derive(Storable, PartialOrd, Ord)]
 #[derive_where(Debug, Clone, PartialEq, Eq, Hash)]
 #[storable(db = D)]
-#[tag = "unshielded-utxo-state[v2]"]
+#[tag = "unshielded-utxo-state[v3]"]
 #[must_use]
 pub struct UtxoState<D: DB> {
     pub utxos: HashMap<Utxo, UtxoMeta, D, NightAnn>,
@@ -2847,7 +2848,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v9]"]
+#[tag = "ledger-state[v10]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,

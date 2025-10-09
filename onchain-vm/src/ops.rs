@@ -91,7 +91,7 @@ impl FieldRepr for Key {
 #[serde(rename_all = "lowercase", expecting = "operation")]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
-#[tag = "impact-op[v1]"]
+#[tag = "impact-op[v2]"]
 #[phantom(M)]
 pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
     Noop {

@@ -702,7 +702,7 @@ impl<D: DB> LedgerState<D> {
                         intent_hash: hash,
                         output_no: i as u32,
                     };
-                    let meta = UtxoMeta { ctime: tblock };
+                    let meta = UtxoMeta { ctime: tblock, source: None };
 
                     state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
                     state.replay_protection = Sp::new(replay_protection);
@@ -1465,6 +1465,7 @@ fn claim_unshielded<D: DB>(
     };
     let meta = UtxoMeta {
         ctime: context.tblock,
+        source: None,
     };
     let utxo = state.utxo.clone().insert(output.clone(), meta);
     #[allow(unused_mut)]
@@ -1554,6 +1555,7 @@ impl<D: DB> UtxoState<D> {
         for output in outputs.iter() {
             let meta = UtxoMeta {
                 ctime: context.block_context.tblock,
+                source: None,
             };
             res = res.insert((&**output).clone(), meta);
         }
@@ -1950,6 +1952,7 @@ mod tests {
             },
             UtxoMeta {
                 ctime: Timestamp::from_secs(0),
+                source: None,
             },
         )
     }

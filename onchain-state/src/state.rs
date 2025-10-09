@@ -74,7 +74,7 @@ pub const CELL_BOUND: usize = 1 << 15;
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[cfg_attr(feature = "proptest", proptest(filter = "proptest_valid"))]
 #[storable(db = D, invariant = StateValue::invariant)]
-#[tag = "impact-state-value[v2]"]
+#[tag = "impact-state-value[v3]"]
 #[non_exhaustive]
 pub enum StateValue<D: DB = InMemoryDB> {
     #[default]
@@ -711,7 +711,7 @@ impl Default for ContractMaintenanceAuthority {
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[serde(bound(serialize = "", deserialize = ""))]
 #[serde(rename_all = "camelCase")]
-#[tag = "contract-state[v4]"]
+#[tag = "contract-state[v5]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -726,7 +726,7 @@ tag_enforcement_test!(ContractState<InMemoryDB>);
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[serde(bound(serialize = "", deserialize = ""))]
 #[serde(rename_all = "camelCase")]
-#[tag = "charged-state[v1]"]
+#[tag = "charged-state[v2]"]
 pub struct ChargedState<D: DB> {
     pub(crate) state: Sp<StateValue<D>, D>,
     // TODO: it would be better to generate charged keys from `data`, since it's
