@@ -30,4 +30,4 @@ describe.concurrent('Proof Server - POST /prove-tx [@slow][@proof-server]', () =
       expect(response.data).toContain('expected header tag');
     });
   });
-})
+});
