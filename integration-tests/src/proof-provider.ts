@@ -227,6 +227,19 @@ export const stopProofServer = () => {
   return stopProofServerBinary();
 };
 
+/**
+ * Provides the base URL for the running proof server instance.
+ *
+ * @throws Error when the proof server has not been started yet.
+ */
+export const getProofServerUrl = (): string => {
+  if (proofServerUrl === 'not started') {
+    throw new Error('Proof server has not been started');
+  }
+
+  return proofServerUrl;
+};
+
 // TODO: this was copied from @midnight-ntwrk/midnight-js-http-client-proof-provider
 // we should either update the source to be less dependent on ledger types
 // or use the ProofServerClient from @midnight-ntwrk/midnight-js-testing@1.0.1-0-pre.be9d6614
