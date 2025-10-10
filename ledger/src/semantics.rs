@@ -702,7 +702,10 @@ impl<D: DB> LedgerState<D> {
                         intent_hash: hash,
                         output_no: i as u32,
                     };
-                    let meta = UtxoMeta { ctime: tblock, source: None };
+                    let meta = UtxoMeta {
+                        ctime: tblock,
+                        source: None,
+                    };
 
                     state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
                     state.replay_protection = Sp::new(replay_protection);
