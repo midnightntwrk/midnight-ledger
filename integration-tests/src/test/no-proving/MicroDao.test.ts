@@ -65,7 +65,14 @@ import {
   ZswapTransient
 } from '@midnight-ntwrk/ledger';
 import { TestState } from '@/test/utils/TestState';
-import { LOCAL_TEST_NETWORK_ID, Random, type ShieldedTokenType, Static, TestResource } from '@/test-objects';
+import {
+  INITIAL_NIGHT_AMOUNT,
+  LOCAL_TEST_NETWORK_ID,
+  Random,
+  type ShieldedTokenType,
+  Static,
+  TestResource
+} from '@/test-objects';
 import {
   cellRead,
   cellWrite,
@@ -118,10 +125,10 @@ describe('Ledger API - MicroDao', () => {
 
     const state = TestState.new();
     const REWARDS_AMOUNT = 5_000_000_000n;
-    const token: ShieldedTokenType = Random.defaultShieldedTokenType();
+    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
 
     state.rewardsShielded(token, REWARDS_AMOUNT);
-    state.giveFeeToken(25);
+    state.giveFeeToken(25, 5n * INITIAL_NIGHT_AMOUNT);
 
     const unbalancedStrictness = new WellFormedStrictness();
     unbalancedStrictness.enforceBalancing = false;

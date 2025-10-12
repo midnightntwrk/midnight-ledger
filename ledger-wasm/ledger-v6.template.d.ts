@@ -491,6 +491,10 @@ export class LedgerState {
    * The dust subsystem state
    */
   readonly dust: DustState;
+  /**
+   * The parameters of the ledger
+   */
+  parameters: LedgerParameters;
 }
 
 /**
@@ -1268,6 +1272,11 @@ export class LedgerParameters {
   static deserialize(raw: Uint8Array): LedgerParameters;
 
   toString(compact?: boolean): string;
+
+  /**
+   * The fee prices for transaction
+   */
+  readonly feePrices: FeePrices;
 }
 
 export class TransactionCostModel {
@@ -1292,6 +1301,16 @@ export class TransactionCostModel {
   static deserialize(raw: Uint8Array): TransactionCostModel;
 
   toString(compact?: boolean): string;
+
+  /**
+   * A cost model for calculating transaction fees
+   */
+  readonly runtimeCostModel: CostModel;
+
+  /**
+   * A baseline cost to begin with
+   */
+  readonly baselineCost: RunningCost;
 }
 
 
