@@ -1258,9 +1258,34 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Notify the storage back-end to increment the persist count on this object.
     ///
     /// See `[StorageBackend::persist]`.
-    pub fn persist(&self) {
+    pub fn persist(&mut self) {
+        // Promote self to Ref if not already
+        if let ChildNode::Direct(..) = self.child_repr {
+            dbg!("IS DIRECT NODE");
+            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+            let value = self
+                .data
+                .get()
+                .expect("A Direct node must contain it's data");
+            value
+                .to_binary_repr(&mut data)
+                .expect("Storable data should be able to be represented in binary");
+            let child_repr = ChildNode::Ref(self.root.clone());
+            let new_sp = self.arena.new_sp_locked(
+                &mut self.arena.lock_metadata(),
+                value.as_ref().clone(),
+                self.root.clone(),
+                data,
+                self.children(),
+                child_repr,
+            );
+            *self = new_sp;
+        }
+        if let ChildNode::Direct(..) = self.child_repr {
+            dbg!("STILL IS DIRECT NODE");
+        }
         self.arena
-            .with_backend(|backend| backend.persist(&self.root))
+            .with_backend(|backend| backend.persist(&self.root));
     }
 
     /// Notify the storage back-end to decrement the persist count on this
@@ -1269,7 +1294,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
         self.arena
-            .with_backend(|backend| backend.unpersist(&self.root))
+            .with_backend(|backend| backend.unpersist(&self.root));
     }
 
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
@@ -3112,7 +3137,7 @@ mod tests {
 
         // Create a persistent key that we can get from both threads.
 
-        let sp = arena.alloc(42u32);
+        let mut sp = arena.alloc(42u32);
         let key = sp.hash();
         sp.persist();
         drop(sp);
