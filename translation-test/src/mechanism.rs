@@ -2,6 +2,7 @@ use base_crypto::cost_model::CostDuration;
 use derive_where::derive_where;
 use serialize::{Deserializable, Serializable, Tagged};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
 use storage::Storable;
@@ -52,7 +53,32 @@ impl<D: DB> TranslationCache<D> {
             .get(&TranslationCacheKey(id.clone(), child))
             .map(|v| (&*v).clone())
     }
+    pub fn resolve<T: Storable<D> + Tagged>(
+        &self,
+        id: &TranslationId,
+        child: RawNode<D>,
+    ) -> io::Result<Option<Sp<T, D>>> {
+        let Some(keyref) = self.lookup(id, child) else {
+            return Ok(None);
+        };
+        default_storage()
+            .get_lazy(&keyref.key.clone().into())
+            .map(Some)
+    }
 }
+
+#[macro_export]
+macro_rules! try_resopt {
+    ($x:expr) => {
+        match $x? {
+            Some(x) => x,
+            None => return Ok(None),
+        }
+    };
+}
+
+pub use try_resopt;
+
 trait AsBackendLoader<D: DB> {
     fn as_backend_loader<'a>(&'a self) -> io::Result<&'a BackendLoader<'a, D>>;
 }
@@ -80,6 +106,7 @@ impl<T: Loader<D>, D: DB> AsBackendLoader<D> for T {
 }
 
 pub trait TypelessTranslation<D: DB> {
+    fn required_translations(&self) -> Vec<TranslationId>;
     fn start(&self, raw: RawNode<D>) -> Box<dyn TypelessTranslationState<D>>;
     fn from_binary_repr(
         &self,
@@ -102,6 +129,7 @@ pub trait TypelessTranslationState<D: DB>: Send + Sync + std::fmt::Debug {
 }
 
 pub trait DirectTranslation<A: Storable<D>, B: Storable<D>, D: DB>: Send + Sync + 'static {
+    fn required_translations() -> Vec<TranslationId>;
     fn child_translations(source: &A) -> Vec<(TranslationId, RawNode<D>)>;
     fn finalize(
         source: &A,
@@ -135,6 +163,9 @@ pub struct DirectSpTranslationState<
 impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B, D>, D: DB>
     TypelessTranslation<D> for DirectSpTranslation<A, B, T, D>
 {
+    fn required_translations(&self) -> Vec<TranslationId> {
+        T::required_translations()
+    }
     fn start(&self, raw: RawNode<D>) -> Box<dyn TypelessTranslationState<D>> {
         let state: DirectSpTranslationState<A, B, T, D> = DirectSpTranslationState {
             children_processed: 0,
@@ -213,8 +244,14 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
 //
 // Alternatively, build up the TL table _somehow_, and auto-derive a storable instance off that.
 
-#[derive(PartialEq, Eq, Debug, Serializable, Clone)]
+#[derive(PartialEq, Eq, Serializable, Clone)]
 pub struct TranslationId(pub Cow<'static, str>, pub Cow<'static, str>);
+
+impl Debug for TranslationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} => {}", &self.0, &self.1)
+    }
+}
 
 #[derive(Storable)]
 #[derive_where(Clone)]
@@ -289,6 +326,20 @@ impl<T: Storable<D>, D: DB> Queue<T, D> {
 
 pub trait TranslationTable<D: DB>: Send + Sync + 'static {
     const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)];
+    fn assert_closure() {
+        let mut missing_tls = vec![];
+        for (outer, tl) in Self::TABLE.iter() {
+            for inner in tl.required_translations() {
+                if let Err(_) = Self::get(&inner) {
+                    missing_tls.push((outer.clone(), inner));
+                }
+            }
+        }
+        for (outer, inner) in missing_tls.iter() {
+            eprintln!("missing translation required for {outer:?}: {inner:?}");
+        }
+        assert!(missing_tls.is_empty());
+    }
     fn get(id: &TranslationId) -> io::Result<&'static dyn TypelessTranslation<D>> {
         Self::TABLE
             .iter()

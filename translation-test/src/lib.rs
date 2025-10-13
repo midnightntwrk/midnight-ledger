@@ -13,6 +13,8 @@ use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
+mod ledger_tl;
+
 use mechanism::*;
 
 #[derive(Storable)]
@@ -84,6 +86,9 @@ mod rl {
 struct NestyLrToRlTranslation;
 
 impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTranslation {
+    fn required_translations() -> Vec<TranslationId> {
+        vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())]
+    }
     fn child_translations(source: &lr::Nesty<D>) -> Vec<(TranslationId, RawNode<D>)> {
         let tlid = || TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
         match source {
@@ -125,6 +130,12 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
 struct FooToBarTranslation;
 
 impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
+    fn required_translations() -> Vec<TranslationId> {
+        vec![TranslationId(
+            MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+        )]
+    }
     fn child_translations(source: &Foo<D>) -> Vec<(TranslationId, RawNode<D>)> {
         vec![
             // HashMap<u64, FooEntry, D> -> HashMap<u64, BarEntry, D>
@@ -171,6 +182,12 @@ impl<D: DB>
         D,
     > for MptFooToBarTranslation
 {
+    fn required_translations() -> Vec<TranslationId> {
+        vec![TranslationId(
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+        )]
+    }
     fn child_translations(
         source: &MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
     ) -> Vec<(TranslationId, RawNode<D>)> {
@@ -209,6 +226,17 @@ impl<D: DB>
         D,
     > for MptNodeFooToBarTranslation
 {
+    fn required_translations() -> Vec<TranslationId> {
+        let entry_tl = TranslationId(
+            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
+            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+        );
+        let self_tl = TranslationId(
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+        );
+        vec![entry_tl, self_tl]
+    }
     fn child_translations(
         source: &merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
     ) -> Vec<(TranslationId, RawNode<D>)> {
@@ -317,6 +345,9 @@ struct FooEntryToBarEntryTranslation;
 impl<D: DB> DirectTranslation<(Sp<u64, D>, Sp<FooEntry, D>), (Sp<u64, D>, Sp<BarEntry, D>), D>
     for FooEntryToBarEntryTranslation
 {
+    fn required_translations() -> Vec<TranslationId> {
+        vec![]
+    }
     fn child_translations(
         source: &(Sp<u64, D>, Sp<FooEntry, D>),
     ) -> Vec<(TranslationId, RawNode<D>)> {
@@ -423,5 +454,10 @@ mod tests {
         let Either::Right(_after) = tl_state.run(cost).unwrap() else {
             panic!("didn't finish");
         };
+    }
+
+    #[test]
+    fn test_test_table_closed() {
+        <TestTable as TranslationTable<InMemoryDB>>::assert_closure();
     }
 }
