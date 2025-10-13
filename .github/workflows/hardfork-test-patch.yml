@@ -38,7 +38,24 @@ jobs:
           echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
-      - name: Checkout repository
+      - name: Get the rust toolchain
+        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
+        with:
+          components: rustfmt
+
+      - name: Checkout workflow branch for patch tool
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        with:
+          ref: ${{ github.ref }}
+
+      - name: Build the patch tool from workflow branch
+        run: |
+          cd ./scripts/hardfork_version_patch/
+          cargo build --release
+          mkdir -p $HOME/tools
+          cp target/release/hardfork_version_patch $HOME/tools/
+
+      - name: Checkout repository at tag
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
         with:
           ref: ${{ github.event.inputs.tag }}
@@ -49,20 +66,9 @@ jobs:
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
 
-      - name: Get the rust toolchain
-        uses: dtolnay/rust-toolchain@38b70195107dddab2c7bbd522bcf763bac00963b
-        with:
-          components: rustfmt
-
-      - name: Build the patch tool
-        run: |
-          # TODO: Checkout the patch tool from the branch this workflow is run from
-          cd ./scripts/hardfork_version_patch/
-          cargo build --release
-
       - name: Patch the sources
         run: |
-          ./scripts/hardfork_version_patch/target/release/hardfork_version_patch
+          $HOME/tools/hardfork_version_patch
           sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
 
       - name: Update Cargo.lock
