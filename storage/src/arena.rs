@@ -1422,9 +1422,9 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     children: d.children.as_ref().clone(),
                 },
             };
-            for child in node.children.iter().map(ChildNode::hash) {
+            for child in node.children.iter() {
                 *incoming_vertices.entry(child.clone()).or_default() += 1;
-                frontier.push(ChildNode::Ref(child.clone()));
+                frontier.push(child.clone());
             }
             raw_size_limit = raw_size_limit
                 .checked_sub(PERSISTENT_HASH_BYTES as u64 + node.data.len() as u64)?;
@@ -1440,13 +1440,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             }
             let disk = disk_objects.get(node.hash()).expect("node must be present");
             list_indices.insert(node.clone(), list_indices.len() as u64);
-            for child in disk.children.iter().map(ChildNode::hash) {
+            for child in disk.children.iter() {
                 let incoming = incoming_vertices
                     .get_mut(&child)
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
-                    empty_incoming_nodes.push(ChildNode::Ref(child.clone()));
+                    empty_incoming_nodes.push(child.clone());
                 }
             }
         }
@@ -2373,19 +2373,19 @@ mod tests {
 
     #[test]
     fn dedup() {
-        let val: u8 = 2;
+        let val: String = "A".repeat(1024);
         let map = new_arena();
-        let _malloced_a = map.alloc::<u8>(val);
-        let _malloced_b = map.alloc::<u8>(val);
+        let _malloced_a = map.alloc::<String>(val.clone());
+        let _malloced_b = map.alloc::<String>(val);
         assert_eq!(map.size(), 1)
     }
 
     #[test]
     fn drop_node() {
         let map = new_arena();
-        let _malloc_a = map.alloc::<u8>(6);
+        let _malloc_a = map.alloc::<String>("A".repeat(1024));
         {
-            let _malloc_b = map.alloc::<u8>(8);
+            let _malloc_b = map.alloc::<String>("B".repeat(1024));
             assert_eq!(map.size(), 2);
         }
         assert_eq!(map.size(), 1);
@@ -3038,7 +3038,7 @@ mod tests {
         assert_eq!(
             sp.children().len(),
             2,
-            "children were inlined, need to fix `Pairg as Storable` impl"
+            "children were inlined, need to fix `Pair as Storable` impl"
         );
 
         // Round trip serialization of Pair.
