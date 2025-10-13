@@ -751,7 +751,8 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         ))
     }
 
-    fn rehash(&self) -> Self {
+    /// Forces a rehash of this part of the tree.
+    pub fn rehash(&self) -> Self {
         match self {
             Leaf { .. } | Collapsed { .. } | Stub { .. } | Node { hash: Some(_), .. } => {
                 self.clone()
