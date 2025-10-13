@@ -62,9 +62,7 @@ jobs:
 
       - name: Patch the sources
         run: |
-          # The ledger isn't in a state right now where hard-forking can be tested, due to recent changes in seralization.
-          # TODO: uncomment the line below once hard-forking is ready for testing again
-          # ./scripts/hardfork_version_patch/target/release/hardfork_version_patch
+          ./scripts/hardfork_version_patch/target/release/hardfork_version_patch
           sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
 
       - name: Format the source code
