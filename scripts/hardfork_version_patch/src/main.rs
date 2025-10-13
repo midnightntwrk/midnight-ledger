@@ -17,13 +17,15 @@ use std::fs;
 use std::path::Path;
 
 fn update_tag_versions(content: &str) -> (String, bool) {
-    let re = Regex::new(r#"#\[tag = "(.+?)(?:\[v(\d+)\])?"?\]"#).unwrap();
+    // Match #[tag = "..."] only at the start of a line (with optional leading whitespace)
+    let re = Regex::new(r#"(?m)^(\s*)#\[tag = "(.+?)(?:\[v(\d+)\])?"?\]"#).unwrap();
     let mut changed = false;
 
     let updated = re.replace_all(content, |caps: &regex::Captures| {
-        let base_tag = &caps[1];
+        let leading_whitespace = &caps[1];
+        let base_tag = &caps[2];
 
-        let new_version = if let Some(version_str) = caps.get(2) {
+        let new_version = if let Some(version_str) = caps.get(3) {
             // Version exists, increment it
             let current_version: u32 = version_str.as_str().parse().unwrap_or(1);
             current_version + 1
@@ -33,7 +35,7 @@ fn update_tag_versions(content: &str) -> (String, bool) {
         };
 
         changed = true;
-        format!(r#"#[tag = "{}[v{}]"]"#, base_tag, new_version)
+        format!(r#"{}#[tag = "{}[v{}]"]"#, leading_whitespace, base_tag, new_version)
     });
 
     (updated.to_string(), changed)
