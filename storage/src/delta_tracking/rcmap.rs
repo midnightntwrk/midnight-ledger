@@ -327,9 +327,10 @@ pub(crate) mod tests {
         let mut to_visit = rcmap
             .children()
             .into_iter()
-            .filter_map(|c| c.into_ref().cloned() )
+            .map(|c| c.hash().clone() )
             .collect::<Vec<_>>();
         let arena = &crate::storage::default_storage::<D>().arena;
+        dbg!(&to_visit);
         while let Some(current) = to_visit.pop() {
             if !visited.insert(current.clone()) {
                 continue;
@@ -351,7 +352,7 @@ pub(crate) mod tests {
     // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.
     #[test]
     fn rc_0_keys_are_descendants() {
-        let val = Sp::<_, InMemoryDB>::new(42u64);
+        let val = Sp::<_, InMemoryDB>::new([42u8;1024]);
         let key = val.root.clone();
 
         // Create RcMap with key in rc_0
@@ -359,6 +360,9 @@ pub(crate) mod tests {
         assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key.clone())));
 
         let descendants = get_rcmap_descendants(&rcmap);
+        dbg!(&rcmap);
+        dbg!(&descendants);
+        dbg!(&key);
         assert!(
             descendants.contains(&key),
             "Key in rc_0 must be a descendant of RcMap"

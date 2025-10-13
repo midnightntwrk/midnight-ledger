@@ -2550,9 +2550,9 @@ mod tests {
         let arena = &new_arena();
 
         // Allocate an `Sp` in the arena
-        let sp1 = arena.alloc(42u32);
+        let sp1 = arena.alloc([42u8; 1024]);
         let root_key = sp1.root.clone();
-        let type_id = TypeId::of::<u32>();
+        let type_id = TypeId::of::<[u8; 1024]>();
         let cache_key = (root_key.clone(), type_id);
 
         // Ensure the `Arc` is in the `sp_cache`, and equal to the one in the
@@ -2564,7 +2564,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<u32>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2593,7 +2593,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<u32>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2616,9 +2616,9 @@ mod tests {
     #[test]
     fn sp_cache_sp_unload() {
         let arena = &new_arena();
-        let mut sp1 = arena.alloc(42u32);
+        let mut sp1 = arena.alloc([42u8; 1024]);
         let mut sp2 = sp1.clone();
-        let cache_key = (sp1.root.clone(), TypeId::of::<u32>());
+        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; 1024]>());
 
         // Verify the weak reference exists in the cache
         {
@@ -2665,8 +2665,8 @@ mod tests {
     #[test]
     fn sp_cache_alloc_same_data_twice() {
         let arena = &new_arena();
-        let sp1 = arena.alloc(42u32);
-        let sp2 = arena.alloc(42u32);
+        let sp1 = arena.alloc([0u8; 1024]);
+        let sp2 = arena.alloc([0u8; 1024]);
         let data1 = sp1.data.get().unwrap();
         let data2 = sp2.data.get().unwrap();
         assert!(
@@ -3169,7 +3169,7 @@ mod tests {
     #[test]
     fn sp_is_lazy() {
         let arena = new_arena();
-        let mut sp = arena.alloc(42u32);
+        let mut sp = arena.alloc([42u8; 1024]);
 
         assert!(!sp.is_lazy());
         sp.unload();
@@ -3181,10 +3181,10 @@ mod tests {
         sp.persist();
         drop(sp);
 
-        let sp = arena.get_lazy::<u32>(&key).unwrap();
+        let sp = arena.get_lazy::<[u8; 1024]>(&key).unwrap();
         assert!(sp.is_lazy());
 
-        let sp = arena.get::<u32>(&key).unwrap();
+        let sp = arena.get::<[u8; 1024]>(&key).unwrap();
         assert!(!sp.is_lazy());
     }
 
