@@ -341,6 +341,43 @@ base_storable!(Timestamp);
 base_storable!(RunningCost);
 base_storable!(String);
 base_storable!(SizeAnn);
+#[cfg(test)]
+base_storable!([u8; 1024]);
+
+#[cfg(test)]
+impl<D: DB> Storable<D> for [u32; 256] {
+    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
+        vec![]
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        let bytes: &[u8; 1024] = unsafe {
+            std::slice::from_raw_parts(self.as_ptr() as *const u8, 256 * std::mem::size_of::<u32>())
+                .try_into()
+                .unwrap()
+        };
+
+        Storable::<D>::to_binary_repr(bytes, writer)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        let val: [u8; 1024] = Storable::<D>::from_binary_repr(reader, child_hashes, loader)?;
+        let data: &[u32; 256] = unsafe {
+            std::slice::from_raw_parts(val.as_ptr() as *const u32, 256)
+                .try_into()
+                .unwrap()
+        };
+        Ok(*data)
+    }
+}
 
 impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
     fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {

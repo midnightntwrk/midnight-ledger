@@ -829,7 +829,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                 obj.children,
                 &child_repr,
             );
-            return Ok(Sp::lazy(self.arena.clone(), key.clone(), todo!()));
+            return Ok(Sp::lazy(self.arena.clone(), key.clone(), child_repr));
         }
         // If not at max depth, then deserialize recursively.
         let loader = BackendLoader {
@@ -1608,18 +1608,18 @@ pub(crate) mod bin_tree {
     #[derive_where(Clone, PartialEq, Eq)]
     #[tag = "test-bin-tree"]
     #[storable(db = D)]
-    pub(crate) struct BinTree<D: DB> {
-        value: u64,
-        pub(crate) left: Option<Sp<BinTree<D>, D>>,
-        pub(crate) right: Option<Sp<BinTree<D>, D>>,
+    pub(crate) struct BinTree<D: DB, T: Storable<D> + PartialEq + Eq> {
+        value: T,
+        pub(crate) left: Option<Sp<BinTree<D, T>, D>>,
+        pub(crate) right: Option<Sp<BinTree<D, T>, D>>,
     }
 
-    impl<D: DB> BinTree<D> {
+    impl<D: DB, T: Storable<D> + PartialEq + Eq> BinTree<D, T> {
         pub(crate) fn new(
-            value: u64,
-            left: Option<Sp<BinTree<D>, D>>,
-            right: Option<Sp<BinTree<D>, D>>,
-        ) -> BinTree<D> {
+            value: T,
+            left: Option<Sp<BinTree<D, T>, D>>,
+            right: Option<Sp<BinTree<D, T>, D>>,
+        ) -> BinTree<D, T> {
             BinTree { value, left, right }
         }
 
@@ -1657,8 +1657,8 @@ pub(crate) mod bin_tree {
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
-    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D>, D> {
-        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D>, D> {
+    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D, u64>, D> {
+        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D, u64>, D> {
             assert!(height > 0);
             let (left, right) = {
                 if height == 1 {
@@ -1673,6 +1673,38 @@ pub(crate) mod bin_tree {
             arena.alloc(BinTree::new(value, left, right))
         }
         go(arena, 1, height)
+    }
+
+    #[cfg(any(
+        test,
+        all(
+            feature = "stress-test",
+            any(feature = "parity-db", feature = "sqlite")
+        )
+    ))]
+    pub(crate) fn large_counting_tree<D: DB>(
+        arena: &Arena<D>,
+        height: usize,
+    ) -> Sp<BinTree<D, [u32; 256]>, D> {
+        fn go<D: DB>(
+            arena: &Arena<D>,
+            value: [u32; 256],
+            height: usize,
+        ) -> Sp<BinTree<D, [u32; 256]>, D> {
+            assert!(height > 0);
+            let (left, right) = {
+                if height == 1 {
+                    (None, None)
+                } else {
+                    (
+                        Some(go(arena, [2 * value[0]; 256], height - 1)),
+                        Some(go(arena, [2 * value[0] + 1; 256], height - 1)),
+                    )
+                }
+            };
+            arena.alloc(BinTree::new(value, left, right))
+        }
+        go(arena, [1; 256], height)
     }
 }
 
@@ -2373,19 +2405,19 @@ mod tests {
 
     #[test]
     fn dedup() {
-        let val: String = "A".repeat(1024);
+        let val = [0; 1024];
         let map = new_arena();
-        let _malloced_a = map.alloc::<String>(val.clone());
-        let _malloced_b = map.alloc::<String>(val);
+        let _malloced_a = map.alloc::<[u8; 1024]>(val.clone());
+        let _malloced_b = map.alloc::<[u8; 1024]>(val);
         assert_eq!(map.size(), 1)
     }
 
     #[test]
     fn drop_node() {
         let map = new_arena();
-        let _malloc_a = map.alloc::<String>("A".repeat(1024));
+        let _malloc_a = map.alloc::<[u8; 1024]>([0; 1024]);
         {
-            let _malloc_b = map.alloc::<String>("B".repeat(1024));
+            let _malloc_b = map.alloc::<[u8; 1024]>([1; 1024]);
             assert_eq!(map.size(), 2);
         }
         assert_eq!(map.size(), 1);
@@ -2394,8 +2426,8 @@ mod tests {
     #[test]
     fn clone_increment_refcount() {
         let map = new_arena();
-        let payload = "A".repeat(1024); // must be larger than SMALL_OBJECT_LIMIT
-        let malloc_a = map.alloc::<String>(payload);
+        let payload = [0; 1024]; // must be larger than SMALL_OBJECT_LIMIT
+        let malloc_a = map.alloc::<[u8; 1024]>(payload);
         let malloc_b = malloc_a.clone();
         let ref_count = map
             .lock_metadata()
@@ -2628,17 +2660,21 @@ mod tests {
         use super::bin_tree::*;
         let arena = &new_arena();
 
-        type BinTree = super::bin_tree::BinTree<DefaultDB>;
+        type BinTree = super::bin_tree::BinTree<DefaultDB, [u32; 256]>;
 
         // Build a tree, unload and walk the left fringe, and check that only
         // the left fringe is forced, while also checking that printing doesn't
         // force any lazy sps, by comparing the Debug fmt of the tree with an
         // expected value.
         {
-            let mut bt = BinTree::new(0, None, None);
+            let mut bt = BinTree::new([0u32; 256], None, None);
             let depth = 5;
             for i in 1..depth {
-                bt = BinTree::new(i, Some(arena.alloc(bt.clone())), Some(arena.alloc(bt)));
+                bt = BinTree::new(
+                    [i as u32; 256],
+                    Some(arena.alloc(bt.clone())),
+                    Some(arena.alloc(bt)),
+                );
             }
             let mut bt = arena.alloc(bt);
             bt.unload();
@@ -2646,11 +2682,8 @@ mod tests {
             for _ in 0..depth {
                 p = p.unwrap().left.as_ref();
             }
-            // Obtain golden value.
-            /* println!("{:?}", bt); */
-            let golden = "BinTree { value: 4, left: Some(BinTree { value: 3, left: Some(BinTree { value: 2, left: Some(BinTree { value: 1, left: Some(BinTree { value: 0, left: None, right: None }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }";
             let actual = format!("{:?}", bt);
-            assert_eq!(actual, golden);
+            assert!(actual.ends_with("right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }"));
         }
 
         // Build a large tree (would not fit in memory without sharing of
@@ -2661,10 +2694,14 @@ mod tests {
         {
             // Build the tree.
 
-            let mut bt1 = BinTree::new(0, None, None);
+            let mut bt1 = BinTree::new([0; 256], None, None);
             let depth = 100;
             for i in 1..depth {
-                bt1 = BinTree::new(i, Some(arena.alloc(bt1.clone())), Some(arena.alloc(bt1)));
+                bt1 = BinTree::new(
+                    [i as u32; 256],
+                    Some(arena.alloc(bt1.clone())),
+                    Some(arena.alloc(bt1)),
+                );
             }
             let mut bt1 = arena.alloc(bt1);
 
@@ -2698,7 +2735,7 @@ mod tests {
             // Load a full tree into memory.
 
             let depth = 13;
-            let mut bt = counting_tree(arena, depth);
+            let mut bt = large_counting_tree(arena, depth);
             // Check that we have a full tree in memory
             assert_eq!(arena.lock_sp_cache().borrow().len(), (1 << depth) - 1);
 
@@ -3053,12 +3090,12 @@ mod tests {
     #[test]
     fn get_unknown_key() {
         let arena = new_arena();
-        let sp = arena.alloc(42u32);
+        let sp = arena.alloc([0; 1024]);
         //let key = VersionedArenaKey::<DefaultHasher>::default();
         let key = sp.hash();
-        assert!(arena.get::<u32>(&key).is_ok());
+        assert!(arena.get::<[u8; 1024]>(&key).is_ok());
         let arena = new_arena();
-        assert!(arena.get::<u32>(&key).is_err());
+        assert!(arena.get::<[u8; 1024]>(&key).is_err());
     }
 
     /// Test intensive concurrent manipulation of `Sp`s for the same key.
