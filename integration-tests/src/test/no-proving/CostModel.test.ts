@@ -156,9 +156,8 @@ describe('Ledger API - CostModel', () => {
    * @then  Value should be ~1.045
    */
   test('max price adjustment is ~1.045', () => {
-    const maxPriceAdjustment = LedgerParameters.initialParameters().maxPriceAdjustment();
-    expect(maxPriceAdjustment).toBeGreaterThanOrEqual(1.045);
-    expect(maxPriceAdjustment).toBeLessThanOrEqual(1.046);
+    expect(maxAdj).toBeGreaterThanOrEqual(1.045);
+    expect(maxAdj).toBeLessThanOrEqual(1.046);
   });
 
   /**
@@ -180,6 +179,28 @@ describe('Ledger API - CostModel', () => {
     expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
     expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
     expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+  });
+
+  /**
+   * @given A small block below target fullness
+   * @when  Calling feesWithMargin with various parameters
+   * @then  Margins are correctly applied to transaction fees
+   */
+  test('applies margin correctly to transaction fees using feesWithMargin', () => {
+    const ITERATIONS = 2;
+    const state = TestState.new();
+    state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
+
+    const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
+    const balanced = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+
+    const baseFee = balanced.fees(state.ledger.parameters);
+    const feesWithMargin0 = balanced.feesWithMargin(state.ledger.parameters, 0);
+    const feesWithMargin1 = balanced.feesWithMargin(state.ledger.parameters, 1);
+
+    expect(feesWithMargin0).toEqual(baseFee);
+    expect(feesWithMargin1).toBeGreaterThan(feesWithMargin0);
   });
 
   /**
