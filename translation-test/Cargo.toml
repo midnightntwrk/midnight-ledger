@@ -11,11 +11,11 @@ storage = { path = "../storage", package = "midnight-storage", features = ["publ
 old-ledger = { path = "../ledger", package = "midnight-ledger" }
 old-zswap = { path = "../zswap", package = "midnight-zswap" }
 old-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["public-internal-structure"] }
-old-onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+old-onchain-state = { path = "../onchain-state", package = "midnight-onchain-state", features = ["public-internal-structure"] }
 old-coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 new-ledger = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-ledger" }
 new-zswap = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-zswap" }
-new-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-onchain-state" }
+new-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-onchain-state", features = ["public-internal-structure"] }
 new-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-transient-crypto", features = ["public-internal-structure"] }
 new-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-coin-structure" }
 derive-where = "^1.5.0"
