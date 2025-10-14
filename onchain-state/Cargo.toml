@@ -6,6 +6,7 @@ license.workspace = true
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest"]
+public-internal-structure = []
 
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }

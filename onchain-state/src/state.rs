@@ -728,12 +728,19 @@ tag_enforcement_test!(ContractState<InMemoryDB>);
 #[serde(rename_all = "camelCase")]
 #[tag = "charged-state[v2]"]
 pub struct ChargedState<D: DB> {
+    #[cfg(feature = "public-internal-structure")]
+    pub state: Sp<StateValue<D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     pub(crate) state: Sp<StateValue<D>, D>,
     // TODO: it would be better to generate charged keys from `data`, since it's
     // an invariant that the chargable contract state is always a subset of the
     // `charged_keys`. I assume this implies a manual `Arbitrary`
     // implementation, but maybe this is some `proptest` magic that supports
     // deriving this ...
+    #[cfg(feature = "public-internal-structure")]
+    #[cfg_attr(feature = "proptest", proptest(value = "RcMap::default()"))]
+    pub charged_keys: RcMap<D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     #[cfg_attr(feature = "proptest", proptest(value = "RcMap::default()"))]
     pub(crate) charged_keys: RcMap<D>,
 }
