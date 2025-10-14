@@ -22,7 +22,7 @@ import {
   TransactionContext,
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
-import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, Static } from '@/test-objects';
+import { getQualifiedShieldedCoinInfo, HEX_64_REGEX, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
 describe('Ledger API - ZswapLocalState', () => {
@@ -65,7 +65,7 @@ describe('Ledger API - ZswapLocalState', () => {
   //    coinInfo.type,
   //    coinInfo.value
   //  );
-  //  const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+  //  const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
   //  const proofErasedTransaction = unprovenTransaction.eraseProofs();
   //  const appliedTxLocalState = localState.applyTx(secretKeys, proofErasedTransaction, {
   //    type: res as 'success' | 'partialSuccess' | 'failure',
@@ -102,7 +102,7 @@ describe('Ledger API - ZswapLocalState', () => {
   //    coinInfo.type,
   //    coinInfo.value
   //  );
-  //  const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+  //  const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
   //  const proofErasedTransaction = unprovenTransaction.eraseProofs();
   //  const appliedTxLocalState = localState.applyTx(secretKeys, proofErasedTransaction, { type: 'failure' });
 
@@ -122,7 +122,7 @@ describe('Ledger API - ZswapLocalState', () => {
    */
   test('should spend coins successfully', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
@@ -132,7 +132,7 @@ describe('Ledger API - ZswapLocalState', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -162,7 +162,7 @@ describe('Ledger API - ZswapLocalState', () => {
    */
   test('should spend coins from output successfully', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
@@ -172,7 +172,7 @@ describe('Ledger API - ZswapLocalState', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -212,7 +212,7 @@ describe('Ledger API - ZswapLocalState', () => {
 
   test('should handle non-empty state', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
@@ -221,7 +221,7 @@ describe('Ledger API - ZswapLocalState', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -243,7 +243,7 @@ describe('Ledger API - ZswapLocalState', () => {
    */
   test('should watch for coin successfully', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
@@ -252,7 +252,7 @@ describe('Ledger API - ZswapLocalState', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -266,7 +266,7 @@ describe('Ledger API - ZswapLocalState', () => {
 
   test('clearPending - should clear pending outputs and spends', () => {
     const localState = new ZswapLocalState();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const coinInfo = Static.shieldedCoinInfo(10n);
     const qualifiedCoinInfoToSpend = getQualifiedShieldedCoinInfo(Static.shieldedCoinInfo(5n), 0n);
@@ -277,7 +277,7 @@ describe('Ledger API - ZswapLocalState', () => {
       coinInfo.type,
       coinInfo.value
     );
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, unprovenOffer);
     const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
