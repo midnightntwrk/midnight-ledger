@@ -1140,6 +1140,18 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    * The binding randomness associated with this transaction
    */
   readonly bindingRandomness: bigint;
+  /**
+   * The transaction's signature marker
+   */
+  readonly signatureMarker: S['instance'];
+  /**
+   * The transaction's proof marker
+   */
+  readonly proofMarker: P['instance'];
+  /**
+   * The transaction's bindingness marker
+   */
+  readonly bindingMarker: B['instance'];
 }
 
 /**

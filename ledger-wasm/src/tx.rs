@@ -921,6 +921,61 @@ impl Transaction {
 
         Ok(())
     }
+
+    #[wasm_bindgen(getter, js_name = "proofMarker")]
+    pub fn proof_marker(&self) -> String {
+        use TransactionTypes::*;
+        match &self.0 {
+            UnprovenWithSignaturePreBinding(_)
+            | UnprovenWithSignatureBinding(_)
+            | UnprovenWithSignatureErasedPreBinding(_)
+            | UnprovenWithSignatureErasedBinding(_) => proofish_to_text(Proofish::PreProof),
+            ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignatureErasedBinding(_) => proofish_to_text(Proofish::Proof),
+            ProofErasedWithSignatureNoBinding(_) | ProofErasedWithSignatureErasedNoBinding(_) => {
+                proofish_to_text(Proofish::NoProof)
+            }
+        }
+    }
+
+    #[wasm_bindgen(getter, js_name = "signatureMarker")]
+    pub fn signature_marker(&self) -> String {
+        use TransactionTypes::*;
+        match &self.0 {
+            UnprovenWithSignaturePreBinding(_)
+            | UnprovenWithSignatureBinding(_)
+            | ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureBinding(_)
+            | ProofErasedWithSignatureNoBinding(_) => signaturish_to_text(Signaturish::Signature),
+            UnprovenWithSignatureErasedPreBinding(_)
+            | UnprovenWithSignatureErasedBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignatureErasedBinding(_)
+            | ProofErasedWithSignatureErasedNoBinding(_) => {
+                signaturish_to_text(Signaturish::SignatureErased)
+            }
+        }
+    }
+
+    #[wasm_bindgen(getter, js_name = "bindingMarker")]
+    pub fn binding_marker(&self) -> String {
+        use TransactionTypes::*;
+        match &self.0 {
+            UnprovenWithSignaturePreBinding(_)
+            | UnprovenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_) => bindingish_to_text(Bindingish::PreBinding),
+            UnprovenWithSignatureBinding(_)
+            | UnprovenWithSignatureErasedBinding(_)
+            | ProvenWithSignatureBinding(_)
+            | ProvenWithSignatureErasedBinding(_) => bindingish_to_text(Bindingish::Binding),
+            ProofErasedWithSignatureNoBinding(_) | ProofErasedWithSignatureErasedNoBinding(_) => {
+                bindingish_to_text(Bindingish::NoBinding)
+            }
+        }
+    }
 }
 
 trait ClaimRewardable {

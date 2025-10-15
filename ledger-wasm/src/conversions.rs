@@ -178,6 +178,14 @@ pub fn text_to_proofish(value: &str) -> Result<Proofish, JsError> {
     })
 }
 
+pub fn proofish_to_text(value: Proofish) -> String {
+    match value {
+        Proofish::Proof => String::from("proof"),
+        Proofish::PreProof => String::from("pre-proof"),
+        Proofish::NoProof => String::from("no-proof"),
+    }
+}
+
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Bindingish {
@@ -195,6 +203,14 @@ pub fn text_to_bindingish(value: &str) -> Result<Bindingish, JsError> {
     })
 }
 
+pub fn bindingish_to_text(value: Bindingish) -> String {
+    match value {
+        Bindingish::Binding => String::from("binding"),
+        Bindingish::PreBinding => String::from("pre-binding"),
+        Bindingish::NoBinding => String::from("no-binding"),
+    }
+}
+
 #[repr(u8)]
 #[non_exhaustive]
 pub enum Signaturish {
@@ -208,6 +224,13 @@ pub fn text_to_signaturish(value: &str) -> Result<Signaturish, JsError> {
         "signature-erased" => Signaturish::SignatureErased,
         _ => return Err(JsError::new("Invalid signature value.")),
     })
+}
+
+pub fn signaturish_to_text(value: Signaturish) -> String {
+    match value {
+        Signaturish::Signature => String::from("signature"),
+        Signaturish::SignatureErased => String::from("signature-erased"),
+    }
 }
 
 #[derive(Serialize, Deserialize)]
