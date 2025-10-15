@@ -16,7 +16,7 @@ use std::env;
 use std::fs;
 use std::path::Path;
 
-fn update_tag_versions(content: &str) -> (String, bool) {
+fn update_tag_versions(content: &str, tags_filter: &Option<Vec<String>>) -> (String, bool) {
     // Match #[tag = "..."] only at the start of a line (with optional leading whitespace)
     let re = Regex::new(r#"(?m)^(\s*)#\[tag = "(.+?)(?:\[v(\d+)\])?"?\]"#).unwrap();
     let mut changed = false;
@@ -24,6 +24,17 @@ fn update_tag_versions(content: &str) -> (String, bool) {
     let updated = re.replace_all(content, |caps: &regex::Captures| {
         let leading_whitespace = &caps[1];
         let base_tag = &caps[2];
+
+        // Check if we should update this tag
+        let should_update = match tags_filter {
+            Some(tags) => tags.iter().any(|t| t == base_tag),
+            None => true, // No filter, update all tags
+        };
+
+        if !should_update {
+            // Return the original match unchanged
+            return caps[0].to_string();
+        }
 
         let new_version = if let Some(version_str) = caps.get(3) {
             // Version exists, increment it
@@ -41,11 +52,11 @@ fn update_tag_versions(content: &str) -> (String, bool) {
     (updated.to_string(), changed)
 }
 
-fn process_file<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
+fn process_file<P: AsRef<Path>>(path: P, tags_filter: &Option<Vec<String>>) -> std::io::Result<()> {
     let path = path.as_ref();
     if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some("rs") {
         let content = fs::read_to_string(&path)?;
-        let (updated_content, changed) = update_tag_versions(&content);
+        let (updated_content, changed) = update_tag_versions(&content, tags_filter);
 
         if changed {
             println!("Updating file: {:?}", path);
@@ -55,14 +66,14 @@ fn process_file<P: AsRef<Path>>(path: P) -> std::io::Result<()> {
     Ok(())
 }
 
-fn process_dir(path: impl AsRef<Path>) -> std::io::Result<()> {
+fn process_dir(path: impl AsRef<Path>, tags_filter: &Option<Vec<String>>) -> std::io::Result<()> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            process_dir(path)?;
+            process_dir(path, tags_filter)?;
         } else {
-            process_file(path)?;
+            process_file(path, tags_filter)?;
         }
     }
     Ok(())
@@ -70,12 +81,31 @@ fn process_dir(path: impl AsRef<Path>) -> std::io::Result<()> {
 
 fn main() -> std::io::Result<()> {
     let args: Vec<String> = env::args().collect();
-    let path = if args.len() > 1 { &args[1] } else { "." };
+
+    let mut path = ".";
+    let mut tags_filter: Option<Vec<String>> = None;
+
+    // Find --tags position
+    if let Some(tags_pos) = args.iter().position(|arg| arg == "--tags") {
+        // Everything after --tags is a tag name
+        if tags_pos + 1 < args.len() {
+            tags_filter = Some(args[tags_pos + 1..].iter().map(|s| s.clone()).collect());
+        }
+
+        // Path is the first arg before --tags (if any)
+        if tags_pos > 1 {
+            path = &args[1];
+        }
+    } else if args.len() > 1 {
+        // No --tags, just a path argument
+        path = &args[1];
+    }
+
     let path = Path::new(path);
     if fs::metadata(&path)?.is_dir() {
-        process_dir(path)?
+        process_dir(path, &tags_filter)?
     } else {
-        process_file(path)?
+        process_file(path, &tags_filter)?
     }
     Ok(())
 }
