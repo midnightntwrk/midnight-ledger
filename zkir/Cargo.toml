@@ -1,6 +1,6 @@
 [package]
 name = "zkir"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.4-hard-fork-test"
 edition = "2024"
 license.workspace = true
 
