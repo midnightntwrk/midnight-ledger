@@ -68,7 +68,7 @@ jobs:
 
       - name: Patch the sources
         run: |
-          $HOME/tools/hardfork_version_patch
+          $HOME/tools/hardfork_version_patch --tags standard-transaction
           sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
 
       - name: Update Cargo.lock
