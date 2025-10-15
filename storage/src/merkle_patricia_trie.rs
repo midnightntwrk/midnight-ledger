@@ -1524,14 +1524,14 @@ mod tests {
         struct Tag;
         type D = WrappedDB<DefaultDB, Tag>;
         let _ = set_default_storage::<D>(Storage::default);
-        let mut mpt = MerklePatriciaTrie::<u64, D>::new();
-        mpt = mpt.insert(&([1, 2, 3]), 100);
-        mpt = mpt.insert(&([1, 2, 2]), 100);
-        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&100));
-        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&100));
+        let mut mpt = MerklePatriciaTrie::<[u8; 1024], D>::new();
+        mpt = mpt.insert(&([1, 2, 3]), [100; 1024]);
+        mpt = mpt.insert(&([1, 2, 2]), [100; 1024]);
+        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&[100; 1024]));
+        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&[100; 1024]));
         assert_eq!(mpt.size(), 2);
         dbg!(&mpt.0.arena);
-        assert_eq!(mpt.0.arena.size(), 5);
+        assert_eq!(mpt.0.arena.size(), 1);
     }
 
     #[test]
@@ -1558,12 +1558,12 @@ mod tests {
         let _ = set_default_storage::<D>(Storage::default);
         let arena = &default_storage::<D>().arena;
         {
-            let mut mpt: MerklePatriciaTrie<u64, D> = MerklePatriciaTrie::new();
-            mpt = mpt.insert(&([1, 2, 3]), 100);
-            mpt = mpt.insert(&([1, 2, 4]), 104);
-            mpt = mpt.insert(&([2, 2, 4]), 105);
-            assert_eq!(arena.size(), 11);
-            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&105));
+            let mut mpt: MerklePatriciaTrie<[u8; 1024], D> = MerklePatriciaTrie::new();
+            mpt = mpt.insert(&([1, 2, 3]), [100; 1024]);
+            mpt = mpt.insert(&([1, 2, 4]), [104; 1024]);
+            mpt = mpt.insert(&([2, 2, 4]), [105; 1024]);
+            assert_eq!(arena.size(), 3);
+            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&[105; 1024]));
         }
         assert_eq!(arena.size(), 0);
     }
