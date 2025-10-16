@@ -781,7 +781,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
             if deltas_only {
                 continue;
             }
-            for (_, call) in self.calls() {
+            for call in intent.calls() {
                 let transcripts = call
                     .guaranteed_transcript
                     .iter()
