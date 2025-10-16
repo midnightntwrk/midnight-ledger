@@ -322,29 +322,29 @@ pub(crate) mod tests {
     #[cfg(test)]
     pub(crate) fn get_rcmap_descendants<D: DB>(
         rcmap: &RcMap<D>,
-    ) -> std::collections::HashSet<ArenaKey<D::Hasher>> {
+    ) -> std::collections::HashSet<ChildNode<D::Hasher>> {
         let mut visited = std::collections::HashSet::new();
         let mut to_visit = rcmap
-            .children()
-            .into_iter()
-            .map(|c| c.hash().clone() )
-            .collect::<Vec<_>>();
+            .children();
         let arena = &crate::storage::default_storage::<D>().arena;
-        dbg!(&to_visit);
         while let Some(current) = to_visit.pop() {
             if !visited.insert(current.clone()) {
                 continue;
             }
-            arena.with_backend(|backend| {
-                let disk_obj = backend.get(&current).expect("Key should exist in backend");
-                to_visit.extend(
-                    disk_obj
-                        .children
-                        .iter()
-                        .filter_map(ChildNode::into_ref)
-                        .cloned(),
-                );
-            });
+            match current {
+                ChildNode::Direct(d) => {
+                    to_visit.extend(d.children.iter().cloned())
+                },
+                ChildNode::Ref(ref r) => {
+                    arena.with_backend(|backend| {
+                        let disk_obj = backend.get(r).expect("Key should exist in backend");
+                        to_visit.extend(
+                            disk_obj
+                            .children.clone()
+                        );
+                    });
+                }
+            }
         }
         visited
     }
@@ -360,11 +360,8 @@ pub(crate) mod tests {
         assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key.clone())));
 
         let descendants = get_rcmap_descendants(&rcmap);
-        dbg!(&rcmap);
-        dbg!(&descendants);
-        dbg!(&key);
         assert!(
-            descendants.contains(&key),
+            descendants.contains(&val.as_child()),
             "Key in rc_0 must be a descendant of RcMap"
         );
     }

@@ -371,7 +371,7 @@ mod tests {
     }
 
     struct Dag<D: DB = DefaultDB> {
-        nodes: HashMap<(u8, u8), ArenaKey<D::Hasher>>,
+        nodes: HashMap<(u8, u8), ChildNode<D::Hasher>>,
         // Sps of the roots to keep them in backend.
         _roots: Vec<Sp<Node<D>, D>>,
     }
@@ -429,7 +429,7 @@ mod tests {
         // Convert to ArenaKey map for easier test access
         let mut arena_nodes = HashMap::new();
         for ((layer, id), node) in &nodes {
-            arena_nodes.insert((*layer, *id), node.root.clone());
+            arena_nodes.insert((*layer, *id), node.child_repr.clone());
         }
 
         Dag {
@@ -486,7 +486,7 @@ mod tests {
     }
 
     // Convert node IDs to ArenaKeys using the DAG
-    fn to_keys<'a, I>(node_ids: I) -> StdHashSet<ArenaKey<crate::DefaultHasher>>
+    fn to_keys<'a, I>(node_ids: I) -> StdHashSet<ChildNode<crate::DefaultHasher>>
     where
         I: IntoIterator<Item = &'a (u8, u8)>,
     {
@@ -798,7 +798,7 @@ mod tests {
             // Convert expected_rcs node IDs to ArenaKeys for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
-                .map(|(node_id, rc)| (ChildNode::Ref(dag.nodes[&node_id].clone()), rc))
+                .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
                 .collect();
 
             assert_eq!(
@@ -821,22 +821,16 @@ mod tests {
         // Initialize from the first root set, and then iterate over each
         // subsequent root set and compute incremental_write_delete_costs.
         let initial_roots = &root_sets_as_keys[0];
-        let initial_results = super::initial_write_delete_costs(
-            &initial_roots
-                .into_iter()
-                .map(|k| ChildNode::Ref(k.clone()))
-                .collect(),
-            |_, _| Default::default(),
-        );
+        let initial_results =
+            super::initial_write_delete_costs(&initial_roots.into_iter().collect(), |_, _| {
+                Default::default()
+            });
         let mut current_charged_keys = initial_results.updated_charged_keys;
         for i in 1..root_sets.len() {
             let next_roots = &root_sets_as_keys[i];
             let results = super::incremental_write_delete_costs::<DefaultDB>(
                 &current_charged_keys,
-                &next_roots
-                    .into_iter()
-                    .map(|k| ChildNode::Ref(k.clone()))
-                    .collect(),
+                &next_roots.into_iter().collect(),
                 |_, _| Default::default(),
                 |_| 1000, // High step limit for complete GC
             );
