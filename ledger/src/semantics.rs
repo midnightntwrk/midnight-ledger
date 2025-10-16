@@ -1208,7 +1208,7 @@ impl<D: DB> LedgerState<D> {
                                     token_type,
                                     bal.checked_add(val).ok_or(
                                         TransactionInvalid::BalanceCheckOutOfBounds {
-                                            token_type: token_type,
+                                            token_type,
                                             current_balance: bal,
                                             operation_value: val,
                                             operation: BalanceOperation::Addition,

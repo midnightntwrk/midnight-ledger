@@ -286,11 +286,11 @@ impl Transaction {
         use TransactionTypes::*;
         use ledger::structure::Transaction::ClaimRewards;
         match &rewards.0 {
-            SignatureClaimRewards(val) => Transaction(UnprovenWithSignatureBinding(ClaimRewards(
-                ledger::structure::ClaimRewardsTransaction::from(val.clone()).into(),
-            ))),
+            SignatureClaimRewards(val) => {
+                Transaction(UnprovenWithSignatureBinding(ClaimRewards(val.clone())))
+            }
             SignatureErasedClaimRewards(val) => Transaction(UnprovenWithSignatureErasedBinding(
-                ClaimRewards(ledger::structure::ClaimRewardsTransaction::from(val.clone()).into()),
+                ClaimRewards(val.clone()),
             )),
         }
     }
@@ -585,41 +585,41 @@ impl Transaction {
         use TransactionTypes::*;
         Ok(Transaction(match (&self.0, &other.0) {
             (UnprovenWithSignaturePreBinding(val), UnprovenWithSignaturePreBinding(other_val)) => {
-                UnprovenWithSignaturePreBinding(val.merge(&other_val)?)
+                UnprovenWithSignaturePreBinding(val.merge(other_val)?)
             }
             (UnprovenWithSignatureBinding(val), UnprovenWithSignatureBinding(other_val)) => {
-                UnprovenWithSignatureBinding(val.merge(&other_val)?)
+                UnprovenWithSignatureBinding(val.merge(other_val)?)
             }
             (
                 UnprovenWithSignatureErasedPreBinding(val),
                 UnprovenWithSignatureErasedPreBinding(other_val),
-            ) => UnprovenWithSignatureErasedPreBinding(val.merge(&other_val)?),
+            ) => UnprovenWithSignatureErasedPreBinding(val.merge(other_val)?),
             (
                 UnprovenWithSignatureErasedBinding(val),
                 UnprovenWithSignatureErasedBinding(other_val),
-            ) => UnprovenWithSignatureErasedBinding(val.merge(&other_val)?),
+            ) => UnprovenWithSignatureErasedBinding(val.merge(other_val)?),
             (ProvenWithSignaturePreBinding(val), ProvenWithSignaturePreBinding(other_val)) => {
-                ProvenWithSignaturePreBinding(val.merge(&other_val)?)
+                ProvenWithSignaturePreBinding(val.merge(other_val)?)
             }
             (ProvenWithSignatureBinding(val), ProvenWithSignatureBinding(other_val)) => {
-                ProvenWithSignatureBinding(val.merge(&other_val)?)
+                ProvenWithSignatureBinding(val.merge(other_val)?)
             }
             (
                 ProvenWithSignatureErasedPreBinding(val),
                 ProvenWithSignatureErasedPreBinding(other_val),
-            ) => ProvenWithSignatureErasedPreBinding(val.merge(&other_val)?),
+            ) => ProvenWithSignatureErasedPreBinding(val.merge(other_val)?),
             (
                 ProvenWithSignatureErasedBinding(val),
                 ProvenWithSignatureErasedBinding(other_val),
-            ) => ProvenWithSignatureErasedBinding(val.merge(&other_val)?),
+            ) => ProvenWithSignatureErasedBinding(val.merge(other_val)?),
             (
                 ProofErasedWithSignatureNoBinding(val),
                 ProofErasedWithSignatureNoBinding(other_val),
-            ) => ProofErasedWithSignatureNoBinding(val.merge(&other_val)?),
+            ) => ProofErasedWithSignatureNoBinding(val.merge(other_val)?),
             (
                 ProofErasedWithSignatureErasedNoBinding(val),
                 ProofErasedWithSignatureErasedNoBinding(other_val),
-            ) => ProofErasedWithSignatureErasedNoBinding(val.merge(&other_val)?),
+            ) => ProofErasedWithSignatureErasedNoBinding(val.merge(other_val)?),
             _ => Err(JsError::new(
                 "Both transactions need to be of the same type.",
             ))?,
@@ -1002,7 +1002,7 @@ where
 
         let imbalances = self
             .balance(fees)
-            .map_err(|err| JsError::new(&String::from(err.to_string())))?;
+            .map_err(|err| JsError::new(&err.to_string()))?;
 
         for ((token, imbalanced_segment), imbalance) in imbalances {
             if imbalanced_segment == segment {
@@ -1018,7 +1018,7 @@ where
         params: &LedgerParameters,
         enforce_time_to_dismiss: bool,
     ) -> Result<JsValue, JsError> {
-        Ok(to_value(&self.cost(&params, enforce_time_to_dismiss)?)?)
+        Ok(to_value(&self.cost(params, enforce_time_to_dismiss)?)?)
     }
 
     fn fees(
@@ -1028,14 +1028,14 @@ where
     ) -> Result<BigInt, JsError> {
         Ok(BigInt::from(ledger::structure::Transaction::fees(
             self,
-            &params,
+            params,
             enforce_time_to_dismiss,
         )?))
     }
 
     fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
         Ok(BigInt::from(
-            ledger::structure::Transaction::fees_with_margin(self, &params, n)?,
+            ledger::structure::Transaction::fees_with_margin(self, params, n)?,
         ))
     }
 
@@ -1358,8 +1358,8 @@ impl ClaimRewardsTransaction {
     pub fn value(&self) -> BigInt {
         use ClaimRewardsTransactionTypes::*;
         match &self.0 {
-            SignatureClaimRewards(val) => BigInt::from(val.value.clone()),
-            SignatureErasedClaimRewards(val) => BigInt::from(val.value.clone()),
+            SignatureClaimRewards(val) => BigInt::from(val.value),
+            SignatureErasedClaimRewards(val) => BigInt::from(val.value),
         }
     }
 
@@ -1505,10 +1505,7 @@ impl TransactionResult {
             Success(..) => None,
             PartialSuccess(e, ..) => e
                 .values()
-                .find_map(|item| match item {
-                    Ok(_) => None,
-                    Err(e) => Some(e),
-                })
+                .find_map(|item| item.as_ref().err())
                 .map(|e| format!("{e}")),
             Failure(e) => Some(format!("{e}")),
         }
@@ -1540,7 +1537,7 @@ impl TransactionResult {
             PartialSuccess(e, ..) => {
                 let res = Map::new();
                 for (k, v) in e {
-                    res.set(&JsValue::from(k.clone()), &JsValue::from(v.is_err()));
+                    res.set(&JsValue::from(*k), &JsValue::from(v.is_err()));
                 }
                 Some(res)
             }

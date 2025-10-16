@@ -115,12 +115,12 @@ impl ContractCallPrototype {
         use ledger::construct::ContractCallExt;
         use ledger::structure::ContractCall as LedgerContractCall;
         Ok(LedgerContractCall::<ProofPreimageMarker, InMemoryDB>::new(
-            self.0.address.clone(),
+            self.0.address,
             self.0.entry_point.clone(),
             self.0.guaranteed_public_transcript.clone(),
             self.0.fallible_public_transcript.clone(),
-            self.0.communication_commitment_rand.clone(),
-            ProofPreimage::construct_proof(&self.0, self.0.communication_commitment_rand.clone()),
+            self.0.communication_commitment_rand,
+            ProofPreimage::construct_proof(&self.0, self.0.communication_commitment_rand),
         )
         .into())
     }

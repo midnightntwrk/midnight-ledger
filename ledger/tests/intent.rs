@@ -64,7 +64,8 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    let res = prog
+    
+    prog
         .iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
@@ -72,8 +73,7 @@ fn program_with_results<D: DB>(
             Op::Ins { n, .. } => *n != 0,
             _ => true,
         })
-        .collect::<Vec<_>>();
-    res
+        .collect::<Vec<_>>()
 }
 
 #[cfg(feature = "proving")]
@@ -1491,7 +1491,7 @@ async fn imbalanced_utxos_1_intent() {
             if overspent_value != -100 {
                 panic!("unbalanced by incorrect amount")
             } else {
-                ()
+                
             }
         }
         Err(e) => panic!(
@@ -1677,7 +1677,7 @@ async fn imbalanced_utxos_1_intent_fallible() {
             if overspent_value != -100 {
                 panic!("unbalanced by incorrect amount")
             } else {
-                ()
+                
             }
         }
         Err(e) => panic!(
@@ -2001,7 +2001,7 @@ async fn post_block_update() {
 
     rps = rps.post_block_update(tblock);
 
-    assert!(!rps.time_filter_map.get(time1).is_some());
+    assert!(rps.time_filter_map.get(time1).is_none());
     assert!(rps.time_filter_map.get(time2).is_some());
 
     assert!(!rps.time_filter_map.contains(&hash1));

@@ -377,7 +377,7 @@ impl ContractState {
         let res = Map::new();
         for item in self.0.balance.iter() {
             let (token, balance) = item.deref();
-            res.set(&token_type_to_value(&token)?, &to_value(&balance)?);
+            res.set(&token_type_to_value(token)?, &to_value(&balance)?);
         }
         Ok(res)
     }
@@ -391,7 +391,7 @@ impl ContractState {
             let token_type: TokenType = value_to_token_type(key)?;
             balance = balance.insert(token_type, from_value(value)?);
         }
-        self.0.balance = balance.into();
+        self.0.balance = balance;
         Ok(())
     }
 
@@ -546,7 +546,7 @@ impl ContractMaintenanceAuthority {
             .collect::<Result<Vec<_>, JsError>>()?;
         let counter = u32::try_from(
             counter
-                .map(|c| u64::try_from(c))
+                .map(u64::try_from)
                 .transpose()
                 .map_err(|_| JsError::new("counter out of range"))?
                 .unwrap_or(0),

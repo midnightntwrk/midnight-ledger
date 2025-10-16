@@ -71,7 +71,7 @@ pub fn sample_signing_key() -> Result<String, JsError> {
 pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<String, JsError> {
     to_value_hex_ser(
         &signatures::SigningKey::from_bytes(&bytes.to_vec())
-            .map_err(|err| JsError::new(&String::from(err.to_string())))?,
+            .map_err(|err| JsError::new(&err.to_string()))?,
     )
 }
 

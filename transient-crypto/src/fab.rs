@@ -16,7 +16,7 @@
 //! alignment which can be used to interpret them either as binary data, or a
 //! sequence of field elements for proving.
 
-use std::iter::{once, repeat};
+use std::iter::once;
 
 use crate::curve::{EmbeddedFr, EmbeddedGroupAffine};
 use crate::curve::{FR_BYTES, FR_BYTES_STORED, Fr};
@@ -105,7 +105,7 @@ impl<T: DynAligned> DynAligned for MerklePath<T> {
     fn dyn_alignment(&self) -> Alignment {
         let leaf_align = self.leaf.dyn_alignment();
         let entry_align = Alignment::concat([&MerkleTreeDigest::alignment(), &bool::alignment()]);
-        Alignment::concat(once(&leaf_align).chain(repeat(&entry_align).take(self.path.len())))
+        Alignment::concat(once(&leaf_align).chain(std::iter::repeat_n(&entry_align, self.path.len())))
     }
 }
 

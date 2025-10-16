@@ -162,9 +162,9 @@ impl ZswapLocalState {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
         Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, &val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, &val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, &val),
+            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
         }))
     }
 
@@ -174,7 +174,7 @@ impl ZswapLocalState {
         update: &MerkleTreeCollapsedUpdate,
     ) -> Result<ZswapLocalState, JsError> {
         Ok(ZswapLocalState(
-            self.0.apply_collapsed_update(&update.as_ref())?,
+            self.0.apply_collapsed_update(update.as_ref())?,
         ))
     }
 
@@ -327,9 +327,9 @@ impl ZswapChainState {
         use ZswapOfferTypes::*;
         let w = whitelist_from_value(whitelist)?;
         construct_apply_result(match &offer.0 {
-            ProvenOffer(val) => self.0.try_apply(&val, w)?,
-            UnprovenOffer(val) => self.0.try_apply(&val, w)?,
-            ProofErasedOffer(val) => self.0.try_apply(&val, w)?,
+            ProvenOffer(val) => self.0.try_apply(val, w)?,
+            UnprovenOffer(val) => self.0.try_apply(val, w)?,
+            ProofErasedOffer(val) => self.0.try_apply(val, w)?,
         })
     }
 

@@ -137,13 +137,9 @@ async fn malicious_imbalance() {
         // This transaction should partially succeed application, meaning that that 95m output is
         // applied, but the 100m input is not spent, leaving us with 195m left over... from 100m start.
         // Because of this, this transaction had damn well better not be considered a well-formed one!
-        match state
+        if let Ok(_) = state
             .clone()
-            .apply(&bad_tx, WellFormedStrictness::default())
-        {
-            Ok(_) => panic!("unexpected success"),
-            Err(_) => (),
-        }
+            .apply(&bad_tx, WellFormedStrictness::default()) { panic!("unexpected success") }
     }
 }
 
@@ -243,11 +239,7 @@ async fn malicious_imbalance_duplicate_nullifier() {
     // This transaction should partially succeed application, meaning that that 95m output is
     // applied, but the 100m input is not spent, leaving us with 195m left over... from 100m start.
     // Because of this, this transaction had damn well better not be considered a well-formed one!
-    match state
+    if let Ok(_) = state
         .clone()
-        .apply(&bad_tx, WellFormedStrictness::default())
-    {
-        Ok(_) => panic!("unexpected success"),
-        Err(_) => (),
-    }
+        .apply(&bad_tx, WellFormedStrictness::default()) { panic!("unexpected success") }
 }

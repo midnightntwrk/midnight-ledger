@@ -1790,10 +1790,11 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
-        if let Some(fallible) = &self.fallible_transcript {
-            if fallible.program.get(0) != Some(&Op::Ckpt) && self.guaranteed_transcript.is_some() {
-                return Err(MalformedTransaction::FallibleWithoutCheckpoint);
-            }
+        if let Some(fallible) = &self.fallible_transcript
+            && fallible.program.get(0) != Some(&Op::Ckpt)
+            && self.guaranteed_transcript.is_some()
+        {
+            return Err(MalformedTransaction::FallibleWithoutCheckpoint);
         }
         for transcript in [
             self.guaranteed_transcript.as_ref(),
