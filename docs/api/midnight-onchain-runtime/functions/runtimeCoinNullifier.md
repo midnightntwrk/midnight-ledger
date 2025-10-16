@@ -2,17 +2,17 @@
 
 ***
 
-[@midnight-ntwrk/onchain-runtime](../globals.md) / runtimeCoinCommitment
+[@midnight-ntwrk/onchain-runtime](../globals.md) / runtimeCoinNullifier
 
-# Function: runtimeCoinCommitment()
+# Function: runtimeCoinNullifier()
 
 ```ts
-function runtimeCoinCommitment(coin, recipient): AlignedValue
+function runtimeCoinNullifier(coin, sender_evidence): AlignedValue
 ```
 
 **`Internal`**
 
-Internal implementation of the runtime's coin commitment primitive.
+Internal implementation of the runtime's coin nullifier primitive.
 
 ## Parameters
 
@@ -20,7 +20,7 @@ Internal implementation of the runtime's coin commitment primitive.
 
 [`AlignedValue`](../type-aliases/AlignedValue.md)
 
-### recipient
+### sender\_evidence
 
 [`AlignedValue`](../type-aliases/AlignedValue.md)
 
