@@ -36,7 +36,7 @@ use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reqwest::Client;
-use serialize::tagged_deserialize;
+use serialize::{tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 
@@ -106,6 +106,13 @@ fn setup(limit: usize) -> Receiver<ServerHandle> {
 async fn stop_server(server_handle: ServerHandle) {
     log::info!("stopping server");
     server_handle.stop(false).await;
+}
+
+async fn serialized_body_without_zk_config() -> Vec<u8> {
+    let tx = valid_tx::<Signature, InMemoryDB>().await;
+    let mut body = Vec::new();
+    tagged_serialize(&tx, &mut body).expect("transaction-only payload should serialize");
+    body
 }
 
 async fn serialized_valid_body() -> Vec<u8> {
@@ -204,6 +211,7 @@ async fn integration_tests() {
     test_prove_tx_should_fail_on_get().await;
     test_prove_tx_should_fail_on_empty_body().await;
     test_prove_tx_should_fail_on_json().await;
+    test_prove_tx_should_fail_without_zk_config().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -336,6 +344,23 @@ async fn test_prove_tx_should_fail_on_json() {
     log::info!("Response code: {:?}", response.status());
     assert_eq!(response.status(), 400);
     let resp_text = dbg!(response.text().await.unwrap());
+    assert!(resp_text.contains("expected header tag"));
+}
+
+#[named]
+async fn test_prove_tx_should_fail_without_zk_config() {
+    setup_test(function_name!());
+
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove-tx", get_host_and_port()))
+        .body(serialized_body_without_zk_config().await)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), 400);
+    let resp_text = response.text().await.unwrap();
     assert!(resp_text.contains("expected header tag"));
 }
 
