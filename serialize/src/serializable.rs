@@ -184,6 +184,15 @@ impl<T> Serializable for PhantomData<T> {
     }
 }
 
+impl<T> Tagged for PhantomData<T> {
+    fn tag() -> Cow<'static, str> {
+        Cow::Borrowed("()")
+    }
+    fn tag_unique_factor() -> String {
+        "()".into()
+    }
+}
+
 impl<T: Serializable> Serializable for Box<T> {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
         T::serialize(&self, writer)
