@@ -14,6 +14,7 @@
 use crate::contract::{ContractCall, ContractCallTypes, ContractDeploy, MaintenanceUpdate};
 use crate::intent::Intent;
 use crate::zswap_wasm::ZswapOffer;
+use base_crypto::cost_model::FeePrices;
 use coin_structure::coin::{Info as ShieldedCoinInfo, QualifiedInfo as QualifiedShieldedCoinInfo};
 use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use hex::{FromHex, ToHex};
@@ -306,6 +307,18 @@ struct PreDustParameters {
         with = "serde_wasm_bindgen::preserve"
     )]
     dust_grace_period_seconds: BigInt,
+}
+
+#[derive(Serialize, Deserialize)]
+struct PreFeePrices {
+    #[serde(rename = "readPrice")]
+    read_price: f64,
+    #[serde(rename = "computePrice")]
+    compute_price: f64,
+    #[serde(rename = "blockUsagePrice")]
+    block_usage_price: f64,
+    #[serde(rename = "writePrice")]
+    write_price: f64,
 }
 
 pub fn value_to_shielded_coininfo(value: JsValue) -> Result<ShieldedCoinInfo, JsError> {
@@ -634,6 +647,15 @@ where
         new_offers = new_offers.insert(k, v.try_into()?);
     }
     Ok(new_offers)
+}
+
+pub fn fee_prices_to_value(fee_prices: &FeePrices) -> Result<JsValue, JsError> {
+    Ok(to_value(&PreFeePrices {
+        read_price: fee_prices.read_price.into(),
+        compute_price: fee_prices.compute_price.into(),
+        block_usage_price: fee_prices.block_usage_price.into(),
+        write_price: fee_prices.write_price.into(),
+    })?)
 }
 
 pub fn do_vecs_match<T: PartialEq>(a: &[T], b: &[T]) -> bool {
