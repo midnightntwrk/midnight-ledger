@@ -358,6 +358,7 @@ mod tests {
     struct Node<D: DB = DefaultDB> {
         id: u64, // Encode (layer, node_id) as layer * 256 + node_id
         children: Vec<Sp<Node<D>, D>>,
+        _data: [u8; 1024], // In-lined data to keep nodes large enough to not be inlined themselves
     }
 
     impl<D: DB> Node<D> {
@@ -366,6 +367,7 @@ mod tests {
             Sp::new(Node {
                 id: encoded_id,
                 children: children.to_vec(),
+                _data: [0; 1024],
             })
         }
     }
@@ -822,15 +824,13 @@ mod tests {
         // subsequent root set and compute incremental_write_delete_costs.
         let initial_roots = &root_sets_as_keys[0];
         let initial_results =
-            super::initial_write_delete_costs(&initial_roots.into_iter().collect(), |_, _| {
-                Default::default()
-            });
+            super::initial_write_delete_costs(initial_roots, |_, _| Default::default());
         let mut current_charged_keys = initial_results.updated_charged_keys;
         for i in 1..root_sets.len() {
             let next_roots = &root_sets_as_keys[i];
             let results = super::incremental_write_delete_costs::<DefaultDB>(
                 &current_charged_keys,
-                &next_roots.into_iter().collect(),
+                &next_roots,
                 |_, _| Default::default(),
                 |_| 1000, // High step limit for complete GC
             );
@@ -855,7 +855,7 @@ mod tests {
             let rcmap_descendants = get_rcmap_descendants(&results.updated_charged_keys);
             for root_key in next_roots {
                 assert!(
-                    rcmap_descendants.contains(root_key),
+                    rcmap_descendants.contains(&root_key),
                     "Root key {:?} should be a descendant of RcMap after incremental_write_delete_costs",
                     root_key
                 );
