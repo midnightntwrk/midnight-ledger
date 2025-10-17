@@ -1261,7 +1261,6 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     pub fn persist(&mut self) {
         // Promote self to Ref if not already
         if let ChildNode::Direct(..) = self.child_repr {
-            dbg!("IS DIRECT NODE");
             let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
             let value = self
                 .data
@@ -1280,9 +1279,6 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_repr,
             );
             *self = new_sp;
-        }
-        if let ChildNode::Direct(..) = self.child_repr {
-            dbg!("STILL IS DIRECT NODE");
         }
         self.arena
             .with_backend(|backend| backend.persist(&self.root));

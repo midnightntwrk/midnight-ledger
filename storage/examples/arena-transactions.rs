@@ -132,6 +132,7 @@ fn main() {
 ///
 /// - calls `persist` and/or `unpersist` the approapriate number of times
 ///   when `commit` is called.
+#[cfg(test)]
 pub fn test_gc_root_update_queue_delayed_effect() {
     let storage = Storage::new(16, DefaultDB::default());
     let arena = &storage.arena;
@@ -154,7 +155,7 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     // - sp3: +2
     let sp1 = arena.alloc(13u32);
     let sp2 = arena.alloc(42u32);
-    let sp3 = arena.alloc(69u32);
+    let sp3 = arena.alloc([69u8; 1024]);
     queue.persist(&sp1);
     queue.unpersist(&sp2);
     queue.persist(&sp3);

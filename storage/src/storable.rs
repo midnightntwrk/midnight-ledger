@@ -342,10 +342,8 @@ base_storable!(Timestamp);
 base_storable!(RunningCost);
 base_storable!(String);
 base_storable!(SizeAnn);
-#[cfg(test)]
-base_storable!([u8; SMALL_OBJECT_LIMIT]);
+base_storable!([u8; SMALL_OBJECT_LIMIT]); // used in tests, cannot be cfg'd out due to examples
 
-#[cfg(test)]
 impl<D: DB> Storable<D> for [u32; SMALL_OBJECT_LIMIT / 4] {
     fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
         vec![]
