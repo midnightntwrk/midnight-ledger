@@ -23,9 +23,9 @@ use serialize::randomised_serialization_test;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 use storage::{
     Storable,
-    arena::{ArenaKey, Sp},
+    arena::Sp,
     db::DB,
-    storable::Loader,
+    storable::{ChildNode, Loader},
 };
 use transient_crypto::curve::FR_BYTES;
 

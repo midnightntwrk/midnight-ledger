@@ -26,9 +26,9 @@ use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use storage::db::InMemoryDB;
 use storage::{
     Storable,
-    arena::{ArenaKey, Sp},
+    arena::Sp,
     db::DB,
-    storable::Loader,
+    storable::{ChildNode, Loader},
 };
 use transient_crypto::merkle_tree::TreeInsertionPath;
 use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};

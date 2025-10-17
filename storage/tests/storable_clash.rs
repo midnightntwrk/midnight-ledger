@@ -16,7 +16,7 @@ use midnight_storage::{self as storage, *};
 use rayon::prelude::*;
 use serialize::{Deserializable, Serializable};
 use std::hash::Hash;
-use storable::Loader;
+use storable::{ChildNode, Loader};
 use storage::{arena::ArenaKey, db::DB};
 
 #[derive(Serializable, Storable, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]

@@ -48,9 +48,8 @@ use storage::arena::Sp;
 use storage::db::{DB, InMemoryDB};
 use storage::delta_tracking::{incremental_write_delete_costs, initial_write_delete_costs};
 use storage::{
-    arena::ArenaKey,
     delta_tracking::RcMap,
-    storable::Loader,
+    storable::{ChildNode, Loader},
     storage::{Array, HashMap},
 };
 use transient_crypto::curve::Fr;
@@ -705,12 +704,10 @@ impl Default for ContractMaintenanceAuthority {
     }
 }
 
-#[derive(Storable, Serialize, Deserialize)]
-#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Storable)]
+#[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[serde(bound(serialize = "", deserialize = ""))]
-#[serde(rename_all = "camelCase")]
 #[tag = "contract-state[v4]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
@@ -720,12 +717,10 @@ pub struct ContractState<D: DB> {
 }
 tag_enforcement_test!(ContractState<InMemoryDB>);
 
-#[derive(Storable, Serialize, Deserialize)]
-#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Storable)]
+#[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[serde(bound(serialize = "", deserialize = ""))]
-#[serde(rename_all = "camelCase")]
 #[tag = "charged-state[v1]"]
 pub struct ChargedState<D: DB> {
     #[cfg(feature = "public-internal-structure")]
@@ -762,7 +757,7 @@ impl<D: DB> ChargedState<D> {
     pub fn new(state: StateValue<D>) -> Self {
         let state = Sp::new(state);
         let charged_keys =
-            initial_write_delete_costs(&[state.hash().into()].into_iter().collect(), |_, _| {
+            initial_write_delete_costs(&[state.as_child()].into_iter().collect(), |_, _| {
                 Default::default()
             })
             .updated_charged_keys;
@@ -801,7 +796,7 @@ impl<D: DB> ChargedState<D> {
         let new_state = Sp::new(new_state);
         let results = incremental_write_delete_costs(
             &self.charged_keys,
-            &[new_state.hash().into()].into_iter().collect(),
+            &[new_state.as_child()].into_iter().collect(),
             cpu_cost,
             gc_limit,
         );

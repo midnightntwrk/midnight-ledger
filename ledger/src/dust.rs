@@ -52,9 +52,9 @@ use std::fmt::{self, Debug, Display, Formatter};
 use storage::db::InMemoryDB;
 use storage::{
     Storable,
-    arena::{ArenaKey, Sp},
+    arena::Sp,
     db::DB,
-    storable::Loader,
+    storable::{ChildNode, Loader},
     storage::{HashMap, HashSet, Identity, Map, TimeFilterMap},
 };
 use transient_crypto::commitment::Pedersen;
