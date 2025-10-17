@@ -20,6 +20,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: proof server now fetches missing artifacts on demand
 - feat: add endpoints for estimating fees with a margin depending on allowed
   block adjustment
+- fix: fix balancing bug in contracts with multiple intents
 
 ## 6.0.0
 

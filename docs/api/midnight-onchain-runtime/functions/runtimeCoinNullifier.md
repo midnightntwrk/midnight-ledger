@@ -1,13 +1,13 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.4**](../README.md)
 
 ***
 
-[@midnight/ledger](../globals.md) / runtimeCoinNullifier
+[@midnight-ntwrk/onchain-runtime](../globals.md) / runtimeCoinNullifier
 
 # Function: runtimeCoinNullifier()
 
 ```ts
-function runtimeCoinNullifier(coin, sender_evidence): AlignedValue;
+function runtimeCoinNullifier(coin, sender_evidence): AlignedValue
 ```
 
 **`Internal`**
