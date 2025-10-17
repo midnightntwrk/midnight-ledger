@@ -554,11 +554,10 @@ fn maybe_str(buf: &[u8]) -> MaybeStr<'_> {
     fn permitted(c: u8) -> bool {
         c.is_ascii_alphanumeric() || b"'+-_\":/\\?#$^*&.".contains(&c)
     }
-    if buf.iter().copied().all(permitted) {
-        if let Ok(s) = std::str::from_utf8(buf) {
+    if buf.iter().copied().all(permitted)
+        && let Ok(s) = std::str::from_utf8(buf) {
             return MaybeStr::Str(s);
         }
-    }
     MaybeStr::Bytes(buf)
 }
 
@@ -770,7 +769,7 @@ impl<D: DB> ChargedState<D> {
     }
 
     pub fn get_ref(&self) -> &StateValue<D> {
-        &*self.state
+        &self.state
     }
 
     pub fn update(

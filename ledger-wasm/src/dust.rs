@@ -1289,7 +1289,7 @@ impl DustLocalState {
         let sk = sk.try_unwrap()?;
         let ctime = Timestamp::from_secs(js_date_to_seconds(ctime));
         let v_fee = u128::try_from(v_fee).map_err(|_| JsError::new("v_fee is out of range"))?;
-        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee.into(), ctime)?;
+        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee, ctime)?;
 
         let res = Array::new();
         res.push(&JsValue::from(DustLocalState(local_state)));
@@ -1338,11 +1338,10 @@ impl DustLocalState {
 
     #[wasm_bindgen(getter)]
     pub fn utxos(&self) -> Result<Vec<JsValue>, JsError> {
-        Ok(self
-            .0
+        self.0
             .utxos()
             .map(|qdo| qdo_to_value(&qdo))
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     }
 
     #[wasm_bindgen(getter)]

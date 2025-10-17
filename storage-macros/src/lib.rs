@@ -22,22 +22,20 @@ use syn::{
 
 fn add_trait_bounds(mut generics: Generics, phantom: &[Ident], db: &Ident) -> Generics {
     for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            if !phantom.contains(&type_param.ident) {
+        if let GenericParam::Type(ref mut type_param) = *param
+            && !phantom.contains(&type_param.ident) {
                 type_param.bounds.push(parse_quote!(Storable<#db>));
             }
-        }
     }
     generics
 }
 
 fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            if !phantom.contains(&type_param.ident) {
+        if let GenericParam::Type(ref mut type_param) = *param
+            && !phantom.contains(&type_param.ident) {
                 type_param.bounds.push(parse_quote!(Tagged));
             }
-        }
     }
     generics
 }
@@ -178,11 +176,11 @@ pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
             fstring.push_str("{}(");
             for i in 0..generics.len() {
                 if i > 0 {
-                    fstring.push_str(",");
+                    fstring.push(',');
                 }
                 fstring.push_str("{}");
             }
-            fstring.push_str(")");
+            fstring.push(')');
             quote! { ::std::borrow::Cow::Owned(::std::format!(#fstring, #tag, #( <#generics as Tagged>::tag() ),*)) }
         };
         let tag_factor_expand = tag_factors(&input.data);
@@ -354,7 +352,7 @@ fn derive_children_fields(fields: &Fields, db: &Ident) -> TokenStream {
                 .map(|f| f.ident.as_ref().expect("named field"));
             let field_children = f.named.iter().map(|f| {
                 let ident = f.ident.as_ref().expect("named field");
-                match child_field(&f) {
+                match child_field(f) {
                     FieldTypes::Child => quote! { child_hashes.push(Sp::hash(#ident).into()); },
                     FieldTypes::Inline => {
                         quote! { child_hashes.append(&mut Storable::<#db>::children(#ident)); }
@@ -375,7 +373,7 @@ fn derive_children_fields(fields: &Fields, db: &Ident) -> TokenStream {
                 .map(|(i, _)| format_ident!("_{i}"));
             let field_children = f.unnamed.iter().enumerate().map(|(i, f)| {
                 let ident = format_ident!("_{i}");
-                match child_field(&f) {
+                match child_field(f) {
                     FieldTypes::Child => quote! { child_hashes.push(Sp::hash(#ident).into()); },
                     FieldTypes::Inline => {
                         quote! { child_hashes.append(&mut Storable::<#db>::children(#ident)); }
@@ -433,7 +431,7 @@ fn derive_to_binary_repr_fields(fields: &Fields, db: &Ident, extra: TokenStream)
                 .map(|field| field.ident.as_ref().expect("named field"));
             let field_writes = f.named.iter().filter_map(|field| {
                 let name = field.ident.as_ref().expect("named field");
-                match child_field(&field) {
+                match child_field(field) {
                     FieldTypes::Child => None,
                     FieldTypes::Inline => {
                         Some(quote! { Storable::<#db>::to_binary_repr(#name, writer)?; })
@@ -458,7 +456,7 @@ fn derive_to_binary_repr_fields(fields: &Fields, db: &Ident, extra: TokenStream)
                 .unnamed
                 .iter()
                 .zip(field_names.iter())
-                .filter_map(|(field, name)| match child_field(&field) {
+                .filter_map(|(field, name)| match child_field(field) {
                     FieldTypes::Child => None,
                     FieldTypes::Inline => {
                         Some(quote! { Storable::<#db>::to_binary_repr(#name, writer)?; })

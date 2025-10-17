@@ -52,7 +52,7 @@ pub fn initial_write_delete_costs<D: DB>(
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
 ) -> WriteDeleteResults<D> {
     let rcmap = RcMap::default();
-    let keys_reachable_from_r0 = get_writes(&rcmap, &r0);
+    let keys_reachable_from_r0 = get_writes(&rcmap, r0);
     let keys_removed = StdHashSet::new();
     let k0 = update_rcmap(&rcmap, &keys_reachable_from_r0);
     WriteDeleteResults::new(keys_reachable_from_r0, keys_removed, k0, cpu_cost)
@@ -385,7 +385,7 @@ mod tests {
     fn compute_reachable_nodes(roots: &[(u8, u8)]) -> StdHashSet<(u8, u8)> {
         let adjacency = test_dag_adjacency();
         let mut reachable = StdHashSet::new();
-        let mut queue: Vec<(u8, u8)> = roots.iter().copied().collect();
+        let mut queue: Vec<(u8, u8)> = roots.to_vec();
 
         while let Some(node_id) = queue.pop() {
             if !reachable.insert(node_id) {

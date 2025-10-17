@@ -226,7 +226,7 @@ impl LedgerState {
         let sys_tx_rewards = ledger::structure::SystemTransaction::DistributeNight(
             ClaimKind::Reward,
             vec![OutputInstructionUnshielded {
-                amount: amount,
+                amount,
                 target_address: address,
                 nonce: OsRng.r#gen(),
             }],
@@ -289,7 +289,7 @@ impl UtxoState {
         let res = Set::new(&JsValue::NULL);
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
-            res.add(&utxo_to_value(&utxo)?);
+            res.add(&utxo_to_value(utxo)?);
         }
         Ok(res)
     }
@@ -301,7 +301,7 @@ impl UtxoState {
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
             if utxo.owner == address {
-                res.add(&utxo_to_value(&utxo)?);
+                res.add(&utxo_to_value(utxo)?);
             }
         }
         Ok(res)
@@ -314,9 +314,9 @@ impl UtxoState {
 
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
-            let is_member = prior.0.utxos.contains_key(&utxo);
+            let is_member = prior.0.utxos.contains_key(utxo);
             if !is_member {
-                let js_value = utxo_to_value(&utxo)?;
+                let js_value = utxo_to_value(utxo)?;
                 let mut accepted = true;
 
                 if let Some(filter_by) = filter_by.clone() {
@@ -337,9 +337,9 @@ impl UtxoState {
         }
         for utxo in prior.0.utxos.iter() {
             let utxo = &*utxo.0;
-            let is_member = self.0.utxos.contains_key(&utxo);
+            let is_member = self.0.utxos.contains_key(utxo);
             if !is_member {
-                let js_value = utxo_to_value(&utxo)?;
+                let js_value = utxo_to_value(utxo)?;
                 let mut accepted = true;
 
                 if let Some(filter_by) = filter_by.clone() {
@@ -354,7 +354,7 @@ impl UtxoState {
                 }
 
                 if accepted {
-                    prior_minus_this.add(&utxo_to_value(&utxo)?);
+                    prior_minus_this.add(&utxo_to_value(utxo)?);
                 }
             }
         }

@@ -25,22 +25,20 @@ use syn::{
 
 fn deserializable_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            if !phantom.contains(&type_param.ident) {
+        if let GenericParam::Type(ref mut type_param) = *param
+            && !phantom.contains(&type_param.ident) {
                 type_param.bounds.push(parse_quote!(Deserializable));
             }
-        }
     }
     generics
 }
 
 fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            if !phantom.contains(&type_param.ident) {
+        if let GenericParam::Type(ref mut type_param) = *param
+            && !phantom.contains(&type_param.ident) {
                 type_param.bounds.push(parse_quote!(Tagged));
             }
-        }
     }
     generics
 }
@@ -122,11 +120,11 @@ pub fn derive_serializable(input: proc_macro::TokenStream) -> proc_macro::TokenS
             fstring.push_str("{}(");
             for i in 0..generics.len() {
                 if i > 0 {
-                    fstring.push_str(",");
+                    fstring.push(',');
                 }
                 fstring.push_str("{}");
             }
-            fstring.push_str(")");
+            fstring.push(')');
             quote! { ::std::borrow::Cow::Owned(::std::format!(#fstring, #tag, #( <#generics as Tagged>::tag() ),*)) }
         };
         let tag_factor_expand = tag_factors(&input.data);
@@ -201,11 +199,10 @@ fn tag_factors(data: &Data) -> TokenStream {
 
 fn serializable_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
-        if let GenericParam::Type(ref mut type_param) = *param {
-            if !phantom.contains(&type_param.ident) {
+        if let GenericParam::Type(ref mut type_param) = *param
+            && !phantom.contains(&type_param.ident) {
                 type_param.bounds.push(parse_quote!(Serializable));
             }
-        }
     }
     generics
 }

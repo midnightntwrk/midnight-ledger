@@ -23,7 +23,7 @@ use ledger::structure::UtxoMeta;
 use ledger::structure::{ClaimKind, SignatureKind};
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable};
-use std::io::Read;
+use std::io::{BufReader, Read};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::storage::HashMap;
@@ -114,7 +114,7 @@ pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, serde_wasm_
 fn from_hex_ser_checked<T: Deserializable, R: Read>(mut bytes: R) -> Result<T, std::io::Error> {
     let value = T::deserialize(&mut bytes, 0)?;
 
-    let count = bytes.bytes().count();
+    let count = BufReader::new(bytes).bytes().count();
 
     if count == 0 {
         return Ok(value);
@@ -529,9 +529,9 @@ impl<P: ProofKind<InMemoryDB>> ContractActionConverter<P> {
     fn untyped_actions_try_from_value(
         action: &JsValue,
     ) -> Result<Option<ContractAction<P, InMemoryDB>>, JsError> {
-        match ContractDeploy::try_ref(&action)? {
+        match ContractDeploy::try_ref(action)? {
             Some(deploy) => Ok(Some(deploy.0.clone().into())),
-            _ => match MaintenanceUpdate::try_ref(&action)? {
+            _ => match MaintenanceUpdate::try_ref(action)? {
                 Some(update) => Ok(Some(update.0.clone().into())),
                 _ => Ok(None),
             },
@@ -544,12 +544,12 @@ impl ContractActionConverter<ProofPreimageMarker> {
         action: &JsValue,
     ) -> Result<ContractAction<ProofPreimageMarker, InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 UnprovenContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type."))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Unexpected action type provided.")),
             },
@@ -561,12 +561,12 @@ impl ContractActionConverter<ProofMarker> {
         action: &JsValue,
     ) -> Result<ContractAction<ProofMarker, InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 ProvenContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type"))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Expected action type")),
             },
@@ -576,12 +576,12 @@ impl ContractActionConverter<ProofMarker> {
 impl ContractActionConverter<()> {
     pub fn try_from_value(action: &JsValue) -> Result<ContractAction<(), InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 ProofErasedContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type"))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Expected action type")),
             },
@@ -629,7 +629,7 @@ where
     let res = Map::new();
     coins.iter().for_each(|coin| {
         res.set(
-            &JsValue::from(coin.0.deref().clone()),
+            &JsValue::from(*coin.0.deref()),
             &JsValue::from(ZswapOffer::from(coin.1.deref().clone())),
         );
     });
