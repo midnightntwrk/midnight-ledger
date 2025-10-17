@@ -27,7 +27,7 @@ use storage::db::DB;
 use storage::storage::default_storage;
 use storage::storage::{HashMap, Map};
 use storage::storage::{Identity, TimeFilterMap};
-use storage::{Storable, arena::ArenaKey, storable::Loader};
+use storage::{Storable, storable::{ChildNode, Loader}};
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 
 #[derive(Storable)]

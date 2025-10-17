@@ -15,7 +15,11 @@
 mod tests {
     use midnight_storage::arena::ArenaKey;
     use midnight_storage::arena::TypedArenaKey;
-    use midnight_storage::{Storable, db::DB, storable::Loader};
+    use midnight_storage::{
+        Storable,
+        db::DB,
+        storable::{ChildNode, Loader},
+    };
     #[cfg(feature = "proptest")]
     use proptest::arbitrary::Arbitrary;
     #[cfg(feature = "proptest")]

@@ -139,8 +139,8 @@ pub fn test_gc_root_update_queue_delayed_effect() {
 
     // Allocate and persist some `Sp`s, so that we have some non-zero root
     // counts to work with.
-    let sp1 = arena.alloc(13u32);
-    let sp2 = arena.alloc(42u32);
+    let mut sp1 = arena.alloc(13u32);
+    let mut sp2 = arena.alloc(42u32);
     sp1.persist();
     sp2.persist();
     drop(sp1);

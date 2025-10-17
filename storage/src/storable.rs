@@ -13,7 +13,8 @@
 
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
-use crate::arena::{ArenaKey, Sp};
+use crate::DefaultHasher;
+use crate::arena::{ArenaKey, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -23,16 +24,22 @@ use base_crypto::{
     hash::HashOutput,
 };
 use crypto::digest::Digest;
+use derive_where::derive_where;
+use macros::Storable;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
+use rand::prelude::Distribution;
+use rand::{Rng, distributions::Standard};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::fmt::Debug;
+use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Super-trait containing all requirements for a Hasher
 pub trait WellBehavedHasher: Digest + Send + Sync + Default + Debug + Clone + 'static {}
@@ -50,7 +57,7 @@ pub trait Loader<D: DB> {
     const CHECK_INVARIANTS: bool;
 
     /// Get a smart pointer to the object with the given key.
-    fn get<T: Storable<D>>(&self, key: &ArenaKey<D::Hasher>) -> Result<Sp<T, D>, std::io::Error>;
+    fn get<T: Storable<D>>(&self, key: &ChildNode<D::Hasher>) -> Result<Sp<T, D>, std::io::Error>;
 
     /// Allocate a new object in the arena.
     fn alloc<T: Storable<D>>(&self, obj: T) -> Sp<T, D>;
@@ -71,12 +78,130 @@ pub trait Loader<D: DB> {
     /// `iter.next()`.
     fn get_next<T: Storable<D>>(
         &self,
-        iter: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        iter: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
     ) -> Result<Sp<T, D>, std::io::Error> {
         self.get(&iter.next().ok_or(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             "iterator should not yield None".to_string(),
         ))?)
+    }
+}
+
+#[derive(Debug, Clone, Storable, Serializable)]
+#[derive_where(Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[storable(base)]
+#[tag = "storage-child-node[v1]"]
+#[phantom(H)]
+/// A representataion of an individual child of a [Storable] object.
+pub enum ChildNode<H: WellBehavedHasher = DefaultHasher> {
+    /// A by-reference child, which can be looked up in the storage arena.
+    Ref(ArenaKey<H>),
+    /// A direct child, typically reserved for small children, represented as its raw data.
+    Direct(DirectChildNode<H>),
+}
+
+impl<H: WellBehavedHasher> From<ArenaKey<H>> for ChildNode<H> {
+    fn from(value: ArenaKey<H>) -> Self {
+        ChildNode::Ref(value)
+    }
+}
+
+impl<H: WellBehavedHasher> Distribution<ChildNode<H>> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ChildNode<H> {
+        ChildNode::Ref(rng.r#gen())
+    }
+}
+
+impl<H: WellBehavedHasher> ChildNode<H> {
+    /// Returns the hash of this child.
+    pub fn hash(&self) -> &ArenaKey<H> {
+        match self {
+            ChildNode::Ref(h) => h,
+            ChildNode::Direct(n) => &n.hash,
+        }
+    }
+
+    /// Returns the referenced children that are *not* directly embedded in this node.
+    pub fn refs(&self) -> Vec<&ArenaKey<H>> {
+        let mut res = Vec::with_capacity(32);
+        let mut frontier = Vec::with_capacity(32);
+        frontier.push(self);
+        while let Some(node) = frontier.pop() {
+            match node {
+                ChildNode::Ref(n) => res.push(n),
+                ChildNode::Direct(d) => frontier.extend(d.children.iter()),
+            }
+        }
+        res
+    }
+
+    /// Returns Some(key) if Ref, None otherwise
+    #[cfg(test)]
+    pub fn into_ref(&self) -> Option<&ArenaKey<H>> {
+        match self {
+            ChildNode::Ref(key) => Some(key),
+            ChildNode::Direct(..) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[derive_where(PartialOrd, Ord, Hash)]
+/// The raw data of a child object
+pub struct DirectChildNode<H: WellBehavedHasher> {
+    /// The data label of this node
+    pub data: Arc<Vec<u8>>,
+    /// The child nodes
+    pub children: Arc<Vec<ChildNode<H>>>,
+    pub(crate) hash: ArenaKey<H>,
+    pub(crate) serialized_size: usize,
+}
+
+impl<H: WellBehavedHasher> PartialEq for DirectChildNode<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+impl<H: WellBehavedHasher> Eq for DirectChildNode<H> {}
+
+impl<H: WellBehavedHasher> DirectChildNode<H> {
+    /// Create a new direct child object from its parts
+    pub(crate) fn new(data: Vec<u8>, children: Vec<ChildNode<H>>) -> Self {
+        let hash = crate::arena::hash(&data, children.iter().map(|c| c.hash()));
+        let serialized_size = data.serialized_size() + children.serialized_size();
+        DirectChildNode {
+            data: Arc::new(data),
+            children: Arc::new(children),
+            hash,
+            serialized_size,
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> Serializable for DirectChildNode<H> {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.data.serialize(writer)?;
+        self.children.serialize(writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.serialized_size
+    }
+}
+
+impl<H: WellBehavedHasher> Tagged for DirectChildNode<H> {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("storage-direct-child-node[v1]")
+    }
+    fn tag_unique_factor() -> String {
+        "(vec(u8),vec(storage-child-node[v1]))".to_owned()
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for DirectChildNode<H> {
+    fn deserialize(reader: &mut impl std::io::Read, recursion_depth: u32) -> std::io::Result<Self> {
+        let data: Vec<u8> = Deserializable::deserialize(reader, recursion_depth + 1)?;
+        let children: Vec<ChildNode<H>> = Deserializable::deserialize(reader, recursion_depth + 1)?;
+        Ok(DirectChildNode::new(data, children))
     }
 }
 
@@ -91,7 +216,7 @@ pub trait Loader<D: DB> {
 pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     /// Provides an iterator over hashes of child `Sp`s, if any. These hashes
     /// will be passed back into `from_binary_repr` when deserializing.
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>>;
+    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>>;
 
     /// Serializes self, omitting any children.
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
@@ -102,7 +227,7 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     /// children given their hash.
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        child_nodes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -112,6 +237,44 @@ pub trait Storable<D: DB>: Clone + Sync + Send + 'static {
     fn check_invariant(&self) -> Result<(), std::io::Error> {
         Ok(())
     }
+
+    /// Represents self as a `ChildNode`
+    fn as_child(&self) -> ChildNode<D::Hasher> {
+        let children = self.children();
+        assert!(
+            children.len() <= 16,
+            "In order to represent the arena as an MPT Storable values must have no more than 16 children (found: {} on type {})",
+            children.len(),
+            std::any::type_name::<Self>(),
+        );
+        let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+        self.to_binary_repr(&mut data)
+            .expect("Storable data should be able to be represented in binary");
+        child_from(&data, &children)
+    }
+}
+
+pub(crate) fn child_from<H: WellBehavedHasher>(
+    data: &[u8],
+    children: &[ChildNode<H>],
+) -> ChildNode<H> {
+    if is_in_small_object_limit(data, children) {
+        ChildNode::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
+    } else {
+        ChildNode::Ref(hash(&data, children.iter().map(ChildNode::hash)))
+    }
+}
+
+fn is_in_small_object_limit<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> bool {
+    const SMALL_OBJECT_LIMIT: usize = 1024;
+    let mut size = 2 + data.len();
+    for child in children.iter() {
+        size += child.serialized_size();
+        if size > SMALL_OBJECT_LIMIT {
+            return false;
+        }
+    }
+    size <= SMALL_OBJECT_LIMIT
 }
 
 /// Helper function, producing an error when an unrecognized discriminant is
@@ -127,7 +290,7 @@ fn bad_discriminant_error<A>() -> Result<A, std::io::Error> {
 macro_rules! base_storable {
     ($val:ty) => {
         impl<D: DB> Storable<D> for $val {
-            fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
+            fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
                 std::vec::Vec::new()
             }
 
@@ -141,7 +304,7 @@ macro_rules! base_storable {
 
             fn from_binary_repr<R: std::io::Read>(
                 reader: &mut R,
-                _child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+                _child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
                 loader: &impl Loader<D>,
             ) -> Result<Self, std::io::Error> {
                 <$val as Deserializable>::deserialize(reader, loader.get_recursion_depth())
@@ -178,9 +341,46 @@ base_storable!(Timestamp);
 base_storable!(RunningCost);
 base_storable!(String);
 base_storable!(SizeAnn);
+#[cfg(test)]
+base_storable!([u8; 1024]);
+
+#[cfg(test)]
+impl<D: DB> Storable<D> for [u32; 256] {
+    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
+        vec![]
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        let bytes: &[u8; 1024] = unsafe {
+            std::slice::from_raw_parts(self.as_ptr() as *const u8, 256 * std::mem::size_of::<u32>())
+                .try_into()
+                .unwrap()
+        };
+
+        Storable::<D>::to_binary_repr(bytes, writer)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        let val: [u8; 1024] = Storable::<D>::from_binary_repr(reader, child_hashes, loader)?;
+        let data: &[u32; 256] = unsafe {
+            std::slice::from_raw_parts(val.as_ptr() as *const u32, 256)
+                .try_into()
+                .unwrap()
+        };
+        Ok(*data)
+    }
+}
 
 impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
         vec![]
     }
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
@@ -191,7 +391,7 @@ impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
     }
     fn from_binary_repr<R: std::io::Read>(
         _reader: &mut R,
-        _child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        _child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
         _loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -205,8 +405,8 @@ impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
 // Storable for Vec is inherently unsafe as a Vec can be arbitrarily long whereas `Storable`
 // requires that a node has no more than 16 children. However, it is useful for testing.
 impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
-        self.iter().map(|v| Sp::hash(v).clone().into()).collect()
+    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
+        self.iter().map(|v| Sp::as_child(v)).collect()
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
@@ -218,7 +418,7 @@ impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
 
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -237,8 +437,8 @@ impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
 }
 
 impl<T: Storable<D>, D: DB> Storable<D> for Option<Sp<T, D>> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        self.clone().map_or(vec![], |sp| vec![sp.root.clone()])
+    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+        self.clone().map_or(vec![], |sp| vec![sp.as_child()])
     }
 
     /// Serializes self, omitting any children
@@ -251,7 +451,7 @@ impl<T: Storable<D>, D: DB> Storable<D> for Option<Sp<T, D>> {
 
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error> {
         let dis = <u8 as Deserializable>::deserialize(reader, 0)?;
@@ -269,8 +469,8 @@ impl<T: Storable<D>, D: DB> Storable<D> for Option<Sp<T, D>> {
 macro_rules! tuple_storable {
     (($a:tt, $aidx: tt) $(, ($as:tt, $asidx:tt))*) => {
         impl<$a: Storable<D1>,$($as: Storable<D1>,)* D1: DB> Storable<D1> for (Sp<$a, D1>, $(Sp<$as, D1>,)*) {
-            fn children(&self) -> std::vec::Vec<ArenaKey<D1::Hasher>> {
-                vec![self.$aidx.hash().clone().into() $(, self.$asidx.hash().clone().into())*]
+            fn children(&self) -> std::vec::Vec<ChildNode<D1::Hasher>> {
+                vec![self.$aidx.as_child() $(, self.$asidx.as_child())*]
             }
 
             /// Serializes self, omitting any children
@@ -280,7 +480,7 @@ macro_rules! tuple_storable {
 
             fn from_binary_repr<R: std::io::Read>(
                 _reader: &mut R,
-                child_hashes: &mut impl Iterator<Item = ArenaKey<D1::Hasher>>,
+                child_hashes: &mut impl Iterator<Item = ChildNode<D1::Hasher>>,
                 loader: &impl Loader<D1>,
             ) -> Result<Self, std::io::Error> {
                 Ok((loader.get_next::<$a>(child_hashes)?, $(loader.get_next::<$as>(child_hashes)?, )*))

@@ -56,6 +56,7 @@ use super::{DB, Update};
 use crate::db::DummyDBStrategy;
 use crate::{
     DefaultHasher, WellBehavedHasher, arena::ArenaKey, backend::OnDiskObject, db::DummyArbitrary,
+    storable::ChildNode,
 };
 use crypto::digest::generic_array::GenericArray;
 #[cfg(feature = "proptest")]
@@ -460,7 +461,8 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children = children.0;
+                    let children: Vec<ChildNode<H>> =
+                        children.0.into_iter().map(Into::into).collect();
                     Ok(OnDiskObject {
                         data,
                         ref_count,
@@ -509,7 +511,8 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children = children.0;
+                        let children: Vec<ChildNode<H>> =
+                            children.0.into_iter().map(Into::into).collect();
                         let obj = OnDiskObject {
                             data,
                             ref_count,
@@ -532,11 +535,17 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
             let mut stmt = tx.prepare(sql).unwrap();
+            let mut children = Vec::new();
+            for node in object.children {
+                if let ChildNode::Ref(key) = node {
+                    children.push(key)
+                }
+            }
             stmt.execute(params![
                 key,
                 object.data,
                 object.ref_count,
-                Children(object.children)
+                Children(children)
             ])
             .unwrap();
             stmt.finalize().unwrap();
@@ -578,14 +587,22 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             for (key, update) in iter {
                 match update {
                     DeleteNode => delete_node.execute(params![key]).unwrap(),
-                    InsertNode(object) => insert_node
-                        .execute(params![
-                            key,
-                            object.data,
-                            object.ref_count,
-                            Children(object.children.clone())
-                        ])
-                        .unwrap(),
+                    InsertNode(object) => {
+                        let mut children = Vec::new();
+                        for node in object.children {
+                            if let ChildNode::Ref(key) = node {
+                                children.push(key)
+                            }
+                        }
+                        insert_node
+                            .execute(params![
+                                key,
+                                object.data,
+                                object.ref_count,
+                                Children(children)
+                            ])
+                            .unwrap()
+                    }
                     SetRootCount(count) => {
                         if count > 0 {
                             set_root_count.execute(params![key, count]).unwrap()

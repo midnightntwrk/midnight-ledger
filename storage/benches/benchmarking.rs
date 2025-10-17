@@ -6,6 +6,7 @@ use midnight_storage::DefaultDB;
 use midnight_storage::arena::{ArenaKey, Sp};
 use midnight_storage::db::InMemoryDB;
 use midnight_storage::delta_tracking::{RcMap, gc_rcmap, get_writes, update_rcmap};
+use midnight_storage::storable::ChildNode;
 use midnight_storage::storage::{HashMap, Map};
 use onchain_state::state::StateValue;
 use pprof::criterion::{Output, PProfProfiler};
@@ -45,8 +46,8 @@ pub fn map_insert(c: &mut Criterion) {
 struct BenchmarkData {
     old_rcmap: RcMap,
     new_rcmap: RcMap,
-    new_roots: StdHashSet<ArenaKey>,
-    keys_added: StdHashSet<ArenaKey>,
+    new_roots: StdHashSet<ChildNode>,
+    keys_added: StdHashSet<ChildNode>,
     json: serde_json::Value,
     _old_sp: Sp<StateValue>, // Keep StateValue alive in backend
     _new_sp: Sp<StateValue>, // Keep StateValue alive in backend
@@ -139,7 +140,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let new_sp = arena.alloc(StateValue::Map(new_map.clone()));
 
         // Build rcmap from old state
-        let old_root = old_sp.hash().into();
+        let old_root = old_sp.as_child();
         let old_roots = StdHashSet::from([old_root]);
         println!("get_writes(old_roots)");
         let keys_for_rcmap = get_writes::<DefaultDB>(&RcMap::default(), &old_roots);
@@ -147,7 +148,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let old_rcmap = update_rcmap(&RcMap::default(), &keys_for_rcmap);
 
         // Get new state roots
-        let new_root = new_sp.hash().into();
+        let new_root = new_sp.as_child();
         let new_roots = StdHashSet::from([new_root]);
 
         // Pre-compute keys_added and keys_removed

@@ -27,12 +27,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{Add, Sub};
 use storage::Storable;
-use storage::arena::ArenaKey;
 use storage::arena::Sp;
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
-use storage::storable::Loader;
+use storage::storable::{ChildNode, Loader};
 use storage::storage::Array;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
