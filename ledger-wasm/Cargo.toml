@@ -1,6 +1,6 @@
 [package]
 name = "midnight-ledger-wasm"
-version = "6.1.0-alpha.4"
+version = "6.1.0-alpha.4-hard-fork-test"
 license.workspace = true
 edition = "2024"
 
