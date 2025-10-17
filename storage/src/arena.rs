@@ -2410,6 +2410,7 @@ pub mod stress_tests {
 mod tests {
     use super::*;
     use crate as storage;
+    use crate::storable::SMALL_OBJECT_LIMIT;
     use crate::{DefaultHasher, storage::Array};
     use macros::Storable;
 
@@ -2430,19 +2431,19 @@ mod tests {
 
     #[test]
     fn dedup() {
-        let val = [0; 1024];
+        let val = [0; SMALL_OBJECT_LIMIT];
         let map = new_arena();
-        let _malloced_a = map.alloc::<[u8; 1024]>(val.clone());
-        let _malloced_b = map.alloc::<[u8; 1024]>(val);
+        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val.clone());
+        let _malloced_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         assert_eq!(map.size(), 1)
     }
 
     #[test]
     fn drop_node() {
         let map = new_arena();
-        let _malloc_a = map.alloc::<[u8; 1024]>([0; 1024]);
+        let _malloc_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>([0; SMALL_OBJECT_LIMIT]);
         {
-            let _malloc_b = map.alloc::<[u8; 1024]>([1; 1024]);
+            let _malloc_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>([1; SMALL_OBJECT_LIMIT]);
             assert_eq!(map.size(), 2);
         }
         assert_eq!(map.size(), 1);
@@ -2451,8 +2452,8 @@ mod tests {
     #[test]
     fn clone_increment_refcount() {
         let map = new_arena();
-        let payload = [0; 1024]; // must be larger than SMALL_OBJECT_LIMIT
-        let malloc_a = map.alloc::<[u8; 1024]>(payload);
+        let payload = [0; SMALL_OBJECT_LIMIT]; // must be larger than SMALL_OBJECT_LIMIT
+        let malloc_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(payload);
         let malloc_b = malloc_a.clone();
         let ref_count = map
             .lock_metadata()
@@ -2550,9 +2551,9 @@ mod tests {
         let arena = &new_arena();
 
         // Allocate an `Sp` in the arena
-        let sp1 = arena.alloc([42u8; 1024]);
+        let sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let root_key = sp1.root.clone();
-        let type_id = TypeId::of::<[u8; 1024]>();
+        let type_id = TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>();
         let cache_key = (root_key.clone(), type_id);
 
         // Ensure the `Arc` is in the `sp_cache`, and equal to the one in the
@@ -2564,7 +2565,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2593,7 +2594,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2616,9 +2617,9 @@ mod tests {
     #[test]
     fn sp_cache_sp_unload() {
         let arena = &new_arena();
-        let mut sp1 = arena.alloc([42u8; 1024]);
+        let mut sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let mut sp2 = sp1.clone();
-        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; 1024]>());
+        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>());
 
         // Verify the weak reference exists in the cache
         {
@@ -2665,8 +2666,8 @@ mod tests {
     #[test]
     fn sp_cache_alloc_same_data_twice() {
         let arena = &new_arena();
-        let sp1 = arena.alloc([0u8; 1024]);
-        let sp2 = arena.alloc([0u8; 1024]);
+        let sp1 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
+        let sp2 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
         let data1 = sp1.data.get().unwrap();
         let data2 = sp2.data.get().unwrap();
         assert!(
@@ -3115,12 +3116,12 @@ mod tests {
     #[test]
     fn get_unknown_key() {
         let arena = new_arena();
-        let sp = arena.alloc([0; 1024]);
+        let sp = arena.alloc([0; SMALL_OBJECT_LIMIT]);
         //let key = VersionedArenaKey::<DefaultHasher>::default();
         let key = sp.hash();
-        assert!(arena.get::<[u8; 1024]>(&key).is_ok());
+        assert!(arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).is_ok());
         let arena = new_arena();
-        assert!(arena.get::<[u8; 1024]>(&key).is_err());
+        assert!(arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).is_err());
     }
 
     /// Test intensive concurrent manipulation of `Sp`s for the same key.
@@ -3169,7 +3170,7 @@ mod tests {
     #[test]
     fn sp_is_lazy() {
         let arena = new_arena();
-        let mut sp = arena.alloc([42u8; 1024]);
+        let mut sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
 
         assert!(!sp.is_lazy());
         sp.unload();
@@ -3181,10 +3182,10 @@ mod tests {
         sp.persist();
         drop(sp);
 
-        let sp = arena.get_lazy::<[u8; 1024]>(&key).unwrap();
+        let sp = arena.get_lazy::<[u8; SMALL_OBJECT_LIMIT]>(&key).unwrap();
         assert!(sp.is_lazy());
 
-        let sp = arena.get::<[u8; 1024]>(&key).unwrap();
+        let sp = arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).unwrap();
         assert!(!sp.is_lazy());
     }
 

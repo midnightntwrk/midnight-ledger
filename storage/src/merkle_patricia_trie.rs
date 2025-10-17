@@ -1485,6 +1485,7 @@ mod tests {
     use crate::{
         Storage,
         db::InMemoryDB,
+        storable::SMALL_OBJECT_LIMIT,
         storage::{WrappedDB, default_storage, set_default_storage},
     };
 
@@ -1524,11 +1525,11 @@ mod tests {
         struct Tag;
         type D = WrappedDB<DefaultDB, Tag>;
         let _ = set_default_storage::<D>(Storage::default);
-        let mut mpt = MerklePatriciaTrie::<[u8; 1024], D>::new();
-        mpt = mpt.insert(&([1, 2, 3]), [100; 1024]);
-        mpt = mpt.insert(&([1, 2, 2]), [100; 1024]);
-        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&[100; 1024]));
-        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&[100; 1024]));
+        let mut mpt = MerklePatriciaTrie::<[u8; SMALL_OBJECT_LIMIT], D>::new();
+        mpt = mpt.insert(&([1, 2, 3]), [100; SMALL_OBJECT_LIMIT]);
+        mpt = mpt.insert(&([1, 2, 2]), [100; SMALL_OBJECT_LIMIT]);
+        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&[100; SMALL_OBJECT_LIMIT]));
+        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&[100; SMALL_OBJECT_LIMIT]));
         assert_eq!(mpt.size(), 2);
         dbg!(&mpt.0.arena);
         assert_eq!(mpt.0.arena.size(), 1);
@@ -1558,12 +1559,13 @@ mod tests {
         let _ = set_default_storage::<D>(Storage::default);
         let arena = &default_storage::<D>().arena;
         {
-            let mut mpt: MerklePatriciaTrie<[u8; 1024], D> = MerklePatriciaTrie::new();
-            mpt = mpt.insert(&([1, 2, 3]), [100; 1024]);
-            mpt = mpt.insert(&([1, 2, 4]), [104; 1024]);
-            mpt = mpt.insert(&([2, 2, 4]), [105; 1024]);
+            let mut mpt: MerklePatriciaTrie<[u8; SMALL_OBJECT_LIMIT], D> =
+                MerklePatriciaTrie::new();
+            mpt = mpt.insert(&([1, 2, 3]), [100; SMALL_OBJECT_LIMIT]);
+            mpt = mpt.insert(&([1, 2, 4]), [104; SMALL_OBJECT_LIMIT]);
+            mpt = mpt.insert(&([2, 2, 4]), [105; SMALL_OBJECT_LIMIT]);
             assert_eq!(arena.size(), 3);
-            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&[105; 1024]));
+            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&[105; SMALL_OBJECT_LIMIT]))
         }
         assert_eq!(arena.size(), 0);
     }

@@ -41,6 +41,8 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
+pub(crate) const SMALL_OBJECT_LIMIT: usize = 1024;
+
 /// Super-trait containing all requirements for a Hasher
 pub trait WellBehavedHasher: Digest + Send + Sync + Default + Debug + Clone + 'static {}
 
@@ -266,7 +268,6 @@ pub(crate) fn child_from<H: WellBehavedHasher>(
 }
 
 fn is_in_small_object_limit<H: WellBehavedHasher>(data: &[u8], children: &[ChildNode<H>]) -> bool {
-    const SMALL_OBJECT_LIMIT: usize = 1024;
     let mut size = 2 + data.len();
     for child in children.iter() {
         size += child.serialized_size();
@@ -342,10 +343,10 @@ base_storable!(RunningCost);
 base_storable!(String);
 base_storable!(SizeAnn);
 #[cfg(test)]
-base_storable!([u8; 1024]);
+base_storable!([u8; SMALL_OBJECT_LIMIT]);
 
 #[cfg(test)]
-impl<D: DB> Storable<D> for [u32; 256] {
+impl<D: DB> Storable<D> for [u32; SMALL_OBJECT_LIMIT / 4] {
     fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
         vec![]
     }
@@ -353,7 +354,7 @@ impl<D: DB> Storable<D> for [u32; 256] {
     where
         Self: Sized,
     {
-        let bytes: &[u8; 1024] = unsafe {
+        let bytes: &[u8; SMALL_OBJECT_LIMIT] = unsafe {
             std::slice::from_raw_parts(self.as_ptr() as *const u8, 256 * std::mem::size_of::<u32>())
                 .try_into()
                 .unwrap()
@@ -369,8 +370,9 @@ impl<D: DB> Storable<D> for [u32; 256] {
     where
         Self: Sized,
     {
-        let val: [u8; 1024] = Storable::<D>::from_binary_repr(reader, child_hashes, loader)?;
-        let data: &[u32; 256] = unsafe {
+        let val: [u8; SMALL_OBJECT_LIMIT] =
+            Storable::<D>::from_binary_repr(reader, child_hashes, loader)?;
+        let data: &[u32; SMALL_OBJECT_LIMIT / 4] = unsafe {
             std::slice::from_raw_parts(val.as_ptr() as *const u32, 256)
                 .try_into()
                 .unwrap()

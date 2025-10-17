@@ -288,6 +288,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::arena::Sp;
     use crate::db::InMemoryDB;
+    use crate::storable::SMALL_OBJECT_LIMIT;
 
     // Test Storable serialization of vector of ChildRef, to be sure the manual
     // Storable impl makes sense.
@@ -352,7 +353,7 @@ pub(crate) mod tests {
     // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.
     #[test]
     fn rc_0_keys_are_descendants() {
-        let val = Sp::<_, InMemoryDB>::new([42u8;1024]);
+        let val = Sp::<_, InMemoryDB>::new([42u8;SMALL_OBJECT_LIMIT]);
         let key = val.root.clone();
 
         // Create RcMap with key in rc_0

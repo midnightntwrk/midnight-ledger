@@ -1961,6 +1961,7 @@ impl<D: DB + DummyArbitrary, T> DummyArbitrary for WrappedDB<D, T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storable::SMALL_OBJECT_LIMIT;
 
     #[test]
     fn iter_map() {
@@ -2448,31 +2449,51 @@ mod tests {
 
         // Create a default storage of type D1.
         let b1 = set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        let s1 = b1.arena.alloc(42u8);
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        let s1 = b1.arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .is_ok()
+        );
 
         // Check that D1 and D2 have disjoint default storages, even tho they're
         // the same underlying database type.
         set_default_storage::<D2>(Storage::<D2>::default).unwrap();
-        assert!(default_storage::<D2>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D2>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .is_err()
+        );
 
         // Drop the D1 default storage and see that we can create a new one.
         unsafe_drop_default_storage::<D1>();
         assert!(try_get_default_storage::<D1>().is_none());
         set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .is_err()
+        );
 
         // Check that dropping the default storage for D1 didn't affect existing
         // references.
-        assert!(b1.get::<u8>(&s1.hash()).is_ok());
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(b1.get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash()).is_ok());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .is_err()
+        );
 
         // Check that we can restore the original D1 default storage (unlikely
         // use case ...)
         let s = Arc::into_inner(b1).expect("we should have the only reference");
         unsafe_drop_default_storage::<D1>();
         set_default_storage::<D1>(|| s).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .is_ok()
+        );
     }
 
     #[cfg(feature = "sqlite")]

@@ -343,7 +343,7 @@ mod tests {
     use crate as storage;
     use crate::arena::Sp;
     use crate::db::DB;
-    use crate::storable::Loader;
+    use crate::storable::{Loader, SMALL_OBJECT_LIMIT};
     use crate::storage::set_default_storage;
     use crate::{DefaultDB, Storable};
     use derive_where::derive_where;
@@ -358,7 +358,7 @@ mod tests {
     struct Node<D: DB = DefaultDB> {
         id: u64, // Encode (layer, node_id) as layer * 256 + node_id
         children: Vec<Sp<Node<D>, D>>,
-        _data: [u8; 1024], // In-lined data to keep nodes large enough to not be inlined themselves
+        _data: [u8; SMALL_OBJECT_LIMIT], // In-lined data to keep nodes large enough to not be inlined themselves
     }
 
     impl<D: DB> Node<D> {
@@ -367,7 +367,7 @@ mod tests {
             Sp::new(Node {
                 id: encoded_id,
                 children: children.to_vec(),
-                _data: [0; 1024],
+                _data: [0; SMALL_OBJECT_LIMIT],
             })
         }
     }
