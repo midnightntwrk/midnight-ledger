@@ -2543,7 +2543,7 @@ mod tests {
             let arena = &storage1.arena;
             let vals1 = vec![1u8, 1, 2, 3, 5];
             let array1: super::Array<_, W<D>> = vals1.into();
-            let sp1 = arena.alloc(array1.clone());
+            let mut sp1 = arena.alloc(array1.clone());
             sp1.persist();
             storage1.with_backend(|backend| backend.flush_all_changes_to_db());
             sp1.hash()

@@ -1622,26 +1622,43 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
 #[cfg(any(test, feature = "stress-test"))]
 pub(crate) mod bin_tree {
     use super::*;
-    use crate as storage;
+    use crate::{self as storage, storable::SMALL_OBJECT_LIMIT};
     use macros::Storable;
+    use std::fmt;
 
-    #[derive(Storable, Debug)]
+    #[derive(Storable)]
     #[derive_where(Clone, PartialEq, Eq)]
     #[tag = "test-bin-tree"]
     #[storable(db = D)]
-    pub(crate) struct BinTree<D: DB, T: Storable<D> + PartialEq + Eq> {
-        value: T,
-        pub(crate) left: Option<Sp<BinTree<D, T>, D>>,
-        pub(crate) right: Option<Sp<BinTree<D, T>, D>>,
+    pub(crate) struct BinTree<D: DB> {
+        value: u64,
+        pub(crate) left: Option<Sp<BinTree<D>, D>>,
+        pub(crate) right: Option<Sp<BinTree<D>, D>>,
+        _data: [u8; SMALL_OBJECT_LIMIT], // used to ensure nodes are not in-lined
     }
 
-    impl<D: DB, T: Storable<D> + PartialEq + Eq> BinTree<D, T> {
+    impl<D: DB> fmt::Debug for BinTree<D> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("BinTree")
+                .field("value", &self.value)
+                .field("left", &self.left)
+                .field("right", &self.right)
+                .finish()
+        }
+    }
+
+    impl<D: DB> BinTree<D> {
         pub(crate) fn new(
-            value: T,
-            left: Option<Sp<BinTree<D, T>, D>>,
-            right: Option<Sp<BinTree<D, T>, D>>,
-        ) -> BinTree<D, T> {
-            BinTree { value, left, right }
+            value: u64,
+            left: Option<Sp<BinTree<D>, D>>,
+            right: Option<Sp<BinTree<D>, D>>,
+        ) -> BinTree<D> {
+            BinTree {
+                value,
+                left,
+                right,
+                _data: [0; SMALL_OBJECT_LIMIT],
+            }
         }
 
         /// Return sum of all node values.
@@ -1678,8 +1695,8 @@ pub(crate) mod bin_tree {
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
-    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D, u64>, D> {
-        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D, u64>, D> {
+    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D>, D> {
+        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D>, D> {
             assert!(height > 0);
             let (left, right) = {
                 if height == 1 {
@@ -1694,38 +1711,6 @@ pub(crate) mod bin_tree {
             arena.alloc(BinTree::new(value, left, right))
         }
         go(arena, 1, height)
-    }
-
-    #[cfg(any(
-        test,
-        all(
-            feature = "stress-test",
-            any(feature = "parity-db", feature = "sqlite")
-        )
-    ))]
-    pub(crate) fn large_counting_tree<D: DB>(
-        arena: &Arena<D>,
-        height: usize,
-    ) -> Sp<BinTree<D, [u32; 256]>, D> {
-        fn go<D: DB>(
-            arena: &Arena<D>,
-            value: [u32; 256],
-            height: usize,
-        ) -> Sp<BinTree<D, [u32; 256]>, D> {
-            assert!(height > 0);
-            let (left, right) = {
-                if height == 1 {
-                    (None, None)
-                } else {
-                    (
-                        Some(go(arena, [2 * value[0]; 256], height - 1)),
-                        Some(go(arena, [2 * value[0] + 1; 256], height - 1)),
-                    )
-                }
-            };
-            arena.alloc(BinTree::new(value, left, right))
-        }
-        go(arena, [1; 256], height)
     }
 }
 
@@ -1957,7 +1942,7 @@ pub mod stress_tests {
                 print!(".");
                 stdout().flush().unwrap();
             }
-            let sp = arena.alloc(x as u64);
+            let mut sp = arena.alloc(x as u64);
             sp.persist();
             key_map.insert(x, sp.hash());
         }
@@ -2129,7 +2114,7 @@ pub mod stress_tests {
             let arena = storage.arena;
             timer.delta("init");
 
-            let bt = counting_tree(&arena, height);
+            let mut bt = counting_tree(&arena, height);
             timer.delta("create tree");
 
             bt.persist();
@@ -2682,21 +2667,17 @@ mod tests {
         use super::bin_tree::*;
         let arena = &new_arena();
 
-        type BinTree = super::bin_tree::BinTree<DefaultDB, [u32; 256]>;
+        type BinTree = super::bin_tree::BinTree<DefaultDB>;
 
         // Build a tree, unload and walk the left fringe, and check that only
         // the left fringe is forced, while also checking that printing doesn't
         // force any lazy sps, by comparing the Debug fmt of the tree with an
         // expected value.
         {
-            let mut bt = BinTree::new([0u32; 256], None, None);
+            let mut bt = BinTree::new(0, None, None);
             let depth = 5;
             for i in 1..depth {
-                bt = BinTree::new(
-                    [i as u32; 256],
-                    Some(arena.alloc(bt.clone())),
-                    Some(arena.alloc(bt)),
-                );
+                bt = BinTree::new(i, Some(arena.alloc(bt.clone())), Some(arena.alloc(bt)));
             }
             let mut bt = arena.alloc(bt);
             bt.unload();
@@ -2705,6 +2686,7 @@ mod tests {
                 p = p.unwrap().left.as_ref();
             }
             let actual = format!("{:?}", bt);
+            dbg!(&actual);
             assert!(actual.ends_with("right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }"));
         }
 
@@ -2716,14 +2698,10 @@ mod tests {
         {
             // Build the tree.
 
-            let mut bt1 = BinTree::new([0; 256], None, None);
+            let mut bt1 = BinTree::new(0, None, None);
             let depth = 100;
             for i in 1..depth {
-                bt1 = BinTree::new(
-                    [i as u32; 256],
-                    Some(arena.alloc(bt1.clone())),
-                    Some(arena.alloc(bt1)),
-                );
+                bt1 = BinTree::new(i, Some(arena.alloc(bt1.clone())), Some(arena.alloc(bt1)));
             }
             let mut bt1 = arena.alloc(bt1);
 
@@ -2757,7 +2735,7 @@ mod tests {
             // Load a full tree into memory.
 
             let depth = 13;
-            let mut bt = large_counting_tree(arena, depth);
+            let mut bt = counting_tree(arena, depth);
             // Check that we have a full tree in memory
             assert_eq!(arena.lock_sp_cache().borrow().len(), (1 << depth) - 1);
 
