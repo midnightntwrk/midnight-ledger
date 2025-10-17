@@ -1,7 +1,7 @@
 {
   "name": "@midnight/ledger",
   "license": "Apache-2.0",
-  "version": "6.1.0-alpha.3",
+  "version": "6.1.0-alpha.4",
   "devDependencies": {
     "rimraf": "^6.0.0",
     "lodash": "^4.17.15",
