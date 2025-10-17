@@ -301,6 +301,7 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
         || !Vec::from(&offer.deltas)
             .windows(2)
             .all(|slice| slice[0].token_type < slice[1].token_type)
+        || !offer.deltas.iter().all(|d| d.value != 0)
     {
         warn!("Zswap offer not in normal form");
         return Err(MalformedOffer::NotNormalized);
