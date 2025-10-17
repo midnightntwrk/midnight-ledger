@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.3**](../README.md)
 
 ***
 
@@ -11,11 +11,16 @@ function proofDataIntoSerializedPreimage(
    input, 
    output, 
    public_transcript, 
-   private_transcript_outputs): Uint8Array;
+   private_transcript_outputs, 
+   key_location?): Uint8Array;
 ```
 
 Converts input, output, and transcript information into a proof preimage
 suitable to pass to a `ProvingProvider`.
+
+The `key_location` parameter is a string used to identify the circuit by
+proving machinery, for backwards-compatibility, if unset it defaults to
+`'dummy'`.
 
 ## Parameters
 
@@ -34,6 +39,10 @@ suitable to pass to a `ProvingProvider`.
 ### private\_transcript\_outputs
 
 [`AlignedValue`](../type-aliases/AlignedValue.md)[]
+
+### key\_location?
+
+`string`
 
 ## Returns
 

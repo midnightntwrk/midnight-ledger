@@ -4,16 +4,6 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
-
-- fix: proof server now correctly fetches Dust keys on startup
-- fix: proof server no longer crashes if trying to fetch keys from within a worker thread
-- fix: allow disabling time-to-dismiss check as part of fee computation for balancing
-- fix: correct token type computation in contract mints
-- feat: proof server now fetches missing artifacts on demand
-- feat: add endpoints for estimating fees with a margin depending on allowed
-  block adjustment
-
 ## 6.1.0
 
 - breaking: feat: Add real cost model
@@ -23,6 +13,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   - `post_block_update` now takes block fullness as an input, and adjust pricing accordingly
 - fix: Fix accounting issue in Pedersen check that prevented contracts from
   minting shielded tokens.
+- fix: proof server now correctly fetches Dust keys on startup
+- fix: proof server no longer crashes if trying to fetch keys from within a worker thread
+- fix: allow disabling time-to-dismiss check as part of fee computation for balancing
+- fix: correct token type computation in contract mints
+- feat: proof server now fetches missing artifacts on demand
+- feat: add endpoints for estimating fees with a margin depending on allowed
+  block adjustment
 
 ## 6.0.0
 

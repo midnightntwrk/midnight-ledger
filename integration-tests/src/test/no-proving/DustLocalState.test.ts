@@ -37,13 +37,13 @@ import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {
   BALANCING_OVERHEAD,
+  DEFAULT_TOKEN_TYPE,
   DUST_GRACE_PERIOD_IN_SECONDS,
   GENERATION_DECAY_RATE,
   INITIAL_NIGHT_AMOUNT,
   initialParameters,
   LOCAL_TEST_NETWORK_ID,
-  NIGHT_DUST_RATIO,
-  NIGHT_TOKEN_TYPE
+  NIGHT_DUST_RATIO
 } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
 import { assertSerializationSuccess } from '@/test-utils';
@@ -184,7 +184,7 @@ describe('Ledger API - DustLocalState', () => {
       {
         value: INITIAL_NIGHT_AMOUNT,
         owner: state.nightKey.verifyingKey(),
-        type: NIGHT_TOKEN_TYPE,
+        type: DEFAULT_TOKEN_TYPE,
         intentHash: utxoIh,
         outputNo: 0
       }
@@ -193,12 +193,12 @@ describe('Ledger API - DustLocalState', () => {
     const outputs: UtxoOutput[] = [
       {
         owner: state.initialNightAddress,
-        type: NIGHT_TOKEN_TYPE,
+        type: DEFAULT_TOKEN_TYPE,
         value: halfAmount
       },
       {
         owner: bobAddress,
-        type: NIGHT_TOKEN_TYPE,
+        type: DEFAULT_TOKEN_TYPE,
         value: halfAmount
       }
     ];
@@ -320,7 +320,7 @@ describe('Ledger API - DustLocalState', () => {
     const outputsWithNumbers: Array<[UtxoOutput, number]> = cycle.map(([, addr], i) => [
       {
         owner: addr,
-        type: NIGHT_TOKEN_TYPE,
+        type: DEFAULT_TOKEN_TYPE,
         value: NIGHT_VAL
       },
       i
@@ -334,7 +334,7 @@ describe('Ledger API - DustLocalState', () => {
           intentHash: utxoIh,
           value: BigInt(CYCLE_LEN) * NIGHT_VAL,
           owner: aliceVk,
-          type: NIGHT_TOKEN_TYPE,
+          type: DEFAULT_TOKEN_TYPE,
           outputNo: 0
         }
       ],
@@ -378,7 +378,7 @@ describe('Ledger API - DustLocalState', () => {
         {
           value: NIGHT_VAL,
           owner: sender,
-          type: NIGHT_TOKEN_TYPE,
+          type: DEFAULT_TOKEN_TYPE,
           intentHash: utxo[0],
           outputNo: utxo[1]
         }
@@ -388,7 +388,7 @@ describe('Ledger API - DustLocalState', () => {
         {
           value: NIGHT_VAL,
           owner: recipient,
-          type: NIGHT_TOKEN_TYPE
+          type: DEFAULT_TOKEN_TYPE
         }
       ];
       intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);

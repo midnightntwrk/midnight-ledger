@@ -491,6 +491,10 @@ export class LedgerState {
    * The dust subsystem state
    */
   readonly dust: DustState;
+  /**
+   * The parameters of the ledger
+   */
+  parameters: LedgerParameters;
 }
 
 /**
@@ -1093,14 +1097,14 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * The underlying resource cost of this transaction.
    */
-  cost(params: LedgerParameters, enforceTimeToDismiss?: bool): SyntheticCost;
+  cost(params: LedgerParameters, enforceTimeToDismiss?: boolean): SyntheticCost;
 
   /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
    */
-  fees(params: LedgerParameters, enforceTimeToDismiss?: bool): bigint;
+  fees(params: LedgerParameters, enforceTimeToDismiss?: boolean): bigint;
 
   /**
    * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
@@ -1268,6 +1272,11 @@ export class LedgerParameters {
   static deserialize(raw: Uint8Array): LedgerParameters;
 
   toString(compact?: boolean): string;
+
+  /**
+   * The fee prices for transaction
+   */
+  readonly feePrices: FeePrices;
 }
 
 export class TransactionCostModel {
@@ -1292,6 +1301,16 @@ export class TransactionCostModel {
   static deserialize(raw: Uint8Array): TransactionCostModel;
 
   toString(compact?: boolean): string;
+
+  /**
+   * A cost model for calculating transaction fees
+   */
+  readonly runtimeCostModel: CostModel;
+
+  /**
+   * A baseline cost to begin with
+   */
+  readonly baselineCost: RunningCost;
 }
 
 

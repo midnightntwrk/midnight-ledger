@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.3**](../README.md)
 
 ***
 
@@ -131,7 +131,7 @@ static deserialize<P>(markerP, raw): ZswapTransient<P>;
 static newFromContractOwnedOutput(
    coin, 
    segment, 
-output): ZswapTransient<PreProof>;
+   output): UnprovenTransient;
 ```
 
 Creates a new contract-owned transient, from a given output and its coin.
@@ -150,8 +150,8 @@ The [QualifiedShieldedCoinInfo](../type-aliases/QualifiedShieldedCoinInfo.md) sh
 
 ##### output
 
-[`ZswapOutput`](ZswapOutput.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOutput`](../type-aliases/UnprovenOutput.md)
 
 #### Returns
 
-`ZswapTransient`\<[`PreProof`](PreProof.md)\>
+[`UnprovenTransient`](../type-aliases/UnprovenTransient.md)
