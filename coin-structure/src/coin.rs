@@ -30,7 +30,8 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 use storage::db::DB;
 use storage::{
     Storable,
-    storable::{ChildNode, Loader},
+    arena::ArenaKey,
+    storable::Loader,
 };
 use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;

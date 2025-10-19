@@ -23,9 +23,9 @@ use std::ops::Deref;
 
 use crate::DefaultDB;
 use crate::Storable;
-use crate::arena::Sp;
+use crate::arena::{ArenaKey, Sp};
 use crate::db::DB;
-use crate::storable::{ChildNode, Loader, SizeAnn};
+use crate::storable::{Loader, SizeAnn};
 use derive_where::derive_where;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 
@@ -1301,7 +1301,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
 impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D>
     for Node<T, D, A>
 {
-    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
         match self {
             Node::Empty => std::vec::Vec::new(),
             Node::Leaf { value, .. } => vec![value.as_child()],
@@ -1426,7 +1426,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
     #[inline(always)]
     fn from_binary_repr<R: Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Node<T, D, A>, std::io::Error> {
         let disc = u8::deserialize(reader, 0)?;

@@ -38,11 +38,11 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::DefaultDB;
 use storage::Storable;
-use storage::arena::{ArenaHash, Sp};
+use storage::arena::{ArenaHash, ArenaKey, Sp};
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
-use storage::storable::{ChildNode, Loader};
+use storage::storable::Loader;
 
 /// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]

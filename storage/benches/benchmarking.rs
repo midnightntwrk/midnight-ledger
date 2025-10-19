@@ -6,7 +6,6 @@ use midnight_storage::DefaultDB;
 use midnight_storage::arena::{ArenaKey, Sp};
 use midnight_storage::db::InMemoryDB;
 use midnight_storage::delta_tracking::{RcMap, gc_rcmap, get_writes, update_rcmap};
-use midnight_storage::storable::ChildNode;
 use midnight_storage::storage::{HashMap, Map};
 use onchain_state::state::StateValue;
 use pprof::criterion::{Output, PProfProfiler};
@@ -46,8 +45,8 @@ pub fn map_insert(c: &mut Criterion) {
 struct BenchmarkData {
     old_rcmap: RcMap,
     new_rcmap: RcMap,
-    new_roots: StdHashSet<ChildNode>,
-    keys_added: StdHashSet<ChildNode>,
+    new_roots: StdHashSet<ArenaKey>,
+    keys_added: StdHashSet<ArenaKey>,
     json: serde_json::Value,
     _old_sp: Sp<StateValue>, // Keep StateValue alive in backend
     _new_sp: Sp<StateValue>, // Keep StateValue alive in backend

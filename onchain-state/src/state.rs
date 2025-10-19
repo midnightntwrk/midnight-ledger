@@ -49,7 +49,8 @@ use storage::db::{DB, InMemoryDB};
 use storage::delta_tracking::{incremental_write_delete_costs, initial_write_delete_costs};
 use storage::{
     delta_tracking::RcMap,
-    storable::{ChildNode, Loader},
+    storable::Loader,
+    arena::ArenaKey,
     storage::{Array, HashMap},
 };
 use transient_crypto::curve::Fr;

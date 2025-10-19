@@ -48,7 +48,8 @@ use std::{any::Any, cmp::Ordering};
 use std::{borrow::Cow, num::NonZeroUsize};
 use storage::Storable;
 use storage::db::DB;
-use storage::storable::{ChildNode, Loader};
+use storage::arena::ArenaKey;
+use storage::storable::Loader;
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {

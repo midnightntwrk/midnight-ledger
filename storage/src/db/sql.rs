@@ -55,8 +55,7 @@ use super::{DB, Update};
 #[cfg(feature = "proptest")]
 use crate::db::DummyDBStrategy;
 use crate::{
-    DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject, db::DummyArbitrary,
-    storable::ChildNode,
+    DefaultHasher, WellBehavedHasher, arena::{ArenaHash, ArenaKey}, backend::OnDiskObject, db::DummyArbitrary,
 };
 use crypto::digest::generic_array::GenericArray;
 #[cfg(feature = "proptest")]
@@ -461,7 +460,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children: Vec<ChildNode<H>> =
+                    let children: Vec<ArenaKey<H>> =
                         children.0.into_iter().map(Into::into).collect();
                     Ok(OnDiskObject {
                         data,
@@ -511,7 +510,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children: Vec<ChildNode<H>> =
+                        let children: Vec<ArenaKey<H>> =
                             children.0.into_iter().map(Into::into).collect();
                         let obj = OnDiskObject {
                             data,
@@ -537,7 +536,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             let mut stmt = tx.prepare(sql).unwrap();
             let mut children = Vec::new();
             for node in object.children {
-                if let ChildNode::Ref(key) = node {
+                if let ArenaKey::Ref(key) = node {
                     children.push(key)
                 }
             }
@@ -590,7 +589,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     InsertNode(object) => {
                         let mut children = Vec::new();
                         for node in object.children {
-                            if let ChildNode::Ref(key) = node {
+                            if let ArenaKey::Ref(key) = node {
                                 children.push(key)
                             }
                         }

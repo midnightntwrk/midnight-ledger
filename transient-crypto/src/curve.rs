@@ -47,7 +47,8 @@ use std::ops::Mul;
 use storage::{
     Storable,
     db::DB,
-    storable::{ChildNode, Loader},
+    arena::ArenaKey,
+    storable::Loader,
 };
 
 /// The outer, main curve

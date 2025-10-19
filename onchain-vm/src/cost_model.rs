@@ -25,7 +25,8 @@ use storage::{
     Storable,
     arena::Sp,
     db::DB,
-    storable::{ChildNode, Loader},
+    arena::ArenaKey,
+    storable::Loader,
 };
 use transient_crypto::curve::FR_BYTES;
 
