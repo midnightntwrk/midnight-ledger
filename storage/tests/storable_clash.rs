@@ -17,7 +17,7 @@ use rayon::prelude::*;
 use serialize::{Deserializable, Serializable};
 use std::hash::Hash;
 use storable::{ChildNode, Loader};
-use storage::{arena::ArenaKey, db::DB};
+use storage::{arena::ArenaHash, db::DB};
 
 #[derive(Serializable, Storable, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 #[storable(base)]

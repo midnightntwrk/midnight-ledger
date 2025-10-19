@@ -13,8 +13,8 @@
 
 #[cfg(test)]
 mod tests {
-    use midnight_storage::arena::ArenaKey;
-    use midnight_storage::arena::TypedArenaKey;
+    use midnight_storage::arena::ArenaHash;
+    use midnight_storage::arena::TypedArenaHash;
     use midnight_storage::{
         Storable,
         db::DB,
@@ -50,7 +50,7 @@ mod tests {
     #[test]
     fn arena_key_deserialization_error() {
         let bytes: std::vec::Vec<u8> = vec![0u8; 20];
-        assert!(tagged_deserialize::<TypedArenaKey<TestVec, sha2::Sha256>>(&bytes[..],).is_err());
+        assert!(tagged_deserialize::<TypedArenaHash<TestVec, sha2::Sha256>>(&bytes[..],).is_err());
     }
 
     #[cfg(feature = "proptest")]

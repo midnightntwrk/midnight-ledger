@@ -44,7 +44,11 @@ use std::io::{self, Read, Write};
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::Mul;
-use storage::{Storable, db::DB, storable::{ChildNode, Loader}};
+use storage::{
+    Storable,
+    db::DB,
+    storable::{ChildNode, Loader},
+};
 
 /// The outer, main curve
 pub mod outer {

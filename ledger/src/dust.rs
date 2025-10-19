@@ -53,7 +53,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use storage::db::InMemoryDB;
 use storage::{
     Storable,
-    arena::{Sp},
+    arena::Sp,
     db::DB,
     storable::{ChildNode, Loader},
     storage::{HashMap, HashSet, Identity, Map, TimeFilterMap},

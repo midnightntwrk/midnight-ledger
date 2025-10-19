@@ -27,7 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{Add, Sub};
 use storage::Storable;
-use storage::arena::ArenaKey;
+use storage::arena::ArenaHash;
 use storage::arena::Sp;
 use storage::db::DB;
 #[cfg(test)]

@@ -14,7 +14,7 @@
 //! Traits for defining new storage mechanisms
 
 use crate as storage;
-use crate::arena::{Arena, ArenaKey, Sp};
+use crate::arena::{Arena, ArenaHash, Sp};
 use crate::backend::StorageBackend;
 use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
@@ -62,7 +62,7 @@ pub struct HashMap<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<(Sp<K, D>, Sp<V, D>)> = SizeAnn,
->(#[allow(clippy::type_complexity)] Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
+>(#[allow(clippy::type_complexity)] Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
 
 impl<
     K: Serializable + Storable<D> + Tagged,
@@ -75,7 +75,7 @@ impl<
         format!("hash-map({},{},{})", K::tag(), V::tag(), A::tag()).into()
     }
     fn tag_unique_factor() -> String {
-        <Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
+        <Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
     }
 }
 tag_enforcement_test!(HashMap<(), ()>);
@@ -245,12 +245,12 @@ impl<
         Self(Map::new())
     }
 
-    fn gen_key(key: &K) -> ArenaKey<D::Hasher> {
+    fn gen_key(key: &K) -> ArenaHash<D::Hasher> {
         let mut hasher = D::Hasher::default();
         let mut bytes: std::vec::Vec<u8> = std::vec::Vec::new();
         K::serialize(key, &mut bytes).expect("HashMap key should be serializable");
         hasher.update(bytes);
-        ArenaKey(hasher.finalize())
+        ArenaHash(hasher.finalize())
     }
 
     /// Insert object value in map, keyed with the hash of object key. Overwrites
@@ -391,7 +391,7 @@ where
     V: 'static,
 {
     #[allow(clippy::type_complexity)]
-    inner: std::vec::IntoIter<(ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
+    inner: std::vec::IntoIter<(ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
 }
 
 impl<K, V, D> Iterator for HashMapIntoIter<K, V, D>
@@ -1864,36 +1864,36 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
 
     fn get_node(
         &self,
-        key: &ArenaKey<Self::Hasher>,
+        key: &ArenaHash<Self::Hasher>,
     ) -> Option<crate::backend::OnDiskObject<Self::Hasher>> {
         self.db.get_node(key)
     }
 
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaKey<Self::Hasher>> {
+    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         self.db.get_unreachable_keys()
     }
 
     fn insert_node(
         &mut self,
-        key: ArenaKey<Self::Hasher>,
+        key: ArenaHash<Self::Hasher>,
         object: crate::backend::OnDiskObject<Self::Hasher>,
     ) {
         self.db.insert_node(key, object)
     }
 
-    fn delete_node(&mut self, key: &ArenaKey<Self::Hasher>) {
+    fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>) {
         self.db.delete_node(key)
     }
 
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32 {
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         self.db.get_root_count(key)
     }
 
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         self.db.set_root_count(key, count)
     }
 
-    fn get_roots(&self) -> std::collections::HashMap<ArenaKey<Self::Hasher>, u32> {
+    fn get_roots(&self) -> std::collections::HashMap<ArenaHash<Self::Hasher>, u32> {
         self.db.get_roots()
     }
 
@@ -1903,7 +1903,7 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
 
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, crate::db::Update<Self::Hasher>)>,
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, crate::db::Update<Self::Hasher>)>,
     {
         self.db.batch_update(iter)
     }
@@ -1912,28 +1912,28 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         &self,
         keys: I,
     ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
+        ArenaHash<Self::Hasher>,
         Option<crate::backend::OnDiskObject<Self::Hasher>>,
     )>
     where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>,
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         self.db.batch_get_nodes(keys)
     }
 
     fn bfs_get_nodes<C>(
         &self,
-        key: &ArenaKey<Self::Hasher>,
+        key: &ArenaHash<Self::Hasher>,
         cache_get: C,
         truncate: bool,
         max_depth: Option<usize>,
         max_count: Option<usize>,
     ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
+        ArenaHash<Self::Hasher>,
         crate::backend::OnDiskObject<Self::Hasher>,
     )>
     where
-        C: Fn(&ArenaKey<Self::Hasher>) -> Option<crate::backend::OnDiskObject<Self::Hasher>>,
+        C: Fn(&ArenaHash<Self::Hasher>) -> Option<crate::backend::OnDiskObject<Self::Hasher>>,
     {
         self.db
             .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)

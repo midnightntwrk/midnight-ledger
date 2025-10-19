@@ -38,11 +38,11 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::DefaultDB;
 use storage::Storable;
-use storage::arena::{ArenaKey, Sp};
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
-use storage::storable::{Loader, ChildNode};
+use storage::storable::{ChildNode, Loader};
 
 /// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]
@@ -355,7 +355,7 @@ tag_enforcement_test!(MerkleTree<(), InMemoryDB>);
 
 impl<A: Storable<D>, D: DB> Hash for MerkleTree<A, D> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Hash::hash(&ArenaKey::from(self.0.hash()), state)
+        Hash::hash(&ArenaHash::from(self.0.hash()), state)
     }
 }
 

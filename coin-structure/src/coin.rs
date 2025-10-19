@@ -28,7 +28,10 @@ use serde::{Deserialize, Serialize};
 use serialize::randomised_serialization_test;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 use storage::db::DB;
-use storage::{Storable, storable::{Loader, ChildNode}};
+use storage::{
+    Storable,
+    storable::{ChildNode, Loader},
+};
 use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;
 use transient_crypto::hash::{degrade_to_transient, transient_hash, upgrade_from_transient};

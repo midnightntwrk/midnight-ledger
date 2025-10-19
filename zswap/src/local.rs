@@ -25,7 +25,7 @@ use rand::{CryptoRng, Rng};
 use serialize::tag_enforcement_test;
 use serialize::{Deserializable, Serializable, Tagged};
 use storage::Storable;
-use storage::arena::ArenaKey;
+use storage::arena::ArenaHash;
 use storage::db::DB;
 use storage::storable::{ChildNode, Loader};
 use storage::storage::default_storage;

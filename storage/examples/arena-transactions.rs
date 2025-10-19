@@ -5,7 +5,7 @@
 use midnight_storage::{
     DefaultDB, Storage,
     arena::test_helpers,
-    arena::{Arena, ArenaKey, Sp},
+    arena::{Arena, ArenaHash, Sp},
     db::DB,
 };
 use std::{any::Any, collections::HashMap};
@@ -26,8 +26,8 @@ use std::{any::Any, collections::HashMap};
 #[derive(Debug)]
 pub struct GcRootUpdateQueue<D: DB> {
     arena: Arena<D>,
-    sps: HashMap<ArenaKey<D::Hasher>, Box<dyn Any>>,
-    persist_counts: HashMap<ArenaKey<D::Hasher>, i32>,
+    sps: HashMap<ArenaHash<D::Hasher>, Box<dyn Any>>,
+    persist_counts: HashMap<ArenaHash<D::Hasher>, i32>,
 }
 
 impl<D: DB> GcRootUpdateQueue<D> {
@@ -99,7 +99,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// For example, if the underlying database root count for key `k` is 2, and
     /// self has a net persist-count update for `k` is -1, then in the map
     /// returned by this function `k` will be mapped to 1 (i.e. 2 - 1).
-    pub fn get_roots(&self) -> HashMap<ArenaKey<D::Hasher>, u32> {
+    pub fn get_roots(&self) -> HashMap<ArenaHash<D::Hasher>, u32> {
         let mut roots = self.arena.with_backend(|b| b.get_roots());
         for (key, queue_count) in &self.persist_counts {
             let db_count = roots.entry(key.clone()).or_insert(0);

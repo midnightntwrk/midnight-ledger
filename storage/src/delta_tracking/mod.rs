@@ -22,7 +22,7 @@ pub use rcmap::RcMap;
 use serialize::Serializable;
 
 use crate::db::DB;
-use crate::{arena::ArenaKey, storable::ChildNode};
+use crate::{arena::ArenaHash, storable::ChildNode};
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
 
@@ -428,7 +428,7 @@ mod tests {
             nodes.insert(node_id, Node::new(node_id, &children));
         }
 
-        // Convert to ArenaKey map for easier test access
+        // Convert to ArenaHash map for easier test access
         let mut arena_nodes = HashMap::new();
         for ((layer, id), node) in &nodes {
             arena_nodes.insert((*layer, *id), node.child_repr.clone());
@@ -487,7 +487,7 @@ mod tests {
         rcs
     }
 
-    // Convert node IDs to ArenaKeys using the DAG
+    // Convert node IDs to ArenaHashs using the DAG
     fn to_keys<'a, I>(node_ids: I) -> StdHashSet<ChildNode<crate::DefaultHasher>>
     where
         I: IntoIterator<Item = &'a (u8, u8)>,
@@ -779,7 +779,7 @@ mod tests {
             root_sets.push(selected_nodes.into_iter().collect::<Vec<_>>());
         }
 
-        // Convert root sets to ArenaKey sets
+        // Convert root sets to ArenaHash sets
         let root_sets_as_keys: Vec<StdHashSet<_>> = root_sets.iter().map(to_keys).collect();
 
         // Compute initial_write_delete_costs for each root set.
@@ -797,7 +797,7 @@ mod tests {
             let expected_rcs = get_subgraph_rcs(&root_sets[i]);
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
-            // Convert expected_rcs node IDs to ArenaKeys for comparison
+            // Convert expected_rcs node IDs to ArenaHashs for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
@@ -839,7 +839,7 @@ mod tests {
             let expected_rcs = get_subgraph_rcs(&root_sets[i]);
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
-            // Convert expected_rcs node IDs to ArenaKeys for comparison
+            // Convert expected_rcs node IDs to ArenaHashs for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone().into(), rc))

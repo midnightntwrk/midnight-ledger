@@ -25,7 +25,7 @@ pub use paritydb::ParityDb;
 use crate::DefaultHasher;
 use crate::backend::OnDiskObject;
 use crate::storable::ChildNode;
-use crate::{WellBehavedHasher, arena::ArenaKey};
+use crate::{WellBehavedHasher, arena::ArenaHash};
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
@@ -68,7 +68,7 @@ pub trait DummyArbitrary {}
 /// In addition to DAG nodes, the DB also stores gc-root counts, to allow
 /// marking nodes as persisted / not subject to GC.
 ///
-/// The DAG nodes are keyed by [`ArenaKey`] hashes, which are content-addresses
+/// The DAG nodes are keyed by [`ArenaHash`] hashes, which are content-addresses
 /// at the level of the Merkle DAG, but NOT at the level of the DB. Details
 /// below.
 ///
@@ -122,17 +122,17 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     type Hasher: WellBehavedHasher;
 
     /// Get node in DAG with key `key`.
-    fn get_node(&self, key: &ArenaKey<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
+    fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
 
     /// Get the keys for all the unreachable nodes, i.e. the nodes with
     /// `ref_count == 0`, which aren't marked as GC roots.
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaKey<Self::Hasher>>;
+    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>>;
 
     /// Insert a DAG node with key `key`.
-    fn insert_node(&mut self, key: ArenaKey<Self::Hasher>, object: OnDiskObject<Self::Hasher>);
+    fn insert_node(&mut self, key: ArenaHash<Self::Hasher>, object: OnDiskObject<Self::Hasher>);
 
     /// Remove the DAG node with key `key`.
-    fn delete_node(&mut self, key: &ArenaKey<Self::Hasher>);
+    fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>);
 
     /// Batch update the database.
     ///
@@ -140,7 +140,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// combine many updates in a single transaction.
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, Update<Self::Hasher>)>;
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>;
 
     /// Batch get nodes.
     ///
@@ -150,9 +150,9 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     fn batch_get_nodes<I>(
         &self,
         keys: I,
-    ) -> std::vec::Vec<(ArenaKey<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
+    ) -> std::vec::Vec<(ArenaHash<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
     where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>;
+        I: Iterator<Item = ArenaHash<Self::Hasher>>;
 
     /// Get all nodes reachable from the node with key `key` using a breadth
     /// first search.
@@ -185,14 +185,14 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     #[allow(clippy::type_complexity)]
     fn bfs_get_nodes<C>(
         &self,
-        key: &ArenaKey<Self::Hasher>,
+        key: &ArenaHash<Self::Hasher>,
         cache_get: C,
         truncate: bool,
         max_depth: Option<usize>,
         max_count: Option<usize>,
-    ) -> std::vec::Vec<(ArenaKey<Self::Hasher>, OnDiskObject<Self::Hasher>)>
+    ) -> std::vec::Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>
     where
-        C: Fn(&ArenaKey<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>,
+        C: Fn(&ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>,
     {
         // The key-value pairs to return.
         let mut kvs = vec![];
@@ -262,15 +262,15 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Get the number of times the node with key `key` has been marked as a GC
     /// root. Returns 0 if the node is not a GC root.
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32;
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32;
 
     /// Set the root count of the node with key `key` to `count`. If `count` is
     /// 0, the node will no longer be a GC root.
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32);
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32);
 
     /// Return a mapping from key to root count, for all the roots in this
     /// DB. All mapped root counts will be positive.
-    fn get_roots(&self) -> HashMap<ArenaKey<Self::Hasher>, u32>;
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32>;
 
     /// Return the number of nodes in this DB.
     fn size(&self) -> usize;
@@ -282,7 +282,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 /// use expensive write transactions behind the scenes.
 pub fn dubious_batch_update<D: DB, I>(db: &mut D, iter: I)
 where
-    I: Iterator<Item = (ArenaKey<D::Hasher>, Update<D::Hasher>)>,
+    I: Iterator<Item = (ArenaHash<D::Hasher>, Update<D::Hasher>)>,
 {
     use Update::*;
     for (k, v) in iter {
@@ -302,9 +302,9 @@ where
 pub fn dubious_batch_get_nodes<D: DB, I>(
     db: &D,
     keys: I,
-) -> Vec<(ArenaKey<D::Hasher>, Option<OnDiskObject<D::Hasher>>)>
+) -> Vec<(ArenaHash<D::Hasher>, Option<OnDiskObject<D::Hasher>>)>
 where
-    I: Iterator<Item = ArenaKey<D::Hasher>>,
+    I: Iterator<Item = ArenaHash<D::Hasher>>,
 {
     keys.map(|k| (k.clone(), db.get_node(&k))).collect()
 }
@@ -312,8 +312,8 @@ where
 #[derive(Clone, Debug)]
 /// An in-memory database
 pub struct InMemoryDB<H: WellBehavedHasher = DefaultHasher> {
-    nodes: Arc<Mutex<HashMap<ArenaKey<H>, OnDiskObject<H>>>>,
-    roots: Arc<Mutex<HashMap<ArenaKey<H>, u32>>>,
+    nodes: Arc<Mutex<HashMap<ArenaHash<H>, OnDiskObject<H>>>>,
+    roots: Arc<Mutex<HashMap<ArenaHash<H>, u32>>>,
 }
 
 impl<H: WellBehavedHasher> DummyArbitrary for InMemoryDB<H> {}
@@ -366,11 +366,11 @@ impl<H: WellBehavedHasher> Arbitrary for InMemoryDB<H> {
 }
 
 impl<H: WellBehavedHasher> InMemoryDB<H> {
-    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaKey<H>, OnDiskObject<H>>> {
+    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, OnDiskObject<H>>> {
         self.nodes.lock().expect("db lock poisoned")
     }
 
-    fn lock_roots(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaKey<H>, u32>> {
+    fn lock_roots(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, u32>> {
         self.roots.lock().expect("db lock poisoned")
     }
 }
@@ -378,11 +378,11 @@ impl<H: WellBehavedHasher> InMemoryDB<H> {
 impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
     type Hasher = H;
 
-    fn get_node(&self, key: &ArenaKey<H>) -> Option<OnDiskObject<H>> {
+    fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         self.lock_nodes().get(key).cloned()
     }
 
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaKey<Self::Hasher>> {
+    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         let nodes_guard = self.lock_nodes();
         let roots_guard = self.lock_roots();
         let mut unreachable = vec![];
@@ -394,19 +394,19 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         unreachable
     }
 
-    fn insert_node(&mut self, key: ArenaKey<H>, object: OnDiskObject<H>) {
+    fn insert_node(&mut self, key: ArenaHash<H>, object: OnDiskObject<H>) {
         self.lock_nodes().insert(key, object);
     }
 
-    fn delete_node(&mut self, key: &ArenaKey<H>) {
+    fn delete_node(&mut self, key: &ArenaHash<H>) {
         self.lock_nodes().remove(key);
     }
 
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32 {
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         self.lock_roots().get(key).cloned().unwrap_or(0)
     }
 
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         if count > 0 {
             self.lock_roots().insert(key, count);
         } else {
@@ -414,7 +414,7 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         }
     }
 
-    fn get_roots(&self) -> HashMap<ArenaKey<Self::Hasher>, u32> {
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         self.lock_roots().clone()
     }
 
@@ -424,7 +424,7 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
 
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, Update<Self::Hasher>)>,
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>,
     {
         dubious_batch_update(self, iter);
     }
@@ -432,9 +432,9 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
     fn batch_get_nodes<I>(
         &self,
         keys: I,
-    ) -> Vec<(ArenaKey<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
+    ) -> Vec<(ArenaHash<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
     where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>,
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         dubious_batch_get_nodes(self, keys)
     }
@@ -455,7 +455,7 @@ mod tests {
     use crate::backend::raw_node::RawNode;
     use crate::{
         DefaultHasher,
-        arena::ArenaKey,
+        arena::ArenaHash,
         backend::OnDiskObject,
         db::{DB, InMemoryDB},
     };
@@ -568,7 +568,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let kvs = (0..num_kvs)
             .map(|_| rng.r#gen())
-            .collect::<Vec<(ArenaKey<_>, OnDiskObject<_>)>>();
+            .collect::<Vec<(ArenaHash<_>, OnDiskObject<_>)>>();
 
         let mut t = crate::test::Timer::new("test_bulk_read");
 
@@ -668,7 +668,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let kvs = (0..num_kvs)
             .map(|_| rng.r#gen())
-            .collect::<Vec<(ArenaKey<_>, OnDiskObject<_>)>>();
+            .collect::<Vec<(ArenaHash<_>, OnDiskObject<_>)>>();
 
         t.delta("gen kvs");
 

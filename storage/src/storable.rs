@@ -14,7 +14,7 @@
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::DefaultHasher;
-use crate::arena::{ArenaKey, Sp, hash};
+use crate::arena::{ArenaHash, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -76,7 +76,7 @@ pub trait Loader<D: DB> {
         Ok(obj)
     }
 
-    /// Convenience function that takes an iterator over `ArenaKey`s, and returns `Sp<T>` keyed by
+    /// Convenience function that takes an iterator over `ArenaHash`s, and returns `Sp<T>` keyed by
     /// `iter.next()`.
     fn get_next<T: Storable<D>>(
         &self,
@@ -97,13 +97,13 @@ pub trait Loader<D: DB> {
 /// A representataion of an individual child of a [Storable] object.
 pub enum ChildNode<H: WellBehavedHasher = DefaultHasher> {
     /// A by-reference child, which can be looked up in the storage arena.
-    Ref(ArenaKey<H>),
+    Ref(ArenaHash<H>),
     /// A direct child, typically reserved for small children, represented as its raw data.
     Direct(DirectChildNode<H>),
 }
 
-impl<H: WellBehavedHasher> From<ArenaKey<H>> for ChildNode<H> {
-    fn from(value: ArenaKey<H>) -> Self {
+impl<H: WellBehavedHasher> From<ArenaHash<H>> for ChildNode<H> {
+    fn from(value: ArenaHash<H>) -> Self {
         ChildNode::Ref(value)
     }
 }
@@ -116,7 +116,7 @@ impl<H: WellBehavedHasher> Distribution<ChildNode<H>> for Standard {
 
 impl<H: WellBehavedHasher> ChildNode<H> {
     /// Returns the hash of this child.
-    pub fn hash(&self) -> &ArenaKey<H> {
+    pub fn hash(&self) -> &ArenaHash<H> {
         match self {
             ChildNode::Ref(h) => h,
             ChildNode::Direct(n) => &n.hash,
@@ -124,7 +124,7 @@ impl<H: WellBehavedHasher> ChildNode<H> {
     }
 
     /// Returns the referenced children that are *not* directly embedded in this node.
-    pub fn refs(&self) -> Vec<&ArenaKey<H>> {
+    pub fn refs(&self) -> Vec<&ArenaHash<H>> {
         let mut res = Vec::with_capacity(32);
         let mut frontier = Vec::with_capacity(32);
         frontier.push(self);
@@ -139,7 +139,7 @@ impl<H: WellBehavedHasher> ChildNode<H> {
 
     /// Returns Some(key) if Ref, None otherwise
     #[cfg(test)]
-    pub fn into_ref(&self) -> Option<&ArenaKey<H>> {
+    pub fn into_ref(&self) -> Option<&ArenaHash<H>> {
         match self {
             ChildNode::Ref(key) => Some(key),
             ChildNode::Direct(..) => None,
@@ -155,7 +155,7 @@ pub struct DirectChildNode<H: WellBehavedHasher> {
     pub data: Arc<Vec<u8>>,
     /// The child nodes
     pub children: Arc<Vec<ChildNode<H>>>,
-    pub(crate) hash: ArenaKey<H>,
+    pub(crate) hash: ArenaHash<H>,
     pub(crate) serialized_size: usize,
 }
 

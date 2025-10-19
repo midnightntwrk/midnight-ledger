@@ -13,7 +13,7 @@
 
 //! Reference count map for tracking charged keys in write and delete costing
 use crate::Storable;
-use crate::arena::ArenaKey;
+use crate::arena::ArenaHash;
 use crate::db::DB;
 use crate::storable::{ChildNode, Loader};
 use crate::storage::Map;
@@ -27,7 +27,7 @@ use std::collections::HashSet as StdHashSet;
 #[cfg(feature = "proptest")]
 use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomData};
 
-/// A wrapper around `ArenaKey` that ensures the referenced node is persisted.
+/// A wrapper around `ArenaHash` that ensures the referenced node is persisted.
 ///
 /// When stored in the arena, `ChildRef` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
@@ -118,7 +118,7 @@ impl<D: DB> Tagged for ChildRef<D> {
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
     /// Reference counts for keys with `rc >= 1`
-    rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
+    rc_ge_1: Map<ArenaHash<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
     /// The `ChildRef` here creates storage overhead -- an additional dag node for
@@ -166,7 +166,7 @@ impl<D: DB> RcMap<D> {
     /// Increment the reference count for a key.
     /// Returns `(new_rcmap, new_rc)`.
     #[must_use]
-    pub(crate) fn modify_rc(&self, key: &ArenaKey<D::Hasher>, updated: u64) -> Self {
+    pub(crate) fn modify_rc(&self, key: &ArenaHash<D::Hasher>, updated: u64) -> Self {
         let curr = self.rc_ge_1.get(key).copied().unwrap_or(0);
         match (curr, updated) {
             (0, 0) =>
@@ -325,24 +325,18 @@ pub(crate) mod tests {
         rcmap: &RcMap<D>,
     ) -> std::collections::HashSet<ChildNode<D::Hasher>> {
         let mut visited = std::collections::HashSet::new();
-        let mut to_visit = rcmap
-            .children();
+        let mut to_visit = rcmap.children();
         let arena = &crate::storage::default_storage::<D>().arena;
         while let Some(current) = to_visit.pop() {
             if !visited.insert(current.clone()) {
                 continue;
             }
             match current {
-                ChildNode::Direct(d) => {
-                    to_visit.extend(d.children.iter().cloned())
-                },
+                ChildNode::Direct(d) => to_visit.extend(d.children.iter().cloned()),
                 ChildNode::Ref(ref r) => {
                     arena.with_backend(|backend| {
                         let disk_obj = backend.get(r).expect("Key should exist in backend");
-                        to_visit.extend(
-                            disk_obj
-                            .children.clone()
-                        );
+                        to_visit.extend(disk_obj.children.clone());
                     });
                 }
             }
@@ -353,7 +347,7 @@ pub(crate) mod tests {
     // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.
     #[test]
     fn rc_0_keys_are_descendants() {
-        let val = Sp::<_, InMemoryDB>::new([42u8;SMALL_OBJECT_LIMIT]);
+        let val = Sp::<_, InMemoryDB>::new([42u8; SMALL_OBJECT_LIMIT]);
         let key = val.root.clone();
 
         // Create RcMap with key in rc_0
@@ -381,8 +375,15 @@ pub(crate) mod tests {
         let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key1, 0);
 
         // Test initialize_key sets rc=0
-        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(0), "get_rc should return 0");
-        assert!(rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())), "key1 should be in rc_0 map");
+        assert_eq!(
+            rcmap.get_rc(&ChildNode::Ref(key1.clone())),
+            Some(0),
+            "get_rc should return 0"
+        );
+        assert!(
+            rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())),
+            "key1 should be in rc_0 map"
+        );
         assert!(
             !rcmap.rc_ge_1.contains_key(&key1),
             "key1 should not be in rc_ge_1 map"
@@ -390,7 +391,11 @@ pub(crate) mod tests {
 
         // Test increment_rc from 0 to 1 moves to rc_ge_1
         let rcmap = rcmap.modify_rc(&key1, 1);
-        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(1), "get_rc should return 1");
+        assert_eq!(
+            rcmap.get_rc(&ChildNode::Ref(key1.clone())),
+            Some(1),
+            "get_rc should return 1"
+        );
         assert!(
             !rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())),
             "key1 should not be in rc_0 map"
@@ -403,7 +408,11 @@ pub(crate) mod tests {
         // Test increment_rc multiple times
         let rcmap = rcmap.modify_rc(&key1, 2);
         let rcmap = rcmap.modify_rc(&key1, 3);
-        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(3), "get_rc should return 3");
+        assert_eq!(
+            rcmap.get_rc(&ChildNode::Ref(key1.clone())),
+            Some(3),
+            "get_rc should return 3"
+        );
         assert!(
             rcmap.rc_ge_1.contains_key(&key1),
             "key1 should remain in rc_ge_1 map"
@@ -419,7 +428,11 @@ pub(crate) mod tests {
 
         // Test decrement_rc from 1 to 0 moves back to rc_0
         let rcmap = rcmap.modify_rc(&key1, 0);
-        assert_eq!(rcmap.get_rc(&ChildNode::Ref(key1.clone())), Some(0), "get_rc should return 0");
+        assert_eq!(
+            rcmap.get_rc(&ChildNode::Ref(key1.clone())),
+            Some(0),
+            "get_rc should return 0"
+        );
         assert!(
             rcmap.rc_0.contains_key(&ChildNode::Ref(key1.clone())),
             "key1 should be back in rc_0 map"
@@ -458,7 +471,10 @@ pub(crate) mod tests {
             "remove_unreachable_key should succeed for rc=0 key"
         );
         let rcmap = rcmap_new.unwrap();
-        assert!(!rcmap.contains(&ChildNode::Ref(key1.clone())), "key1 should no longer be in rcmap");
+        assert!(
+            !rcmap.contains(&ChildNode::Ref(key1.clone())),
+            "key1 should no longer be in rcmap"
+        );
         assert_eq!(
             rcmap.get_rc(&ChildNode::Ref(key1.clone())),
             None,
