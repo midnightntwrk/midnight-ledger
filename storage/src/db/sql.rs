@@ -18,8 +18,8 @@
 //! overkill) or `sqlx` (a db agnostic, async-first SQL toolkit, but claimed to
 //! be "7-70x slower" than `rusqlite` and `diesel`).
 //!
-//! We need to implement a mapping from `ArenaKey` hashes to `OnDiskObject {
-//! data: Vec<u8>, ref_count: u32, children: Vec<ArenaKey> }`. For simplicity,
+//! We need to implement a mapping from `ArenaHash` hashes to `OnDiskObject {
+//! data: Vec<u8>, ref_count: u32, children: Vec<ArenaHash> }`. For simplicity,
 //! we use a single table `node`, with the hash keys as primary ids, and store the
 //! vector of children hashes as a serialized binary blob. Alternatively, since
 //! the hashes are expected to be 32 bytes, we could probably improve disk usage
@@ -34,7 +34,7 @@
 //! We serialize hash keys using versioned serialization via
 //! [`crate::serialize::Serializable`], but behind the scenes no version information is
 //! included for the hash keys, i.e. there is no version overhead from
-//! this. However, the serialization format for `ArenaKey` includes the length
+//! this. However, the serialization format for `ArenaHash` includes the length
 //! of the vector, even tho these are always the same size for a given hash
 //! function, so we could probably reduce from 36 to 32 bytes per hash using a
 //! custom serializer.
@@ -55,8 +55,10 @@ use super::{DB, Update};
 #[cfg(feature = "proptest")]
 use crate::db::DummyDBStrategy;
 use crate::{
-    DefaultHasher, WellBehavedHasher, arena::ArenaKey, backend::OnDiskObject, db::DummyArbitrary,
-    storable::ChildNode,
+    DefaultHasher, WellBehavedHasher,
+    arena::{ArenaHash, ArenaKey},
+    backend::OnDiskObject,
+    db::DummyArbitrary,
 };
 use crypto::digest::generic_array::GenericArray;
 #[cfg(feature = "proptest")]
@@ -328,7 +330,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     /// but means this function is not sufficient to clean up the db after a
     /// crash which left the db in an inconsistent state, in terms of db-stored
     /// reference counts.
-    fn _gc(&mut self, additional_roots: HashSet<ArenaKey<H>>) {
+    fn _gc(&mut self, additional_roots: HashSet<ArenaHash<H>>) {
         self.with_tx(Immediate, |tx| {
             // Select keys that are not roots and have a `ref_count` of 0.
             let sql =
@@ -355,18 +357,18 @@ impl<H: WellBehavedHasher> SqlDB<H> {
             loop {
                 let unreachable_keys: Vec<_> = get_unreachable_keys
                     .query_map([], |row| {
-                        let key: ArenaKey<H> = row.get(0)?;
+                        let key: ArenaHash<H> = row.get(0)?;
                         Ok(key)
                     })
                     .unwrap()
                     .map(|r| r.unwrap())
-                    .filter(|k: &ArenaKey<H>| !additional_roots.contains(k))
+                    .filter(|k: &ArenaHash<H>| !additional_roots.contains(k))
                     .collect();
                 if unreachable_keys.is_empty() {
                     break;
                 }
                 for key in unreachable_keys {
-                    let children: Vec<ArenaKey<H>> = get_children
+                    let children: Vec<ArenaHash<H>> = get_children
                         .query_row(params![key.clone()], |row| {
                             let children: Children<H> = row.get(0)?;
                             Ok(children.0)
@@ -410,7 +412,7 @@ impl<H: WellBehavedHasher> Drop for SqlDB<H> {
     }
 }
 
-impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
+impl<H: WellBehavedHasher> ToSql for ArenaHash<H> {
     fn to_sql(&self) -> Result<rusqlite::types::ToSqlOutput<'_>> {
         // We could use `serialize` here, but then we'd get the length in the
         // front. We probably don't care, but having the pure, unprefixed key
@@ -420,9 +422,9 @@ impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
     }
 }
 
-impl<H: WellBehavedHasher> FromSql for ArenaKey<H> {
+impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
-        Ok(ArenaKey(
+        Ok(ArenaHash(
             GenericArray::from_slice(value.as_bytes()?).clone(),
         ))
     }
@@ -430,7 +432,7 @@ impl<H: WellBehavedHasher> FromSql for ArenaKey<H> {
 
 // Newtype wrapper for `OnDiskObject.children`, so we can implement conversion
 // traits.
-struct Children<H: WellBehavedHasher>(Vec<ArenaKey<H>>);
+struct Children<H: WellBehavedHasher>(Vec<ArenaHash<H>>);
 
 impl<H: WellBehavedHasher> ToSql for Children<H> {
     fn to_sql(&self) -> Result<rusqlite::types::ToSqlOutput<'_>> {
@@ -451,7 +453,7 @@ impl<H: WellBehavedHasher> FromSql for Children<H> {
 impl<H: WellBehavedHasher> DB for SqlDB<H> {
     type Hasher = H;
 
-    fn get_node(&self, key: &ArenaKey<H>) -> Option<OnDiskObject<H>> {
+    fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         let key = key.clone();
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT data, ref_count, children FROM node WHERE key = (?1)";
@@ -461,7 +463,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children: Vec<ChildNode<H>> =
+                    let children: Vec<ArenaKey<H>> =
                         children.0.into_iter().map(Into::into).collect();
                     Ok(OnDiskObject {
                         data,
@@ -476,15 +478,15 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         })
     }
 
-    fn get_unreachable_keys(&self) -> Vec<ArenaKey<H>> {
+    fn get_unreachable_keys(&self) -> Vec<ArenaHash<H>> {
         self.with_tx(Deferred, |tx| {
             // Select keys that are not roots and have a `ref_count` of 0.
             let sql =
                 "SELECT key FROM node WHERE key NOT IN (SELECT key FROM root) AND ref_count = 0";
             let mut get_unreachable_keys = tx.prepare(sql).unwrap();
-            let unreachable_keys: Vec<ArenaKey<H>> = get_unreachable_keys
+            let unreachable_keys: Vec<ArenaHash<H>> = get_unreachable_keys
                 .query_map([], |row| {
-                    let key: ArenaKey<H> = row.get(0)?;
+                    let key: ArenaHash<H> = row.get(0)?;
                     Ok(key)
                 })
                 .unwrap()
@@ -496,9 +498,9 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     }
 
     /// Batch get nodes for all keys in `keys`.
-    fn batch_get_nodes<I>(&self, keys: I) -> Vec<(ArenaKey<H>, Option<OnDiskObject<H>>)>
+    fn batch_get_nodes<I>(&self, keys: I) -> Vec<(ArenaHash<H>, Option<OnDiskObject<H>>)>
     where
-        I: Iterator<Item = ArenaKey<H>>,
+        I: Iterator<Item = ArenaHash<H>>,
     {
         let keys = keys.collect::<Vec<_>>();
         self.with_tx(Deferred, |tx| {
@@ -511,7 +513,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children: Vec<ChildNode<H>> =
+                        let children: Vec<ArenaKey<H>> =
                             children.0.into_iter().map(Into::into).collect();
                         let obj = OnDiskObject {
                             data,
@@ -530,14 +532,14 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     }
 
     /// Always use `batch_update` instead if you have a lot of keys to insert!
-    fn insert_node(&mut self, key: ArenaKey<H>, object: OnDiskObject<H>) {
+    fn insert_node(&mut self, key: ArenaHash<H>, object: OnDiskObject<H>) {
         self.with_tx(Immediate, |tx| {
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
             let mut stmt = tx.prepare(sql).unwrap();
             let mut children = Vec::new();
             for node in object.children {
-                if let ChildNode::Ref(key) = node {
+                if let ArenaKey::Ref(key) = node {
                     children.push(key)
                 }
             }
@@ -553,7 +555,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     }
 
     /// Always use `batch_update` instead if you have a lot of keys to delete!
-    fn delete_node(&mut self, key: &ArenaKey<H>) {
+    fn delete_node(&mut self, key: &ArenaHash<H>) {
         let key = key.clone();
         self.with_tx(Immediate, |tx| {
             let sql = "DELETE FROM node WHERE key = (?1)";
@@ -567,7 +569,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     /// the trait!
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<H>, Update<H>)>,
+        I: Iterator<Item = (ArenaHash<H>, Update<H>)>,
     {
         use Update::*;
         // For batching at the SQL level, this approach is supposed to be faster
@@ -590,7 +592,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     InsertNode(object) => {
                         let mut children = Vec::new();
                         for node in object.children {
-                            if let ChildNode::Ref(key) = node {
+                            if let ArenaKey::Ref(key) = node {
                                 children.push(key)
                             }
                         }
@@ -629,7 +631,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         })
     }
 
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32 {
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         let key = key.clone();
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT count FROM root WHERE key = (?1)";
@@ -644,7 +646,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         })
     }
 
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         self.with_tx(Immediate, |tx| {
             if count > 0 {
                 let sql = "INSERT OR REPLACE INTO root (key, count) \
@@ -661,13 +663,13 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         })
     }
 
-    fn get_roots(&self) -> HashMap<ArenaKey<Self::Hasher>, u32> {
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT key, count FROM root";
             let mut stmt = tx.prepare(sql).unwrap();
             let result = stmt
                 .query_map([], |row| {
-                    let key: ArenaKey<H> = row.get(0)?;
+                    let key: ArenaHash<H> = row.get(0)?;
                     let count: u32 = row.get(1)?;
                     Ok((key, count))
                 })
@@ -696,7 +698,9 @@ impl<H: WellBehavedHasher> Arbitrary for SqlDB<H> {
 #[cfg(test)]
 mod tests {
     use super::{SqlDB, Update::*};
-    use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaKey, backend::OnDiskObject, db::DB};
+    use crate::{
+        DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject, db::DB,
+    };
     use rand::Rng;
     use rusqlite::TransactionBehavior::Deferred;
     use rusqlite::types::FromSql;
@@ -729,7 +733,7 @@ mod tests {
     /// Test concurrent reading and writing.
     fn test_concurrent_access(mk_db: impl Fn() -> SqlDB) {
         let mut rng = rand::thread_rng();
-        let k: ArenaKey<_> = rng.r#gen();
+        let k: ArenaHash<_> = rng.r#gen();
         let v: OnDiskObject<_> = rng.r#gen();
         let mut jobs = vec![];
         for _ in 0..NUM_WRITE_JOBS {
@@ -756,7 +760,7 @@ mod tests {
     /// Note that this is not a realistic workload, since inserting or deleting
     /// in a loop should always be done with `bulk_insert` instead.
     fn insert_read_delete_loop<H: WellBehavedHasher>(
-        k: ArenaKey<H>,
+        k: ArenaHash<H>,
         v: OnDiskObject<H>,
         mut db: SqlDB<H>,
     ) {
@@ -769,7 +773,7 @@ mod tests {
 
     /// Helper for testing concurrent DB access.
     fn bulk_insert_loop<H: WellBehavedHasher>(
-        k: ArenaKey<H>,
+        k: ArenaHash<H>,
         v: OnDiskObject<H>,
         mut db: SqlDB<H>,
     ) {
@@ -780,7 +784,7 @@ mod tests {
     }
 
     /// Helper for testing concurrent DB access.
-    fn read_loop<H: WellBehavedHasher>(k: ArenaKey<H>, db: SqlDB<H>) {
+    fn read_loop<H: WellBehavedHasher>(k: ArenaHash<H>, db: SqlDB<H>) {
         for _ in 0..ITERS_PER_JOB {
             db.get_node(&k);
         }

@@ -47,8 +47,9 @@ use std::sync::{Arc, Mutex};
 use std::{any::Any, cmp::Ordering};
 use std::{borrow::Cow, num::NonZeroUsize};
 use storage::Storable;
+use storage::arena::ArenaKey;
 use storage::db::DB;
-use storage::storable::{ChildNode, Loader};
+use storage::storable::Loader;
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {

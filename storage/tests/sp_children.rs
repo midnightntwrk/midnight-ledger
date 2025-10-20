@@ -11,13 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use arena::{ArenaKey, Sp};
+use arena::{ArenaHash, ArenaKey, Sp};
 use db::DB;
 use derive_where::derive_where;
 use midnight_storage as storage;
 use midnight_storage::*;
 use serialize::Serializable;
-use storable::{ChildNode, Loader};
+use storable::Loader;
 
 #[derive(Debug, Storable)]
 #[storable(db = D)]

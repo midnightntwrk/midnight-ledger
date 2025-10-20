@@ -15,24 +15,24 @@
 //! An [`Arena`] for storing Merkle-ized data structures in
 //! memory, persisting them to disk, and reloading them from disk.
 //!
-//! Arena objects are content-addressed by [`ArenaKey`] hashes, and managed via
+//! Arena objects are content-addressed by [`ArenaHash`] hashes, and managed via
 //! [`Sp`] smart pointers that track in-memory references. See [`StorageBackend`]
 //! for the persistence internals, and assumptions about the interaction between
 //! the arena and back-end.
-use crate::WellBehavedHasher;
-use crate::storable::{ChildNode, DirectChildNode, Loader, child_from};
+use crate::storable::{Loader, child_from};
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{
     DefaultDB, DefaultHasher,
     backend::{OnDiskObject, StorageBackend},
     db::DB,
-    storable::Storable,
 };
+use crate::{Storable, WellBehavedHasher};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
 use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
+use rand::Rng;
 use rand::distributions::{Distribution, Standard};
 use serialize::{self, Deserializable, Serializable, Tagged};
 use std::any::TypeId;
@@ -54,8 +54,8 @@ use std::{
 
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
-    child_hashes: impl Iterator<Item = &'a ArenaKey<H>>,
-) -> ArenaKey<H> {
+    child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
+) -> ArenaHash<H> {
     let mut hasher = H::default();
     hasher.update((root_binary_repr.len() as u32).to_le_bytes());
     hasher.update(root_binary_repr);
@@ -64,27 +64,27 @@ pub(crate) fn hash<'a, H: WellBehavedHasher>(
         hasher.update(c.0.clone())
     }
 
-    ArenaKey(hasher.finalize())
+    ArenaHash(hasher.finalize())
 }
 
 /// A wrapped `ArenaKey` which includes a tag indicating the content's data type.
 /// The tag and key are left intentionally opaque to the end user to reduce the
 /// possibility of mishandling the embedded tag.
-#[derive_where(Debug, Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
+#[derive_where(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[derive(Serializable)]
 #[phantom(T, H)]
-pub struct TypedArenaKey<T, H: Digest> {
+pub struct TypedArenaKey<T, H: WellBehavedHasher> {
     key: ArenaKey<H>,
     _phantom: PhantomData<T>,
 }
 
-impl<T, H: Digest> From<TypedArenaKey<T, H>> for ArenaKey<H> {
+impl<T, H: WellBehavedHasher> From<TypedArenaKey<T, H>> for ArenaKey<H> {
     fn from(val: TypedArenaKey<T, H>) -> Self {
         val.key
     }
 }
 
-impl<T, H: Digest> From<ArenaKey<H>> for TypedArenaKey<T, H> {
+impl<T, H: WellBehavedHasher> From<ArenaKey<H>> for TypedArenaKey<T, H> {
     fn from(val: ArenaKey<H>) -> Self {
         TypedArenaKey {
             key: val,
@@ -93,7 +93,7 @@ impl<T, H: Digest> From<ArenaKey<H>> for TypedArenaKey<T, H> {
     }
 }
 
-impl<T: Tagged, H: Digest> Tagged for TypedArenaKey<T, H> {
+impl<T: Tagged, H: WellBehavedHasher> Tagged for TypedArenaKey<T, H> {
     fn tag() -> std::borrow::Cow<'static, str> {
         std::borrow::Cow::Owned(format!("storage-key({})", T::tag()))
     }
@@ -105,21 +105,21 @@ impl<T: Tagged, H: Digest> Tagged for TypedArenaKey<T, H> {
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct ArenaKey<H: Digest = DefaultHasher>(
+pub struct ArenaHash<H: Digest = DefaultHasher>(
     pub GenericArray<u8, <H as OutputSizeUser>::OutputSize>,
 );
 
-impl<H: Digest> Tagged for ArenaKey<H> {
+impl<H: Digest> Tagged for ArenaHash<H> {
     fn tag() -> std::borrow::Cow<'static, str> {
-        "storage-key".into()
+        "storage-hash".into()
     }
     fn tag_unique_factor() -> String {
-        "storage-key".into()
+        "storage-hash".into()
     }
 }
 
-impl<D: DB> Storable<D> for ArenaKey<D::Hasher> {
-    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
+impl<D: DB> Storable<D> for ArenaHash<D::Hasher> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         std::vec::Vec::new()
     }
 
@@ -133,7 +133,7 @@ impl<D: DB> Storable<D> for ArenaKey<D::Hasher> {
 
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        _child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
+        _child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
         _loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -145,15 +145,15 @@ impl<D: DB> Storable<D> for ArenaKey<D::Hasher> {
     }
 }
 
-// impl<H: Digest + 'static> WellBehaved for ArenaKey<H> {}
+// impl<H: Digest + 'static> WellBehaved for ArenaHash<H> {}
 
-impl<H: Digest> Debug for ArenaKey<H> {
+impl<H: Digest> Debug for ArenaHash<H> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0.encode_hex::<String>())
     }
 }
 
-impl<D: Digest> Hash for ArenaKey<D> {
+impl<D: Digest> Hash for ArenaHash<D> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.hash::<H>(state)
     }
@@ -176,7 +176,7 @@ impl<D: Digest> Hash for ArenaKey<D> {
 // `<H as OutputSizeUser>::output_size()`, so we don't actually need
 // to encode it in the serialization. This would reduce the keys from
 // 36 to 32 bytes in the common case.
-impl<H: Digest> Serializable for ArenaKey<H> {
+impl<H: Digest> Serializable for ArenaHash<H> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         writer.write_all(&self.0[..])
     }
@@ -186,37 +186,37 @@ impl<H: Digest> Serializable for ArenaKey<H> {
     }
 }
 
-impl<H: Digest> Deserializable for ArenaKey<H> {
+impl<H: Digest> Deserializable for ArenaHash<H> {
     fn deserialize(
         reader: &mut impl std::io::Read,
         _recursive_depth: u32,
     ) -> std::io::Result<Self> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
-        Ok(ArenaKey(GenericArray::clone_from_slice(&res)))
+        Ok(ArenaHash(GenericArray::clone_from_slice(&res)))
     }
 }
 
-impl<H: Digest> Distribution<ArenaKey<H>> for Standard {
-    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaKey<H> {
+impl<H: Digest> Distribution<ArenaHash<H>> for Standard {
+    fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaHash<H> {
         let mut bytes = GenericArray::default();
         rng.fill_bytes(&mut bytes);
-        ArenaKey(bytes)
+        ArenaHash(bytes)
     }
 }
 
-impl<H: Digest> serde::Serialize for ArenaKey<H> {
+impl<H: Digest> serde::Serialize for ArenaHash<H> {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         serializer.serialize_bytes(&self.0[..])
     }
 }
 
-impl<'de, H: Digest> serde::Deserialize<'de> for ArenaKey<H> {
+impl<'de, H: Digest> serde::Deserialize<'de> for ArenaHash<H> {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        struct ArenaKeyVisitor<H: Digest>(std::marker::PhantomData<H>);
+        struct ArenaHashVisitor<H: Digest>(std::marker::PhantomData<H>);
 
-        impl<'de, H: Digest> serde::de::Visitor<'de> for ArenaKeyVisitor<H> {
-            type Value = ArenaKey<H>;
+        impl<'de, H: Digest> serde::de::Visitor<'de> for ArenaHashVisitor<H> {
+            type Value = ArenaHash<H>;
 
             fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
                 write!(
@@ -230,7 +230,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaKey<H> {
                 if v.len() != <H as Digest>::output_size() {
                     return Err(E::invalid_length(v.len(), &self));
                 }
-                Ok(ArenaKey(GenericArray::clone_from_slice(v)))
+                Ok(ArenaHash(GenericArray::clone_from_slice(v)))
             }
 
             fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
@@ -238,12 +238,12 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaKey<H> {
             }
         }
 
-        deserializer.deserialize_bytes(ArenaKeyVisitor(std::marker::PhantomData))
+        deserializer.deserialize_bytes(ArenaHashVisitor(std::marker::PhantomData))
     }
 }
 
-impl<H: Digest> ArenaKey<H> {
-    /// Create an `ArenaKey` from bytes.
+impl<H: Digest> ArenaHash<H> {
+    /// Create an `ArenaHash` from bytes.
     ///
     /// Useful for `printf` debugging of tests.
     ///
@@ -254,7 +254,125 @@ impl<H: Digest> ArenaKey<H> {
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;
         }
-        ArenaKey(bytes)
+        ArenaHash(bytes)
+    }
+}
+
+#[derive(Debug, Clone, Storable, Serializable)]
+#[derive_where(Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[storable(base)]
+#[tag = "storage-key[v2]"]
+#[phantom(H)]
+/// A representataion of an individual child of a [Storable] object.
+pub enum ArenaKey<H: WellBehavedHasher = DefaultHasher> {
+    /// A by-reference child, which can be looked up in the storage arena.
+    Ref(ArenaHash<H>),
+    /// A direct child, typically reserved for small children, represented as its raw data.
+    Direct(DirectChildNode<H>),
+}
+
+impl<H: WellBehavedHasher> From<ArenaHash<H>> for ArenaKey<H> {
+    fn from(value: ArenaHash<H>) -> Self {
+        ArenaKey::Ref(value)
+    }
+}
+
+impl<H: WellBehavedHasher> Distribution<ArenaKey<H>> for Standard {
+    fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ArenaKey<H> {
+        ArenaKey::Ref(rng.r#gen())
+    }
+}
+
+impl<H: WellBehavedHasher> ArenaKey<H> {
+    /// Returns the hash of this child.
+    pub fn hash(&self) -> &ArenaHash<H> {
+        match self {
+            ArenaKey::Ref(h) => h,
+            ArenaKey::Direct(n) => &n.hash,
+        }
+    }
+
+    /// Returns the referenced children that are *not* directly embedded in this node.
+    pub fn refs(&self) -> Vec<&ArenaHash<H>> {
+        let mut res = Vec::with_capacity(32);
+        let mut frontier = Vec::with_capacity(32);
+        frontier.push(self);
+        while let Some(node) = frontier.pop() {
+            match node {
+                ArenaKey::Ref(n) => res.push(n),
+                ArenaKey::Direct(d) => frontier.extend(d.children.iter()),
+            }
+        }
+        res
+    }
+
+    /// Returns Some(key) if Ref, None otherwise
+    #[cfg(test)]
+    pub fn into_ref(&self) -> Option<&ArenaHash<H>> {
+        match self {
+            ArenaKey::Ref(key) => Some(key),
+            ArenaKey::Direct(..) => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[derive_where(PartialOrd, Ord, Hash)]
+/// The raw data of a child object
+pub struct DirectChildNode<H: WellBehavedHasher> {
+    /// The data label of this node
+    pub data: Arc<Vec<u8>>,
+    /// The child nodes
+    pub children: Arc<Vec<ArenaKey<H>>>,
+    pub(crate) hash: ArenaHash<H>,
+    pub(crate) serialized_size: usize,
+}
+
+impl<H: WellBehavedHasher> PartialEq for DirectChildNode<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash == other.hash
+    }
+}
+impl<H: WellBehavedHasher> Eq for DirectChildNode<H> {}
+
+impl<H: WellBehavedHasher> DirectChildNode<H> {
+    /// Create a new direct child object from its parts
+    pub(crate) fn new(data: Vec<u8>, children: Vec<ArenaKey<H>>) -> Self {
+        let hash = crate::arena::hash(&data, children.iter().map(|c| c.hash()));
+        let serialized_size = data.serialized_size() + children.serialized_size();
+        DirectChildNode {
+            data: Arc::new(data),
+            children: Arc::new(children),
+            hash,
+            serialized_size,
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> Serializable for DirectChildNode<H> {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.data.serialize(writer)?;
+        self.children.serialize(writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.serialized_size
+    }
+}
+
+impl<H: WellBehavedHasher> Tagged for DirectChildNode<H> {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("storage-direct-child-node[v1]")
+    }
+    fn tag_unique_factor() -> String {
+        "(vec(u8),vec(storage-key[v2]))".to_owned()
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for DirectChildNode<H> {
+    fn deserialize(reader: &mut impl std::io::Read, recursion_depth: u32) -> std::io::Result<Self> {
+        let data: Vec<u8> = Deserializable::deserialize(reader, recursion_depth + 1)?;
+        let children: Vec<ArenaKey<H>> = Deserializable::deserialize(reader, recursion_depth + 1)?;
+        Ok(DirectChildNode::new(data, children))
     }
 }
 
@@ -326,18 +444,18 @@ impl<D: DB> Default for Arena<D> {
 /// The `metadata` is purely concerned with hash related metadata, so unlike for
 /// the `sp_cache`, we don't care about ambiguity between hashes and types,
 /// i.e. keying on the hash here is sufficient.
-type MetaData<D> = HashMap<ArenaKey<<D as DB>::Hasher>, Node>;
+type MetaData<D> = HashMap<ArenaHash<<D as DB>::Hasher>, Node>;
 
-/// An `ArenaKey` together with a type, to avoid collisions when keying typed
+/// An `ArenaHash` together with a type, to avoid collisions when keying typed
 /// data by its hash: different types need not have disjoint hashes, and so we
 /// need to include the type in the key to avoid collisions in some cases.
-type DynTypedArenaKey<H> = (ArenaKey<H>, TypeId);
+type DynTypedArenaHash<H> = (ArenaHash<H>, TypeId);
 
 /// Keys are `hash x type_id` because the hash alone is ambiguous for
 /// determining the typed value with this hash: the hash is determined only by
 /// the binary serialization, which need not be disjoint across types.
 type SpCache<D> =
-    HashMap<DynTypedArenaKey<<D as DB>::Hasher>, std::sync::Weak<dyn Any + Sync + Send>>;
+    HashMap<DynTypedArenaHash<<D as DB>::Hasher>, std::sync::Weak<dyn Any + Sync + Send>>;
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
@@ -392,7 +510,7 @@ impl<D: DB> Arena<D> {
             .expect("Storable data should be able to be represented in binary");
         let child_repr = child_from(&data, &children);
         let root_hash = child_repr.hash().clone();
-        if let ChildNode::Ref(_) = &child_repr {
+        if let ArenaKey::Ref(_) = &child_repr {
             self.new_sp_locked(
                 &mut self.lock_metadata(),
                 value,
@@ -416,10 +534,10 @@ impl<D: DB> Arena<D> {
         &self,
         metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
         value: T,
-        key: ArenaKey<D::Hasher>,
+        key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
-        children: std::vec::Vec<ChildNode<D::Hasher>>,
-        child_repr: ChildNode<D::Hasher>,
+        children: std::vec::Vec<ArenaKey<D::Hasher>>,
+        child_repr: ArenaKey<D::Hasher>,
     ) -> Sp<T, D> {
         self.track_locked(metadata, key.clone(), data, children, &child_repr);
         // Try to reuse any existing cached `Arc` for `value`, creating and
@@ -441,9 +559,9 @@ impl<D: DB> Arena<D> {
     fn new_sp<T: Storable<D>>(
         &self,
         value: T,
-        key: ArenaKey<D::Hasher>,
+        key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
-        children: std::vec::Vec<ChildNode<D::Hasher>>,
+        children: std::vec::Vec<ArenaKey<D::Hasher>>,
     ) -> Sp<T, D> {
         let child_node = child_from(&data, &children);
         self.new_sp_locked(
@@ -467,7 +585,7 @@ impl<D: DB> Arena<D> {
     fn read_sp_cache_locked<T: Sync + Send + Any>(
         &self,
         sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) -> Option<Arc<T>> {
         let type_id = TypeId::of::<T>();
         let cache_key = (key.clone(), type_id);
@@ -484,7 +602,7 @@ impl<D: DB> Arena<D> {
     fn write_sp_cache_locked<T: Storable<D>>(
         &self,
         sp_cache: &MutexGuard<RefCell<SpCache<D>>>,
-        key: ArenaKey<D::Hasher>,
+        key: ArenaHash<D::Hasher>,
         value: Arc<T>,
     ) {
         let type_id = TypeId::of::<T>();
@@ -501,7 +619,7 @@ impl<D: DB> Arena<D> {
 
     /// Try to build an eager Sp from the Sp cache, returning `None` if the
     /// needed object is not available.
-    fn get_from_cache<T: Storable<D>>(&self, key: &ArenaKey<D::Hasher>) -> Option<Sp<T, D>> {
+    fn get_from_cache<T: Storable<D>>(&self, key: &ArenaHash<D::Hasher>) -> Option<Sp<T, D>> {
         // Hold the metadata lock so we can hold the Sp cache lock while calling
         // Sp::eager, which itself acquires the metadata lock. We need to be
         // careful to avoid a race where someone else clears our arc from the Sp
@@ -551,8 +669,8 @@ impl<D: DB> Arena<D> {
     /// Retrieves the child keys of a given key.
     pub fn children(
         &self,
-        key: &ArenaKey<D::Hasher>,
-    ) -> Result<Vec<ChildNode<D::Hasher>>, io::Error> {
+        key: &ArenaHash<D::Hasher>,
+    ) -> Result<Vec<ArenaKey<D::Hasher>>, io::Error> {
         Ok(self
             .lock_backend()
             .borrow_mut()
@@ -594,14 +712,14 @@ impl<D: DB> Arena<D> {
     fn track_locked(
         &self,
         metadata: &MutexGuard<'_, RefCell<MetaData<D>>>,
-        key: ArenaKey<D::Hasher>,
+        key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
-        children: std::vec::Vec<ChildNode<D::Hasher>>,
-        child_repr: &ChildNode<D::Hasher>,
+        children: std::vec::Vec<ArenaKey<D::Hasher>>,
+        child_repr: &ArenaKey<D::Hasher>,
     ) {
         if !RefCell::borrow(metadata).contains_key(&key) {
             RefCell::borrow_mut(metadata).insert(key.clone(), Node::new());
-            if let ChildNode::Ref(_) = child_repr {
+            if let ArenaKey::Ref(_) = child_repr {
                 RefCell::borrow_mut(&self.lock_backend()).cache(key, data, children);
             }
         }
@@ -612,7 +730,7 @@ impl<D: DB> Arena<D> {
     fn remove_locked(
         &self,
         metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) {
         RefCell::borrow_mut(metadata).remove(key);
         // FIXME: Super temporary! Replace this with a tracking of Sp's being small, and that
@@ -623,7 +741,7 @@ impl<D: DB> Arena<D> {
     fn decrement_ref_locked(
         &self,
         metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) {
         let mut remove = None;
 
@@ -639,14 +757,14 @@ impl<D: DB> Arena<D> {
         }
     }
 
-    fn decrement_ref(&self, key: &ArenaKey<D::Hasher>) {
+    fn decrement_ref(&self, key: &ArenaHash<D::Hasher>) {
         self.decrement_ref_locked(&mut self.lock_metadata(), key);
     }
 
     fn increment_ref_locked(
         &self,
         metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) {
         RefCell::borrow_mut(metadata)
             .get_mut(key)
@@ -654,7 +772,7 @@ impl<D: DB> Arena<D> {
             .ref_count += 1;
     }
 
-    fn increment_ref(&self, key: &ArenaKey<D::Hasher>) {
+    fn increment_ref(&self, key: &ArenaHash<D::Hasher>) {
         self.increment_ref_locked(&mut self.lock_metadata(), key)
     }
 
@@ -732,7 +850,7 @@ impl<D: DB> Arena<D> {
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
         }
-        .get(&ChildNode::Ref(key))?;
+        .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
             Ok(res)
         } else {
@@ -774,10 +892,10 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
 
     fn get<T: Storable<D>>(
         &self,
-        child: &ChildNode<<D as DB>::Hasher>,
+        child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
         let key = match child {
-            ChildNode::Direct(direct_node) => {
+            ArenaKey::Direct(direct_node) => {
                 let value = T::from_binary_repr(
                     &mut &direct_node.data[..],
                     &mut direct_node.children.iter().cloned(),
@@ -785,7 +903,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                 )?;
                 return Ok(Sp::new(value));
             }
-            ChildNode::Ref(key) => key,
+            ArenaKey::Ref(key) => key,
         };
         // Build from existing cached value if possible.
 
@@ -876,17 +994,17 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
 /// for strict `Sp`s.
 pub(crate) struct IrLoader<'a, D: DB> {
     arena: &'a Arena<D>,
-    all: &'a HashMap<ArenaKey<D::Hasher>, IntermediateRepr<D>>,
+    all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
     recursion_depth: u32,
     /// The keys we've already deserialized once.
-    visited: Rc<RefCell<HashSet<DynTypedArenaKey<D::Hasher>>>>,
+    visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
 }
 
 #[cfg(test)]
 impl<'a, D: DB> IrLoader<'a, D> {
     pub(crate) fn new(
         arena: &'a Arena<D>,
-        all: &'a HashMap<ArenaKey<D::Hasher>, IntermediateRepr<D>>,
+        all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
     ) -> IrLoader<'a, D> {
         IrLoader {
             arena,
@@ -907,10 +1025,10 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
     /// This loader always returns eager `Sp`s.
     fn get<T: Storable<D>>(
         &self,
-        child: &ChildNode<<D as DB>::Hasher>,
+        child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
         let key = match child {
-            ChildNode::Direct(child) => {
+            ArenaKey::Direct(child) => {
                 let value = T::from_binary_repr(
                     &mut &child.data[..],
                     &mut child.children.iter().map(|child| child.clone()),
@@ -918,7 +1036,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
                 )?;
                 return Ok(Sp::new(value));
             }
-            ChildNode::Ref(key) => key,
+            ArenaKey::Ref(key) => key,
         };
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
@@ -960,7 +1078,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
-            &mut ir.children.clone().into_iter().map(ChildNode::Ref),
+            &mut ir.children.clone().into_iter().map(ArenaKey::Ref),
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
@@ -983,7 +1101,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
 #[derive(Debug)]
 pub struct IntermediateRepr<D: DB> {
     binary_repr: std::vec::Vec<u8>,
-    children: std::vec::Vec<ArenaKey<D::Hasher>>,
+    children: std::vec::Vec<ArenaHash<D::Hasher>>,
     db_type: PhantomData<D>,
 }
 
@@ -1047,11 +1165,11 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     /// y.data.get().unwrap())` is true.
     data: OnceLock<Arc<T>>,
     /// This Sp represented as a child node (for easy access)
-    pub(crate) child_repr: ChildNode<D::Hasher>,
+    pub(crate) child_repr: ArenaKey<D::Hasher>,
     /// The arena this Sp points into
     pub(crate) arena: Arena<D>,
     /// The persistent hash of data.
-    pub(crate) root: ArenaKey<D::Hasher>,
+    pub(crate) root: ArenaHash<D::Hasher>,
 }
 
 impl<T: Display, D: DB> Display for Sp<T, D> {
@@ -1113,9 +1231,9 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     ///   arena cache, and then fall back on deserialization.
     fn eager(
         arena: Arena<D>,
-        root: ArenaKey<D::Hasher>,
+        root: ArenaHash<D::Hasher>,
         arc: Arc<T>,
-        child_repr: ChildNode<D::Hasher>,
+        child_repr: ArenaKey<D::Hasher>,
     ) -> Self {
         let sp = Sp::lazy(arena, root, child_repr);
         let _ = sp.data.set(arc);
@@ -1130,8 +1248,8 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// database if persisted or a parent is persisted.
     pub fn into_tracked(&self) -> Self {
         match &self.child_repr {
-            ChildNode::Direct(dcn) => {
-                let child_repr = ChildNode::Ref(self.root.clone());
+            ArenaKey::Direct(dcn) => {
+                let child_repr = ArenaKey::Ref(self.root.clone());
                 self.arena.track_locked(
                     &self.arena.lock_metadata(),
                     self.root.clone(),
@@ -1146,7 +1264,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
                     root: self.root.clone(),
                 }
             }
-            ChildNode::Ref(_) => self.clone(),
+            ArenaKey::Ref(_) => self.clone(),
         }
     }
 
@@ -1158,7 +1276,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// the `Sp` before creating it. Note that `track_locked` is a no-op for
     /// already registered root keys, so there is no harm in calling it if
     /// you're not sure.
-    fn lazy(arena: Arena<D>, root: ArenaKey<D::Hasher>, child_repr: ChildNode<D::Hasher>) -> Self {
+    fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
         // This `increment_ref` will panic if `root` is not in `metadata`.
         arena.increment_ref(&root);
         let data = OnceLock::new();
@@ -1201,7 +1319,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             max_depth,
             recursion_depth: 0,
         };
-        loader.get(&ChildNode::Ref(key.clone()))
+        loader.get(&key)
     }
 }
 
@@ -1216,7 +1334,7 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
-        if let ChildNode::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
         Sp {
@@ -1240,28 +1358,33 @@ impl<T, D: DB> Sp<T, D> {
     /// Return hash of self and all children, cached from `&lt;T as Storable&gt;::hash()`.
     ///
     /// This is the root key of `self`, as a content-addressed Merkle node.
-    pub fn hash(&self) -> TypedArenaKey<T, D::Hasher> {
+    pub fn hash(&self) -> ArenaHash<D::Hasher> {
+        self.root.clone()
+    }
+
+    /// Returns the [`TypedArenaKey`] representation of this Sp, useful as a
+    /// reference to persist.
+    pub fn as_typed_key(&self) -> TypedArenaKey<T, D::Hasher> {
         TypedArenaKey {
-            key: self.root.clone(),
+            key: self.as_child(),
             _phantom: PhantomData,
         }
+    }
+
+    /// Returns the [`ArenaKey`] representation of this Sp, being either a ref
+    /// to `[Sp::hash]`, or the direct encoding for small children.
+    pub fn as_child(&self) -> ArenaKey<D::Hasher> {
+        self.child_repr.clone()
     }
 }
 
 impl<T: Storable<D>, D: DB> Sp<T, D> {
-    /// Returns the [`ChildNode`] representation of this Sp, being either a ref
-    /// to `[Sp::hash]`, or the direct encoding for small children.
-    pub fn as_child(&self) -> ChildNode<D::Hasher> {
-        self.child_repr.clone()
-    }
-
     /// Notify the storage back-end to increment the persist count on this object.
     ///
     /// See `[StorageBackend::persist]`.
     pub fn persist(&mut self) {
         // Promote self to Ref if not already
-        if let ChildNode::Direct(..) = self.child_repr {
-            dbg!("IS DIRECT NODE");
+        if let ArenaKey::Direct(..) = self.child_repr {
             let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
             let value = self
                 .data
@@ -1270,7 +1393,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             value
                 .to_binary_repr(&mut data)
                 .expect("Storable data should be able to be represented in binary");
-            let child_repr = ChildNode::Ref(self.root.clone());
+            let child_repr = ArenaKey::Ref(self.root.clone());
             let new_sp = self.arena.new_sp_locked(
                 &mut self.arena.lock_metadata(),
                 value.as_ref().clone(),
@@ -1280,9 +1403,6 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_repr,
             );
             *self = new_sp;
-        }
-        if let ChildNode::Direct(..) = self.child_repr {
-            dbg!("STILL IS DIRECT NODE");
         }
         self.arena
             .with_backend(|backend| backend.persist(&self.root));
@@ -1384,7 +1504,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     // easiest way to get that is to just create the lazy `Sp`
                     // for that `Arc`, i.e. what `self` will become when
                     // `force_as_arc` is done!
-                    let sp: Sp<T, _> = Sp::from_arena(&self.arena, &self.root, max_depth)
+                    let sp: Sp<T, _> = Sp::from_arena(&self.arena, &self.as_child(), max_depth)
                         .expect("root should be in the arena");
                     let arc = sp
                         .data
@@ -1435,13 +1555,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 continue;
             }
             let node = match child {
-                ChildNode::Ref(ref key) => arena
+                ArenaKey::Ref(ref key) => arena
                     .lock_backend()
                     .borrow_mut()
                     .get(&key)
                     .expect("Arena should contain current serialization target")
                     .clone(),
-                ChildNode::Direct(ref d) => OnDiskObject {
+                ArenaKey::Direct(ref d) => OnDiskObject {
                     data: d.data.as_ref().clone(),
                     ref_count: 0,
                     children: d.children.as_ref().clone(),
@@ -1500,7 +1620,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
-        if let ChildNode::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr {
             // It's important that we unload() before calling decrement_ref(),
             // because unload() is responsible for cleaning up the sp_cache, and
             // decrement_ref() is responsible for cleaning up the metadata, and the
@@ -1578,13 +1698,13 @@ pub struct TopoSortedNode {
 }
 
 impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
-    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
         self.deref().children()
     }
 
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error> {
         T::from_binary_repr(reader, child_hashes, loader).map(|sp| loader.alloc(sp))
@@ -1626,26 +1746,43 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
 #[cfg(any(test, feature = "stress-test"))]
 pub(crate) mod bin_tree {
     use super::*;
-    use crate as storage;
+    use crate::{self as storage, storable::SMALL_OBJECT_LIMIT};
     use macros::Storable;
+    use std::fmt;
 
-    #[derive(Storable, Debug)]
+    #[derive(Storable)]
     #[derive_where(Clone, PartialEq, Eq)]
     #[tag = "test-bin-tree"]
     #[storable(db = D)]
-    pub(crate) struct BinTree<D: DB, T: Storable<D> + PartialEq + Eq> {
-        value: T,
-        pub(crate) left: Option<Sp<BinTree<D, T>, D>>,
-        pub(crate) right: Option<Sp<BinTree<D, T>, D>>,
+    pub(crate) struct BinTree<D: DB> {
+        value: u64,
+        pub(crate) left: Option<Sp<BinTree<D>, D>>,
+        pub(crate) right: Option<Sp<BinTree<D>, D>>,
+        _data: [u8; SMALL_OBJECT_LIMIT], // used to ensure nodes are not in-lined
     }
 
-    impl<D: DB, T: Storable<D> + PartialEq + Eq> BinTree<D, T> {
+    impl<D: DB> fmt::Debug for BinTree<D> {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("BinTree")
+                .field("value", &self.value)
+                .field("left", &self.left)
+                .field("right", &self.right)
+                .finish()
+        }
+    }
+
+    impl<D: DB> BinTree<D> {
         pub(crate) fn new(
-            value: T,
-            left: Option<Sp<BinTree<D, T>, D>>,
-            right: Option<Sp<BinTree<D, T>, D>>,
-        ) -> BinTree<D, T> {
-            BinTree { value, left, right }
+            value: u64,
+            left: Option<Sp<BinTree<D>, D>>,
+            right: Option<Sp<BinTree<D>, D>>,
+        ) -> BinTree<D> {
+            BinTree {
+                value,
+                left,
+                right,
+                _data: [0; SMALL_OBJECT_LIMIT],
+            }
         }
 
         /// Return sum of all node values.
@@ -1682,8 +1819,8 @@ pub(crate) mod bin_tree {
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
-    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D, u64>, D> {
-        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D, u64>, D> {
+    pub(crate) fn counting_tree<D: DB>(arena: &Arena<D>, height: usize) -> Sp<BinTree<D>, D> {
+        fn go<D: DB>(arena: &Arena<D>, value: u64, height: usize) -> Sp<BinTree<D>, D> {
             assert!(height > 0);
             let (left, right) = {
                 if height == 1 {
@@ -1699,38 +1836,6 @@ pub(crate) mod bin_tree {
         }
         go(arena, 1, height)
     }
-
-    #[cfg(any(
-        test,
-        all(
-            feature = "stress-test",
-            any(feature = "parity-db", feature = "sqlite")
-        )
-    ))]
-    pub(crate) fn large_counting_tree<D: DB>(
-        arena: &Arena<D>,
-        height: usize,
-    ) -> Sp<BinTree<D, [u32; 256]>, D> {
-        fn go<D: DB>(
-            arena: &Arena<D>,
-            value: [u32; 256],
-            height: usize,
-        ) -> Sp<BinTree<D, [u32; 256]>, D> {
-            assert!(height > 0);
-            let (left, right) = {
-                if height == 1 {
-                    (None, None)
-                } else {
-                    (
-                        Some(go(arena, [2 * value[0]; 256], height - 1)),
-                        Some(go(arena, [2 * value[0] + 1; 256], height - 1)),
-                    )
-                }
-            };
-            arena.alloc(BinTree::new(value, left, right))
-        }
-        go(arena, [1; 256], height)
-    }
 }
 
 /// Helper functions for testing arena in other crates, specifically the `/examples`
@@ -1739,7 +1844,7 @@ pub mod test_helpers {
     use super::*;
 
     /// Get the root count of key.
-    pub fn get_root_count<D: DB>(arena: &Arena<D>, key: &ArenaKey<D::Hasher>) -> u32 {
+    pub fn get_root_count<D: DB>(arena: &Arena<D>, key: &ArenaHash<D::Hasher>) -> u32 {
         arena.lock_backend().borrow().get_root_count(key)
     }
 
@@ -1754,7 +1859,7 @@ pub mod test_helpers {
     /// drop, not just an `Arc` drop.
     pub fn read_sp_cache<D: DB, T: Storable<D>>(
         arena: &Arena<D>,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) -> Option<Arc<T>> {
         arena.read_sp_cache_locked::<T>(&arena.lock_sp_cache(), key)
     }
@@ -1961,9 +2066,9 @@ pub mod stress_tests {
                 print!(".");
                 stdout().flush().unwrap();
             }
-            let sp = arena.alloc(x as u64);
+            let mut sp = arena.alloc(x as u64);
             sp.persist();
-            key_map.insert(x, sp.hash());
+            key_map.insert(x, sp.as_typed_key());
         }
         let elapsed = start_time.elapsed();
         println!("{:.2?}", elapsed);
@@ -2133,14 +2238,14 @@ pub mod stress_tests {
             let arena = storage.arena;
             timer.delta("init");
 
-            let bt = counting_tree(&arena, height);
+            let mut bt = counting_tree(&arena, height);
             timer.delta("create tree");
 
             bt.persist();
             arena.with_backend(|b| b.flush_all_changes_to_db());
             timer.delta("persist tree to disk");
 
-            bt.hash()
+            bt.as_typed_key()
         };
         timer.delta("drop");
 
@@ -2166,7 +2271,12 @@ pub mod stress_tests {
 
             let max_depth = Some(height);
             let truncate = false;
-            arena.with_backend(|b| b.pre_fetch(&key.clone().into(), max_depth, truncate));
+            arena.with_backend(|b| {
+                key.key
+                    .refs()
+                    .iter()
+                    .for_each(|hash| b.pre_fetch(hash, max_depth, truncate))
+            });
             let bt = arena.get_lazy::<BinTree<D>>(&key).unwrap();
             assert_eq!(bt.sum(), sum);
             timer.delta("lazy load and traverse tree, with prefetch");
@@ -2195,7 +2305,12 @@ pub mod stress_tests {
 
             let max_depth = Some(height);
             let truncate = false;
-            arena.with_backend(|b| b.pre_fetch(&key.clone().into(), max_depth, truncate));
+            arena.with_backend(|b| {
+                key.key
+                    .refs()
+                    .iter()
+                    .for_each(|hash| b.pre_fetch(hash, max_depth, truncate))
+            });
             let bt = arena.get::<BinTree<D>>(&key).unwrap();
             assert_eq!(bt.sum(), sum);
             timer.delta("eager load and traverse tree, with prefetch");
@@ -2410,6 +2525,7 @@ pub mod stress_tests {
 mod tests {
     use super::*;
     use crate as storage;
+    use crate::storable::SMALL_OBJECT_LIMIT;
     use crate::{DefaultHasher, storage::Array};
     use macros::Storable;
 
@@ -2430,19 +2546,19 @@ mod tests {
 
     #[test]
     fn dedup() {
-        let val = [0; 1024];
+        let val = [0; SMALL_OBJECT_LIMIT];
         let map = new_arena();
-        let _malloced_a = map.alloc::<[u8; 1024]>(val.clone());
-        let _malloced_b = map.alloc::<[u8; 1024]>(val);
+        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val.clone());
+        let _malloced_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         assert_eq!(map.size(), 1)
     }
 
     #[test]
     fn drop_node() {
         let map = new_arena();
-        let _malloc_a = map.alloc::<[u8; 1024]>([0; 1024]);
+        let _malloc_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>([0; SMALL_OBJECT_LIMIT]);
         {
-            let _malloc_b = map.alloc::<[u8; 1024]>([1; 1024]);
+            let _malloc_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>([1; SMALL_OBJECT_LIMIT]);
             assert_eq!(map.size(), 2);
         }
         assert_eq!(map.size(), 1);
@@ -2451,8 +2567,8 @@ mod tests {
     #[test]
     fn clone_increment_refcount() {
         let map = new_arena();
-        let payload = [0; 1024]; // must be larger than SMALL_OBJECT_LIMIT
-        let malloc_a = map.alloc::<[u8; 1024]>(payload);
+        let payload = [0; SMALL_OBJECT_LIMIT]; // must be larger than SMALL_OBJECT_LIMIT
+        let malloc_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(payload);
         let malloc_b = malloc_a.clone();
         let ref_count = map
             .lock_metadata()
@@ -2490,7 +2606,7 @@ mod tests {
         #[derive(Clone, PartialOrd, Ord, PartialEq, Eq)]
         struct Nesty(Option<Sp<Nesty>>);
         impl Storable<DefaultDB> for Nesty {
-            fn children(&self) -> std::vec::Vec<ChildNode<<DefaultDB as DB>::Hasher>> {
+            fn children(&self) -> std::vec::Vec<ArenaKey<<DefaultDB as DB>::Hasher>> {
                 self.0.children()
             }
             fn to_binary_repr<W: std::io::Write>(
@@ -2501,7 +2617,7 @@ mod tests {
             }
             fn from_binary_repr<R: std::io::Read>(
                 reader: &mut R,
-                child_hashes: &mut impl Iterator<Item = ChildNode<DefaultHasher>>,
+                child_hashes: &mut impl Iterator<Item = ArenaKey<DefaultHasher>>,
                 loader: &impl Loader<DefaultDB>,
             ) -> Result<Self, std::io::Error> {
                 Ok(Nesty(
@@ -2550,9 +2666,9 @@ mod tests {
         let arena = &new_arena();
 
         // Allocate an `Sp` in the arena
-        let sp1 = arena.alloc([42u8; 1024]);
+        let sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let root_key = sp1.root.clone();
-        let type_id = TypeId::of::<[u8; 1024]>();
+        let type_id = TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>();
         let cache_key = (root_key.clone(), type_id);
 
         // Ensure the `Arc` is in the `sp_cache`, and equal to the one in the
@@ -2564,7 +2680,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2593,7 +2709,7 @@ mod tests {
             let weak_ref = sp_cache.get(&cache_key).unwrap();
             assert!(weak_ref.upgrade().is_some());
             let dyn_arc = weak_ref.upgrade().unwrap();
-            let arc = dyn_arc.downcast::<[u8; 1024]>().unwrap();
+            let arc = dyn_arc.downcast::<[u8; SMALL_OBJECT_LIMIT]>().unwrap();
             assert!(Arc::ptr_eq(&arc, sp1.data.get().unwrap()));
         }
 
@@ -2616,9 +2732,9 @@ mod tests {
     #[test]
     fn sp_cache_sp_unload() {
         let arena = &new_arena();
-        let mut sp1 = arena.alloc([42u8; 1024]);
+        let mut sp1 = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         let mut sp2 = sp1.clone();
-        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; 1024]>());
+        let cache_key = (sp1.root.clone(), TypeId::of::<[u8; SMALL_OBJECT_LIMIT]>());
 
         // Verify the weak reference exists in the cache
         {
@@ -2665,8 +2781,8 @@ mod tests {
     #[test]
     fn sp_cache_alloc_same_data_twice() {
         let arena = &new_arena();
-        let sp1 = arena.alloc([0u8; 1024]);
-        let sp2 = arena.alloc([0u8; 1024]);
+        let sp1 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
+        let sp2 = arena.alloc([0u8; SMALL_OBJECT_LIMIT]);
         let data1 = sp1.data.get().unwrap();
         let data2 = sp2.data.get().unwrap();
         assert!(
@@ -2685,21 +2801,17 @@ mod tests {
         use super::bin_tree::*;
         let arena = &new_arena();
 
-        type BinTree = super::bin_tree::BinTree<DefaultDB, [u32; 256]>;
+        type BinTree = super::bin_tree::BinTree<DefaultDB>;
 
         // Build a tree, unload and walk the left fringe, and check that only
         // the left fringe is forced, while also checking that printing doesn't
         // force any lazy sps, by comparing the Debug fmt of the tree with an
         // expected value.
         {
-            let mut bt = BinTree::new([0u32; 256], None, None);
+            let mut bt = BinTree::new(0, None, None);
             let depth = 5;
             for i in 1..depth {
-                bt = BinTree::new(
-                    [i as u32; 256],
-                    Some(arena.alloc(bt.clone())),
-                    Some(arena.alloc(bt)),
-                );
+                bt = BinTree::new(i, Some(arena.alloc(bt.clone())), Some(arena.alloc(bt)));
             }
             let mut bt = arena.alloc(bt);
             bt.unload();
@@ -2708,6 +2820,7 @@ mod tests {
                 p = p.unwrap().left.as_ref();
             }
             let actual = format!("{:?}", bt);
+            dbg!(&actual);
             assert!(actual.ends_with("right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }), right: Some(<Lazy Sp>) }"));
         }
 
@@ -2719,14 +2832,10 @@ mod tests {
         {
             // Build the tree.
 
-            let mut bt1 = BinTree::new([0; 256], None, None);
+            let mut bt1 = BinTree::new(0, None, None);
             let depth = 100;
             for i in 1..depth {
-                bt1 = BinTree::new(
-                    [i as u32; 256],
-                    Some(arena.alloc(bt1.clone())),
-                    Some(arena.alloc(bt1)),
-                );
+                bt1 = BinTree::new(i, Some(arena.alloc(bt1.clone())), Some(arena.alloc(bt1)));
             }
             let mut bt1 = arena.alloc(bt1);
 
@@ -2760,7 +2869,7 @@ mod tests {
             // Load a full tree into memory.
 
             let depth = 13;
-            let mut bt = large_counting_tree(arena, depth);
+            let mut bt = counting_tree(arena, depth);
             // Check that we have a full tree in memory
             assert_eq!(arena.lock_sp_cache().borrow().len(), (1 << depth) - 1);
 
@@ -2787,7 +2896,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "stress test failed: \nthread 'main' has overflowed its stack"]
+    #[should_panic = "thread 'main' has overflowed its stack"]
     fn drop_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.
@@ -2798,7 +2907,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "stress test failed: \nthread 'main' has overflowed its stack"]
+    #[should_panic = "thread 'main' has overflowed its stack"]
     fn serialize_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.
@@ -3094,7 +3203,7 @@ mod tests {
         // not inlined when contained in a Pair.
         let x = arena.alloc(0u32);
         let y = arena.alloc(0u64);
-        assert_eq!(x.hash().key, y.hash().key);
+        assert_eq!(x.as_typed_key().key, y.as_typed_key().key);
         assert_ne!(x.type_id(), y.type_id());
         let sp = arena.alloc(Pair { x, y });
         assert_eq!(
@@ -3115,12 +3224,12 @@ mod tests {
     #[test]
     fn get_unknown_key() {
         let arena = new_arena();
-        let sp = arena.alloc([0; 1024]);
-        //let key = VersionedArenaKey::<DefaultHasher>::default();
-        let key = sp.hash();
-        assert!(arena.get::<[u8; 1024]>(&key).is_ok());
+        let sp = arena.alloc([0; SMALL_OBJECT_LIMIT]);
+        //let key = VersionedArenaHash::<DefaultHasher>::default();
+        let key = sp.as_typed_key();
+        assert!(arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).is_ok());
         let arena = new_arena();
-        assert!(arena.get::<[u8; 1024]>(&key).is_err());
+        assert!(arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).is_err());
     }
 
     /// Test intensive concurrent manipulation of `Sp`s for the same key.
@@ -3138,7 +3247,7 @@ mod tests {
         // Create a persistent key that we can get from both threads.
 
         let mut sp = arena.alloc(42u32);
-        let key = sp.hash();
+        let key = sp.as_typed_key();
         sp.persist();
         drop(sp);
 
@@ -3169,7 +3278,7 @@ mod tests {
     #[test]
     fn sp_is_lazy() {
         let arena = new_arena();
-        let mut sp = arena.alloc([42u8; 1024]);
+        let mut sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
 
         assert!(!sp.is_lazy());
         sp.unload();
@@ -3177,14 +3286,14 @@ mod tests {
         let _ = sp.deref();
         assert!(!sp.is_lazy());
 
-        let key = sp.hash();
+        let key = sp.as_typed_key();
         sp.persist();
         drop(sp);
 
-        let sp = arena.get_lazy::<[u8; 1024]>(&key).unwrap();
+        let sp = arena.get_lazy::<[u8; SMALL_OBJECT_LIMIT]>(&key).unwrap();
         assert!(sp.is_lazy());
 
-        let sp = arena.get::<[u8; 1024]>(&key).unwrap();
+        let sp = arena.get::<[u8; SMALL_OBJECT_LIMIT]>(&key).unwrap();
         assert!(!sp.is_lazy());
     }
 
