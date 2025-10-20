@@ -1078,7 +1078,7 @@ impl<D: DB> LedgerState<D> {
         context: &TransactionContext<D>,
     ) -> Result<
         (Self, Vec<TransactionResult<D>>),
-        (
+        Box<(
             // The state before the first failure
             Self,
             // The results up to the failure
@@ -1087,14 +1087,14 @@ impl<D: DB> LedgerState<D> {
             TransactionInvalid<D>,
             // The remaining transactions, including the failing one
             &'a [VerifiedTransaction<D>],
-        ),
+        )>,
     > {
         let mut state = self.clone();
         let mut res = Vec::with_capacity(txs.len());
         for (i, tx) in txs.iter().enumerate() {
             let (state2, txres) = state.apply(tx, context);
             if let TransactionResult::Failure(err) = txres {
-                return Err((state, res, err, &txs[i..]));
+                return Err(Box::new((state, res, err, &txs[i..])));
             } else {
                 res.push(txres);
             }
@@ -1522,7 +1522,9 @@ impl<D: DB> UtxoState<D> {
             let input_utxo = Utxo::from(input.clone());
             let is_member = res.utxos.contains_key(&input_utxo);
             if !is_member {
-                return Err(TransactionInvalid::InputNotInUtxos(input_utxo.clone()));
+                return Err(TransactionInvalid::InputNotInUtxos(Box::new(
+                    input_utxo.clone(),
+                )));
             }
 
             // self.utxos -= inputs;

@@ -1348,8 +1348,8 @@ impl<
 
         if comm != expected {
             return Err(MalformedTransaction::PedersenCheckFailure {
-                expected,
-                calculated: comm,
+                expected: Box::new(expected),
+                calculated: Box::new(comm),
             });
         };
 

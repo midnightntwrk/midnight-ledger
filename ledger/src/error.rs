@@ -214,7 +214,7 @@ pub enum TransactionInvalid<D: DB> {
         operation_value: u128,
         operation: BalanceOperation,
     },
-    InputNotInUtxos(Utxo),
+    InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
@@ -444,7 +444,7 @@ pub enum MalformedTransaction<D: DB> {
         key_id: usize,
     },
     InvalidDustRegistrationSignature {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
     },
     OutOfDustValidityWindow {
         dust_ctime: Timestamp,
@@ -455,7 +455,7 @@ pub enum MalformedTransaction<D: DB> {
         key: VerifyingKey,
     },
     InsufficientDustForRegistrationFee {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
         available_dust: u128,
     },
     ThresholdMissed {
@@ -492,8 +492,8 @@ pub enum MalformedTransaction<D: DB> {
         operation_value: u128,
     },
     PedersenCheckFailure {
-        expected: EmbeddedGroupAffine,
-        calculated: EmbeddedGroupAffine,
+        expected: Box<EmbeddedGroupAffine>,
+        calculated: Box<EmbeddedGroupAffine>,
     },
     BalanceCheckOverspend {
         token_type: TokenType,
@@ -1171,7 +1171,7 @@ pub enum TransactionProvingError<D: DB> {
     LeftoverEntries {
         address: ContractAddress,
         entry_point: EntryPointBuf,
-        entries: Transcript<D>,
+        entries: Box<Transcript<D>>,
     },
     RanOutOfEntries {
         address: ContractAddress,
