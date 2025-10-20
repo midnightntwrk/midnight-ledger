@@ -55,7 +55,10 @@ use super::{DB, Update};
 #[cfg(feature = "proptest")]
 use crate::db::DummyDBStrategy;
 use crate::{
-    DefaultHasher, WellBehavedHasher, arena::{ArenaHash, ArenaKey}, backend::OnDiskObject, db::DummyArbitrary,
+    DefaultHasher, WellBehavedHasher,
+    arena::{ArenaHash, ArenaKey},
+    backend::OnDiskObject,
+    db::DummyArbitrary,
 };
 use crypto::digest::generic_array::GenericArray;
 #[cfg(feature = "proptest")]

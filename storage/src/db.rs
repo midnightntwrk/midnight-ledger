@@ -24,7 +24,10 @@ pub use paritydb::ParityDb;
 
 use crate::DefaultHasher;
 use crate::backend::OnDiskObject;
-use crate::{WellBehavedHasher, arena::{ArenaHash, ArenaKey}};
+use crate::{
+    WellBehavedHasher,
+    arena::{ArenaHash, ArenaKey},
+};
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
@@ -218,9 +221,8 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
                     match cache_get(&k) {
                         Some(node) => {
                             if !truncate {
-                                next_keys.extend(
-                                    node.children.iter().flat_map(ArenaKey::refs).cloned(),
-                                );
+                                next_keys
+                                    .extend(node.children.iter().flat_map(ArenaKey::refs).cloned());
                             }
                         }
                         _ => {

@@ -21,8 +21,8 @@ mod rcmap;
 pub use rcmap::RcMap;
 use serialize::Serializable;
 
+use crate::arena::ArenaKey;
 use crate::db::DB;
-use crate::arena::{ArenaHash, ArenaKey};
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use std::collections::HashSet as StdHashSet;
 

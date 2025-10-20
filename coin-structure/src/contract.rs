@@ -20,9 +20,9 @@ use fake::Dummy;
 use proptest_derive::Arbitrary;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
 use storage::Storable;
+use storage::arena::ArenaKey;
 use storage::db::DB;
 use storage::storable::Loader;
-use storage::arena::ArenaKey;
 use transient_crypto::curve::Fr;
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 

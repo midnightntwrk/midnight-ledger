@@ -55,10 +55,7 @@ use std::ops::Deref;
 use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::storage::Map;
-use storage::{
-    Storable,
-    storable::Loader,
-};
+use storage::{Storable, storable::Loader};
 use transient_crypto::curve::Fr;
 
 // Need to: Convert to SerdeBlockContext / SerdeEffects

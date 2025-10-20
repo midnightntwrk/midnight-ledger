@@ -2452,7 +2452,7 @@ mod tests {
         let s1 = b1.arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
         assert!(
             default_storage::<D1>()
-                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
                 .is_ok()
         );
 
@@ -2461,7 +2461,7 @@ mod tests {
         set_default_storage::<D2>(Storage::<D2>::default).unwrap();
         assert!(
             default_storage::<D2>()
-                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
                 .is_err()
         );
 
@@ -2471,16 +2471,19 @@ mod tests {
         set_default_storage::<D1>(Storage::<D1>::default).unwrap();
         assert!(
             default_storage::<D1>()
-                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
                 .is_err()
         );
 
         // Check that dropping the default storage for D1 didn't affect existing
         // references.
-        assert!(b1.get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash()).is_ok());
+        assert!(
+            b1.get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
         assert!(
             default_storage::<D1>()
-                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
                 .is_err()
         );
 
@@ -2491,7 +2494,7 @@ mod tests {
         set_default_storage::<D1>(|| s).unwrap();
         assert!(
             default_storage::<D1>()
-                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.hash())
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
                 .is_ok()
         );
     }

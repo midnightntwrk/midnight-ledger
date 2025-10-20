@@ -52,7 +52,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// The `sp::persist` is not actually called at this time, so actual gc root
     /// counts in the backend will not be updated yet.
     pub fn persist<T: 'static>(&mut self, sp: &Sp<T, D>) {
-        let key = sp.hash().clone();
+        let key = sp.as_typed_key().clone();
         *self.persist_counts.entry(key.clone().into()).or_insert(0) += 1;
         let mut sp = sp.clone();
         // Don't keep descendant references in arena unnecessarily.
@@ -67,7 +67,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// The `sp::unpersist` is not actually called at this time, so actual gc
     /// root counts in the backend will not be updated yet.
     pub fn unpersist<T: 'static>(&mut self, sp: &Sp<T, D>) {
-        let key = sp.hash().clone();
+        let key = sp.as_typed_key().clone();
         *self.persist_counts.entry(key.into()).or_insert(0) -= 1;
     }
 
@@ -167,9 +167,9 @@ pub fn test_gc_root_update_queue_delayed_effect() {
 
     // Save the keys and drop the `Sp`s, to ensure that the
     // `GcRootUpdateQueue` correctly keeps around references to the `Sp`s.
-    let k1 = sp1.hash().clone();
-    let k2 = sp2.hash().clone();
-    let k3 = sp3.hash().clone();
+    let k1 = sp1.as_typed_key().clone();
+    let k2 = sp2.as_typed_key().clone();
+    let k3 = sp3.as_typed_key().clone();
     drop(sp1);
     drop(sp2);
     drop(sp3);
@@ -205,9 +205,9 @@ pub fn test_gc_root_update_queue_no_leak() {
     let mut queue = GcRootUpdateQueue::begin(arena);
 
     let sp_child = arena.alloc(420u32);
-    let key_child = sp_child.hash().clone();
+    let key_child = sp_child.as_typed_key().clone();
     let sp_parent = arena.alloc(Some(sp_child.clone()));
-    let key_parent = sp_parent.hash().clone();
+    let key_parent = sp_parent.as_typed_key().clone();
     queue.persist(&sp_parent);
     drop(sp_child);
     drop(sp_parent);

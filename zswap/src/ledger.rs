@@ -29,7 +29,7 @@ use storage::storage::{HashMap, Map};
 use storage::storage::{Identity, TimeFilterMap};
 use storage::{
     Storable,
-    arena::{ArenaKey, ArenaHash},
+    arena::{ArenaHash, ArenaKey},
     storable::Loader,
 };
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
