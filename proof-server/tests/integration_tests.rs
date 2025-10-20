@@ -17,6 +17,7 @@ use base_crypto::{self, time::Timestamp};
 use ledger::structure::{Intent, LedgerState, SignatureKind};
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
+use std::collections::HashSet;
 use std::env;
 use std::sync::Once;
 use std::sync::mpsc::Receiver;
@@ -133,6 +134,53 @@ async fn serialized_body_with_double_zk_config() -> Vec<u8> {
     payload
 }
 
+// Builds an invalid body by swapping the values of two ZK Config entries.
+// Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject with 400.
+async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
+
+    let valid_body = serialized_valid_body().await;
+    let (tx, keys): (
+        Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        std::collections::HashMap<
+            transient_crypto::proofs::KeyLocation,
+            transient_crypto::proofs::ProvingKeyMaterial,
+        >,
+    ) = tagged_deserialize(&valid_body[..]).ok()?;
+
+    let mut entries: Vec<_> = keys.into_iter().collect();
+    if entries.len() < 2 {
+        let (_, extra_keys): (
+            Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+            std::collections::HashMap<
+                transient_crypto::proofs::KeyLocation,
+                transient_crypto::proofs::ProvingKeyMaterial,
+            >,
+        ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
+        let mut existing_keys: HashSet<_> = entries.iter().map(|(key, _)| key.clone()).collect();
+        entries.extend(
+            extra_keys
+                .into_iter()
+                .filter(|(key, _)| existing_keys.insert(key.clone())),
+        );
+    }
+
+    if entries.len() < 2 {
+        return None;
+    }
+
+    let (k1, v1) = entries[0].clone();
+    let (k2, v2) = entries[1].clone();
+    entries[0] = (k1, v2);
+    entries[1] = (k2, v1);
+
+    let swapped_keys = entries
+    .into_iter()
+    .collect::<std::collections::HashMap<_, _>>();
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, swapped_keys), &mut payload).expect("swapped payload should serialize");
+    Some(payload)
+}
+
 async fn serialized_valid_body() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
     #[allow(deprecated)]
@@ -231,6 +279,7 @@ async fn integration_tests() {
     test_prove_tx_should_fail_on_json().await;
     test_prove_tx_should_fail_without_zk_config().await;
     test_prove_tx_should_fail_with_double_zk_config().await;
+    test_prove_tx_should_fail_with_swapped_zk_config_values().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -413,6 +462,33 @@ async fn test_prove_tx_should_fail_with_double_zk_config() {
             .unwrap()
             .is_match(resp_text.as_str())
     );
+}
+
+// Negative test: `/prove-tx` must reject payloads where ZK Config values are value-swapped.
+// Given:
+// - A valid request `(tx, {A -> zkA, B -> zkB, ...})`.
+// - We swap the proving material so that `{A -> zkB, B -> zkA}`.
+// When: The malformed payload is POSTed to `/prove-tx`.
+// Then: The server responds with `400 Bad Request`.
+#[named]
+async fn test_prove_tx_should_fail_with_swapped_zk_config_values() {
+    setup_test(function_name!());
+
+    if let Some(payload) = serialized_body_with_swapped_zk_config_values().await {
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", get_host_and_port()))
+            .body(payload)
+            .send()
+            .await
+            .unwrap();
+
+        log::info!("Response code: {:?}", response.status());
+        assert_eq!(response.status(), 400);
+        let resp_text = response.text().await.unwrap();
+        assert!(resp_text.contains("failed to find proving key"));
+    } else {
+        log::warn!("Skipping swapped ZK config test due to missing proving keys in resolver");
+    }
 }
 
 #[named]
