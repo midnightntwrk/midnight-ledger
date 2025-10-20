@@ -44,6 +44,12 @@ use storage::{Storable, db::InMemoryDB};
 
 pub trait TryRef: RefFromWasmAbi<Abi = u32> {
     fn instanceof(val: &JsValue) -> bool;
+    /// # Safety
+    ///
+    /// This function assumes that the provided `JsValue` is a valid instance of the expected type,
+    /// and that its internal pointer (`__wbg_ptr`) is correctly set and points to a valid Rust object.
+    /// Calling this on an invalid or mismatched `JsValue` may result in undefined behavior, memory corruption,
+    /// or crashes. The caller must ensure that `instanceof(val)` returns true before invoking this function.
     unsafe fn unchecked_ref(_val: &JsValue) -> Result<Self::Anchor, JsError>;
     fn try_ref(val: &JsValue) -> Result<Option<Self::Anchor>, JsError> {
         if Self::instanceof(val) {
