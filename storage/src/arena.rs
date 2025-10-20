@@ -1099,8 +1099,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             "IR not found in `all` map",
         ))?;
         if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            return Err(std::io::Error::other(
                 "Reached recursion limit".to_string(),
             ));
         }
@@ -1635,7 +1634,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             list_indices.insert(node.clone(), list_indices.len() as u64);
             for child in disk.children.iter() {
                 let incoming = incoming_vertices
-                    .get_mut(&child)
+                    .get_mut(child)
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
@@ -1766,7 +1765,7 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
     }
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        T::check_invariant(&self)
+        T::check_invariant(self)
     }
 }
 

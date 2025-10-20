@@ -175,7 +175,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params = self.parameters.dust.clone();
+        let params = self.parameters.dust;
         let commitment_root = self
             .dust
             .utxo
@@ -287,7 +287,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params_old = self.previously_validated_state.parameters.dust.clone();
+        let params_old = self.previously_validated_state.parameters.dust;
         let commitment_root_old = self
             .previously_validated_state
             .dust
@@ -304,7 +304,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             .get(ctime)
             .map(|x| x.0)
             .unwrap_or_default();
-        let params_new = self.new_state.parameters.dust.clone();
+        let params_new = self.new_state.parameters.dust;
         let commitment_root_new = self
             .new_state
             .dust
@@ -503,7 +503,7 @@ impl<
                 })
                 .transpose()?;
             self.binding_commitment
-                .valid(&Intent::challenge_pre_for(&self, segment_id))
+                .valid(&Intent::challenge_pre_for(self, segment_id))
         })?;
 
         self.actions
@@ -580,14 +580,14 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(&*x, 0).map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, 0).map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {
                         if *seg_x_offer.0 == 0 {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
-                        P::zswap_well_formed(&seg_x_offer.1.deref(), *seg_x_offer.0.deref())
+                        P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
                             .map_err(|e: zswap::error::MalformedOffer| {
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
@@ -632,7 +632,7 @@ where
                 ref_state.stateless_check(|| {
                     B::when_sealed(Ok(
                         // There's no point in checking this unless we actually care about signature verification
-                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(&mtx).well_formed(),
+                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
                 Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
@@ -1172,7 +1172,6 @@ impl<
                         shielded_outputs: shielded_outputs
                             .into_iter()
                             .map(|x| x.erase_proof())
-                            .into_iter()
                             .collect(),
                         transient_outputs: outputs.into_iter().map(|x| x.erase_proof()).collect(),
                     },
@@ -1395,8 +1394,7 @@ impl<
         let transcripts: Vec<_> = calls
             .iter()
             .flat_map(|(segment, call)| {
-                (*call)
-                    .guaranteed_transcript
+                call.guaranteed_transcript
                     .iter()
                     .map(move |t| (segment, &0, t, call.address))
                     .chain(
@@ -1541,8 +1539,8 @@ impl<
             .iter()
             .flat_map(|(segment, _, t, _)| {
                 t.effects.claimed_contract_calls.iter().map(|call| {
-                    let (_seq, addr, hash, fr) = (&*call).into_inner();
-                    (**segment, (addr, hash, fr))
+                    let (_seq, addr, hash, fr) = &call.into_inner();
+                    (**segment, (*addr, *hash, *fr))
                 })
             })
             .collect();
@@ -1590,7 +1588,7 @@ impl<
                         let (sp, i) = sp.deref();
                         (
                             (**intent_seg, **logical_seg == 0),
-                            ((sp.deref().0.clone(), sp.deref().1.clone()), *(*i).deref()),
+                            ((sp.deref().0, sp.deref().1), *(*i).deref()),
                         )
                     })
                 })
@@ -1603,10 +1601,7 @@ impl<
                         (
                             (**intent_seg, **logical_seg == 0),
                             (
-                                (
-                                    sp.deref().0.deref().clone(),
-                                    PublicAddress::Contract((*addr).clone()),
-                                ),
+                                (*sp.deref().0.deref(), PublicAddress::Contract(*addr)),
                                 *sp.deref().1.deref(),
                             ),
                         )
@@ -1626,7 +1621,7 @@ impl<
                                 (segment, guaranteed),
                                 (
                                     (
-                                        TokenType::Unshielded(output.type_.clone()),
+                                        TokenType::Unshielded(output.type_),
                                         PublicAddress::User(output.owner),
                                     ),
                                     output.value,
@@ -1694,7 +1689,7 @@ impl<D: DB> ContractDeploy<D> {
         if self.initial_state.balance.iter().any(|bal| *bal.1 > 0) {
             let mut err_data = std::collections::HashMap::new();
             for val in self.initial_state.balance.clone().iter() {
-                err_data.insert(*(*val).0, *(*val).1);
+                err_data.insert(*val.0, *val.1);
             }
             return Err(MalformedTransaction::<D>::MalformedContractDeploy(
                 MalformedContractDeploy::NonZeroBalance(err_data),
@@ -1785,10 +1780,11 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
-        if let Some(fallible) = &self.fallible_transcript {
-            if fallible.program.get(0) != Some(&Op::Ckpt) && self.guaranteed_transcript.is_some() {
-                return Err(MalformedTransaction::FallibleWithoutCheckpoint);
-            }
+        if let Some(fallible) = &self.fallible_transcript
+            && fallible.program.get(0) != Some(&Op::Ckpt)
+            && self.guaranteed_transcript.is_some()
+        {
+            return Err(MalformedTransaction::FallibleWithoutCheckpoint);
         }
         for transcript in [
             self.guaranteed_transcript.as_ref(),

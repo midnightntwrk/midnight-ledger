@@ -277,13 +277,13 @@ fn gen_arrays(sizes: &[usize]) -> Vec<StateValueArray> {
 fn choose_aligned_values(num: usize, map: &StateValueMap) -> Vec<AlignedValue> {
     let avs: Vec<_> = map
         .keys()
-        .sorted_by_key(|av| <AlignedValue as Serializable>::serialized_size(av))
+        .sorted_by_key(<AlignedValue as Serializable>::serialized_size)
         .collect();
     let size = avs.len();
     let half_size = size / 2;
     let mut results = vec![];
     // Here ((num+1)/2) = ceil(num/2).
-    for i in 0..((num + 1) / 2) {
+    for i in 0..num.div_ceil(2) {
         // Even steps thru the first half of the range
         results.push(avs[(size / num) * i].clone())
     }
@@ -326,7 +326,7 @@ struct BenchWithArgs {
 
 impl BenchWithArgs {
     fn new() -> Self {
-        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").map_or(false, |v| {
+        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").is_ok_and(|v| {
             if v == "1" {
                 true
             } else {
@@ -578,7 +578,7 @@ impl BenchWithArgs {
                 "uid": self.next_uid(),
             });
             if sizes.len() == 1 {
-                json[format!("value_size")] = sizes[0].into();
+                json["value_size".to_string()] = sizes[0].into();
             } else {
                 for (i, size) in sizes.iter().enumerate() {
                     json[format!("value_{i}_size")] = (*size).into();

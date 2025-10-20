@@ -716,7 +716,7 @@ impl<'a, D: DB> From<&'a Effects<D>> for VmValue<D> {
                         eff.claimed_contract_calls
                             .iter()
                             .map(|sp_item| {
-                                let ref value_sp = *sp_item;
+                                let value_sp = &(*sp_item);
                                 let value: ClaimedContractCallsValue =
                                     (*(*value_sp).clone()).clone();
                                 (value.into(), StateValue::Null)
@@ -798,8 +798,8 @@ impl<D: DB> TryFrom<VmValue<D>> for Effects<D> {
                 Err(TranscriptRejected::EffectDecodeError)
             }
         }
-        if let StateValue::Array(arr) = &val.value {
-            if arr.len() == 9 {
+        if let StateValue::Array(arr) = &val.value
+            && arr.len() == 9 {
                 return Ok(Effects {
                     claimed_nullifiers: map_from::<Nullifier, (), D>(arr.get(0).unwrap())?
                         .iter()
@@ -830,7 +830,6 @@ impl<D: DB> TryFrom<VmValue<D>> for Effects<D> {
                     claimed_unshielded_spends: map_from(arr.get(8).unwrap())?,
                 });
             }
-        }
         Err(TranscriptRejected::EffectDecodeError)
     }
 }
@@ -957,13 +956,12 @@ impl<D: DB> QueryContext<D> {
         );
         state.state = new_charged_state;
         let gas_cost = res.gas_cost + state_cost;
-        if let Some(gas_limit) = gas_limit {
-            if gas_cost > gas_limit {
+        if let Some(gas_limit) = gas_limit
+            && gas_cost > gas_limit {
                 // TODO?: return a more specific error, explaining that gas
                 // limit was exceeded by write+delete vs by cpu during vm eval?
                 return Err(TranscriptRejected::Execution(OnchainProgramError::OutOfGas));
             }
-        }
 
         trace!("transcript application successful");
         Ok(QueryResults {
@@ -987,16 +985,16 @@ impl<D: DB> QueryContext<D> {
         transcript: &Transcript<D>,
         cost_model: &CostModel,
     ) -> Result<QueryResults<ResultModeVerify, D>, TranscriptRejected<D>> {
-        Ok(self.query(
+        self.query(
             &Vec::from(&transcript.program),
             Some(transcript.gas),
             cost_model,
-        )?)
+        )
     }
 }
 
 fn ensure_fully_deserialized(data: &[u8]) -> Result<(), std::io::Error> {
-    if data.len() != 0 {
+    if !data.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Not all bytes read, {} bytes remaining", data.len()),

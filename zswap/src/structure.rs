@@ -268,7 +268,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             .iter()
             .copied()
             .last()
-            .map(|fr| TryInto::<u16>::try_into(fr))
+            .map(TryInto::<u16>::try_into)
             .transpose()
             .unwrap_or(None)
     }
@@ -319,7 +319,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             .iter()
             .copied()
             .last()
-            .map(|fr| TryInto::<u16>::try_into(fr))
+            .map(TryInto::<u16>::try_into)
             .transpose()
             .unwrap_or(None)
     }

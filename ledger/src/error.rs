@@ -780,8 +780,8 @@ impl<D: DB> Display for MalformedTransaction<D> {
         use MalformedTransaction::*;
         match self {
             InvalidNetworkId { expected, found } => {
-                let expected = sanitize_network_id(&expected);
-                let found = sanitize_network_id(&found);
+                let expected = sanitize_network_id(expected);
+                let found = sanitize_network_id(found);
                 write!(
                     formatter,
                     "invalid network ID - expect '{expected}' found '{found}'"

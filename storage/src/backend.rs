@@ -30,6 +30,7 @@ use serialize::{Deserializable, Serializable};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    slice,
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -992,13 +993,8 @@ impl<D: DB> StorageBackend<D> {
                 self.write_cache.set(key, value).is_none(),
                 "write cache is unbounded, it can't evict"
             );
-        } else {
-            match self.read_cache.set(key, value) {
-                Some((_, v)) => {
-                    debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
-                }
-                _ => {}
-            }
+        } else if let Some((_, v)) = self.read_cache.set(key, value) {
+            debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
         }
     }
 

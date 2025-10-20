@@ -449,7 +449,7 @@ impl<D: DB> TestState<D> {
                     .map(|(_, qci)| {
                         let (next_state, inp) = self
                             .zswap
-                            .spend(&mut rng, &self.zswap_keys, &*qci, seg)
+                            .spend(&mut rng, &self.zswap_keys, &qci, seg)
                             .unwrap(); // TODO: unwrap
                         self.zswap = next_state;
                         inp
@@ -651,7 +651,7 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
     {
         if let Ok(addr) = env::var("MIDNIGHT_PROOF_SERVER") {
             let provider = ProofServerProvider {
-                base_url: addr.into(),
+                base_url: addr,
                 resolver,
             };
             tx.prove(provider, &INITIAL_COST_MODEL)
@@ -832,7 +832,6 @@ pub async fn serialize_request_body<S: SignatureKind<D> + Tagged, D: DB>(
 
     let circuits_used = tx
         .calls()
-        .into_iter()
         .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
         .collect::<Vec<_>>();
     let mut keys = HashMap::new();

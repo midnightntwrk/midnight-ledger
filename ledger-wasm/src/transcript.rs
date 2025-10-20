@@ -38,9 +38,7 @@ impl PreTranscript {
         program: JsValue,
         comm_comm: JsValue,
     ) -> Result<PreTranscript, JsError> {
-        let comm_comm = if comm_comm.is_null() {
-            None
-        } else if comm_comm.is_undefined() {
+        let comm_comm = if comm_comm.is_null() || comm_comm.is_undefined() {
             None
         } else if comm_comm.is_string() {
             let comm_comm_str = String::from(JsString::from(comm_comm));
