@@ -90,11 +90,17 @@ impl MerkleTreeCollapsedUpdate {
 #[wasm_bindgen]
 pub struct ZswapLocalState(pub(crate) zswap::local::State<InMemoryDB>);
 
+impl Default for ZswapLocalState {
+    fn default() -> Self {
+        ZswapLocalState(zswap::local::State::new())
+    }
+}
+
 #[wasm_bindgen]
 impl ZswapLocalState {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        ZswapLocalState(zswap::local::State::new())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = firstFree, js_name = "firstFree")]
@@ -266,6 +272,12 @@ impl ZswapLocalState {
 #[derive(Clone)]
 pub struct ZswapChainState(pub(crate) zswap::ledger::State<InMemoryDB>);
 
+impl Default for ZswapChainState {
+    fn default() -> Self {
+        ZswapChainState(zswap::ledger::State::new())
+    }
+}
+
 impl From<zswap::ledger::State<InMemoryDB>> for ZswapChainState {
     fn from(state: zswap::ledger::State<InMemoryDB>) -> ZswapChainState {
         ZswapChainState(state)
@@ -282,7 +294,7 @@ impl From<ZswapChainState> for zswap::ledger::State<InMemoryDB> {
 impl ZswapChainState {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        ZswapChainState(zswap::ledger::State::new())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = firstFree, js_name = "firstFree")]

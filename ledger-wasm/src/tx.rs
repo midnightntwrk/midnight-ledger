@@ -823,7 +823,7 @@ impl Transaction {
             }
         }
 
-        Ok(match &mut self.0 {
+        match &mut self.0 {
             UnprovenWithSignatureBinding(_)
             | UnprovenWithSignatureErasedBinding(_)
             | ProvenWithSignatureBinding(_)
@@ -849,7 +849,8 @@ impl Transaction {
                 tx.fallible_coins = zswap_offers_to_fallible_coins::<()>(offers)?;
             }
             _ => Err(JsError::new("Not a standard transaction."))?,
-        })
+        };
+        Ok(())
     }
 
     #[wasm_bindgen(getter, js_name = "intents")]
@@ -1144,13 +1145,14 @@ fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
 }
 
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct WellFormedStrictness(pub(crate) ledger::verify::WellFormedStrictness);
 
 #[wasm_bindgen]
 impl WellFormedStrictness {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        WellFormedStrictness(Default::default())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = enforceBalancing)]
