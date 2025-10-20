@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
@@ -21,7 +20,6 @@ use coin_structure::coin::Info as CoinInfo;
 use coin_structure::transfer::{Recipient, SenderEvidence};
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
-use midnight_ledger::dust::DustResolver;
 use midnight_ledger::error::{
     EffectsCheckError, MalformedTransaction, SequencingCheckError, TransactionInvalid,
 };
@@ -79,10 +77,10 @@ async fn resolve_any(key: KeyLocation) -> std::io::Result<Option<ProvingKeyMater
 lazy_static! {
     static ref RESOLVER: Resolver = Resolver::new(
         PUBLIC_PARAMS.clone(),
-        DustResolver(
-            MidnightDataProvider::new(
-                FetchMode::OnDemand,
-                OutputMode::Log,
+        midnight_ledger::dust::DustResolver(
+            base_crypto::data_provider::MidnightDataProvider::new(
+                base_crypto::data_provider::FetchMode::OnDemand,
+                base_crypto::data_provider::OutputMode::Log,
                 midnight_ledger::dust::DUST_EXPECTED_FILES.to_owned(),
             )
             .unwrap()
@@ -96,9 +94,8 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    
-    prog
-        .iter()
+
+    prog.iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
             Op::Idx { path, .. } => !path.is_empty(),
