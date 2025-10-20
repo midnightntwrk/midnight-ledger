@@ -14,13 +14,13 @@
 //! Traits for defining new storage mechanisms
 
 use crate as storage;
-use crate::arena::{Arena, ArenaKey, Sp};
+use crate::arena::{Arena, ArenaHash, ArenaKey, Sp};
 use crate::backend::StorageBackend;
 use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::MerklePatriciaTrie;
 use crate::merkle_patricia_trie::Semigroup;
-use crate::storable::{ChildNode, Loader, SizeAnn};
+use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
 use crypto::digest::Digest;
@@ -65,10 +65,10 @@ pub struct HashMap<
 >(
     #[cfg(feature = "public-internal-structure")]
     #[allow(clippy::type_complexity)]
-    pub Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+    pub Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
     #[cfg(not(feature = "public-internal-structure"))]
     #[allow(clippy::type_complexity)]
-    Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+    Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
 );
 
 impl<
@@ -82,7 +82,7 @@ impl<
         format!("hash-map({},{},{})", K::tag(), V::tag(), A::tag()).into()
     }
     fn tag_unique_factor() -> String {
-        <Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
+        <Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
     }
 }
 tag_enforcement_test!(HashMap<(), ()>);
@@ -252,12 +252,12 @@ impl<
         Self(Map::new())
     }
 
-    fn gen_key(key: &K) -> ArenaKey<D::Hasher> {
+    fn gen_key(key: &K) -> ArenaHash<D::Hasher> {
         let mut hasher = D::Hasher::default();
         let mut bytes: std::vec::Vec<u8> = std::vec::Vec::new();
         K::serialize(key, &mut bytes).expect("HashMap key should be serializable");
         hasher.update(bytes);
-        ArenaKey(hasher.finalize())
+        ArenaHash(hasher.finalize())
     }
 
     /// Insert object value in map, keyed with the hash of object key. Overwrites
@@ -398,7 +398,7 @@ where
     V: 'static,
 {
     #[allow(clippy::type_complexity)]
-    inner: std::vec::IntoIter<(ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
+    inner: std::vec::IntoIter<(ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
 }
 
 impl<K, V, D> Iterator for HashMapIntoIter<K, V, D>
@@ -968,12 +968,12 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
 pub struct Identity<V>(pub V);
 
 impl<V: Storable<D>, D: DB> Storable<D> for Identity<V> {
-    fn children(&self) -> std::vec::Vec<ChildNode<<D as DB>::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         self.0.children()
     }
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ChildNode<<D as DB>::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -1271,7 +1271,7 @@ impl<
 {
     /// Rather than in-lining the wrapped MPT it is a child such that we know the public Map has
     /// only a single child element (rather than up to 16)
-    fn children(&self) -> std::vec::Vec<ChildNode<D::Hasher>> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
         vec![Sp::as_child(&self.mpt)]
     }
 
@@ -1284,7 +1284,7 @@ impl<
 
     fn from_binary_repr<R: std::io::Read>(
         _reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ChildNode<D::Hasher>>,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
@@ -1891,36 +1891,36 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
 
     fn get_node(
         &self,
-        key: &ArenaKey<Self::Hasher>,
+        key: &ArenaHash<Self::Hasher>,
     ) -> Option<crate::backend::OnDiskObject<Self::Hasher>> {
         self.db.get_node(key)
     }
 
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaKey<Self::Hasher>> {
+    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         self.db.get_unreachable_keys()
     }
 
     fn insert_node(
         &mut self,
-        key: ArenaKey<Self::Hasher>,
+        key: ArenaHash<Self::Hasher>,
         object: crate::backend::OnDiskObject<Self::Hasher>,
     ) {
         self.db.insert_node(key, object)
     }
 
-    fn delete_node(&mut self, key: &ArenaKey<Self::Hasher>) {
+    fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>) {
         self.db.delete_node(key)
     }
 
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32 {
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
         self.db.get_root_count(key)
     }
 
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         self.db.set_root_count(key, count)
     }
 
-    fn get_roots(&self) -> std::collections::HashMap<ArenaKey<Self::Hasher>, u32> {
+    fn get_roots(&self) -> std::collections::HashMap<ArenaHash<Self::Hasher>, u32> {
         self.db.get_roots()
     }
 
@@ -1930,7 +1930,7 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
 
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, crate::db::Update<Self::Hasher>)>,
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, crate::db::Update<Self::Hasher>)>,
     {
         self.db.batch_update(iter)
     }
@@ -1939,28 +1939,28 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         &self,
         keys: I,
     ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
+        ArenaHash<Self::Hasher>,
         Option<crate::backend::OnDiskObject<Self::Hasher>>,
     )>
     where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>,
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         self.db.batch_get_nodes(keys)
     }
 
     fn bfs_get_nodes<C>(
         &self,
-        key: &ArenaKey<Self::Hasher>,
+        key: &ArenaHash<Self::Hasher>,
         cache_get: C,
         truncate: bool,
         max_depth: Option<usize>,
         max_count: Option<usize>,
     ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
+        ArenaHash<Self::Hasher>,
         crate::backend::OnDiskObject<Self::Hasher>,
     )>
     where
-        C: Fn(&ArenaKey<Self::Hasher>) -> Option<crate::backend::OnDiskObject<Self::Hasher>>,
+        C: Fn(&ArenaHash<Self::Hasher>) -> Option<crate::backend::OnDiskObject<Self::Hasher>>,
     {
         self.db
             .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)
@@ -1988,6 +1988,7 @@ impl<D: DB + DummyArbitrary, T> DummyArbitrary for WrappedDB<D, T> {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storable::SMALL_OBJECT_LIMIT;
 
     #[test]
     fn iter_map() {
@@ -2475,31 +2476,54 @@ mod tests {
 
         // Create a default storage of type D1.
         let b1 = set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        let s1 = b1.arena.alloc(42u8);
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        let s1 = b1.arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
 
         // Check that D1 and D2 have disjoint default storages, even tho they're
         // the same underlying database type.
         set_default_storage::<D2>(Storage::<D2>::default).unwrap();
-        assert!(default_storage::<D2>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D2>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Drop the D1 default storage and see that we can create a new one.
         unsafe_drop_default_storage::<D1>();
         assert!(try_get_default_storage::<D1>().is_none());
         set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Check that dropping the default storage for D1 didn't affect existing
         // references.
-        assert!(b1.get::<u8>(&s1.hash()).is_ok());
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            b1.get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Check that we can restore the original D1 default storage (unlikely
         // use case ...)
         let s = Arc::into_inner(b1).expect("we should have the only reference");
         unsafe_drop_default_storage::<D1>();
         set_default_storage::<D1>(|| s).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
     }
 
     #[cfg(feature = "sqlite")]
@@ -2549,7 +2573,7 @@ mod tests {
             let arena = &storage1.arena;
             let vals1 = vec![1u8, 1, 2, 3, 5];
             let array1: super::Array<_, W<D>> = vals1.into();
-            let sp1 = arena.alloc(array1.clone());
+            let mut sp1 = arena.alloc(array1.clone());
             sp1.persist();
             storage1.with_backend(|backend| backend.flush_all_changes_to_db());
             sp1.hash()

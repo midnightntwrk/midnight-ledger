@@ -52,10 +52,10 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Deref;
-use storage::arena::Sp;
+use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::storage::Map;
-use storage::{Storable, storable::{ChildNode, Loader}};
+use storage::{Storable, storable::Loader};
 use transient_crypto::curve::Fr;
 
 // Need to: Convert to SerdeBlockContext / SerdeEffects

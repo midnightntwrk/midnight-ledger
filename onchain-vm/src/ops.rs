@@ -28,9 +28,9 @@ use std::fmt::Debug;
 use storage::db::DB;
 #[cfg(feature = "proptest")]
 use storage::db::InMemoryDB;
-use storage::storable::{ChildNode, Loader};
+use storage::storable::Loader;
 use storage::storage::Array;
-use storage::{DefaultDB, Storable};
+use storage::{DefaultDB, Storable, arena::ArenaKey};
 use transient_crypto::curve::Fr;
 use transient_crypto::repr::FieldRepr;
 

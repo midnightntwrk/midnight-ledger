@@ -5,7 +5,7 @@
 use midnight_storage::{
     DefaultDB, Storage,
     arena::test_helpers,
-    arena::{Arena, ArenaKey, Sp},
+    arena::{Arena, ArenaHash, Sp},
     db::DB,
 };
 use std::{any::Any, collections::HashMap};
@@ -26,8 +26,8 @@ use std::{any::Any, collections::HashMap};
 #[derive(Debug)]
 pub struct GcRootUpdateQueue<D: DB> {
     arena: Arena<D>,
-    sps: HashMap<ArenaKey<D::Hasher>, Box<dyn Any>>,
-    persist_counts: HashMap<ArenaKey<D::Hasher>, i32>,
+    sps: HashMap<ArenaHash<D::Hasher>, Box<dyn Any>>,
+    persist_counts: HashMap<ArenaHash<D::Hasher>, i32>,
 }
 
 impl<D: DB> GcRootUpdateQueue<D> {
@@ -52,7 +52,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// The `sp::persist` is not actually called at this time, so actual gc root
     /// counts in the backend will not be updated yet.
     pub fn persist<T: 'static>(&mut self, sp: &Sp<T, D>) {
-        let key = sp.hash().clone();
+        let key = sp.as_typed_key().clone();
         *self.persist_counts.entry(key.clone().into()).or_insert(0) += 1;
         let mut sp = sp.clone();
         // Don't keep descendant references in arena unnecessarily.
@@ -67,7 +67,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// The `sp::unpersist` is not actually called at this time, so actual gc
     /// root counts in the backend will not be updated yet.
     pub fn unpersist<T: 'static>(&mut self, sp: &Sp<T, D>) {
-        let key = sp.hash().clone();
+        let key = sp.as_typed_key().clone();
         *self.persist_counts.entry(key.into()).or_insert(0) -= 1;
     }
 
@@ -99,7 +99,7 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// For example, if the underlying database root count for key `k` is 2, and
     /// self has a net persist-count update for `k` is -1, then in the map
     /// returned by this function `k` will be mapped to 1 (i.e. 2 - 1).
-    pub fn get_roots(&self) -> HashMap<ArenaKey<D::Hasher>, u32> {
+    pub fn get_roots(&self) -> HashMap<ArenaHash<D::Hasher>, u32> {
         let mut roots = self.arena.with_backend(|b| b.get_roots());
         for (key, queue_count) in &self.persist_counts {
             let db_count = roots.entry(key.clone()).or_insert(0);
@@ -132,6 +132,7 @@ fn main() {
 ///
 /// - calls `persist` and/or `unpersist` the approapriate number of times
 ///   when `commit` is called.
+#[cfg(test)]
 pub fn test_gc_root_update_queue_delayed_effect() {
     let storage = Storage::new(16, DefaultDB::default());
     let arena = &storage.arena;
@@ -154,7 +155,7 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     // - sp3: +2
     let sp1 = arena.alloc(13u32);
     let sp2 = arena.alloc(42u32);
-    let sp3 = arena.alloc(69u32);
+    let sp3 = arena.alloc([69u8; 1024]);
     queue.persist(&sp1);
     queue.unpersist(&sp2);
     queue.persist(&sp3);
@@ -166,9 +167,9 @@ pub fn test_gc_root_update_queue_delayed_effect() {
 
     // Save the keys and drop the `Sp`s, to ensure that the
     // `GcRootUpdateQueue` correctly keeps around references to the `Sp`s.
-    let k1 = sp1.hash().clone();
-    let k2 = sp2.hash().clone();
-    let k3 = sp3.hash().clone();
+    let k1 = sp1.as_typed_key().clone();
+    let k2 = sp2.as_typed_key().clone();
+    let k3 = sp3.as_typed_key().clone();
     drop(sp1);
     drop(sp2);
     drop(sp3);
@@ -204,9 +205,9 @@ pub fn test_gc_root_update_queue_no_leak() {
     let mut queue = GcRootUpdateQueue::begin(arena);
 
     let sp_child = arena.alloc(420u32);
-    let key_child = sp_child.hash().clone();
+    let key_child = sp_child.as_typed_key().clone();
     let sp_parent = arena.alloc(Some(sp_child.clone()));
-    let key_parent = sp_parent.hash().clone();
+    let key_parent = sp_parent.as_typed_key().clone();
     queue.persist(&sp_parent);
     drop(sp_child);
     drop(sp_parent);
