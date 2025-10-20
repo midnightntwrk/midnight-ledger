@@ -108,11 +108,29 @@ async fn stop_server(server_handle: ServerHandle) {
     server_handle.stop(false).await;
 }
 
+// Builds a request body that contains only the tagged transaction preimage
+// (no ZK Config section).
 async fn serialized_body_without_zk_config() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
     let mut body = Vec::new();
     tagged_serialize(&tx, &mut body).expect("transaction-only payload should serialize");
     body
+}
+
+// Builds an invalid request body with two different ZK Configs back-to-back:
+// `[(tx, zkA)] [zkB]`.
+async fn serialized_body_with_double_zk_config() -> Vec<u8> {
+    let mut payload = serialized_valid_body().await;
+    let zswap_tx = valid_unbalanced_zswap(1);
+    let mut zswap_tx_bytes = Vec::new();
+    tagged_serialize(&zswap_tx, &mut zswap_tx_bytes)
+        .expect("transaction-only payload should serialize");
+
+    let mut zswap_payload = serialized_valid_zswap_body().await;
+    let zswap_config = zswap_payload.split_off(zswap_tx_bytes.len());
+
+    payload.extend_from_slice(&zswap_config);
+    payload
 }
 
 async fn serialized_valid_body() -> Vec<u8> {
@@ -212,6 +230,7 @@ async fn integration_tests() {
     test_prove_tx_should_fail_on_empty_body().await;
     test_prove_tx_should_fail_on_json().await;
     test_prove_tx_should_fail_without_zk_config().await;
+    test_prove_tx_should_fail_with_double_zk_config().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -347,6 +366,10 @@ async fn test_prove_tx_should_fail_on_json() {
     assert!(resp_text.contains("expected header tag"));
 }
 
+// Negative test: `/prove-tx` must reject a payload without ZK Config.
+// Given: A request body that contains only the tagged transaction preimage.
+// When: POSTed to `/prove-tx`.
+// Then: The server responds with `400 Bad Request`.
 #[named]
 async fn test_prove_tx_should_fail_without_zk_config() {
     setup_test(function_name!());
@@ -362,6 +385,34 @@ async fn test_prove_tx_should_fail_without_zk_config() {
     assert_eq!(response.status(), 400);
     let resp_text = response.text().await.unwrap();
     assert!(resp_text.contains("expected header tag"));
+}
+
+// Negative test: `/prove-tx` must reject payloads that include two different
+// ZK Config blocks one after another (double ZK Config).
+// Given:
+// - A valid request `[(tx, zkA)]`.
+// - A second, different ZK Config `zkB` (sourced from a different valid body).
+// When: We append `zkB` after the first tuple and POST to `/prove-tx`.
+// Then: The server responds with `400 Bad Request`.
+#[named]
+async fn test_prove_tx_should_fail_with_double_zk_config() {
+    setup_test(function_name!());
+
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove-tx", get_host_and_port()))
+        .body(serialized_body_with_double_zk_config().await)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), 400);
+    let resp_text = response.text().await.unwrap();
+    assert!(
+        Regex::new(r"^Not all bytes read deserializing '.*'; \d+ bytes remaining$")
+            .unwrap()
+            .is_match(resp_text.as_str())
+    );
 }
 
 #[named]
