@@ -219,7 +219,7 @@ jobs:
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo check --all-targets --workspace --all-features
 
       - name: Cargo clippy (--all-targets --workspace --all-features --all -- -Aclippy::type_complexity -Dwarnings)
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' nix develop .#ci -c cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity  -Aclippy::result_large_err -Aclippy::mutable_key_type -Aclippy::large_enum_variant -Aclippy::implied_bounds_in_impls -Aclippy::too_many_arguments --no-deps
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' nix develop .#ci -c cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity  -Aclippy::result_large_err -Aclippy::mutable_key_type -Aclippy::large_enum_variant -Aclippy::too_many_arguments --no-deps
 
       - name: Build and Test (default features)
         run: |
