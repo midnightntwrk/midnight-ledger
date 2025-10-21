@@ -184,9 +184,7 @@ async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
 async fn serialized_valid_body() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
     #[allow(deprecated)]
-    let body = serialize_request_body(&tx, &RESOLVER).await.unwrap();
-    eprintln!("{}", String::from_utf8_lossy(&body));
-    body
+    serialize_request_body(&tx, &RESOLVER).await.unwrap()
 }
 
 async fn serialized_valid_zswap_body() -> Vec<u8> {
@@ -277,9 +275,9 @@ async fn integration_tests() {
     test_prove_tx_should_fail_on_get().await;
     test_prove_tx_should_fail_on_empty_body().await;
     test_prove_tx_should_fail_on_json().await;
-    test_prove_tx_should_fail_without_zk_config().await;
-    test_prove_tx_should_fail_with_double_zk_config().await;
-    test_prove_tx_should_fail_with_swapped_zk_config_values().await;
+    test_prove_should_fail_without_zk_config().await;
+    test_prove_should_fail_with_double_zk_config().await;
+    test_prove_should_fail_with_swapped_zk_config_values().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -415,16 +413,16 @@ async fn test_prove_tx_should_fail_on_json() {
     assert!(resp_text.contains("expected header tag"));
 }
 
-// Negative test: `/prove-tx` must reject a payload without ZK Config.
+// Negative test: `/prove` must reject a payload without ZK Config.
 // Given: A request body that contains only the tagged transaction preimage.
-// When: POSTed to `/prove-tx`.
+// When: POSTed to `/prove`.
 // Then: The server responds with `400 Bad Request`.
 #[named]
-async fn test_prove_tx_should_fail_without_zk_config() {
+async fn test_prove_should_fail_without_zk_config() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .body(serialized_body_without_zk_config().await)
         .send()
         .await
@@ -436,19 +434,19 @@ async fn test_prove_tx_should_fail_without_zk_config() {
     assert!(resp_text.contains("expected header tag"));
 }
 
-// Negative test: `/prove-tx` must reject payloads that include two different
+// Negative test: `/prove` must reject payloads that include two different
 // ZK Config blocks one after another (double ZK Config).
 // Given:
 // - A valid request `[(tx, zkA)]`.
 // - A second, different ZK Config `zkB` (sourced from a different valid body).
-// When: We append `zkB` after the first tuple and POST to `/prove-tx`.
+// When: We append `zkB` after the first tuple and POST to `/prove`.
 // Then: The server responds with `400 Bad Request`.
 #[named]
-async fn test_prove_tx_should_fail_with_double_zk_config() {
+async fn test_prove_should_fail_with_double_zk_config() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .body(serialized_body_with_double_zk_config().await)
         .send()
         .await
@@ -457,26 +455,22 @@ async fn test_prove_tx_should_fail_with_double_zk_config() {
     log::info!("Response code: {:?}", response.status());
     assert_eq!(response.status(), 400);
     let resp_text = response.text().await.unwrap();
-    assert!(
-        Regex::new(r"^Not all bytes read deserializing '.*'; \d+ bytes remaining$")
-            .unwrap()
-            .is_match(resp_text.as_str())
-    );
+    assert!(resp_text.contains("expected header tag"));
 }
 
-// Negative test: `/prove-tx` must reject payloads where ZK Config values are value-swapped.
+// Negative test: `/prove` must reject payloads where ZK Config values are value-swapped.
 // Given:
 // - A valid request `(tx, {A -> zkA, B -> zkB, ...})`.
 // - We swap the proving material so that `{A -> zkB, B -> zkA}`.
-// When: The malformed payload is POSTed to `/prove-tx`.
+// When: The malformed payload is POSTed to `/prove`.
 // Then: The server responds with `400 Bad Request`.
 #[named]
-async fn test_prove_tx_should_fail_with_swapped_zk_config_values() {
+async fn test_prove_should_fail_with_swapped_zk_config_values() {
     setup_test(function_name!());
 
     if let Some(payload) = serialized_body_with_swapped_zk_config_values().await {
         let response = HTTP_CLIENT
-            .post(format!("{}/prove-tx", get_host_and_port()))
+            .post(format!("{}/prove", get_host_and_port()))
             .body(payload)
             .send()
             .await
@@ -486,9 +480,7 @@ async fn test_prove_tx_should_fail_with_swapped_zk_config_values() {
         assert_eq!(response.status(), 400);
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
-    } else {
-        log::warn!("Skipping swapped ZK config test due to missing proving keys in resolver");
-    }
+    } 
 }
 
 #[named]
