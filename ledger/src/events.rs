@@ -57,7 +57,7 @@ tag_enforcement_test!(EventSource);
 #[storable(base)]
 #[tag = "zswap-preimage-evidence[v1]"]
 pub enum ZswapPreimageEvidence {
-    Ciphertext(CoinCiphertext),
+    Ciphertext(Box<CoinCiphertext>),
     PublicPreimage {
         coin: CoinInfo,
         recipient: Recipient,
@@ -104,7 +104,7 @@ pub enum EventDetails<D: DB> {
         entry_point: EntryPointBuf,
         logged_item: StateValue<D>,
     },
-    ParamChange(LedgerParameters),
+    ParamChange(Sp<LedgerParameters, D>),
     DustInitialUtxo {
         output: QualifiedDustOutput,
         generation: DustGenerationInfo,
