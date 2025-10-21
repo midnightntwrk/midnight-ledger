@@ -17,6 +17,7 @@ use base_crypto::{self, time::Timestamp};
 use ledger::structure::{Intent, LedgerState, SignatureKind};
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::env;
 use std::sync::Once;
@@ -26,6 +27,7 @@ use std::time::Duration;
 use std::{sync::mpsc, thread};
 use storage::arena::Sp;
 use transient_crypto::commitment::PedersenRandomness;
+use transient_crypto::proofs::KeyLocation;
 use zswap::Delta;
 
 use actix_web::{dev::ServerHandle, rt};
@@ -181,6 +183,43 @@ async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     Some(payload)
 }
 
+// Builds an invalid body by changing one of the ZK Config keys to reference a
+// circuit ID that is not used in the transaction.
+async fn serialized_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
+    let valid_body = serialized_valid_body().await;
+    let (tx, keys): (
+        Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        std::collections::HashMap<
+            transient_crypto::proofs::KeyLocation,
+            transient_crypto::proofs::ProvingKeyMaterial,
+        >,
+    ) = tagged_deserialize(&valid_body[..]).ok()?;
+
+    let mut entries: Vec<_> = keys.into_iter().collect();
+    if entries.is_empty() {
+        let (_, fallback_keys): (
+            Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+            std::collections::HashMap<
+                transient_crypto::proofs::KeyLocation,
+                transient_crypto::proofs::ProvingKeyMaterial,
+            >,
+        ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
+        entries = fallback_keys.into_iter().collect();
+    }
+
+    let (KeyLocation(original_id), value) = entries.pop()?;
+    let wrong_key = KeyLocation(Cow::Owned(format!("{original_id}_wrong")));
+    entries.push((wrong_key, value));
+
+    let mutated_keys = entries
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, mutated_keys), &mut payload).ok()?;
+    Some(payload)
+}
+
 async fn serialized_valid_body() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
     #[allow(deprecated)]
@@ -278,6 +317,7 @@ async fn integration_tests() {
     test_prove_should_fail_without_zk_config().await;
     test_prove_should_fail_with_double_zk_config().await;
     test_prove_should_fail_with_swapped_zk_config_values().await;
+    test_prove_should_fail_with_wrong_circuit_id().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -469,6 +509,30 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
     setup_test(function_name!());
 
     if let Some(payload) = serialized_body_with_swapped_zk_config_values().await {
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove", get_host_and_port()))
+            .body(payload)
+            .send()
+            .await
+            .unwrap();
+
+        log::info!("Response code: {:?}", response.status());
+        assert_eq!(response.status(), 400);
+        let resp_text = response.text().await.unwrap();
+        assert!(resp_text.contains("failed to find proving key"));
+    } 
+}
+
+// Negative test: `/prove` must reject payloads whose ZK Config contains an
+// entry keyed by a circuit ID that is not part of the transaction.
+// Given: A valid request `(tx, {A -> zkA, ...})`.
+// When: We replace one key with `C_wrong` while keeping the proving material.
+// Then: The server responds with `400 Bad Request`.
+#[named]
+async fn test_prove_should_fail_with_wrong_circuit_id() {
+    setup_test(function_name!());
+
+    if let Some(payload) = serialized_body_with_wrong_circuit_id().await {
         let response = HTTP_CLIENT
             .post(format!("{}/prove", get_host_and_port()))
             .body(payload)
