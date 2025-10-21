@@ -34,7 +34,8 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 /// `ArenaKey`.
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 pub struct ChildRef<D: DB> {
-    child: ArenaKey<D::Hasher>,
+    /// The referenced child
+    pub child: ArenaKey<D::Hasher>,
 }
 
 impl<D: DB> ChildRef<D> {

@@ -2803,7 +2803,7 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "1.0.0-alpha.1"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -2858,7 +2858,7 @@ dependencies = [
 [[package]]
 name = "midnight-coin-structure"
 version = "1.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2932,7 +2932,7 @@ dependencies = [
 [[package]]
 name = "midnight-ledger"
 version = "6.1.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "anyhow",
  "derive-where",
@@ -3022,7 +3022,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-runtime"
 version = "1.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "derive-where",
  "enum_index",
@@ -3088,7 +3088,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-state"
 version = "1.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "derive-where",
  "fake",
@@ -3130,7 +3130,7 @@ dependencies = [
 [[package]]
 name = "midnight-onchain-vm"
 version = "1.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "derive-where",
  "fake",
@@ -3334,7 +3334,7 @@ dependencies = [
 [[package]]
 name = "midnight-transient-crypto"
 version = "1.0.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "anyhow",
  "blake2b_simd",
@@ -3443,7 +3443,7 @@ dependencies = [
 [[package]]
 name = "midnight-zswap"
 version = "6.1.0-alpha.3"
-source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#0805b434b81ccbb3b813e4e7f9da6d0404c133be"
+source = "git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork#3def3829db39020687e194eccf57a98fde294680"
 dependencies = [
  "derive-where",
  "fake",

@@ -8,14 +8,14 @@ use std::marker::PhantomData;
 use storage::Storable;
 use storage::arena::{ArenaKey, BackendLoader, Sp};
 use storage::db::{DB, InMemoryDB};
-use storage::delta_tracking::KeyRef;
+use storage::delta_tracking::ChildRef;
 use storage::storable::Loader;
 use storage::storage::{HashMap, Map, default_storage};
 
 pub type RawNode<D> = ArenaKey<<D as DB>::Hasher>;
 
 pub enum StepResult<D: DB> {
-    Finished(Sp<KeyRef<D>, D>),
+    Finished(Sp<ChildRef<D>, D>),
     NotEnoughTime,
     Suspended,
     Depends {
@@ -34,7 +34,7 @@ struct TranslationCacheKey<D: DB>(TranslationId, RawNode<D>);
 #[derive_where(Clone, Debug)]
 #[storable(db = D)]
 pub struct TranslationCache<D: DB> {
-    map: HashMap<TranslationCacheKey<D>, KeyRef<D>, D>,
+    map: HashMap<TranslationCacheKey<D>, ChildRef<D>, D>,
 }
 
 impl<D: DB> TranslationCache<D> {
@@ -43,12 +43,12 @@ impl<D: DB> TranslationCache<D> {
             map: HashMap::new(),
         }
     }
-    fn insert(&self, id: TranslationId, from: RawNode<D>, to: KeyRef<D>) -> Self {
+    fn insert(&self, id: TranslationId, from: RawNode<D>, to: ChildRef<D>) -> Self {
         Self {
             map: self.map.insert(TranslationCacheKey(id, from), to),
         }
     }
-    pub fn lookup(&self, id: &TranslationId, child: RawNode<D>) -> Option<KeyRef<D>> {
+    pub fn lookup(&self, id: &TranslationId, child: RawNode<D>) -> Option<ChildRef<D>> {
         self.map
             .get(&TranslationCacheKey(id.clone(), child))
             .map(|v| (&*v).clone())
@@ -62,7 +62,7 @@ impl<D: DB> TranslationCache<D> {
             return Ok(None);
         };
         default_storage()
-            .get_lazy(&keyref.key.clone().into())
+            .get_lazy(&keyref.child.clone().into())
             .map(Some)
     }
 }
@@ -220,7 +220,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
                 // the ref alive, like in the rcmap.
                 Some(res) => {
                     let sp = Sp::new(res);
-                    let keyref = Sp::new(KeyRef::new(sp.hash().into()));
+                    let keyref = Sp::new(ChildRef::new(sp.hash().into()));
                     drop(sp);
                     Ok(StepResult::Finished(keyref))
                 }
@@ -452,7 +452,7 @@ impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
         })
     }
 
-    pub fn run(&self, mut limit: CostDuration) -> io::Result<Either<Self, Sp<KeyRef<D>, D>>> {
+    pub fn run(&self, mut limit: CostDuration) -> io::Result<Either<Self, Sp<ChildRef<D>, D>>> {
         let mut cur = self.clone();
         let result = loop {
             match cur.step(&mut limit)? {
@@ -470,7 +470,7 @@ impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
         }
     }
 
-    fn step(&self, limit: &mut CostDuration) -> io::Result<Either<(bool, Self), Sp<KeyRef<D>, D>>> {
+    fn step(&self, limit: &mut CostDuration) -> io::Result<Either<(bool, Self), Sp<ChildRef<D>, D>>> {
         let mut cur = self
             .work_queue
             .front()
@@ -549,7 +549,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
                 _phantom2: PhantomData,
             })),
             Either::Right(hash) => Ok(Either::Right(
-                default_storage::<D>().get_lazy(&hash.key.clone().into())?,
+                default_storage::<D>().get_lazy(&hash.child.clone().into())?,
             )),
         }
     }

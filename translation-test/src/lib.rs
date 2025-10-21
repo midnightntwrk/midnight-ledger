@@ -13,7 +13,7 @@ use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
-mod ledger_tl;
+//mod ledger_tl;
 
 use mechanism::*;
 
@@ -116,10 +116,10 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                 Ok(Some(rl::Nesty::Node(
                     *n,
                     storage
-                        .get_lazy(&btrans.key.into())
+                        .get_lazy(&btrans.child.into())
                         .expect("translated node must be in storage"),
                     storage
-                        .get_lazy(&atrans.key.into())
+                        .get_lazy(&atrans.child.into())
                         .expect("translated node must be in storage"),
                 )))
             }
@@ -163,7 +163,7 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
             return Ok(None);
         };
         let bar = HashMap(Map {
-            mpt: default_storage::<D>().get_lazy(&footl.key.clone().into())?,
+            mpt: default_storage::<D>().get_lazy(&footl.child.clone().into())?,
             key_type: PhantomData,
         });
         Ok(Some(Bar {
@@ -212,7 +212,7 @@ impl<D: DB>
             return Ok(None);
         };
         Ok(Some(MerklePatriciaTrie(
-            default_storage::<D>().get_lazy(&tl.key.clone().into())?,
+            default_storage::<D>().get_lazy(&tl.child.clone().into())?,
         )))
     }
 }
@@ -286,7 +286,7 @@ impl<D: DB>
                     let Some(entry) = cache.lookup(&self_tl, child.hash().into()) else {
                         return Ok(None);
                     };
-                    *new_child = default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                    *new_child = default_storage::<D>().get_lazy(&entry.child.clone().into())?;
                 }
                 let ann = new_children
                     .iter()
@@ -305,7 +305,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
-                    default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                    default_storage::<D>().get_lazy(&entry.child.clone().into())?;
                 let ann = child.ann();
                 merkle_patricia_trie::Node::Extension {
                     ann,
@@ -318,7 +318,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
-                    default_storage::<D>().get_lazy(&entry.key.clone().into())?;
+                    default_storage::<D>().get_lazy(&entry.child.clone().into())?;
                 let ann = SizeAnn::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
@@ -330,9 +330,9 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
-                    default_storage::<D>().get_lazy(&value_entry.key.clone().into())?;
+                    default_storage::<D>().get_lazy(&value_entry.child.clone().into())?;
                 let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
-                    default_storage::<D>().get_lazy(&child_entry.key.clone().into())?;
+                    default_storage::<D>().get_lazy(&child_entry.child.clone().into())?;
                 let ann = SizeAnn::from_value(&value).append(&child.ann());
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
