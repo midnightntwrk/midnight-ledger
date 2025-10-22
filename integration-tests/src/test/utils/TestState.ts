@@ -334,6 +334,7 @@ export class TestState {
 
     return dustImbalance ? -dustImbalance[1] : undefined;
   }
+
   balanceTx(txi: Transaction<Signaturish, Proofish, Bindingish>): Transaction<Signaturish, Proofish, Bindingish> {
     let tx = txi;
     const fees = undefined;
