@@ -59,7 +59,6 @@
           ./proof-server
           ./storage
           ./zkir
-          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto

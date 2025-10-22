@@ -24,7 +24,7 @@ use transient_crypto::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use zkir::IrSource;
+use zkir::{v2, v3, IrSource};
 
 struct JsKeyProvider(JsValue);
 
@@ -145,11 +145,33 @@ pub async fn prove(
         preimage.binding_input = fr_from_bigint(bi)?;
     }
     let provider = JsKeyProvider(provider);
-    let proof = preimage
-        .prove::<IrSource>(OsRng, &provider, &provider)
-        .await
-        .map_err(|e| JsError::new(&e.to_string()))?
-        .0;
+
+    let Some(data) = provider.resolve_key(preimage.key_location.clone()).await? else {
+        return Err(JsError::new(&format!(
+            "failed to resolve key at '{}'",
+            &preimage.key_location.0
+        )));
+    };
+
+    let ir = IrSource::from_tagged_reader(&data.ir_source[..])?;
+
+    let proof = match ir {
+        IrSource::V2(_) => {
+            preimage
+                .prove::<v2::IrSource>(OsRng, &provider, &provider)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?
+                .0
+        }
+        IrSource::V3(_) => {
+            preimage
+                .prove::<v3::IrSource>(OsRng, &provider, &provider)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?
+                .0
+        }
+    };
+
     let mut res = Vec::new();
     tagged_serialize(&proof, &mut res)?;
     Ok(Uint8Array::from(&res[..]))
@@ -165,7 +187,7 @@ pub async fn check(ser_preimage: Uint8Array, provider: JsValue) -> Result<Vec<Js
             &preimage.key_location.0
         )));
     };
-    let ir: IrSource = tagged_deserialize(&mut &data.ir_source[..])?;
+    let ir = IrSource::from_tagged_reader(&data.ir_source[..])?;
     let res = preimage
         .check(&ir)
         .map_err(|e| JsError::new(&e.to_string()))?;
@@ -216,6 +238,9 @@ impl WrappedProvingProvider {
 pub fn json_ir_to_binary(json: &str) -> Result<Uint8Array, JsError> {
     let ir: IrSource = IrSource::load(json.as_bytes())?;
     let mut buf = Vec::new();
-    tagged_serialize(&ir, &mut buf)?;
+    match &ir {
+        IrSource::V2(v2_ir) => tagged_serialize(v2_ir, &mut buf)?,
+        IrSource::V3(v3_ir) => tagged_serialize(v3_ir, &mut buf)?,
+    }
     Ok(buf[..].into())
 }

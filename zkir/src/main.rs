@@ -17,7 +17,7 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::tagged_serialize;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
@@ -85,10 +85,13 @@ fn maybe_bzkir(path: impl AsRef<Path>) -> anyhow::Result<IrSource> {
         Some(Some("zkir")) => {
             let ir = IrSource::load(BufReader::new(File::open(&path)?))?;
             let mut bzkir = BufWriter::new(File::create(path.as_ref().with_extension("bzkir"))?);
-            tagged_serialize(&ir, &mut bzkir)?;
+            match &ir {
+                IrSource::V2(v2_ir) => tagged_serialize(v2_ir, &mut bzkir)?,
+                IrSource::V3(v3_ir) => tagged_serialize(v3_ir, &mut bzkir)?,
+            }
             Ok(ir)
         }
-        _ => Ok(tagged_deserialize(&mut BufReader::new(File::open(path)?))?),
+        _ => Ok(IrSource::from_tagged_reader(BufReader::new(File::open(path)?))?),
     }
 }
 

@@ -38,8 +38,8 @@ use transient_crypto::proofs::{
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[tag = "ir-source[v3]"]
 pub struct IrSource {
-    /// The number of inputs, the initial elements in the memory
-    pub num_inputs: u32,
+    /// The list of input identifiers for this circuit
+    pub inputs: Vec<Identifier>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -124,7 +124,7 @@ fn field_deser<'a, D: serde::Deserializer<'a>>(deserializer: D) -> Result<Fr, D:
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[serde(rename_all = "snake_case", tag = "op")]
-#[tag = "ir-instruction[v2]"]
+#[tag = "ir-instruction[v3]"]
 pub enum Instruction {
     /// Assert that variable has value `1`. UB if variable is not `0` or `1`.
     ///

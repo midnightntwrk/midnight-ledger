@@ -207,17 +207,17 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
-        if preimage.inputs.len() != self.num_inputs as usize {
+        if preimage.inputs.len() != self.inputs.len() {
             bail!(
                 "Expected {} inputs, received {}",
-                self.num_inputs,
+                self.inputs.len(),
                 preimage.inputs.len()
             );
         }
         let mut memory: HashMap<Identifier, Fr> = HashMap::new();
-        // Initialize memory with inputs using v_0, v_1, etc.
-        for (i, input) in preimage.inputs.iter().enumerate() {
-            memory.insert(Identifier::from_index(i as u32), *input);
+        // Initialize memory with the named inputs
+        for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
+            memory.insert(id.clone(), *input);
         }
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
@@ -585,12 +585,11 @@ impl Relation for IrSource {
         _instance: Value<Self::Instance>,
         witness: Value<Self::Witness>,
     ) -> Result<(), Error> {
-        // Extract input values for initial variables (v_0, v_1, etc.)
+        // Extract input values using the named identifiers
         let mut input_values = Vec::new();
-        for i in 0..self.num_inputs {
-            let id = Identifier::from_index(i);
+        for id in &self.inputs {
             let value = witness.as_ref().map(|preproc| {
-                preproc.memory.get(&id).copied().unwrap_or(0.into())
+                preproc.memory.get(id).copied().unwrap_or(0.into())
             });
             input_values.push(value);
         }
@@ -598,11 +597,11 @@ impl Relation for IrSource {
         let binding_input_value = witness.as_ref().map(|preproc| preproc.binding_input);
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
-        // Initialize memory HashMap with assigned inputs
+        // Initialize memory HashMap with assigned inputs using actual identifiers
         let mut memory: HashMap<Identifier, AssignedNative<outer::Scalar>> = HashMap::new();
-        for (i, value) in input_values.into_iter().enumerate() {
+        for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
             let assigned = std.assign(layouter, value)?;
-            memory.insert(Identifier::from_index(i as u32), assigned);
+            memory.insert(id.clone(), assigned);
         }
 
         let binding_input = std.assign(layouter, binding_input_value)?;
@@ -877,10 +876,9 @@ impl Relation for IrSource {
             let comm_comm_rand = std.assign(layouter, comm_comm_rand_value)?;
 
             let mut preimage = vec![comm_comm_rand];
-            // Collect input values in order (v_0, v_1, ...)
-            for i in 0..self.num_inputs {
-                let id = Identifier::from_index(i);
-                if let Some(val) = memory.get(&id) {
+            // Collect input values using named identifiers
+            for id in &self.inputs {
+                if let Some(val) = memory.get(id) {
                     preimage.push(val.clone());
                 }
             }
