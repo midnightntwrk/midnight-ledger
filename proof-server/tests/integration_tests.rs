@@ -14,7 +14,7 @@
 #![deny(warnings)]
 
 use base_crypto::{self, time::Timestamp};
-use ledger::structure::{Intent, LedgerState, SignatureKind};
+use ledger::structure::{Intent, LedgerState, SignatureKind, ContractDeploy, ProofMarker, ProofPreimageMarker, Transaction};
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
 use std::borrow::Cow;
@@ -26,8 +26,7 @@ use std::time::Duration;
 #[cfg(test)]
 use std::{sync::mpsc, thread};
 use storage::arena::Sp;
-use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::proofs::KeyLocation;
+use transient_crypto::{commitment::PedersenRandomness, proofs::KeyLocation};
 use zswap::Delta;
 
 use actix_web::{dev::ServerHandle, rt};
@@ -43,10 +42,10 @@ use serialize::{tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 
-use ledger::structure::{ContractDeploy, ProofMarker, ProofPreimageMarker, Transaction};
 #[allow(deprecated)]
-use ledger::test_utilities::{Resolver, serialize_request_body, test_resolver, verifier_key};
+use ledger::test_utilities::{ProofServerProvider, Resolver, serialize_request_body, test_resolver, verifier_key};
 use midnight_proof_server::server;
+use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use regex::Regex;
 
 const NUM_WORKERS: usize = 2;
@@ -318,6 +317,7 @@ async fn integration_tests() {
     test_prove_should_fail_with_double_zk_config().await;
     test_prove_should_fail_with_swapped_zk_config_values().await;
     test_prove_should_fail_with_wrong_circuit_id().await;
+    test_prove_should_generate_valid_proof_for_smallest_transaction().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -520,7 +520,7 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
         assert_eq!(response.status(), 400);
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
-    } 
+    }
 }
 
 // Negative test: `/prove` must reject payloads whose ZK Config contains an
@@ -545,6 +545,46 @@ async fn test_prove_should_fail_with_wrong_circuit_id() {
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
     } 
+}
+
+// Scenario: Generate valid proof – smallest size transaction
+// Given: Minimal transaction on "local-test" (no inputs/outputs; default fields)
+// When: It is proved via `Transaction::prove` using a `ProofServerProvider` (new `/prove` flow)
+// Then: We obtain a proven transaction that:
+//   - round-trips through tagged (de)serialization, and
+//   - is well-formed
+#[named]
+async fn test_prove_should_generate_valid_proof_for_smallest_transaction() {
+    setup_test(function_name!());
+
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        Transaction::new("local-test", Default::default(), None, Default::default());
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    let proven = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .expect("proving smallest transaction should succeed");
+
+    let mut bytes = Vec::new();
+    tagged_serialize(&proven, &mut bytes)
+        .expect("proven transaction should serialize successfully");
+    let round_trip: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
+        tagged_deserialize(&bytes[..]).expect("proven transaction should deserialize successfully");
+
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    round_trip
+        .well_formed(
+            &LedgerState::new("local-test"),
+            strictness,
+            Timestamp::from_secs(0),
+        )
+        .expect("proven smallest transaction should be well formed");
 }
 
 #[named]
