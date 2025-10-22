@@ -156,7 +156,7 @@ fn serialize_optional_date<S: serde::Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     if let Some(date) = date {
-        serde::Serializer::serialize_f64(serializer, date.get_time())
+        serde_wasm_bindgen::preserve::serialize(date, serializer)
     } else {
         serializer.serialize_none()
     }
