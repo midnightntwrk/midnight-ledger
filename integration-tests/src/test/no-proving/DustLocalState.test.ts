@@ -59,26 +59,24 @@ describe('Ledger API - DustLocalState', () => {
    */
   test('should print out information as string', () => {
     const localState = new DustLocalState(initialParameters);
-    const expected = `DustLocalState(
-    DustLocalState {
-        generating_tree: MerkleTree(root = Some(-)) {},
-        generating_tree_first_free: 0,
-        commitment_tree: MerkleTree(root = Some(-)) {},
-        commitment_tree_first_free: 0,
-        night_indices: {},
-        dust_utxos: {},
-        sync_time: Timestamp(
-            0,
+    const expected = `DustLocalState {
+    generating_tree: MerkleTree(root = Some(-)) {},
+    generating_tree_first_free: 0,
+    commitment_tree: MerkleTree(root = Some(-)) {},
+    commitment_tree_first_free: 0,
+    night_indices: {},
+    dust_utxos: {},
+    sync_time: Timestamp(
+        0,
+    ),
+    params: DustParameters {
+        night_dust_ratio: ${NIGHT_DUST_RATIO},
+        generation_decay_rate: ${GENERATION_DECAY_RATE},
+        dust_grace_period: Duration(
+            ${DUST_GRACE_PERIOD_IN_SECONDS},
         ),
-        params: DustParameters {
-            night_dust_ratio: ${NIGHT_DUST_RATIO},
-            generation_decay_rate: ${GENERATION_DECAY_RATE},
-            dust_grace_period: Duration(
-                ${DUST_GRACE_PERIOD_IN_SECONDS},
-            ),
-        },
     },
-)`;
+}`;
 
     expect(localState.toString()).toEqual(expected);
   });
