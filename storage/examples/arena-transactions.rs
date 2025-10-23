@@ -4,8 +4,7 @@
 //! `test_*` functions for example usage.
 use midnight_storage::{
     DefaultDB, Storage,
-    arena::test_helpers,
-    arena::{Arena, ArenaHash, Sp},
+    arena::{Arena, ArenaHash, ArenaKey, Sp, test_helpers},
     db::DB,
 };
 use std::{any::Any, collections::HashMap};
@@ -26,8 +25,8 @@ use std::{any::Any, collections::HashMap};
 #[derive(Debug)]
 pub struct GcRootUpdateQueue<D: DB> {
     arena: Arena<D>,
-    sps: HashMap<ArenaHash<D::Hasher>, Box<dyn Any>>,
-    persist_counts: HashMap<ArenaHash<D::Hasher>, i32>,
+    sps: HashMap<ArenaKey<D::Hasher>, Box<dyn Any>>,
+    persist_counts: HashMap<ArenaKey<D::Hasher>, i32>,
 }
 
 impl<D: DB> GcRootUpdateQueue<D> {
@@ -80,7 +79,11 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// point, e.g. by calling
     /// [`midnight_storage::backend::StorageBackend::flush_all_changes_to_db`].
     pub fn commit(self) {
-        for (key, count) in self.persist_counts {
+        for (key, count) in self
+            .persist_counts
+            .iter()
+            .flat_map(|(key, count)| key.refs().into_iter().map(|hash| (hash.clone(), *count)))
+        {
             if count > 0 {
                 for _ in 0..count {
                     self.arena.with_backend(|b| b.persist(&key));
@@ -101,13 +104,17 @@ impl<D: DB> GcRootUpdateQueue<D> {
     /// returned by this function `k` will be mapped to 1 (i.e. 2 - 1).
     pub fn get_roots(&self) -> HashMap<ArenaHash<D::Hasher>, u32> {
         let mut roots = self.arena.with_backend(|b| b.get_roots());
-        for (key, queue_count) in &self.persist_counts {
+        for (key, queue_count) in self
+            .persist_counts
+            .iter()
+            .flat_map(|(key, count)| key.refs().into_iter().map(|hash| (hash.clone(), *count)))
+        {
             let db_count = roots.entry(key.clone()).or_insert(0);
-            let net_count = *db_count as i32 + *queue_count;
+            let net_count = *db_count as i32 + queue_count;
             assert!(net_count >= 0, "gc root count underflow");
             *db_count = net_count as u32;
             if net_count == 0 {
-                roots.remove(key);
+                roots.remove(&key);
             }
         }
         roots
@@ -175,16 +182,28 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     drop(sp3);
 
     // Check that the gc root counts haven't been updated yet.
-    assert_eq!(test_helpers::get_root_count(arena, &k1.clone().into()), 1);
-    assert_eq!(test_helpers::get_root_count(arena, &k2.clone().into()), 1);
-    assert_eq!(test_helpers::get_root_count(arena, &k3.clone().into()), 0);
+    assert!(
+        k1.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 1)
+    );
+    assert!(
+        k2.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 1)
+    );
+    assert!(
+        k3.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 0)
+    );
 
     // Check that `GcRootUpdateQueue::get_roots` correctly takes the
     // uncommitted root updates into account.
     assert_eq!(queue.get_roots(), {
         let mut roots = HashMap::new();
-        roots.insert(k1.clone().into(), 2);
-        roots.insert(k3.clone().into(), 2);
+        roots.extend(k1.refs().iter().map(|x| ((*x).clone(), 2)));
+        roots.extend(k3.refs().iter().map(|x| ((*x).clone(), 2)));
         roots
     });
 
@@ -192,9 +211,21 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     queue.commit();
 
     // Check that the gc root counts have been updated correctly.
-    assert_eq!(test_helpers::get_root_count(arena, &k1.into()), 2);
-    assert_eq!(test_helpers::get_root_count(arena, &k2.into()), 0);
-    assert_eq!(test_helpers::get_root_count(arena, &k3.into()), 2);
+    assert!(
+        k1.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 2)
+    );
+    assert!(
+        k2.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 0)
+    );
+    assert!(
+        k3.refs()
+            .iter()
+            .all(|r| test_helpers::get_root_count(arena, &r) == 2)
+    );
 }
 
 /// Check that queuing a gc-root update doesn't keep child `Sp`s cached in
@@ -211,8 +242,18 @@ pub fn test_gc_root_update_queue_no_leak() {
     queue.persist(&sp_parent);
     drop(sp_child);
     drop(sp_parent);
-    assert!(test_helpers::read_sp_cache::<_, u32>(arena, &key_child.into()).is_none());
-    assert!(test_helpers::read_sp_cache::<_, Option<Sp<u32>>>(arena, &key_parent.into()).is_none());
+    assert!(
+        key_child
+            .refs()
+            .iter()
+            .all(|r| test_helpers::read_sp_cache::<_, u32>(arena, &r).is_none())
+    );
+    assert!(
+        key_parent
+            .refs()
+            .iter()
+            .all(|r| test_helpers::read_sp_cache::<_, Option<Sp<u32>>>(arena, &r).is_none())
+    );
 }
 
 #[cfg(test)]

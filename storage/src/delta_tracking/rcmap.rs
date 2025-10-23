@@ -15,7 +15,7 @@
 use crate::Storable;
 use crate::arena::{ArenaHash, ArenaKey};
 use crate::db::DB;
-use crate::storable::Loader;
+use crate::storable::{Loader, child_from};
 use crate::storage::Map;
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
@@ -43,34 +43,78 @@ impl<D: DB> ChildRef<D> {
     }
 }
 
+// NOTE: This previously used to be much simpler, just returning the reference
+// as the singular child.
+//
+// This ceased to work with the small nodes optimisation, because of a tacit
+// assumptions that this child would be present in backend storage. This is
+// guarnateed if *this* object is also in backend storage, which is *only*
+// guarnateed if one of its parents is in storage *or* it gets allocated as an
+// `ArenaKey::Ref` (that is, is not a small node itself).
+//
+// The result was that small ref nodes would not get allocated, and then when
+// trying to traverse the child nodes the operation would fail.
+//
+// To circumvent this, we make sure that the ref node is *the same* as the thing
+// its referencing from a backend perspective, that way we can always traverse
+// the children -- either directly (if its a small node) or through the backend
+// (if its a ref).
+//
+// To do this, we need to hack the Storable implementation to match what its
+// referencing, which we do by resolving refs with the backend.
+//
+// This is quite brittle, as it still relies on the referenced key actually
+// being in the backend. In particular, this doesn't tolerate untrusted inputs
+// well, which is the case in contract deployments. Thankfully, in this case we
+// validate that the rcmap matches that computed directly from the state.
+//
+// Nevertheless, longer term it may make sense to change this structure to use
+// Sp<dyn Any, D> instead, though we current don't have good mechanisms for
+// casting or retrieving those.
 impl<D: DB> Storable<D> for ChildRef<D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        vec![self.child.clone()]
+        match &self.child {
+            ArenaKey::Direct(direct) => (*direct.children).clone(),
+            ArenaKey::Ref(ref_) => {
+                let obj = crate::storage::default_storage::<D>()
+                    .arena
+                    .with_backend(|backend| backend.get(&ref_).cloned())
+                    .expect("Referenced object must be in storage");
+                obj.children
+            }
+        }
     }
 
-    fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
     where
         Self: Sized,
     {
-        // All information is in the child
-        Ok(())
+        match &self.child {
+            ArenaKey::Direct(direct) => writer.write_all(&direct.data[..]),
+            ArenaKey::Ref(ref_) => {
+                let obj = crate::storage::default_storage::<D>()
+                    .arena
+                    .with_backend(|backend| backend.get(&ref_).cloned())
+                    .expect("Referenced object must be in storage");
+                writer.write_all(&obj.data[..])
+            }
+        }
     }
 
     fn from_binary_repr<R: std::io::Read>(
-        _reader: &mut R,
+        reader: &mut R,
         children: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
         _loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized,
     {
-        match children.next() {
-            Some(child) => Ok(ChildRef::new(child)),
-            _ => Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "ChildRef missing child key",
-            )),
-        }
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let children = children.collect::<Vec<_>>();
+        Ok(Self {
+            child: child_from(&data, &children),
+        })
     }
 }
 
@@ -295,10 +339,11 @@ pub(crate) mod tests {
     #[test]
     fn keyref_round_trip_storable() {
         // Create a dummy value to get an arena key
-        let val = Sp::<_, InMemoryDB>::new(42u64);
-        let key = val.root.clone();
-        let keyref = ChildRef::<InMemoryDB>::new(ArenaKey::Ref(key));
+        let val = Sp::<_, InMemoryDB>::new([0u8; 1024]);
+        let key = val.as_child();
+        let keyref = ChildRef::<InMemoryDB>::new(key);
 
+        let _ = Sp::new(keyref.clone());
         // Create a vector with 3 of the same ChildRef
         let keyrefs = vec![
             Sp::new(keyref.clone()),
@@ -365,131 +410,118 @@ pub(crate) mod tests {
     #[test]
     fn rcmap_operations() {
         // Create test keys using simple u8 values
-        let val1 = Sp::<_, InMemoryDB>::new(1u8);
-        let key1 = val1.root.clone();
-        let val2 = Sp::<_, InMemoryDB>::new(2u8);
-        let key2 = val2.root.clone();
-        let val3 = Sp::<_, InMemoryDB>::new(3u8);
-        let key3 = val3.root.clone();
+        let val1 = Sp::<_, InMemoryDB>::new([1u8; 1024]);
+        let key1 = val1.as_child();
+        let ArenaKey::Ref(hash1) = key1.clone() else {
+            panic!("testing refs");
+        };
+        let val2 = Sp::<_, InMemoryDB>::new([2u8; 1024]);
+        let key2 = val2.as_child();
+        let ArenaKey::Ref(hash2) = key2.clone() else {
+            panic!("testing refs");
+        };
+        let val3 = Sp::<_, InMemoryDB>::new([3u8; 1024]);
+        let key3 = val3.as_child();
+        let ArenaKey::Ref(hash3) = key3.clone() else {
+            panic!("testing refs");
+        };
 
-        let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key1, 0);
+        let rcmap = RcMap::<InMemoryDB>::default().ins_root(key1.clone());
 
         // Test initialize_key sets rc=0
-        assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key1.clone())),
-            Some(0),
-            "get_rc should return 0"
-        );
+        assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
+        assert!(rcmap.rc_0.contains_key(&key1), "key1 should be in rc_0 map");
         assert!(
-            rcmap.rc_0.contains_key(&ArenaKey::Ref(key1.clone())),
-            "key1 should be in rc_0 map"
-        );
-        assert!(
-            !rcmap.rc_ge_1.contains_key(&key1),
+            !rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should not be in rc_ge_1 map"
         );
 
         // Test increment_rc from 0 to 1 moves to rc_ge_1
-        let rcmap = rcmap.modify_rc(&key1, 1);
-        assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key1.clone())),
-            Some(1),
-            "get_rc should return 1"
-        );
+        let rcmap = rcmap.modify_rc(&hash1, 1);
+        assert_eq!(rcmap.get_rc(&key1), Some(1), "get_rc should return 1");
         assert!(
-            !rcmap.rc_0.contains_key(&ArenaKey::Ref(key1.clone())),
+            !rcmap.rc_0.contains_key(&key1),
             "key1 should not be in rc_0 map"
         );
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should be in rc_ge_1 map"
         );
 
         // Test increment_rc multiple times
-        let rcmap = rcmap.modify_rc(&key1, 2);
-        let rcmap = rcmap.modify_rc(&key1, 3);
-        assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key1.clone())),
-            Some(3),
-            "get_rc should return 3"
-        );
+        let rcmap = rcmap.modify_rc(&hash1, 2);
+        let rcmap = rcmap.modify_rc(&hash1, 3);
+        assert_eq!(rcmap.get_rc(&key1), Some(3), "get_rc should return 3");
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should remain in rc_ge_1 map"
         );
 
         // Test decrement_rc multiple times
-        let rcmap = rcmap.modify_rc(&key1, 2);
-        let rcmap = rcmap.modify_rc(&key1, 1);
+        let rcmap = rcmap.modify_rc(&hash1, 2);
+        let rcmap = rcmap.modify_rc(&hash1, 1);
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should still be in rc_ge_1 map"
         );
 
         // Test decrement_rc from 1 to 0 moves back to rc_0
-        let rcmap = rcmap.modify_rc(&key1, 0);
-        assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key1.clone())),
-            Some(0),
-            "get_rc should return 0"
-        );
+        let rcmap = rcmap.modify_rc(&hash1, 0);
+        assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
         assert!(
-            rcmap.rc_0.contains_key(&ArenaKey::Ref(key1.clone())),
+            rcmap.rc_0.contains_key(&key1),
             "key1 should be back in rc_0 map"
         );
         assert!(
-            !rcmap.rc_ge_1.contains_key(&key1),
+            !rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should not be in rc_ge_1 map"
         );
 
         // Test get_rc on nonexistent key returns None
         assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key2.clone())),
+            rcmap.get_rc(&key2),
             None,
             "get_rc on nonexistent key should return None"
         );
 
         // Test multiple keys
-        let rcmap = rcmap.modify_rc(&key2, 1);
-        let rcmap = rcmap.modify_rc(&key3, 2);
+        let rcmap = rcmap.modify_rc(&hash2, 1);
+        let rcmap = rcmap.modify_rc(&hash3, 2);
 
         // Verify all keys have correct reference counts
-        assert_eq!(rcmap.get_rc(&ArenaKey::Ref(key1.clone())), Some(0));
-        assert_eq!(rcmap.get_rc(&ArenaKey::Ref(key2.clone())), Some(1));
-        assert_eq!(rcmap.get_rc(&ArenaKey::Ref(key3.clone())), Some(2));
+        assert_eq!(rcmap.get_rc(&key1), Some(0));
+        assert_eq!(rcmap.get_rc(&key2), Some(1));
+        assert_eq!(rcmap.get_rc(&key3), Some(2));
 
         // Verify correct map placement
-        assert!(rcmap.rc_0.contains_key(&ArenaKey::Ref(key1.clone())));
-        assert!(rcmap.rc_ge_1.contains_key(&key2));
-        assert!(rcmap.rc_ge_1.contains_key(&key3));
+        assert!(rcmap.rc_0.contains_key(&key1));
+        assert!(rcmap.rc_ge_1.contains_key(&hash2));
+        assert!(rcmap.rc_ge_1.contains_key(&hash3));
 
         // Test remove_unreachable_key functionality
         // Remove key1 (rc=0) should succeed
-        let rcmap_new = rcmap.remove_unreachable_key(&ArenaKey::Ref(key1.clone()));
+        let rcmap_new = rcmap.remove_unreachable_key(&key1);
         assert!(
             rcmap_new.is_some(),
             "remove_unreachable_key should succeed for rc=0 key"
         );
         let rcmap = rcmap_new.unwrap();
-        assert!(
-            !rcmap.contains(&ArenaKey::Ref(key1.clone())),
-            "key1 should no longer be in rcmap"
-        );
+        assert!(!rcmap.contains(&key1), "key1 should no longer be in rcmap");
         assert_eq!(
-            rcmap.get_rc(&ArenaKey::Ref(key1.clone())),
+            rcmap.get_rc(&key1),
             None,
             "get_rc should return None for removed key"
         );
 
         // Remove key2 (rc=1) should fail
-        let rcmap_new = rcmap.remove_unreachable_key(&ArenaKey::Ref(key2.clone()));
+        let rcmap_new = rcmap.remove_unreachable_key(&key2);
         assert!(
             rcmap_new.is_none(),
             "remove_unreachable_key should fail for rc>0 key"
         );
 
         // Remove nonexistent key should fail
-        let rcmap_new = rcmap.remove_unreachable_key(&ArenaKey::Ref(key1.clone()));
+        let rcmap_new = rcmap.remove_unreachable_key(&key1);
         assert!(
             rcmap_new.is_none(),
             "remove_unreachable_key should fail for nonexistent key"
