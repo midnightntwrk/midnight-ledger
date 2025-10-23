@@ -26,7 +26,8 @@ use std::time::Duration;
 #[cfg(test)]
 use std::{sync::mpsc, thread};
 use storage::arena::Sp;
-use transient_crypto::{commitment::PedersenRandomness, proofs::KeyLocation};
+use transient_crypto::commitment::PedersenRandomness;
+use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as _};
 use zswap::Delta;
 
 use actix_web::{dev::ServerHandle, rt};
@@ -38,12 +39,11 @@ use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use reqwest::Client;
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::{Tagged, tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 
-#[allow(deprecated)]
-use ledger::test_utilities::{ProofServerProvider, Resolver, serialize_request_body, test_resolver, verifier_key};
+use ledger::test_utilities::{ProofServerProvider, Resolver, test_resolver, verifier_key};
 use midnight_proof_server::server;
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use regex::Regex;
@@ -138,7 +138,6 @@ async fn serialized_body_with_double_zk_config() -> Vec<u8> {
 // Builds an invalid body by swapping the values of two ZK Config entries.
 // Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject with 400.
 async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
-
     let valid_body = serialized_valid_body().await;
     let (tx, keys): (
         Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
@@ -219,16 +218,51 @@ async fn serialized_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
     Some(payload)
 }
 
+// Builds the **canonical /prove request body** for a normal valid transaction.
 async fn serialized_valid_body() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
-    #[allow(deprecated)]
-    serialize_request_body(&tx, &RESOLVER).await.unwrap()
+    serialize_transaction_payload(&tx, &RESOLVER).await
 }
 
+// Builds the **canonical /prove request body** for the smallest transaction we use in tests
+// (a minimal zswap variant).
 async fn serialized_valid_zswap_body() -> Vec<u8> {
     let tx = valid_unbalanced_zswap(1);
-    #[allow(deprecated)]
-    serialize_request_body(&tx, &RESOLVER).await.unwrap()
+    serialize_transaction_payload(&tx, &RESOLVER).await
+}
+
+// Serializes a given **unproven transaction (preimage)** plus resolver-provided proving keys
+// into the exact tagged payload that `/prove` expects.
+async fn serialize_transaction_payload<S, D>(
+    tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
+    resolver: &Resolver,
+) -> Vec<u8>
+where
+    S: SignatureKind<D> + Tagged,
+    D: DB,
+{
+    let circuits_used = tx
+        .calls()
+        .into_iter()
+        .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
+        .collect::<Vec<_>>();
+
+    let mut keys: std::collections::HashMap<KeyLocation, ProvingKeyMaterial> =
+        std::collections::HashMap::new();
+    for circuit in circuits_used {
+        let location = KeyLocation(Cow::Owned(circuit));
+        if let Some(material) = resolver
+            .resolve_key(location.clone())
+            .await
+            .expect("resolver should resolve keys")
+        {
+            keys.insert(location, material);
+        }
+    }
+
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, keys), &mut payload).expect("transaction payload should serialize");
+    payload
 }
 
 fn valid_unbalanced_zswap(
@@ -298,6 +332,31 @@ async fn valid_tx<S: SignatureKind<D>, D: DB>()
     tx
 }
 
+// Builds a large valid *unproven* transaction (preimage form) for stress-testing proving.
+async fn large_valid_tx<S: SignatureKind<D>, D: DB>(
+    num_intents: usize,
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
+    let mut rng = StdRng::seed_from_u64(0x4242);
+
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let contract = ContractState::new(
+        stval!([(0u64), (false), (0u64)]),
+        HashMap::new().insert(b"count"[..].into(), count_op.clone()),
+        Default::default(),
+    );
+
+    let mut intents =
+        HashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+
+    for i in 0..num_intents {
+        let deploy = ContractDeploy::new(&mut rng, contract.clone());
+        let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
+        intents = intents.insert(i as u16 + 1, intent);
+    }
+
+    Transaction::new("local-test", intents, None, Default::default())
+}
+
 fn setup_test(name: &str) {
     log::info!("Running test: {}", name);
 }
@@ -318,6 +377,7 @@ async fn integration_tests() {
     test_prove_should_fail_with_swapped_zk_config_values().await;
     test_prove_should_fail_with_wrong_circuit_id().await;
     test_prove_should_generate_valid_proof_for_smallest_transaction().await;
+    test_prove_should_generate_valid_proof_for_big_transaction().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
@@ -544,7 +604,7 @@ async fn test_prove_should_fail_with_wrong_circuit_id() {
         assert_eq!(response.status(), 400);
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
-    } 
+    }
 }
 
 // Scenario: Generate valid proof – smallest size transaction
@@ -585,6 +645,45 @@ async fn test_prove_should_generate_valid_proof_for_smallest_transaction() {
             Timestamp::from_secs(0),
         )
         .expect("proven smallest transaction should be well formed");
+}
+
+// Scenario: Generate valid proof – big transaction
+// Given: Large contract deployment transaction on "local-test" with many intents
+// When: It is proved via `Transaction::prove` using a `ProofServerProvider`
+// Then: We obtain a proven transaction that can be serialized, deserialized, and validated
+#[named]
+async fn test_prove_should_generate_valid_proof_for_big_transaction() {
+    setup_test(function_name!());
+
+    const NUM_INTENTS: usize = 32;
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        large_valid_tx(NUM_INTENTS).await;
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    let proven = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .expect("proving big transaction should succeed");
+
+    let mut bytes = Vec::new();
+    tagged_serialize(&proven, &mut bytes)
+        .expect("proven transaction should serialize successfully");
+    let round_trip: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
+        tagged_deserialize(&bytes[..]).expect("proven transaction should deserialize successfully");
+
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    round_trip
+        .well_formed(
+            &LedgerState::new("local-test"),
+            strictness,
+            Timestamp::from_secs(0),
+        )
+        .expect("proven big transaction should be well formed");
 }
 
 #[named]
