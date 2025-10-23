@@ -1410,9 +1410,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             );
             *self = new_sp;
         }
-        // FIXME: Don't persist the root!
         self.arena
-            .with_backend(|backend| backend.persist(&self.root));
+            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.persist(&ref_)));
     }
 
     /// Notify the storage back-end to decrement the persist count on this
@@ -1420,9 +1419,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     ///
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
-        // FIXME: Don't persist the root!
         self.arena
-            .with_backend(|backend| backend.unpersist(&self.root));
+            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.unpersist(&ref_)));
     }
 
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
