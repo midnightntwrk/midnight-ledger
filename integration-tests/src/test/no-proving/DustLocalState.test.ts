@@ -59,26 +59,24 @@ describe('Ledger API - DustLocalState', () => {
    */
   test('should print out information as string', () => {
     const localState = new DustLocalState(initialParameters);
-    const expected = `DustLocalState(
-    DustLocalState {
-        generating_tree: MerkleTree(root = Some(-)) {},
-        generating_tree_first_free: 0,
-        commitment_tree: MerkleTree(root = Some(-)) {},
-        commitment_tree_first_free: 0,
-        night_indices: {},
-        dust_utxos: {},
-        sync_time: Timestamp(
-            0,
+    const expected = `DustLocalState {
+    generating_tree: MerkleTree(root = Some(-)) {},
+    generating_tree_first_free: 0,
+    commitment_tree: MerkleTree(root = Some(-)) {},
+    commitment_tree_first_free: 0,
+    night_indices: {},
+    dust_utxos: {},
+    sync_time: Timestamp(
+        0,
+    ),
+    params: DustParameters {
+        night_dust_ratio: ${NIGHT_DUST_RATIO},
+        generation_decay_rate: ${GENERATION_DECAY_RATE},
+        dust_grace_period: Duration(
+            ${DUST_GRACE_PERIOD_IN_SECONDS},
         ),
-        params: DustParameters {
-            night_dust_ratio: ${NIGHT_DUST_RATIO},
-            generation_decay_rate: ${GENERATION_DECAY_RATE},
-            dust_grace_period: Duration(
-                ${DUST_GRACE_PERIOD_IN_SECONDS},
-            ),
-        },
     },
-)`;
+}`;
 
     expect(localState.toString()).toEqual(expected);
   });
@@ -248,6 +246,45 @@ describe('Ledger API - DustLocalState', () => {
 
     expect(state.dust.utxos.length).toEqual(1);
     expect(state.dust.walletBalance(state.time)).toEqual(NIGHT_DUST_RATIO * halfAmount);
+  });
+
+  test('should set the generation info dtime correctly', () => {
+    const signingKey = sampleSigningKey();
+    const verifyingKey = signatureVerifyingKey(signingKey);
+    const bobAddress: UserAddress = addressFromKey(verifyingKey);
+    const state = TestState.new();
+
+    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+    expect(state.dust.utxos.length).toEqual(1);
+    expect(state.dust.generationInfo(state.dust.utxos[0])!.dtime).toBeUndefined();
+
+    const utxoIh: IntentHash = state.ledger.utxo.utxos.values().next().value!.intentHash;
+    const intent = Intent.new(state.time);
+    const inputs: UtxoSpend[] = [
+      {
+        value: INITIAL_NIGHT_AMOUNT,
+        owner: state.nightKey.verifyingKey(),
+        type: DEFAULT_TOKEN_TYPE,
+        intentHash: utxoIh,
+        outputNo: 0
+      }
+    ];
+
+    const outputs: UtxoOutput[] = [
+      {
+        owner: bobAddress,
+        type: DEFAULT_TOKEN_TYPE,
+        value: INITIAL_NIGHT_AMOUNT
+      }
+    ];
+
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+    const balancedTx = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balancedTx, new WellFormedStrictness(), balancedTx.cost(state.ledger.parameters));
+
+    expect(state.dust.utxos.length).toEqual(1);
+    expect(state.dust.generationInfo(state.dust.utxos[0])!.dtime).toBeInstanceOf(Date);
   });
 
   /**
