@@ -14,7 +14,11 @@
 #![deny(warnings)]
 
 use base_crypto::{self, time::Timestamp};
-use ledger::structure::{Intent, LedgerState, SignatureKind, ContractDeploy, ProofMarker, ProofPreimageMarker, Transaction};
+use ledger::error::TransactionProvingError;
+use ledger::structure::{
+    ContractDeploy, Intent, LedgerState, ProofMarker, ProofPreimageMarker, SignatureKind,
+    Transaction,
+};
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
 use std::borrow::Cow;
@@ -174,8 +178,8 @@ async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     entries[1] = (k2, v1);
 
     let swapped_keys = entries
-    .into_iter()
-    .collect::<std::collections::HashMap<_, _>>();
+        .into_iter()
+        .collect::<std::collections::HashMap<_, _>>();
     let mut payload = Vec::new();
     tagged_serialize(&(tx, swapped_keys), &mut payload).expect("swapped payload should serialize");
     Some(payload)
@@ -311,6 +315,12 @@ fn valid_unbalanced_zswap(
 
 async fn valid_tx<S: SignatureKind<D>, D: DB>()
 -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
+    valid_tx_with_network_id("local-test").await
+}
+
+async fn valid_tx_with_network_id<S: SignatureKind<D>, D: DB>(
+    network_id: &str,
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     let mut rng = StdRng::seed_from_u64(0x42);
 
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
@@ -327,9 +337,7 @@ async fn valid_tx<S: SignatureKind<D>, D: DB>()
     let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
     intents = intents.insert(1, intent);
 
-    let tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D> =
-        Transaction::new("local-test", intents, None, Default::default());
-    tx
+    Transaction::new(network_id, intents, None, Default::default())
 }
 
 // Builds a large valid *unproven* transaction (preimage form) for stress-testing proving.
@@ -361,6 +369,34 @@ fn setup_test(name: &str) {
     log::info!("Running test: {}", name);
 }
 
+fn set_network_id(value: &str) {
+    unsafe {
+        env::set_var("NETWORK_ID", value);
+    }
+}
+
+fn clear_network_id() {
+    unsafe {
+        env::remove_var("NETWORK_ID");
+    }
+}
+
+// Asserts that a network-ID mismatch was returned by the server.
+fn assert_network_id_error(msg: &str) {
+    assert!(
+        msg.contains("invalid network ID"),
+        "expected network ID error, got '{msg}'"
+    );
+    assert!(
+        msg.contains("Undeployed"),
+        "expected error to mention expected network ID, got '{msg}'"
+    );
+    assert!(
+        msg.contains("DevNet"),
+        "expected error to mention found network ID, got '{msg}'"
+    );
+}
+
 #[tokio::test]
 async fn integration_tests() {
     let _server_handle = setup(LIMIT).recv().unwrap();
@@ -384,6 +420,16 @@ async fn integration_tests() {
     test_health_check_still_works_when_server_is_fully_loaded().await;
 
     stop_server(_server_handle).await;
+
+    let previous_network_id = env::var("NETWORK_ID").ok();
+    set_network_id("Undeployed");
+    let _server_handle = setup(LIMIT).recv().unwrap();
+    test_prove_should_fail_with_mismatched_network_id().await;
+    stop_server(_server_handle).await;
+    match previous_network_id {
+        Some(value) => set_network_id(&value),
+        None => clear_network_id(),
+    }
 
     let _server_handle = setup(LIMIT).recv().unwrap();
     test_ready_reports_correct_job_numbers().await;
@@ -684,6 +730,43 @@ async fn test_prove_should_generate_valid_proof_for_big_transaction() {
             Timestamp::from_secs(0),
         )
         .expect("proven big transaction should be well formed");
+}
+
+// Negative test: proving must fail when the transaction `network_id` does not
+// match the proof server's `NETWORK_ID`.
+// Given: Server with NETWORK_ID="Undeployed" and a tx tagged "DevNet".
+// When: We prove via `Transaction::prove` using a `ProofServerProvider`.
+// Then: It fails with "invalid network ID", naming expected "Undeployed" and found "DevNet".
+#[named]
+async fn test_prove_should_fail_with_mismatched_network_id() {
+    setup_test(function_name!());
+
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        valid_tx_with_network_id("DevNet").await;
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    match tx.prove(provider, &INITIAL_COST_MODEL).await {
+        Ok(proven) => {
+            let mut strictness = WellFormedStrictness::default();
+            strictness.enforce_balancing = false;
+            let err = proven
+                .well_formed(
+                    &LedgerState::new("Undeployed"),
+                    strictness,
+                    Timestamp::from_secs(0),
+                )
+                .expect_err("expected well-formed check to fail when network IDs mismatch");
+            assert_network_id_error(&err.to_string());
+        }
+        Err(TransactionProvingError::Proving(err)) => {
+            assert_network_id_error(&err.to_string());
+        }
+        Err(other) => panic!("expected proving error from server, got {other:?}"),
+    }
 }
 
 #[named]
