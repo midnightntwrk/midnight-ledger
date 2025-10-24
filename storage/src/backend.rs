@@ -467,11 +467,10 @@ impl<D: DB> StorageBackend<D> {
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ArenaKey<D::Hasher>>,
     ) {
-        // FIXME: re-enable
-        //assert!(
-        //    !self.live_inserts.contains(&key),
-        //    "a key can't be cached more than once without being uncached"
-        //);
+        assert!(
+            !self.live_inserts.contains(&key),
+            "a key can't be cached more than once without being uncached"
+        );
         self.live_inserts.insert(key.clone());
 
         // If this object is already in memory then there's nothing to change

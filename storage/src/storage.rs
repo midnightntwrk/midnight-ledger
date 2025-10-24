@@ -2576,7 +2576,7 @@ mod tests {
             let mut sp1 = arena.alloc(array1.clone());
             sp1.persist();
             storage1.with_backend(|backend| backend.flush_all_changes_to_db());
-            sp1.hash()
+            sp1.as_typed_key()
         };
         unsafe_drop_default_storage::<W<D>>();
         std::thread::sleep(std::time::Duration::from_secs(1));

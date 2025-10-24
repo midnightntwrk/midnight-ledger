@@ -78,6 +78,13 @@ pub struct TypedArenaKey<T, H: WellBehavedHasher> {
     _phantom: PhantomData<T>,
 }
 
+impl<T, H: WellBehavedHasher> TypedArenaKey<T, H> {
+    /// Returns the referenced children that are *not* directly embedded in this node.
+    pub fn refs(&self) -> Vec<&ArenaHash<H>> {
+        self.key.refs()
+    }
+}
+
 impl<T, H: WellBehavedHasher> From<TypedArenaKey<T, H>> for ArenaKey<H> {
     fn from(val: TypedArenaKey<T, H>) -> Self {
         val.key
@@ -733,9 +740,7 @@ impl<D: DB> Arena<D> {
         key: &ArenaHash<D::Hasher>,
     ) {
         RefCell::borrow_mut(metadata).remove(key);
-        // FIXME: Super temporary! Replace this with a tracking of Sp's being small, and that
-        // feeding into a param here.
-        // RefCell::borrow_mut(&self.lock_backend()).uncache(key);
+        RefCell::borrow_mut(&self.lock_backend()).uncache(key);
     }
 
     fn decrement_ref_locked(
@@ -1096,8 +1101,6 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
 }
 
 /// An intermediate raw binary representation of an arena object.
-/// FIXME: this probably breaks the new direct child on
-/// serialization/deserialization figure out what to do there.
 #[derive(Debug)]
 pub struct IntermediateRepr<D: DB> {
     binary_repr: std::vec::Vec<u8>,
@@ -1277,8 +1280,11 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// already registered root keys, so there is no harm in calling it if
     /// you're not sure.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
-        // This `increment_ref` will panic if `root` is not in `metadata`.
-        arena.increment_ref(&root);
+        // This `increment_ref` will panic if the child refs are not in `metadata`.
+        child_repr
+            .refs()
+            .into_iter()
+            .for_each(|hash| arena.increment_ref(hash));
         let data = OnceLock::new();
         Sp {
             data,
@@ -1405,7 +1411,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             *self = new_sp;
         }
         self.arena
-            .with_backend(|backend| backend.persist(&self.root));
+            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.persist(&ref_)));
     }
 
     /// Notify the storage back-end to decrement the persist count on this
@@ -1414,7 +1420,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
         self.arena
-            .with_backend(|backend| backend.unpersist(&self.root));
+            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.unpersist(&ref_)));
     }
 
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
@@ -1620,14 +1626,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
-        if let ArenaKey::Ref(_) = self.child_repr {
+        // We only need to do this on refs, because others aren't actually
+        // ref-counted. Additionally, note that if we have a Direct node here,
+        // then the children contained within this Sp will do their own cleanup.
+        self.unload();
+        if let ArenaKey::Ref(hash) = &self.child_repr {
             // It's important that we unload() before calling decrement_ref(),
             // because unload() is responsible for cleaning up the sp_cache, and
             // decrement_ref() is responsible for cleaning up the metadata, and the
             // invariant is that any Arc in the sp_cache must have a corresponding
             // entry in the metadata.
-            self.unload();
-            self.arena.decrement_ref(&self.root);
+            self.arena.decrement_ref(hash);
         }
     }
 }
@@ -2841,7 +2850,7 @@ mod tests {
 
             // Unload and get second pointer.
 
-            let key = bt1.root.clone();
+            let key = bt1.as_typed_key();
             bt1.unload();
             let bt2 = arena.get_lazy::<BinTree>(&key.into()).unwrap();
 
@@ -3040,12 +3049,9 @@ mod tests {
                     let unique_val = force_sp(&sp_unique);
                     assert_eq!(common_val, 0);
                     assert_eq!(unique_val, (i + 1) as u32);
+                    assert_eq!(arena.get(&common_sp.as_typed_key()).unwrap(), common_sp);
                     assert_eq!(
-                        arena.get(&common_sp.root.clone().into()).unwrap(),
-                        common_sp
-                    );
-                    assert_eq!(
-                        arena.get_lazy(&sp_unique.root.clone().into()).unwrap(),
+                        arena.get_lazy(&sp_unique.as_typed_key()).unwrap(),
                         sp_unique
                     );
                 }
