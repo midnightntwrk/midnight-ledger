@@ -74,7 +74,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
 #[cfg(feature = "proof-verifying")]
-const SPEND_VK_RAW: &[u8] = include_bytes!("../../static/dust/spend.verifier");
+const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
@@ -89,7 +89,7 @@ impl Resolver for DustResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
             "midnight/dust/spend" => {
-                concat!("dust/", include_str!("../../static/version"), "/spend")
+                concat!("dust/", midnight_static::version!(), "/spend")
             }
             _ => return Ok(None),
         };
@@ -1693,9 +1693,9 @@ impl<D: DB> DustLocalState<D> {
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("dust/", include_str!("../../static/version"), "/", $name),
+            concat!("dust/", midnight_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
-                &include_bytes!(concat!("../../static/dust/", $name, ".sha256"))
+                &include_bytes!(concat!("../static/dust/", $name, ".sha256"))
                     .split_at(64)
                     .0,
             ),

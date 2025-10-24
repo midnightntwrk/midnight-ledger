@@ -2884,6 +2884,7 @@ dependencies = [
  "midnight-ledger",
  "midnight-onchain-runtime",
  "midnight-serialize",
+ "midnight-static",
  "midnight-storage",
  "midnight-transient-crypto",
  "midnight-zswap",
@@ -3114,6 +3115,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-static"
+version = "1.0.0-alpha.4"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+]
+
+[[package]]
 name = "midnight-storage"
 version = "1.0.0-alpha.4"
 dependencies = [
@@ -3250,6 +3259,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-runtime",
  "midnight-serialize",
+ "midnight-static",
  "midnight-storage",
  "midnight-transient-crypto",
  "paste",

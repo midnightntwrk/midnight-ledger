@@ -44,9 +44,9 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("zswap/", include_str!("../../static/version"), "/", $name),
+            concat!("zswap/", midnight_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
-                &include_bytes!(concat!("../../static/zswap/", $name, ".sha256"))
+                &include_bytes!(concat!("../static/", $name, ".sha256"))
                     .split_at(64)
                     .0,
             ),
