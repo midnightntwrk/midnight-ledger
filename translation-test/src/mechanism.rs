@@ -220,7 +220,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
                 // the ref alive, like in the rcmap.
                 Some(res) => {
                     let sp = Sp::new(res);
-                    let keyref = Sp::new(ChildRef::new(sp.hash().into()));
+                    let keyref = Sp::new(ChildRef::new(sp.as_child()));
                     drop(sp);
                     Ok(StepResult::Finished(keyref))
                 }
@@ -229,7 +229,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         }
     }
     fn children(&self) -> std::vec::Vec<RawNode<D>> {
-        vec![self.value.hash().into()]
+        vec![self.value.as_child()]
     }
     fn to_binary_repr(&self, mut writer: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
         self.children_processed.serialize(&mut writer)
@@ -515,7 +515,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
     pub fn start(input: Sp<A, D>) -> io::Result<Self> {
         let tlid = TranslationId(A::tag(), B::tag());
         Ok(TypedTranslationState {
-            state: TranslationState::start(&tlid, input.hash().into())?,
+            state: TranslationState::start(&tlid, input.as_child())?,
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         })
@@ -524,7 +524,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
     pub fn change_target(&self, target: Sp<A, D>) -> io::Result<Self> {
         let tlid = TranslationId(A::tag(), B::tag());
         Ok(TypedTranslationState {
-            state: self.state.change_target(&tlid, target.hash().into())?,
+            state: self.state.change_target(&tlid, target.as_child())?,
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         })
@@ -549,7 +549,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
                 _phantom2: PhantomData,
             })),
             Either::Right(hash) => Ok(Either::Right(
-                default_storage::<D>().get_lazy(&hash.child.clone().into())?,
+                default_storage::<D>().get_lazy(&dbg!(hash).child.clone().into())?,
             )),
         }
     }

@@ -87,33 +87,46 @@ struct NestyLrToRlTranslation;
 
 impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTranslation {
     fn required_translations() -> Vec<TranslationId> {
-        vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())]
+        eprintln!("nesty required_translations 1");
+        let res = vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())];
+        eprintln!("nesty required_translations 2");
+        res
     }
     fn child_translations(source: &lr::Nesty<D>) -> Vec<(TranslationId, RawNode<D>)> {
+        eprintln!("nesty child_translations 1");
         let tlid = || TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
-        match source {
+        eprintln!("nesty child_translations 2");
+        let res = match source {
             lr::Nesty::Empty => vec![],
-            lr::Nesty::Node(_, a, b) => vec![(tlid(), a.hash().into()), (tlid(), b.hash().into())],
-        }
+            lr::Nesty::Node(_, a, b) => vec![(tlid(), a.as_child()), (tlid(), b.as_child())],
+        };
+        eprintln!("nesty child_translations 3");
+        res
     }
     fn finalize(
         source: &lr::Nesty<D>,
         limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<rl::Nesty<D>>> {
+        eprintln!("nesty finalise 1");
         let tlid = TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
+        eprintln!("nesty finalise 2");
         let storage = default_storage::<D>();
+        eprintln!("nesty finalise 3");
         // TODO: adjust limit
         match source {
             lr::Nesty::Empty => Ok(Some(rl::Nesty::Empty)),
             lr::Nesty::Node(n, a, b) => {
-                let Some(atrans) = cache.lookup(&tlid, a.hash().into()) else {
+                eprintln!("nesty finalise 3a");
+                let Some(atrans) = cache.lookup(&tlid, a.as_child()) else {
                     return Ok(None);
                 };
-                let Some(btrans) = cache.lookup(&tlid, b.hash().into()) else {
+                eprintln!("nesty finalise 3b");
+                let Some(btrans) = cache.lookup(&tlid, b.as_child()) else {
                     return Ok(None);
                 };
-                Ok(Some(rl::Nesty::Node(
+                eprintln!("nesty finalise 3c");
+                let res = Ok(Some(rl::Nesty::Node(
                     *n,
                     storage
                         .get_lazy(&btrans.child.into())
@@ -121,7 +134,9 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                     storage
                         .get_lazy(&atrans.child.into())
                         .expect("translated node must be in storage"),
-                )))
+                )));
+                eprintln!("nesty finalise 3d");
+                res
             }
         }
     }
@@ -146,7 +161,7 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
                     MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
                     MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
                 ),
-                source.foo.0.mpt.hash().into(),
+                source.foo.0.mpt.as_child(),
             ),
         ]
     }
@@ -159,7 +174,7 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
             MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
             MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
         );
-        let Some(footl) = cache.lookup(&foo_tlid, source.foo.0.mpt.hash().into()) else {
+        let Some(footl) = cache.lookup(&foo_tlid, source.foo.0.mpt.as_child()) else {
             return Ok(None);
         };
         let bar = HashMap(Map {
@@ -196,7 +211,7 @@ impl<D: DB>
                 merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
                 merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
             ),
-            source.0.hash().into(),
+            source.0.as_child(),
         )]
     }
     fn finalize(
@@ -208,7 +223,7 @@ impl<D: DB>
             merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
             merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
         );
-        let Some(tl) = cache.lookup(&tlid, source.0.hash().into()) else {
+        let Some(tl) = cache.lookup(&tlid, source.0.as_child()) else {
             return Ok(None);
         };
         Ok(Some(MerklePatriciaTrie(
@@ -252,16 +267,16 @@ impl<D: DB>
             merkle_patricia_trie::Node::Empty => vec![],
             merkle_patricia_trie::Node::Branch { children, .. } => children
                 .iter()
-                .map(|child| (self_tl.clone(), child.hash().into()))
+                .map(|child| (self_tl.clone(), child.as_child()))
                 .collect(),
             merkle_patricia_trie::Node::Extension { child, .. } => {
-                vec![(self_tl, child.hash().into())]
+                vec![(self_tl, child.as_child())]
             }
             merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => vec![
-                (entry_tl, value.hash().into()),
-                (self_tl, child.hash().into()),
+                (entry_tl, value.as_child()),
+                (self_tl, child.as_child()),
             ],
-            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.hash().into())],
+            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.as_child())],
         }
     }
     fn finalize(
@@ -283,7 +298,7 @@ impl<D: DB>
                 let mut new_children =
                     core::array::from_fn(|_| Sp::new(merkle_patricia_trie::Node::Empty));
                 for (child, new_child) in children.iter().zip(new_children.iter_mut()) {
-                    let Some(entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                    let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                         return Ok(None);
                     };
                     *new_child = default_storage::<D>().get_lazy(&entry.child.clone().into())?;
@@ -301,7 +316,7 @@ impl<D: DB>
                 compressed_path,
                 child,
             } => {
-                let Some(entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
                 let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
@@ -314,7 +329,7 @@ impl<D: DB>
                 }
             }
             merkle_patricia_trie::Node::Leaf { ann, value } => {
-                let Some(entry) = cache.lookup(&entry_tl, value.hash().into()) else {
+                let Some(entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
                 let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
@@ -323,10 +338,10 @@ impl<D: DB>
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
             merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child } => {
-                let Some(value_entry) = cache.lookup(&entry_tl, value.hash().into()) else {
+                let Some(value_entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
-                let Some(child_entry) = cache.lookup(&self_tl, child.hash().into()) else {
+                let Some(child_entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
                 let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
