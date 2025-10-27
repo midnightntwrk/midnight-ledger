@@ -1280,11 +1280,10 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// already registered root keys, so there is no harm in calling it if
     /// you're not sure.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
-        // This `increment_ref` will panic if the child refs are not in `metadata`.
-        child_repr
-            .refs()
-            .into_iter()
-            .for_each(|hash| arena.increment_ref(hash));
+        // This `increment_ref` will panic if the child ref is not in `metadata`.
+        if let ArenaKey::Ref(hash) = &child_repr {
+            arena.increment_ref(hash);
+        }
         let data = OnceLock::new();
         Sp {
             data,
