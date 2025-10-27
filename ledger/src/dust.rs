@@ -168,7 +168,7 @@ pub type Seed = [u8; 32];
 pub struct DustPublicKey(pub Fr);
 tag_enforcement_test!(DustPublicKey);
 
-#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
 #[storable(base)]
 #[tag = "dust-secret-key[v1]"]
 pub struct DustSecretKey(pub Fr);

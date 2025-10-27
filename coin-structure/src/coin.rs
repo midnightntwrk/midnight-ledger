@@ -139,10 +139,6 @@ impl rand::distributions::Distribution<Nonce> for rand::distributions::Standard 
     Copy,
     Clone,
     Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
     FieldRepr,
     FromFieldRepr,
     BinaryHashRepr,
@@ -160,9 +156,6 @@ impl Debug for SecretKey {
         write!(formatter, "<coin secret key>")
     }
 }
-
-#[cfg(feature = "proptest")]
-randomised_serialization_test!(SecretKey);
 
 impl SecretKey {
     pub fn public_key(&self) -> PublicKey {
