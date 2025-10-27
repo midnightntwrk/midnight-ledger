@@ -22,7 +22,7 @@ use ledger::structure::{
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
 use std::borrow::Cow;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::sync::Once;
 use std::sync::mpsc::Receiver;
@@ -45,7 +45,7 @@ use rand::{Rng, SeedableRng};
 use reqwest::Client;
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
-use storage::storage::HashMap;
+use storage::storage::HashMap as StorageHashMap;
 
 use ledger::test_utilities::{ProofServerProvider, Resolver, test_resolver, verifier_key};
 use midnight_proof_server::server;
@@ -114,9 +114,9 @@ async fn stop_server(server_handle: ServerHandle) {
     server_handle.stop(false).await;
 }
 
-// Builds a request body that contains only the tagged transaction preimage
+// Builds an invalid body that contains only the tagged transaction preimage
 // (no ZK Config section).
-async fn serialized_body_without_zk_config() -> Vec<u8> {
+async fn serialized_invalid_body_without_zk_config() -> Vec<u8> {
     let tx = valid_tx::<Signature, InMemoryDB>().await;
     let mut body = Vec::new();
     tagged_serialize(&tx, &mut body).expect("transaction-only payload should serialize");
@@ -125,7 +125,7 @@ async fn serialized_body_without_zk_config() -> Vec<u8> {
 
 // Builds an invalid request body with two different ZK Configs back-to-back:
 // `[(tx, zkA)] [zkB]`.
-async fn serialized_body_with_double_zk_config() -> Vec<u8> {
+async fn serialized_invalid_body_with_double_zk_config() -> Vec<u8> {
     let mut payload = serialized_valid_body().await;
     let zswap_tx = valid_unbalanced_zswap(1);
     let mut zswap_tx_bytes = Vec::new();
@@ -141,24 +141,18 @@ async fn serialized_body_with_double_zk_config() -> Vec<u8> {
 
 // Builds an invalid body by swapping the values of two ZK Config entries.
 // Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject with 400.
-async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
+async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     let valid_body = serialized_valid_body().await;
     let (tx, keys): (
         Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
-        std::collections::HashMap<
-            transient_crypto::proofs::KeyLocation,
-            transient_crypto::proofs::ProvingKeyMaterial,
-        >,
+        HashMap<KeyLocation, ProvingKeyMaterial>,
     ) = tagged_deserialize(&valid_body[..]).ok()?;
 
     let mut entries: Vec<_> = keys.into_iter().collect();
     if entries.len() < 2 {
         let (_, extra_keys): (
             Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
-            std::collections::HashMap<
-                transient_crypto::proofs::KeyLocation,
-                transient_crypto::proofs::ProvingKeyMaterial,
-            >,
+            HashMap<KeyLocation, ProvingKeyMaterial>,
         ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
         let mut existing_keys: HashSet<_> = entries.iter().map(|(key, _)| key.clone()).collect();
         entries.extend(
@@ -177,9 +171,7 @@ async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     entries[0] = (k1, v2);
     entries[1] = (k2, v1);
 
-    let swapped_keys = entries
-        .into_iter()
-        .collect::<std::collections::HashMap<_, _>>();
+    let swapped_keys = entries.into_iter().collect::<HashMap<_, _>>();
     let mut payload = Vec::new();
     tagged_serialize(&(tx, swapped_keys), &mut payload).expect("swapped payload should serialize");
     Some(payload)
@@ -187,24 +179,18 @@ async fn serialized_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
 
 // Builds an invalid body by changing one of the ZK Config keys to reference a
 // circuit ID that is not used in the transaction.
-async fn serialized_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
+async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
     let valid_body = serialized_valid_body().await;
     let (tx, keys): (
         Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
-        std::collections::HashMap<
-            transient_crypto::proofs::KeyLocation,
-            transient_crypto::proofs::ProvingKeyMaterial,
-        >,
+        HashMap<KeyLocation, ProvingKeyMaterial>,
     ) = tagged_deserialize(&valid_body[..]).ok()?;
 
     let mut entries: Vec<_> = keys.into_iter().collect();
     if entries.is_empty() {
         let (_, fallback_keys): (
             Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
-            std::collections::HashMap<
-                transient_crypto::proofs::KeyLocation,
-                transient_crypto::proofs::ProvingKeyMaterial,
-            >,
+            HashMap<KeyLocation, ProvingKeyMaterial>,
         ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
         entries = fallback_keys.into_iter().collect();
     }
@@ -213,9 +199,7 @@ async fn serialized_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
     let wrong_key = KeyLocation(Cow::Owned(format!("{original_id}_wrong")));
     entries.push((wrong_key, value));
 
-    let mutated_keys = entries
-        .into_iter()
-        .collect::<std::collections::HashMap<_, _>>();
+    let mutated_keys = entries.into_iter().collect::<HashMap<_, _>>();
 
     let mut payload = Vec::new();
     tagged_serialize(&(tx, mutated_keys), &mut payload).ok()?;
@@ -251,8 +235,7 @@ where
         .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
         .collect::<Vec<_>>();
 
-    let mut keys: std::collections::HashMap<KeyLocation, ProvingKeyMaterial> =
-        std::collections::HashMap::new();
+    let mut keys: HashMap<KeyLocation, ProvingKeyMaterial> = HashMap::new();
     for circuit in circuits_used {
         let location = KeyLocation(Cow::Owned(circuit));
         if let Some(material) = resolver
@@ -326,14 +309,14 @@ async fn valid_tx_with_network_id<S: SignatureKind<D>, D: DB>(
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
-        HashMap::new().insert(b"count"[..].into(), count_op.clone()),
+        StorageHashMap::new().insert(b"count"[..].into(), count_op.clone()),
         Default::default(),
     );
 
     let deploy = ContractDeploy::new(&mut rng, contract.clone());
 
     let mut intents =
-        HashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+        StorageHashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
     let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
     intents = intents.insert(1, intent);
 
@@ -349,12 +332,12 @@ async fn large_valid_tx<S: SignatureKind<D>, D: DB>(
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
-        HashMap::new().insert(b"count"[..].into(), count_op.clone()),
+        StorageHashMap::new().insert(b"count"[..].into(), count_op.clone()),
         Default::default(),
     );
 
     let mut intents =
-        HashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+        StorageHashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
 
     for i in 0..num_intents {
         let deploy = ContractDeploy::new(&mut rng, contract.clone());
@@ -569,7 +552,7 @@ async fn test_prove_should_fail_without_zk_config() {
 
     let response = HTTP_CLIENT
         .post(format!("{}/prove", get_host_and_port()))
-        .body(serialized_body_without_zk_config().await)
+        .body(serialized_invalid_body_without_zk_config().await)
         .send()
         .await
         .unwrap();
@@ -593,7 +576,7 @@ async fn test_prove_should_fail_with_double_zk_config() {
 
     let response = HTTP_CLIENT
         .post(format!("{}/prove", get_host_and_port()))
-        .body(serialized_body_with_double_zk_config().await)
+        .body(serialized_invalid_body_with_double_zk_config().await)
         .send()
         .await
         .unwrap();
@@ -614,7 +597,7 @@ async fn test_prove_should_fail_with_double_zk_config() {
 async fn test_prove_should_fail_with_swapped_zk_config_values() {
     setup_test(function_name!());
 
-    if let Some(payload) = serialized_body_with_swapped_zk_config_values().await {
+    if let Some(payload) = serialized_invalid_body_with_swapped_zk_config_values().await {
         let response = HTTP_CLIENT
             .post(format!("{}/prove", get_host_and_port()))
             .body(payload)
@@ -638,7 +621,7 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
 async fn test_prove_should_fail_with_wrong_circuit_id() {
     setup_test(function_name!());
 
-    if let Some(payload) = serialized_body_with_wrong_circuit_id().await {
+    if let Some(payload) = serialized_invalid_body_with_wrong_circuit_id().await {
         let response = HTTP_CLIENT
             .post(format!("{}/prove", get_host_and_port()))
             .body(payload)
