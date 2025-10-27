@@ -1020,6 +1020,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
         if skip > program.len() {
             return Err(OnchainProgramError::RanPastProgramEnd);
         }
+        if stack.len() > MAX_STACK_HEIGHT as usize {
+            return Err(OnchainProgramError::StackOverflow);
+        }
         program = &program[skip..];
     }
     Ok(VmResults {
