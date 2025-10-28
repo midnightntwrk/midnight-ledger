@@ -161,19 +161,15 @@ async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u
         }
     }
 
-    if keys.len() < 2 {
-        return None;
-    }
-
     let mut key_iter = keys.keys();
-    let first_key = key_iter
-        .next()
-        .cloned()
-        .expect("guard ensures at least two keys");
-    let second_key = key_iter
-        .next()
-        .cloned()
-        .expect("guard ensures at least two keys");
+    let first_key = match key_iter.next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
+    let second_key = match key_iter.next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
     drop(key_iter);
 
     let (_, first_value) = keys
