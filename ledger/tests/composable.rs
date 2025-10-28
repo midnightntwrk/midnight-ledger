@@ -116,8 +116,8 @@ async fn composable() {
 
     // Part 1: Deploy inner
     println!(":: Part 1: Deploy inner");
-    let get_op = ContractOperation::new(dbg!(verifier_key(&RESOLVER, "get").await));
-    let set_op = ContractOperation::new(dbg!(verifier_key(&RESOLVER, "set").await));
+    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await);
+    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await);
     let auth_sk: HashOutput = rng.r#gen();
     let auth_pk = persistent_commit(b"mdn:ex:ci", auth_sk);
     let contract = ContractState::new(
