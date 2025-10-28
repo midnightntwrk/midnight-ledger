@@ -42,9 +42,9 @@ use lazy_static::lazy_static;
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use reqwest::Client;
+use reqwest::{Client, StatusCode};
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
-use storage::db::{DB, InMemoryDB};
+use storage::db::InMemoryDB;
 use storage::storage::HashMap as StorageHashMap;
 
 use ledger::test_utilities::{ProofServerProvider, Resolver, test_resolver, verifier_key};
@@ -117,7 +117,7 @@ async fn stop_server(server_handle: ServerHandle) {
 // Builds an invalid body that contains only the tagged transaction preimage
 // (no ZK Config section).
 async fn serialized_invalid_body_without_zk_config() -> Vec<u8> {
-    let tx = valid_tx::<Signature, InMemoryDB>().await;
+    let tx = valid_tx::<Signature>().await;
     let mut body = Vec::new();
     tagged_serialize(&tx, &mut body).expect("transaction-only payload should serialize");
     body
@@ -140,7 +140,7 @@ async fn serialized_invalid_body_with_double_zk_config() -> Vec<u8> {
 }
 
 // Builds an invalid body by swapping the values of two ZK Config entries.
-// Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject with 400.
+// Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject.
 async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     let valid_body = serialized_valid_body().await;
     let (tx, keys): (
@@ -208,7 +208,7 @@ async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
 
 // Builds the **canonical /prove request body** for a normal valid transaction.
 async fn serialized_valid_body() -> Vec<u8> {
-    let tx = valid_tx::<Signature, InMemoryDB>().await;
+    let tx = valid_tx::<Signature>().await;
     serialize_transaction_payload(&tx, &RESOLVER).await
 }
 
@@ -221,13 +221,12 @@ async fn serialized_valid_zswap_body() -> Vec<u8> {
 
 // Serializes a given **unproven transaction (preimage)** plus resolver-provided proving keys
 // into the exact tagged payload that `/prove` expects.
-async fn serialize_transaction_payload<S, D>(
-    tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, D>,
+async fn serialize_transaction_payload<S>(
+    tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
     resolver: &Resolver,
 ) -> Vec<u8>
 where
-    S: SignatureKind<D> + Tagged,
-    D: DB,
+    S: SignatureKind<InMemoryDB> + Tagged,
 {
     let circuits_used = tx
         .calls()
@@ -296,14 +295,14 @@ fn valid_unbalanced_zswap(
     )
 }
 
-async fn valid_tx<S: SignatureKind<D>, D: DB>()
--> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
-    valid_tx_with_network_id("local-test").await
+async fn valid_tx<S: SignatureKind<InMemoryDB>>()
+-> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
+    valid_tx_with_network_id::<S>("local-test").await
 }
 
-async fn valid_tx_with_network_id<S: SignatureKind<D>, D: DB>(
+async fn valid_tx_with_network_id<S: SignatureKind<InMemoryDB>>(
     network_id: &str,
-) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
     let mut rng = StdRng::seed_from_u64(0x42);
 
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
@@ -315,8 +314,11 @@ async fn valid_tx_with_network_id<S: SignatureKind<D>, D: DB>(
 
     let deploy = ContractDeploy::new(&mut rng, contract.clone());
 
-    let mut intents =
-        StorageHashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+    let mut intents = StorageHashMap::<
+        u16,
+        Intent<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        InMemoryDB,
+    >::new();
     let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
     intents = intents.insert(1, intent);
 
@@ -324,9 +326,9 @@ async fn valid_tx_with_network_id<S: SignatureKind<D>, D: DB>(
 }
 
 // Builds a large valid *unproven* transaction (preimage form) for stress-testing proving.
-async fn large_valid_tx<S: SignatureKind<D>, D: DB>(
+async fn large_valid_tx<S: SignatureKind<InMemoryDB>>(
     num_intents: usize,
-) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
     let mut rng = StdRng::seed_from_u64(0x4242);
 
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
@@ -336,8 +338,11 @@ async fn large_valid_tx<S: SignatureKind<D>, D: DB>(
         Default::default(),
     );
 
-    let mut intents =
-        StorageHashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+    let mut intents = StorageHashMap::<
+        u16,
+        Intent<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        InMemoryDB,
+    >::new();
 
     for i in 0..num_intents {
         let deploy = ContractDeploy::new(&mut rng, contract.clone());
@@ -404,16 +409,8 @@ async fn integration_tests() {
 
     stop_server(_server_handle).await;
 
-    let previous_network_id = env::var("NETWORK_ID").ok();
-    set_network_id("Undeployed");
-    let _server_handle = setup(LIMIT).recv().unwrap();
     test_prove_should_fail_with_mismatched_network_id().await;
-    stop_server(_server_handle).await;
-    match previous_network_id {
-        Some(value) => set_network_id(&value),
-        None => clear_network_id(),
-    }
-
+    
     let _server_handle = setup(LIMIT).recv().unwrap();
     test_ready_reports_correct_job_numbers().await;
     stop_server(_server_handle).await;
@@ -545,7 +542,7 @@ async fn test_prove_tx_should_fail_on_json() {
 // Negative test: `/prove` must reject a payload without ZK Config.
 // Given: A request body that contains only the tagged transaction preimage.
 // When: POSTed to `/prove`.
-// Then: The server responds with `400 Bad Request`.
+// Then: The server responds with `Bad Request`.
 #[named]
 async fn test_prove_should_fail_without_zk_config() {
     setup_test(function_name!());
@@ -558,7 +555,7 @@ async fn test_prove_should_fail_without_zk_config() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let resp_text = response.text().await.unwrap();
     assert!(resp_text.contains("expected header tag"));
 }
@@ -569,7 +566,7 @@ async fn test_prove_should_fail_without_zk_config() {
 // - A valid request `[(tx, zkA)]`.
 // - A second, different ZK Config `zkB` (sourced from a different valid body).
 // When: We append `zkB` after the first tuple and POST to `/prove`.
-// Then: The server responds with `400 Bad Request`.
+// Then: The server responds with `Bad Request`.
 #[named]
 async fn test_prove_should_fail_with_double_zk_config() {
     setup_test(function_name!());
@@ -582,7 +579,7 @@ async fn test_prove_should_fail_with_double_zk_config() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let resp_text = response.text().await.unwrap();
     assert!(resp_text.contains("expected header tag"));
 }
@@ -592,7 +589,7 @@ async fn test_prove_should_fail_with_double_zk_config() {
 // - A valid request `(tx, {A -> zkA, B -> zkB, ...})`.
 // - We swap the proving material so that `{A -> zkB, B -> zkA}`.
 // When: The malformed payload is POSTed to `/prove`.
-// Then: The server responds with `400 Bad Request`.
+// Then: The server responds with `Bad Request`.
 #[named]
 async fn test_prove_should_fail_with_swapped_zk_config_values() {
     setup_test(function_name!());
@@ -606,7 +603,7 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
             .unwrap();
 
         log::info!("Response code: {:?}", response.status());
-        assert_eq!(response.status(), 400);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
     }
@@ -616,7 +613,7 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
 // entry keyed by a circuit ID that is not part of the transaction.
 // Given: A valid request `(tx, {A -> zkA, ...})`.
 // When: We replace one key with `C_wrong` while keeping the proving material.
-// Then: The server responds with `400 Bad Request`.
+// Then: The server responds with `Bad Request`.
 #[named]
 async fn test_prove_should_fail_with_wrong_circuit_id() {
     setup_test(function_name!());
@@ -630,7 +627,7 @@ async fn test_prove_should_fail_with_wrong_circuit_id() {
             .unwrap();
 
         log::info!("Response code: {:?}", response.status());
-        assert_eq!(response.status(), 400);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         let resp_text = response.text().await.unwrap();
         assert!(resp_text.contains("failed to find proving key"));
     }
@@ -724,6 +721,10 @@ async fn test_prove_should_generate_valid_proof_for_big_transaction() {
 async fn test_prove_should_fail_with_mismatched_network_id() {
     setup_test(function_name!());
 
+    let previous_network_id = env::var("NETWORK_ID").ok();
+    set_network_id("Undeployed");
+    let server_handle = setup(LIMIT).recv().unwrap();
+
     let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
         valid_tx_with_network_id("DevNet").await;
 
@@ -749,6 +750,12 @@ async fn test_prove_should_fail_with_mismatched_network_id() {
             assert_network_id_error(&err.to_string());
         }
         Err(other) => panic!("expected proving error from server, got {other:?}"),
+    }
+    stop_server(server_handle).await;
+
+    match previous_network_id {
+        Some(value) => set_network_id(&value),
+        None => clear_network_id(),
     }
 }
 
