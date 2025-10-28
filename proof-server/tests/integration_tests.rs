@@ -22,7 +22,7 @@ use ledger::structure::{
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
 use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::env;
 use std::sync::Once;
 use std::sync::mpsc::Receiver;
@@ -143,37 +143,50 @@ async fn serialized_invalid_body_with_double_zk_config() -> Vec<u8> {
 // Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject.
 async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
     let valid_body = serialized_valid_body().await;
-    let (tx, keys): (
+    let (tx, mut keys): (
         Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
         HashMap<KeyLocation, ProvingKeyMaterial>,
     ) = tagged_deserialize(&valid_body[..]).ok()?;
 
-    let mut entries: Vec<_> = keys.into_iter().collect();
-    if entries.len() < 2 {
+    if keys.len() < 2 {
         let (_, extra_keys): (
             Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
             HashMap<KeyLocation, ProvingKeyMaterial>,
         ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
-        let mut existing_keys: HashSet<_> = entries.iter().map(|(key, _)| key.clone()).collect();
-        entries.extend(
-            extra_keys
-                .into_iter()
-                .filter(|(key, _)| existing_keys.insert(key.clone())),
-        );
+        for (location, material) in extra_keys {
+            keys.entry(location).or_insert(material);
+            if keys.len() >= 2 {
+                break;
+            }
+        }
     }
 
-    if entries.len() < 2 {
+    if keys.len() < 2 {
         return None;
     }
 
-    let (k1, v1) = entries[0].clone();
-    let (k2, v2) = entries[1].clone();
-    entries[0] = (k1, v2);
-    entries[1] = (k2, v1);
+    let mut key_iter = keys.keys();
+    let first_key = key_iter
+        .next()
+        .cloned()
+        .expect("guard ensures at least two keys");
+    let second_key = key_iter
+        .next()
+        .cloned()
+        .expect("guard ensures at least two keys");
+    drop(key_iter);
 
-    let swapped_keys = entries.into_iter().collect::<HashMap<_, _>>();
+    let (_, first_value) = keys
+        .remove_entry(&first_key)
+        .expect("first key should still exist");
+    let (_, second_value) = keys
+        .remove_entry(&second_key)
+        .expect("second key should still exist");
+    debug_assert!(keys.insert(first_key, second_value).is_none());
+    debug_assert!(keys.insert(second_key, first_value).is_none());
+
     let mut payload = Vec::new();
-    tagged_serialize(&(tx, swapped_keys), &mut payload).expect("swapped payload should serialize");
+    tagged_serialize(&(tx, keys), &mut payload).expect("swapped payload should serialize");
     Some(payload)
 }
 
@@ -181,28 +194,34 @@ async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u
 // circuit ID that is not used in the transaction.
 async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
     let valid_body = serialized_valid_body().await;
-    let (tx, keys): (
+    let (tx, mut keys): (
         Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
         HashMap<KeyLocation, ProvingKeyMaterial>,
     ) = tagged_deserialize(&valid_body[..]).ok()?;
 
-    let mut entries: Vec<_> = keys.into_iter().collect();
-    if entries.is_empty() {
+    if keys.is_empty() {
         let (_, fallback_keys): (
             Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
             HashMap<KeyLocation, ProvingKeyMaterial>,
         ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
-        entries = fallback_keys.into_iter().collect();
+        keys = fallback_keys;
     }
 
-    let (KeyLocation(original_id), value) = entries.pop()?;
-    let wrong_key = KeyLocation(Cow::Owned(format!("{original_id}_wrong")));
-    entries.push((wrong_key, value));
+    let key_to_replace = match keys.keys().next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
 
-    let mutated_keys = entries.into_iter().collect::<HashMap<_, _>>();
+    let (KeyLocation(original_id), value) = keys
+        .remove_entry(&key_to_replace)
+        .expect("selected key should exist");
+    let mut wrong_id = original_id.into_owned();
+    wrong_id.push_str("_wrong");
+    let wrong_key = KeyLocation(Cow::Owned(wrong_id));
+    debug_assert!(keys.insert(wrong_key, value).is_none());
 
     let mut payload = Vec::new();
-    tagged_serialize(&(tx, mutated_keys), &mut payload).ok()?;
+    tagged_serialize(&(tx, keys), &mut payload).ok()?;
     Some(payload)
 }
 
@@ -410,7 +429,7 @@ async fn integration_tests() {
     stop_server(_server_handle).await;
 
     test_prove_should_fail_with_mismatched_network_id().await;
-    
+
     let _server_handle = setup(LIMIT).recv().unwrap();
     test_ready_reports_correct_job_numbers().await;
     stop_server(_server_handle).await;
