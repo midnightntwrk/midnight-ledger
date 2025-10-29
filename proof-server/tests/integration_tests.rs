@@ -14,10 +14,18 @@
 #![deny(warnings)]
 
 use base_crypto::{self, time::Timestamp};
-use ledger::structure::{Intent, LedgerState, SignatureKind};
+use ledger::error::TransactionProvingError;
+use ledger::structure::{
+    ContractDeploy, Intent, LedgerState, ProofMarker, ProofPreimageMarker, SignatureKind,
+    Transaction,
+};
 use ledger::verify::WellFormedStrictness;
 use midnight_proof_server::worker_pool::WorkerPool;
+use std::borrow::Cow;
+use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::Once;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -25,6 +33,7 @@ use std::time::Duration;
 use std::{sync::mpsc, thread};
 use storage::arena::Sp;
 use transient_crypto::commitment::PedersenRandomness;
+use transient_crypto::proofs::{KeyLocation, ProvingKeyMaterial, Resolver as _};
 use zswap::Delta;
 
 use actix_web::{dev::ServerHandle, rt};
@@ -35,15 +44,14 @@ use lazy_static::lazy_static;
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use reqwest::Client;
-use serialize::tagged_deserialize;
-use storage::db::{DB, InMemoryDB};
-use storage::storage::HashMap;
+use reqwest::{Client, StatusCode};
+use serialize::{Tagged, tagged_deserialize, tagged_serialize};
+use storage::db::InMemoryDB;
+use storage::storage::HashMap as StorageHashMap;
 
-use ledger::structure::{ContractDeploy, ProofMarker, ProofPreimageMarker, Transaction};
-#[allow(deprecated)]
-use ledger::test_utilities::{Resolver, serialize_request_body, test_resolver, verifier_key};
+use ledger::test_utilities::{ProofServerProvider, Resolver, test_resolver, verifier_key};
 use midnight_proof_server::server;
+use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use regex::Regex;
 
 const NUM_WORKERS: usize = 2;
@@ -108,18 +116,246 @@ async fn stop_server(server_handle: ServerHandle) {
     server_handle.stop(false).await;
 }
 
-async fn serialized_valid_body() -> Vec<u8> {
-    let tx = valid_tx::<Signature, InMemoryDB>().await;
-    #[allow(deprecated)]
-    let body = serialize_request_body(&tx, &RESOLVER).await.unwrap();
-    eprintln!("{}", String::from_utf8_lossy(&body));
+// Builds an invalid body that contains only the tagged transaction preimage
+// (no ZK Config section).
+async fn serialized_invalid_body_without_zk_config() -> Vec<u8> {
+    let tx = valid_tx::<Signature>().await;
+    let mut body = Vec::new();
+    tagged_serialize(&tx, &mut body).expect("transaction-only payload should serialize");
     body
 }
 
+// Builds an invalid request body with two different ZK Configs back-to-back:
+// `[(tx, zkA)] [zkB]`.
+async fn serialized_invalid_body_with_double_zk_config() -> Vec<u8> {
+    let mut payload = serialized_valid_body().await;
+    let zswap_tx = valid_unbalanced_zswap(1);
+    let mut zswap_tx_bytes = Vec::new();
+    tagged_serialize(&zswap_tx, &mut zswap_tx_bytes)
+        .expect("transaction-only payload should serialize");
+
+    let mut zswap_payload = serialized_valid_zswap_body().await;
+    let zswap_config = zswap_payload.split_off(zswap_tx_bytes.len());
+
+    payload.extend_from_slice(&zswap_config);
+    payload
+}
+
+// Builds an invalid body by swapping the values of two ZK Config entries.
+// Result: {A -> zkB, B -> zkA} (keys unchanged). Server should reject.
+async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u8>> {
+    let valid_body = serialized_valid_body().await;
+    let (tx, mut keys): (
+        Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        HashMap<KeyLocation, ProvingKeyMaterial>,
+    ) = tagged_deserialize(&valid_body[..]).ok()?;
+
+    if keys.len() < 2 {
+        let (_, extra_keys): (
+            Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+            HashMap<KeyLocation, ProvingKeyMaterial>,
+        ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
+        for (location, material) in extra_keys {
+            keys.entry(location).or_insert(material);
+            if keys.len() >= 2 {
+                break;
+            }
+        }
+    }
+
+    ensure_minimum_distinct_keys(&mut keys);
+
+    let mut key_iter = keys.keys();
+    let first_key = match key_iter.next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
+    let second_key = match key_iter.next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
+    drop(key_iter);
+
+    let (_, first_value) = keys
+        .remove_entry(&first_key)
+        .expect("first key should still exist");
+    let (_, second_value) = keys
+        .remove_entry(&second_key)
+        .expect("second key should still exist");
+    debug_assert!(keys.insert(first_key, second_value).is_none());
+    debug_assert!(keys.insert(second_key, first_value).is_none());
+
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, keys), &mut payload).expect("swapped payload should serialize");
+    Some(payload)
+}
+
+// Builds an invalid body by changing one of the ZK Config keys to reference a
+// circuit ID that is not used in the transaction.
+async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
+    let valid_body = serialized_valid_body().await;
+    let (tx, mut keys): (
+        Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        HashMap<KeyLocation, ProvingKeyMaterial>,
+    ) = tagged_deserialize(&valid_body[..]).ok()?;
+
+    if keys.is_empty() {
+        let (_, fallback_keys): (
+            Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+            HashMap<KeyLocation, ProvingKeyMaterial>,
+        ) = tagged_deserialize(&serialized_valid_zswap_body().await[..]).ok()?;
+        keys = fallback_keys;
+    }
+
+    ensure_minimum_distinct_keys(&mut keys);
+
+    let key_to_replace = match keys.keys().next() {
+        Some(key) => key.clone(),
+        None => return None,
+    };
+
+    let (KeyLocation(original_id), value) = keys
+        .remove_entry(&key_to_replace)
+        .expect("selected key should exist");
+    let mut wrong_id = original_id.into_owned();
+    wrong_id.push_str("_wrong");
+    let wrong_key = KeyLocation(Cow::Owned(wrong_id));
+    debug_assert!(keys.insert(wrong_key, value).is_none());
+
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, keys), &mut payload).ok()?;
+    Some(payload)
+}
+
+// Ensures a request payload has at least two distinct proving-key entries, hydrating fixtures
+// and synthesizing a tweaked clone when necessary so negative tests exercise swapping logic.
+fn ensure_minimum_distinct_keys(keys: &mut HashMap<KeyLocation, ProvingKeyMaterial>) {
+    if keys.len() >= 2 {
+        return;
+    }
+
+    ensure_has_fixture(keys);
+    if keys.len() >= 2 {
+        return;
+    }
+
+    let Some((existing_key, existing_value)) =
+        keys.iter().next().map(|(k, v)| (k.clone(), v.clone()))
+    else {
+        unreachable!("keys map cannot be empty after fixture hydration");
+    };
+
+    let mut mutated_value = existing_value;
+    tweak_all(&mut mutated_value);
+
+    let base_name = existing_key.0.as_ref();
+    let mut counter = 1usize;
+    let synthetic_key = loop {
+        let candidate = if counter == 1 {
+            format!("{base_name}_alt")
+        } else {
+            format!("{base_name}_alt{counter}")
+        };
+
+        if !keys.keys().any(|existing| existing.0.as_ref() == candidate) {
+            break KeyLocation(Cow::Owned(candidate));
+        }
+
+        counter += 1;
+    };
+
+    keys.insert(synthetic_key, mutated_value);
+}
+
+// Loads the fallback proving-key fixture from disk when the resolver produces no entries.
+fn ensure_has_fixture(keys: &mut HashMap<KeyLocation, ProvingKeyMaterial>) {
+    if !keys.is_empty() {
+        return;
+    }
+
+    let Some(test_dir) = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR").ok() else {
+        panic!(
+            "no proving keys available; set MIDNIGHT_LEDGER_TEST_STATIC_DIR to the test artifacts directory"
+        );
+    };
+
+    let base = Path::new(&test_dir).join("fallible");
+    let keys_dir = base.join("keys");
+    let zkir_dir = base.join("zkir");
+
+    let prover_key = fs::read(keys_dir.join("count.prover")).expect("count prover key missing");
+    let verifier_key =
+        fs::read(keys_dir.join("count.verifier")).expect("count verifier key missing");
+    let ir_source = fs::read(zkir_dir.join("count.bzkir")).expect("count IR source missing");
+
+    keys.insert(
+        KeyLocation(Cow::Owned("count".to_owned())),
+        ProvingKeyMaterial {
+            prover_key,
+            verifier_key,
+            ir_source,
+        },
+    );
+}
+
+// Mutates every component of a proving key so cloned fixtures remain distinct in negative tests.
+fn tweak_all(material: &mut ProvingKeyMaterial) {
+    fn tweak(bytes: &mut Vec<u8>) {
+        if let Some(first) = bytes.first_mut() {
+            *first ^= 0x01;
+        } else {
+            bytes.push(0x01);
+        }
+    }
+
+    tweak(&mut material.prover_key);
+    tweak(&mut material.verifier_key);
+    tweak(&mut material.ir_source);
+}
+
+// Builds the **canonical /prove request body** for a normal valid transaction.
+async fn serialized_valid_body() -> Vec<u8> {
+    let tx = valid_tx::<Signature>().await;
+    serialize_transaction_payload(&tx, &RESOLVER).await
+}
+
+// Builds the **canonical /prove request body** for the smallest transaction we use in tests
+// (a minimal zswap variant).
 async fn serialized_valid_zswap_body() -> Vec<u8> {
     let tx = valid_unbalanced_zswap(1);
-    #[allow(deprecated)]
-    serialize_request_body(&tx, &RESOLVER).await.unwrap()
+    serialize_transaction_payload(&tx, &RESOLVER).await
+}
+
+// Serializes a given **unproven transaction (preimage)** plus resolver-provided proving keys
+// into the exact tagged payload that `/prove` expects.
+async fn serialize_transaction_payload<S>(
+    tx: &Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+    resolver: &Resolver,
+) -> Vec<u8>
+where
+    S: SignatureKind<InMemoryDB> + Tagged,
+{
+    let circuits_used = tx
+        .calls()
+        .into_iter()
+        .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
+        .collect::<Vec<_>>();
+
+    let mut keys: HashMap<KeyLocation, ProvingKeyMaterial> = HashMap::new();
+    for circuit in circuits_used {
+        let location = KeyLocation(Cow::Owned(circuit));
+        if let Some(material) = resolver
+            .resolve_key(location.clone())
+            .await
+            .expect("resolver should resolve keys")
+        {
+            keys.insert(location, material);
+        }
+    }
+
+    let mut payload = Vec::new();
+    tagged_serialize(&(tx, keys), &mut payload).expect("transaction payload should serialize");
+    payload
 }
 
 fn valid_unbalanced_zswap(
@@ -166,31 +402,97 @@ fn valid_unbalanced_zswap(
     )
 }
 
-async fn valid_tx<S: SignatureKind<D>, D: DB>()
--> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
+async fn valid_tx<S: SignatureKind<InMemoryDB>>()
+-> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
+    valid_tx_with_network_id::<S>("local-test").await
+}
+
+async fn valid_tx_with_network_id<S: SignatureKind<InMemoryDB>>(
+    network_id: &str,
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
     let mut rng = StdRng::seed_from_u64(0x42);
 
     let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
-        HashMap::new().insert(b"count"[..].into(), count_op.clone()),
+        StorageHashMap::new().insert(b"count"[..].into(), count_op.clone()),
         Default::default(),
     );
 
     let deploy = ContractDeploy::new(&mut rng, contract.clone());
 
-    let mut intents =
-        HashMap::<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D>::new();
+    let mut intents = StorageHashMap::<
+        u16,
+        Intent<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        InMemoryDB,
+    >::new();
     let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
     intents = intents.insert(1, intent);
 
-    let tx: Transaction<S, ProofPreimageMarker, PedersenRandomness, D> =
-        Transaction::new("local-test", intents, None, Default::default());
-    tx
+    Transaction::new(network_id, intents, None, Default::default())
+}
+
+// Builds a large valid *unproven* transaction (preimage form) for stress-testing proving.
+async fn large_valid_tx<S: SignatureKind<InMemoryDB>>(
+    num_intents: usize,
+) -> Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
+    let mut rng = StdRng::seed_from_u64(0x4242);
+
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let contract = ContractState::new(
+        stval!([(0u64), (false), (0u64)]),
+        StorageHashMap::new().insert(b"count"[..].into(), count_op.clone()),
+        Default::default(),
+    );
+
+    let mut intents = StorageHashMap::<
+        u16,
+        Intent<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
+        InMemoryDB,
+    >::new();
+
+    for i in 0..num_intents {
+        let deploy = ContractDeploy::new(&mut rng, contract.clone());
+        let intent = Intent::empty(&mut rng, Timestamp::from_secs(3600)).add_deploy(deploy);
+        intents = intents.insert(i as u16 + 1, intent);
+    }
+
+    Transaction::new("local-test", intents, None, Default::default())
 }
 
 fn setup_test(name: &str) {
     log::info!("Running test: {}", name);
+}
+
+fn set_network_id(value: &str) {
+    // SAFETY: The tests run the proof server in a dedicated thread spawned for each
+    // scenario, and we never mutate the process environment concurrently elsewhere.
+    unsafe {
+        env::set_var("NETWORK_ID", value);
+    }
+}
+
+fn clear_network_id() {
+    // SAFETY: See `set_network_id`; we own the lifecycle of the spawned server during tests.
+    unsafe {
+        env::remove_var("NETWORK_ID");
+    }
+}
+
+// Asserts that a network-ID mismatch was returned by the server.
+fn assert_network_id_error(msg: &str) {
+    assert!(
+        msg.contains("invalid network ID"),
+        "expected network ID error, got '{msg}'"
+    );
+    assert!(
+        msg.contains("Undeployed"),
+        "expected error to mention expected network ID, got '{msg}'"
+    );
+    assert!(
+        msg.contains("DevNet"),
+        "expected error to mention found network ID, got '{msg}'"
+    );
 }
 
 #[tokio::test]
@@ -204,12 +506,20 @@ async fn integration_tests() {
     test_prove_tx_should_fail_on_get().await;
     test_prove_tx_should_fail_on_empty_body().await;
     test_prove_tx_should_fail_on_json().await;
+    test_prove_should_fail_without_zk_config().await;
+    test_prove_should_fail_with_double_zk_config().await;
+    test_prove_should_fail_with_swapped_zk_config_values().await;
+    test_prove_should_fail_with_wrong_circuit_id().await;
+    test_prove_should_generate_valid_proof_for_smallest_transaction().await;
+    test_prove_should_generate_valid_proof_for_big_transaction().await;
     test_prove_tx_should_prove_correct_tx().await;
     test_prove_tx_should_fail_on_repeated_body().await;
     test_prove_tx_should_fail_on_corrupted_body().await;
     test_health_check_still_works_when_server_is_fully_loaded().await;
 
     stop_server(_server_handle).await;
+
+    test_prove_should_fail_with_mismatched_network_id().await;
 
     let _server_handle = setup(LIMIT).recv().unwrap();
     test_ready_reports_correct_job_numbers().await;
@@ -337,6 +647,238 @@ async fn test_prove_tx_should_fail_on_json() {
     assert_eq!(response.status(), 400);
     let resp_text = dbg!(response.text().await.unwrap());
     assert!(resp_text.contains("expected header tag"));
+}
+
+// Negative test: `/prove` must reject a payload without ZK Config.
+// Given: A request body that contains only the tagged transaction preimage.
+// When: POSTed to `/prove`.
+// Then: The server responds with `Bad Request`.
+#[named]
+async fn test_prove_should_fail_without_zk_config() {
+    setup_test(function_name!());
+
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(serialized_invalid_body_without_zk_config().await)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(resp_text.contains("expected header tag"));
+}
+
+// Negative test: `/prove` must reject payloads that include two different
+// ZK Config blocks one after another (double ZK Config).
+// Given:
+// - A valid request `[(tx, zkA)]`.
+// - A second, different ZK Config `zkB` (sourced from a different valid body).
+// When: We append `zkB` after the first tuple and POST to `/prove`.
+// Then: The server responds with `Bad Request`.
+#[named]
+async fn test_prove_should_fail_with_double_zk_config() {
+    setup_test(function_name!());
+
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(serialized_invalid_body_with_double_zk_config().await)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(resp_text.contains("expected header tag"));
+}
+
+// Negative test: `/prove` must reject payloads where ZK Config values are value-swapped.
+// Given:
+// - A valid request `(tx, {A -> zkA, B -> zkB, ...})`.
+// - We swap the proving material so that `{A -> zkB, B -> zkA}`.
+// When: The malformed payload is POSTed to `/prove`.
+// Then: The server responds with `Bad Request`.
+#[named]
+async fn test_prove_should_fail_with_swapped_zk_config_values() {
+    setup_test(function_name!());
+
+    let payload = serialized_invalid_body_with_swapped_zk_config_values()
+        .await
+        .expect(
+            "expected to build payload with swapped proving material; ensure proving keys are available"
+        );
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(payload)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(
+        resp_text.contains("failed to find proving key")
+            || resp_text.contains("expected header tag")
+    );
+}
+
+// Negative test: `/prove` must reject payloads whose ZK Config contains an
+// entry keyed by a circuit ID that is not part of the transaction.
+// Given: A valid request `(tx, {A -> zkA, ...})`.
+// When: We replace one key with `C_wrong` while keeping the proving material.
+// Then: The server responds with `Bad Request`.
+#[named]
+async fn test_prove_should_fail_with_wrong_circuit_id() {
+    setup_test(function_name!());
+
+    let payload = serialized_invalid_body_with_wrong_circuit_id()
+        .await
+        .expect(
+            "expected to build payload with wrong circuit identifier; ensure proving keys are available"
+        );
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(payload)
+        .send()
+        .await
+        .unwrap();
+
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(
+        resp_text.contains("failed to find proving key")
+            || resp_text.contains("expected header tag")
+    );
+}
+
+// Scenario: Generate valid proof – smallest size transaction
+// Given: Minimal transaction on "local-test" (no inputs/outputs; default fields)
+// When: It is proved via `Transaction::prove` using a `ProofServerProvider` (new `/prove` flow)
+// Then: We obtain a proven transaction that:
+//   - round-trips through tagged (de)serialization, and
+//   - is well-formed
+#[named]
+async fn test_prove_should_generate_valid_proof_for_smallest_transaction() {
+    setup_test(function_name!());
+
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        Transaction::new("local-test", Default::default(), None, Default::default());
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    let proven = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .expect("proving smallest transaction should succeed");
+
+    let mut bytes = Vec::new();
+    tagged_serialize(&proven, &mut bytes)
+        .expect("proven transaction should serialize successfully");
+    let round_trip: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
+        tagged_deserialize(&bytes[..]).expect("proven transaction should deserialize successfully");
+
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    round_trip
+        .well_formed(
+            &LedgerState::new("local-test"),
+            strictness,
+            Timestamp::from_secs(0),
+        )
+        .expect("proven smallest transaction should be well formed");
+}
+
+// Scenario: Generate valid proof – big transaction
+// Given: Large contract deployment transaction on "local-test" with many intents
+// When: It is proved via `Transaction::prove` using a `ProofServerProvider`
+// Then: We obtain a proven transaction that can be serialized, deserialized, and validated
+#[named]
+async fn test_prove_should_generate_valid_proof_for_big_transaction() {
+    setup_test(function_name!());
+
+    const NUM_INTENTS: usize = 32;
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        large_valid_tx(NUM_INTENTS).await;
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    let proven = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .expect("proving big transaction should succeed");
+
+    let mut bytes = Vec::new();
+    tagged_serialize(&proven, &mut bytes)
+        .expect("proven transaction should serialize successfully");
+    let round_trip: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
+        tagged_deserialize(&bytes[..]).expect("proven transaction should deserialize successfully");
+
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    round_trip
+        .well_formed(
+            &LedgerState::new("local-test"),
+            strictness,
+            Timestamp::from_secs(0),
+        )
+        .expect("proven big transaction should be well formed");
+}
+
+// Negative test: proving must fail when the transaction `network_id` does not
+// match the proof server's `NETWORK_ID`.
+// Given: Server with NETWORK_ID="Undeployed" and a tx tagged "DevNet".
+// When: We prove via `Transaction::prove` using a `ProofServerProvider`.
+// Then: It fails with "invalid network ID", naming expected "Undeployed" and found "DevNet".
+#[named]
+async fn test_prove_should_fail_with_mismatched_network_id() {
+    setup_test(function_name!());
+
+    let previous_network_id = env::var("NETWORK_ID").ok();
+    set_network_id("Undeployed");
+    let server_handle = setup(LIMIT).recv().unwrap();
+
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        valid_tx_with_network_id("DevNet").await;
+
+    let provider = ProofServerProvider {
+        base_url: get_host_and_port(),
+        resolver: &RESOLVER,
+    };
+
+    match tx.prove(provider, &INITIAL_COST_MODEL).await {
+        Ok(proven) => {
+            let mut strictness = WellFormedStrictness::default();
+            strictness.enforce_balancing = false;
+            let err = proven
+                .well_formed(
+                    &LedgerState::new("Undeployed"),
+                    strictness,
+                    Timestamp::from_secs(0),
+                )
+                .expect_err("expected well-formed check to fail when network IDs mismatch");
+            assert_network_id_error(&err.to_string());
+        }
+        Err(TransactionProvingError::Proving(err)) => {
+            assert_network_id_error(&err.to_string());
+        }
+        Err(other) => panic!("expected proving error from server, got {other:?}"),
+    }
+    stop_server(server_handle).await;
+
+    match previous_network_id {
+        Some(value) => set_network_id(&value),
+        None => clear_network_id(),
+    }
 }
 
 #[named]
