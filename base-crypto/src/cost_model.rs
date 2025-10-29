@@ -638,7 +638,7 @@ impl Mul for FixedPoint {
         // C = A * B
         // (c / (2 ** 64)) = (a / (2 ** 64)) * (b / (2 ** 64)) = (a * b) / (2 ** 128)
         // c = (a * b) / (2 ** 64)
-        let ab = i256::from(self.0) * i128::from(rhs.0);
+        let ab = i256::from(self.0) * rhs.0;
         let c = i256::min(i256::from(i128::MAX), ab >> 64).as_i128();
         FixedPoint(c)
     }

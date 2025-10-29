@@ -24,6 +24,7 @@ mod tests {
     use onchain_vm::result_mode::*;
     use onchain_vm::vm_value::{ValueStrength, VmValue};
     use onchain_vm::vmval;
+    use std::slice;
     use storage::arena::Sp;
     use storage::db::InMemoryDB;
     use storage::storage::HashMap;
@@ -521,44 +522,47 @@ mod tests {
             Ok((vec![empty_list.clone()], vec![]))
         );
         assert_eq!(
-            run_program(&[empty_list.clone()], &List_head!(f, false, u64),),
+            run_program(slice::from_ref(&empty_list), &List_head!(f, false, u64),),
             Ok((vec![empty_list.clone()], vec![read!((false, 0u64))])),
         );
         assert_eq!(
-            run_program(&[empty_list.clone()], &List_is_empty!(f, false, u64),),
+            run_program(slice::from_ref(&empty_list), &List_is_empty!(f, false, u64),),
             Ok((vec![empty_list.clone()], vec![read!(true)]))
         );
         assert_eq!(
-            run_program(&[empty_list.clone()], &List_length!(f, false, u64),),
+            run_program(slice::from_ref(&empty_list), &List_length!(f, false, u64),),
             Ok((vec![empty_list.clone()], vec![read!(0u64)]))
         );
         let list_5 = vmval!([[(5u64), [null, null, (0u64)], (1u64)]]);
         assert_eq!(
             run_program(
-                &[empty_list.clone()],
+                slice::from_ref(&empty_list),
                 &List_push_front!(f, false, u64, 5u64),
             ),
             Ok((vec![list_5.clone()], vec![]))
         );
         let list_5_12 = vmval!([[(12u64), [(5u64), [null, null, (0u64)], (1u64)], (2u64)]]);
         assert_eq!(
-            run_program(&[list_5.clone()], &List_push_front!(f, false, u64, 12u64),),
+            run_program(
+                slice::from_ref(&list_5),
+                &List_push_front!(f, false, u64, 12u64),
+            ),
             Ok((vec![list_5_12.clone()], vec![]))
         );
         assert_eq!(
-            run_program(&[list_5_12.clone()], &List_head!(f, false, u64),),
+            run_program(slice::from_ref(&list_5_12), &List_head!(f, false, u64),),
             Ok((vec![list_5_12.clone()], vec![read!((true, 12u64))]))
         );
         assert_eq!(
-            run_program(&[list_5_12.clone()], &List_is_empty!(f, false, u64),),
+            run_program(slice::from_ref(&list_5_12), &List_is_empty!(f, false, u64),),
             Ok((vec![list_5_12.clone()], vec![read!(false)]))
         );
         assert_eq!(
-            run_program(&[list_5_12.clone()], &List_length!(f, false, u64)),
+            run_program(slice::from_ref(&list_5_12), &List_length!(f, false, u64)),
             Ok((vec![list_5_12.clone()], vec![read!(2u64)]))
         );
         assert_eq!(
-            run_program(&[list_5_12.clone()], &List_pop_front!(f, false, u64),),
+            run_program(slice::from_ref(&list_5_12), &List_pop_front!(f, false, u64),),
             Ok((vec![list_5.clone()], vec![]))
         );
     }
@@ -583,7 +587,7 @@ mod tests {
         );
         assert_eq!(
             run_program(
-                &[empty_mtree.clone()],
+                slice::from_ref(&empty_mtree),
                 &MerkleTree_check_root!(f, false, 8, u8, root(vmval!({MT(8) {}}))),
             ),
             Ok((vec![empty_mtree.clone()], vec![read!(true)]))
@@ -593,7 +597,7 @@ mod tests {
         let mtree_12 = vmval!([[{MT(8) {12 => fake_hash_5}}, (13u64)]]);
         assert_eq!(
             run_program(
-                &[empty_mtree.clone()],
+                slice::from_ref(&empty_mtree),
                 &MerkleTree_insert_index!(f, false, 8, u8, 5u8, 12u64),
             ),
             Ok((vec![mtree_12.clone()], vec![]))
@@ -604,14 +608,14 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_12.clone()],
+                slice::from_ref(&mtree_12),
                 &MerkleTree_insert_index!(f, false, 8, u8, 5u8, 5u64),
             ),
             Ok((vec![mtree_5_12.clone()], vec![]))
         );
         assert_eq!(
             run_program(
-                &[mtree_5_12.clone()],
+                slice::from_ref(&mtree_5_12),
                 &MerkleTree_insert_index!(f, false, 8, u8, 5u8, 256u64),
             ),
             Err(OnchainProgramError::BoundsExceeded)
@@ -622,22 +626,28 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_5_12.clone()],
+                slice::from_ref(&mtree_5_12),
                 &MerkleTree_insert_index!(f, false, 8, u8, 5u8, 255u64),
             ),
             Ok((vec![full_tree.clone()], vec![]))
         );
         assert_eq!(
-            run_program(&[full_tree.clone()], &MerkleTree_is_full!(f, false, 8, u8),),
+            run_program(
+                slice::from_ref(&full_tree),
+                &MerkleTree_is_full!(f, false, 8, u8),
+            ),
             Ok((vec![full_tree.clone()], vec![read!(true)]))
         );
         assert_eq!(
-            run_program(&[mtree_5_12.clone()], &MerkleTree_is_full!(f, false, 8, u8),),
+            run_program(
+                slice::from_ref(&mtree_5_12),
+                &MerkleTree_is_full!(f, false, 8, u8),
+            ),
             Ok((vec![mtree_5_12.clone()], vec![read!(false)]))
         );
         assert_eq!(
             run_program(
-                &[full_tree.clone()],
+                slice::from_ref(&full_tree),
                 &MerkleTree_insert!(f, false, 8, u8, 5u8),
             ),
             Err(OnchainProgramError::BoundsExceeded)
@@ -648,7 +658,7 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_5_12.clone()],
+                slice::from_ref(&mtree_5_12),
                 &MerkleTree_insert!(f, false, 8, u8, 5u8),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![]))
@@ -657,7 +667,7 @@ mod tests {
             root(vmval!({MT(8) {5 => fake_hash_5, 12 => fake_hash_5, 13 => fake_hash_5}}));
         assert_eq!(
             run_program(
-                &[mtree_5_12_13.clone()],
+                slice::from_ref(&mtree_5_12_13),
                 &MerkleTree_check_root!(f, false, 8, u8, correct_root),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![read!(true)]))
@@ -665,7 +675,7 @@ mod tests {
         let old_root = root(vmval!({MT(8) {5 => fake_hash_5, 12 => fake_hash_5}}));
         assert_eq!(
             run_program(
-                &[mtree_5_12_13.clone()],
+                slice::from_ref(&mtree_5_12_13),
                 &MerkleTree_check_root!(f, false, 8, u8, old_root),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![read!(false)]))
@@ -696,7 +706,7 @@ mod tests {
         );
         assert_eq!(
             run_program(
-                &[empty_mtree.clone()],
+                slice::from_ref(&empty_mtree),
                 &HistoricMerkleTree_check_root!(f, false, 8, u8, root(vmval!({MT(8) {}}))),
             ),
             Ok((vec![empty_mtree.clone()], vec![read!(true)]))
@@ -712,7 +722,7 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[empty_mtree.clone()],
+                slice::from_ref(&empty_mtree),
                 &HistoricMerkleTree_insert_index!(f, false, 8, u8, 5u8, 12u64),
             ),
             Ok((vec![mtree_12.clone()], vec![]))
@@ -728,14 +738,14 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_12.clone()],
+                slice::from_ref(&mtree_12),
                 &HistoricMerkleTree_insert_index!(f, false, 8, u8, 5u8, 5u64),
             ),
             Ok((vec![mtree_5_12.clone()], vec![]))
         );
         assert_eq!(
             run_program(
-                &[mtree_5_12.clone()],
+                slice::from_ref(&mtree_5_12),
                 &HistoricMerkleTree_is_full!(f, false, 8, u8),
             ),
             Ok((vec![mtree_5_12.clone()], vec![read!(false)]))
@@ -752,7 +762,7 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_5_12.clone()],
+                slice::from_ref(&mtree_5_12),
                 &HistoricMerkleTree_insert!(f, false, 8, u8, 5u8),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![]))
@@ -761,7 +771,7 @@ mod tests {
             root(vmval!({MT(8) {5 => fake_hash_5, 12 => fake_hash_5, 13 => fake_hash_5}}));
         assert_eq!(
             run_program(
-                &[mtree_5_12_13.clone()],
+                slice::from_ref(&mtree_5_12_13),
                 &HistoricMerkleTree_check_root!(f, false, 8, u8, current_root),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![read!(true)]))
@@ -769,7 +779,7 @@ mod tests {
         let old_root = root(vmval!({MT(8) {5 => fake_hash_5, 12 => fake_hash_5}}));
         assert_eq!(
             run_program(
-                &[mtree_5_12_13.clone()],
+                slice::from_ref(&mtree_5_12_13),
                 &HistoricMerkleTree_check_root!(f, false, 8, u8, old_root),
             ),
             Ok((vec![mtree_5_12_13.clone()], vec![read!(true)]))
@@ -783,17 +793,17 @@ mod tests {
         ]]);
         assert_eq!(
             run_program(
-                &[mtree_5_12_13.clone()],
+                &[mtree_5_12_13],
                 &HistoricMerkleTree_reset_history!(f, false, 8, u8),
             ),
             Ok((vec![mtree_5_12_13_no_hist.clone()], vec![]))
         );
         assert_eq!(
             run_program(
-                &[mtree_5_12_13_no_hist.clone()],
+                slice::from_ref(&mtree_5_12_13_no_hist),
                 &HistoricMerkleTree_check_root!(f, false, 8, u8, old_root),
             ),
-            Ok((vec![mtree_5_12_13_no_hist.clone()], vec![read!(false)]))
+            Ok((vec![mtree_5_12_13_no_hist], vec![read!(false)]))
         );
     }
 

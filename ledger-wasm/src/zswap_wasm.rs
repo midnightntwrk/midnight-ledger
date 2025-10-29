@@ -157,9 +157,9 @@ impl ZswapTransient {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapTransientTypes::*;
         match &self.0 {
-            ProvenTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -339,9 +339,9 @@ impl ZswapOutput {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapOutputTypes::*;
         match &self.0 {
-            ProvenOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -461,9 +461,9 @@ impl ZswapInput {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapInputTypes::*;
         match &self.0 {
-            ProvenInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenInput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenInput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedInput(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -631,21 +631,21 @@ impl ZswapOffer {
         use ZswapOfferTypes::*;
         match (&self.0, &other.0) {
             (ProvenOffer(self_val), ProvenOffer(other_val)) => {
-                Ok(ZswapOffer(ProvenOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(ProvenOffer(self_val.merge(other_val)?)))
             }
             (UnprovenOffer(self_val), UnprovenOffer(other_val)) => {
-                let self_segment_id = offer_segment_id(&self_val)?;
-                let other_segment_id = offer_segment_id(&other_val)?;
+                let self_segment_id = offer_segment_id(self_val)?;
+                let other_segment_id = offer_segment_id(other_val)?;
                 if self_segment_id != other_segment_id {
                     return Err(JsError::new(&format!(
                         "Mismatched output segments. Self: {:?}, Other: {:?}",
                         self_segment_id, other_segment_id
                     )));
                 }
-                Ok(ZswapOffer(UnprovenOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(UnprovenOffer(self_val.merge(other_val)?)))
             }
             (ProofErasedOffer(self_val), ProofErasedOffer(other_val)) => {
-                Ok(ZswapOffer(ProofErasedOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(ProofErasedOffer(self_val.merge(other_val)?)))
             }
             _ => Err(JsError::new(
                 "Only ZswapOffers of the same proof type can be merged with each other.",
@@ -1072,8 +1072,7 @@ pub(crate) fn offer_segment_id(
     let output_segments = offer
         .outputs
         .iter()
-        .map(|output| output.segment())
-        .flatten()
+        .flat_map(|output| output.segment())
         .collect::<HashSet<_>>();
 
     if output_segments.len() > 1 {
@@ -1087,8 +1086,7 @@ pub(crate) fn offer_segment_id(
     let input_segments = offer
         .inputs
         .iter()
-        .map(|input| input.segment())
-        .flatten()
+        .flat_map(|input| input.segment())
         .collect::<HashSet<_>>();
 
     if input_segments.len() > 1 {
@@ -1102,8 +1100,7 @@ pub(crate) fn offer_segment_id(
     let transient_segments = offer
         .transient
         .iter()
-        .map(|transient| transient.segment())
-        .flatten()
+        .flat_map(|transient| transient.segment())
         .collect::<HashSet<_>>();
 
     if transient_segments.len() > 1 {
