@@ -34,13 +34,13 @@ impl Resolver for ZswapResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
             "midnight/zswap/spend" => {
-                concat!("zswap/", midnight_static::version!(), "/spend")
+                concat!("zswap/", midnight_ledger_static::version!(), "/spend")
             }
             "midnight/zswap/output" => {
-                concat!("zswap/", midnight_static::version!(), "/output")
+                concat!("zswap/", midnight_ledger_static::version!(), "/output")
             }
             "midnight/zswap/sign" => {
-                concat!("zswap/", midnight_static::version!(), "/sign")
+                concat!("zswap/", midnight_ledger_static::version!(), "/sign")
             }
             _ => return Ok(None),
         };

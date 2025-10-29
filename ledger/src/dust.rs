@@ -89,7 +89,7 @@ impl Resolver for DustResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
             "midnight/dust/spend" => {
-                concat!("dust/", midnight_static::version!(), "/spend")
+                concat!("dust/", midnight_ledger_static::version!(), "/spend")
             }
             _ => return Ok(None),
         };
@@ -1693,7 +1693,7 @@ impl<D: DB> DustLocalState<D> {
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("dust/", midnight_static::version!(), "/", $name),
+            concat!("dust/", midnight_ledger_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
                 &include_bytes!(concat!("../static/dust/", $name, ".sha256"))
                     .split_at(64)
