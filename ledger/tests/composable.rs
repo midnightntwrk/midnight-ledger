@@ -150,7 +150,6 @@ async fn composable() {
     };
     let mut strictness = WellFormedStrictness::default();
     strictness.enforce_balancing = false;
-    dbg!(&tx);
     state.assert_apply(&tx, strictness);
 
     // Part 2: Deploy outer
