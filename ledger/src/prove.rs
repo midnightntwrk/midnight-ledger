@@ -14,8 +14,9 @@
 use crate::dust::DustResolver;
 use crate::error::TransactionProvingError;
 use crate::structure::{
-    ContractAction, ContractCall, Intent, ProofMarker, ProofPreimageMarker, ProofPreimageVersioned,
-    ProofVersioned, SignatureKind, StandardTransaction, Transaction,
+    ContractAction, ContractCall, Intent, PedersenRandomnessIntent, ProofMarker,
+    ProofPreimageMarker, ProofPreimageVersioned, ProofVersioned, SignatureKind,
+    StandardTransaction, Transaction,
 };
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use futures::future::join_all;
@@ -86,19 +87,20 @@ impl transient_crypto::proofs::Resolver for Resolver {
     }
 }
 
+// Map of prooved intents
+type ProovedIntents<S, D> =
+    storage::storage::HashMap<u16, PedersenRandomnessIntent<S, ProofMarker, D>, D>;
+
 #[instrument(skip(prover, cost_model))]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
     intents: &storage::storage::HashMap<
         u16,
-        Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
+        PedersenRandomnessIntent<S, ProofPreimageMarker, D>,
         D,
     >,
     mut prover: impl ProvingProvider,
     cost_model: &CostModel,
-) -> Result<
-    storage::storage::HashMap<u16, Intent<S, ProofMarker, PedersenRandomness, D>, D>,
-    ProvingError,
-> {
+) -> Result<ProovedIntents<S, D>, ProvingError> {
     let res = join_all(intents.iter().map(|seg_x_intent| {
         let split_prover = prover.split();
         async move {
@@ -130,20 +132,17 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
         let _guard = tokio_handle.as_ref().map(Handle::enter);
         let mut proven = futures::executor::block_on(self.prove(MockProver, &INITIAL_COST_MODEL))?
             .seal(StdRng::seed_from_u64(0x00));
-        match proven {
-            Transaction::Standard(ref mut stx) => {
-                let intents = stx
-                    .intents
-                    .iter()
-                    .map(|segintent| {
-                        let mut intent = (&*segintent.1).clone();
-                        intent.binding_commitment = PureGeneratorPedersen::largest_representable();
-                        (*segintent.0, intent)
-                    })
-                    .collect();
-                stx.intents = intents;
-            }
-            _ => {}
+        if let Transaction::Standard(ref mut stx) = proven {
+            let intents = stx
+                .intents
+                .iter()
+                .map(|segintent| {
+                    let mut intent = (*segintent.1).clone();
+                    intent.binding_commitment = PureGeneratorPedersen::largest_representable();
+                    (*segintent.0, intent)
+                })
+                .collect();
+            stx.intents = intents;
         }
         Ok(proven)
     }
@@ -195,7 +194,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+impl<S: SignatureKind<D>, D: DB> PedersenRandomnessIntent<S, ProofPreimageMarker, D> {
     #[instrument(skip(self, prover, cost_model))]
     #[allow(clippy::type_complexity)]
     pub async fn prove(
@@ -203,7 +202,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         segment_id: u16,
         mut prover: impl ProvingProvider,
         cost_model: &CostModel,
-    ) -> Result<(u16, Intent<S, ProofMarker, PedersenRandomness, D>), ProvingError> {
+    ) -> Result<(u16, PedersenRandomnessIntent<S, ProofMarker, D>), ProvingError> {
         let actions =
             join_all(self.actions.iter_deref().map(|call| {
                 call.prove(prover.split(), self.binding_commitment.into(), cost_model)
@@ -258,7 +257,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
         cost_model: &CostModel,
     ) -> Result<ContractCall<ProofMarker, D>, TransactionProvingError<D>> {
         let active_calls = match &self.proof {
-            ProofPreimageVersioned::V1(proof) => prover.check(&proof).await?,
+            ProofPreimageVersioned::V1(proof) => prover.check(proof).await?,
         };
         let mut remaining_active_calls = &active_calls[..];
 
@@ -358,7 +357,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
             ProofPreimageVersioned::V1(preimage) => ProofVersioned::V1(
                 prover
                     .prove(
-                        &preimage,
+                        preimage,
                         Some(intermediate_call.binding_input(binding_commitment)),
                     )
                     .await?,
@@ -487,7 +486,7 @@ mod tests {
             {
                 println!("  '{name}'");
             }
-            assert!(false);
+            panic!();
         }
     }
 }

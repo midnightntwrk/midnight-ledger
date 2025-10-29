@@ -277,13 +277,13 @@ fn gen_arrays(sizes: &[usize]) -> Vec<StateValueArray> {
 fn choose_aligned_values(num: usize, map: &StateValueMap) -> Vec<AlignedValue> {
     let avs: Vec<_> = map
         .keys()
-        .sorted_by_key(|av| <AlignedValue as Serializable>::serialized_size(av))
+        .sorted_by_key(<AlignedValue as Serializable>::serialized_size)
         .collect();
     let size = avs.len();
     let half_size = size / 2;
     let mut results = vec![];
     // Here ((num+1)/2) = ceil(num/2).
-    for i in 0..((num + 1) / 2) {
+    for i in 0..num.div_ceil(2) {
         // Even steps thru the first half of the range
         results.push(avs[(size / num) * i].clone())
     }
@@ -326,7 +326,7 @@ struct BenchWithArgs {
 
 impl BenchWithArgs {
     fn new() -> Self {
-        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").map_or(false, |v| {
+        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").is_ok_and(|v| {
             if v == "1" {
                 true
             } else {
@@ -578,7 +578,7 @@ impl BenchWithArgs {
                 "uid": self.next_uid(),
             });
             if sizes.len() == 1 {
-                json[format!("value_size")] = sizes[0].into();
+                json["value_size".to_string()] = sizes[0].into();
             } else {
                 for (i, size) in sizes.iter().enumerate() {
                     json[format!("value_{i}_size")] = (*size).into();
@@ -984,14 +984,12 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
     });
     group.finish();
 
-    let configs: [(&str, fn() -> Op<ResultMode>); 2] =
-        [("rem", || op![rem]), ("remc", || op![remc])];
+    let configs: [(&str, Op<ResultMode>); 2] = [("rem", op![rem]), ("remc", op![remc])];
     for (name, mk_op) in configs {
         let mut group = mk_group(c, name);
         let mut bench = |container, key, json| {
             let stack = [container, key];
-            let op = mk_op();
-            bench_one_op(&mut group, &stack, op, json);
+            bench_one_op(&mut group, &stack, mk_op.clone(), json);
         };
         bwa.with_map_and_key(&mut bench);
         bwa.with_bmt_and_key(bench);
@@ -1039,15 +1037,12 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
     // blowup. If we wanted to test multiple iterations, we'd need to combine
     // the per-iteration parameters into per-call parameters, by summing all of
     // the per-iteration parameters.
-    let configs: [(
-        &str,
-        fn() -> Op<ResultMode>,
-        fn(AlignedValue) -> Op<ResultMode>,
-    ); 4] = [
-        ("idx", || op![idx[stack]], |key| op![idx[key]]),
-        ("idxc", || op![idxc[stack]], |key| op![idxc[key]]),
-        ("idxp", || op![idxp[stack]], |key| op![idxp[key]]),
-        ("idxpc", || op![idxpc[stack]], |key| op![idxpc[key]]),
+    #[allow(clippy::type_complexity)]
+    let configs: [(&str, Op<ResultMode>, fn(AlignedValue) -> Op<ResultMode>); 4] = [
+        ("idx", op![idx[stack]], |key| op![idx[key]]),
+        ("idxc", op![idxc[stack]], |key| op![idxc[key]]),
+        ("idxp", op![idxp[stack]], |key| op![idxp[key]]),
+        ("idxpc", op![idxpc[stack]], |key| op![idxpc[key]]),
     ];
     for (name, mk_stack_op, mk_key_op) in configs {
         let mut group = mk_group(c, name);
@@ -1056,8 +1051,7 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
             // a keyword, not a reference to the `stack` variable defined above!
             json["arg_from_stack"] = json!(1);
             let stack = [container, key];
-            let op = mk_stack_op();
-            bench_one_op(&mut group, &stack, op, json);
+            bench_one_op(&mut group, &stack, mk_stack_op.clone(), json);
         };
         bwa.with_map_and_key(&mut bench_stack_key);
         bwa.with_bmt_and_key(&mut bench_stack_key);
@@ -1077,15 +1071,13 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
     }
 
     // Like for `idx*`, we only test a single iteration.
-    let configs: [(&str, fn() -> Op<ResultMode>); 2] =
-        [("ins", || op![ins 1]), ("insc", || op![insc 1])];
+    let configs: [(&str, Op<ResultMode>); 2] = [("ins", op![ins 1]), ("insc", op![insc 1])];
     for (name, mk_op) in configs {
         let mut group = mk_group(c, name);
         let mut bench = |container, key, value, json| {
             let stack = [container, key, value];
             // Insert value at key.
-            let op = mk_op();
-            bench_one_op(&mut group, &stack, op, json);
+            bench_one_op(&mut group, &stack, mk_op.clone(), json);
         };
         bwa.with_map_and_key_and_value(&mut bench);
         bwa.with_bmt_and_key_and_value(&mut bench);

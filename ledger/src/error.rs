@@ -214,7 +214,7 @@ pub enum TransactionInvalid<D: DB> {
         operation_value: u128,
         operation: BalanceOperation,
     },
-    InputNotInUtxos(Utxo),
+    InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
@@ -444,7 +444,7 @@ pub enum MalformedTransaction<D: DB> {
         key_id: usize,
     },
     InvalidDustRegistrationSignature {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
     },
     OutOfDustValidityWindow {
         dust_ctime: Timestamp,
@@ -455,7 +455,7 @@ pub enum MalformedTransaction<D: DB> {
         key: VerifyingKey,
     },
     InsufficientDustForRegistrationFee {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
         available_dust: u128,
     },
     ThresholdMissed {
@@ -492,8 +492,8 @@ pub enum MalformedTransaction<D: DB> {
         operation_value: u128,
     },
     PedersenCheckFailure {
-        expected: EmbeddedGroupAffine,
-        calculated: EmbeddedGroupAffine,
+        expected: Box<EmbeddedGroupAffine>,
+        calculated: Box<EmbeddedGroupAffine>,
     },
     BalanceCheckOverspend {
         token_type: TokenType,
@@ -687,16 +687,22 @@ pub struct SubsetCheckFailure<T> {
     pub subset: Vec<T>,
 }
 
+/// Type alias for a tuple containing a segment ID and contract call details.
+/// The inner tuple holds the contract address, a hash output (such as a commitment or nullifier),
+/// and a field element (Fr), which may represent a value or cryptographic proof.
+/// This structure is commonly used to identify and track contract calls within a specific segment.
+pub type SegmentContractCall = (u16, (ContractAddress, HashOutput, Fr));
+
 #[derive(Clone, Debug)]
 pub enum EffectsCheckError {
-    RealCallsSubsetCheckFailure(SubsetCheckFailure<(u16, (ContractAddress, HashOutput, Fr))>),
+    RealCallsSubsetCheckFailure(SubsetCheckFailure<SegmentContractCall>),
     AllCommitmentsSubsetCheckFailure(SubsetCheckFailure<(u16, Commitment)>),
     #[allow(clippy::type_complexity)]
     RealUnshieldedSpendsSubsetCheckFailure(
         SubsetCheckFailure<((u16, bool), ((TokenType, PublicAddress), u128))>,
     ),
     ClaimedUnshieldedSpendsUniquenessFailure(Vec<((u16, Commitment), usize)>),
-    ClaimedCallsUniquenessFailure(Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)>),
+    ClaimedCallsUniquenessFailure(Vec<(SegmentContractCall, usize)>),
     NullifiersNEClaimedNullifiers {
         nullifiers: Vec<(u16, Nullifier, ContractAddress)>,
         claimed_nullifiers: Vec<(u16, Nullifier, ContractAddress)>,
@@ -780,8 +786,8 @@ impl<D: DB> Display for MalformedTransaction<D> {
         use MalformedTransaction::*;
         match self {
             InvalidNetworkId { expected, found } => {
-                let expected = sanitize_network_id(&expected);
-                let found = sanitize_network_id(&found);
+                let expected = sanitize_network_id(expected);
+                let found = sanitize_network_id(found);
                 write!(
                     formatter,
                     "invalid network ID - expect '{expected}' found '{found}'"
@@ -1171,7 +1177,7 @@ pub enum TransactionProvingError<D: DB> {
     LeftoverEntries {
         address: ContractAddress,
         entry_point: EntryPointBuf,
-        entries: Transcript<D>,
+        entries: Box<Transcript<D>>,
     },
     RanOutOfEntries {
         address: ContractAddress,

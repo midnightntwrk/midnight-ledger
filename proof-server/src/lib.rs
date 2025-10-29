@@ -201,23 +201,21 @@ async fn check(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                                 )
                                 .expect("data provider initialization failed"),
                             ),
-                            Box::new(move |loc: KeyLocation| match &*loc.0 {
-                                _ => Box::pin(std::future::ready(Ok(None))),
-                            }),
+                            Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
                         );
                         let proof_data = resolver
                             .resolve_key(ppi.key_location().clone())
                             .await
                             .map_err(|e| WorkError::BadInput(e.to_string()))?;
-                        let ir = proof_data
+
+                        proof_data
                             .ok_or_else(|| {
                                 WorkError::BadInput(format!(
                                     "couldn't find built-in key {}",
                                     &ppi.key_location().0
                                 ))
                             })?
-                            .ir_source;
-                        ir
+                            .ir_source
                     }
                 };
                 let result = match ppi {
@@ -277,9 +275,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         )
                         .expect("data provider initialization failed"),
                     ),
-                    Box::new(move |loc: KeyLocation| match &*loc.0 {
-                        _ => Box::pin(std::future::ready(Ok(data.clone()))),
-                    }),
+                    Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(data.clone())))),
                 );
                 let proof = match ppi {
                     ProofPreimageVersioned::V1(mut ppi) => {
@@ -339,10 +335,8 @@ async fn prove_transaction(
                         )
                         .expect("data provider initialization failed"),
                     ),
-                    Box::new(move |loc| match &*loc.0 {
-                        _ => Box::pin(std::future::ready(Ok(keys
-                            .get(loc.0.as_ref())
-                            .map(|v| v.clone())))),
+                    Box::new(move |loc| {
+                        Box::pin(std::future::ready(Ok(keys.get(loc.0.as_ref()).cloned())))
                     }),
                 );
                 let provider = ZkirV2Local {

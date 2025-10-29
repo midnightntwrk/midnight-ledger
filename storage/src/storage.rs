@@ -445,7 +445,7 @@ impl<
 > serde::Serialize for HashSet<V, D, A>
 {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        ser.collect_seq(self.iter().map(|v| (&**v).clone()))
+        ser.collect_seq(self.iter().map(|v| (**v).clone()))
     }
 }
 
@@ -870,7 +870,7 @@ impl<V: Storable<D>, D: DB> Iterator for ArrayIter<'_, V, D> {
             .0
             .lookup_sp(&Array::<V, D>::index_to_nibbles(self.next_index));
         self.next_index += 1;
-        return result;
+        result
     }
 }
 
@@ -883,6 +883,12 @@ pub struct MultiSet<V: Serializable + Storable<D>, D: DB> {
     elements: HashMap<V, u32, D>,
 }
 tag_enforcement_test!(MultiSet<(), DefaultDB>);
+
+impl<V: Serializable + Storable<D>, D: DB> Default for MultiSet<V, D> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
     /// Create a new, empty `MultiSet`
@@ -911,11 +917,11 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
     /// Decrement the count of an element by `n`, removing it if its count becomes 0
     #[must_use]
     pub fn remove_n(&self, element: &V, n: u32) -> Self {
-        let current_count = self.elements.get(&element).map(|x| *x.deref()).unwrap_or(0);
+        let current_count = self.elements.get(element).map(|x| *x.deref()).unwrap_or(0);
         let result = u32::checked_sub(current_count, n).unwrap_or(0);
         if result == 0 {
             MultiSet {
-                elements: self.elements.remove(&element),
+                elements: self.elements.remove(element),
             }
         } else {
             MultiSet {
@@ -1004,7 +1010,7 @@ impl<T: Storable<D> + Serializable, D: DB, A: Storable<D> + Annotation<(Sp<T, D>
     Semigroup for HashSet<T, D, A>
 {
     fn append(&self, other: &Self) -> Self {
-        self.union(&other)
+        self.union(other)
     }
 }
 
@@ -1113,6 +1119,15 @@ where
     }
 }
 
+impl<C: Container<D> + Debug + Storable<D> + Serializable, D: DB> Default for TimeFilterMap<C, D>
+where
+    <C as Container<D>>::Item: Serializable,
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<C: Container<D> + Debug + Storable<D> + Serializable, D: DB> TimeFilterMap<C, D>
 where
     <C as Container<D>>::Item: Serializable,
@@ -1179,7 +1194,7 @@ where
         }
         res.time_map = res
             .time_map
-            .insert(BigEndianU64(ts.to_secs()), xs.append(&v));
+            .insert(BigEndianU64(ts.to_secs()), xs.append(v));
 
         res
     }
@@ -1358,7 +1373,7 @@ impl<T: serde::Serialize + Storable<D>, D: DB> serde::Serialize for Sp<T, D> {
     where
         S: serde::Serializer,
     {
-        <T as serde::Serialize>::serialize(&self, serializer)
+        <T as serde::Serialize>::serialize(self, serializer)
     }
 }
 
@@ -1551,8 +1566,8 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         self.mpt.deref().clone().size()
     }
 
-    fn from_mpt(&self, mpt: MerklePatriciaTrie<V, D, A>) -> Self {
-        Map {
+    fn build_from_mpt(&self, mpt: MerklePatriciaTrie<V, D, A>) -> Self {
+        Self {
             mpt: Sp::new(mpt),
             key_type: self.key_type,
         }
@@ -1583,7 +1598,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> Map<BigEndianU64, V,
     /// 15.
     pub fn prune(&self, target_path: &[u8]) -> (Self, std::vec::Vec<Sp<V, D>>) {
         let (mpt, removed) = self.mpt.prune(target_path);
-        (self.from_mpt(mpt), removed)
+        (self.build_from_mpt(mpt), removed)
     }
 }
 
@@ -2065,7 +2080,7 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(512), 512);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
     }
@@ -2076,106 +2091,106 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(1), 1);
         time_map = time_map.insert(Timestamp::from_secs(2), 2);
 
-        assert_eq!(time_map.get(Timestamp::from_secs(0)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(0)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1)).copied(),
             Some(Identity(1))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), true);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
+        assert!(!time_map.contains(&0));
+        assert!(time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
         // Drop all things before the first item
         time_map = time_map.filter(Timestamp::from_secs(2));
         // First item should be gone now
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
 
         // Fails if to_nibbles bit emission order is reversed (as it was originally)
         time_map = time_map.insert(Timestamp::from_secs(16), 16);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(16)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(16)).copied(),
             Some(Identity(16))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(17)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(17)).copied(),
             Some(Identity(16))
         );
 
         time_map = time_map.filter(Timestamp::from_secs(2));
 
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(17)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(17)).copied(),
             Some(Identity(16))
         );
 
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
-        assert_eq!(time_map.contains(&16), true);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
+        assert!(time_map.contains(&16));
 
         // Fails if little-endian encoded during serialisation
         time_map = time_map.insert(Timestamp::from_secs(256), 256);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(256)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(256)).copied(),
             Some(Identity(256))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
 
         time_map = time_map.filter(Timestamp::from_secs(2));
 
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
 
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
-        assert_eq!(time_map.contains(&256), true);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
+        assert!(time_map.contains(&256));
     }
 
     #[test]
@@ -2207,7 +2222,7 @@ mod tests {
         let mut time_map = TimeFilterMap::<Identity<i32>, InMemoryDB>::new();
         time_map = time_map.insert(Timestamp::from_secs(100), 1);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(100)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(100)).copied(),
             Some(Identity(1))
         );
         assert!(time_map.contains(&1));
@@ -2215,11 +2230,11 @@ mod tests {
         assert!(!time_map.contains(&1));
         assert!(time_map.contains(&2));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(100)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(100)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(101)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(101)).copied(),
             Some(Identity(2))
         );
     }
@@ -2234,11 +2249,11 @@ mod tests {
         assert!(time_map.contains(&10));
         assert!(time_map.contains(&20));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(20)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(20)).copied(),
             Some(Identity(20))
         );
     }
@@ -2270,15 +2285,15 @@ mod tests {
         assert!(time_map.contains(&30));
         assert_eq!(time_map.get(Timestamp::from_secs(10)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(20)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(20)).copied(),
             Some(Identity(20))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(21)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(21)).copied(),
             Some(Identity(20))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(30)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(30)).copied(),
             Some(Identity(30))
         );
     }
@@ -2295,11 +2310,11 @@ mod tests {
         assert!(!time_map.contains(&10));
         assert!(time_map.contains(&20));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(30)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(30)).copied(),
             Some(Identity(30))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(31)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(31)).copied(),
             Some(Identity(30))
         );
 
@@ -2309,11 +2324,11 @@ mod tests {
         assert!(time_map.contains(&40));
         assert_eq!(time_map.get(Timestamp::from_secs(39)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(40)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(40)).copied(),
             Some(Identity(40))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(41)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(41)).copied(),
             Some(Identity(40))
         );
 
@@ -2329,18 +2344,18 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(10), 10);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(0)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(0)).copied(),
             Some(Identity(0))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(5)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(5)).copied(),
             Some(Identity(0))
         );
         assert!(time_map.contains(&0));
 
         time_map = time_map.filter(Timestamp::from_secs(0));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(0)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(0)).copied(),
             Some(Identity(0))
         );
         assert!(time_map.contains(&0));
@@ -2350,7 +2365,7 @@ mod tests {
         assert!(!time_map.contains(&0));
         assert_eq!(time_map.get(Timestamp::from_secs(5)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
     }
@@ -2361,25 +2376,25 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(10), 10);
         time_map = time_map.insert(Timestamp::from_secs(1000000), 1000000);
 
-        assert_eq!(time_map.get(Timestamp::from_secs(9)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(9)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(11)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(11)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(999999)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(999999)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000001)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000001)).copied(),
             Some(Identity(1000000))
         );
         assert!(time_map.contains(&10));
@@ -2387,11 +2402,11 @@ mod tests {
 
         time_map = time_map.filter(Timestamp::from_secs(10));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert!(time_map.contains(&10));
@@ -2400,7 +2415,7 @@ mod tests {
         time_map = time_map.filter(Timestamp::from_secs(1000000));
         assert_eq!(time_map.get(Timestamp::from_secs(10)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert!(!time_map.contains(&10));

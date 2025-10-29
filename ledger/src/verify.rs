@@ -15,7 +15,7 @@ use crate::dust::DustParameters;
 use crate::error::MalformedContractDeploy;
 use crate::error::{
     BalanceOperation, DisjointCheckError, EffectsCheckError, MalformedTransaction,
-    SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
+    SegmentContractCall, SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
 };
 use crate::primitive::MultiSet;
 use crate::structure::{
@@ -175,7 +175,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params = self.parameters.dust.clone();
+        let params = self.parameters.dust;
         let commitment_root = self
             .dust
             .utxo
@@ -287,7 +287,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params_old = self.previously_validated_state.parameters.dust.clone();
+        let params_old = self.previously_validated_state.parameters.dust;
         let commitment_root_old = self
             .previously_validated_state
             .dust
@@ -304,7 +304,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             .get(ctime)
             .map(|x| x.0)
             .unwrap_or_default();
-        let params_new = self.new_state.parameters.dust.clone();
+        let params_new = self.new_state.parameters.dust;
         let commitment_root_new = self
             .new_state
             .dust
@@ -503,7 +503,7 @@ impl<
                 })
                 .transpose()?;
             self.binding_commitment
-                .valid(&Intent::challenge_pre_for(&self, segment_id))
+                .valid(&Intent::challenge_pre_for(self, segment_id))
         })?;
 
         self.actions
@@ -580,14 +580,14 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(&*x, 0).map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, 0).map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {
                         if *seg_x_offer.0 == 0 {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
-                        P::zswap_well_formed(&seg_x_offer.1.deref(), *seg_x_offer.0.deref())
+                        P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
                             .map_err(|e: zswap::error::MalformedOffer| {
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
@@ -632,7 +632,7 @@ where
                 ref_state.stateless_check(|| {
                     B::when_sealed(Ok(
                         // There's no point in checking this unless we actually care about signature verification
-                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(&mtx).well_formed(),
+                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
                 Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
@@ -970,11 +970,17 @@ fn sequencing_correlation_check<D: DB>(
     Ok(())
 }
 
+// Type alias for mapping contract call keys to a list of call nodes and their context.
+// The key (`CallKey`) uniquely identifies a contract call (address, entrypoint hash, commitment).
+// The value is a vector of tuples, each containing a `CallNode` (with segment, address, and index)
+// and a boolean indicating whether the call is in a guaranteed context (`true`) or fallible context (`false`).
+type CallNodeMap = std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>;
+
 fn sequencing_context_check<P: ProofKind<D>, D: DB>(
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
     calls_in_intent: std::collections::HashMap<u32, &ContractCall<P, D>>,
-    callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>,
+    callers_for_addr: CallNodeMap,
 ) -> Result<(), MalformedTransaction<D>> {
     // If a calls `b`, `b` must be contained within the 'lifetime' of the
     // call instruction in `a`.
@@ -1047,10 +1053,9 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
     calls_in_intent: &std::collections::HashMap<u32, &ContractCall<P, D>>,
-) -> Result<std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>, MalformedTransaction<D>> {
+) -> Result<CallNodeMap, MalformedTransaction<D>> {
     // A map from (address, entry_point_hash, commitment) to caller nodes (+ guaranteed flag)
-    let mut callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>> =
-        std::collections::HashMap::new();
+    let mut callers_for_addr: CallNodeMap = std::collections::HashMap::new();
 
     for (cid, call) in calls_in_intent {
         let this_node: CallNode = CallNode {
@@ -1172,7 +1177,6 @@ impl<
                         shielded_outputs: shielded_outputs
                             .into_iter()
                             .map(|x| x.erase_proof())
-                            .into_iter()
                             .collect(),
                         transient_outputs: outputs.into_iter().map(|x| x.erase_proof()).collect(),
                     },
@@ -1349,8 +1353,8 @@ impl<
 
         if comm != expected {
             return Err(MalformedTransaction::PedersenCheckFailure {
-                expected,
-                calculated: comm,
+                expected: Box::new(expected),
+                calculated: Box::new(comm),
             });
         };
 
@@ -1395,8 +1399,7 @@ impl<
         let transcripts: Vec<_> = calls
             .iter()
             .flat_map(|(segment, call)| {
-                (*call)
-                    .guaranteed_transcript
+                call.guaranteed_transcript
                     .iter()
                     .map(move |t| (segment, &0, t, call.address))
                     .chain(
@@ -1537,22 +1540,21 @@ impl<
                 }),
             ));
         }
-        let claimed_calls: MultiSet<(u16, (ContractAddress, HashOutput, Fr))> = transcripts
+        let claimed_calls: MultiSet<SegmentContractCall> = transcripts
             .iter()
             .flat_map(|(segment, _, t, _)| {
                 t.effects.claimed_contract_calls.iter().map(|call| {
-                    let (_seq, addr, hash, fr) = (&*call).into_inner();
-                    (**segment, (addr, hash, fr))
+                    let (_seq, addr, hash, fr) = &call.into_inner();
+                    (**segment, (*addr, *hash, *fr))
                 })
             })
             .collect();
 
-        let duplicate_claimed_calls: Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)> =
-            claimed_calls
-                .clone()
-                .into_iter()
-                .filter(|(_, count)| count > &1)
-                .collect();
+        let duplicate_claimed_calls: Vec<(SegmentContractCall, usize)> = claimed_calls
+            .clone()
+            .into_iter()
+            .filter(|(_, count)| count > &1)
+            .collect();
 
         if !(duplicate_claimed_calls.is_empty()) {
             return Err(MalformedTransaction::EffectsCheckFailure(
@@ -1560,7 +1562,7 @@ impl<
             ));
         }
 
-        let real_calls: MultiSet<(u16, (ContractAddress, HashOutput, Fr))> = calls
+        let real_calls: MultiSet<SegmentContractCall> = calls
             .iter()
             .map(|(segment, call)| {
                 (
@@ -1582,60 +1584,61 @@ impl<
                 }),
             ));
         }
-        let claimed_unshielded_spends: MultiSet<((u16, bool), ((TokenType, PublicAddress), u128))> =
-            transcripts
-                .iter()
-                .flat_map(|(intent_seg, logical_seg, t, _)| {
-                    t.effects.claimed_unshielded_spends.iter().map(|sp| {
-                        let (sp, i) = sp.deref();
-                        (
-                            (**intent_seg, **logical_seg == 0),
-                            ((sp.deref().0.clone(), sp.deref().1.clone()), *(*i).deref()),
-                        )
-                    })
+
+        // Type alias for a tuple representing a contract call with metadata and value.
+        // The outer tuple holds a segment ID and a boolean indicating a special property (e.g., guaranteed or fallible context).
+        // The inner tuple contains a token type and public address (identifying the asset and recipient), along with a value (u128) representing the amount.
+        // This structure is useful for tracking contract calls, their context, and associated asset transfers.
+        type ContractCallInfo = ((u16, bool), ((TokenType, PublicAddress), u128));
+        let claimed_unshielded_spends: MultiSet<ContractCallInfo> = transcripts
+            .iter()
+            .flat_map(|(intent_seg, logical_seg, t, _)| {
+                t.effects.claimed_unshielded_spends.iter().map(|sp| {
+                    let (sp, i) = sp.deref();
+                    (
+                        (**intent_seg, **logical_seg == 0),
+                        ((sp.deref().0, sp.deref().1), *(*i).deref()),
+                    )
                 })
-                .collect();
-        let real_unshielded_spends: MultiSet<((u16, bool), ((TokenType, PublicAddress), u128))> =
-            transcripts
-                .iter()
-                .flat_map(|(intent_seg, logical_seg, t, addr)| {
-                    t.effects.unshielded_inputs.iter().map(move |sp| {
+            })
+            .collect();
+        let real_unshielded_spends: MultiSet<ContractCallInfo> = transcripts
+            .iter()
+            .flat_map(|(intent_seg, logical_seg, t, addr)| {
+                t.effects.unshielded_inputs.iter().map(move |sp| {
+                    (
+                        (**intent_seg, **logical_seg == 0),
                         (
-                            (**intent_seg, **logical_seg == 0),
+                            (*sp.deref().0.deref(), PublicAddress::Contract(*addr)),
+                            *sp.deref().1.deref(),
+                        ),
+                    )
+                })
+            })
+            .chain(self.intents.iter().flat_map(|sp| {
+                let intent = &sp.clone().1;
+                let segment = *sp.0;
+                let guaranteed_outputs = intent.guaranteed_outputs();
+                let fallible_outputs = intent.fallible_outputs();
+                guaranteed_outputs
+                    .iter()
+                    .map(|o| (true, o))
+                    .chain(fallible_outputs.iter().map(|o| (false, o)))
+                    .map(move |(guaranteed, output)| {
+                        (
+                            (segment, guaranteed),
                             (
                                 (
-                                    sp.deref().0.deref().clone(),
-                                    PublicAddress::Contract((*addr).clone()),
+                                    TokenType::Unshielded(output.type_),
+                                    PublicAddress::User(output.owner),
                                 ),
-                                *sp.deref().1.deref(),
+                                output.value,
                             ),
                         )
                     })
-                })
-                .chain(self.intents.iter().flat_map(|sp| {
-                    let intent = &sp.clone().1;
-                    let segment = *sp.0;
-                    let guaranteed_outputs = intent.guaranteed_outputs();
-                    let fallible_outputs = intent.fallible_outputs();
-                    guaranteed_outputs
-                        .iter()
-                        .map(|o| (true, o))
-                        .chain(fallible_outputs.iter().map(|o| (false, o)))
-                        .map(move |(guaranteed, output)| {
-                            (
-                                (segment, guaranteed),
-                                (
-                                    (
-                                        TokenType::Unshielded(output.type_.clone()),
-                                        PublicAddress::User(output.owner),
-                                    ),
-                                    output.value,
-                                ),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                }))
-                .collect();
+                    .collect::<Vec<_>>()
+            }))
+            .collect();
 
         if !(real_unshielded_spends.has_subset(&claimed_unshielded_spends)) {
             return Err(MalformedTransaction::EffectsCheckFailure(
@@ -1694,7 +1697,7 @@ impl<D: DB> ContractDeploy<D> {
         if self.initial_state.balance.iter().any(|bal| *bal.1 > 0) {
             let mut err_data = std::collections::HashMap::new();
             for val in self.initial_state.balance.clone().iter() {
-                err_data.insert(*(*val).0, *(*val).1);
+                err_data.insert(*val.0, *val.1);
             }
             return Err(MalformedTransaction::<D>::MalformedContractDeploy(
                 MalformedContractDeploy::NonZeroBalance(err_data),
@@ -1785,10 +1788,11 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
-        if let Some(fallible) = &self.fallible_transcript {
-            if fallible.program.get(0) != Some(&Op::Ckpt) && self.guaranteed_transcript.is_some() {
-                return Err(MalformedTransaction::FallibleWithoutCheckpoint);
-            }
+        if let Some(fallible) = &self.fallible_transcript
+            && fallible.program.get(0) != Some(&Op::Ckpt)
+            && self.guaranteed_transcript.is_some()
+        {
+            return Err(MalformedTransaction::FallibleWithoutCheckpoint);
         }
         for transcript in [
             self.guaranteed_transcript.as_ref(),
