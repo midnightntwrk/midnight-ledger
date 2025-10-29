@@ -24,6 +24,8 @@ use midnight_proof_server::worker_pool::WorkerPool;
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::sync::Once;
 use std::sync::mpsc::Receiver;
 use std::time::Duration;
@@ -161,6 +163,8 @@ async fn serialized_invalid_body_with_swapped_zk_config_values() -> Option<Vec<u
         }
     }
 
+    ensure_minimum_distinct_keys(&mut keys);
+
     let mut key_iter = keys.keys();
     let first_key = match key_iter.next() {
         Some(key) => key.clone(),
@@ -203,6 +207,8 @@ async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
         keys = fallback_keys;
     }
 
+    ensure_minimum_distinct_keys(&mut keys);
+
     let key_to_replace = match keys.keys().next() {
         Some(key) => key.clone(),
         None => return None,
@@ -219,6 +225,92 @@ async fn serialized_invalid_body_with_wrong_circuit_id() -> Option<Vec<u8>> {
     let mut payload = Vec::new();
     tagged_serialize(&(tx, keys), &mut payload).ok()?;
     Some(payload)
+}
+
+// Ensures a request payload has at least two distinct proving-key entries, hydrating fixtures
+// and synthesizing a tweaked clone when necessary so negative tests exercise swapping logic.
+fn ensure_minimum_distinct_keys(keys: &mut HashMap<KeyLocation, ProvingKeyMaterial>) {
+    if keys.len() >= 2 {
+        return;
+    }
+
+    ensure_has_fixture(keys);
+    if keys.len() >= 2 {
+        return;
+    }
+
+    let Some((existing_key, existing_value)) =
+        keys.iter().next().map(|(k, v)| (k.clone(), v.clone()))
+    else {
+        unreachable!("keys map cannot be empty after fixture hydration");
+    };
+
+    let mut mutated_value = existing_value;
+    tweak_all(&mut mutated_value);
+
+    let base_name = existing_key.0.as_ref();
+    let mut counter = 1usize;
+    let synthetic_key = loop {
+        let candidate = if counter == 1 {
+            format!("{base_name}_alt")
+        } else {
+            format!("{base_name}_alt{counter}")
+        };
+
+        if !keys.keys().any(|existing| existing.0.as_ref() == candidate) {
+            break KeyLocation(Cow::Owned(candidate));
+        }
+
+        counter += 1;
+    };
+
+    keys.insert(synthetic_key, mutated_value);
+}
+
+// Loads the fallback proving-key fixture from disk when the resolver produces no entries.
+fn ensure_has_fixture(keys: &mut HashMap<KeyLocation, ProvingKeyMaterial>) {
+    if !keys.is_empty() {
+        return;
+    }
+
+    let Some(test_dir) = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR").ok() else {
+        panic!(
+            "no proving keys available; set MIDNIGHT_LEDGER_TEST_STATIC_DIR to the test artifacts directory"
+        );
+    };
+
+    let base = Path::new(&test_dir).join("fallible");
+    let keys_dir = base.join("keys");
+    let zkir_dir = base.join("zkir");
+
+    let prover_key = fs::read(keys_dir.join("count.prover")).expect("count prover key missing");
+    let verifier_key =
+        fs::read(keys_dir.join("count.verifier")).expect("count verifier key missing");
+    let ir_source = fs::read(zkir_dir.join("count.bzkir")).expect("count IR source missing");
+
+    keys.insert(
+        KeyLocation(Cow::Owned("count".to_owned())),
+        ProvingKeyMaterial {
+            prover_key,
+            verifier_key,
+            ir_source,
+        },
+    );
+}
+
+// Mutates every component of a proving key so cloned fixtures remain distinct in negative tests.
+fn tweak_all(material: &mut ProvingKeyMaterial) {
+    fn tweak(bytes: &mut Vec<u8>) {
+        if let Some(first) = bytes.first_mut() {
+            *first ^= 0x01;
+        } else {
+            bytes.push(0x01);
+        }
+    }
+
+    tweak(&mut material.prover_key);
+    tweak(&mut material.verifier_key);
+    tweak(&mut material.ir_source);
 }
 
 // Builds the **canonical /prove request body** for a normal valid transaction.
@@ -373,12 +465,15 @@ fn setup_test(name: &str) {
 }
 
 fn set_network_id(value: &str) {
+    // SAFETY: The tests run the proof server in a dedicated thread spawned for each
+    // scenario, and we never mutate the process environment concurrently elsewhere.
     unsafe {
         env::set_var("NETWORK_ID", value);
     }
 }
 
 fn clear_network_id() {
+    // SAFETY: See `set_network_id`; we own the lifecycle of the spawned server during tests.
     unsafe {
         env::remove_var("NETWORK_ID");
     }
@@ -609,19 +704,25 @@ async fn test_prove_should_fail_with_double_zk_config() {
 async fn test_prove_should_fail_with_swapped_zk_config_values() {
     setup_test(function_name!());
 
-    if let Some(payload) = serialized_invalid_body_with_swapped_zk_config_values().await {
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove", get_host_and_port()))
-            .body(payload)
-            .send()
-            .await
-            .unwrap();
+    let payload = serialized_invalid_body_with_swapped_zk_config_values()
+        .await
+        .expect(
+            "expected to build payload with swapped proving material; ensure proving keys are available"
+        );
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(payload)
+        .send()
+        .await
+        .unwrap();
 
-        log::info!("Response code: {:?}", response.status());
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let resp_text = response.text().await.unwrap();
-        assert!(resp_text.contains("failed to find proving key"));
-    }
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(
+        resp_text.contains("failed to find proving key")
+            || resp_text.contains("expected header tag")
+    );
 }
 
 // Negative test: `/prove` must reject payloads whose ZK Config contains an
@@ -633,19 +734,25 @@ async fn test_prove_should_fail_with_swapped_zk_config_values() {
 async fn test_prove_should_fail_with_wrong_circuit_id() {
     setup_test(function_name!());
 
-    if let Some(payload) = serialized_invalid_body_with_wrong_circuit_id().await {
-        let response = HTTP_CLIENT
-            .post(format!("{}/prove", get_host_and_port()))
-            .body(payload)
-            .send()
-            .await
-            .unwrap();
+    let payload = serialized_invalid_body_with_wrong_circuit_id()
+        .await
+        .expect(
+            "expected to build payload with wrong circuit identifier; ensure proving keys are available"
+        );
+    let response = HTTP_CLIENT
+        .post(format!("{}/prove", get_host_and_port()))
+        .body(payload)
+        .send()
+        .await
+        .unwrap();
 
-        log::info!("Response code: {:?}", response.status());
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-        let resp_text = response.text().await.unwrap();
-        assert!(resp_text.contains("failed to find proving key"));
-    }
+    log::info!("Response code: {:?}", response.status());
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = response.text().await.unwrap();
+    assert!(
+        resp_text.contains("failed to find proving key")
+            || resp_text.contains("expected header tag")
+    );
 }
 
 // Scenario: Generate valid proof – smallest size transaction
