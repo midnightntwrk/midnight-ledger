@@ -30,6 +30,7 @@ use serialize::{Deserializable, Serializable};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
+    slice,
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -582,7 +583,7 @@ impl<D: DB> StorageBackend<D> {
 
     /// Un-mark `key` as GC root. See [`Self::persist`].
     pub fn unpersist(&mut self, key: &ArenaKey<D::Hasher>) {
-        self.update_counts(&[key.clone()], Delta::new_root_delta(-1));
+        self.update_counts(slice::from_ref(key), Delta::new_root_delta(-1));
     }
 
     /// Mark `key` as a GC root, meaning it will be persisted across GC runs,
@@ -593,7 +594,7 @@ impl<D: DB> StorageBackend<D> {
     /// a GC root. In other words, the GC-root status of a key is a non-negative
     /// int, not a bool.
     pub fn persist(&mut self, key: &ArenaKey<D::Hasher>) {
-        self.update_counts(&[key.clone()], Delta::new_root_delta(1));
+        self.update_counts(slice::from_ref(key), Delta::new_root_delta(1));
     }
 
     /// Load DAG rooted at `key` into the cache from the DB.
@@ -992,13 +993,8 @@ impl<D: DB> StorageBackend<D> {
                 self.write_cache.set(key, value).is_none(),
                 "write cache is unbounded, it can't evict"
             );
-        } else {
-            match self.read_cache.set(key, value) {
-                Some((_, v)) => {
-                    debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
-                }
-                _ => {}
-            }
+        } else if let Some((_, v)) = self.read_cache.set(key, value) {
+            debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
         }
     }
 

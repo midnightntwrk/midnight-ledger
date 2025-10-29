@@ -1419,7 +1419,7 @@ where
 }
 
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B, D> {
-    pub fn calls<'a>(&'a self) -> impl Iterator<Item = &'a ContractCall<P, D>> {
+    pub fn calls(&self) -> impl Iterator<Item = &ContractCall<P, D>> {
         self.actions.iter_deref().filter_map(|cd| match cd {
             ContractAction::Call(upd) => Some(&**upd),
             _ => None,
@@ -1522,9 +1522,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
         &self,
     ) -> impl Iterator<Item = Input<<P as ProofKind<D>>::LatestProof, D>> + use<'_, S, P, B, D>
     {
-        self.guaranteed_inputs()
-            .into_iter()
-            .chain(self.fallible_inputs())
+        self.guaranteed_inputs().chain(self.fallible_inputs())
     }
 
     pub fn guaranteed_inputs(
@@ -1933,7 +1931,7 @@ where
                             // VM stack setup / destroy cost
                             // Left out of scope here to avoid going to deep into
                             // stack structure.
-                            *cost += model.stack_setup_cost(&transcript);
+                            *cost += model.stack_setup_cost(transcript);
                         }
                     }
                     ContractAction::Deploy(deploy) => {
@@ -1981,7 +1979,7 @@ where
                 let offers = stx
                     .guaranteed_coins
                     .iter()
-                    .map(|o| (0, (&**o).clone()))
+                    .map(|o| (0, (**o).clone()))
                     .chain(
                         stx.fallible_coins
                             .iter()
@@ -2039,7 +2037,7 @@ where
         validation_cost.compute_time = validation_cost.compute_time / model.parallelism_factor;
         let guaranteed_cost = self.application_cost(model).0;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
-        return CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time);
+        CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time)
     }
 
     pub fn cost(
@@ -2352,7 +2350,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                 (addr == callee.address
                     && ep == callee.entry_point.ep_hash()
                     && cc == callee.communication_commitment)
-                    .then(|| (guaranteed, seq))
+                    .then_some((guaranteed, seq))
             })
     }
 
@@ -2942,6 +2940,8 @@ impl<T: Deserializable> serde::de::Visitor<'_> for BorshVisitor<T> {
     }
 }
 
+pub const FEE_TOKEN: TokenType = TokenType::Dust;
+
 #[cfg(test)]
 mod tests {
     use storage::db::InMemoryDB;
@@ -2963,5 +2963,3 @@ mod tests {
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
     }
 }
-
-pub const FEE_TOKEN: TokenType = TokenType::Dust;
