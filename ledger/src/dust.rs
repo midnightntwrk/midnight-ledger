@@ -34,6 +34,7 @@ use base_crypto::{
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
 use futures::future::join_all;
+use indexmap::IndexMap;
 #[cfg(feature = "proof-verifying")]
 use lazy_static::lazy_static;
 use onchain_runtime::{
@@ -1687,6 +1688,210 @@ impl<D: DB> DustLocalState<D> {
         res.commitment_tree = res.commitment_tree.rehash();
         res.generating_tree = res.generating_tree.rehash();
         Ok(res)
+    }
+}
+
+trait ToOption: Sized {
+    fn to_option(&self) -> Option<Self>;
+}
+
+impl<K: Clone, V: Clone, S: Clone> ToOption for IndexMap<K, V, S> {
+    fn to_option(&self) -> Option<Self> {
+        if self.is_empty() {
+            None
+        } else {
+            Some((*self).clone())
+        }
+    }
+}
+
+#[derive(Debug, Storable)]
+#[derive_where(Clone)]
+#[storable(db = D)]
+#[tag = "dust-local-state[v1]"]
+pub struct DustLocalStateLight<D: DB> {
+    pub generating_info: HashMap<InitialNonce, DustGenerationInfo, D>,
+    dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
+    pub sync_time: Timestamp,
+    pub params: DustParameters,
+}
+tag_enforcement_test!(DustLocalStateLight<InMemoryDB>);
+
+impl<D: DB> DustLocalStateLight<D> {
+    pub fn new(params: DustParameters) -> Self {
+        DustLocalStateLight {
+            generating_info: HashMap::new(),
+            dust_utxos: HashMap::new(),
+            sync_time: Timestamp::default(),
+            params,
+        }
+    }
+
+    pub fn wallet_balance(&self, time: Timestamp, gen_info: &DustGenerationInfo) -> u128 {
+        self.utxos()
+            .filter_map(|utxo| {
+                Some(DustOutput::from(utxo).updated_value(gen_info, time, &self.params))
+            })
+            .sum()
+    }
+
+    pub fn utxos(&self) -> impl Iterator<Item = QualifiedDustOutput> {
+        self.dust_utxos.values().filter_map(|v| {
+            if v.pending_until.is_none() {
+                Some(v.utxo)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {
+        Some(*self.generating_info.get(&qdo.backing_night)?)
+    }
+
+    /* Spend:
+    we need to get the path_for_leaf data passing the:
+       1) gen_path: gen_idx + gen_info.merkle_hash()
+           gen_idx can be retrieved on server if I pass &utxo.backing_night
+       2) com_path: utxo.mt_index + HashOutput::from(old_com)
+            we can simply pass the commitment here
+    */
+
+    pub fn sync(
+        &self,
+        txs_with_events: IndexMap<Timestamp, Vec<Event<D>>>,
+        sk: &DustSecretKey,
+    ) -> DustLocalStateLight<D> {
+        if txs_with_events.is_empty() {
+            return (*self).clone();
+        }
+
+        let pk = DustPublicKey::from(sk.clone());
+
+        // here we simulate the subscription to the address-relate Dust generation events
+        let mut updated_state = (*self).clone();
+        for (_, events) in &txs_with_events {
+            for event in events {
+                match &event.content {
+                    EventDetails::DustInitialUtxo {
+                        output, generation, ..
+                    } => {
+                        if pk == output.owner {
+                            updated_state.generating_info = updated_state
+                                .generating_info
+                                .insert(generation.nonce, *generation);
+                            updated_state.dust_utxos = updated_state.dust_utxos.insert(
+                                output.nullifier(sk),
+                                DustWalletUtxoState {
+                                    utxo: *output,
+                                    pending_until: None,
+                                },
+                            );
+                        }
+                    }
+                    _ => (),
+                }
+            }
+        }
+
+        // find related txs by existing nullifiers and process the events
+        while let Some(txs_by_nullifiers) = self
+            .find_txs_by_nullifiers(
+                updated_state.dust_utxos.keys().collect::<Vec<_>>(),
+                &txs_with_events,
+            )
+            .to_option()
+        {
+            for (_, events) in txs_by_nullifiers {
+                updated_state = updated_state.replay_events(sk, events.iter());
+            }
+        }
+
+        // update last sync time
+        let last_tx = txs_with_events.last().unwrap();
+        updated_state.sync_time = *last_tx.0;
+
+        updated_state
+    }
+
+    pub fn find_txs_by_nullifiers(
+        &self,
+        nullifiers: Vec<DustNullifier>,
+        tx_events: &IndexMap<Timestamp, Vec<Event<D>>>,
+    ) -> IndexMap<Timestamp, Vec<Event<D>>> {
+        let mut filtered = tx_events.clone();
+        filtered.retain(|_, events| {
+            events.iter().any(|event| {
+                matches!(event.content, EventDetails::DustSpendProcessed {
+                    nullifier,
+                    ..
+                } if nullifiers.contains(&nullifier))
+            })
+        });
+        filtered
+    }
+
+    pub fn replay_events<'a>(
+        &self,
+        sk: &DustSecretKey,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Self {
+        let res = events
+            .into_iter()
+            .fold((*self).clone(), |mut state, event| match &event.content {
+                EventDetails::DustSpendProcessed {
+                    commitment_index,
+                    nullifier,
+                    v_fee,
+                    declared_time,
+                    ..
+                } => {
+                    if let Some(utxo) = state.dust_utxos.get(&nullifier) {
+                        if let Some(gen_info) = state.generating_info.get(&utxo.utxo.backing_night)
+                        {
+                            let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
+                                &*gen_info,
+                                *declared_time,
+                                &self.params,
+                            );
+                            let v_now = v_pre_spend.saturating_sub(*v_fee);
+                            state.dust_utxos = state.dust_utxos.remove(&nullifier);
+                            let qdo_new = QualifiedDustOutput {
+                                backing_night: utxo.utxo.backing_night,
+                                ctime: *declared_time,
+                                initial_value: v_now,
+                                seq: utxo.utxo.seq + 1,
+                                nonce: transient_hash(
+                                    (utxo.utxo.backing_night, utxo.utxo.seq + 1, sk.0)
+                                        .field_vec()
+                                        .as_ref(),
+                                ),
+                                owner: utxo.utxo.owner,
+                                mt_index: *commitment_index,
+                            };
+                            state.dust_utxos = state.dust_utxos.insert(
+                                qdo_new.nullifier(sk),
+                                DustWalletUtxoState {
+                                    utxo: qdo_new,
+                                    pending_until: None,
+                                },
+                            );
+                        } else {
+                            error!("Unable to find backing NIGHT");
+                        }
+                    }
+                    state
+                }
+                EventDetails::DustGenerationDtimeUpdate { update, .. } => {
+                    dbg!(update.leaf.1);
+                    // state.generating_tree =
+                    //     state.generating_tree.update_from_evidence(update.clone())?;
+
+                    state
+                }
+                _ => state,
+            });
+        res
     }
 }
 

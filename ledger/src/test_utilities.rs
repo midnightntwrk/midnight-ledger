@@ -14,7 +14,8 @@
 use crate::construct::ContractCallPrototype;
 use crate::dust::DustResolver;
 use crate::dust::{
-    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
+    DustActions, DustLocalState, DustLocalStateLight, DustOutput, DustPublicKey, DustRegistration,
+    DustSecretKey,
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
@@ -41,6 +42,7 @@ use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
 };
 use derive_where::derive_where;
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
@@ -106,8 +108,8 @@ pub struct TestState<D: DB> {
     pub zswap: ZswapLocalState<D>,
     pub utxos: HashSet<Utxo, D>,
     pub dust: DustLocalState<D>,
-    pub events: Vec<Event<D>>,
-
+    pub dust_light: DustLocalStateLight<D>,
+    pub events: IndexMap<Timestamp, Vec<Event<D>>>,
     pub time: Timestamp,
 
     pub zswap_keys: SecretKeys,
@@ -122,8 +124,8 @@ impl<D: DB> TestState<D> {
             zswap: ZswapLocalState::new(),
             utxos: HashSet::new(),
             dust: DustLocalState::new(INITIAL_PARAMETERS.dust),
-            events: Vec::new(),
-
+            dust_light: DustLocalStateLight::new(INITIAL_PARAMETERS.dust),
+            events: IndexMap::new(),
             time: Timestamp::from_secs(0),
 
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
@@ -371,6 +373,7 @@ impl<D: DB> TestState<D> {
             .dust
             .replay_events(&self.dust_key, result.events())
             .expect("just applied transaction should replay");
+        assert_eq!(self.events.insert(self.time, result.events().into()), None);
         let pk = UserAddress::from(self.night_key.verifying_key());
         self.utxos = self
             .ledger
@@ -393,14 +396,13 @@ impl<D: DB> TestState<D> {
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
-        dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
-        dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
-        dbg!(
-            tx.cost(&self.ledger.parameters, false)
-                .ok()
-                .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
-        );
+        tx.cost(&self.ledger.parameters, false).ok();
+        tx.validation_cost(&self.ledger.parameters.cost_model);
+        tx.application_cost(&self.ledger.parameters.cost_model);
+
+        tx.cost(&self.ledger.parameters, false)
+            .ok()
+            .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits));
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -557,6 +559,22 @@ impl<D: DB> TestState<D> {
         }
         // TODO: Balance unshielded
         Ok(merged_tx)
+    }
+
+    pub fn manual_sync(&mut self) {
+        // get new transactions
+        let mut new_txs = self.events.clone();
+        let last_sync_time = self.dust_light.sync_time;
+        new_txs.retain(|block_time, _| {
+            if last_sync_time == Timestamp::default() {
+                *block_time >= last_sync_time
+            } else {
+                *block_time > last_sync_time
+            }
+        });
+
+        // trigger sync
+        self.dust_light = self.dust_light.sync(new_txs, &self.dust_key);
     }
 }
 

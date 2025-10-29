@@ -272,3 +272,45 @@ async fn test_cycle_transfers() {
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
 }
+
+#[tokio::test]
+async fn test_custom_sync() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state = TestState::<InMemoryDB>::new(&mut rng);
+    state.give_fee_token(&mut rng, 1).await;
+    state.manual_sync();
+    assert_eq!(
+        state.dust.utxos().collect::<Vec<_>>(),
+        state.dust_light.utxos().collect::<Vec<_>>()
+    );
+
+    // send 2 empty txs
+    let resolver = test_resolver("");
+    {
+        let tx =
+            Transaction::<Signature, _, _, _>::from_intents("local-test", [].into_iter().collect());
+        let tx = tx_prove_bind(rng.split(), &tx, &resolver).await.unwrap();
+        let tx = state.balance_tx(rng.split(), tx, &resolver).await.unwrap();
+        let strictness = WellFormedStrictness::default();
+        state.assert_apply(&tx, strictness);
+    }
+
+    {
+        let tx =
+            Transaction::<Signature, _, _, _>::from_intents("local-test", [].into_iter().collect());
+        let tx = tx_prove_bind(rng.split(), &tx, &resolver).await.unwrap();
+        let tx = state.balance_tx(rng.split(), tx, &resolver).await.unwrap();
+        let strictness = WellFormedStrictness::default();
+        state.assert_apply(&tx, strictness);
+    }
+
+    state.manual_sync();
+
+    assert_eq!(
+        state.dust.utxos().collect::<Vec<_>>(),
+        state.dust_light.utxos().collect::<Vec<_>>()
+    );
+
+    // TODO: for dtime check, we need to send our night token
+    // dbg!(dust_spend);
+}
