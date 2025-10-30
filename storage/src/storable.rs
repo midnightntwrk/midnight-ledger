@@ -33,6 +33,7 @@ use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::fmt::Debug;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 /// Super-trait containing all requirements for a Hasher
 pub trait WellBehavedHasher: Digest + Send + Sync + Default + Debug + Clone + 'static {}
@@ -233,6 +234,31 @@ impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
         }
 
         Ok(value)
+    }
+}
+
+impl<T: Storable<D>, D: DB> Storable<D> for Arc<T> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        T::children(self)
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::to_binary_repr(self, writer)
+    }
+    fn check_invariant(&self) -> Result<(), std::io::Error> {
+        T::check_invariant(self)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::from_binary_repr(reader, child_hashes, loader).map(Arc::new)
     }
 }
 

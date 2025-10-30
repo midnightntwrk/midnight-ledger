@@ -154,7 +154,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                         &AuthorizedClaim {
                             coin,
                             recipient: *target_address,
-                            proof: (),
+                            proof: std::sync::Arc::new(()),
                         },
                     );
                 }

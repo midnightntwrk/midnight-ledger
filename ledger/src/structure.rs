@@ -225,7 +225,7 @@ impl<D: DB> PedersenDowngradeable<D> for Pedersen {
 #[tag = "proof-preimage-versioned"]
 #[non_exhaustive]
 pub enum ProofPreimageVersioned {
-    V1(ProofPreimage),
+    V1(std::sync::Arc<ProofPreimage>),
 }
 tag_enforcement_test!(ProofPreimageVersioned);
 
@@ -410,7 +410,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
 
 impl From<ProofPreimage> for ProofPreimageVersioned {
     fn from(proof: ProofPreimage) -> Self {
-        Self::V1(proof)
+        Self::V1(std::sync::Arc::new(proof))
     }
 }
 

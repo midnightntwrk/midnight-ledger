@@ -168,7 +168,7 @@ are:
     overlap with the spend mapping)
   - For each unshielded spend in `Effects`, there is one matching unshielded
     UTXO output or contract input (in `Effects::unshielded_inputs`) in the same
-    segment, and the mapping is bidirectional.
+    segment.
 - Ensure that the transaction is balanced
 
 Balancing is done on a per-segment-id basis, where segment ID `0` encompasses

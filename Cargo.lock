@@ -2787,6 +2787,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "signature",
+ "subtle",
  "tracing",
  "zeroize",
 ]

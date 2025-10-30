@@ -82,15 +82,9 @@ impl<'de> Deserialize<'de> for PublicKey {
 
 /// A secret key, the discrete logarithm of the corresponding [`PublicKey`].
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Copy, Clone, Eq, Serializable, Zeroize)]
+#[derive(Copy, Clone, Serializable, Zeroize)]
 #[tag = "encryption-secret-key[v1]"]
 pub struct SecretKey(EmbeddedFr);
-
-impl PartialEq for SecretKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
 
 impl Debug for SecretKey {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -98,8 +92,6 @@ impl Debug for SecretKey {
     }
 }
 
-#[cfg(feature = "proptest")]
-randomised_serialization_test!(SecretKey);
 tag_enforcement_test!(SecretKey);
 
 /// A ciphertext. The ciphertext includes an encryption of a zero element, which
