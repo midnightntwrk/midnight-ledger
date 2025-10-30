@@ -1883,10 +1883,9 @@ impl<D: DB> DustLocalStateLight<D> {
                     state
                 }
                 EventDetails::DustGenerationDtimeUpdate { update, .. } => {
-                    dbg!(update.leaf.1);
-                    // state.generating_tree =
-                    //     state.generating_tree.update_from_evidence(update.clone())?;
-
+                    state.generating_info = state
+                        .generating_info
+                        .insert(update.leaf.1.nonce, update.leaf.1);
                     state
                 }
                 _ => state,
