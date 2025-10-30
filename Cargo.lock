@@ -2882,6 +2882,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger",
+ "midnight-ledger-static",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
@@ -2901,6 +2902,14 @@ dependencies = [
  "tracing-subscriber",
  "zeroize",
  "zkir",
+]
+
+[[package]]
+name = "midnight-ledger-static"
+version = "1.0.0-alpha.4"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
 ]
 
 [[package]]
@@ -3248,6 +3257,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
+ "midnight-ledger-static",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
