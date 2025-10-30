@@ -35,6 +35,7 @@ use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
 use base_crypto::cost_model::SyntheticCost;
 use base_crypto::data_provider::{self, MidnightDataProvider};
+use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::signatures::{Signature, SigningKey};
 use base_crypto::time::{Duration, Timestamp};
@@ -275,6 +276,7 @@ impl<D: DB> TestState<D> {
             .post_block_update(self.time, self.balanced_block_fullness())
             .unwrap();
         self.dust = self.dust.process_ttls(self.time);
+        self.dust_light = self.dust_light.process_ttls(self.time);
     }
 
     fn balanced_block_fullness(&self) -> SyntheticCost {
@@ -536,7 +538,38 @@ impl<D: DB> TestState<D> {
                     .spend(&self.dust_key, &qdo, v_fee, self.time)
                     .unwrap(); // TODO unwrap
                 self.dust = new_dust;
-                spends = spends.push(spend);
+                spends = spends.push(spend.clone());
+                let commitment = qdo.commitment();
+                let gen_idx = self
+                    .ledger
+                    .dust
+                    .generation
+                    .night_indices
+                    .get(&qdo.backing_night)
+                    .unwrap(); // TODO unwrap
+                if let Ok((new_dust, spend2)) = self.dust_light.spend(
+                    &self.dust_key,
+                    &qdo,
+                    v_fee,
+                    self.time,
+                    self.ledger
+                        .dust
+                        .generation
+                        .generating_tree
+                        .path_for_leaf(*gen_idx, gen_info.merkle_hash())
+                        .unwrap(), // TODO unwrap
+                    self.ledger
+                        .dust
+                        .utxo
+                        .commitments
+                        .path_for_leaf(qdo.mt_index, HashOutput::from(commitment))
+                        .unwrap(), // TODO unwrap
+                    self.ledger.dust.generation.generating_tree.root().unwrap(), // TODO unwrap
+                    self.ledger.dust.utxo.commitments.root().unwrap(),           // TODO unwrap
+                ) {
+                    self.dust_light = new_dust;
+                    assert_eq!(spend, spend2);
+                }
             }
             if dust > 0 {
                 panic!("failed to balance testing transaction's dust");

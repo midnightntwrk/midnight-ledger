@@ -67,7 +67,7 @@ use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
     hash::{transient_hash, upgrade_from_transient},
-    merkle_tree::{MerkleTree, MerkleTreeDigest},
+    merkle_tree::{MerklePath, MerkleTree, MerkleTreeDigest},
     proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
     repr::FieldRepr,
 };
@@ -1749,13 +1749,141 @@ impl<D: DB> DustLocalStateLight<D> {
         Some(*self.generating_info.get(&qdo.backing_night)?)
     }
 
-    /* Spend:
-    we need to get the path_for_leaf data passing the:
-       1) gen_path: gen_idx + gen_info.merkle_hash()
-           gen_idx can be retrieved on server if I pass &utxo.backing_night
-       2) com_path: utxo.mt_index + HashOutput::from(old_com)
-            we can simply pass the commitment here
-    */
+    pub fn spend(
+        &self,
+        sk: &DustSecretKey,
+        utxo: &QualifiedDustOutput,
+        v_fee: u128,
+        ctime: Timestamp,
+        gen_path: MerklePath<HashOutput>,
+        com_path: MerklePath<HashOutput>,
+        generating_tree_root: MerkleTreeDigest,
+        commitment_tree_root: MerkleTreeDigest,
+    ) -> Result<(Self, DustSpend<ProofPreimageMarker, D>), DustSpendError> {
+        let mut state = self.clone();
+        let old_nullifier = utxo.nullifier(sk);
+        let gen_info = self
+            .generating_info
+            .get(&utxo.backing_night)
+            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?;
+        let v_new = DustOutput::from(*utxo).updated_value(&gen_info, ctime, &self.params);
+        if v_fee > v_new {
+            return Err(DustSpendError::NotEnoughDust {
+                available: v_new,
+                required: v_fee,
+            });
+        }
+        let new_output = DustOutput {
+            ctime,
+            initial_value: v_new - v_fee,
+            owner: utxo.owner,
+            nonce: transient_hash(
+                (utxo.backing_night, utxo.seq + 1, sk.0)
+                    .field_vec()
+                    .as_ref(),
+            ),
+            seq: utxo.seq + 1,
+        };
+        let new_commitment = new_output.commitment();
+        let mut utxo_entry = (*state
+            .dust_utxos
+            .get(&old_nullifier)
+            .ok_or_else(|| DustSpendError::DustUtxoNotTracked(*utxo))?)
+        .clone();
+        utxo_entry.pending_until = Some(ctime + self.params.dust_grace_period);
+        state.dust_utxos = state.dust_utxos.insert(old_nullifier, utxo_entry);
+        let inputs = (
+            DustOutput::from(*utxo),
+            sk.clone(),
+            *gen_info,
+            com_path.clone(),
+            gen_path.clone(),
+            utxo.backing_night,
+            utxo.seq,
+        )
+            .field_vec();
+        let mut prog = Vec::new();
+        // Check commitment merkle tree root
+        prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
+            [Key::Value(0u8.into())],
+            false,
+            32,
+            Fr,
+            commitment_tree_root
+        ));
+        // Check generation merkle tree root
+        prog.extend(HistoricMerkleTree_check_root!(
+            [Key::Value(1u8.into())],
+            false,
+            32,
+            Fr,
+            generating_tree_root
+        ));
+        // Read spend
+        prog.extend(Cell_read!([Key::Value(5u8.into())], false, DustSpend));
+        // Read ctime
+        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        // Read dust parameters
+        prog.extend(Cell_read!([Key::Value(3u8.into())], false, DustParameters));
+        // Insert old nullifier
+        prog.extend(Set_insert!(
+            [Key::Value(2u8.into())],
+            false,
+            Fr,
+            old_nullifier.0
+        ));
+        // Read ctime
+        prog.extend(Cell_read!([Key::Value(4u8.into())], false, u64));
+        // Insert a new commitment
+        prog.extend(HistoricMerkleTree_insert_hash!(
+            [Key::Value(0u8.into())],
+            false,
+            32,
+            Fr,
+            HashOutput::from(new_commitment)
+        ));
+        let mut public_transcript_inputs = vec![];
+        let erased_spend = DustSpend::<(), D> {
+            v_fee,
+            old_nullifier,
+            new_commitment,
+            proof: (),
+        };
+        for op in with_outputs(
+            prog.into_iter(),
+            [
+                true.into(),                 // commitment root check
+                true.into(),                 // nullifier root check
+                erased_spend.clone().into(), // dust spend read
+                ctime.into(),                // ctime read
+                self.params.clone().into(),  // parameter read
+                ctime.into(),                // ctime read
+            ]
+            .into_iter(),
+        ) {
+            op.field_repr(&mut public_transcript_inputs);
+        }
+        let public_transcript_outputs =
+            (true, true, erased_spend, ctime, self.params, ctime).field_vec();
+        let proof = ProofPreimage {
+            inputs,
+            public_transcript_inputs,
+            public_transcript_outputs,
+            binding_input: Default::default(),
+            communications_commitment: None,
+            private_transcript: vec![(v_new - v_fee).into()],
+            key_location: KeyLocation(std::borrow::Cow::Borrowed("midnight/dust/spend")),
+        };
+        Ok((
+            state,
+            DustSpend {
+                v_fee,
+                old_nullifier,
+                new_commitment,
+                proof,
+            },
+        ))
+    }
 
     pub fn sync(
         &self,
@@ -1829,6 +1957,30 @@ impl<D: DB> DustLocalStateLight<D> {
             })
         });
         filtered
+    }
+
+    pub fn process_ttls(&self, time: Timestamp) -> Self {
+        let mut state = self.clone();
+        state.dust_utxos = state
+            .dust_utxos
+            .iter()
+            .filter_map(|utxo| {
+                let nul = *utxo.0;
+                let mut utxo = *utxo.1;
+                let gen_info = self.generating_info.get(&utxo.utxo.backing_night)?;
+                let v_new =
+                    DustOutput::from(utxo.utxo).updated_value(&gen_info, time, &self.params);
+                if utxo.pending_until.map(|ptime| ptime <= time) == Some(true) {
+                    utxo.pending_until = None;
+                }
+                if v_new == 0 && time > utxo.utxo.ctime {
+                    None
+                } else {
+                    Some((nul, utxo))
+                }
+            })
+            .collect();
+        state
     }
 
     pub fn replay_events<'a>(
