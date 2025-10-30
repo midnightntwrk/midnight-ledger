@@ -2,7 +2,9 @@
 name = "midnight-zkir-wasm"
 version = "2.0.0-alpha.4"
 edition = "2024"
+description = "WASM bindings for the Midnight ZKIR compiler."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

@@ -3,6 +3,7 @@ name = "midnight-onchain-runtime-wasm"
 version = "1.0.0-alpha.4"
 edition = "2024"
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

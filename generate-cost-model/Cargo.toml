@@ -3,6 +3,9 @@ name = "generate-cost-model"
 version = "1.0.0-alpha.1"
 edition = "2024"
 license.workspace = true
+description = "Crate for cost-model related tools"
+repository = "https://github.com/midnightntwrk/midnight-ledger"
+publish = false
 
 [lints.rust]
 warnings = "deny"

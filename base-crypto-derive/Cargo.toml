@@ -1,8 +1,10 @@
 [package]
 name = "midnight-base-crypto-derive"
 version = "1.0.0-alpha.4"
+description = "Derive macros for `midnight-base-crypto`."
 edition = "2024"
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [lib]
 proc-macro = true

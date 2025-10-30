@@ -1,8 +1,10 @@
 [package]
 name = "midnight-proof-server"
 edition = "2024"
+description = "A trusted service that has access to your private data and generates zk-proofs with that private data on your behalf."
 license.workspace = true
 version.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = []

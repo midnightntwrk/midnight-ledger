@@ -2,7 +2,9 @@
 name = "midnight-onchain-vm"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "This crate implements the on-chain virtual machine (ImpactVM) for executing smart contracts in Midnight. Impact is a non-turing complete language designed just to specify the effects on the ledger state."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "runtime-state/proptest"]

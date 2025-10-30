@@ -2,6 +2,9 @@
 name = "midnight-zkir-wasm-mt"
 version = "2.0.0-alpha"
 edition = "2024"
+description = "An example of proving using webworkers to achieve parallelism."
+publish = false
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [lib]
 crate-type = ["cdylib", "rlib"]

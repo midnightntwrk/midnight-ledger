@@ -1,8 +1,10 @@
 [package]
-name = "zkir"
+name = "midnight-zkir"
 version = "2.0.0-alpha.4"
 edition = "2024"
+description = "Zkir compiler. Zkir is a higher level language than ImpactVM making it easier to write zk-proof circuits."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [[bin]]
 name = "zkir"

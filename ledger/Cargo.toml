@@ -1,8 +1,10 @@
 [package]
 name = "midnight-ledger"
 edition = "2024"
+description = "This crate implements transaction assembly and semantics for Midnight"
 license.workspace = true
 version.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = ["proof-verifying"]

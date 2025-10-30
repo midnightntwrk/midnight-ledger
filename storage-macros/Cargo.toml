@@ -2,7 +2,9 @@
 name = "midnight-storage-macros"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "Derive macros for `midnight-storage`."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

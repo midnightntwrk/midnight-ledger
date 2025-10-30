@@ -1,8 +1,10 @@
 [package]
 name = "midnight-zswap"
 edition = "2024"
+description = "A ZK proof system for private asset transfers in Midnight Ledger."
 license.workspace = true
 version.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = ["proof-verifying"]
