@@ -50,6 +50,7 @@ use storage::Storable;
 use storage::arena::ArenaKey;
 use storage::db::DB;
 use storage::storable::Loader;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {
@@ -621,6 +622,15 @@ impl VerifierKey {
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct KeyLocation(pub Cow<'static, str>);
 
+impl Zeroize for KeyLocation {
+    fn zeroize(&mut self) {
+        if let Cow::Owned(s) = &mut self.0 {
+            s.zeroize();
+        }
+        self.0 = Cow::Borrowed("");
+    }
+}
+
 impl Tagged for KeyLocation {
     fn tag() -> Cow<'static, str> {
         Cow::Borrowed("string")
@@ -676,7 +686,19 @@ pub trait ProvingProvider {
 }
 
 /// Everything necessary to produce a proof.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Hash, Storable)]
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serializable,
+    Hash,
+    Storable,
+    Zeroize,
+    ZeroizeOnDrop,
+)]
 #[storable(base)]
 #[tag = "proof-preimage"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]

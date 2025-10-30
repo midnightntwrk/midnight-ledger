@@ -77,7 +77,7 @@ impl AuthorizedClaim<ProofPreimage> {
         Ok(AuthorizedClaim {
             coin,
             recipient: pk,
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         })
     }
 }
@@ -179,7 +179,7 @@ impl<D: DB> Input<ProofPreimage, D> {
                 _ => None,
             },
             merkle_tree_root,
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         };
         //debug_assert!(inp.well_formed().is_ok());
         Ok(inp)
@@ -289,7 +289,7 @@ impl<D: DB> Output<ProofPreimage, D> {
                 _ => None,
             },
             ciphertext: ciphertext.map(|x| Sp::new(x)),
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         };
         // NOTE: rc negated because output commitments are subtracted
         Ok(outp)

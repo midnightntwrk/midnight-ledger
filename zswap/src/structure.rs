@@ -26,6 +26,7 @@ use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{Add, Sub};
+use std::sync::Arc;
 use storage::Storable;
 use storage::arena::ArenaKey;
 use storage::arena::Sp;
@@ -185,7 +186,7 @@ impl From<CoinCiphertext> for encryption::Ciphertext {
 pub struct AuthorizedClaim<P> {
     pub coin: CoinInfo,
     pub recipient: CoinPublicKey,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(AuthorizedClaim<()>);
 
@@ -194,7 +195,7 @@ impl<P> AuthorizedClaim<P> {
         AuthorizedClaim {
             coin: self.coin,
             recipient: self.recipient,
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
@@ -208,7 +209,7 @@ pub struct Input<P: Storable<D>, D: DB> {
     pub value_commitment: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub merkle_tree_root: MerkleTreeDigest,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(Input<(), InMemoryDB>);
 
@@ -229,7 +230,7 @@ impl<P: Storable<D>, D: DB> Input<P, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
@@ -283,7 +284,7 @@ pub struct Output<P: Storable<D>, D: DB> {
     pub value_commitment: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(Output<(), InMemoryDB>);
 
@@ -294,7 +295,7 @@ impl<P: Storable<D>, D: DB> Output<P, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
@@ -349,8 +350,8 @@ pub struct Transient<P: Storable<D>, D: DB> {
     pub value_commitment_output: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
-    pub proof_input: P,
-    pub proof_output: P,
+    pub proof_input: Arc<P>,
+    pub proof_output: Arc<P>,
 }
 tag_enforcement_test!(Transient<(), InMemoryDB>);
 
@@ -363,8 +364,8 @@ impl<P: Storable<D>, D: DB> Transient<P, D> {
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof_input: (),
-            proof_output: (),
+            proof_input: Arc::new(()),
+            proof_output: Arc::new(()),
         }
     }
 }
