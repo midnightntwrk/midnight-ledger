@@ -1708,7 +1708,7 @@ impl<K: Clone, V: Clone, S: Clone> ToOption for IndexMap<K, V, S> {
 #[derive(Debug, Storable)]
 #[derive_where(Clone)]
 #[storable(db = D)]
-#[tag = "dust-local-state[v1]"]
+#[tag = "dust-local-state-light[v1]"]
 pub struct DustLocalStateLight<D: DB> {
     pub generating_info: HashMap<InitialNonce, DustGenerationInfo, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
