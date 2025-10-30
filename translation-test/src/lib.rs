@@ -129,10 +129,10 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                 let res = Ok(Some(rl::Nesty::Node(
                     *n,
                     storage
-                        .get_lazy(&btrans.child.into())
+                        .get_lazy(&btrans.child.clone().into())
                         .expect("translated node must be in storage"),
                     storage
-                        .get_lazy(&atrans.child.into())
+                        .get_lazy(&atrans.child.clone().into())
                         .expect("translated node must be in storage"),
                 )));
                 eprintln!("nesty finalise 3d");

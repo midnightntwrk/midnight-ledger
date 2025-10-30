@@ -15,8 +15,8 @@
 use crate::Storable;
 use crate::arena::{ArenaHash, ArenaKey};
 use crate::db::DB;
-use crate::storable::{Loader, child_from};
-use crate::storage::Map;
+use crate::storable::Loader;
+use crate::storage::{default_storage, Map};
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
@@ -32,75 +32,52 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 /// When stored in the arena, `ArenaKey` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
 /// `ArenaKey`.
-#[derive_where(Clone, Debug, PartialEq, Eq)]
+#[derive_where(Debug, PartialEq, Eq)]
 pub struct ChildRef<D: DB> {
     /// The referenced child
     pub child: ArenaKey<D::Hasher>,
 }
 
+// NOTE: This used to not be necessary, as creating an Sp of the ref would guarnatee allocation in
+// the backend. With the small nodes optimisation, this is no longer guaranteed, as the backend is
+// only invoked when a parent that isn't a small node is instantiated.
+//
+// However, if the referenced node(s) aren't in the backend, the ref doesn't do its job of keeping
+// these allocated. Therefore, we manually increment its ref count on allocation, and decrement it
+// on deallocation, using the backend `persist`/`unpersist` methods. Note that these are part of
+// what happens during (non-small node) Sp allocation, so this is only replicating a subset of this
+// behaviour. (Technically those are refcount updates instead of persist/unpersist, but the latter
+// are just thin wrappers around refcount updates)
 impl<D: DB> ChildRef<D> {
     /// Creates a new reference
     pub fn new(child: ArenaKey<D::Hasher>) -> Self {
+        default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
         Self { child }
     }
 }
 
-// NOTE: This previously used to be much simpler, just returning the reference
-// as the singular child.
-//
-// This ceased to work with the small nodes optimisation, because of a tacit
-// assumptions that this child would be present in backend storage. This is
-// guarnateed if *this* object is also in backend storage, which is *only*
-// guarnateed if one of its parents is in storage *or* it gets allocated as an
-// `ArenaKey::Ref` (that is, is not a small node itself).
-//
-// The result was that small ref nodes would not get allocated, and then when
-// trying to traverse the child nodes the operation would fail.
-//
-// To circumvent this, we make sure that the ref node is *the same* as the thing
-// its referencing from a backend perspective, that way we can always traverse
-// the children -- either directly (if its a small node) or through the backend
-// (if its a ref).
-//
-// To do this, we need to hack the Storable implementation to match what its
-// referencing, which we do by resolving refs with the backend.
-//
-// This is quite brittle, as it still relies on the referenced key actually
-// being in the backend. In particular, this doesn't tolerate untrusted inputs
-// well, which is the case in contract deployments. Thankfully, in this case we
-// validate that the rcmap matches that computed directly from the state.
-//
-// Nevertheless, longer term it may make sense to change this structure to use
-// Sp<dyn Any, D> instead, though we current don't have good mechanisms for
-// casting or retrieving those.
+impl<D: DB> Clone for ChildRef<D> {
+    fn clone(&self) -> Self {
+        ChildRef::new(self.child.clone())
+    }
+}
+
+impl<D: DB> Drop for ChildRef<D> {
+    fn drop(&mut self) {
+        default_storage::<D>().with_backend(|b| self.child.refs().iter().for_each(|r| b.unpersist(r)));
+    }
+}
+
 impl<D: DB> Storable<D> for ChildRef<D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        match &self.child {
-            ArenaKey::Direct(direct) => (*direct.children).clone(),
-            ArenaKey::Ref(ref_) => {
-                let obj = crate::storage::default_storage::<D>()
-                    .arena
-                    .with_backend(|backend| backend.get(&ref_).cloned())
-                    .expect("Referenced object must be in storage");
-                obj.children
-            }
-        }
+        vec![self.child.clone()]
     }
 
-    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
     where
         Self: Sized,
     {
-        match &self.child {
-            ArenaKey::Direct(direct) => writer.write_all(&direct.data[..]),
-            ArenaKey::Ref(ref_) => {
-                let obj = crate::storage::default_storage::<D>()
-                    .arena
-                    .with_backend(|backend| backend.get(&ref_).cloned())
-                    .expect("Referenced object must be in storage");
-                writer.write_all(&obj.data[..])
-            }
-        }
+        Ok(())
     }
 
     fn from_binary_repr<R: std::io::Read>(
@@ -111,12 +88,14 @@ impl<D: DB> Storable<D> for ChildRef<D> {
     where
         Self: Sized,
     {
+        let mut children = children.collect::<Vec<_>>();
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
-        let children = children.collect::<Vec<_>>();
-        Ok(Self {
-            child: child_from(&data, &children),
-        })
+        if children.len() == 1 && data.is_empty() {
+            Ok(Self::new(children.pop().expect("must be present")))
+        } else {
+            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ref should have exactly one child and no data"))
+        }
     }
 }
 
