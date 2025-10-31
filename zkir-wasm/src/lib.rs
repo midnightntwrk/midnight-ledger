@@ -13,6 +13,7 @@
 
 use hex::FromHex;
 use js_sys::{BigInt, Function, JsString, Promise, Uint8Array};
+use midnight_zkir::IrSource;
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize, tagged_serialize};
 use transient_crypto::{
@@ -24,7 +25,6 @@ use transient_crypto::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use midnight_zkir::IrSource;
 
 struct JsKeyProvider(JsValue);
 

@@ -17,6 +17,7 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use midnight_zkir::IrSource;
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::ffi::OsString;
 use std::fs::File;
@@ -29,7 +30,6 @@ use tracing_subscriber::Registry;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 use transient_crypto::proofs::Zkir;
-use midnight_zkir::IrSource;
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
