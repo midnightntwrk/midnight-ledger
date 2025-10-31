@@ -24,7 +24,7 @@ use transient_crypto::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use zkir::IrSource;
+use midnight_zkir::IrSource;
 
 struct JsKeyProvider(JsValue);
 

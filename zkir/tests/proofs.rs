@@ -29,7 +29,7 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use zkir::{IrSource, Preprocessed};
+    use midnight_zkir::{IrSource, Preprocessed};
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
 
