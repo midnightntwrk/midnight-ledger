@@ -375,7 +375,7 @@
             rustc = packages.rust-build-toolchain;
             cargo = packages.rust-build-toolchain;
           }).buildRustPackage rec {
-              pname = "zkir";
+              pname = "midnight-zkir";
               version = (builtins.fromTOML (builtins.readFile ./zkir/Cargo.toml)).package.version;
               src = rustWorkspaceSrc;
               cargoLock.lockFile = ./Cargo.lock;

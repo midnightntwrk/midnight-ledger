@@ -2,7 +2,9 @@
 name = "midnight-coin-structure"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "The coin-structure crate defines the on-chain data formats and helpers for coins (addresses, token types, commitments, nullifiers, etc.)"
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "storage/proptest", "transient-crypto/proptest", "serialize/proptest"]

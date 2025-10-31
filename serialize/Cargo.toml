@@ -2,7 +2,9 @@
 name = "midnight-serialize"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "Serialization and deserialization utilities for Midnight data structures."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "dep:rand"]
