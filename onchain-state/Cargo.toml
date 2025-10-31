@@ -2,6 +2,7 @@
 name = "midnight-onchain-state"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "On-chain state types for Midnight Ledger."
 license.workspace = true
 repository = "https://github.com/midnightntwrk/midnight-ledger"
 
