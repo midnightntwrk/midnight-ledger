@@ -57,5 +57,5 @@ proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
-zkir = { path = ".", features = ["proptest"] }
+midnight-zkir = { path = ".", features = ["proptest"] }
 actix-rt = "^2.9.0"
