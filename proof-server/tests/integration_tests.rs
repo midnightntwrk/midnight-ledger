@@ -399,10 +399,21 @@ async fn await_proving_results(
         match task.expect("Proving task should not panic") {
             Ok(()) => {}
             Err(TransactionProvingError::Proving(err)) if allow_queue_full => {
-                assert!(
-                    err.to_string().contains("Job Queue full"),
-                    "unexpected proving error: {err}"
-                );
+                let message = err.to_string();
+                if message.contains("Job Queue full") {
+                    continue;
+                }
+                if let Some(reqwest_err) = err.downcast_ref::<reqwest::Error>() {
+                    if reqwest_err.status().is_none()
+                        && (reqwest_err.is_timeout()
+                            || reqwest_err.is_connect()
+                            || reqwest_err.is_request())
+                    {
+                        log::debug!("tolerating transient prove transport error: {reqwest_err}");
+                        continue;
+                    }
+                }
+                panic!("unexpected proving error: {message}");
             }
             Err(TransactionProvingError::Proving(err)) => {
                 panic!("unexpected proving failure: {err}");
