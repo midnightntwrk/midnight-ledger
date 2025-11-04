@@ -26,8 +26,8 @@ use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::sync::Once;
 use std::sync::mpsc::Receiver;
+use std::sync::{Arc, Once};
 use std::time::Duration;
 #[cfg(test)]
 use std::{sync::mpsc, thread};
@@ -56,6 +56,8 @@ use regex::Regex;
 
 const NUM_WORKERS: usize = 2;
 const LIMIT: usize = 2;
+const CONCURRENT_PROVE_REQUESTS: usize = 10;
+const HEALTH_LOAD_REQUESTS: usize = 50;
 static mut SERVER_PORT: u16 = 0;
 static INIT: Once = Once::new();
 
@@ -65,13 +67,6 @@ lazy_static! {
         .build()
         .unwrap();
     static ref RESOLVER: Resolver = test_resolver("fallible");
-}
-
-fn build_client(timeout: u64) -> Client {
-    Client::builder()
-        .timeout(Duration::from_secs(timeout))
-        .build()
-        .unwrap()
 }
 
 pub fn setup_logger() -> () {
@@ -358,6 +353,65 @@ where
     payload
 }
 
+// Builds a ProofServerProvider bound to the shared resolver so tests can hit `/prove`.
+fn proof_provider(base_url: String) -> ProofServerProvider<'static> {
+    ProofServerProvider {
+        base_url,
+        resolver: &RESOLVER,
+    }
+}
+
+// Spawns proving tasks that submit `tx` to the proof server, optionally spacing dispatches.
+async fn spawn_proving_tasks(
+    count: usize,
+    base_url: String,
+    tx: Arc<Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB>>,
+    delay_between: Option<Duration>,
+    log_success: bool,
+) -> Vec<tokio::task::JoinHandle<Result<(), TransactionProvingError<InMemoryDB>>>> {
+    let mut tasks = Vec::with_capacity(count);
+    for i in 0..count {
+        let base_url = base_url.clone();
+        let tx = Arc::clone(&tx);
+        let handle = tokio::spawn(async move {
+            let provider = proof_provider(base_url);
+            let result = tx.prove(provider, &INITIAL_COST_MODEL).await.map(|_| ());
+            if log_success && result.is_ok() {
+                log::info!("Iteration {i:?} proved successfully");
+            }
+            result
+        });
+        tasks.push(handle);
+
+        if let Some(delay) = delay_between {
+            tokio::time::sleep(delay).await;
+        }
+    }
+    tasks
+}
+
+// Waits for proving tasks to complete, asserting on queue-full tolerance appropriately.
+async fn await_proving_results(
+    tasks: Vec<tokio::task::JoinHandle<Result<(), TransactionProvingError<InMemoryDB>>>>,
+    allow_queue_full: bool,
+) {
+    for task in futures::future::join_all(tasks).await {
+        match task.expect("Proving task should not panic") {
+            Ok(()) => {}
+            Err(TransactionProvingError::Proving(err)) if allow_queue_full => {
+                assert!(
+                    err.to_string().contains("Job Queue full"),
+                    "unexpected proving error: {err}"
+                );
+            }
+            Err(TransactionProvingError::Proving(err)) => {
+                panic!("unexpected proving failure: {err}");
+            }
+            Err(other) => panic!("unexpected proving failure: {other:?}"),
+        }
+    }
+}
+
 fn valid_unbalanced_zswap(
     num_outputs: usize,
 ) -> Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> {
@@ -503,18 +557,18 @@ async fn integration_tests() {
     test_health_should_return_status().await;
     test_proof_versions_should_return_status().await;
     test_version_should_return_current_version().await;
-    test_prove_tx_should_fail_on_get().await;
-    test_prove_tx_should_fail_on_empty_body().await;
-    test_prove_tx_should_fail_on_json().await;
+    test_prove_should_fail_on_get().await;
+    test_prove_should_fail_on_empty_body().await;
+    test_prove_should_fail_on_json().await;
     test_prove_should_fail_without_zk_config().await;
     test_prove_should_fail_with_double_zk_config().await;
     test_prove_should_fail_with_swapped_zk_config_values().await;
     test_prove_should_fail_with_wrong_circuit_id().await;
     test_prove_should_generate_valid_proof_for_smallest_transaction().await;
     test_prove_should_generate_valid_proof_for_big_transaction().await;
-    test_prove_tx_should_prove_correct_tx().await;
-    test_prove_tx_should_fail_on_repeated_body().await;
-    test_prove_tx_should_fail_on_corrupted_body().await;
+    test_prove_should_prove_correct_transaction().await;
+    test_prove_should_fail_on_repeated_body().await;
+    test_prove_should_fail_on_corrupted_body().await;
     test_health_check_still_works_when_server_is_fully_loaded().await;
 
     stop_server(_server_handle).await;
@@ -530,11 +584,11 @@ async fn integration_tests() {
     stop_server(_server_handle).await;
 
     let _server_handle = setup(10).recv().unwrap();
-    test_prove_tx_should_be_able_to_validate_multiple_txs().await;
+    test_prove_should_handle_multiple_requests().await;
     stop_server(_server_handle).await;
 
     let _server_handle = setup(0).recv().unwrap();
-    test_prove_tx_should_be_able_to_validate_multiple_txs_with_zero_limit().await;
+    test_prove_should_handle_multiple_requests_with_zero_limit().await;
     stop_server(_server_handle).await;
 }
 
@@ -549,7 +603,7 @@ async fn test_root_should_return_status() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), StatusCode::OK);
     let json_resp = response.json::<serde_json::Value>().await.unwrap();
     assert_eq!(json_resp.get("status").unwrap().as_str().unwrap(), "ok");
 }
@@ -565,7 +619,7 @@ async fn test_health_should_return_status() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), StatusCode::OK);
     let json_resp = response.json::<serde_json::Value>().await.unwrap();
     assert_eq!(json_resp.get("status").unwrap().as_str().unwrap(), "ok");
 }
@@ -581,7 +635,7 @@ async fn test_proof_versions_should_return_status() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.text().await.unwrap(), "[\"V1\"]");
 }
 
@@ -596,47 +650,47 @@ async fn test_version_should_return_current_version() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 200);
+    assert_eq!(response.status(), StatusCode::OK);
     assert_eq!(response.text().await.unwrap(), env!("CARGO_PKG_VERSION"));
 }
 
 #[named]
-async fn test_prove_tx_should_fail_on_get() {
+async fn test_prove_should_fail_on_get() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .get(format!("{}/prove-tx", get_host_and_port()))
+        .get(format!("{}/prove", get_host_and_port()))
         .send()
         .await
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 404);
+    assert_eq!(response.status(), StatusCode::NOT_FOUND);
 }
 
 #[named]
-async fn test_prove_tx_should_fail_on_empty_body() {
+async fn test_prove_should_fail_on_empty_body() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .send()
         .await
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let resp_text = response.text().await.unwrap();
     assert!(resp_text.contains("expected header tag"));
     assert!(resp_text.contains(", got ''"));
 }
 
 #[named]
-async fn test_prove_tx_should_fail_on_json() {
+async fn test_prove_should_fail_on_json() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .header("Content-Type", "application/json")
         .body(r#"{"key": "value"}"#)
         .send()
@@ -644,7 +698,7 @@ async fn test_prove_tx_should_fail_on_json() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
     let resp_text = dbg!(response.text().await.unwrap());
     assert!(resp_text.contains("expected header tag"));
 }
@@ -768,10 +822,7 @@ async fn test_prove_should_generate_valid_proof_for_smallest_transaction() {
     let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
         Transaction::new("local-test", Default::default(), None, Default::default());
 
-    let provider = ProofServerProvider {
-        base_url: get_host_and_port(),
-        resolver: &RESOLVER,
-    };
+    let provider = proof_provider(get_host_and_port());
 
     let proven = tx
         .prove(provider, &INITIAL_COST_MODEL)
@@ -807,10 +858,7 @@ async fn test_prove_should_generate_valid_proof_for_big_transaction() {
     let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
         large_valid_tx(NUM_INTENTS).await;
 
-    let provider = ProofServerProvider {
-        base_url: get_host_and_port(),
-        resolver: &RESOLVER,
-    };
+    let provider = proof_provider(get_host_and_port());
 
     let proven = tx
         .prove(provider, &INITIAL_COST_MODEL)
@@ -850,10 +898,7 @@ async fn test_prove_should_fail_with_mismatched_network_id() {
     let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
         valid_tx_with_network_id("DevNet").await;
 
-    let provider = ProofServerProvider {
-        base_url: get_host_and_port(),
-        resolver: &RESOLVER,
-    };
+    let provider = proof_provider(get_host_and_port());
 
     match tx.prove(provider, &INITIAL_COST_MODEL).await {
         Ok(proven) => {
@@ -882,22 +927,24 @@ async fn test_prove_should_fail_with_mismatched_network_id() {
 }
 
 #[named]
-async fn test_prove_tx_should_prove_correct_tx() {
+async fn test_prove_should_prove_correct_transaction() {
     setup_test(function_name!());
 
-    let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
-        .body(serialized_valid_body().await)
-        .send()
-        .await
-        .unwrap();
+    let tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+        valid_tx::<Signature>().await;
 
-    log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 200);
-    let bytes = dbg!(response.bytes().await.unwrap());
-    log::info!("Proving response: {} bytes", bytes.len());
+    let provider = proof_provider(get_host_and_port());
+
+    let proven = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .expect("proving canonical transaction payload should succeed");
+
+    let mut bytes = Vec::new();
+    tagged_serialize(&proven, &mut bytes)
+        .expect("proven transaction should serialize successfully");
     let proof: Transaction<Signature, ProofMarker, PedersenRandomness, InMemoryDB> =
-        tagged_deserialize(&bytes[..]).unwrap();
+        tagged_deserialize(&bytes[..]).expect("proven transaction should deserialize successfully");
     let mut strictness = WellFormedStrictness::default();
     strictness.enforce_balancing = false;
     proof
@@ -910,41 +957,20 @@ async fn test_prove_tx_should_prove_correct_tx() {
 }
 
 #[named]
-async fn test_prove_tx_should_be_able_to_validate_multiple_txs() {
+async fn test_prove_should_handle_multiple_requests() {
     setup_test(function_name!());
-    let mut handles = Vec::new();
-
-    for i in 0..10 {
-        let client = HTTP_CLIENT.clone();
-        let handle = tokio::spawn(async move {
-            let body = serialized_valid_body().await;
-            let response = client
-                .post(format!("{}/prove-tx", get_host_and_port()))
-                .body(body)
-                .send()
-                .await?;
-            log::info!("Iteration: {:?}, Response code: {:?}", i, response.status());
-            assert_eq!(response.status(), 200);
-            Ok::<(), reqwest::Error>(())
-        });
-        handles.push(handle);
-    }
-
-    let results = futures::future::join_all(handles).await;
-
-    for result in results {
-        result
-            .expect("Request should not fail")
-            .expect("Request should not panic");
-    }
+    let base_url = get_host_and_port();
+    let tx = Arc::new(valid_tx::<Signature>().await);
+    let handles = spawn_proving_tasks(CONCURRENT_PROVE_REQUESTS, base_url, tx, None, true).await;
+    await_proving_results(handles, false).await;
 }
 
 #[named]
-async fn test_prove_tx_should_fail_on_repeated_body() {
+async fn test_prove_should_fail_on_repeated_body() {
     setup_test(function_name!());
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .body(
             serialized_valid_body()
                 .await
@@ -957,16 +983,19 @@ async fn test_prove_tx_should_fail_on_repeated_body() {
         .unwrap();
 
     log::info!("Response code: {:?}", response.status());
-    assert_eq!(response.status(), 400);
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let resp_text = dbg!(response.text().await.unwrap());
     assert!(
-        Regex::new(r"^Not all bytes read deserializing '.*'; \d+ bytes remaining$")
-            .unwrap()
-            .is_match(dbg!(response.text().await.unwrap().as_str()))
+        resp_text.contains("expected header tag")
+            || Regex::new(r"^Not all bytes read deserializing '.*'; \d+ bytes remaining$")
+                .unwrap()
+                .is_match(resp_text.as_str()),
+        "unexpected response text: {resp_text}"
     );
 }
 
 #[named]
-async fn test_prove_tx_should_fail_on_corrupted_body() {
+async fn test_prove_should_fail_on_corrupted_body() {
     setup_test(function_name!());
     let mut body = serialized_valid_body().await;
     let mut rng = rand::rngs::StdRng::seed_from_u64(42);
@@ -977,7 +1006,7 @@ async fn test_prove_tx_should_fail_on_corrupted_body() {
     }
 
     let response = HTTP_CLIENT
-        .post(format!("{}/prove-tx", get_host_and_port()))
+        .post(format!("{}/prove", get_host_and_port()))
         .body(body)
         .send()
         .await
@@ -986,74 +1015,52 @@ async fn test_prove_tx_should_fail_on_corrupted_body() {
     let stat = response.status();
     dbg!(response.bytes().await.unwrap());
     log::info!("Response code: {:?}", stat);
-    assert_eq!(stat, 400);
+    assert_eq!(stat, StatusCode::BAD_REQUEST);
 }
 
 #[named]
-async fn test_prove_tx_should_be_able_to_validate_multiple_txs_with_zero_limit() {
+async fn test_prove_should_handle_multiple_requests_with_zero_limit() {
     setup_test(function_name!());
-    let mut handles = Vec::new();
-
-    for i in 0..10 {
-        let client = HTTP_CLIENT.clone();
-        let handle = tokio::spawn(async move {
-            let response = client
-                .post(format!("{}/prove-tx", get_host_and_port()))
-                .body(serialized_valid_body().await)
-                .send()
-                .await?;
-            log::info!("Iteration: {:?}, Response code: {:?}", i, response.status());
-            assert_eq!(response.status(), 200);
-            Ok::<(), reqwest::Error>(())
-        });
-        handles.push(handle);
-    }
+    let base_url = get_host_and_port();
+    let tx = Arc::new(valid_tx::<Signature>().await);
+    let handles =
+        spawn_proving_tasks(CONCURRENT_PROVE_REQUESTS, base_url.clone(), tx, None, true).await;
 
     let resp = HTTP_CLIENT
-        .get(format!("{}/ready", get_host_and_port()))
+        .get(format!("{}/ready", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), StatusCode::OK);
     let json_resp = resp.json::<serde_json::Value>().await.unwrap();
     assert_eq!(json_resp.get("status").unwrap().as_str().unwrap(), "ok");
     assert_eq!(json_resp.get("jobCapacity").unwrap().as_u64().unwrap(), 0);
-
-    let results = futures::future::join_all(handles).await;
-
-    for result in results {
-        result
-            .expect("Request should not fail")
-            .expect("Request should not panic");
-    }
+    await_proving_results(handles, false).await;
 }
 
 #[named]
 async fn test_ready_reports_busy() {
     setup_test(function_name!());
-    let body = serialized_valid_zswap_body().await;
-    let mut tasks = vec![];
     let num_reqs = LIMIT + NUM_WORKERS;
-    for _ in 0..num_reqs {
-        let fut = build_client(30)
-            .post(format!("{}/prove-tx", get_host_and_port()))
-            .body(body.clone())
-            .send();
-        let task = tokio::spawn(fut);
-        tasks.push(task);
-
-        // Wait for job to get picked up
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    let base_url = get_host_and_port();
+    let tx = Arc::new(valid_unbalanced_zswap(1));
+    let tasks = spawn_proving_tasks(
+        num_reqs,
+        base_url.clone(),
+        tx,
+        Some(Duration::from_millis(50)),
+        false,
+    )
+    .await;
     // Wait for requests to send
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let resp = HTTP_CLIENT
-        .get(format!("{}/ready", get_host_and_port()))
+        .get(format!("{}/ready", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 503);
+    assert_eq!(resp.status(), StatusCode::SERVICE_UNAVAILABLE);
     let json_resp = resp.json::<serde_json::Value>().await.unwrap();
     assert_eq!(
         json_resp.get("jobsProcessing").unwrap().as_u64().unwrap(),
@@ -1064,38 +1071,38 @@ async fn test_ready_reports_busy() {
         (num_reqs - NUM_WORKERS) as u64
     );
     assert_eq!(json_resp.get("status").unwrap().as_str().unwrap(), "busy");
+
+    await_proving_results(tasks, true).await;
 }
 
 #[named]
 async fn test_ready_reports_correct_job_numbers() {
     setup_test(function_name!());
-    let body = serialized_valid_zswap_body().await;
-    let mut tasks = vec![];
     let num_reqs = LIMIT - 1 + NUM_WORKERS;
+    let base_url = get_host_and_port();
+    let tx = Arc::new(valid_unbalanced_zswap(1));
 
     let now = std::time::Instant::now();
-    for _ in 0..num_reqs {
-        let fut = build_client(30)
-            .post(format!("{}/prove-tx", get_host_and_port()))
-            .body(body.clone())
-            .send();
-        let task = tokio::spawn(fut);
-        tasks.push(task);
-        // Wait for request to be picked up
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    let tasks = spawn_proving_tasks(
+        num_reqs,
+        base_url.clone(),
+        tx,
+        Some(Duration::from_millis(50)),
+        false,
+    )
+    .await;
     // Wait for requests to send
     tokio::time::sleep(Duration::from_millis(100)).await;
 
     let resp = HTTP_CLIENT
-        .get(format!("{}/ready", get_host_and_port()))
+        .get(format!("{}/ready", base_url))
         .send()
         .await
         .unwrap();
     let status = resp.status();
     let json_resp = resp.json::<serde_json::Value>().await.unwrap();
     println!("{:#?}", json_resp);
-    assert_eq!(status, 200);
+    assert_eq!(status, StatusCode::OK);
     assert_eq!(json_resp.get("status").unwrap().as_str().unwrap(), "ok");
     assert_eq!(
         json_resp.get("jobsProcessing").unwrap().as_u64().unwrap(),
@@ -1107,29 +1114,26 @@ async fn test_ready_reports_correct_job_numbers() {
     );
 
     println!("elapsed: {:?}", now.elapsed());
+
+    await_proving_results(tasks, true).await;
 }
 
 #[named]
 async fn test_health_check_still_works_when_server_is_fully_loaded() {
     setup_test(function_name!());
-    let body = serialized_valid_zswap_body().await;
-    let mut tasks = vec![];
-    let num_reqs = 50;
-    for _ in 0..num_reqs {
-        let fut = build_client(30)
-            .post(format!("{}/prove-tx", get_host_and_port()))
-            .body(body.clone())
-            .send();
-        let task = tokio::spawn(fut);
-        tasks.push(task);
-    }
+    let base_url = get_host_and_port();
+    let tx = Arc::new(valid_unbalanced_zswap(1));
+    let num_reqs = HEALTH_LOAD_REQUESTS;
+    let tasks = spawn_proving_tasks(num_reqs, base_url.clone(), tx, None, false).await;
     // Wait for requests to send
     tokio::time::sleep(Duration::from_millis(300)).await;
 
     let resp = HTTP_CLIENT
-        .get(format!("{}/health", get_host_and_port()))
+        .get(format!("{}/health", base_url))
         .send()
         .await
         .unwrap();
-    assert_eq!(resp.status(), 200);
+    assert_eq!(resp.status(), StatusCode::OK);
+
+    await_proving_results(tasks, true).await;
 }
