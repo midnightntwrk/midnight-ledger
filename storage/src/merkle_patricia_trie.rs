@@ -1352,7 +1352,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             Node::Branch { ann, children } => {
                 let non_empty_children = children
                     .iter()
-                    .filter(|child| matches!(***child, Node::Empty))
+                    .filter(|child| !matches!(***child, Node::Empty))
                     .count();
                 if non_empty_children < 2 {
                     return Err(std::io::Error::new(
