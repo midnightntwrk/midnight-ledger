@@ -251,14 +251,14 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
                     state.first_free += 1;
                     if let Some(ci) = state.pending_outputs.get(&commitment) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                        let nullifier = ci
+                            .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone()));
                         let qci = ci.qualify(*mt_index);
                         state.pending_outputs = state.pending_outputs.remove(&commitment);
                         state.coins = state.coins.insert(nullifier, qci);
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                        let nullifier = ci
+                            .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone()));
                         let qci = ci.qualify(*mt_index);
                         state.coins = state.coins.insert(nullifier, qci);
                     } else {

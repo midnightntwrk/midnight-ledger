@@ -53,7 +53,7 @@ impl AuthorizedClaim<ProofPreimage> {
         coin: CoinInfo,
         sk: &CoinSecretKey,
     ) -> Result<Self, OfferCreationFailed> {
-        let pk = match Recipient::from(&SenderEvidence::User(*sk)) {
+        let pk = match Recipient::from(&SenderEvidence::User(sk.clone())) {
             Recipient::User(pk) => pk,
             Recipient::Contract(_) => unreachable!(),
         };

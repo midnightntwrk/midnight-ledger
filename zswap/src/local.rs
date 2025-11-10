@@ -99,7 +99,7 @@ impl<D: DB> State<D> {
         if secret_keys.coin_public_key() == tx.recipient {
             res.coins = self.coins.insert(
                 tx.coin
-                    .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key)),
+                    .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone())),
                 tx.coin.qualify(self.first_free),
             );
         } else {
@@ -153,7 +153,7 @@ impl<D: DB> State<D> {
                     res.coins = res.coins.insert(
                         CoinInfo::nullifier(
                             &(&qci).into(),
-                            &SenderEvidence::User(secret_keys.coin_secret_key),
+                            &SenderEvidence::User(secret_keys.coin_secret_key.clone()),
                         ),
                         qci,
                     );
@@ -165,7 +165,7 @@ impl<D: DB> State<D> {
                 res.coins = res.coins.insert(
                     CoinInfo::nullifier(
                         &(&qci).into(),
-                        &SenderEvidence::User(secret_keys.coin_secret_key),
+                        &SenderEvidence::User(secret_keys.coin_secret_key.clone()),
                     ),
                     qci,
                 );
@@ -218,7 +218,7 @@ impl<D: DB> State<D> {
             rng,
             coin,
             segment,
-            SenderEvidence::User(secret_keys.coin_secret_key),
+            SenderEvidence::User(secret_keys.coin_secret_key.clone()),
             tree,
         )?;
         let res = State {
