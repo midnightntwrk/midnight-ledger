@@ -840,6 +840,13 @@ impl<D: DB> Arena<D> {
             result = Ok(root);
         }
 
+        // TODO: Suggested fix for missing ArenaKey representation: do a graph-walk bottom-up on
+        // `nodes`, to build a map from ArenaHash -> ArenaKey, using `child_from`.
+        // Pass this into IrLoader, and use it during `get`
+        //
+        // Might make sense to make this part of the topological sort, as things might be in a
+        // better representation at that point.
+
         let key = result?;
         let res: Sp<T, D> = IrLoader {
             arena: self,
@@ -1083,6 +1090,9 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
+            // FIXME: This should not be directly constructing a Ref!
+            // We need to make sure this is the correct small nodes representation of these child
+            // nodes
             &mut ir.children.clone().into_iter().map(ArenaKey::Ref),
             &loader,
         )?);
@@ -1409,8 +1419,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             );
             *self = new_sp;
         }
-        self.arena
-            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.persist(&ref_)));
+        self.arena.with_backend(|backend| {
+            self.child_repr
+                .refs()
+                .into_iter()
+                .for_each(|ref_| backend.persist(&ref_))
+        });
     }
 
     /// Notify the storage back-end to decrement the persist count on this
@@ -1418,8 +1432,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     ///
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
-        self.arena
-            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.unpersist(&ref_)));
+        self.arena.with_backend(|backend| {
+            self.child_repr
+                .refs()
+                .into_iter()
+                .for_each(|ref_| backend.unpersist(&ref_))
+        });
     }
 
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
