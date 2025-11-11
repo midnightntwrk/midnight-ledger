@@ -73,7 +73,7 @@ pub(crate) fn hash<'a, H: WellBehavedHasher>(
 #[derive_where(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[derive(Serializable)]
 #[phantom(T, H)]
-pub struct TypedArenaKey<T, H: WellBehavedHasher> {
+pub struct TypedArenaKey<T: ?Sized, H: WellBehavedHasher> {
     key: ArenaKey<H>,
     _phantom: PhantomData<T>,
 }
@@ -1351,7 +1351,52 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     }
 }
 
-impl<T, D: DB> Sp<T, D> {
+impl<D: DB> Sp<dyn Any + Send + Sync, D> {
+    /// Downcasts this dynamically typed pointer to a concrete type, if possible.
+    pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<T>> = match self.data.get() {
+            Some(arc) => {
+                let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
+                concrete_arc.into()
+            }
+            None => OnceLock::new(),
+        };
+        Some(Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        })
+    }
+}
+
+impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
+    /// Casts this pointer into a dynamically typed `Any` pointer.
+    pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
+            Some(arc) => {
+                let dyn_arc: Arc<dyn Any + Send + Sync> = arc.clone();
+                dyn_arc.into()
+            }
+            None => OnceLock::new(),
+        };
+        Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        }
+    }
+}
+
+
+impl<T: ?Sized, D: DB> Sp<T, D> {
     /// Return true iff this `Sp` is lazy/unforced, i.e. its data has not yet
     /// been loaded.
     ///
@@ -1703,6 +1748,36 @@ pub struct TopoSortedNode {
     pub child_indices: Vec<u64>,
     /// The data of this node
     pub data: Vec<u8>,
+}
+
+impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        match &self.child_repr {
+            ArenaKey::Direct(key) => key.children.deref().clone(),
+            ArenaKey::Ref(hash) => {
+                self.arena.with_backend(|backend| backend.get(hash).expect("ref Sp must be in backend").children.clone())
+            }
+        }
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized {
+        todo!()
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized {
+        match &self.child_repr {
+            ArenaKey::Direct(key) => writer.write_all(&key.data),
+            ArenaKey::Ref(hash) => {
+                self.arena.with_backend(|backend| writer.write_all(&backend.get(hash).expect("ref Sp must be in backend").data))
+            }
+        }
+    }
 }
 
 impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {

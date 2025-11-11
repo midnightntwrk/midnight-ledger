@@ -175,7 +175,7 @@ impl<const N: usize> Serializable for [u8; N] {
     }
 }
 
-impl<T> Serializable for PhantomData<T> {
+impl<T: ?Sized> Serializable for PhantomData<T> {
     fn serialize(&self, _writer: &mut impl Write) -> std::io::Result<()> {
         Ok(())
     }
@@ -184,7 +184,7 @@ impl<T> Serializable for PhantomData<T> {
     }
 }
 
-impl<T> Tagged for PhantomData<T> {
+impl<T: ?Sized> Tagged for PhantomData<T> {
     fn tag() -> Cow<'static, str> {
         Cow::Borrowed("()")
     }

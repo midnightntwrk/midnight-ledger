@@ -1,69 +1,86 @@
 use base_crypto::cost_model::CostDuration;
 use derive_where::derive_where;
 use serialize::{Deserializable, Serializable, Tagged};
+use std::any::Any;
 use std::borrow::Cow;
 use std::fmt::Debug;
 use std::io;
 use std::marker::PhantomData;
+use std::sync::atomic::AtomicU64;
+use std::time::Instant;
 use storage::Storable;
-use storage::arena::{ArenaKey, BackendLoader, Sp};
-use storage::db::{DB, InMemoryDB};
-use storage::delta_tracking::ChildRef;
+use storage::arena::{ArenaHash, ArenaKey, BackendLoader, Sp};
+use storage::db::DB;
 use storage::storable::Loader;
 use storage::storage::{HashMap, Map, default_storage};
 
 pub type RawNode<D> = ArenaKey<<D as DB>::Hasher>;
 
 pub enum StepResult<D: DB> {
-    Finished(Sp<ChildRef<D>, D>),
+    Finished(Sp<dyn Any + Send + Sync, D>),
     NotEnoughTime,
     Suspended,
-    Depends {
-        id: TranslationId,
-        child: RawNode<D>,
-    },
+    Depends(Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)>),
 }
 
 #[derive(Serializable, Storable)]
-#[derive_where(Clone, Debug)]
+#[derive_where(Clone, Debug, PartialEq, Eq, Hash)]
 #[storable(base)]
 #[phantom(D)]
-struct TranslationCacheKey<D: DB>(TranslationId, RawNode<D>);
+struct TranslationCacheKey<D: DB> {
+    tlid: TranslationId,
+    hash: ArenaHash<D::Hasher>,
+    persist: bool,
+}
 
-#[derive(Storable)]
-#[derive_where(Clone, Debug)]
-#[storable(db = D)]
+impl<D: DB> TranslationCacheKey<D> {
+    fn from_key(tlid: &TranslationId, key: &ArenaKey<D::Hasher>) -> Self {
+        TranslationCacheKey { tlid: tlid.clone(), hash: key.hash().clone(), persist: matches!(key, ArenaKey::Ref(_)) }
+    }
+}
+
+//#[derive(Storable)]
+#[derive_where(Clone)]
+//#[storable(db = D)]
 pub struct TranslationCache<D: DB> {
-    map: HashMap<TranslationCacheKey<D>, ChildRef<D>, D>,
+    //map: HashMap<TranslationCacheKey<D>, ChildRef<D>, D>,
+    //map: rpds::map::hash_trie_map::HashTrieMapSync<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>>,
+    persistent_map: HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D>,
+    transient_map: hashbrown::HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>>,
+}
+
+impl<D: DB> From<HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D>> for TranslationCache<D> {
+    fn from(persistent_map: HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D>) -> Self {
+        TranslationCache { persistent_map, transient_map: hashbrown::HashMap::new() }
+    }
+}
+
+impl<D: DB> From<TranslationCache<D>> for HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D> {
+    fn from(value: TranslationCache<D>) -> Self {
+        value.transient_map.into_iter().filter(|(k, _)| k.persist).fold(value.persistent_map, |pm, (k, v)| pm.insert(k, v))
+    }
 }
 
 impl<D: DB> TranslationCache<D> {
-    fn new() -> Self {
-        TranslationCache {
-            map: HashMap::new(),
-        }
+    fn insert(&mut self, id: TranslationId, from: RawNode<D>, to: Sp<dyn Any + Send + Sync, D>) {
+        self.transient_map.insert(TranslationCacheKey::from_key(&id, &from), to);
     }
-    fn insert(&self, id: TranslationId, from: RawNode<D>, to: ChildRef<D>) -> Self {
-        Self {
-            map: self.map.insert(TranslationCacheKey(id, from), to),
-        }
-    }
-    pub fn lookup(&self, id: &TranslationId, child: RawNode<D>) -> Option<ChildRef<D>> {
-        self.map
-            .get(&TranslationCacheKey(id.clone(), child))
+    pub fn lookup(&self, id: &TranslationId, child: RawNode<D>) -> Option<Sp<dyn Any + Send + Sync, D>> {
+        let key = TranslationCacheKey::from_key(id, &child);
+        self.transient_map
+            .get(&key)
             .map(|v| (&*v).clone())
+            .or_else(|| self.persistent_map.get(&key).map(|v| (&*v).clone()))
     }
-    pub fn resolve<T: Storable<D> + Tagged>(
+    pub fn resolve<T: Storable<D> + Tagged + Any + Send + Sync>(
         &self,
         id: &TranslationId,
         child: RawNode<D>,
     ) -> io::Result<Option<Sp<T, D>>> {
-        let Some(keyref) = self.lookup(id, child) else {
+        let Some(dynsp) = self.lookup(id, child) else {
             return Ok(None);
         };
-        default_storage()
-            .get_lazy(&keyref.child.clone().into())
-            .map(Some)
+        dynsp.downcast::<T>().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to downcast element in cache; type mismatch")).map(Some)
     }
 }
 
@@ -107,7 +124,7 @@ impl<T: Loader<D>, D: DB> AsBackendLoader<D> for T {
 
 pub trait TypelessTranslation<D: DB> {
     fn required_translations(&self) -> Vec<TranslationId>;
-    fn start(&self, raw: RawNode<D>) -> Box<dyn TypelessTranslationState<D>>;
+    fn start(&self, node: Sp<dyn Any + Send + Sync, D>) -> Box<dyn TypelessTranslationState<D>>;
     fn from_binary_repr(
         &self,
         reader: &mut dyn std::io::Read,
@@ -130,7 +147,7 @@ pub trait TypelessTranslationState<D: DB>: Send + Sync + std::fmt::Debug {
 
 pub trait DirectTranslation<A: Storable<D>, B: Storable<D>, D: DB>: Send + Sync + 'static {
     fn required_translations() -> Vec<TranslationId>;
-    fn child_translations(source: &A) -> Vec<(TranslationId, RawNode<D>)>;
+    fn child_translations(source: &A) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)>;
     fn finalize(
         source: &A,
         limit: &mut CostDuration,
@@ -154,7 +171,6 @@ pub struct DirectSpTranslationState<
     T: DirectTranslation<A, B, D>,
     D: DB,
 > {
-    children_processed: u32,
     value: Sp<A, D>,
     _phantom1: PhantomData<B>,
     _phantom2: PhantomData<T>,
@@ -166,12 +182,9 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
     fn required_translations(&self) -> Vec<TranslationId> {
         T::required_translations()
     }
-    fn start(&self, raw: RawNode<D>) -> Box<dyn TypelessTranslationState<D>> {
+    fn start(&self, value: Sp<dyn Any + Send + Sync, D>) -> Box<dyn TypelessTranslationState<D>> {
         let state: DirectSpTranslationState<A, B, T, D> = DirectSpTranslationState {
-            children_processed: 0,
-            value: default_storage()
-                .get(&raw.into())
-                .expect("translation target must be present"),
+            value: value.downcast().expect("translation target must be downcastable"),
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         };
@@ -204,35 +217,38 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<StepResult<D>> {
-        let mut proc_children = T::child_translations(&self.value);
-        if (self.children_processed as usize) < proc_children.len() {
-            let child = proc_children.swap_remove(self.children_processed as usize);
-            self.children_processed += 1;
-            Ok(StepResult::Depends {
-                id: child.0,
-                child: child.1,
-            })
+        let t0 = Instant::now();
+        let mut required_children = T::child_translations(&self.value);
+        required_children.retain(|(tid, obj)| cache.lookup(tid, obj.as_child()).is_none());
+        let t1 = Instant::now();
+        TDEP.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + (t1 - t0).as_nanos() as u64)).unwrap();
+        if !required_children.is_empty() {
+            Ok(StepResult::Depends(required_children))
         } else {
+            let t0 = Instant::now();
             let res = T::finalize(&self.value, limit, cache)?;
-            match res {
+            let res = match res {
                 // TODO: Here and elsewhere, we destroy the Sp for the hash,
                 // which will actually deallocate it. Use something that keeps
                 // the ref alive, like in the rcmap.
                 Some(res) => {
                     let sp = Sp::new(res);
-                    let keyref = Sp::new(ChildRef::new(sp.as_child()));
+                    let upcast = sp.upcast();
                     drop(sp);
-                    Ok(StepResult::Finished(keyref))
+                    Ok(StepResult::Finished(upcast))
                 }
                 None => Ok(StepResult::Suspended),
-            }
+            };
+            let t1 = Instant::now();
+            TFIN.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + (t1 - t0).as_nanos() as u64)).unwrap();
+            res
         }
     }
     fn children(&self) -> std::vec::Vec<RawNode<D>> {
         vec![self.value.as_child()]
     }
-    fn to_binary_repr(&self, mut writer: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
-        self.children_processed.serialize(&mut writer)
+    fn to_binary_repr(&self, _writer: &mut dyn std::io::Write) -> Result<(), std::io::Error> {
+        Ok(())
     }
 }
 
@@ -244,7 +260,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
 //
 // Alternatively, build up the TL table _somehow_, and auto-derive a storable instance off that.
 
-#[derive(PartialEq, Eq, Serializable, Clone)]
+#[derive(PartialEq, Eq, Serializable, Clone, Hash)]
 pub struct TranslationId(pub Cow<'static, str>, pub Cow<'static, str>);
 
 impl Debug for TranslationId {
@@ -257,19 +273,15 @@ impl Debug for TranslationId {
 #[derive_where(Clone)]
 #[derive_where(Debug; T)]
 #[storable(db = D)]
-pub struct Queue<T: Storable<D>, D: DB> {
+pub struct PersistentQueue<T: Storable<D>, D: DB> {
     pub start: u64,
     pub end: u64,
     pub queue: Map<u64, T, D>,
 }
 
-impl<T: Storable<D>, D: DB> Queue<T, D> {
+impl<T: Storable<D>, D: DB> PersistentQueue<T, D> {
     pub fn empty() -> Self {
-        Queue {
-            start: 0,
-            end: 0,
-            queue: Map::new(),
-        }
+        PersistentQueue { start: 0, end: 0, queue: Map::new() }
     }
 
     pub fn is_empty(&self) -> bool {
@@ -324,6 +336,82 @@ impl<T: Storable<D>, D: DB> Queue<T, D> {
     }
 }
 
+
+//#[derive(Storable)]
+#[derive_where(Clone)]
+#[derive_where(Debug; T)]
+//#[storable(db = D)]
+pub struct Queue<T: Storable<D>, D: DB> {
+    //pub start: u64,
+    //pub end: u64,
+    //pub queue: Map<u64, T, D>,
+    //pub queue: rpds::map::red_black_tree_map::RedBlackTreeMapSync<u64, T>,
+    persistent_queue: PersistentQueue<T, D>,
+    transient_queue: Vec<T>,
+}
+
+impl<T: Storable<D>, D: DB> From<PersistentQueue<T, D>> for Queue<T, D> {
+    fn from(persistent_queue: PersistentQueue<T, D>) -> Self {
+        Queue {
+            persistent_queue,
+            transient_queue: Vec::new(),
+        }
+    }
+}
+
+impl<T: Storable<D>, D: DB> From<Queue<T, D>> for PersistentQueue<T, D> {
+    fn from(queue: Queue<T, D>) -> Self {
+        queue.transient_queue.into_iter().fold(queue.persistent_queue, |pq, entry| pq.push_front(entry))
+    }
+}
+
+impl<T: Storable<D>, D: DB> Queue<T, D> {
+    pub fn is_empty(&self) -> bool {
+        self.persistent_queue.is_empty() && self.transient_queue.is_empty()
+    }
+
+    pub fn front(&self) -> Option<&T> {
+        self.transient_queue.last().or_else(|| self.persistent_queue.front())
+    }
+
+    pub fn back(&self) -> Option<&T> {
+        self.persistent_queue.back().or_else(|| self.transient_queue.first())
+    }
+
+    pub fn push_front(&mut self, value: T) {
+        self.transient_queue.push(value)
+    }
+
+    pub fn push_back(&mut self, value: T) {
+        self.persistent_queue = self.persistent_queue.push_back(value);
+    }
+
+    pub fn remove_front(&mut self) -> Option<T> {
+        if let Some(value) = self.transient_queue.pop() {
+            return Some(value);
+        }
+        let res = self.persistent_queue.front().cloned();
+        if res.is_some() {
+            self.persistent_queue = self.persistent_queue.remove_front();
+        }
+        res
+    }
+
+    pub fn remove_back(&mut self) -> Option<T> {
+        let persistent_back = self.persistent_queue.back().cloned();
+        if persistent_back.is_some() {
+            self.persistent_queue = self.persistent_queue.remove_back();
+            return persistent_back;
+        }
+        // If we reach here, the persistent queue must be empty
+        if self.transient_queue.is_empty() {
+            None
+        } else {
+            Some(self.transient_queue.remove(0))
+        }
+    }
+}
+
 pub trait TranslationTable<D: DB>: Send + Sync + 'static {
     const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)];
     fn assert_closure() {
@@ -352,15 +440,15 @@ pub trait TranslationTable<D: DB>: Send + Sync + 'static {
             })
             .map(|tl| tl.1)
     }
-    fn start(id: &TranslationId, raw: RawNode<D>) -> io::Result<TaggedTranslationState<Self, D>>
+    fn start(id: &TranslationId, node: Sp<dyn Any + Send + Sync, D>) -> io::Result<TaggedTranslationState<Self, D>>
     where
         Self: Sized,
     {
         let tl = Self::get(id)?;
         Ok(TaggedTranslationState {
             id: id.clone(),
-            from: raw.clone(),
-            typeless_state: tl.start(raw),
+            from: node.as_child(),
+            typeless_state: tl.start(node),
             _phantom: PhantomData,
         })
     }
@@ -384,6 +472,12 @@ impl<TABLE: TranslationTable<D>, D: DB> Clone for TaggedTranslationState<TABLE, 
         }
     }
 }
+
+pub static TUPDATE: AtomicU64 = AtomicU64::new(0);
+pub static TPROCESS: AtomicU64 = AtomicU64::new(0);
+pub static TDEP: AtomicU64 = AtomicU64::new(0);
+pub static TFIN: AtomicU64 = AtomicU64::new(0);
+pub static NPROC: AtomicU64 = AtomicU64::new(0);
 
 impl<TABLE: TranslationTable<D>, D: DB> Storable<D> for TaggedTranslationState<TABLE, D> {
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
@@ -419,13 +513,32 @@ impl<TABLE: TranslationTable<D>, D: DB> Storable<D> for TaggedTranslationState<T
     }
 }
 
-#[derive(Storable)]
-#[derive_where(Clone, Debug)]
-#[storable(db = D)]
-#[phantom(TABLE)]
+//#[derive(Storable)]
+#[derive_where(Clone)]
+//#[storable(db = D)]
+//#[phantom(TABLE)]
 pub struct TranslationState<TABLE: TranslationTable<D>, D: DB> {
+    work_queue: PersistentQueue<TaggedTranslationState<TABLE, D>, D>,
+    cache: HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D>,
+    result: Option<Sp<dyn Any + Send + Sync, D>>,
+}
+
+struct InflightTranslationState<TABLE: TranslationTable<D>, D: DB> {
     work_queue: Queue<TaggedTranslationState<TABLE, D>, D>,
     cache: TranslationCache<D>,
+    result: Option<Sp<dyn Any + Send + Sync, D>>,
+}
+
+impl<TABLE: TranslationTable<D>, D: DB> From<TranslationState<TABLE, D>> for InflightTranslationState<TABLE, D> {
+    fn from(value: TranslationState<TABLE, D>) -> Self {
+        InflightTranslationState { work_queue: value.work_queue.into(), cache: value.cache.into(), result: value.result.into() }
+    }
+}
+
+impl<TABLE: TranslationTable<D>, D: DB> From<InflightTranslationState<TABLE, D>> for TranslationState<TABLE, D> {
+    fn from(value: InflightTranslationState<TABLE, D>) -> Self {
+        TranslationState { work_queue: value.work_queue.into(), cache: value.cache.into(), result: value.result.into() }
+    }
 }
 
 pub enum Either<A, B> {
@@ -434,74 +547,84 @@ pub enum Either<A, B> {
 }
 
 impl<TABLE: TranslationTable<D>, D: DB> TranslationState<TABLE, D> {
-    pub fn start(id: &TranslationId, raw: RawNode<D>) -> io::Result<Self> {
-        let tl = TABLE::start(id, raw)?;
+    pub fn start(id: &TranslationId, node: Sp<dyn Any + Send + Sync, D>) -> io::Result<Self> {
+        let tl = TABLE::start(id, node)?;
+        let work_queue = PersistentQueue::empty().push_back(tl);
         let s0 = TranslationState {
-            work_queue: Queue::empty().push_back(tl),
-            cache: TranslationCache::new(),
+            work_queue,
+            cache: HashMap::new(),
+            result: None,
         };
         Ok(s0)
     }
 
-    pub fn change_target(&self, id: &TranslationId, raw: RawNode<D>) -> io::Result<Self> {
-        let tl = TABLE::start(id, raw)?;
+    pub fn change_target(&self, id: &TranslationId, node: Sp<dyn Any + Send + Sync, D>) -> io::Result<Self> {
+        let tl = TABLE::start(id, node)?;
         let work_queue = self.work_queue.push_back(tl);
         Ok(TranslationState {
             work_queue,
             cache: self.cache.clone(),
+            result: None,
         })
     }
 
-    pub fn run(&self, mut limit: CostDuration) -> io::Result<Either<Self, Sp<ChildRef<D>, D>>> {
-        let mut cur = self.clone();
-        let result = loop {
+    pub fn run(&self, mut limit: CostDuration) -> io::Result<Self> {
+        let mut cur = InflightTranslationState::from(self.clone());
+        cur.result = loop {
             match cur.step(&mut limit)? {
-                Either::Left((true, state)) => {
-                    cur = state;
-                    break None;
-                }
-                Either::Left((false, state)) => cur = state,
+                Either::Left(true) => break None,
+                Either::Left(false) => {}
                 Either::Right(res) => break Some(res),
             }
         };
-        match result {
-            Some(res) => Ok(Either::Right(res)),
-            None => Ok(Either::Left(cur)),
-        }
+        Ok(cur.into())
     }
 
-    fn step(&self, limit: &mut CostDuration) -> io::Result<Either<(bool, Self), Sp<ChildRef<D>, D>>> {
-        let mut cur = self
-            .work_queue
-            .front()
-            .expect("work queue must not be empty")
-            .clone();
-        let mut work_queue = self.work_queue.remove_front();
-        let mut cache = self.cache.clone();
+    fn result(&self) -> Option<Sp<dyn Any + Send + Sync, D>> {
+        self.result.clone()
+    }
+}
+
+impl<TABLE: TranslationTable<D>, D: DB> InflightTranslationState<TABLE, D> {
+    fn step(&mut self, limit: &mut CostDuration) -> io::Result<Either<bool, Sp<dyn Any + Send + Sync, D>>> {
+        let t0 = Instant::now();
+        let mut cur = self.work_queue.remove_front().expect("work queue must not be empty");
         let mut finished = false;
-        match cur.typeless_state.as_mut().step(limit, &self.cache)? {
-            StepResult::Suspended => work_queue = work_queue.push_front(cur),
-            StepResult::Depends { id, child } => {
-                work_queue = work_queue.push_front(cur);
-                work_queue = work_queue.push_front(TABLE::start(&id, child)?);
+        let t1 = Instant::now();
+        let step_res = cur.typeless_state.step(limit, &self.cache)?;
+        let t2 = Instant::now();
+        match step_res {
+            StepResult::Suspended => self.work_queue.push_front(cur),
+            StepResult::Depends(dependencies) => {
+                self.work_queue.push_front(cur);
+                for (id, child) in dependencies.into_iter() {
+                    if self.cache.lookup(&id, child.as_child()).is_none() {
+                        self.work_queue.push_front(TABLE::start(&id, child)?);
+                    }
+                }
             }
             StepResult::Finished(res) => {
-                if work_queue.is_empty() {
+                if self.work_queue.is_empty() {
                     return Ok(Either::Right(res));
                 } else {
-                    cache = cache.insert(cur.id, cur.from, (&*res).clone());
+                    self.cache.insert(cur.id, cur.from, res);
                 }
             }
             StepResult::NotEnoughTime => finished = true,
         }
-        Ok(Either::Left((finished, Self { work_queue, cache })))
+        let res = Ok(Either::Left(finished));
+        let t3 = Instant::now();
+        TPROCESS.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + (t2 - t1).as_nanos() as u64)).unwrap();
+        TUPDATE.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + ((t3 - t2) + (t1 - t0)).as_nanos() as u64)).unwrap();
+        NPROC.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + 1)).unwrap();
+        res
     }
 }
 
-#[derive(Storable)]
-#[derive_where(Clone, Debug)]
-#[storable(db = D)]
-#[phantom(A, B, TABLE)]
+//#[derive(Storable)]
+#[derive_where(Clone)]
+//#[storable(db = D)]
+//#[phantom(A, B, TABLE)]
 pub struct TypedTranslationState<A: Storable<D>, B: Storable<D>, TABLE: TranslationTable<D>, D: DB>
 {
     pub state: TranslationState<TABLE, D>,
@@ -515,7 +638,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
     pub fn start(input: Sp<A, D>) -> io::Result<Self> {
         let tlid = TranslationId(A::tag(), B::tag());
         Ok(TypedTranslationState {
-            state: TranslationState::start(&tlid, input.as_child())?,
+            state: TranslationState::start(&tlid, input.upcast())?,
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         })
@@ -524,7 +647,7 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
     pub fn change_target(&self, target: Sp<A, D>) -> io::Result<Self> {
         let tlid = TranslationId(A::tag(), B::tag());
         Ok(TypedTranslationState {
-            state: self.state.change_target(&tlid, target.as_child())?,
+            state: self.state.change_target(&tlid, target.upcast())?,
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         })
@@ -541,16 +664,11 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
         default_storage::<D>().get_lazy(&hash.into())
     }
 
-    pub fn run(&self, limit: CostDuration) -> io::Result<Either<Self, Sp<B, D>>> {
-        match self.state.run(limit)? {
-            Either::Left(state) => Ok(Either::Left(TypedTranslationState {
-                state,
-                _phantom1: PhantomData,
-                _phantom2: PhantomData,
-            })),
-            Either::Right(hash) => Ok(Either::Right(
-                default_storage::<D>().get_lazy(&dbg!(hash).child.clone().into())?,
-            )),
-        }
+    pub fn run(&self, limit: CostDuration) -> io::Result<Self> {
+        Ok(TypedTranslationState { state: self.state.run(limit)?, _phantom1: PhantomData, _phantom2: PhantomData })
+    }
+
+    pub fn result(&self) -> io::Result<Option<Sp<B, D>>> {
+        self.state.result().map(|dynsp| dynsp.downcast::<B>().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to downcast result to correct type"))).transpose()
     }
 }

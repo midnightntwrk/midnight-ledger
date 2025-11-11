@@ -1,6 +1,7 @@
 use base_crypto::cost_model::CostDuration;
 use derive_where::derive_where;
 use serialize::{Deserializable, Serializable, Tagged};
+use std::any::Any;
 use std::borrow::Cow;
 use std::io;
 use std::marker::PhantomData;
@@ -22,7 +23,7 @@ use mechanism::*;
 #[storable(db = D)]
 #[tag = "foo"]
 pub struct Foo<D: DB> {
-    foo: HashMap<u64, FooEntry, D>,
+    foo: Map<u64, FooEntry, D>,
     #[storable(child)]
     baz: Sp<Baz<D>, D>,
 }
@@ -32,7 +33,7 @@ pub struct Foo<D: DB> {
 #[storable(db = D)]
 #[tag = "bar"]
 pub struct Bar<D: DB> {
-    bar: HashMap<u64, BarEntry, D>,
+    bar: Map<u64, BarEntry, D>,
     #[storable(child)]
     baz: Sp<Baz<D>, D>,
 }
@@ -63,7 +64,7 @@ mod lr {
     #[tag = "nesty-lr"]
     pub enum Nesty<D: DB> {
         Empty,
-        Node(u32, Sp<Nesty<D>, D>, Sp<Nesty<D>, D>),
+        Node(u32, #[storable(child)] Sp<Nesty<D>, D>, #[storable(child)] Sp<Nesty<D>, D>),
     }
 }
 
@@ -87,55 +88,36 @@ struct NestyLrToRlTranslation;
 
 impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTranslation {
     fn required_translations() -> Vec<TranslationId> {
-        eprintln!("nesty required_translations 1");
-        let res = vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())];
-        eprintln!("nesty required_translations 2");
-        res
+        vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())]
     }
-    fn child_translations(source: &lr::Nesty<D>) -> Vec<(TranslationId, RawNode<D>)> {
-        eprintln!("nesty child_translations 1");
+    fn child_translations(source: &lr::Nesty<D>) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlid = || TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
-        eprintln!("nesty child_translations 2");
-        let res = match source {
+        match source {
             lr::Nesty::Empty => vec![],
-            lr::Nesty::Node(_, a, b) => vec![(tlid(), a.as_child()), (tlid(), b.as_child())],
-        };
-        eprintln!("nesty child_translations 3");
-        res
+            lr::Nesty::Node(_, a, b) => vec![(tlid(), a.upcast()), (tlid(), b.upcast())],
+        }
     }
     fn finalize(
         source: &lr::Nesty<D>,
-        limit: &mut CostDuration,
+        _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<rl::Nesty<D>>> {
-        eprintln!("nesty finalise 1");
         let tlid = TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
-        eprintln!("nesty finalise 2");
-        let storage = default_storage::<D>();
-        eprintln!("nesty finalise 3");
         // TODO: adjust limit
         match source {
             lr::Nesty::Empty => Ok(Some(rl::Nesty::Empty)),
             lr::Nesty::Node(n, a, b) => {
-                eprintln!("nesty finalise 3a");
                 let Some(atrans) = cache.lookup(&tlid, a.as_child()) else {
                     return Ok(None);
                 };
-                eprintln!("nesty finalise 3b");
                 let Some(btrans) = cache.lookup(&tlid, b.as_child()) else {
                     return Ok(None);
                 };
-                eprintln!("nesty finalise 3c");
                 let res = Ok(Some(rl::Nesty::Node(
                     *n,
-                    storage
-                        .get_lazy(&btrans.child.clone().into())
-                        .expect("translated node must be in storage"),
-                    storage
-                        .get_lazy(&atrans.child.clone().into())
-                        .expect("translated node must be in storage"),
+                    btrans.downcast().expect("translated node must be correctly translated"),
+                    atrans.downcast().expect("translated node must be correctly translated"),
                 )));
-                eprintln!("nesty finalise 3d");
                 res
             }
         }
@@ -147,21 +129,21 @@ struct FooToBarTranslation;
 impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
     fn required_translations() -> Vec<TranslationId> {
         vec![TranslationId(
-            MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
-            MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<FooEntry, D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<BarEntry, D, SizeAnn>::tag(),
         )]
     }
-    fn child_translations(source: &Foo<D>) -> Vec<(TranslationId, RawNode<D>)> {
+    fn child_translations(source: &Foo<D>) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![
             // HashMap<u64, FooEntry, D> -> HashMap<u64, BarEntry, D>
             // => Map(ArenaKey<D::Hasher>, (Sp<u64, D>, Sp<FooEntry, D>)) -> Map(ArenaKey<D::Hasher>, (Sp<u64, D>, Sp<BarEntry, D>)) ->
             // => Sp<MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), SizeAnn>, D> -> Sp<MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), SizeAnn>, D>
             (
                 TranslationId(
-                    MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
-                    MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+                    MerklePatriciaTrie::<FooEntry, D, SizeAnn>::tag(),
+                    MerklePatriciaTrie::<BarEntry, D, SizeAnn>::tag(),
                 ),
-                source.foo.0.mpt.as_child(),
+                source.foo.mpt.upcast(),
             ),
         ]
     }
@@ -171,16 +153,16 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<Bar<D>>> {
         let foo_tlid = TranslationId(
-            MerklePatriciaTrie::<(Sp<u64, D>, Sp<FooEntry, D>), D, SizeAnn>::tag(),
-            MerklePatriciaTrie::<(Sp<u64, D>, Sp<BarEntry, D>), D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<FooEntry, D, SizeAnn>::tag(),
+            MerklePatriciaTrie::<BarEntry, D, SizeAnn>::tag(),
         );
-        let Some(footl) = cache.lookup(&foo_tlid, source.foo.0.mpt.as_child()) else {
+        let Some(footl) = cache.lookup(&foo_tlid, source.foo.mpt.as_child()) else {
             return Ok(None);
         };
-        let bar = HashMap(Map {
-            mpt: default_storage::<D>().get_lazy(&footl.child.clone().into())?,
+        let bar = Map {
+            mpt: footl.downcast().expect("translated node must be correctly translated"),
             key_type: PhantomData,
-        });
+        };
         Ok(Some(Bar {
             bar,
             baz: source.baz.clone(),
@@ -192,42 +174,42 @@ struct MptFooToBarTranslation;
 
 impl<D: DB>
     DirectTranslation<
-        MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
-        MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), D>,
+        MerklePatriciaTrie<FooEntry, D>,
+        MerklePatriciaTrie<BarEntry, D>,
         D,
     > for MptFooToBarTranslation
 {
     fn required_translations() -> Vec<TranslationId> {
         vec![TranslationId(
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+            merkle_patricia_trie::Node::<BarEntry, D>::tag(),
         )]
     }
     fn child_translations(
-        source: &MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+        source: &MerklePatriciaTrie<FooEntry, D>,
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![(
             TranslationId(
-                merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-                merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+                merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+                merkle_patricia_trie::Node::<BarEntry, D>::tag(),
             ),
-            source.0.as_child(),
+            source.0.upcast(),
         )]
     }
     fn finalize(
-        source: &MerklePatriciaTrie<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        source: &MerklePatriciaTrie<FooEntry, D>,
         _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
-    ) -> io::Result<Option<MerklePatriciaTrie<(Sp<u64, D>, Sp<BarEntry, D>), D>>> {
+    ) -> io::Result<Option<MerklePatriciaTrie<BarEntry, D>>> {
         let tlid = TranslationId(
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+            merkle_patricia_trie::Node::<BarEntry, D>::tag(),
         );
         let Some(tl) = cache.lookup(&tlid, source.0.as_child()) else {
             return Ok(None);
         };
         Ok(Some(MerklePatriciaTrie(
-            default_storage::<D>().get_lazy(&tl.child.clone().into())?,
+            tl.downcast().expect("translated node must be in cache")
         )))
     }
 }
@@ -236,15 +218,15 @@ struct MptNodeFooToBarTranslation;
 
 impl<D: DB>
     DirectTranslation<
-        merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
-        merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>,
+        merkle_patricia_trie::Node<FooEntry, D>,
+        merkle_patricia_trie::Node<BarEntry, D>,
         D,
     > for MptNodeFooToBarTranslation
 {
     fn required_translations() -> Vec<TranslationId> {
         let entry_tl = TranslationId(
-            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
-            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+            FooEntry::tag(),
+            BarEntry::tag(),
         );
         let self_tl = TranslationId(
             merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
@@ -253,44 +235,44 @@ impl<D: DB>
         vec![entry_tl, self_tl]
     }
     fn child_translations(
-        source: &merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+        source: &merkle_patricia_trie::Node<FooEntry, D>,
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let entry_tl = TranslationId(
-            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
-            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+            FooEntry::tag(),
+            BarEntry::tag(),
         );
         let self_tl = TranslationId(
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+            merkle_patricia_trie::Node::<BarEntry, D>::tag(),
         );
         match source {
             merkle_patricia_trie::Node::Empty => vec![],
             merkle_patricia_trie::Node::Branch { children, .. } => children
                 .iter()
-                .map(|child| (self_tl.clone(), child.as_child()))
+                .map(|child| (self_tl.clone(), child.upcast()))
                 .collect(),
             merkle_patricia_trie::Node::Extension { child, .. } => {
-                vec![(self_tl, child.as_child())]
+                vec![(self_tl, child.upcast())]
             }
             merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => vec![
-                (entry_tl, value.as_child()),
-                (self_tl, child.as_child()),
+                (entry_tl, value.upcast()),
+                (self_tl, child.upcast()),
             ],
-            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.as_child())],
+            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.upcast())],
         }
     }
     fn finalize(
-        source: &merkle_patricia_trie::Node<(Sp<u64, D>, Sp<FooEntry, D>), D>,
+        source: &merkle_patricia_trie::Node<FooEntry, D>,
         _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
-    ) -> io::Result<Option<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>>> {
+    ) -> io::Result<Option<merkle_patricia_trie::Node<BarEntry, D>>> {
         let entry_tl = TranslationId(
-            <(Sp<u64, D>, Sp<FooEntry, D>)>::tag(),
-            <(Sp<u64, D>, Sp<BarEntry, D>)>::tag(),
+            FooEntry::tag(),
+            BarEntry::tag(),
         );
         let self_tl = TranslationId(
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+            merkle_patricia_trie::Node::<BarEntry, D>::tag(),
         );
         Ok(Some(match source {
             merkle_patricia_trie::Node::Empty => merkle_patricia_trie::Node::Empty,
@@ -301,7 +283,7 @@ impl<D: DB>
                     let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                         return Ok(None);
                     };
-                    *new_child = default_storage::<D>().get_lazy(&entry.child.clone().into())?;
+                    *new_child = entry.downcast().expect("translated node must be downcastable");
                 }
                 let ann = new_children
                     .iter()
@@ -319,8 +301,8 @@ impl<D: DB>
                 let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
-                let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
-                    default_storage::<D>().get_lazy(&entry.child.clone().into())?;
+                let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
+                    entry.downcast().expect("translated node must be downcastable");
                 let ann = child.ann();
                 merkle_patricia_trie::Node::Extension {
                     ann,
@@ -332,8 +314,8 @@ impl<D: DB>
                 let Some(entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
-                let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
-                    default_storage::<D>().get_lazy(&entry.child.clone().into())?;
+                let value: Sp<BarEntry, D> =
+                    entry.downcast().expect("translated node must be downcastable");
                 let ann = SizeAnn::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
@@ -344,10 +326,10 @@ impl<D: DB>
                 let Some(child_entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
-                let value: Sp<(Sp<u64, D>, Sp<BarEntry, D>), D> =
-                    default_storage::<D>().get_lazy(&value_entry.child.clone().into())?;
-                let child: Sp<merkle_patricia_trie::Node<(Sp<u64, D>, Sp<BarEntry, D>), D>, D> =
-                    default_storage::<D>().get_lazy(&child_entry.child.clone().into())?;
+                let value: Sp<BarEntry, D> =
+                    value_entry.downcast().expect("translated node must be downcastable");
+                let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
+                    child_entry.downcast().expect("translated node must be downcastable");
                 let ann = SizeAnn::from_value(&value).append(&child.ann());
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
@@ -357,26 +339,25 @@ impl<D: DB>
 
 struct FooEntryToBarEntryTranslation;
 
-impl<D: DB> DirectTranslation<(Sp<u64, D>, Sp<FooEntry, D>), (Sp<u64, D>, Sp<BarEntry, D>), D>
+impl<D: DB> DirectTranslation<FooEntry, BarEntry, D>
     for FooEntryToBarEntryTranslation
 {
     fn required_translations() -> Vec<TranslationId> {
         vec![]
     }
     fn child_translations(
-        source: &(Sp<u64, D>, Sp<FooEntry, D>),
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+        source: &FooEntry,
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![]
     }
     fn finalize(
-        source: &(Sp<u64, D>, Sp<FooEntry, D>),
+        source: &FooEntry,
         _limit: &mut CostDuration,
         _cache: &TranslationCache<D>,
-    ) -> io::Result<Option<(Sp<u64, D>, Sp<BarEntry, D>)>> {
-        Ok(Some((
-            source.0.clone(),
-            Sp::new(BarEntry(source.1.0.wrapping_mul(42))),
-        )))
+    ) -> io::Result<Option<BarEntry>> {
+        Ok(Some(
+            BarEntry(source.0.wrapping_mul(42)),
+        ))
     }
 }
 
@@ -394,22 +375,22 @@ impl<D: DB> TranslationTable<D> for TestTable {
         ),
         (
             TranslationId(
-                Cow::Borrowed("mpt((u64,foo-entry),size-annotation)"),
-                Cow::Borrowed("mpt((u64,bar-entry),size-annotation)"),
+                Cow::Borrowed("mpt(foo-entry,size-annotation)"),
+                Cow::Borrowed("mpt(bar-entry,size-annotation)"),
             ),
             &DirectSpTranslation::<_, _, MptFooToBarTranslation, _>(PhantomData),
         ),
         (
             TranslationId(
-                Cow::Borrowed("mpt-node((u64,foo-entry),size-annotation)"),
-                Cow::Borrowed("mpt-node((u64,bar-entry),size-annotation)"),
+                Cow::Borrowed("mpt-node(foo-entry,size-annotation)"),
+                Cow::Borrowed("mpt-node(bar-entry,size-annotation)"),
             ),
             &DirectSpTranslation::<_, _, MptNodeFooToBarTranslation, _>(PhantomData),
         ),
         (
             TranslationId(
-                Cow::Borrowed("(u64,foo-entry)"),
-                Cow::Borrowed("(u64,bar-entry)"),
+                Cow::Borrowed("foo-entry"),
+                Cow::Borrowed("bar-entry"),
             ),
             &DirectSpTranslation::<_, _, FooEntryToBarEntryTranslation, _>(PhantomData),
         ),
@@ -427,7 +408,7 @@ mod tests {
             return Sp::new(lr::Nesty::Empty);
         }
         let left = mk_nesty(depth - 1, offset);
-        let right = mk_nesty(depth - 1, offset + 1 << depth);
+        let right = mk_nesty(depth - 1, offset + (1 << depth));
         Sp::new(lr::Nesty::Node(offset, left, right))
     }
 
@@ -441,7 +422,11 @@ mod tests {
 
     #[test]
     fn test_nesty_tl() {
-        let before = mk_nesty(10, 0);
+        let t0 = std::time::Instant::now();
+        let n = 20;
+        let before = mk_nesty(n, 0);
+        dbg!(before.serialize_to_node_list().nodes.len());
+        let t1 = std::time::Instant::now();
         let tl_state = TypedTranslationState::<
             lr::Nesty<InMemoryDB>,
             rl::Nesty<InMemoryDB>,
@@ -450,14 +435,36 @@ mod tests {
         >::start(before)
         .unwrap();
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
-        let Either::Right(_after) = tl_state.run(cost).unwrap() else {
+        let finished_state = tl_state.run(cost).unwrap();
+        let Some(_after) = finished_state.result().unwrap() else {
             panic!("didn't finish");
         };
+        let tfin0 = std::time::Instant::now();
+        drop(_after);
+        drop(finished_state);
+        drop(tl_state);
+        let tfin1 = std::time::Instant::now();
+        let dt0 = tfin1 - t0;
+        let dt1 = tfin0 - t1;
+        let m = 1 << n;
+        eprintln!("took {dt0:?} for {m} items ({} items per second) [incl construction]", m as f64 / dt0.as_secs_f64());
+        eprintln!("took {dt1:?} for {m} items ({} items per second) [excl construction]", m as f64 / dt1.as_secs_f64());
+        dbg!(&TUPDATE);
+        dbg!(&TPROCESS);
+        dbg!(&TDEP);
+        dbg!(&TFIN);
+        dbg!(&NPROC);
+        dbg!(TUPDATE.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
+        dbg!(TPROCESS.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
     }
 
     #[test]
     fn test_foo_tl() {
-        let before = mk_foo(10);
+        let t0 = std::time::Instant::now();
+        let n = 18;
+        let before = mk_foo(n);
+        dbg!(before.foo.mpt.serialize_to_node_list().nodes.len());
+        let t1 = std::time::Instant::now();
         let tl_state = TypedTranslationState::<
             Foo<InMemoryDB>,
             Bar<InMemoryDB>,
@@ -466,9 +473,24 @@ mod tests {
         >::start(before)
         .unwrap();
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
-        let Either::Right(_after) = tl_state.run(cost).unwrap() else {
+        let finished_state = tl_state.run(cost).unwrap();
+        let Some(_after) = finished_state.result().unwrap() else {
             panic!("didn't finish");
         };
+        let tfin0 = std::time::Instant::now();
+        drop(_after);
+        drop(finished_state);
+        drop(tl_state);
+        let tfin1 = std::time::Instant::now();
+        let dt0 = tfin1 - t0;
+        let dt1 = tfin0 - t0;
+        let dt2 = tfin1 - t1;
+        let dt3 = tfin0 - t1;
+        let m = 1 << n;
+        eprintln!("took {dt0:?} for {m} items ({} items per second) [incl construction, incl drop]", m as f64 / dt0.as_secs_f64());
+        eprintln!("took {dt1:?} for {m} items ({} items per second) [incl construction, excl drop]", m as f64 / dt1.as_secs_f64());
+        eprintln!("took {dt2:?} for {m} items ({} items per second) [excl construction, incl drop]", m as f64 / dt2.as_secs_f64());
+        eprintln!("took {dt3:?} for {m} items ({} items per second) [excl construction, excl drop]", m as f64 / dt3.as_secs_f64());
     }
 
     #[test]

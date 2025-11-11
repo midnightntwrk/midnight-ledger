@@ -19,4 +19,4 @@ new-onchain-state = { git = "https://github.com/midnightntwrk/midnight-ledger", 
 new-transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-transient-crypto", features = ["public-internal-structure"] }
 new-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", branch = "tkerber/translation-test-fork", package = "midnight-coin-structure" }
 derive-where = "^1.5.0"
-
+hashbrown = "^0.16.0"
