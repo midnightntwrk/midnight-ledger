@@ -974,6 +974,8 @@ mod tests {
 
     #[test]
     fn test_state_ser() {
+        let cs = ChargedState::<InMemoryDB>::new(StateValue::Null);
+        test_ser::<RcMap<InMemoryDB>>(cs.charged_keys);
         test_ser::<ContractState<InMemoryDB>>(ContractState::default());
         test_ser::<StateValue<InMemoryDB>>(stval!((512u64)));
         test_ser::<StateValue<InMemoryDB>>(stval!({ 512u64 => (12u64) }));
