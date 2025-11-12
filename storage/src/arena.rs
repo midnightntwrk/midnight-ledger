@@ -953,7 +953,7 @@ struct Node {
     /// doesn't tell us that the back-end data for `sp.root` can be uncached,
     /// since some other `Sp<U>` with the same hash could still be referencing
     /// that back-end data.
-    ref_count: u32,
+    ref_count: u64,
 }
 
 impl Node {
