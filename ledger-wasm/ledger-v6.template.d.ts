@@ -1659,7 +1659,11 @@ export type ClaimKind = "Reward" | "CardanoBridge";
  * A request to allocate rewards, authorized by the reward's recipient
  */
 export class ClaimRewardsTransaction<S extends Signaturish> {
-  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S);
+  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S, kind?: ClaimKind);
+
+  static new(network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, kind: ClaimKind): ClaimRewardsTransaction<SignatureErased>;
+
+  addSignature(signature: Signature): ClaimRewardsTransaction<SignatureEnabled>;
 
   eraseSignatures(): ClaimRewardsTransaction<SignatureErased>;
 

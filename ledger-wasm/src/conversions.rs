@@ -724,3 +724,11 @@ pub fn claim_kind_to_text(kind: &ClaimKind) -> String {
         ClaimKind::CardanoBridge => String::from("CardanoBridge"),
     }
 }
+
+pub fn text_to_claim_kind(value: &str) -> Result<ClaimKind, JsError> {
+    Ok(match value {
+        "Reward" => ClaimKind::Reward,
+        "CardanoBridge" => ClaimKind::CardanoBridge,
+        _ => return Err(JsError::new("Invalid 'claim kind' value.")),
+    })
+}

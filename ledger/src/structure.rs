@@ -1622,6 +1622,17 @@ pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
 tag_enforcement_test!(ClaimRewardsTransaction<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
+    pub fn add_signature(&self, signature: Signature) -> ClaimRewardsTransaction<Signature, D> {
+        ClaimRewardsTransaction {
+            network_id: self.network_id.clone(),
+            value: self.value,
+            owner: self.owner.clone(),
+            nonce: self.nonce,
+            signature,
+            kind: self.kind,
+        }
+    }
+
     pub fn erase_signatures(&self) -> ErasedClaimRewardsTransaction<D> {
         ClaimRewardsTransaction {
             network_id: self.network_id.clone(),
@@ -1645,8 +1656,6 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
         Serializable::serialize(&rewards.owner, &mut data)
             .expect("In-memory serialization should succeed");
         Serializable::serialize(&rewards.nonce, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&rewards.signature, &mut data)
             .expect("In-memory serialization should succeed");
         data
     }
