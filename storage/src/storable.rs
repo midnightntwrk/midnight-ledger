@@ -455,7 +455,7 @@ tuple_storable!(
 macro_rules! randomised_storable_test {
     ($type:ty) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             /// Test that `to_binary_repr` followed by `from_binary_repr` is the identity
             /// for argument value.
             #[allow(non_snake_case)]

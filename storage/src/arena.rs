@@ -23,6 +23,7 @@ use crate::storable::Loader;
 use crate::storage::{DEFAULT_CACHE_SIZE, default_storage};
 use crate::{DefaultDB, DefaultHasher, backend::StorageBackend, db::DB, storable::Storable};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
+#[allow(deprecated)]
 use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
 use hex::ToHex;
@@ -96,12 +97,15 @@ impl<T: Tagged, H: Digest> Tagged for TypedArenaKey<T, H> {
     }
 }
 
+// newtype is a hack to get the allow lint to work.
+#[allow(deprecated)]
+type HashArray<H> = GenericArray<u8, <H as OutputSizeUser>::OutputSize>;
+
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct ArenaKey<H: Digest = DefaultHasher>(
-    pub GenericArray<u8, <H as OutputSizeUser>::OutputSize>,
-);
+#[allow(deprecated)]
+pub struct ArenaKey<H: Digest = DefaultHasher>(pub HashArray<H>);
 
 impl<H: Digest> Tagged for ArenaKey<H> {
     fn tag() -> std::borrow::Cow<'static, str> {
@@ -133,6 +137,7 @@ impl<D: DB> Storable<D> for ArenaKey<D::Hasher> {
     where
         Self: Sized,
     {
+        #[allow(deprecated)]
         let mut array = GenericArray::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
         reader.read_exact(&mut array)?;
         Ok(Self(array))
@@ -156,6 +161,7 @@ impl<D: Digest> Hash for ArenaKey<D> {
     where
         Self: Sized,
     {
+        #[allow(deprecated)]
         GenericArray::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
             data.iter()
                 .map(|k| k.0.clone())
@@ -187,12 +193,14 @@ impl<H: Digest> Deserializable for ArenaKey<H> {
     ) -> std::io::Result<Self> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
+        #[allow(deprecated)]
         Ok(ArenaKey(GenericArray::clone_from_slice(&res)))
     }
 }
 
 impl<H: Digest> Distribution<ArenaKey<H>> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaKey<H> {
+        #[allow(deprecated)]
         let mut bytes = GenericArray::default();
         rng.fill_bytes(&mut bytes);
         ArenaKey(bytes)
@@ -224,6 +232,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaKey<H> {
                 if v.len() != <H as Digest>::output_size() {
                     return Err(E::invalid_length(v.len(), &self));
                 }
+                #[allow(deprecated)]
                 Ok(ArenaKey(GenericArray::clone_from_slice(v)))
             }
 
@@ -244,6 +253,7 @@ impl<H: Digest> ArenaKey<H> {
     /// The bytes don't need to be as long as the key's internal byte array; the
     /// unspecified values will be filled in with zeros.
     pub(crate) fn _from_bytes(bs: &[u8]) -> Self {
+        #[allow(deprecated)]
         let mut bytes = GenericArray::default();
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;

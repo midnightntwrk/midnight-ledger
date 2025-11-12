@@ -219,6 +219,9 @@ jobs:
       - name: Cargo check (--workspace --all-features)
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo check --all-targets --workspace --all-features
 
+      - name: Cargo audit
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit
+
       - name: Build and Test (default features)
         run: |
           cargo install cargo2junit
