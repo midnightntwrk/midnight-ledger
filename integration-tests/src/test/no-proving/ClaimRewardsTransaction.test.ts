@@ -86,9 +86,9 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, nonce, 'CardanoBridge');
     expect(tx.signature.toString()).toEqual(new SignatureErased().toString());
 
-    const signature = new SignatureEnabled(signData(signingKey, tx.dataToSign));
+    const signature = signData(signingKey, tx.dataToSign);
     const signedTx = tx.addSignature(signature);
-    expect(signedTx.signature.toString()).toEqual(signature.toString());
-    assertSerializationSuccess(signedTx, signature.instance);
+    expect(signedTx.signature.toString()).toEqual(new SignatureEnabled(signature).toString());
+    assertSerializationSuccess(signedTx, signedTx.signature.instance);
   });
 });
