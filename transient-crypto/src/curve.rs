@@ -415,7 +415,7 @@ impl Mul<Fr> for EmbeddedGroupAffine {
         let embedded_modulus = Fr::from_le_bytes(&embedded_m1.as_le_bytes())
             .expect("embedded modulus should fit in scalar field")
             + Fr::from(1);
-        while rhs > embedded_modulus {
+        while rhs >= embedded_modulus {
             rhs = rhs - embedded_modulus;
         }
         self * EmbeddedFr::try_from(rhs).expect("after reducing, rhs should fit in embedded scalar")
