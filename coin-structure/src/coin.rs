@@ -545,7 +545,7 @@ impl BinaryHashRepr for TokenType {
     fn binary_len(&self) -> usize {
         match self {
             TokenType::Dust => 1,
-            _ => 32,
+            _ => 33,
         }
     }
 }
@@ -904,3 +904,20 @@ hash_serde!(
     SecretKey,
     UserAddress
 );
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "proptest")]
+    use proptest::prelude::*;
+
+    use super::*;
+
+    #[cfg(feature = "proptest")]
+    proptest! {
+        #[test]
+        fn test_token_type_binary_hash_repr_len(tt in TokenType::arbitrary()) {
+            let bin_repr = tt.binary_vec();
+            assert_eq!(bin_repr.len(), tt.binary_len());
+        }
+    }
+}
