@@ -24,7 +24,7 @@ use serialize::{Deserializable, Serializable, Tagged};
 use std::{
     fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, Neg, Sub},
+    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
 #[derive(
@@ -64,6 +64,12 @@ impl Sum for CostDuration {
     }
 }
 
+impl SubAssign for CostDuration {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
 impl AddAssign for CostDuration {
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
@@ -74,6 +80,13 @@ impl Add for CostDuration {
     type Output = CostDuration;
     fn add(self, rhs: Self) -> Self::Output {
         CostDuration(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl Sub for CostDuration {
+    type Output = CostDuration;
+    fn sub(self, rhs: Self) -> Self::Output {
+        CostDuration(self.0.saturating_sub(rhs.0))
     }
 }
 

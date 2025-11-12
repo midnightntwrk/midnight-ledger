@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage", features = ["public-internal-structure"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["public-internal-structure", "parity-db"] }
 old-ledger = { path = "../ledger", package = "midnight-ledger" }
 old-zswap = { path = "../zswap", package = "midnight-zswap" }
 old-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["public-internal-structure"] }

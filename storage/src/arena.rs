@@ -34,7 +34,7 @@ use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
-use serialize::{self, Deserializable, Serializable, Tagged};
+use serialize::{self, Deserializable, ReadExt, Serializable, Tagged};
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -1371,6 +1371,28 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
             data,
         })
     }
+
+    /// Downcasts this dynamically typed pointer to a concrete type, but pushes through the cast
+    /// regardless of the underlying type.
+    ///
+    /// This will effectively unload the Sp, and construct a new lazy Sp with the same backing
+    /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
+    /// failure to a context where a failure panics.
+    pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
+            Some(Ok(concrete_arc)) => concrete_arc.into(),
+            None | Some(Err(_)) => OnceLock::new(),
+        };
+        Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        }
+    }
 }
 
 impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
@@ -1554,8 +1576,10 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     // easiest way to get that is to just create the lazy `Sp`
                     // for that `Arc`, i.e. what `self` will become when
                     // `force_as_arc` is done!
-                    let sp: Sp<T, _> = Sp::from_arena(&self.arena, &self.as_child(), max_depth)
-                        .expect("root should be in the arena");
+                    let sp: Sp<T, _> = match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
+                        Ok(v) => v,
+                        Err(e) => panic!("root should be in the arena (T={}): {e:?}", std::any::type_name::<T>()),
+                    };
                     let arc = sp
                         .data
                         .get()
@@ -1750,6 +1774,37 @@ pub struct TopoSortedNode {
     pub data: Vec<u8>,
 }
 
+#[derive_where(Clone)]
+/// An opaque storable data structure. Any storable data can be read as an opaque object, but
+/// cannot be practically mutated from there.
+pub struct Opaque<D: DB> {
+    data: Vec<u8>,
+    children: Vec<Sp<dyn Any + Send + Sync, D>>,
+}
+
+impl<D: DB> Storable<D> for Opaque<D> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        self.children.iter().map(|child| child.as_child()).collect()
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+        where
+            Self: Sized {
+        writer.write_all(&self.data)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+            reader: &mut R,
+            child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+            loader: &impl Loader<D>,
+        ) -> Result<Self, std::io::Error>
+        where
+            Self: Sized {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let children = child_nodes.map(|hash| loader.get::<Opaque<_>>(&hash).map(|sp| sp.upcast())).collect::<Result<_, _>>()?;
+        Ok(Self { data, children })
+    }
+}
+
 impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         match &self.child_repr {
@@ -1766,7 +1821,7 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized {
-        todo!()
+        Opaque::from_binary_repr(reader, child_nodes, loader).map(|opaque| Sp::new(opaque).upcast())
     }
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
     where

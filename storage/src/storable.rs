@@ -14,7 +14,7 @@
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
 use crate::DefaultHasher;
-use crate::arena::{ArenaHash, ArenaKey, DirectChildNode, Sp, hash};
+use crate::arena::{ArenaHash, ArenaKey, DirectChildNode, Opaque, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -36,6 +36,7 @@ use rand::prelude::Distribution;
 use rand::{Rng, distributions::Standard};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
+use std::any::Any;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -315,6 +316,35 @@ impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
         }
 
         Ok(value)
+    }
+}
+
+impl<D: DB> Storable<D> for Option<Sp<dyn Any + Send + Sync, D>> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
+        self.clone().map_or(vec![], |sp| vec![sp.as_child()])
+    }
+
+    /// Serializes self, omitting any children
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        match self {
+            Some(_) => <u8 as Serializable>::serialize(&0, writer),
+            None => <u8 as Serializable>::serialize(&1, writer),
+        }
+    }
+
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error> {
+        let dis = <u8 as Deserializable>::deserialize(reader, 0)?;
+        match dis {
+            0 => {
+                Ok(Some(Sp::new(Opaque::from_binary_repr(reader, child_hashes, loader)?).upcast()))
+            }
+            1 => Ok(None),
+            _ => bad_discriminant_error(),
+        }
     }
 }
 

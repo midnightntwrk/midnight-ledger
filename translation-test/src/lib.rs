@@ -7,7 +7,7 @@ use std::io;
 use std::marker::PhantomData;
 use storage::Storable;
 use storage::arena::{ArenaKey, BackendLoader, Sp};
-use storage::db::{DB, InMemoryDB};
+use storage::db::{DB, InMemoryDB, ParityDb};
 use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie, Monoid, Semigroup};
 use storage::storable::{Loader, SizeAnn};
 use storage::storage::{HashMap, Map, default_storage};
@@ -17,6 +17,8 @@ pub mod mechanism;
 //mod ledger_tl;
 
 use mechanism::*;
+
+type TestDb = ParityDb;
 
 #[derive(Storable)]
 #[derive_where(Clone, Debug)]
@@ -99,11 +101,16 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
     }
     fn finalize(
         source: &lr::Nesty<D>,
-        _limit: &mut CostDuration,
+        limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<rl::Nesty<D>>> {
         let tlid = TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
-        // TODO: adjust limit
+        // Heuristic: 5us per node
+        let dt = CostDuration::from_picoseconds(5_000_000);
+        *limit -= dt;
+        if *limit == CostDuration::ZERO {
+            return Ok(None);
+        }
         match source {
             lr::Nesty::Empty => Ok(Some(rl::Nesty::Empty)),
             lr::Nesty::Node(n, a, b) => {
@@ -115,8 +122,8 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                 };
                 let res = Ok(Some(rl::Nesty::Node(
                     *n,
-                    btrans.downcast().expect("translated node must be correctly translated"),
-                    atrans.downcast().expect("translated node must be correctly translated"),
+                    btrans.force_downcast(),
+                    atrans.force_downcast(),
                 )));
                 res
             }
@@ -160,7 +167,7 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
             return Ok(None);
         };
         let bar = Map {
-            mpt: footl.downcast().expect("translated node must be correctly translated"),
+            mpt: footl.force_downcast(),
             key_type: PhantomData,
         };
         Ok(Some(Bar {
@@ -209,7 +216,7 @@ impl<D: DB>
             return Ok(None);
         };
         Ok(Some(MerklePatriciaTrie(
-            tl.downcast().expect("translated node must be in cache")
+            tl.force_downcast(),
         )))
     }
 }
@@ -283,7 +290,7 @@ impl<D: DB>
                     let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                         return Ok(None);
                     };
-                    *new_child = entry.downcast().expect("translated node must be downcastable");
+                    *new_child = entry.force_downcast();
                 }
                 let ann = new_children
                     .iter()
@@ -302,7 +309,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
-                    entry.downcast().expect("translated node must be downcastable");
+                    entry.force_downcast();
                 let ann = child.ann();
                 merkle_patricia_trie::Node::Extension {
                     ann,
@@ -315,7 +322,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let value: Sp<BarEntry, D> =
-                    entry.downcast().expect("translated node must be downcastable");
+                    entry.force_downcast();
                 let ann = SizeAnn::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
@@ -327,9 +334,9 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let value: Sp<BarEntry, D> =
-                    value_entry.downcast().expect("translated node must be downcastable");
+                    value_entry.force_downcast();
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
-                    child_entry.downcast().expect("translated node must be downcastable");
+                    child_entry.force_downcast();
                 let ann = SizeAnn::from_value(&value).append(&child.ann());
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
@@ -401,9 +408,9 @@ impl<D: DB> TranslationTable<D> for TestTable {
 mod tests {
     use super::*;
     use serialize::Tagged;
-    use storage::{arena::Sp, db::InMemoryDB};
+    use storage::{Storage, arena::Sp, storage::set_default_storage};
 
-    fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<InMemoryDB>> {
+    fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<TestDb>, TestDb> {
         if depth == 0 {
             return Sp::new(lr::Nesty::Empty);
         }
@@ -412,7 +419,7 @@ mod tests {
         Sp::new(lr::Nesty::Node(offset, left, right))
     }
 
-    fn mk_foo(depth: usize) -> Sp<Foo<InMemoryDB>> {
+    fn mk_foo(depth: usize) -> Sp<Foo<TestDb>, TestDb> {
         let baz = Sp::new(Baz {
             baz: (0..(1 << depth)).map(|i| (i * 4, ())).collect(),
         });
@@ -422,26 +429,30 @@ mod tests {
 
     #[test]
     fn test_nesty_tl() {
+        set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref()))).unwrap();
         let t0 = std::time::Instant::now();
-        let n = 20;
-        let before = mk_nesty(n, 0);
+        let n = 23;
+        let mut before = mk_nesty(n, 0);
         dbg!(before.serialize_to_node_list().nodes.len());
+        before.persist();
+        before.unload();
         let t1 = std::time::Instant::now();
-        let tl_state = TypedTranslationState::<
-            lr::Nesty<InMemoryDB>,
-            rl::Nesty<InMemoryDB>,
+        let mut tl_state = Sp::new(TypedTranslationState::<
+            lr::Nesty<TestDb>,
+            rl::Nesty<TestDb>,
             TestTable,
-            InMemoryDB,
+            TestDb,
         >::start(before)
-        .unwrap();
+        .unwrap());
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
-        let finished_state = tl_state.run(cost).unwrap();
-        let Some(_after) = finished_state.result().unwrap() else {
-            panic!("didn't finish");
-        };
+        while tl_state.result().unwrap().is_none() {
+            tl_state = Sp::new(tl_state.run(cost).unwrap());
+            tl_state.persist();
+            tl_state.unload();
+        }
+        let _after = tl_state.result().unwrap().unwrap();
         let tfin0 = std::time::Instant::now();
         drop(_after);
-        drop(finished_state);
         drop(tl_state);
         let tfin1 = std::time::Instant::now();
         let dt0 = tfin1 - t0;
@@ -466,10 +477,10 @@ mod tests {
         dbg!(before.foo.mpt.serialize_to_node_list().nodes.len());
         let t1 = std::time::Instant::now();
         let tl_state = TypedTranslationState::<
-            Foo<InMemoryDB>,
-            Bar<InMemoryDB>,
+            Foo<TestDb>,
+            Bar<TestDb>,
             TestTable,
-            InMemoryDB,
+            TestDb,
         >::start(before)
         .unwrap();
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
@@ -495,6 +506,6 @@ mod tests {
 
     #[test]
     fn test_test_table_closed() {
-        <TestTable as TranslationTable<InMemoryDB>>::assert_closure();
+        <TestTable as TranslationTable<TestDb>>::assert_closure();
     }
 }

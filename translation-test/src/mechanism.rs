@@ -80,7 +80,7 @@ impl<D: DB> TranslationCache<D> {
         let Some(dynsp) = self.lookup(id, child) else {
             return Ok(None);
         };
-        dynsp.downcast::<T>().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to downcast element in cache; type mismatch")).map(Some)
+        Ok(Some(dynsp.force_downcast::<T>()))
     }
 }
 
@@ -171,6 +171,7 @@ pub struct DirectSpTranslationState<
     T: DirectTranslation<A, B, D>,
     D: DB,
 > {
+    #[storable(child)]
     value: Sp<A, D>,
     _phantom1: PhantomData<B>,
     _phantom2: PhantomData<T>,
@@ -184,7 +185,7 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
     }
     fn start(&self, value: Sp<dyn Any + Send + Sync, D>) -> Box<dyn TypelessTranslationState<D>> {
         let state: DirectSpTranslationState<A, B, T, D> = DirectSpTranslationState {
-            value: value.downcast().expect("translation target must be downcastable"),
+            value: value.force_downcast(),
             _phantom1: PhantomData,
             _phantom2: PhantomData,
         };
@@ -196,13 +197,18 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         mut child_hashes: &mut dyn Iterator<Item = RawNode<D>>,
         loader: &BackendLoader<D>,
     ) -> Result<Box<dyn TypelessTranslationState<D>>, std::io::Error> {
-        Ok(Box::new(
+        //let mut data = Vec::new();
+        //reader.read_to_end(&mut data)?;
+        //let hashes = child_hashes.collect::<Vec<_>>();
+        //let a = loader.get::<A>(&hashes[0]).unwrap();
+        let res: Result<Box<dyn TypelessTranslationState<D>>, _> = Ok(Box::new(
             DirectSpTranslationState::<A, B, T, D>::from_binary_repr(
                 &mut reader,
                 &mut child_hashes,
                 loader,
             )?,
-        ))
+        ));
+        res
     }
 }
 
@@ -237,7 +243,12 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
                     drop(sp);
                     Ok(StepResult::Finished(upcast))
                 }
-                None => Ok(StepResult::Suspended),
+                None =>
+                if *limit == CostDuration::ZERO {
+                    Ok(StepResult::NotEnoughTime)
+                } else {
+                    Ok(StepResult::Suspended)
+                },
             };
             let t1 = Instant::now();
             TFIN.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + (t1 - t0).as_nanos() as u64)).unwrap();
@@ -513,10 +524,10 @@ impl<TABLE: TranslationTable<D>, D: DB> Storable<D> for TaggedTranslationState<T
     }
 }
 
-//#[derive(Storable)]
+#[derive(Storable)]
 #[derive_where(Clone)]
-//#[storable(db = D)]
-//#[phantom(TABLE)]
+#[storable(db = D)]
+#[phantom(TABLE)]
 pub struct TranslationState<TABLE: TranslationTable<D>, D: DB> {
     work_queue: PersistentQueue<TaggedTranslationState<TABLE, D>, D>,
     cache: HashMap<TranslationCacheKey<D>, Sp<dyn Any + Send + Sync, D>, D>,
@@ -621,10 +632,10 @@ impl<TABLE: TranslationTable<D>, D: DB> InflightTranslationState<TABLE, D> {
     }
 }
 
-//#[derive(Storable)]
+#[derive(Storable)]
 #[derive_where(Clone)]
-//#[storable(db = D)]
-//#[phantom(A, B, TABLE)]
+#[storable(db = D)]
+#[phantom(A, B, TABLE)]
 pub struct TypedTranslationState<A: Storable<D>, B: Storable<D>, TABLE: TranslationTable<D>, D: DB>
 {
     pub state: TranslationState<TABLE, D>,
@@ -669,6 +680,6 @@ impl<A: Storable<D> + Tagged, B: Storable<D> + Tagged, TABLE: TranslationTable<D
     }
 
     pub fn result(&self) -> io::Result<Option<Sp<B, D>>> {
-        self.state.result().map(|dynsp| dynsp.downcast::<B>().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "failed to downcast result to correct type"))).transpose()
+        Ok(self.state.result().map(|dynsp| dynsp.force_downcast::<B>()))
     }
 }
