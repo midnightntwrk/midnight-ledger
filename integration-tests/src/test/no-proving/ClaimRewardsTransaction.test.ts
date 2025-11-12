@@ -14,6 +14,8 @@
 import {
   ClaimRewardsTransaction,
   sampleSigningKey,
+  signData,
+  SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey
 } from '@midnight-ntwrk/ledger';
@@ -37,5 +39,56 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     expect(tx.owner).toEqual(svk);
     expect(tx.kind).toEqual('Reward');
     assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('should construct ClaimRewardsTransaction with a different claim kind', async () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const tx = new ClaimRewardsTransaction(
+      signature.instance,
+      'local-test',
+      100n,
+      svk,
+      nonce,
+      signature,
+      'CardanoBridge'
+    );
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual('CardanoBridge');
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('new - should construct a signature-erased ClaimRewardsTransaction', async () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, nonce, 'CardanoBridge');
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual('CardanoBridge');
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('addSignature - should sign and insert a signature', async () => {
+    const signingKey = sampleSigningKey();
+    const svk = signatureVerifyingKey(signingKey);
+    const nonce = Static.nonce();
+    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, nonce, 'CardanoBridge');
+    expect(tx.signature.toString()).toEqual(new SignatureErased().toString());
+
+    const signature = new SignatureEnabled(signData(signingKey, tx.dataToSign));
+    const signedTx = tx.addSignature(signature);
+    expect(signedTx.signature.toString()).toEqual(signature.toString());
+    assertSerializationSuccess(signedTx, signature.instance);
   });
 });
