@@ -17,10 +17,13 @@ import {
   signData,
   SignatureEnabled,
   SignatureErased,
-  signatureVerifyingKey
+  signatureVerifyingKey,
+  Transaction,
+  WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
-import { Static } from '@/test-objects';
+import { INITIAL_NIGHT_AMOUNT, Static } from '@/test-objects';
+import { TestState } from '@/test/utils/TestState';
 
 describe('Ledger API - ClaimRewardsTransaction', () => {
   /**
@@ -82,13 +85,32 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
   test('addSignature - should sign and insert a signature', async () => {
     const signingKey = sampleSigningKey();
     const svk = signatureVerifyingKey(signingKey);
-    const nonce = Static.nonce();
-    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, nonce, 'CardanoBridge');
+    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, Static.nonce(), 'CardanoBridge');
     expect(tx.signature.toString()).toEqual(new SignatureErased().toString());
 
     const signature = signData(signingKey, tx.dataToSign);
     const signedTx = tx.addSignature(signature);
     expect(signedTx.signature.toString()).toEqual(new SignatureEnabled(signature).toString());
     assertSerializationSuccess(signedTx, signedTx.signature.instance);
+  });
+
+  test('should apply the ClaimRewardsTransaction correctly', async () => {
+    const state = TestState.new();
+    state.distributeNight(state.initialNightAddress, INITIAL_NIGHT_AMOUNT, state.time);
+    expect(state.ledger.utxo.utxos.values().next().value).toBeUndefined();
+
+    const rewards = ClaimRewardsTransaction.new(
+      'local-test',
+      INITIAL_NIGHT_AMOUNT,
+      state.nightKey.verifyingKey(),
+      Static.nonce(),
+      'Reward'
+    );
+    const signature = state.nightKey.signData(rewards.dataToSign);
+    const signedRewards = rewards.addSignature(signature);
+
+    const tx = Transaction.fromRewards(signedRewards);
+    state.assertApply(tx, new WellFormedStrictness());
+    expect(state.ledger.utxo.utxos.values().next().value?.value).toEqual(INITIAL_NIGHT_AMOUNT);
   });
 });

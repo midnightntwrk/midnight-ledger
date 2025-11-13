@@ -36,6 +36,8 @@ import {
   type SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
+  signData,
+  type Signature,
   type Signaturish,
   type SigningKey,
   type SyntheticCost,
@@ -85,6 +87,9 @@ class NightKey {
   }
   verifyingKey() {
     return signatureVerifyingKey(this.signingKey);
+  }
+  signData(data: Uint8Array): Signature {
+    return signData(this.signingKey, data);
   }
 }
 
@@ -281,8 +286,12 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
+  distributeNight(address: UserAddress, amount: bigint, time: Date) {
+    this.ledger = this.ledger.testingDistributeNight(address, amount, time);
+  }
+
   rewardNight(amount: bigint) {
-    this.ledger = this.ledger.testingDistributeNight(this.initialNightAddress, amount, this.time);
+    this.distributeNight(this.initialNightAddress, amount, this.time);
     const claimRewardsTransaction = new ClaimRewardsTransaction(
       SignatureMarker.signatureErased,
       LOCAL_TEST_NETWORK_ID,
