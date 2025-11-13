@@ -3,6 +3,7 @@ use base_crypto::cost_model::{CostDuration, RunningCost};
 use base_crypto::time::Timestamp;
 use base_crypto::fab::AlignedValue;
 use serialize::{Deserializable, Serializable, Tagged};
+use std::any::Any;
 use std::borrow::Cow;
 use std::io;
 use std::marker::PhantomData;
@@ -42,9 +43,9 @@ impl<D: DB> DirectTranslation<old_zswap::ledger::State<D>, new_zswap::ledger::St
     }
     fn child_translations(
         source: &old_zswap::ledger::State<D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<_, _, D>>::required_translations();
-        vec![(tlids[0].clone(), source.coin_coms.0.hash().into())]
+        vec![(tlids[0].clone(), source.coin_coms.0.upcast())]
     }
     fn finalize(
         source: &old_zswap::ledger::State<D>,
@@ -53,7 +54,7 @@ impl<D: DB> DirectTranslation<old_zswap::ledger::State<D>, new_zswap::ledger::St
     ) -> std::io::Result<Option<new_zswap::ledger::State<D>>> {
         let tls = Self::child_translations(source);
         let coin_coms = new_transient_crypto::merkle_tree::MerkleTree(try_resopt!(
-            cache.resolve(&tls[0].0, tls[0].1.clone())
+            cache.resolve(&tls[0].0, tls[0].1.as_child())
         ));
         let past_roots = TimeFilterMap::new().insert(
             Timestamp::from_secs(0),
@@ -116,14 +117,14 @@ impl<D: DB>
     }
     fn child_translations(
         source: &old_ledger::structure::LedgerState<D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![
             (
                 TranslationId(
                     old_zswap::ledger::State::<D>::tag(),
                     new_zswap::ledger::State::<D>::tag(),
                 ),
-                source.zswap.hash().into(),
+                source.zswap.upcast(),
             ),
             (
                 TranslationId(
@@ -138,21 +139,21 @@ impl<D: DB>
                         new_ledger::annotation::NightAnn,
                     >::tag(),
                 ),
-                source.contract.mpt.hash().into(),
+                source.contract.mpt.upcast(),
             ),
             (
                 TranslationId(
                     old_ledger::structure::UtxoState::<D>::tag(),
                     new_ledger::structure::UtxoState::<D>::tag(),
                 ),
-                source.utxo.hash().into(),
+                source.utxo.upcast(),
             ),
             (
                 TranslationId(
                     old_ledger::dust::DustState::<D>::tag(),
                     new_ledger::dust::DustState::<D>::tag(),
                 ),
-                source.dust.hash().into(),
+                source.dust.upcast(),
             ),
         ]
     }
@@ -162,13 +163,13 @@ impl<D: DB>
         cache: &TranslationCache<D>,
     ) -> std::io::Result<Option<new_ledger::structure::LedgerState<D>>> {
         let tls = Self::child_translations(source);
-        let zswap = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+        let zswap = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
         let contract = Map {
-            mpt: try_resopt!(cache.resolve(&tls[1].0, tls[1].1.clone())),
+            mpt: try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child())),
             key_type: PhantomData,
         };
-        let utxo = try_resopt!(cache.resolve(&tls[2].0, tls[2].1.clone()));
-        let dust = try_resopt!(cache.resolve(&tls[3].0, tls[3].1.clone()));
+        let utxo = try_resopt!(cache.resolve(&tls[2].0, tls[2].1.as_child()));
+        let dust = try_resopt!(cache.resolve(&tls[3].0, tls[3].1.as_child()));
         Ok(Some(new_ledger::structure::LedgerState {
             network_id: source.network_id.clone(),
             parameters: recast(&source.parameters)?,
@@ -222,13 +223,13 @@ impl<D: DB> DirectTranslation<old_ledger::dust::DustState<D>, new_ledger::dust::
     }
     fn child_translations(
         source: &old_ledger::dust::DustState<D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<_, _, D>>::required_translations();
         vec![
-            (tlids[0].clone(), source.utxo.commitments.0.hash().into()),
+            (tlids[0].clone(), source.utxo.commitments.0.upcast()),
             (
                 tlids[1].clone(),
-                source.generation.generating_tree.0.hash().into(),
+                source.generation.generating_tree.0.upcast(),
             ),
         ]
     }
@@ -239,10 +240,10 @@ impl<D: DB> DirectTranslation<old_ledger::dust::DustState<D>, new_ledger::dust::
     ) -> io::Result<Option<new_ledger::dust::DustState<D>>> {
         let tls = Self::child_translations(source);
         let commitments = new_transient_crypto::merkle_tree::MerkleTree(try_resopt!(
-            cache.resolve(&tls[0].0, tls[0].1.clone())
+            cache.resolve(&tls[0].0, tls[0].1.as_child())
         ));
         let generating_tree = new_transient_crypto::merkle_tree::MerkleTree(try_resopt!(
-            cache.resolve(&tls[1].0, tls[1].1.clone())
+            cache.resolve(&tls[1].0, tls[1].1.as_child())
         ));
         let commitment_root_history = TimeFilterMap::new().insert(
             Timestamp::from_secs(0),
@@ -315,9 +316,9 @@ impl<D: DB>
     }
     fn child_translations(
         source: &old_ledger::structure::UtxoState<D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<_, _, D>>::required_translations();
-        vec![(tlids[0].clone(), source.utxos.0.mpt.hash().into())]
+        vec![(tlids[0].clone(), source.utxos.0.mpt.upcast())]
     }
     fn finalize(
         source: &old_ledger::structure::UtxoState<D>,
@@ -325,7 +326,7 @@ impl<D: DB>
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<new_ledger::structure::UtxoState<D>>> {
         let tls = Self::child_translations(source);
-        let utxo_mpt = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+        let utxo_mpt = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
         Ok(Some(new_ledger::structure::UtxoState {
             utxos: HashMap(Map {
                 mpt: utxo_mpt,
@@ -352,13 +353,13 @@ impl<D: DB, A: Storable<D> + Tagged, B: Storable<D> + Tagged>
     }
     fn child_translations(
         source: &old_transient_crypto::merkle_tree::MerkleTreeNode<A, D>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         if let old_transient_crypto::merkle_tree::MerkleTreeNode::Node { left, right, .. } = source
         {
             let tlid = <Self as DirectTranslation<_, _, D>>::required_translations();
             vec![
-                (tlid[0].clone(), left.hash().into()),
-                (tlid[0].clone(), right.hash().into()),
+                (tlid[0].clone(), left.upcast()),
+                (tlid[0].clone(), right.upcast()),
             ]
         } else {
             vec![]
@@ -397,8 +398,8 @@ impl<D: DB, A: Storable<D> + Tagged, B: Storable<D> + Tagged>
                 ..
             } => {
                 let tls = Self::child_translations(source);
-                let left = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
-                let right = try_resopt!(cache.resolve(&tls[1].0, tls[1].1.clone()));
+                let left = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
+                let right = try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child()));
                 NewMT::Node {
                     left: right,
                     right: left,
@@ -430,9 +431,9 @@ impl<
     }
     fn child_translations(
         source: &MerklePatriciaTrie<A, D, AnnA>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<MerklePatriciaTrie<A, D, AnnA>, _, D>>::required_translations();
-        vec![(tlids[0].clone(), source.0.hash().into())]
+        vec![(tlids[0].clone(), source.0.upcast())]
     }
     fn finalize(
         source: &MerklePatriciaTrie<A, D, AnnA>,
@@ -441,7 +442,7 @@ impl<
     ) -> io::Result<Option<MerklePatriciaTrie<B, D, AnnB>>> {
         let tls = Self::child_translations(source);
         Ok(Some(MerklePatriciaTrie(try_resopt!(
-            cache.resolve(&tls[0].0, tls[0].1.clone())
+            cache.resolve(&tls[0].0, tls[0].1.as_child())
         ))))
     }
 }
@@ -469,7 +470,7 @@ impl<
     }
     fn child_translations(
         source: &merkle_patricia_trie::Node<A, D, AnnA>,
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tls = <Self as DirectTranslation<merkle_patricia_trie::Node::<A, D, AnnA>, _, D>>::required_translations();
         let entry_tl = tls[0].clone();
         let self_tl = tls[1].clone();
@@ -477,16 +478,16 @@ impl<
             merkle_patricia_trie::Node::Empty => vec![],
             merkle_patricia_trie::Node::Branch { children, .. } => children
                 .iter()
-                .map(|child| (self_tl.clone(), child.hash().into()))
+                .map(|child| (self_tl.clone(), child.upcast()))
                 .collect(),
             merkle_patricia_trie::Node::Extension { child, .. } => {
-                vec![(self_tl, child.hash().into())]
+                vec![(self_tl, child.upcast())]
             }
             merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => vec![
-                (entry_tl, value.hash().into()),
-                (self_tl, child.hash().into()),
+                (entry_tl, value.upcast()),
+                (self_tl, child.upcast()),
             ],
-            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.hash().into())],
+            merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.upcast())],
         }
     }
     fn finalize(
@@ -501,7 +502,7 @@ impl<
                 let mut new_children =
                     core::array::from_fn(|_| Sp::new(merkle_patricia_trie::Node::Empty));
                 for (child, new_child) in tls.iter().zip(new_children.iter_mut()) {
-                    *new_child = try_resopt!(cache.resolve(&child.0, child.1.clone()));
+                    *new_child = try_resopt!(cache.resolve(&child.0, child.1.as_child()));
                 }
                 let ann = new_children
                     .iter()
@@ -515,7 +516,7 @@ impl<
                 compressed_path, ..
             } => {
                 let child: Sp<merkle_patricia_trie::Node<B, D, AnnB>, D> =
-                    try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+                    try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
                 let ann = child.ann();
                 merkle_patricia_trie::Node::Extension {
                     ann,
@@ -524,14 +525,14 @@ impl<
                 }
             }
             merkle_patricia_trie::Node::Leaf { .. } => {
-                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
                 let ann = AnnB::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
             merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child } => {
-                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+                let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
                 let child: Sp<merkle_patricia_trie::Node<B, D, AnnB>, D> =
-                    try_resopt!(cache.resolve(&tls[1].0, tls[1].1.clone()));
+                    try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child()));
                 let ann = AnnB::from_value(&value).append(&child.ann());
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
@@ -562,7 +563,7 @@ impl<D: DB>
             Sp<old_ledger::structure::Utxo, D>,
             Sp<old_ledger::structure::UtxoMeta, D>,
         ),
-    ) -> Vec<(TranslationId, RawNode<D>)> {
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![]
     }
     fn finalize(
@@ -594,8 +595,8 @@ impl<K: Storable<D> + Tagged, A: Storable<D> + Tagged, B: Storable<D> + Tagged, 
     fn required_translations() -> Vec<TranslationId> {
         vec![TranslationId(A::tag(), B::tag())]
     }
-    fn child_translations(source: &(Sp<K, D>, Sp<A, D>)) -> Vec<(TranslationId, RawNode<D>)> {
-        vec![(TranslationId(A::tag(), B::tag()), source.1.hash().into())]
+    fn child_translations(source: &(Sp<K, D>, Sp<A, D>)) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
+        vec![(TranslationId(A::tag(), B::tag()), source.1.upcast())]
     }
     fn finalize(
             source: &(Sp<K, D>, Sp<A, D>),
@@ -603,7 +604,7 @@ impl<K: Storable<D> + Tagged, A: Storable<D> + Tagged, B: Storable<D> + Tagged, 
             cache: &TranslationCache<D>,
         ) -> io::Result<Option<(Sp<K, D>, Sp<B, D>)>> {
         let tls = Self::child_translations(source);
-        let b = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+        let b = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
         Ok(Some((recast(&source.0)?, b)))
     }
 }
@@ -616,10 +617,10 @@ impl<D: DB> DirectTranslation<old_onchain_state::state::ContractState<D>, new_on
             TranslationId(old_onchain_state::state::StateValue::<D>::tag(), new_onchain_state::state::StateValue::<D>::tag())
         ]
     }
-    fn child_translations(source: &old_onchain_state::state::ContractState<D>) -> Vec<(TranslationId, RawNode<D>)> {
+    fn child_translations(source: &old_onchain_state::state::ContractState<D>) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<_, _, D>>::required_translations();
         vec![
-            (tlids[0].clone(), source.data.state.hash().into())
+            (tlids[0].clone(), source.data.state.upcast())
         ]
     }
     fn finalize(
@@ -628,7 +629,7 @@ impl<D: DB> DirectTranslation<old_onchain_state::state::ContractState<D>, new_on
             cache: &TranslationCache<D>,
     ) -> io::Result<Option<new_onchain_state::state::ContractState<D>>> {
         let tls = Self::child_translations(source);
-        let state: Sp<new_onchain_state::state::StateValue<D>, D> = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone()));
+        let state: Sp<new_onchain_state::state::StateValue<D>, D> = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
         let state_hash = state.hash().into();
         let data = new_onchain_state::state::ChargedState {
             state,
@@ -660,13 +661,13 @@ impl<D: DB> DirectTranslation<old_onchain_state::state::StateValue<D>, new_oncha
             TranslationId(old_transient_crypto::merkle_tree::MerkleTreeNode::<(), D>::tag(), new_transient_crypto::merkle_tree::MerkleTreeNode::<(), D>::tag()),
         ]
     }
-    fn child_translations(source: &old_onchain_state::state::StateValue<D>) -> Vec<(TranslationId, RawNode<D>)> {
+    fn child_translations(source: &old_onchain_state::state::StateValue<D>) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlids = <Self as DirectTranslation<_, _, D>>::required_translations();
         use old_onchain_state::state::StateValue as OldSV;
         match source {
-            OldSV::Map(map) => vec![(tlids[0].clone(), map.0.mpt.hash().into())],
-            OldSV::Array(arr) => vec![(tlids[1].clone(), arr.0.hash().into())],
-            OldSV::BoundedMerkleTree(mt) => vec![(tlids[2].clone(), mt.0.hash().into())],
+            OldSV::Map(map) => vec![(tlids[0].clone(), map.0.mpt.upcast())],
+            OldSV::Array(arr) => vec![(tlids[1].clone(), arr.0.upcast())],
+            OldSV::BoundedMerkleTree(mt) => vec![(tlids[2].clone(), mt.0.upcast())],
             _ => vec![],
         }
     }
@@ -682,11 +683,11 @@ impl<D: DB> DirectTranslation<old_onchain_state::state::StateValue<D>, new_oncha
             OldSV::Null => NewSV::Null,
             OldSV::Cell(val) => NewSV::Cell(val.clone()),
             OldSV::Map(_) => NewSV::Map(HashMap(Map {
-                mpt: try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone())),
+                mpt: try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child())),
                 key_type: PhantomData,
             })),
-            OldSV::Array(_) => NewSV::Array(Array(try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone())))),
-            OldSV::BoundedMerkleTree(_) => NewSV::BoundedMerkleTree(new_transient_crypto::merkle_tree::MerkleTree(try_resopt!(cache.resolve(&tls[0].0, tls[0].1.clone())))),
+            OldSV::Array(_) => NewSV::Array(Array(try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child())))),
+            OldSV::BoundedMerkleTree(_) => NewSV::BoundedMerkleTree(new_transient_crypto::merkle_tree::MerkleTree(try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child())))),
             _ => unreachable!(),
         }))
     }

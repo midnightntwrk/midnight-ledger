@@ -14,7 +14,7 @@ use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
-//mod ledger_tl;
+mod ledger_tl;
 
 use mechanism::*;
 
@@ -236,8 +236,8 @@ impl<D: DB>
             BarEntry::tag(),
         );
         let self_tl = TranslationId(
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<FooEntry, D>), D>::tag(),
-            merkle_patricia_trie::Node::<(Sp<u64, D>, Sp<BarEntry, D>), D>::tag(),
+            merkle_patricia_trie::Node::<FooEntry, D>::tag(),
+            merkle_patricia_trie::Node::<BarEntry, D>::tag(),
         );
         vec![entry_tl, self_tl]
     }
