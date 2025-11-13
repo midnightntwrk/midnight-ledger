@@ -44,11 +44,12 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     assertSerializationSuccess(tx, signature.instance);
   });
 
-  test('should construct ClaimRewardsTransaction with a different claim kind', () => {
+  test('should construct ClaimRewardsTransaction with the CardanoBridge claim kind', () => {
     const svk = signatureVerifyingKey(sampleSigningKey());
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
+    const kind = 'CardanoBridge';
     const tx = new ClaimRewardsTransaction(
       signature.instance,
       LOCAL_TEST_NETWORK_ID,
@@ -56,14 +57,38 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
       svk,
       nonce,
       signature,
-      'CardanoBridge'
+      kind
     );
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
     expect(tx.nonce).toEqual(nonce);
     expect(tx.owner).toEqual(svk);
-    expect(tx.kind).toEqual('CardanoBridge');
+    expect(tx.kind).toEqual(kind);
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('should construct ClaimRewardsTransaction with the Reward claim kind', () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const kind = 'Reward';
+    const tx = new ClaimRewardsTransaction(
+      signature.instance,
+      LOCAL_TEST_NETWORK_ID,
+      value,
+      svk,
+      nonce,
+      signature,
+      kind
+    );
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual(kind);
     assertSerializationSuccess(tx, signature.instance);
   });
 
