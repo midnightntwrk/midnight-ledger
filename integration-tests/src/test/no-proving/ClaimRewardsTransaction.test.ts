@@ -22,7 +22,7 @@ import {
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
-import { INITIAL_NIGHT_AMOUNT, Static } from '@/test-objects';
+import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
 
 describe('Ledger API - ClaimRewardsTransaction', () => {
@@ -34,7 +34,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
-    const tx = new ClaimRewardsTransaction(signature.instance, 'local-test', 100n, svk, nonce, signature);
+    const tx = new ClaimRewardsTransaction(signature.instance, LOCAL_TEST_NETWORK_ID, 100n, svk, nonce, signature);
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
@@ -51,7 +51,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const nonce = Static.nonce();
     const tx = new ClaimRewardsTransaction(
       signature.instance,
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       100n,
       svk,
       nonce,
@@ -72,7 +72,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
-    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, nonce, 'CardanoBridge');
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, svk, nonce, 'CardanoBridge');
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
@@ -85,7 +85,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
   test('addSignature - should sign and insert a signature', async () => {
     const signingKey = sampleSigningKey();
     const svk = signatureVerifyingKey(signingKey);
-    const tx = ClaimRewardsTransaction.new('local-test', 100n, svk, Static.nonce(), 'CardanoBridge');
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, svk, Static.nonce(), 'CardanoBridge');
     expect(tx.signature.toString()).toEqual(new SignatureErased().toString());
 
     const signature = signData(signingKey, tx.dataToSign);
@@ -100,7 +100,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     expect(state.ledger.utxo.utxos.values().next().value).toBeUndefined();
 
     const rewards = ClaimRewardsTransaction.new(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       INITIAL_NIGHT_AMOUNT,
       state.nightKey.verifyingKey(),
       Static.nonce(),
