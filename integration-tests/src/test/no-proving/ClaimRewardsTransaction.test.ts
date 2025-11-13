@@ -29,12 +29,12 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
   /**
    * Test construction of ClaimRewardsTransaction.
    */
-  test('should construct ClaimRewardsTransaction correctly', async () => {
+  test('should construct ClaimRewardsTransaction correctly', () => {
     const svk = signatureVerifyingKey(sampleSigningKey());
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
-    const tx = new ClaimRewardsTransaction(signature.instance, LOCAL_TEST_NETWORK_ID, 100n, svk, nonce, signature);
+    const tx = new ClaimRewardsTransaction(signature.instance, LOCAL_TEST_NETWORK_ID, value, svk, nonce, signature);
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
@@ -44,7 +44,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     assertSerializationSuccess(tx, signature.instance);
   });
 
-  test('should construct ClaimRewardsTransaction with a different claim kind', async () => {
+  test('should construct ClaimRewardsTransaction with a different claim kind', () => {
     const svk = signatureVerifyingKey(sampleSigningKey());
     const signature = new SignatureErased();
     const value = 100n;
@@ -52,7 +52,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const tx = new ClaimRewardsTransaction(
       signature.instance,
       LOCAL_TEST_NETWORK_ID,
-      100n,
+      value,
       svk,
       nonce,
       signature,
@@ -67,12 +67,12 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     assertSerializationSuccess(tx, signature.instance);
   });
 
-  test('new - should construct a signature-erased ClaimRewardsTransaction', async () => {
+  test('new - should construct a signature-erased ClaimRewardsTransaction', () => {
     const svk = signatureVerifyingKey(sampleSigningKey());
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
-    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, svk, nonce, 'CardanoBridge');
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, value, svk, nonce, 'CardanoBridge');
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
@@ -82,7 +82,37 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     assertSerializationSuccess(tx, signature.instance);
   });
 
-  test('addSignature - should sign and insert a signature', async () => {
+  test('new - should construct a signature-enabled ClaimRewardsTransaction', () => {
+    const signingKey = sampleSigningKey();
+    const svk = signatureVerifyingKey(signingKey);
+    const value = 100n;
+    const nonce = Static.nonce();
+    const kind = 'CardanoBridge';
+
+    // create a signature-erased tx
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, value, svk, nonce, kind);
+
+    // sign and add a signature
+    const signature = signData(signingKey, tx.dataToSign);
+    const signedTx = tx.addSignature(signature);
+
+    // create a signature-enabled tx from the signed tx
+    const signatureEnabledTx = new ClaimRewardsTransaction(
+      signedTx.signature.instance,
+      LOCAL_TEST_NETWORK_ID,
+      value,
+      svk,
+      nonce,
+      signedTx.signature,
+      kind
+    );
+
+    // validate they are equal
+    expect(signatureEnabledTx.toString(true)).toEqual(signedTx.toString(true));
+    assertSerializationSuccess(signatureEnabledTx, signatureEnabledTx.signature.instance);
+  });
+
+  test('addSignature - should sign and insert a signature', () => {
     const signingKey = sampleSigningKey();
     const svk = signatureVerifyingKey(signingKey);
     const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, svk, Static.nonce(), 'CardanoBridge');
@@ -94,7 +124,7 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     assertSerializationSuccess(signedTx, signedTx.signature.instance);
   });
 
-  test('should apply the ClaimRewardsTransaction correctly', async () => {
+  test('should apply the ClaimRewardsTransaction correctly', () => {
     const state = TestState.new();
     state.distributeNight(state.initialNightAddress, INITIAL_NIGHT_AMOUNT, state.time);
     expect(state.ledger.utxo.utxos.values().next().value).toBeUndefined();
