@@ -15,10 +15,13 @@ use base_crypto::{
     rng::SplittableRng,
     signatures::{Signature, SigningKey},
 };
-use coin_structure::coin::{NIGHT, UserAddress};
+use coin_structure::coin::{Info as CoinInfo, NIGHT, ShieldedTokenType, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
-    dust::{DustActions, DustPublicKey, DustRegistration, INITIAL_DUST_PARAMETERS, InitialNonce},
+    dust::{
+        DustActions, DustPublicKey, DustRegistration, DustSpend, INITIAL_DUST_PARAMETERS,
+        InitialNonce,
+    },
     structure::{
         CNightGeneratesDustEvent, Intent, SystemTransaction, Transaction, UnshieldedOffer,
         UtxoOutput, UtxoSpend,
@@ -27,11 +30,124 @@ use midnight_ledger::{
     verify::WellFormedStrictness,
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use storage::{arena::Sp, db::InMemoryDB};
+use zswap::{Offer, Output as ZswapOutput, keys::SecretKeys, local};
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("");
+}
+
+#[tokio::test]
+async fn test_shielded_intent_1() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    // Initial states
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    let strictness = WellFormedStrictness::default();
+    let verifying_key = state.night_key.verifying_key();
+
+    state.reward_night(&mut rng, 1_000_000).await;
+    state.rewards_shielded(&mut rng, ShieldedTokenType::default(), 1_000_000);
+    state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
+
+    let utxo_ih = state.ledger.utxo.utxos.iter().next().unwrap().0.intent_hash;
+
+    let mut intent = Intent::<(), _, _, _>::empty(&mut rng, state.time);
+    intent.guaranteed_unshielded_offer = Some(Sp::new(UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: utxo_ih,
+            output_no: 0,
+            owner: verifying_key,
+            type_: NIGHT,
+            value: 1_000_000,
+        }]
+        .into(),
+        outputs: vec![UtxoOutput {
+            owner: state.night_key.verifying_key().into(),
+            type_: NIGHT,
+            value: 1_000_000,
+        }]
+        .into(),
+        signatures: vec![].into(),
+    }));
+    intent.dust_actions = Some(Sp::new(DustActions {
+        spends: vec![].into(),
+        registrations: vec![DustRegistration {
+            allow_fee_payment: 1_000_000_000_000_000,
+            dust_address: Some(Sp::new(DustPublicKey::from(state.dust_key.clone()))),
+            night_key: state.night_key.verifying_key(),
+            signature: None,
+        }]
+        .into(),
+        ctime: state.time,
+    }));
+    let intent = intent
+        .sign(
+            &mut rng,
+            1,
+            &[state.night_key.clone()],
+            &[],
+            &[state.night_key.clone()],
+        )
+        .unwrap();
+    dbg!(&intent);
+    let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+    state.assert_apply(&tx, strictness);
+    state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
+
+    let utxo_ih = state.ledger.utxo.utxos.iter().next().unwrap().0.intent_hash;
+
+    let coin = CoinInfo {
+        nonce: rng.r#gen(),
+        type_: ShieldedTokenType(rng.r#gen()),
+        value: rng.r#gen(),
+    };
+    let output = ZswapOutput::new(
+        &mut rng,
+        &coin,
+        0,
+        &state.zswap_keys.coin_public_key(),
+        Some(state.zswap_keys.enc_public_key()),
+    )
+    .unwrap();
+    let offer = Offer {
+        inputs: vec![].into(),
+        outputs: vec![output].into(),
+        transient: vec![].into(),
+        deltas: vec![].into(),
+    };
+
+    let mut intent = Intent::<(), _, _, _>::empty(&mut rng, state.time);
+    let utxo = state.dust.utxos().next().unwrap();
+    let (_new_state, spend) = state
+        .dust
+        .spend(&state.dust_key, &utxo, 1_000_000_000_000_000, state.time)
+        .unwrap();
+
+    intent.dust_actions = Some(Sp::new(DustActions {
+        spends: vec![spend].into(),
+        registrations: vec![].into(),
+        ctime: state.time,
+    }));
+    let intent = intent
+        .sign(
+            &mut rng,
+            1,
+            &[state.night_key.clone()],
+            &[],
+            &[state.night_key.clone()],
+        )
+        .unwrap();
+
+    let tx = Transaction::new(
+        "local-test",
+        [(1, intent)].into_iter().collect(),
+        Some(offer),
+        HashMap::new(),
+    );
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = false;
+    state.assert_apply(&tx, strictness);
 }
 
 #[tokio::test]
