@@ -386,6 +386,9 @@ impl<'de> Deserialize<'de> for TokenType {
                     }
                     return Ok(TokenType::Dust);
                 }
+                if tag != UNSHIELDED_TAG && tag != SHIELDED_TAG {
+                    return Err(E::unknown_variant(&tag.to_string(), &["0", "1", "2"]));
+                }
                 if v.len() != 33 {
                     return Err(E::invalid_length(v.len(), &self));
                 }
