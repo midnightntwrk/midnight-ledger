@@ -1,8 +1,10 @@
 [package]
 name = "midnight-base-crypto"
 version = "1.0.0-alpha.4"
+description = "This crate collects cryptographic primitives used in Midnight's ledger."
 edition = "2024"
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = []

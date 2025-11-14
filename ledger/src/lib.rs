@@ -14,7 +14,7 @@
 #![deny(unreachable_pub)]
 #![deny(warnings)]
 
-//! This crate implements transaction assembly and semantics for Midnight as a prototype.
+//! This crate implements transaction assembly and semantics for Midnight.
 
 #[macro_use]
 extern crate tracing;

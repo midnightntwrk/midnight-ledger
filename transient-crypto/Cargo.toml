@@ -2,7 +2,9 @@
 name = "midnight-transient-crypto"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "ZK friendly cryptographic operations used in Midnight that are likely to be upgraded and thus should not be persisted."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = []

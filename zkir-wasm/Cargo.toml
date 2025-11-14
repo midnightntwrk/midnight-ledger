@@ -2,14 +2,16 @@
 name = "midnight-zkir-wasm"
 version = "2.0.0-alpha.4"
 edition = "2024"
+description = "WASM bindings for the Midnight ZKIR compiler."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-zkir = { path = "../zkir" }
+midnight-zkir = { path = "../zkir" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }

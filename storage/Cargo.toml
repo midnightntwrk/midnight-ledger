@@ -2,7 +2,9 @@
 name = "midnight-storage"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = "Persistence layer for Midnight Ledger data structures with plugable backends."
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]

@@ -2,7 +2,9 @@
 name = "midnight-onchain-runtime"
 version = "1.0.0-alpha.4"
 edition = "2024"
+description = ""
 license.workspace = true
+repository = "https://github.com/midnightntwrk/midnight-ledger"
 
 [features]
 default = ["vendored"]
