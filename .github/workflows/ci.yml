@@ -52,7 +52,7 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@e0990284d4e88052ddc376519731419354851a42
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
@@ -184,7 +184,7 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@e0990284d4e88052ddc376519731419354851a42
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io

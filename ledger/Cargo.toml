@@ -23,6 +23,7 @@ base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
+midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { path = "../zkir", package = "zkir", optional = true }
 
