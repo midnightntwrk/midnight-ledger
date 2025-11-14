@@ -15,6 +15,7 @@ use crate::VecExt;
 use crate::serializable::GLOBAL_TAG;
 use crate::tagged::Tagged;
 use std::borrow::Cow;
+use std::io::BufReader;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -30,7 +31,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     let tag_expected = format!("{GLOBAL_TAG}{}:", T::tag());
     let mut read_tag = vec![0u8; tag_expected.len()];
     let mut remaining_tag_buf = &mut read_tag[..];
-    while remaining_tag_buf.len() > 0 {
+    while !remaining_tag_buf.is_empty() {
         let read = reader.read(remaining_tag_buf)?;
         if read == 0 {
             let rem = remaining_tag_buf.len();
@@ -52,7 +53,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
-    let count = reader.bytes().count();
+    let count = BufReader::new(reader).bytes().count();
 
     if count == 0 {
         return Ok(value);
@@ -158,6 +159,7 @@ impl<T: Deserializable> Deserializable for Arc<T> {
 }
 
 impl<const N: usize> Deserializable for [u8; N] {
+    #[allow(clippy::uninit_assumed_init)]
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
         unsafe {
             let mut res = std::mem::MaybeUninit::<[u8; N]>::uninit().assume_init();

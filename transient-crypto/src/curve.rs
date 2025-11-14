@@ -355,7 +355,7 @@ impl Fr {
     /// Initialize an [Fr] from arbitrary 64 bytes (little-endian)
     /// ensuring the result falls into the space by taking modulo.
     pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
-        Fr(outer::Scalar::from_uniform_bytes(&bytes))
+        Fr(outer::Scalar::from_uniform_bytes(bytes))
     }
 
     /// Output an [Fr] as a little-endian bytes-string

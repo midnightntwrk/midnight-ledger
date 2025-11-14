@@ -401,11 +401,10 @@ impl<H: WellBehavedHasher> SqlDB<H> {
 
 impl<H: WellBehavedHasher> Drop for SqlDB<H> {
     fn drop(&mut self) {
-        if let Some(lock_file) = &self.lock_file {
-            if let Err(e) = fs2::FileExt::unlock(lock_file) {
+        if let Some(lock_file) = &self.lock_file
+            && let Err(e) = fs2::FileExt::unlock(lock_file) {
                 eprintln!("Failed to unlock mutex file: {:?}", e);
             }
-        }
     }
 }
 
@@ -757,7 +756,7 @@ mod tests {
         mut db: SqlDB<H>,
     ) {
         let u = InsertNode(v);
-        let iter = std::iter::repeat((k.clone(), u.clone())).take(ITERS_PER_JOB);
+        let iter = std::iter::repeat_n((k.clone(), u.clone()), ITERS_PER_JOB);
         db.batch_update(iter);
         db.delete_node(&k);
     }

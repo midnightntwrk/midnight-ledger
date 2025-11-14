@@ -27,7 +27,7 @@ pub struct VmResults(vm::VmResults<ResultModeGather, InMemoryDB>);
 #[wasm_bindgen]
 impl VmResults {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Result<StateValue, JsError> {
+    pub fn new() -> Result<Self, JsError> {
         Err(JsError::new(
             "VmResults cannot be constructed directly through the WASM API.",
         ))

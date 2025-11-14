@@ -81,12 +81,18 @@ fn generate_state_pool() -> Vec<HashMap<AlignedValue, StateValue>> {
     pool
 }
 
-// Generate state pairs with four relationship types
-fn generate_state_pairs() -> Vec<(
+// StatePair represents a tuple containing:
+// - an old state map,
+// - a new state map,
+// - and a description string for the state transition scenario.
+type StatePair = (
     HashMap<AlignedValue, StateValue>,
     HashMap<AlignedValue, StateValue>,
     &'static str,
-)> {
+);
+
+// Generate state pairs with four relationship types
+fn generate_state_pairs() -> Vec<StatePair> {
     let mut rng = StdRng::seed_from_u64(0x42);
     let pool = generate_state_pool();
     let mut pairs = Vec::new();
@@ -128,12 +134,11 @@ fn generate_state_pairs() -> Vec<(
 
 // Compute benchmark data from state pairs
 fn compute_benchmark_data() -> Vec<BenchmarkData> {
-    let mut uid = 0;
     let arena = &midnight_storage::storage::default_storage::<InMemoryDB>().arena;
     let state_pairs = generate_state_pairs();
     let mut benchmark_data = Vec::new();
 
-    for (i, (old_map, new_map, relationship)) in state_pairs.iter().enumerate() {
+    for (uid, (i, (old_map, new_map, relationship))) in state_pairs.iter().enumerate().enumerate() {
         println!("compute_benchmark_data: {i}/{}", state_pairs.len());
         let old_sp = arena.alloc(StateValue::Map(old_map.clone()));
         let new_sp = arena.alloc(StateValue::Map(new_map.clone()));
@@ -176,7 +181,6 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             _old_sp: old_sp,
             _new_sp: new_sp,
         });
-        uid += 1;
     }
 
     benchmark_data

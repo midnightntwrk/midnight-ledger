@@ -86,8 +86,8 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
             match node {
                 Node::Empty => Ok(A::empty()),
                 Node::Leaf { ann, value } => {
-                    let true_val = A::from_value(&value);
-                    if ann != &A::from_value(&value) {
+                    let true_val = A::from_value(value);
+                    if ann != &A::from_value(value) {
                         return err(ann, true_val);
                     };
                     Ok(true_val)
@@ -109,7 +109,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
                     Ok(true_val)
                 }
                 Node::MidBranchLeaf { ann, value, child } => {
-                    let true_val = sum_ann(&child.deref().clone())?.append(&A::from_value(&*value));
+                    let true_val = sum_ann(&child.deref().clone())?.append(&A::from_value(value));
                     if ann != &true_val {
                         return err(ann, true_val);
                     }
@@ -118,7 +118,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
             }
         }
 
-        let _ = sum_ann(&self.0.deref())?;
+        let _ = sum_ann(self.0.deref())?;
         Ok(())
     }
 
@@ -249,6 +249,9 @@ where
     fn set_size(&self, x: u64) -> Self;
 }
 
+// Type alias for the most common Node usage to reduce type complexity.
+pub(crate) type SpNode<T, D, A> = Sp<Node<T, D, A>, D>;
+
 // The MPT node
 #[derive(Debug, Default)]
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
@@ -267,17 +270,17 @@ pub(crate) enum Node<
     },
     Branch {
         ann: A,
-        children: [Sp<Node<T, D, A>, D>; 16],
+        children: Box<[SpNode<T, D, A>; 16]>,
     },
     Extension {
         ann: A,
         compressed_path: std::vec::Vec<u8>, // with a length no longer than 255
-        child: Sp<Node<T, D, A>, D>,
+        child: SpNode<T, D, A>,
     },
     MidBranchLeaf {
         ann: A,
         value: Sp<T, D>,
-        child: Sp<Node<T, D, A>, D>, // should only be an `Extension` or `Branch`
+        child: SpNode<T, D, A>, // should only be an `Extension` or `Branch`
     },
 }
 
@@ -360,15 +363,11 @@ pub trait Monoid: Semigroup {
 }
 
 impl Semigroup for () {
-    fn append(&self, _: &Self) -> Self {
-        ()
-    }
+    fn append(&self, _: &Self) -> Self {}
 }
 
 impl Monoid for () {
-    fn empty() -> Self {
-        ()
-    }
+    fn empty() -> Self {}
 }
 
 impl Semigroup for u64 {
@@ -473,7 +472,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
     }
 }
 
-impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D> {
+impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> SpNode<T, D, A> {
     fn lookup_sp(&self, path: &[u8]) -> Option<Sp<T, D>> {
         self.lookup_with(path, Clone::clone)
     }
@@ -626,7 +625,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                             _ => (
                                 Sp::new(Node::Extension {
                                     compressed_path: vec![path_head as u8],
-                                    child: child,
+                                    child,
                                     ann,
                                 }),
                                 pruned,
@@ -813,10 +812,9 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                     // Obviously it follows that the `else` case here just means all keys in this node are greater than the target
                     // and thus there aren't any candidates.
                     && diverging_compressed_nibble < diverging_remaining_nibble
+                        && let Some((key, val)) = self.find_largest_key_in_subtree(explored_path)
                     {
-                        if let Some((key, val)) = self.find_largest_key_in_subtree(explored_path) {
-                            Self::update_best_pred(best_predecessor, key, val)
-                        }
+                        Self::update_best_pred(best_predecessor, key, val)
                     }
                 }
             }
@@ -850,7 +848,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
     ) {
         if best_predecessor
             .as_ref()
-            .map_or(true, |(bp_path, _)| candidate_path > *bp_path)
+            .is_none_or(|(bp_path, _)| candidate_path > *bp_path)
         {
             *best_predecessor = Some((candidate_path, candidate_value));
         }
@@ -978,7 +976,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                     });
                 }
 
-                let branch_ann = A::from_value(&value).append(&existing_ann);
+                let branch_ann = A::from_value(&value).append(existing_ann);
                 (
                     self.arena.alloc(Node::MidBranchLeaf {
                         ann: branch_ann,
@@ -1023,14 +1021,14 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                 // complete path match, insert at the child node
                 if index == compressed_path.len() {
                     let (new_child, existing) = child.insert(&path[index..], value);
-                    return (
+                    (
                         self.arena.alloc(Node::Extension {
                             ann: new_child.ann(),
                             compressed_path: compressed_path.clone(),
                             child: new_child,
                         }),
                         existing,
-                    );
+                    )
                 } else {
                     // if path splits on final nibble old child node doesn't need an extension,
                     // otherwise it does
@@ -1045,7 +1043,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                     };
 
                     let compressed_path_index: usize = compressed_path[index].into();
-                    let mut children: [Sp<Node<T, D, A>, D>; 16] =
+                    let mut children: [SpNode<T, D, A>; 16] =
                         core::array::from_fn(|_| self.arena.alloc(Node::Empty));
                     children[compressed_path_index] = remaining;
 
@@ -1056,7 +1054,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
 
                     let branch = self.arena.alloc(Node::Branch {
                         ann: initial_ann,
-                        children,
+                        children: Box::new(children),
                     });
 
                     let (final_branch, existing) = branch.insert(&path[index..], value);
@@ -1082,7 +1080,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                 ..
             } => {
                 let (new_child, existing) = child.insert(path, value);
-                let new_ann = A::from_value(&leaf_value).append(&new_child.ann());
+                let new_ann = A::from_value(leaf_value).append(&new_child.ann());
 
                 (
                     self.arena.alloc(Node::MidBranchLeaf {
@@ -1274,7 +1272,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                     (child.clone(), Some(value.clone()))
                 } else {
                     let (child, removed) = child.remove(path);
-                    let new_ann = child.ann().append(&Annotation::<T>::from_value(&value));
+                    let new_ann = child.ann().append(&Annotation::<T>::from_value(value));
                     match child.deref() {
                         Node::Empty => (
                             self.arena.alloc(Node::Leaf {
@@ -1320,11 +1318,11 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             Node::Leaf { ann, .. } => {
                 u8::serialize(&1, writer)?;
-                A::serialize(&ann, writer)?;
+                A::serialize(ann, writer)?;
             }
             Node::Branch { ann, .. } => {
                 u8::serialize(&2, writer)?;
-                A::serialize(&ann, writer)?;
+                A::serialize(ann, writer)?;
             }
             Node::Extension {
                 ann,
@@ -1332,14 +1330,14 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 ..
             } => {
                 u8::serialize(&3, writer)?;
-                A::serialize(&ann, writer)?;
+                A::serialize(ann, writer)?;
                 let compressed = compress_nibbles(compressed_path);
                 u8::serialize(&(compressed_path.len() as u8), writer)?;
                 std::vec::Vec::<u8>::serialize(&compressed, writer)?;
             }
             Node::MidBranchLeaf { ann, .. } => {
                 u8::serialize(&4, writer)?;
-                A::serialize(&ann, writer)?;
+                A::serialize(ann, writer)?;
             }
         }
 
@@ -1442,7 +1440,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             2 => {
                 let ann = A::deserialize(reader, 0)?;
-                let mut children: [Sp<Node<T, D, A>, D>; 16] =
+                let mut children: [SpNode<T, D, A>; 16] =
                     core::array::from_fn(|_| loader.alloc(Node::Empty));
 
                 #[allow(clippy::needless_range_loop)]
@@ -1450,14 +1448,17 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                     *child = loader.get_next(child_hashes)?;
                 }
 
-                Ok(Node::Branch { ann, children })
+                Ok(Node::Branch {
+                    ann,
+                    children: Box::new(children),
+                })
             }
             3 => {
                 let ann = A::deserialize(reader, 0)?;
                 let len = u8::deserialize(reader, 0)?;
                 let path =
                     expand_nibbles(&std::vec::Vec::<u8>::deserialize(reader, 0)?, len as usize);
-                let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
+                let child: SpNode<T, D, A> = loader.get_next(child_hashes)?;
                 Ok(Node::Extension {
                     ann,
                     compressed_path: path,
@@ -1467,7 +1468,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             4 => {
                 let ann = A::deserialize(reader, 0)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
-                let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
+                let child: SpNode<T, D, A> = loader.get_next(child_hashes)?;
                 Ok(Node::MidBranchLeaf { ann, value, child })
             }
             _ => Err(std::io::Error::new(

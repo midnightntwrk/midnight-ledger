@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(feature = "mock-verify")]
 //! ONLY FOR USE DURING BENCHMARKING OR TESTING
 //!
 //! Allows for realistic-ish system benchmarks without having to generate proofs
@@ -137,12 +136,12 @@ fn load_default_calib() -> Calibration {
 }
 
 fn calibration() -> &'static Calibration {
-    CALIBRATION.get_or_init(|| load_default_calib())
+    CALIBRATION.get_or_init(load_default_calib)
 }
 
 fn burn_step(i: u64) {
     let mut sha = Sha256::new();
-    sha.update(&i.to_be_bytes());
+    sha.update(i.to_be_bytes());
     black_box(sha.finalize());
 }
 
@@ -290,7 +289,7 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
         let median_iters = iter_curve[iter_curve.len() / 2];
 
         calibration_results.push(CalibrationRecord {
-            circuit_inputs: size as usize,
+            circuit_inputs: size,
             median_iters,
         });
     }
