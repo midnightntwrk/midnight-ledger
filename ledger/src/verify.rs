@@ -374,16 +374,11 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
         match &self.v2 {
             Some(_) => Ok(()),
             None => {
-                if cfg!(feature = "test-utilities") {
-                    warn!("no verifier key set, ignoring in test mode");
-                    Ok(())
-                } else {
-                    warn!("no verifier key set");
-                    Err(MalformedTransaction::VerifierKeyNotSet {
-                        address,
-                        operation: operation.into(),
-                    })
-                }
+                warn!("no verifier key set");
+                Err(MalformedTransaction::VerifierKeyNotSet {
+                    address,
+                    operation: operation.into(),
+                })
             }
         }
     }

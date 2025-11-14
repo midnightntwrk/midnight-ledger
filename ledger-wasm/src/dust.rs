@@ -1351,6 +1351,11 @@ impl DustLocalState {
     pub fn params(&self) -> Result<DustParameters, JsError> {
         Ok(DustParameters(self.0.params))
     }
+
+    #[wasm_bindgen(getter, js_name = "syncTime")]
+    pub fn sync_time(&self) -> Date {
+        seconds_to_js_date(self.0.sync_time.to_secs())
+    }
 }
 
 #[wasm_bindgen]
