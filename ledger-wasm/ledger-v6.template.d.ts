@@ -215,7 +215,7 @@ export class DustSecretKey {
 
   /**
    * Temporary method to create an instance of {@link DustSecretKey} from a bigint (its natural representation)
-   * @param bigint 
+   * @param bigint
    */
   static fromBigint(bigint: bigint): DustSecretKey;
 
@@ -354,6 +354,7 @@ export class DustLocalState {
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
   readonly params: DustParameters;
+  readonly syncTime: Date;
 }
 
 /**
@@ -491,6 +492,10 @@ export class LedgerState {
    * The dust subsystem state
    */
   readonly dust: DustState;
+  /**
+   * The parameters of the ledger
+   */
+  parameters: LedgerParameters;
 }
 
 /**
@@ -1093,14 +1098,14 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * The underlying resource cost of this transaction.
    */
-  cost(params: LedgerParameters): SyntheticCost;
+  cost(params: LedgerParameters, enforceTimeToDismiss?: boolean): SyntheticCost;
 
   /**
    * The cost of this transaction, in SPECKs.
    *
    * Note that this is *only* accurate when called with proven transactions.
    */
-  fees(params: LedgerParameters): bigint;
+  fees(params: LedgerParameters, enforceTimeToDismiss?: boolean): bigint;
 
   /**
    * The cost of this transaction, in SPECKs, with a safety margin of `n` blocks applied.
@@ -1152,6 +1157,8 @@ export class PreTranscript {
   toString(compact?: boolean): string;
 }
 
+export type PartitionedTranscript = [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined];
+
 /**
  * Computes the communication commitment corresponding to an input/output pair and randomness.
  */
@@ -1162,7 +1169,7 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
  * resulting in guaranteed and fallible {@link Transcript}s, optimally
  * allocated, and heuristically covered for gas fees.
  */
-export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): [Transcript<AlignedValue> | undefined, Transcript<AlignedValue> | undefined][];
+export function partitionTranscripts(calls: PreTranscript[], params: LedgerParameters): PartitionedTranscript[];
 
 /**
  * The hash of a transaction, as a hex-encoded 256-bit bytestring
@@ -1266,6 +1273,11 @@ export class LedgerParameters {
   static deserialize(raw: Uint8Array): LedgerParameters;
 
   toString(compact?: boolean): string;
+
+  /**
+   * The fee prices for transaction
+   */
+  readonly feePrices: FeePrices;
 }
 
 export class TransactionCostModel {
@@ -1290,6 +1302,16 @@ export class TransactionCostModel {
   static deserialize(raw: Uint8Array): TransactionCostModel;
 
   toString(compact?: boolean): string;
+
+  /**
+   * A cost model for calculating transaction fees
+   */
+  readonly runtimeCostModel: CostModel;
+
+  /**
+   * A baseline cost to begin with
+   */
+  readonly baselineCost: RunningCost;
 }
 
 

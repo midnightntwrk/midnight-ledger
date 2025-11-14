@@ -499,6 +499,12 @@ impl From<f64> for FixedPoint {
     }
 }
 
+impl From<FixedPoint> for i128 {
+    fn from(fp: FixedPoint) -> i128 {
+        fp.0 >> 64
+    }
+}
+
 impl From<FixedPoint> for f64 {
     fn from(fp: FixedPoint) -> f64 {
         fp.0 as f64 / 2f64.powi(64)

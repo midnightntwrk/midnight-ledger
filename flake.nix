@@ -135,7 +135,7 @@
               checkPhase = ''
                 cargo fmt -- --check
                 cargo check --all-targets --workspace
-                cargo test ${if heavy-checks then "--release --target" else ""}
+                ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
               cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
 
@@ -353,7 +353,7 @@
             '';
           };
 
-          packages.ledger = mkLedger {};
+          packages.ledger = mkLedger { heavy-checks = true; };
 
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v1"; };
 

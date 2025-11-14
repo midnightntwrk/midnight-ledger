@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { BALANCING_OVERHEAD, initialParameters, LOCAL_TEST_NETWORK_ID, NIGHT_TOKEN_TYPE } from '@/test-objects';
+import { BALANCING_OVERHEAD, DEFAULT_TOKEN_TYPE, initialParameters, LOCAL_TEST_NETWORK_ID } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
 import {
   DustActions,
@@ -44,7 +44,7 @@ export function generateSampleDust(
     {
       value: nightAmount,
       owner: state.nightKey.verifyingKey(),
-      type: NIGHT_TOKEN_TYPE,
+      type: DEFAULT_TOKEN_TYPE,
       intentHash: utxoIh,
       outputNo: 0
     }
@@ -53,7 +53,7 @@ export function generateSampleDust(
   const outputs: UtxoOutput[] = [
     {
       owner: state.initialNightAddress,
-      type: NIGHT_TOKEN_TYPE,
+      type: DEFAULT_TOKEN_TYPE,
       value: nightAmount
     }
   ];

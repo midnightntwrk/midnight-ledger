@@ -1,6 +1,6 @@
 [workspace]
 package.license = "Apache-2.0"
-package.version = "6.1.0-alpha.2"
+package.version = "6.1.0-alpha.4"
 members = [
     "zswap",
     "ledger",

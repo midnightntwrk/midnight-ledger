@@ -374,16 +374,11 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
         match &self.v2 {
             Some(_) => Ok(()),
             None => {
-                if cfg!(feature = "test-utilities") {
-                    warn!("no verifier key set, ignoring in test mode");
-                    Ok(())
-                } else {
-                    warn!("no verifier key set");
-                    Err(MalformedTransaction::VerifierKeyNotSet {
-                        address,
-                        operation: operation.into(),
-                    })
-                }
+                warn!("no verifier key set");
+                Err(MalformedTransaction::VerifierKeyNotSet {
+                    address,
+                    operation: operation.into(),
+                })
             }
         }
     }
@@ -604,7 +599,7 @@ where
                 })?;
 
                 ref_state.param_check(false, |params| {
-                    let fees = match self.fees(params) {
+                    let fees = match self.fees(params, true) {
                         Ok(fees) => fees,
                         Err(e) => {
                             if strictness.enforce_balancing {
@@ -781,7 +776,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
             if deltas_only {
                 continue;
             }
-            for (_, call) in self.calls() {
+            for call in intent.calls() {
                 let transcripts = call
                     .guaranteed_transcript
                     .iter()

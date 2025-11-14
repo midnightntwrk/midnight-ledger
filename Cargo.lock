@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2793,7 +2793,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -2828,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2905,7 +2905,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -2933,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2964,7 +2964,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2984,7 +2984,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "fake",
@@ -3005,7 +3005,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "fake",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "crypto",
  "konst",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3115,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "archery",
  "criterion",
@@ -3153,7 +3153,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3170,7 +3170,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3236,7 +3236,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "criterion",
  "derive-where",

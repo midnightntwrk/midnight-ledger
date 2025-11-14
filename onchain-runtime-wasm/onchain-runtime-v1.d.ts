@@ -88,6 +88,28 @@ export type RunningCost = {
 };
 
 /**
+ * The fee prices for transaction
+ */
+export type FeePrices = {
+  /**
+   * The price of time spent reading from disk.
+   */
+  readPrice: number,
+  /**
+   * The price of time spent in single-threaded compute.
+   */
+  computePrice: number,
+  /**
+   * The price of block usage.
+   */
+  blockUsagePrice: number,
+  /**
+   * The price of time spent writing to disk.
+   */
+  writePrice: number,
+}
+
+/**
  * Holds the coin secret key of a user, serialized as a hex-encoded 32-byte string
  */
 export class CoinSecretKey {

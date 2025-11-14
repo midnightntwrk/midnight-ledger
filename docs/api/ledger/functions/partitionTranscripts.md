@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
 
 ***
 
@@ -7,11 +7,7 @@
 # Function: partitionTranscripts()
 
 ```ts
-function partitionTranscripts(calls, params): [
-  | undefined
-  | Transcript<AlignedValue>, 
-  | undefined
-  | Transcript<AlignedValue>][];
+function partitionTranscripts(calls, params): PartitionedTranscript[];
 ```
 
 Finalizes a set of programs against their initial contexts,
@@ -30,8 +26,4 @@ allocated, and heuristically covered for gas fees.
 
 ## Returns
 
-\[
-  \| `undefined`
-  \| [`Transcript`](../type-aliases/Transcript.md)\<[`AlignedValue`](../type-aliases/AlignedValue.md)\>, 
-  \| `undefined`
-  \| [`Transcript`](../type-aliases/Transcript.md)\<[`AlignedValue`](../type-aliases/AlignedValue.md)\>\][]
+[`PartitionedTranscript`](../type-aliases/PartitionedTranscript.md)[]
