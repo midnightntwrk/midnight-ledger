@@ -22,6 +22,15 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
+      - name: Maximize build space
+        run: |
+          df -h
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          df -h
+
       - name: Configure git rewrite
         run: |
           mkdir -p $HOME/.config/git
@@ -34,7 +43,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@7be5dee1421f63d07e71ce6e0a9f8a4b07c2a487 # v31.6.1
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -43,7 +52,7 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@e0990284d4e88052ddc376519731419354851a42
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
@@ -85,7 +94,7 @@ jobs:
           nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
 
       - name: Upload Logs
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
          name: logs-${{ matrix.os }}
          path: integration-tests/logs/
@@ -136,14 +145,14 @@ jobs:
       #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Test Results
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # ratchet:actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # ratchet:actions/upload-artifact@v4
         if: always()
         with:
           name: 'ledger-wasm-test-results-ctrf-${{ matrix.os }}'
           path: './integration-tests/reports/ctrf-report.json'
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: 'ledger-wasm-test-results-junit-${{ matrix.os }}'
           path: ./integration-tests/reports/test-report.xml
@@ -166,7 +175,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Install Nix (2)
-        uses: cachix/install-nix-action@7be5dee1421f63d07e71ce6e0a9f8a4b07c2a487 # v31.6.1
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
         with:
           nix_path: nixpkgs=channel:nixos-unstable #trya
           extra_nix_config: |
@@ -175,7 +184,7 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@e0990284d4e88052ddc376519731419354851a42
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
@@ -256,7 +265,7 @@ jobs:
       #      **/target/test-*.xml
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: 'proof-server-test-results-${{ matrix.os }}'
           path: target/test-*

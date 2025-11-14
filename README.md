@@ -139,7 +139,7 @@ Some of these rust crates use feature flags. For the most part, using default fe
 | `proving` | Enables proofs in tests and benchmarks. Note that the library *will* have proving capability, even when not enabled. |
 | `stress-test` | Enables expensive storage tests. |
 | `sqlite` | Enables the [SQLite](https://sqlite.org) storage backend. |
-| `test-utilities` | Enables testing helpers in the `ledger` crate, and loosens some well-formedness checks very slightly. |
+| `test-utilities` | Enables testing helpers in the `ledger` crate. |
 | `unstable` | Enabled transitively for unstable feature flags, and refuses to build unless the `MIDNIGHT_LEDGER_EXPERIMENTAL` environment variable is set. |
 | `vendored` | A feature of `onchain-runtime` that will skip the build of compact macros that would require scheme dependencies for downstream crates otherwise. Enabled by default. |
 

@@ -1,8 +1,8 @@
-[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.1**](README.md)
+[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.4**](README.md)
 
 ***
 
-# @midnight-ntwrk/onchain-runtime v1.0.0-alpha.1
+# @midnight-ntwrk/onchain-runtime v1.0.0-alpha.4
 
 ## Classes
 
@@ -37,6 +37,7 @@
 - [DustTokenType](type-aliases/DustTokenType.md)
 - [Effects](type-aliases/Effects.md)
 - [EncodedStateValue](type-aliases/EncodedStateValue.md)
+- [FeePrices](type-aliases/FeePrices.md)
 - [Fr](type-aliases/Fr.md)
 - [GatherResult](type-aliases/GatherResult.md)
 - [Key](type-aliases/Key.md)
@@ -93,6 +94,7 @@
 - [rawTokenType](functions/rawTokenType.md)
 - [runProgram](functions/runProgram.md)
 - [runtimeCoinCommitment](functions/runtimeCoinCommitment.md)
+- [runtimeCoinNullifier](functions/runtimeCoinNullifier.md)
 - [sampleContractAddress](functions/sampleContractAddress.md)
 - [sampleRawTokenType](functions/sampleRawTokenType.md)
 - [sampleSigningKey](functions/sampleSigningKey.md)

@@ -567,13 +567,13 @@ impl Transaction {
             | UnprovenWithSignatureErasedPreBinding(_)
             | UnprovenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureNoBinding(_)
+            | ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureErasedNoBinding(_) => Err(JsError::new(
-                "Transaction hash is available for proven transactions only.",
+                "Transaction hash is available for proven, signed and bound transactions only.",
             )),
-            ProvenWithSignaturePreBinding(val) => to_hex_ser(&val.transaction_hash()),
             ProvenWithSignatureBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedPreBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedBinding(val) => to_hex_ser(&val.transaction_hash()),
         }
     }
 
@@ -685,12 +685,25 @@ impl Transaction {
         get_dyn_transaction(self.0.clone()).imbalances(segment, fees)
     }
 
-    pub fn cost(&self, params: &LedgerParameters) -> Result<JsValue, JsError> {
-        get_dyn_transaction(self.0.clone()).cost(params)
+    pub fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: Option<bool>,
+    ) -> Result<JsValue, JsError> {
+        get_dyn_transaction(self.0.clone()).cost(params, enforce_time_to_dismiss.unwrap_or(false))
     }
 
-    pub fn fees(&self, params: &LedgerParameters) -> Result<BigInt, JsError> {
-        get_dyn_transaction(self.0.clone()).fees(params)
+    pub fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: Option<bool>,
+    ) -> Result<BigInt, JsError> {
+        get_dyn_transaction(self.0.clone()).fees(params, enforce_time_to_dismiss.unwrap_or(false))
+    }
+
+    #[wasm_bindgen(js_name = "feesWithMargin")]
+    pub fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
+        get_dyn_transaction(self.0.clone()).fees_with_margin(params, n)
     }
 
     #[wasm_bindgen(js_name = "toString")]
@@ -932,8 +945,17 @@ impl ClaimRewardable for ledger::structure::ClaimRewardsTransaction<(), InMemory
 
 trait Transactionable {
     fn imbalances(&self, segment: u16, fees: Option<BigInt>) -> Result<Map, JsError>;
-    fn cost(&self, params: &LedgerParameters) -> Result<JsValue, JsError>;
-    fn fees(&self, params: &LedgerParameters) -> Result<BigInt, JsError>;
+    fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<JsValue, JsError>;
+    fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<BigInt, JsError>;
+    fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError>;
     fn to_string(&self, compact: Option<bool>) -> String;
     fn rewards(&self) -> Option<ClaimRewardsTransaction>;
     fn binding_randomness(&self) -> Result<BigInt, JsError>;
@@ -991,12 +1013,30 @@ where
         Ok(res)
     }
 
-    fn cost(&self, params: &LedgerParameters) -> Result<JsValue, JsError> {
-        Ok(to_value(&self.cost(&params)?)?)
+    fn cost(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<JsValue, JsError> {
+        Ok(to_value(&self.cost(&params, enforce_time_to_dismiss)?)?)
     }
 
-    fn fees(&self, params: &LedgerParameters) -> Result<BigInt, JsError> {
-        Ok(BigInt::from(self.fees(&params)?))
+    fn fees(
+        &self,
+        params: &LedgerParameters,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<BigInt, JsError> {
+        Ok(BigInt::from(ledger::structure::Transaction::fees(
+            self,
+            &params,
+            enforce_time_to_dismiss,
+        )?))
+    }
+
+    fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
+        Ok(BigInt::from(
+            ledger::structure::Transaction::fees_with_margin(self, &params, n)?,
+        ))
     }
 
     fn to_string(&self, compact: Option<bool>) -> String {

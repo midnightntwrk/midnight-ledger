@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
 
 ***
 
@@ -21,6 +21,16 @@ The parameters associated with DUST.
 
 ***
 
+### feePrices
+
+```ts
+readonly feePrices: FeePrices;
+```
+
+The fee prices for transaction
+
+***
+
 ### transactionCostModel
 
 ```ts
@@ -30,6 +40,24 @@ readonly transactionCostModel: TransactionCostModel;
 The cost model used for transaction fees contained in these parameters
 
 ## Methods
+
+### maxPriceAdjustment()
+
+```ts
+maxPriceAdjustment(): number;
+```
+
+The maximum price adjustment per block with the current parameters, as a multiplicative
+factor (that is: 1.1 would indicate a 10% adjustment). Will always return the positive (>1)
+adjustment factor. Note that negative adjustments are the additive inverse (1.1 has a
+corresponding 0.9 downward adjustment), *not* the multiplicative as might reasonably be
+assumed.
+
+#### Returns
+
+`number`
+
+***
 
 ### serialize()
 

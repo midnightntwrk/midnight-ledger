@@ -17,6 +17,7 @@ use crate::zswap_state::ZswapChainState;
 use base_crypto::hash::HashOutput;
 use coin_structure::coin::ShieldedTokenType;
 use js_sys::{JsString, Map, Uint8Array};
+use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::from_value_ser;
 use rand::rngs::OsRng;
 use serialize::tagged_serialize;
@@ -835,6 +836,11 @@ impl LedgerParameters {
         ))
     }
 
+    #[wasm_bindgen(js_name = "maxPriceAdjustment")]
+    pub fn max_price_adjustment(&self) -> f64 {
+        self.0.max_price_adjustment().into()
+    }
+
     #[wasm_bindgen(js_name = "initialParameters")]
     pub fn initial_parameters() -> LedgerParameters {
         LedgerParameters(ledger::structure::INITIAL_PARAMETERS)
@@ -867,6 +873,11 @@ impl LedgerParameters {
         } else {
             format!("{:#?}", &self.0)
         }
+    }
+
+    #[wasm_bindgen(getter, js_name = "feePrices")]
+    pub fn fee_prices(&self) -> Result<JsValue, JsError> {
+        fee_prices_to_value(&self.0.fee_prices)
     }
 }
 
@@ -907,6 +918,16 @@ impl TransactionCostModel {
         } else {
             format!("{:#?}", &self.0)
         }
+    }
+
+    #[wasm_bindgen(getter, js_name = "runtimeCostModel")]
+    pub fn runtime_cost_model(&self) -> CostModel {
+        CostModel::from(self.0.runtime_cost_model.clone())
+    }
+
+    #[wasm_bindgen(getter, js_name = "baselineCost")]
+    pub fn baseline_cost(&self) -> Result<JsValue, JsError> {
+        Ok(to_value(&self.0.baseline_cost.clone())?)
     }
 }
 

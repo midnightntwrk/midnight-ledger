@@ -242,14 +242,13 @@ pub(crate) fn initial_nonce(output_no: u32, intent_hash: IntentHash) -> InitialN
 }
 
 impl UtxoSpend {
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
 
 impl Utxo {
-    #[allow(unused)]
-    pub(crate) fn initial_nonce(&self) -> InitialNonce {
+    pub fn initial_nonce(&self) -> InitialNonce {
         initial_nonce(self.output_no, self.intent_hash)
     }
 }
@@ -1301,8 +1300,8 @@ pub struct DustLocalState<D: DB> {
     commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
-    sync_time: Timestamp,
-    params: DustParameters,
+    pub sync_time: Timestamp,
+    pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 

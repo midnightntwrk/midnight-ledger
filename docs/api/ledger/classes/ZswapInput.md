@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
 
 ***
 
@@ -111,7 +111,7 @@ static newContractOwned(
    coin, 
    segment, 
    contract, 
-state): ZswapInput<PreProof>;
+   state): UnprovenInput;
 ```
 
 #### Parameters
@@ -134,4 +134,4 @@ state): ZswapInput<PreProof>;
 
 #### Returns
 
-`ZswapInput`\<[`PreProof`](PreProof.md)\>
+[`UnprovenInput`](../type-aliases/UnprovenInput.md)

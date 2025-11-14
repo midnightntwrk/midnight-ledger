@@ -88,6 +88,28 @@ export type RunningCost = {
 };
 
 /**
+ * The fee prices for transaction
+ */
+export type FeePrices = {
+  /**
+   * The price of time spent reading from disk.
+   */
+  readPrice: number,
+  /**
+   * The price of time spent in single-threaded compute.
+   */
+  computePrice: number,
+  /**
+   * The price of block usage.
+   */
+  blockUsagePrice: number,
+  /**
+   * The price of time spent writing to disk.
+   */
+  writePrice: number,
+}
+
+/**
  * Holds the coin secret key of a user, serialized as a hex-encoded 32-byte string
  */
 export class CoinSecretKey {
@@ -546,12 +568,17 @@ export function maxField(): bigint;
 /**
  * Converts input, output, and transcript information into a proof preimage
  * suitable to pass to a `ProvingProvider`.
+ *
+ * The `key_location` parameter is a string used to identify the circuit by
+ * proving machinery, for backwards-compatibility, if unset it defaults to
+ * `'dummy'`.
  */
 export function proofDataIntoSerializedPreimage(
   input: AlignedValue,
   output: AlignedValue,
   public_transcript: Op<AlignedValue>[],
-  private_transcript_outputs: AlignedValue[]
+  private_transcript_outputs: AlignedValue[],
+  key_location?: string,
 ): Uint8Array;
 
 /**

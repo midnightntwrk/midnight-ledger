@@ -499,6 +499,12 @@ impl From<f64> for FixedPoint {
     }
 }
 
+impl From<FixedPoint> for i128 {
+    fn from(fp: FixedPoint) -> i128 {
+        fp.0 >> 64
+    }
+}
+
 impl From<FixedPoint> for f64 {
     fn from(fp: FixedPoint) -> f64 {
         fp.0 as f64 / 2f64.powi(64)
@@ -537,6 +543,26 @@ impl FixedPoint {
             u128::MAX
         } else {
             res.as_u128()
+        }
+    }
+
+    /// Raises the number to an integer power.
+    pub fn powi(self, mut exp: i32) -> Self {
+        match exp {
+            i32::MIN..=-1 => dbg!(FixedPoint::ONE / self).powi(dbg!(-exp)),
+            0 => FixedPoint::ONE,
+            1..=i32::MAX => {
+                let mut acc = FixedPoint::ONE;
+                let mut cur = self;
+                while exp >= 1 {
+                    if exp & 0b1 != 0 {
+                        acc = acc * cur;
+                    }
+                    cur = cur * cur;
+                    exp >>= 1;
+                }
+                acc
+            }
         }
     }
 
@@ -873,6 +899,14 @@ mod tests {
             within_permissible_error(
                 a, b, epsilon
             );
+        }
+        #[test]
+        fn fixed_point_powi(a in (1e-1f64..1e1f64), b in (-15..15)) {
+            if a != 0.0 {
+                let pure_error_factor = a.powi(b) / f64::from(FixedPoint::from(a).powi(b));
+                let non_compounded_error_factor = pure_error_factor.powi(-b.abs());
+                within_permissible_error(1.0, non_compounded_error_factor, 0.001);
+            }
         }
         #[test]
         fn fixed_point_addition(a in (-1e18f64..1e18f64), b in (-1e18f64..1e18f64)) {

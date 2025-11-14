@@ -26,24 +26,22 @@ describe('Ledger API - DustState', () => {
   test('should print out information as string', () => {
     const dustState = new DustState();
 
-    const expected = `DustState(
-    DustState {
-        utxo: DustUtxoState {
-            commitments: MerkleTree(root = Some(-)) {},
-            commitments_first_free: 0,
-            nullifiers: {},
-            root_history: {},
-        },
-        generation: DustGenerationState {
-            address_delegation: {},
-            generating_tree: MerkleTree(root = Some(-)) {},
-            generating_tree_first_free: 0,
-            generating_set: {},
-            night_indices: {},
-            root_history: {},
-        },
+    const expected = `DustState {
+    utxo: DustUtxoState {
+        commitments: MerkleTree(root = Some(-)) {},
+        commitments_first_free: 0,
+        nullifiers: {},
+        root_history: {},
     },
-)`;
+    generation: DustGenerationState {
+        address_delegation: {},
+        generating_tree: MerkleTree(root = Some(-)) {},
+        generating_tree_first_free: 0,
+        generating_set: {},
+        night_indices: {},
+        root_history: {},
+    },
+}`;
 
     expect(dustState.toString()).toEqual(expected);
   });

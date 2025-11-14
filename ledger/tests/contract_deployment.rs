@@ -30,7 +30,7 @@ use storage::db::InMemoryDB;
 use storage::storage::HashMap;
 
 lazy_static! {
-    static ref RESOLVER: Resolver = test_resolver("contract_deployment");
+    static ref RESOLVER: Resolver = test_resolver("fallible");
 }
 
 #[tokio::test]

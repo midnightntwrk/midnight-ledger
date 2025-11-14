@@ -6,6 +6,7 @@
 - breaking: contract states are now wrapped in `ChargedState`, which does
   accounting for state space that has been paid for.
 - breaking: major refactor of runtime cost-model
+- feat: add `key_location` parameter to proof data serializer.
 
 ## Version `0.5.0`
 
@@ -25,7 +26,7 @@
 ## Version `0.4.0`
 
 - Feature: Added `balance` field to `ContractState`, and added logic
-to constrain values of this map to `0`.
+  to constrain values of this map to `0`.
 
   Also extended `Effects` to contain unshielded token information, and
   added `CallContext` struct.
@@ -34,28 +35,35 @@ to constrain values of this map to `0`.
 - Reexported breaking changes in `midnight-coin-structure`
 
 ## Version `0.3.0`
+
 - breaking: chore: bump to pull in breaking serialization format changes.
 - breaking: chore: bump to pull in breaking `transient-crypto` `0.5.0` changes.
 
 ## Version `0.2.6`
+
 - Bug fix: Browser compatibility
 
 ## Version `0.2.5`
+
 - Versioning updates to contract state.
 
 ## Version `0.2.4`
+
 - Updated to use `transient-crypto`.
 
 ## Version `0.2.3`
+
 - Updated to `coin-structure-0.3`, catching the breaking change in a backwards
-compatible way
+  compatible way
 
 ## Version `0.2.2`
+
 - Added missing sequence number to effects type.
 - Fix incorrect JS conversion of contract addresses in effects.
 - Remove conditions for null pointers from WASM API.
 
 ## Version `0.2.1`
+
 - Pulled in storage changes
 - Fixed network id parameter in serialize functions
 
@@ -80,8 +88,8 @@ compatible way
 ## Version `0.2.0-beta.1`
 
 - Add contract maintenance authorities to contract states
-    - These consist of a sequence of signature verifying keys, and a theshold
-    - Semantics are not defined here.
+  - These consist of a sequence of signature verifying keys, and a theshold
+  - Semantics are not defined here.
 - Expose signing keys to wasm
 - Prepare `ContractOperation` for the ability to support containing multiple
   versions of keys simultaneously.
