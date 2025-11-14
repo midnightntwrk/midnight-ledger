@@ -184,7 +184,8 @@ mod tests {
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use transient_crypto::merkle_tree::MerkleTree;
-    use zkir_v2::{Instruction, IrSource, LocalProvingProvider};
+    use zkir_v2::v2::Instruction;
+    use zkir_v2::{IrSource, LocalProvingProvider};
 
     use super::*;
 
@@ -195,8 +196,10 @@ mod tests {
             use std::fs::File;
             use std::path::PathBuf;
             let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
-            let ir = tagged_deserialize::<IrSource>(&mut File::open(file).unwrap()).unwrap();
-            ir.instructions
+            let ir = IrSource::from_tagged_reader(File::open(file).unwrap()).unwrap();
+            ir.as_v2()
+                .unwrap()
+                .instructions
                 .iter()
                 .filter_map(|ins| match ins {
                     Instruction::PiSkip { count, .. } => Some(*count as usize),
