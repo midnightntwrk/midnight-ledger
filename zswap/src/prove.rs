@@ -194,9 +194,7 @@ mod tests {
             use serialize::Deserializable;
             use std::fs::File;
             use std::path::PathBuf;
-            let file = PathBuf::from("./static")
-                .join(ir)
-                .with_extension("bzkir");
+            let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
             let ir = tagged_deserialize::<IrSource>(&mut File::open(file).unwrap()).unwrap();
             ir.instructions
                 .iter()
