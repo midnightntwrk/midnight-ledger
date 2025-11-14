@@ -233,6 +233,9 @@ impl<A: Storable<D> + std::fmt::Debug, B: Storable<D>, T: DirectTranslation<A, B
         } else {
             let t0 = Instant::now();
             let res = T::finalize(&self.value, limit, cache)?;
+            // Heuristic for overhead of processing a node. Dominates in most cases.
+            // Set at 20us.
+            *limit -= CostDuration::from_picoseconds(20_000_000);
             let res = match res {
                 // TODO: Here and elsewhere, we destroy the Sp for the hash,
                 // which will actually deallocate it. Use something that keeps
@@ -623,7 +626,7 @@ impl<TABLE: TranslationTable<D>, D: DB> InflightTranslationState<TABLE, D> {
             }
             StepResult::NotEnoughTime => finished = true,
         }
-        let res = Ok(Either::Left(finished));
+        let res = Ok(Either::Left(finished || *limit == CostDuration::ZERO));
         let t3 = Instant::now();
         TPROCESS.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + (t2 - t1).as_nanos() as u64)).unwrap();
         TUPDATE.fetch_update(std::sync::atomic::Ordering::SeqCst, std::sync::atomic::Ordering::SeqCst, |x| Some(x + ((t3 - t2) + (t1 - t0)).as_nanos() as u64)).unwrap();

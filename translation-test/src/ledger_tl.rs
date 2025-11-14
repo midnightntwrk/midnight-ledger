@@ -2,6 +2,7 @@ use crate::mechanism::*;
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use base_crypto::time::Timestamp;
 use base_crypto::fab::AlignedValue;
+use new_ledger::structure::INITIAL_TRANSACTION_COST_MODEL;
 use serialize::{Deserializable, Serializable, Tagged};
 use std::any::Any;
 use std::borrow::Cow;
@@ -13,9 +14,10 @@ use storage::db::{DB, InMemoryDB};
 use storage::delta_tracking::{RcMap, initial_write_delete_costs};
 use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie};
 use storage::storage::{HashMap, HashSet, Map, TimeFilterMap, Array, default_storage};
+use std::ops::Deref;
 
 fn recast<A: Storable<D>, B: Storable<D> + Tagged, D: DB>(a: &Sp<A, D>) -> io::Result<Sp<B, D>> {
-    default_storage::<D>().get_lazy(&ArenaKey::from(a.hash()).into())
+    default_storage::<D>().get_lazy(&a.as_child().into())
 }
 
 fn recast_from_ser<A: Serializable, B: Deserializable>(a: &A) -> io::Result<B> {
@@ -397,6 +399,8 @@ impl<D: DB, A: Storable<D> + Tagged, B: Storable<D> + Tagged>
                 height,
                 ..
             } => {
+                // Account for Poseidon hashing cost
+                *limit -= INITIAL_TRANSACTION_COST_MODEL.runtime_cost_model.transient_hash;
                 let tls = Self::child_translations(source);
                 let left = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
                 let right = try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child()));
@@ -580,7 +584,7 @@ impl<D: DB>
         )>,
     > {
         Ok(Some((
-            Sp::new(recast_from_ser(&source.0)?),
+            Sp::new(recast_from_ser(source.0.deref())?),
             Sp::new(new_ledger::structure::UtxoMeta {
                 ctime: source.1.ctime,
                 source: None,
@@ -952,14 +956,99 @@ impl<D: DB> TranslationTable<D> for LedgerTlTable {
 
 #[cfg(test)]
 mod tests {
-    use storage::db::InMemoryDB;
+    use old_transient_crypto::commitment::Pedersen;
+    use storage::{db::{InMemoryDB, ParityDb}, storage::set_default_storage, Storage};
 
-    use crate::mechanism::TranslationTable;
-
+    use crate::{mechanism::*, TestDb};
+    use storage::arena::Sp;
+    use base_crypto::cost_model::CostDuration;
     use super::LedgerTlTable;
+    use rand::Rng;
+    use std::ops::Deref;
 
     #[test]
     fn test_test_table_closed() {
         <LedgerTlTable as TranslationTable<InMemoryDB>>::assert_closure();
+    }
+
+    fn mk_ledger(n: usize) -> old_ledger::structure::LedgerState<TestDb> {
+        let mut state = old_ledger::structure::LedgerState::new("local-test");
+        let mut rng = rand::rngs::OsRng;
+        state.utxo = Sp::new((0..n).fold(state.utxo.deref().clone(), |utxo, _| utxo.insert(old_ledger::structure::Utxo {
+            intent_hash: rng.r#gen(),
+            output_no: rng.r#gen(),
+            owner: rng.r#gen(),
+            type_: rng.r#gen(),
+            value: rng.r#gen(),
+        }, old_ledger::structure::UtxoMeta {
+            ctime: rng.r#gen(),
+        })));
+        state.zswap = Sp::new((0..n).fold(state.zswap.deref().clone(), |zswap, n| {
+            let offer = old_zswap::Offer { inputs: vec![].into(), outputs: vec![old_zswap::Output {
+                ciphertext: None,
+                coin_com: rng.r#gen(),
+                contract_address: None,
+                value_commitment: Pedersen(rng.r#gen()),
+                proof: (),
+            }].into(), transient: vec![].into(), deltas: vec![].into(), };
+            state.zswap.deref().try_apply(&offer, None).unwrap().0
+        }));
+        state
+    }
+
+    #[test]
+    fn test_ledger_tl() {
+        set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref()))).unwrap();
+        let t0 = std::time::Instant::now();
+        let n = 100_000;
+        let mut before = Sp::<_, TestDb>::new(mk_ledger(n));
+        dbg!(before.serialize_to_node_list().nodes.len());
+        before.persist();
+        before.unload();
+        let t1 = std::time::Instant::now();
+        let mut tl_state = Sp::new(TypedTranslationState::<
+            old_ledger::structure::LedgerState<TestDb>,
+            new_ledger::structure::LedgerState<TestDb>,
+            LedgerTlTable,
+            TestDb,
+        >::start(before)
+        .unwrap());
+        tl_state.persist();
+        // 350ms
+        let per_block_cost = CostDuration::from_picoseconds(350_000_000_000);
+        let mut i = 1;
+        while tl_state.result().unwrap().is_none() {
+            let tb0 = std::time::Instant::now();
+            let mut new_tl_state = Sp::new(tl_state.run(per_block_cost).unwrap());
+            let tb1 = std::time::Instant::now();
+            eprintln!("block {i} processed in {:?} (target: 350ms)", tb1 - tb0);
+            i += 1;
+            new_tl_state.persist();
+            tl_state.unpersist();
+            tl_state = new_tl_state;
+            tl_state.unload();
+        }
+        let _after = tl_state.result().unwrap().unwrap();
+        eprintln!("done");
+        let tfin0 = std::time::Instant::now();
+        drop(_after);
+        drop(tl_state);
+        let tfin1 = std::time::Instant::now();
+        let dt0 = tfin1 - t0;
+        let dt1 = tfin0 - t0;
+        let dt2 = tfin1 - t1;
+        let dt3 = tfin0 - t1;
+        let m = 2 * n;
+        eprintln!("took {dt0:?} for {m} items ({} items per second) [incl construction, incl drop]", m as f64 / dt0.as_secs_f64());
+        eprintln!("took {dt1:?} for {m} items ({} items per second) [incl construction, excl drop]", m as f64 / dt1.as_secs_f64());
+        eprintln!("took {dt2:?} for {m} items ({} items per second) [excl construction, incl drop]", m as f64 / dt2.as_secs_f64());
+        eprintln!("took {dt3:?} for {m} items ({} items per second) [excl construction, excl drop]", m as f64 / dt3.as_secs_f64());
+        dbg!(&TUPDATE);
+        dbg!(&TPROCESS);
+        dbg!(&TDEP);
+        dbg!(&TFIN);
+        dbg!(&NPROC);
+        dbg!(TUPDATE.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
+        dbg!(TPROCESS.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
     }
 }

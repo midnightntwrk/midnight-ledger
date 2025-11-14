@@ -101,16 +101,10 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
     }
     fn finalize(
         source: &lr::Nesty<D>,
-        limit: &mut CostDuration,
+        _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<rl::Nesty<D>>> {
         let tlid = TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
-        // Heuristic: 5us per node
-        let dt = CostDuration::from_picoseconds(5_000_000);
-        *limit -= dt;
-        if *limit == CostDuration::ZERO {
-            return Ok(None);
-        }
         match source {
             lr::Nesty::Empty => Ok(Some(rl::Nesty::Empty)),
             lr::Nesty::Node(n, a, b) => {

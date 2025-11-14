@@ -3402,6 +3402,7 @@ dependencies = [
  "midnight-transient-crypto 1.0.0-alpha.3 (git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork)",
  "midnight-zswap 6.1.0-alpha.3",
  "midnight-zswap 6.1.0-alpha.3 (git+https://github.com/midnightntwrk/midnight-ledger?branch=tkerber%2Ftranslation-test-fork)",
+ "rand 0.8.5",
 ]
 
 [[package]]
