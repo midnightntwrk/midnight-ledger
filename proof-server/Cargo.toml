@@ -15,7 +15,8 @@ transient-crypto = { path = "../transient-crypto", package = "midnight-transient
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
-zkir_v2 = { path = "../zkir", package = "zkir" }
+zkir = { path = "../zkir", package = "zkir" }
+zkir-v3 = { path = "../zkir-v3" }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

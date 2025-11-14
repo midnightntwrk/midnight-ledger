@@ -45,7 +45,8 @@ use transient_crypto::proofs::{
     KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr, Zkir,
 };
 use worker_pool::{JobStatus, WorkError, WorkerPool};
-use zkir_v2::{IrSource as ZkirV2, LocalProvingProvider as ZkirV2Local};
+use zkir as zkir_v2;
+use zkir_v3;
 use zswap::prove::ZswapResolver;
 
 pub mod worker_pool;
@@ -163,12 +164,20 @@ async fn proof_versions() -> impl Responder {
 async fn get_k(payload: Payload) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /k...");
     let request = payload_to_bytes(payload).await?;
-    let zkir: ZkirV2 = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    let k = zkir.k();
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
     );
+
+    // Version detection - try V2 first, then V3
+    let k = if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(&request[..]) {
+        ir_v2.k()
+    } else if let Ok(ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(&request[..]) {
+        ir_v3.k()
+    } else {
+        return Err(ErrorBadRequest("Unsupported ZKIR version"));
+    };
+
     Ok(HttpResponse::Ok().body(format!("{k}")))
 }
 
@@ -222,10 +231,16 @@ async fn check(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 };
                 let result = match ppi {
                     ProofPreimageVersioned::V1(ppi) => {
-                        let ir: ZkirV2 = tagged_deserialize(&mut &ir[..])
-                            .map_err(|e| WorkError::BadInput(e.to_string()))?;
-                        ppi.check(&ir)
-                            .map_err(|e| WorkError::BadInput(e.to_string()))?
+                        // Version detection - try V2 first, then V3
+                        if let Ok(ir_v2) = tagged_deserialize::<zkir_v2::IrSource>(&ir[..]) {
+                            ppi.check(&ir_v2)
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?
+                        } else if let Ok(ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(&ir[..]) {
+                            ppi.check(&ir_v3)
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?
+                        } else {
+                            return Err(WorkError::BadInput("Unsupported ZKIR version".into()));
+                        }
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.
@@ -267,6 +282,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 .build()
                 .unwrap();
             rt.block_on(async move {
+                let data_for_resolver = data.clone();
                 let resolver = Resolver::new(
                     PUBLIC_PARAMS.clone(),
                     DustResolver(
@@ -278,7 +294,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         .expect("data provider initialization failed"),
                     ),
                     Box::new(move |loc: KeyLocation| match &*loc.0 {
-                        _ => Box::pin(std::future::ready(Ok(data.clone()))),
+                        _ => Box::pin(std::future::ready(Ok(data_for_resolver.clone()))),
                     }),
                 );
                 let proof = match ppi {
@@ -286,12 +302,40 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         if let Some(binding_input) = binding_input {
                             ppi.binding_input = binding_input;
                         }
-                        ProofVersioned::V1(
-                            ppi.prove::<ZkirV2>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                        let proving_data = match data {
+                            Some(pkm) => pkm,
+                            None => resolver
+                                .resolve_key(ppi.key_location.clone())
                                 .await
                                 .map_err(|e| WorkError::BadInput(e.to_string()))?
-                                .0,
-                        )
+                                .ok_or_else(|| {
+                                    WorkError::BadInput(format!(
+                                        "couldn't find key {}",
+                                        &ppi.key_location.0
+                                    ))
+                                })?,
+                        };
+
+                        // Version detection - try V2 first, then V3
+                        let proof = if let Ok(_ir_v2) =
+                            tagged_deserialize::<zkir_v2::IrSource>(&proving_data.ir_source[..])
+                        {
+                            ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                                .await
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?
+                                .0
+                        } else if let Ok(_ir_v3) =
+                            tagged_deserialize::<zkir_v3::IrSource>(&proving_data.ir_source[..])
+                        {
+                            ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                                .await
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?
+                                .0
+                        } else {
+                            return Err(WorkError::BadInput("Unsupported ZKIR version".into()));
+                        };
+
+                        ProofVersioned::V1(proof)
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.
@@ -345,7 +389,7 @@ async fn prove_transaction(
                             .map(|v| v.clone())))),
                     }),
                 );
-                let provider = ZkirV2Local {
+                let provider = zkir_v2::LocalProvingProvider {
                     rng: OsRng,
                     params: &resolver,
                     resolver: &resolver,
