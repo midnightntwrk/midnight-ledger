@@ -973,7 +973,6 @@ impl<D: DB> LedgerState<D> {
                         }
                     }
                 }
-                #[cfg(not(feature = "test-utilities"))]
                 if fees_remaining != 0 {
                     error!(
                         "Reached end of fee accounting stage with {fees_remaining} SPECKs of Dust not paid. This is either a ledger accounting bug, `well_formed` was not checked correctly, or the fee parameters changed after it was checked."
