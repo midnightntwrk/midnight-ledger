@@ -1,0 +1,18 @@
+{
+  "name": "@midnight/zkir-v3",
+  "version": "3.0.0-alpha.1",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "rimraf": "^6.0.0",
+    "lodash": "^4.17.15",
+    "typedoc": "^0.28.0",
+    "typedoc-plugin-markdown": "^4.0.0-next.53"
+  },
+  "type": "module",
+  "scripts": {
+    "build:markdown-docs": "rimraf ../docs/api/zkir-v3 && npx typedoc --plugin typedoc-plugin-markdown zkir-v3.d.ts --out ../docs/api/zkir-v3"
+  },
+  "dependencies": {
+    "typescript": "^5.3.3"
+  }
+}
