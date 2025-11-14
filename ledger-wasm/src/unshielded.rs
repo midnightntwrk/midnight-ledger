@@ -12,7 +12,6 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use ledger::structure::UnshieldedOffer as LedgerUnshieldedOffer;
 use storage::db::InMemoryDB;
@@ -90,14 +89,11 @@ impl UnshieldedOffer {
             .collect::<Result<Vec<_>, _>>()?;
         let mut signatures = signatures
             .into_iter()
-            .map(|sig| Ok::<signatures::Signature, JsError>(from_hex_ser(&sig)?))
+            .map(|sig| from_hex_ser(&sig))
             .collect::<Result<Vec<_>, _>>()?;
         if signatures.len() == inputs.len() {
             signatures = {
-                let mut input_sigs = inputs
-                    .iter()
-                    .zip(signatures.into_iter())
-                    .collect::<Vec<_>>();
+                let mut input_sigs = inputs.iter().zip(signatures).collect::<Vec<_>>();
                 input_sigs.sort();
                 input_sigs.into_iter().map(|(_, s)| s).collect()
             };
@@ -128,7 +124,7 @@ impl UnshieldedOffer {
             Signature(val) => {
                 let sigs = signatures
                     .into_iter()
-                    .map(|sig| Ok::<signatures::Signature, JsError>(from_hex_ser(&sig)?))
+                    .map(|sig| from_hex_ser(&sig))
                     .collect::<Result<Vec<_>, _>>()?;
                 val.add_signatures(sigs);
                 Signature(val.clone())
@@ -136,7 +132,7 @@ impl UnshieldedOffer {
             SignatureErased(val) => {
                 let sigs = signatures
                     .into_iter()
-                    .map(|sig| Ok::<(), JsError>(from_hex_ser(&sig)?))
+                    .map(|sig| from_hex_ser(&sig))
                     .collect::<Result<Vec<_>, _>>()?;
                 val.add_signatures(sigs);
                 SignatureErased(val.clone())
@@ -173,13 +169,13 @@ impl UnshieldedOffer {
                 .inputs
                 .clone()
                 .iter()
-                .map(|v| Ok(utxo_spend_to_value(&v)?))
+                .map(|v| utxo_spend_to_value(&v))
                 .collect(),
             SignatureErased(val) => val
                 .inputs
                 .clone()
                 .iter()
-                .map(|v| Ok(utxo_spend_to_value(&v)?))
+                .map(|v| utxo_spend_to_value(&v))
                 .collect(),
         }
     }
@@ -192,13 +188,13 @@ impl UnshieldedOffer {
                 .outputs
                 .clone()
                 .iter()
-                .map(|v| Ok(utxo_output_to_value(&v)?))
+                .map(|v| utxo_output_to_value(&v))
                 .collect(),
             SignatureErased(val) => val
                 .outputs
                 .clone()
                 .iter()
-                .map(|v| Ok(utxo_output_to_value(&v)?))
+                .map(|v| utxo_output_to_value(&v))
                 .collect(),
         }
     }
@@ -210,12 +206,12 @@ impl UnshieldedOffer {
             Signature(val) => val
                 .signatures
                 .iter_deref()
-                .map(|sig| Ok(to_hex_ser(&sig)?))
+                .map(|sig| to_hex_ser(&sig))
                 .collect(),
             SignatureErased(val) => val
                 .signatures
                 .iter_deref()
-                .map(|sig| Ok(to_hex_ser(&sig)?))
+                .map(|sig| to_hex_ser(&sig))
                 .collect(),
         }
     }

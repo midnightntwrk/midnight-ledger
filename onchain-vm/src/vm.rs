@@ -114,7 +114,7 @@ fn add<E, B: TryInto<u64, Error = E>, D: DB>(
 where
     OnchainProgramError<D>: From<E>,
 {
-    let a_tmp: Result<u64, InvalidBuiltinDecode> = (&**a.as_ref()).try_into();
+    let a_tmp: Result<u64, InvalidBuiltinDecode> = (&**a).try_into();
     let a = a_tmp?;
     let b: u64 = b.try_into()?;
     a.checked_add(b)
@@ -129,7 +129,7 @@ fn sub<E, B: TryInto<u64, Error = E>, D: DB>(
 where
     OnchainProgramError<D>: From<E>,
 {
-    let a: Result<u64, InvalidBuiltinDecode> = (&**a.as_ref()).try_into();
+    let a: Result<u64, InvalidBuiltinDecode> = (&**a).try_into();
     let b: u64 = b.try_into()?;
     a?.checked_sub(b)
         .ok_or(OnchainProgramError::ArithmeticOverflow)
@@ -137,8 +137,8 @@ where
 }
 
 fn lt<D: DB>(a: &Value, b: &Value) -> Result<AlignedValue, OnchainProgramError<D>> {
-    let a: u64 = (&**a.as_ref()).try_into()?;
-    let b: u64 = (&**b.as_ref()).try_into()?;
+    let a: u64 = (&**a).try_into()?;
+    let b: u64 = (&**b).try_into()?;
     Ok((a < b).into())
 }
 
@@ -227,9 +227,7 @@ fn idx<D: DB>(
                 ))
             }
         }
-        _ => Err(OnchainProgramError::TypeError(format!(
-            "tried to idx, only map, array, and bmt are supported"
-        ))),
+        _ => Err(OnchainProgramError::TypeError("tried to idx, only map, array, and bmt are supported".to_string())),
     }
 }
 
@@ -312,12 +310,11 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
     let vnew = VmValue::new;
     let mut gas = RunningCost::default();
     let incr_gas_full = |mut gas: RunningCost, by: RunningCost| {
-        gas = gas + by;
-        if let Some(limit) = gas_limit {
-            if gas.compute_time > limit.compute_time || gas.read_time > limit.read_time {
+        gas += by;
+        if let Some(limit) = gas_limit
+            && (gas.compute_time > limit.compute_time || gas.read_time > limit.read_time) {
                 return Err(OnchainProgramError::OutOfGas);
             }
-        }
         Ok(gas)
     };
     let incr_gas = |gas: RunningCost, by: CostDuration| {
@@ -334,11 +331,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
     let mut steps_executed: usize = 0;
 
     while !program.is_empty() {
-        if let Some(limit) = step_limit {
-            if steps_executed >= limit {
+        if let Some(limit) = step_limit
+            && steps_executed >= limit {
                 break;
             }
-        }
         steps_executed += 1;
 
         let op = &program[0];
@@ -367,7 +363,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
             | Op::Rem { .. } => 2,
             Op::Dup { n } => *n as usize + 1,
             Op::Swap { n } => *n as usize + 2,
-            Op::Idx { path, .. } => path.iter().filter(|key| &**key == &Key::Stack).count() + 1,
+            Op::Idx { path, .. } => path.iter().filter(|key| **key == Key::Stack).count() + 1,
             Op::Ins { n, .. } => *n as usize * 2 + 1,
         };
         let stack_len = stack.len();
@@ -409,7 +405,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                 gas = incr_gas(gas, cost_model.eq)?;
                 let a = stack.pop().unwrap().0.as_cell()?;
                 let b = stack.pop().unwrap().0.as_cell()?;
-                stack.push((vnew(Strong, eq(&*a, &*b)?.into()), CacheKey(None)));
+                stack.push((vnew(Strong, eq(&a, &b)?.into()), CacheKey(None)));
             }
             Type => {
                 let val = stack.pop().unwrap().0.value;
@@ -433,9 +429,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     }
                     StateValue::Array(a) => (incr_gas(gas, cost_model.size_array)?, a.len() as u64),
                     _ => {
-                        return Err(OnchainProgramError::TypeError(format!(
-                            "attempted to take size, only map, array, and bmt are supported"
-                        )));
+                        return Err(OnchainProgramError::TypeError("attempted to take size, only map, array, and bmt are supported".to_string()));
                     }
                 };
                 gas = new_gas;
@@ -563,13 +557,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     vnew(
                         Strong,
                         AlignedValue::from(match &a {
-                            StateValue::BoundedMerkleTree(tree) => tree.root().ok_or_else(|| OnchainProgramError::TypeError(format!(
-                                "attempted to take root of non-rehashed bmt (this should not be possible!)"
-                            )))?,
+                            StateValue::BoundedMerkleTree(tree) => tree.root().ok_or_else(|| OnchainProgramError::TypeError("attempted to take root of non-rehashed bmt (this should not be possible!)".to_string()))?,
                             _ => {
-                                return Err(OnchainProgramError::TypeError(format!(
-                                    "attempted to take root of non bmt"
-                                )));
+                                return Err(OnchainProgramError::TypeError("attempted to take root of non bmt".to_string()));
                             }
                         })
                         .into(),
@@ -589,7 +579,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                 gas = incr_gas(
                     gas,
                     cost_model.popeq_coeff_value_size
-                        * <AlignedValue as Serializable>::serialized_size(&*value) as u64,
+                        * <AlignedValue as Serializable>::serialized_size(value) as u64,
                 )?;
                 if let Some(event) = M::process_read(result, value)? {
                     events.push(event);
@@ -686,9 +676,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         AlignedValue::from(match &map {
                             StateValue::Map(map) => map.contains_key(&key),
                             _ => {
-                                return Err(OnchainProgramError::TypeError(format!(
-                                    "attempted to check membership, only map is supported"
-                                )));
+                                return Err(OnchainProgramError::TypeError("attempted to check membership, only map is supported".to_string()));
                             }
                         })
                         .into(),
@@ -743,9 +731,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                             .rehash(),
                     ),
                     _ => {
-                        return Err(OnchainProgramError::TypeError(format!(
-                            "attempted to rem, only map and bmt are supported",
-                        )));
+                        return Err(OnchainProgramError::TypeError("attempted to rem, only map and bmt are supported".to_string()));
                     }
                 };
                 stack.push((vnew(container.0.strength, container_nxt), container.1));
@@ -772,7 +758,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
             } => {
                 let mut stack_keys = path
                     .iter()
-                    .filter(|key| &**key == &Key::Stack)
+                    .filter(|key| **key == Key::Stack)
                     .map(|_| stack.pop().unwrap().0)
                     .collect::<Vec<_>>()
                     .into_iter();
@@ -994,9 +980,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                             }
                         }
                         _ => {
-                            return Err(OnchainProgramError::TypeError(format!(
-                                "attempted to ins, only array, map, and bmt are supported"
-                            )));
+                            return Err(OnchainProgramError::TypeError("attempted to ins, only array, map, and bmt are supported".to_string()));
                         }
                     };
                     curr.0 = vnew(curr.0.strength & container_str, next);

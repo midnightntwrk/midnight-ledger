@@ -153,7 +153,7 @@ impl Distribution<RecursiveFoo> for Standard {
 
 #[derive(Debug, Storable, Clone, PartialEq, Arbitrary)]
 struct ConcatFoo {
-    foo: Foo,
+    first_foo: Foo,
     other_foo: Foo,
 }
 

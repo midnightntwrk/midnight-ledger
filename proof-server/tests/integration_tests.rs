@@ -66,7 +66,7 @@ fn build_client(timeout: u64) -> Client {
         .unwrap()
 }
 
-pub fn setup_logger() -> () {
+pub fn setup_logger() {
     INIT.call_once(|| {
         env_logger::init_from_env(env_logger::Env::new().default_filter_or("info"));
     });

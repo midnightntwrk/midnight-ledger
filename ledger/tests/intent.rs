@@ -47,6 +47,7 @@ use onchain_runtime::{
 use rand::Rng;
 use rand::{SeedableRng, rngs::StdRng};
 use std::borrow::Cow;
+use std::slice;
 use storage::arena::Sp;
 use storage::db::DB;
 use storage::db::InMemoryDB;
@@ -64,16 +65,15 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    let res = prog
-        .iter()
+
+    prog.iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
             Op::Idx { path, .. } => !path.is_empty(),
             Op::Ins { n, .. } => *n != 0,
             _ => true,
         })
-        .collect::<Vec<_>>();
-    res
+        .collect::<Vec<_>>()
 }
 
 #[cfg(feature = "proving")]
@@ -169,7 +169,7 @@ async fn well_formed_sign_wrong_key() {
         .sign(
             &mut rng,
             segment_id,
-            &[signing_key_f.clone()],
+            slice::from_ref(&signing_key_f.clone()),
             &[signing_key_f],
             &[],
         )
@@ -230,7 +230,7 @@ async fn well_formed_signature_verification_failure_all() {
         .sign(
             &mut rng,
             segment_id,
-            &[signing_key_g.clone()],
+            slice::from_ref(&signing_key_g),
             &[signing_key_f],
             &[],
         )
@@ -338,7 +338,7 @@ async fn unsealed_no_signature_check() {
         .sign(
             &mut rng,
             segment_id,
-            &[signing_key_g.clone()],
+            slice::from_ref(&signing_key_g),
             &[signing_key_f],
             &[],
         )
@@ -1490,8 +1490,6 @@ async fn imbalanced_utxos_1_intent() {
         }) => {
             if overspent_value != -100 {
                 panic!("unbalanced by incorrect amount")
-            } else {
-                ()
             }
         }
         Err(e) => panic!(
@@ -1676,8 +1674,6 @@ async fn imbalanced_utxos_1_intent_fallible() {
         }) => {
             if overspent_value != -100 {
                 panic!("unbalanced by incorrect amount")
-            } else {
-                ()
             }
         }
         Err(e) => panic!(
@@ -2001,7 +1997,7 @@ async fn post_block_update() {
 
     rps = rps.post_block_update(tblock);
 
-    assert!(!rps.time_filter_map.get(time1).is_some());
+    assert!(rps.time_filter_map.get(time1).is_none());
     assert!(rps.time_filter_map.get(time2).is_some());
 
     assert!(!rps.time_filter_map.contains(&hash1));

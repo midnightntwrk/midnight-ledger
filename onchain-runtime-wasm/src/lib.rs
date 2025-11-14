@@ -65,11 +65,7 @@ pub fn from_value_ser<T: Deserializable + Tagged>(
         tagged_deserialize(&mut data.to_vec().as_slice()).map_err(|e| {
             Error::new(
                 ErrorKind::InvalidData,
-                format!(
-                    "Unable to deserialize {}. Error: {}",
-                    struct_name,
-                    e.to_string()
-                ),
+                format!("Unable to deserialize {}. Error: {}", struct_name, e),
             )
         })?,
     )
@@ -82,7 +78,7 @@ pub fn from_value_hex_ser<T: Deserializable>(data: &str) -> Result<T, wasm_bindg
 fn from_hex_ser_checked<T: Deserializable, R: Read>(mut bytes: R) -> Result<T, std::io::Error> {
     let value = T::deserialize(&mut bytes, 0)?;
 
-    let count = bytes.bytes().count();
+    let count = std::io::BufReader::new(bytes).bytes().count();
 
     if count == 0 {
         return Ok(value);
