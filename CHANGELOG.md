@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- Remove special-casing of validation behaviour depending on the
+  `test-utilities` feature being present.
+
 ## 6.1.0
 
 - breaking: feat: Add real cost model

@@ -567,13 +567,13 @@ impl Transaction {
             | UnprovenWithSignatureErasedPreBinding(_)
             | UnprovenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureNoBinding(_)
+            | ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureErasedNoBinding(_) => Err(JsError::new(
-                "Transaction hash is available for proven transactions only.",
+                "Transaction hash is available for proven, signed and bound transactions only.",
             )),
-            ProvenWithSignaturePreBinding(val) => to_hex_ser(&val.transaction_hash()),
             ProvenWithSignatureBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedPreBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedBinding(val) => to_hex_ser(&val.transaction_hash()),
         }
     }
 
