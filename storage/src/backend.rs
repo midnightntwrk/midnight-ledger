@@ -1200,7 +1200,7 @@ pub(crate) mod raw_node {
 
 #[cfg(test)]
 mod tests {
-    use crate as storage;
+    use crate::{self as storage, storable::child_from};
     use crypto::digest::Digest;
     use derive_where::derive_where;
     use raw_node::RawNode;
@@ -1417,13 +1417,26 @@ mod tests {
         };
         let (child_key, child_bytes) = in_database_repr(child.clone());
         let (parent_key, parent_bytes) = in_database_repr(parent.clone());
-        let (_gp_key, gp_bytes) = in_database_repr(gp.clone());
+        let (gp_key, gp_bytes) = in_database_repr(gp.clone());
+
+        let child_child_repr = child_from(&child_bytes, &[]);
+        let parent_child_repr = child_from(&parent_bytes, &[child_child_repr.clone()]);
+        let gp_child_repr = child_from(
+            &gp_bytes,
+            &[parent_child_repr.clone(), child_child_repr.clone()],
+        );
+
+        let keys_to_childref = HashMap::from([
+            (child_key.clone(), child_child_repr.clone()),
+            (parent_key.clone(), parent_child_repr.clone()),
+            (gp_key.clone(), gp_child_repr.clone()),
+        ]);
 
         // Test that `Storable` is implemented correctly on `TestNode`.
         let child_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut child_bytes.clone().as_slice(),
             &mut vec![].into_iter(),
-            &IrLoader::new(arena, &HashMap::new()),
+            &IrLoader::new(arena, &HashMap::new(), HashMap::new()),
         )
         .unwrap();
         assert_eq!(child_reconstructed, child);
@@ -1434,7 +1447,7 @@ mod tests {
         let parent_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut parent_bytes.clone().as_slice(),
             &mut vec![ArenaKey::Ref(child_key.clone())].into_iter(),
-            &IrLoader::new(arena, &all),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(parent_reconstructed, parent);
@@ -1449,7 +1462,7 @@ mod tests {
                 ArenaKey::Ref(child_key.clone()),
             ]
             .into_iter(),
-            &IrLoader::new(arena, &all),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(gp_reconstructed, gp);

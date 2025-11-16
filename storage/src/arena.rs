@@ -840,12 +840,30 @@ impl<D: DB> Arena<D> {
             result = Ok(root);
         }
 
-        // TODO: Suggested fix for missing ArenaKey representation: do a graph-walk bottom-up on
-        // `nodes`, to build a map from ArenaHash -> ArenaKey, using `child_from`.
-        // Pass this into IrLoader, and use it during `get`
-        //
-        // Might make sense to make this part of the topological sort, as things might be in a
-        // better representation at that point.
+        let mut key_to_child_repr: HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<D::Hasher>> =
+            std::collections::HashMap::new();
+        for node in nodes.nodes.iter() {
+            let children = node
+                .child_indices
+                .iter()
+                .map(|i| {
+                    idx_existing_nodes(&existing_nodes, *i)
+                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let root = hash::<D::Hasher>(&node.data, children.iter());
+            let children = children
+                .iter()
+                .map(|h| {
+                    key_to_child_repr.get(h).ok_or(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        "child not in key_to_child_repr",
+                    ))
+                })
+                .map(|r| r.cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            key_to_child_repr.insert(root, child_from(&node.data, &children));
+        }
 
         let key = result?;
         let res: Sp<T, D> = IrLoader {
@@ -861,6 +879,7 @@ impl<D: DB> Arena<D> {
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            key_to_child_repr,
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1010,6 +1029,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
+    key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
 }
 
 #[cfg(test)]
@@ -1017,12 +1037,14 @@ impl<'a, D: DB> IrLoader<'a, D> {
     pub(crate) fn new(
         arena: &'a Arena<D>,
         all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
+        key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
     ) -> IrLoader<'a, D> {
         IrLoader {
             arena,
             all,
             recursion_depth: 0,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            key_to_child_repr,
         }
     }
 }
@@ -1087,13 +1109,19 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             all: self.all,
             recursion_depth: self.recursion_depth + 1,
             visited: self.visited.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
         };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
             // FIXME: This should not be directly constructing a Ref!
             // We need to make sure this is the correct small nodes representation of these child
             // nodes
-            &mut ir.children.clone().into_iter().map(ArenaKey::Ref),
+            &mut ir.children.clone().into_iter().map(|k| {
+                self.key_to_child_repr
+                    .get(&k)
+                    .expect("should be able to convert child ArenaHash to ArenaKey")
+                    .clone()
+            }),
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
@@ -1765,6 +1793,100 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
             .arena
             .clone()
             .deserialize_sp(reader, recursive_depth)
+    }
+}
+
+#[derive_where(Clone)]
+/// An opaque storable data structure. Any storable data can be read as an opaque object, but
+/// cannot be practically mutated from there.
+pub struct Opaque<D: DB> {
+    data: Vec<u8>,
+    children: Vec<Sp<dyn Any + Send + Sync, D>>,
+}
+
+//NOTE: copied from branch `tkerber/translation-test`
+impl<D: DB> Storable<D> for Opaque<D> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        self.children.iter().map(|child| child.as_child()).collect()
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        writer.write_all(&self.data)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        let children = child_nodes
+            .map(|hash| loader.get::<Opaque<_>>(&hash).map(|sp| sp.upcast()))
+            .collect::<Result<_, _>>()?;
+        Ok(Self { data, children })
+    }
+}
+
+impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        match &self.child_repr {
+            ArenaKey::Direct(key) => key.children.deref().clone(),
+            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+                backend
+                    .get(hash)
+                    .expect("ref Sp must be in backend")
+                    .children
+                    .clone()
+            }),
+        }
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        Opaque::from_binary_repr(reader, child_nodes, loader).map(|opaque| Sp::new(opaque).upcast())
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        match &self.child_repr {
+            ArenaKey::Direct(key) => writer.write_all(&key.data),
+            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+                writer.write_all(&backend.get(hash).expect("ref Sp must be in backend").data)
+            }),
+        }
+    }
+}
+
+impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
+    /// Casts this pointer into a dynamically typed `Any` pointer.
+    pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
+            Some(arc) => {
+                let dyn_arc: Arc<dyn Any + Send + Sync> = arc.clone();
+                dyn_arc.into()
+            }
+            None => OnceLock::new(),
+        };
+        Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        }
     }
 }
 

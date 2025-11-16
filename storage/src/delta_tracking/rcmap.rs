@@ -13,7 +13,7 @@
 
 //! Reference count map for tracking charged keys in write and delete costing
 use crate::Storable;
-use crate::arena::{ArenaHash, ArenaKey};
+use crate::arena::{ArenaHash, ArenaKey, Opaque, Sp};
 use crate::db::DB;
 use crate::storable::Loader;
 use crate::storage::{Map, default_storage};
@@ -21,6 +21,7 @@ use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
 use serialize::{Deserializable, Serializable, Tagged};
+use std::any::Any;
 #[cfg(test)]
 use std::collections::HashMap;
 use std::collections::HashSet as StdHashSet;
@@ -53,14 +54,7 @@ struct ChildRef<D: DB> {
 // are just thin wrappers around refcount updates)
 impl<D: DB> ChildRef<D> {
     fn new(child: ArenaKey<D::Hasher>) -> Self {
-        // FIXME this *will* panic if `child` is not already allocated. That's not guaranteed,
-        // because it may come from a malicious serialization, and while this must include *data*
-        // for the child element (because it is deserializing the Sp DAG), this data is *only*
-        // guaranteed to be in the Loader, *not* the backend, because it is never actually loaded.
-        //
-        // Suggested fix: Actually load this child element in `ChildRef::from_binary_repr`, by
-        // loading an Sp<dyn Any + Send + Sync>, *then* construct the ChildRef,
-        // *then* drop the Sp.
+        // this *will* panic if `child` is not already allocated. 
         default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
         Self { child }
     }
@@ -104,8 +98,11 @@ impl<D: DB> Storable<D> for ChildRef<D> {
         reader.read_to_end(&mut data)?;
         if children.len() == 1 && data.is_empty() {
             let child = children.pop().expect("must be present");
-            //loader.get(&child)?;
-            Ok(Self::new(child))
+            let mut sp: Sp<Opaque<D>, D> = loader.get(&child)?;
+            sp.persist();
+            let child_ref = Self::new(child);
+            sp.unpersist();
+            Ok(child_ref)
         } else {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
