@@ -65,4 +65,4 @@ hex = "^0.4.3"
 [[bench]]
 name = "benchmarking"
 harness = false
-required-features = ["proving", "dust"]
+required-features = ["proving"]
