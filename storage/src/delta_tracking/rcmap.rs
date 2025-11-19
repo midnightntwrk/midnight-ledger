@@ -54,7 +54,7 @@ struct ChildRef<D: DB> {
 // are just thin wrappers around refcount updates)
 impl<D: DB> ChildRef<D> {
     fn new(child: ArenaKey<D::Hasher>) -> Self {
-        // this *will* panic if `child` is not already allocated. 
+        // this *will* panic if `child` is not already allocated.
         default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
         Self { child }
     }

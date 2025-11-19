@@ -374,7 +374,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
                             Ok(children.0)
                         })
                         .unwrap();
-                    for child in children {
+                    for child in children.iter().flat_map(|k| k.refs()) {
                         dec_ref_count.execute(params![child]).unwrap();
                     }
                     delete_node.execute(params![key]).unwrap();
