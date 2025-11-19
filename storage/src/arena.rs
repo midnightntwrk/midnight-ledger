@@ -1068,7 +1068,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
                     &mut child.children.iter().map(|child| child.clone()),
                     self,
                 )?;
-                return Ok(Sp::new(value));
+                return Ok(self.arena.alloc(value));
             }
             ArenaKey::Ref(key) => key,
         };
