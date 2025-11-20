@@ -116,7 +116,7 @@ impl ParamsVerifier {
     }
 }
 
-const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../../static/bls_filecoin_2p14");
+const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_filecoin_2p14");
 
 lazy_static! {
     /// The filecoin verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
