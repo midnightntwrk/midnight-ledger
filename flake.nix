@@ -490,7 +490,7 @@
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_100
+              pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];
