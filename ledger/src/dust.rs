@@ -314,8 +314,7 @@ impl DustOutput {
         } else {
             0
         };
-        let value_phase_3 = value_phase_12.saturating_sub(dt_phase_3.saturating_mul(rate));
-        value_phase_3
+        value_phase_12.saturating_sub(dt_phase_3.saturating_mul(rate))
     }
 
     pub fn commitment(&self) -> DustCommitment {
@@ -613,7 +612,7 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
                 P::latest_proof_verify(
-                    &*SPEND_VK,
+                    &SPEND_VK,
                     &self.proof,
                     pis,
                     strictness.proof_verification_mode,
@@ -658,7 +657,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
                 S::signature_verify(
                     &parent.data_to_sign(segment_id),
                     self.night_key.clone(),
-                    &sig,
+                    sig,
                 )
             }) == Some(true)
         {
@@ -666,7 +665,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
         } else {
             warn!(registration = ?self, "signature verification of dust registration failed");
             Err(MalformedTransaction::InvalidDustRegistrationSignature {
-                registration: self.erase_signatures(),
+                registration: Box::new(self.erase_signatures()),
             })
         }
     }
@@ -790,7 +789,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
                                     "insufficient fees to cover registration fee allowance"
                                 );
                                 Err(MalformedTransaction::InsufficientDustForRegistrationFee {
-                                    registration: reg.erase_signatures(),
+                                    registration: Box::new(reg.erase_signatures()),
                                     available_dust: available,
                                 })
                             } else {
@@ -1066,7 +1065,7 @@ impl<D: DB> DustState<D> {
         };
         if self.generation.generating_set.member(&gen_info.into()) {
             warn!(?gen_info, "already present generation info");
-            return Err(GenerationInfoAlreadyPresentError(gen_info.clone()));
+            return Err(GenerationInfoAlreadyPresentError(gen_info));
         }
         state.generation.generating_set = state.generation.generating_set.insert(gen_info.into());
         state.generation.generating_tree = state.generation.generating_tree.update_hash(
@@ -1157,7 +1156,7 @@ impl<D: DB> DustState<D> {
                 .generation
                 .generating_tree
                 .index(*idx)
-                .map(|gen_info| gen_info.1.clone())
+                .map(|gen_info| *gen_info.1)
             else {
                 error!(utxo = ?Utxo::from(input.clone()), ?idx, "invariant violated: `night_indices` reference not backed in `generating_tree`");
                 debug_assert!(false);
@@ -1258,9 +1257,9 @@ tag_enforcement_test!(DustWalletUtxoState);
 
 #[derive(Debug)]
 pub enum DustSpendError {
-    BackingNightNotFound(QualifiedDustOutput),
+    BackingNightNotFound(Box<QualifiedDustOutput>),
     NotEnoughDust { available: u128, required: u128 },
-    DustUtxoNotTracked(QualifiedDustOutput),
+    DustUtxoNotTracked(Box<QualifiedDustOutput>),
     MerkleTreeNotRehashed(&'static str),
 }
 
@@ -1360,11 +1359,11 @@ impl<D: DB> DustLocalState<D> {
         let gen_idx = *self
             .night_indices
             .get(&utxo.backing_night)
-            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?;
+            .ok_or(DustSpendError::BackingNightNotFound(Box::new(*utxo)))?;
         let gen_info = self
             .generating_tree
             .index(gen_idx)
-            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?
+            .ok_or(DustSpendError::BackingNightNotFound(Box::new(*utxo)))?
             .1;
         // TODO: Fixme: This is assuming that `generating_tree` *is* associated
         // with `ctime`. That seems backwards? We should figure out what `ctime`
@@ -1372,13 +1371,13 @@ impl<D: DB> DustLocalState<D> {
         let gen_path = self
             .generating_tree
             .path_for_leaf(gen_idx, gen_info.merkle_hash())
-            .map_err(|_| DustSpendError::BackingNightNotFound(*utxo))?;
+            .map_err(|_| DustSpendError::BackingNightNotFound(Box::new(*utxo)))?;
         let old_com = utxo.commitment();
         let old_nul = utxo.nullifier(sk);
         let com_path = self
             .commitment_tree
             .path_for_leaf(utxo.mt_index, HashOutput::from(old_com))
-            .map_err(|_| DustSpendError::DustUtxoNotTracked(*utxo))?;
+            .map_err(|_| DustSpendError::DustUtxoNotTracked(Box::new(*utxo)))?;
         let v_new = DustOutput::from(*utxo).updated_value(gen_info, ctime, &self.params);
         if v_fee > v_new {
             return Err(DustSpendError::NotEnoughDust {
@@ -1398,11 +1397,10 @@ impl<D: DB> DustLocalState<D> {
             seq: utxo.seq + 1,
         };
         let new_commitment = new_output.commitment();
-        let mut utxo_entry = (*state
+        let mut utxo_entry = *state
             .dust_utxos
             .get(&old_nullifier)
-            .ok_or_else(|| DustSpendError::DustUtxoNotTracked(*utxo))?)
-        .clone();
+            .ok_or(DustSpendError::DustUtxoNotTracked(Box::new(*utxo)))?;
         utxo_entry.pending_until = Some(ctime + self.params.dust_grace_period);
         state.dust_utxos = state.dust_utxos.insert(old_nullifier, utxo_entry);
         let inputs = (
@@ -1470,7 +1468,7 @@ impl<D: DB> DustLocalState<D> {
                 true.into(),                 // nullifier root check
                 erased_spend.clone().into(), // dust spend read
                 ctime.into(),                // ctime read
-                self.params.clone().into(),  // parameter read
+                self.params.into(),          // parameter read
                 ctime.into(),                // ctime read
             ]
             .into_iter(),
@@ -1619,7 +1617,7 @@ impl<D: DB> DustLocalState<D> {
                         (),
                     );
                     state.commitment_tree_first_free += 1;
-                    if let Some(utxo) = state.dust_utxos.get(&nullifier) {
+                    if let Some(utxo) = state.dust_utxos.get(nullifier) {
                         if let Some(gen_idx) = state.night_indices.get(&utxo.utxo.backing_night) {
                             let gen_info = state.generating_tree.index(*gen_idx).unwrap().1;
                             let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
@@ -1628,7 +1626,7 @@ impl<D: DB> DustLocalState<D> {
                                 &self.params,
                             );
                             let v_now = v_pre_spend.saturating_sub(*v_fee);
-                            state.dust_utxos = state.dust_utxos.remove(&nullifier);
+                            state.dust_utxos = state.dust_utxos.remove(nullifier);
                             let qdo_new = QualifiedDustOutput {
                                 backing_night: utxo.utxo.backing_night,
                                 ctime: *declared_time,

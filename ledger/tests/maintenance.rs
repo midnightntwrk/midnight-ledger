@@ -301,7 +301,7 @@ fn maintenance() {
         dbg!(&tx);
         assert!(matches!(
             dbg!(tx.well_formed(&state.ledger, strictness, state.time)),
-            Err(MalformedTransaction::NotNormalized { .. })
+            Err(MalformedTransaction::NotNormalized)
         ));
     }
 
@@ -317,7 +317,7 @@ fn maintenance() {
         dbg!(&tx);
         assert!(matches!(
             dbg!(tx.well_formed(&state.ledger, strictness, state.time)),
-            Err(MalformedTransaction::NotNormalized { .. })
+            Err(MalformedTransaction::NotNormalized)
         ));
     }
 

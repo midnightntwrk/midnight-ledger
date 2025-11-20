@@ -356,9 +356,9 @@ impl Serialize for TokenType {
     {
         let bytes = match self {
             TokenType::Unshielded(data) => {
-                once(UNSHIELDED_TAG).chain(data.0.0.into_iter()).collect()
+                once(UNSHIELDED_TAG).chain(data.0.0).collect()
             }
-            TokenType::Shielded(data) => once(SHIELDED_TAG).chain(data.0.0.into_iter()).collect(),
+            TokenType::Shielded(data) => once(SHIELDED_TAG).chain(data.0.0).collect(),
             TokenType::Dust => vec![DUST_TAG],
         };
         serializer.serialize_bytes(&bytes)
