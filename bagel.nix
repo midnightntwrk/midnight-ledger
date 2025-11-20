@@ -36,7 +36,7 @@ let
       inherit stdenv;
   }).overrideScope (final: prev: {
     cargoBuildHook = prev.cargoBuildHook.overrideDerivation (_: {
-      rustcTarget = "wasm32-unknown-unknown";
+      rustcTargetSpec = "wasm32-unknown-unknown";
     });
     cargoInstallHook = pkgs.hello;
   })).buildRustPackage ({
@@ -166,7 +166,7 @@ in pkgs.stdenvNoCC.mkDerivation {
     pkgs.nodejs
     pkgs.coreutils
     pkgs.gnused
-    pkgs.wasm-bindgen-cli_0_2_100
+    pkgs.wasm-bindgen-cli_0_2_104
     pkgs.binaryen
   ];
 }
