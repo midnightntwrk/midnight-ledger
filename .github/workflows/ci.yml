@@ -305,7 +305,7 @@ jobs:
           nix develop .#ci -c cargo config -Z unstable-options get net.git-fetch-with-cli
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results.json
           # Filter is a workaround for johnterickson/cargo2junit#85
-          jq -cR 'fromjson? | select( .type != "report" )' test-results.json | cargo2junit > ../target/test-results.xml
+          jq -cR 'fromjson? | select( .type != "report" )' test-results.json | cargo2junit > ./target/test-results.xml
           cp test-results.json ./target/
 
       - name: Build and Test - Proof server (default features)
