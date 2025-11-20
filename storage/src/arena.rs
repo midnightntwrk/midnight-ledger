@@ -1113,9 +1113,6 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
         };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
-            // FIXME: This should not be directly constructing a Ref!
-            // We need to make sure this is the correct small nodes representation of these child
-            // nodes
             &mut ir.children.clone().into_iter().map(|k| {
                 self.key_to_child_repr
                     .get(&k)
