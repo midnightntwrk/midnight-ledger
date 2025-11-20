@@ -14,7 +14,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom = { version = "^0.2.8", features = ["js"] }
-wasm-bindgen = "=0.2.100"
+wasm-bindgen = "=0.2.105"
 wasm-bindgen-futures = "^0.4.50"
 js-sys = "^0.3.61"
 hex = "^0.4.3"

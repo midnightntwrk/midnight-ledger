@@ -19,7 +19,7 @@ coin-structure = { path = "../coin-structure", package = "midnight-coin-structur
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom = { version = "^0.2.16", features = ["js"] }
-wasm-bindgen = "=0.2.100"
+wasm-bindgen = "=0.2.105"
 serde = "^1.0.219"
 serde_bytes = "^0.11.17"
 serde-wasm-bindgen = "^0.6.5"
