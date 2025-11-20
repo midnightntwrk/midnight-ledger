@@ -304,14 +304,16 @@ jobs:
           cargo install cargo2junit
           nix develop .#ci -c cargo config -Z unstable-options get net.git-fetch-with-cli
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results.json
-          cat test-results.json | cargo2junit > ./target/test-results.xml
+          # Filter is a workaround for johnterickson/cargo2junit#85
+          jq -cR 'fromjson? | select( .type != "report" )' test-results.json | cargo2junit > ../target/test-results.xml
           cp test-results.json ./target/
 
       - name: Build and Test - Proof server (default features)
         run: |
           cd proof-server
           nix develop .#ci -c cargo test --release -- -Z unstable-options --format json --report-time --nocapture --test-threads=1 | tee test-results-proof-server.json
-          cat test-results-proof-server.json | cargo2junit > ../target/test-results-proof-server.xml
+          # Filter is a workaround for johnterickson/cargo2junit#85
+          jq -cR 'fromjson? | select( .type != "report" )' test-results-proof-server.json | cargo2junit > ../target/test-results-proof-server.xml
           cp test-results-proof-server.json ../target/
 
       - name: Build Docs
