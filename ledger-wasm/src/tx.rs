@@ -1391,7 +1391,7 @@ impl ClaimRewardsTransaction {
     pub fn data_to_sign(&self) -> Uint8Array {
         use ClaimRewardsTransactionTypes::*;
         match &self.0 {
-            SignatureClaimRewards(val) => val.data_to_sign().as_slice().into(),
+            SignatureClaimRewards(val) => val.erase_signatures().data_to_sign().as_slice().into(),
             SignatureErasedClaimRewards(val) => val.data_to_sign().as_slice().into(),
         }
     }

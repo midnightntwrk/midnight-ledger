@@ -1643,14 +1643,16 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
             kind: self.kind,
         }
     }
+}
 
+impl<D: DB> ClaimRewardsTransaction<(), D> {
     pub fn data_to_sign(&self) -> Vec<u8> {
         let mut data = Vec::new();
         data.extend(b"midnight:sig-claim_rewards_transaction:");
-        Self::to_hash_data((*self).clone(), data)
+        Self::to_hash_data(self.clone(), data)
     }
 
-    pub fn to_hash_data(rewards: ClaimRewardsTransaction<S, D>, mut data: Vec<u8>) -> Vec<u8> {
+    pub fn to_hash_data(rewards: ClaimRewardsTransaction<(), D>, mut data: Vec<u8>) -> Vec<u8> {
         Serializable::serialize(&rewards.value, &mut data)
             .expect("In-memory serialization should succeed");
         Serializable::serialize(&rewards.owner, &mut data)
