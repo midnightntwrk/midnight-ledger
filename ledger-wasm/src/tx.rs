@@ -1237,17 +1237,23 @@ impl From<ledger::structure::ClaimRewardsTransaction<(), InMemoryDB>> for ClaimR
 #[wasm_bindgen]
 impl ClaimRewardsTransaction {
     #[wasm_bindgen(constructor)]
-    pub fn new(
+    pub fn construct(
         signature_marker: &str,
         network_id: String,
         value: BigInt,
         owner: &str,
         nonce: &str,
         signature: JsValue,
+        kind: JsValue,
     ) -> Result<ClaimRewardsTransaction, JsError> {
         let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
+        let kind = if kind.is_null() || kind.is_undefined() {
+            ledger::structure::ClaimKind::Reward
+        } else {
+            text_to_claim_kind(&String::from(JsString::from(kind)))?
+        };
 
         use ClaimRewardsTransactionTypes::*;
         use Signaturish::*;
@@ -1264,7 +1270,7 @@ impl ClaimRewardsTransaction {
                     owner,
                     nonce,
                     signature: signature.deref().0.clone(),
-                    kind: ledger::structure::ClaimKind::Reward,
+                    kind,
                 })
             }
             SignatureErased => {
@@ -1277,10 +1283,46 @@ impl ClaimRewardsTransaction {
                     owner,
                     nonce,
                     signature: (),
-                    kind: ledger::structure::ClaimKind::Reward,
+                    kind,
                 })
             }
         }))
+    }
+
+    pub fn new(
+        network_id: String,
+        value: BigInt,
+        owner: &str,
+        nonce: &str,
+        kind: &str,
+    ) -> Result<ClaimRewardsTransaction, JsError> {
+        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
+        let nonce = Nonce(from_hex_ser(nonce)?);
+        let kind = text_to_claim_kind(kind)?;
+        use ClaimRewardsTransactionTypes::*;
+        Ok(ClaimRewardsTransaction(SignatureErasedClaimRewards(
+            ledger::structure::ClaimRewardsTransaction {
+                network_id,
+                value,
+                owner,
+                nonce,
+                signature: (),
+                kind,
+            },
+        )))
+    }
+
+    #[wasm_bindgen(js_name = "addSignature")]
+    pub fn add_signature(&self, signature: &str) -> Result<ClaimRewardsTransaction, JsError> {
+        let signature: Signature = from_hex_ser(signature)?;
+        use ClaimRewardsTransactionTypes::*;
+        Ok(ClaimRewardsTransaction(SignatureClaimRewards(
+            match &self.0 {
+                SignatureClaimRewards(val) => val.add_signature(signature),
+                SignatureErasedClaimRewards(val) => val.add_signature(signature),
+            },
+        )))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
@@ -1349,7 +1391,7 @@ impl ClaimRewardsTransaction {
     pub fn data_to_sign(&self) -> Uint8Array {
         use ClaimRewardsTransactionTypes::*;
         match &self.0 {
-            SignatureClaimRewards(val) => val.data_to_sign().as_slice().into(),
+            SignatureClaimRewards(val) => val.erase_signatures().data_to_sign().as_slice().into(),
             SignatureErasedClaimRewards(val) => val.data_to_sign().as_slice().into(),
         }
     }
