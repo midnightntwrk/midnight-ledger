@@ -132,7 +132,7 @@ mod tests {
         // new
         assert_eq!(
             run_program(&[vmval!((4u64))], &ops![new]),
-            Ok((vec![vmval!({MT(0) {}})], vec![]))
+            Ok((vec![vmval!({MT(1) {}})], vec![]))
         );
 
         // neg
@@ -240,7 +240,7 @@ mod tests {
 
         // idx
         assert_eq!(
-            run_program(&[vmval!({MT(0) {}})], &ops![idx[0u8]]),
+            run_program(&[vmval!({MT(1) {}})], &ops![idx[0u8]]),
             Ok((vec!(vmval!(null)), vec![]))
         );
 

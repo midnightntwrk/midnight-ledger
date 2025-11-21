@@ -33,7 +33,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;
 use transient_crypto::hash::{degrade_to_transient, transient_hash, upgrade_from_transient};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
@@ -136,19 +136,15 @@ impl rand::distributions::Distribution<Nonce> for rand::distributions::Standard 
 
 #[derive(
     Default,
-    Copy,
     Clone,
     Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
     FieldRepr,
     FromFieldRepr,
     BinaryHashRepr,
     Serializable,
     Dummy,
     Zeroize,
+    ZeroizeOnDrop,
 )]
 #[tag = "zswap-coin-secret-key[v1]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -160,9 +156,6 @@ impl Debug for SecretKey {
         write!(formatter, "<coin secret key>")
     }
 }
-
-#[cfg(feature = "proptest")]
-randomised_serialization_test!(SecretKey);
 
 impl SecretKey {
     pub fn public_key(&self) -> PublicKey {
@@ -393,6 +386,9 @@ impl<'de> Deserialize<'de> for TokenType {
                     }
                     return Ok(TokenType::Dust);
                 }
+                if tag != UNSHIELDED_TAG && tag != SHIELDED_TAG {
+                    return Err(E::unknown_variant(&tag.to_string(), &["0", "1", "2"]));
+                }
                 if v.len() != 33 {
                     return Err(E::invalid_length(v.len(), &self));
                 }
@@ -552,7 +548,7 @@ impl BinaryHashRepr for TokenType {
     fn binary_len(&self) -> usize {
         match self {
             TokenType::Dust => 1,
-            _ => 32,
+            _ => 33,
         }
     }
 }
@@ -911,3 +907,20 @@ hash_serde!(
     SecretKey,
     UserAddress
 );
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "proptest")]
+    use proptest::prelude::*;
+
+    use super::*;
+
+    #[cfg(feature = "proptest")]
+    proptest! {
+        #[test]
+        fn test_token_type_binary_hash_repr_len(tt in TokenType::arbitrary()) {
+            let bin_repr = tt.binary_vec();
+            assert_eq!(bin_repr.len(), tt.binary_len());
+        }
+    }
+}

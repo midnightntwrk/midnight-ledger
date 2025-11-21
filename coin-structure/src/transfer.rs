@@ -56,7 +56,7 @@ impl FieldRepr for Recipient {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serializable, Dummy)]
+#[derive(Debug, Clone, Hash, Serializable, Dummy)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub enum SenderEvidence {
     User(SecretKey),

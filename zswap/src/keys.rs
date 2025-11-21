@@ -34,6 +34,7 @@ use crate::error::OfferCreationFailed;
 use crate::structure::*;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Seed([u8; 32]);
 
 impl Debug for Seed {

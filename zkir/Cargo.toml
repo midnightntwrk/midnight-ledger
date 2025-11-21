@@ -12,7 +12,7 @@ required-features = ["binary"]
 [features]
 binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
 proptest = [
-  "dep:paste",
+  "dep:pastey",
   "dep:proptest",
   "dep:proptest-derive",
   "base-crypto/proptest",
@@ -50,7 +50,7 @@ indicatif = { version = "^0.17.11", optional = true }
 console = { version = "^0.15.11", optional = true }
 futures-executor = { version = "^0.3.31", optional = true }
 
-paste = { version = "1.0.14", optional = true }
+pastey = { version = "0.1.1", optional = true }
 proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 

@@ -33,8 +33,6 @@ pub const PERSISTENT_HASH_BYTES: usize = 32;
     Copy,
     Clone,
     Default,
-    PartialEq,
-    Eq,
     PartialOrd,
     Ord,
     Hash,
@@ -48,6 +46,14 @@ pub const PERSISTENT_HASH_BYTES: usize = 32;
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct HashOutput(pub [u8; PERSISTENT_HASH_BYTES]);
 tag_enforcement_test!(HashOutput);
+
+impl PartialEq for HashOutput {
+    fn eq(&self, other: &Self) -> bool {
+        subtle::ConstantTimeEq::ct_eq(&self.0[..], &other.0[..]).into()
+    }
+}
+
+impl Eq for HashOutput {}
 
 impl Tagged for HashOutput {
     fn tag() -> std::borrow::Cow<'static, str> {

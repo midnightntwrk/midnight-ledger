@@ -582,7 +582,7 @@ macro_rules! tag_enforcement_test {
     };
     ($type:ident < $($targ:ty),* >) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             #[allow(non_snake_case)]
             #[test]
             fn [<tag_enforcement_test_ $type>]() {
@@ -613,7 +613,7 @@ macro_rules! randomised_tagged_serialization_test {
     };
     ($type:ident < $($targ:ty),* >) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             #[allow(non_snake_case)]
             #[test]
             fn [<proptest_deserialize_tagged_ $type>]() where $type<$($targ),*>: proptest::prelude::Arbitrary {
@@ -641,7 +641,7 @@ macro_rules! randomised_serialization_test {
     };
     ($type:ident < $($targ:ty),* >) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             #[allow(non_snake_case)]
             #[test]
             fn [<proptest_deserialize_ $type>]() where $type<$($targ),*>: proptest::prelude::Arbitrary {

@@ -18,7 +18,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = "^0.8.0"
-paste = "1.0.15"
+pastey = "0.1.1"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = "~1.6.0"
 derive-where = "^1.5.0"
