@@ -19,8 +19,7 @@ use derive_where::derive_where;
 use serialize::tag_enforcement_test;
 use serialize::{Deserializable, Serializable, Tagged};
 use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::arena::Sp;
+use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::storable::Loader;
 // #[cfg(feature = "proptest")] TODO WG

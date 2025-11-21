@@ -139,7 +139,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let new_sp = arena.alloc(StateValue::Map(new_map.clone()));
 
         // Build rcmap from old state
-        let old_root = old_sp.hash().into();
+        let old_root = old_sp.as_child();
         let old_roots = StdHashSet::from([old_root]);
         println!("get_writes(old_roots)");
         let keys_for_rcmap = get_writes::<DefaultDB>(&RcMap::default(), &old_roots);
@@ -147,7 +147,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let old_rcmap = update_rcmap(&RcMap::default(), &keys_for_rcmap);
 
         // Get new state roots
-        let new_root = new_sp.hash().into();
+        let new_root = new_sp.as_child();
         let new_roots = StdHashSet::from([new_root]);
 
         // Pre-compute keys_added and keys_removed
