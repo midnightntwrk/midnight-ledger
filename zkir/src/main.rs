@@ -152,7 +152,7 @@ async fn main() -> anyhow::Result<()> {
             write!(term, "Mock compiling circuit {ir_file:?}")?;
             term.flush()?;
             let ir = maybe_bzkir(ir_file)?;
-            let model = ir.model(None);
+            let model = ir.model();
             writeln!(term, " (k={}, rows={})", model.k(), model.rows())?;
             info!(?model, "full model");
         }
@@ -165,7 +165,7 @@ async fn main() -> anyhow::Result<()> {
                 term.flush()?;
                 let path = ir_dir.join(file);
                 let ir = without_extension(path)?;
-                let model = ir.model(None);
+                let model = ir.model();
                 writeln!(term, " (k={}, rows={})", model.k(), model.rows())?;
                 info!(?model, "full model for {file:?}");
             }
@@ -196,7 +196,7 @@ async fn main() -> anyhow::Result<()> {
                 let ir = without_extension(path)?;
                 let k = ir.k();
                 pb.set_message(format!("  circuit {file:?} (k={k})"));
-                let model = ir.model(None);
+                let model = ir.model();
                 pb.set_message(format!("  circuit {file:?} (k={k}, rows={})", model.rows()));
                 info!(?model, "full model for {file:?}");
                 data.push((pb, ir, k));
@@ -242,7 +242,7 @@ async fn main() -> anyhow::Result<()> {
             let mut pk_file = BufWriter::new(File::create(prover_key)?);
             let mut vk_file = BufWriter::new(File::create(verifier_key)?);
             let k = ir.k();
-            let model = ir.model(None);
+            let model = ir.model();
             write!(term, " (k={k}, rows={})", model.rows())?;
             info!(?model, "full model");
             term.flush()?;

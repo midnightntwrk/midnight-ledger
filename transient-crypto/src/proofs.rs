@@ -77,7 +77,7 @@ impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
 
 /// A specific instance of the prover parameters.
 #[derive(Clone)]
-pub struct ParamsProver(Arc<ParamsKZG<Bls12>>);
+pub struct ParamsProver(pub Arc<ParamsKZG<Bls12>>);
 
 impl AsRef<ParamsKZG<Bls12>> for ParamsProver {
     fn as_ref(&self) -> &ParamsKZG<Bls12> {
@@ -238,10 +238,10 @@ pub(crate) enum InnerProverKey<T: Zkir> {
 
 impl<T: Zkir> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
-        Cow::Owned(format!("prover-key[v5]({})", T::tag()))
+        Cow::Owned(format!("prover-key[v6]({})", T::tag()))
     }
     fn tag_unique_factor() -> String {
-        format!("prover-key[v5]({})", T::tag())
+        format!("prover-key[v6]({})", T::tag())
     }
 }
 
@@ -372,10 +372,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v4]")
+        Cow::Borrowed("verifier-key[v5]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v4]".into()
+        "verifier-key[v5]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
@@ -550,8 +550,10 @@ impl VerifierKey {
         let vk = self.force_init()?;
         let pi = statement.map(|f| f.0).collect::<Vec<_>>();
         trace!(statement = ?pi, "verifying proof against statement");
-        compact_std_lib::verify::<DummyRelation, TranscriptHash>(&params.0, &vk, &pi, &proof.0)
-            .map_err(|_| anyhow::anyhow!("Invalid proof"))
+        compact_std_lib::verify::<DummyRelation, TranscriptHash>(
+            &params.0, &vk, &pi, None, &proof.0,
+        )
+        .map_err(|_| anyhow::anyhow!("Invalid proof"))
     }
 
     /// Mocks the checking of a proof against a statement
@@ -575,7 +577,6 @@ impl VerifierKey {
     ) -> Result<(), VerifyingError> {
         use midnight_circuits::compact_std_lib::batch_verify;
 
-        let mut params_verifier = vec![];
         let mut vks = vec![];
         let mut pis = vec![];
         let mut proofs = vec![];
@@ -583,13 +584,12 @@ impl VerifierKey {
         for (vk, proof, stmt) in parts.into_iter() {
             let pi = stmt.map(|f| f.0).collect::<Vec<_>>();
             let vk = vk.force_init()?;
-            params_verifier.push((*params.0).clone());
             vks.push(vk);
             pis.push(pi);
             proofs.push(proof.0.clone());
         }
 
-        batch_verify::<TranscriptHash>(&params_verifier, &vks, &pis, &proofs)
+        batch_verify::<TranscriptHash>(&params.0, &vks, &pis, &proofs)
             .map_err(|_| anyhow::anyhow!("Invalid proof"))
     }
 

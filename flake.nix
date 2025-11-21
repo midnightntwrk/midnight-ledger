@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/dde9ed5570893a1e382bf87859469fb44b99d1d2";
+      url = "github:midnightntwrk/midnight-ledger/1512ab5fd63cb423a5d8c17cf956ad33b1eec087";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -389,6 +389,16 @@
             version = "0.1.0";
 
             srcs = [
+              (pkgs.fetchurl { url = param-for 0; hash = "sha256-CXNk4UIPqkilNymg4GZgwHyWiMDYPQbdU1XS8ivuyDQ="; })
+              (pkgs.fetchurl { url = param-for 1; hash = "sha256-x8llsslMB1jGAr1BtgM4Y1OEIzQ45mZP8BxJKSjn8ns="; })
+              (pkgs.fetchurl { url = param-for 2; hash = "sha256-HKrlVJHAb2JkJpdFvlI314Bqm9e+akFyFIJBjxUQxuw="; })
+              (pkgs.fetchurl { url = param-for 3; hash = "sha256-PECHS2p6OJnoNk6Fkvz7u8Wg4BIRdbHra3hEvHQpJAg="; })
+              (pkgs.fetchurl { url = param-for 4; hash = "sha256-cVpoDV14BCmgeo7ZRnxJGqqqB4hNeTrnaXcBKr9i/ko="; })
+              (pkgs.fetchurl { url = param-for 5; hash = "sha256-GxT3sZSfwJBKghgwG+WaF6Gh7/IYQgor64uSdu2WXug="; })
+              (pkgs.fetchurl { url = param-for 6; hash = "sha256-LGAtFxaphOMCnfqHdmfg3mBYAXZKrXahopa04t8fOTo="; })
+              (pkgs.fetchurl { url = param-for 7; hash = "sha256-6n3upIIbW/eCLfnlzwsZcJWAagf8U7NuicntIXVMTfc="; })
+              (pkgs.fetchurl { url = param-for 8; hash = "sha256-YsZ5mz3Yyh/XHC5h0Cl6C2xU2H8AaFzw/tbao/hz7+A="; })
+              (pkgs.fetchurl { url = param-for 9; hash = "sha256-XcPkczulB9Gkw1PxsDS/ocnQA/jiGpM/2lZH6RQNiRA="; })
               (pkgs.fetchurl { url = param-for 10; hash = "sha256-0aNAPB+Gaegu0o2TkeEwEa6naAGyj+FLQr920UG076I="; })
               (pkgs.fetchurl { url = param-for 11; hash = "sha256-tQR/BYANvYT9HqQ7lqiFDhKLelle0TLNcliMwssUayk="; })
               (pkgs.fetchurl { url = param-for 12; hash = "sha256-syeRd1r1//GuXq1oLD2IMpF+uwZStDz4EKHjlW6yenE="; })
