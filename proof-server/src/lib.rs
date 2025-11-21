@@ -45,7 +45,7 @@ use transient_crypto::proofs::{
     KeyLocation, ProvingKeyMaterial, Resolver as ResolverT, WrappedIr, Zkir,
 };
 use worker_pool::{JobStatus, WorkError, WorkerPool};
-use zkir_v2::{IrSource as ZkirV2, LocalProvingProvider as ZkirV2Local};
+use zkir::{IrSource, LocalProvingProvider, v2, v3};
 use zswap::prove::ZswapResolver;
 
 pub mod worker_pool;
@@ -163,8 +163,11 @@ async fn proof_versions() -> impl Responder {
 async fn get_k(payload: Payload) -> Result<HttpResponse, Error> {
     info!("Starting to process request for /k...");
     let request = payload_to_bytes(payload).await?;
-    let zkir: ZkirV2 = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
-    let k = zkir.k();
+    let zkir = IrSource::from_tagged_reader(&request[..]).map_err(ErrorBadRequest)?;
+    let k = match zkir {
+        IrSource::V2(ir) => ir.k(),
+        IrSource::V3(ir) => ir.k(),
+    };
     debug!(
         "Received request: {}",
         (&request[..]).encode_hex::<String>()
@@ -222,10 +225,16 @@ async fn check(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 };
                 let result = match ppi {
                     ProofPreimageVersioned::V1(ppi) => {
-                        let ir: ZkirV2 = tagged_deserialize(&mut &ir[..])
+                        let ir_wrapper = IrSource::from_tagged_reader(&ir[..])
                             .map_err(|e| WorkError::BadInput(e.to_string()))?;
-                        ppi.check(&ir)
-                            .map_err(|e| WorkError::BadInput(e.to_string()))?
+                        match ir_wrapper {
+                            IrSource::V2(ir) => ppi
+                                .check(&ir)
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?,
+                            IrSource::V3(ir) => ppi
+                                .check(&ir)
+                                .map_err(|e| WorkError::BadInput(e.to_string()))?,
+                        }
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.
@@ -267,6 +276,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 .build()
                 .unwrap();
             rt.block_on(async move {
+                let data_for_resolver = data.clone();
                 let resolver = Resolver::new(
                     PUBLIC_PARAMS.clone(),
                     DustResolver(
@@ -278,7 +288,7 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         .expect("data provider initialization failed"),
                     ),
                     Box::new(move |loc: KeyLocation| match &*loc.0 {
-                        _ => Box::pin(std::future::ready(Ok(data.clone()))),
+                        _ => Box::pin(std::future::ready(Ok(data_for_resolver.clone()))),
                     }),
                 );
                 let proof = match ppi {
@@ -286,12 +296,39 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         if let Some(binding_input) = binding_input {
                             ppi.binding_input = binding_input;
                         }
-                        ProofVersioned::V1(
-                            ppi.prove::<ZkirV2>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                        let proving_data = match data {
+                            Some(pkm) => pkm,
+                            None => resolver
+                                .resolve_key(ppi.key_location.clone())
                                 .await
                                 .map_err(|e| WorkError::BadInput(e.to_string()))?
-                                .0,
-                        )
+                                .ok_or_else(|| {
+                                    WorkError::BadInput(format!(
+                                        "couldn't find key {}",
+                                        &ppi.key_location.0
+                                    ))
+                                })?,
+                        };
+
+                        let ir = IrSource::from_tagged_reader(&proving_data.ir_source[..])
+                            .map_err(|e| WorkError::BadInput(e.to_string()))?;
+
+                        let proof = match ir {
+                            IrSource::V2(_) => {
+                                ppi.prove::<v2::IrSource>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                                    .await
+                                    .map_err(|e| WorkError::BadInput(e.to_string()))?
+                                    .0
+                            }
+                            IrSource::V3(_) => {
+                                ppi.prove::<v3::IrSource>(OsRng, &*PUBLIC_PARAMS, &resolver)
+                                    .await
+                                    .map_err(|e| WorkError::BadInput(e.to_string()))?
+                                    .0
+                            }
+                        };
+
+                        ProofVersioned::V1(proof)
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.
@@ -345,7 +382,7 @@ async fn prove_transaction(
                             .map(|v| v.clone())))),
                     }),
                 );
-                let provider = ZkirV2Local {
+                let provider = LocalProvingProvider {
                     rng: OsRng,
                     params: &resolver,
                     resolver: &resolver,

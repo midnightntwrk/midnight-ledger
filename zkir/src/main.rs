@@ -17,7 +17,7 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::tagged_serialize;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
@@ -85,10 +85,15 @@ fn maybe_bzkir(path: impl AsRef<Path>) -> anyhow::Result<IrSource> {
         Some(Some("zkir")) => {
             let ir = IrSource::load(BufReader::new(File::open(&path)?))?;
             let mut bzkir = BufWriter::new(File::create(path.as_ref().with_extension("bzkir"))?);
-            tagged_serialize(&ir, &mut bzkir)?;
+            match &ir {
+                IrSource::V2(v2_ir) => tagged_serialize(v2_ir, &mut bzkir)?,
+                IrSource::V3(v3_ir) => tagged_serialize(v3_ir, &mut bzkir)?,
+            }
             Ok(ir)
         }
-        _ => Ok(tagged_deserialize(&mut BufReader::new(File::open(path)?))?),
+        _ => Ok(IrSource::from_tagged_reader(BufReader::new(File::open(
+            path,
+        )?))?),
     }
 }
 
@@ -220,9 +225,18 @@ async fn main() -> anyhow::Result<()> {
                 let mut vk_file =
                     BufWriter::new(File::create(key_dir.join(file).with_extension("verifier"))?);
                 pb.enable_steady_tick(Duration::from_millis(100));
-                let (pk, vk) = ir.keygen(&pp).await?;
-                tagged_serialize(&pk, &mut pk_file)?;
-                tagged_serialize(&vk, &mut vk_file)?;
+                match ir {
+                    IrSource::V2(ir_v2) => {
+                        let (pk, vk) = ir_v2.keygen(&pp).await?;
+                        tagged_serialize(&pk, &mut pk_file)?;
+                        tagged_serialize(&vk, &mut vk_file)?;
+                    }
+                    IrSource::V3(ir_v3) => {
+                        let (pk, vk) = ir_v3.keygen(&pp).await?;
+                        tagged_serialize(&pk, &mut pk_file)?;
+                        tagged_serialize(&vk, &mut vk_file)?;
+                    }
+                }
                 pb.finish();
                 overall.set_message(format!("{n}/{}", data.len()));
                 overall.set_position(prog);
@@ -261,9 +275,19 @@ async fn main() -> anyhow::Result<()> {
             )?;
             pb.set_message(format!("Compiling circuit {ir_file:?} (k={k})"));
             pb.enable_steady_tick(Duration::from_millis(100));
-            let (pk, vk) = ir.keygen(&pp).await?;
-            tagged_serialize(&pk, &mut pk_file)?;
-            tagged_serialize(&vk, &mut vk_file)?;
+            // Match on the version and call keygen on the specific type
+            match ir {
+                IrSource::V2(ir_v2) => {
+                    let (pk, vk) = ir_v2.keygen(&pp).await?;
+                    tagged_serialize(&pk, &mut pk_file)?;
+                    tagged_serialize(&vk, &mut vk_file)?;
+                }
+                IrSource::V3(ir_v3) => {
+                    let (pk, vk) = ir_v3.keygen(&pp).await?;
+                    tagged_serialize(&pk, &mut pk_file)?;
+                    tagged_serialize(&vk, &mut vk_file)?;
+                }
+            }
             pb.finish();
         }
     }

@@ -16,19 +16,19 @@ extern crate tracing;
 
 use base_crypto::rng::SplittableRng;
 use rand::{CryptoRng, Rng};
-use serialize::tagged_deserialize;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProvingProvider, Resolver,
 };
 
-mod ir;
-mod ir_vm;
+pub mod v2;
+pub mod v3;
 
-pub use ir::{Instruction, IrSource};
-pub use ir_vm::Preprocessed;
+mod ir_wrapper;
+pub mod version;
 
-/// Implements `ProvingProvider` locally
+pub use ir_wrapper::{Instruction, IrSource, Model, Preprocessed};
+
 pub struct LocalProvingProvider<
     'a,
     R: Rng + CryptoRng + SplittableRng,
@@ -57,7 +57,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
                     preimage.key_location.0
                 )
             })?;
-        let ir: IrSource = tagged_deserialize(&mut &proving_data.ir_source[..])?;
+        let ir = IrSource::from_tagged_reader(&proving_data.ir_source[..])?;
         preimage.check(&ir)
     }
     async fn prove(
@@ -69,10 +69,36 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
         if let Some(binding_input) = overwrite_binding_input {
             preimage.binding_input = binding_input;
         }
-        Ok(preimage
-            .prove::<IrSource>(self.rng, self.params, self.resolver)
+
+        let proving_data = self
+            .resolver
+            .resolve_key(preimage.key_location.clone())
             .await?
-            .0)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "attempted to prove for '{}' without circuit data!",
+                    preimage.key_location.0
+                )
+            })?;
+
+        let ir = IrSource::from_tagged_reader(&proving_data.ir_source[..])?;
+
+        let proof = match ir {
+            IrSource::V2(_) => {
+                preimage
+                    .prove::<v2::IrSource>(self.rng, self.params, self.resolver)
+                    .await?
+                    .0
+            }
+            IrSource::V3(_) => {
+                preimage
+                    .prove::<v3::IrSource>(self.rng, self.params, self.resolver)
+                    .await?
+                    .0
+            }
+        };
+
+        Ok(proof)
     }
     fn split(&mut self) -> Self {
         Self {
