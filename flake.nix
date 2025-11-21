@@ -103,12 +103,7 @@
               [
                 self.packages.${system}.local-params
                 zkir.packages.${system}.zkir
-              ] else [])
-              ++ (
-                if isDarwin
-                then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                else []
-              );
+              ] else []);
           };
         mkLedger = {
           isCrossArm ? false,
@@ -150,12 +145,7 @@
                   zkir.packages.${system}.zkir
                   rust-build
                   pkgs.chez
-                ]
-                ++ (
-                  if isDarwin
-                  then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                  else []
-                );
+                ];
 
               doCheck = true;
             }
@@ -490,7 +480,7 @@
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_100
+              pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];

@@ -355,7 +355,7 @@ fn derive_children_fields(fields: &Fields, db: &Ident) -> TokenStream {
             let field_children = f.named.iter().map(|f| {
                 let ident = f.ident.as_ref().expect("named field");
                 match child_field(&f) {
-                    FieldTypes::Child => quote! { child_hashes.push(Sp::hash(#ident).into()); },
+                    FieldTypes::Child => quote! { child_hashes.push(Sp::as_child(#ident).into()); },
                     FieldTypes::Inline => {
                         quote! { child_hashes.append(&mut Storable::<#db>::children(#ident)); }
                     }
@@ -376,7 +376,7 @@ fn derive_children_fields(fields: &Fields, db: &Ident) -> TokenStream {
             let field_children = f.unnamed.iter().enumerate().map(|(i, f)| {
                 let ident = format_ident!("_{i}");
                 match child_field(&f) {
-                    FieldTypes::Child => quote! { child_hashes.push(Sp::hash(#ident).into()); },
+                    FieldTypes::Child => quote! { child_hashes.push(Sp::as_child(#ident).into()); },
                     FieldTypes::Inline => {
                         quote! { child_hashes.append(&mut Storable::<#db>::children(#ident)); }
                     }

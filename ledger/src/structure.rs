@@ -59,8 +59,7 @@ use std::iter::once;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::arena::Sp;
+use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::db::InMemoryDB;
 use storage::merkle_patricia_trie::Annotation;
@@ -2369,7 +2368,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 }
 
 #[derive(Storable)]
-#[derive_where(Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+#[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[tag = "contract-deploy[v2]"]
 pub struct ContractDeploy<D: DB> {

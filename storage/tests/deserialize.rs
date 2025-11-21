@@ -13,8 +13,7 @@
 
 #[cfg(test)]
 mod tests {
-    use midnight_storage::arena::ArenaKey;
-    use midnight_storage::arena::TypedArenaKey;
+    use midnight_storage::arena::{ArenaHash, ArenaKey, TypedArenaKey};
     use midnight_storage::{Storable, db::DB, storable::Loader};
     #[cfg(feature = "proptest")]
     use proptest::arbitrary::Arbitrary;

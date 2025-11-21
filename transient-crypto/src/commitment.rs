@@ -31,8 +31,9 @@ use serde::Serialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::ops::{Add, Neg, Sub};
 use storage::Storable;
+use storage::arena::ArenaKey;
 use storage::db::DB;
-use storage::{arena::ArenaKey, storable::Loader};
+use storage::storable::Loader;
 
 /// Homomorphic Pedersen commitment.
 /// a) Summed commitments should verify against their summed randomness.
