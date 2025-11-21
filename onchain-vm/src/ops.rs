@@ -25,13 +25,12 @@ use serde::{Deserialize, Serialize};
 use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::fmt::Debug;
-use storage::arena::ArenaKey;
 use storage::db::DB;
 #[cfg(feature = "proptest")]
 use storage::db::InMemoryDB;
 use storage::storable::Loader;
 use storage::storage::Array;
-use storage::{DefaultDB, Storable};
+use storage::{DefaultDB, Storable, arena::ArenaKey};
 use transient_crypto::curve::Fr;
 use transient_crypto::repr::FieldRepr;
 

@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- Remove special-casing of validation behaviour depending on the
+  `test-utilities` feature being present.
+
 ## 6.1.0
 
 - breaking: feat: Add real cost model
@@ -21,6 +26,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add endpoints for estimating fees with a margin depending on allowed
   block adjustment
 - fix: fix balancing bug in contracts with multiple intents
+- fix: remove special casing of checks on test-utilities feature
 
 ## 6.0.0
 

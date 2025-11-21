@@ -21,12 +21,7 @@ use serde::Serialize;
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
-use storage::{
-    Storable,
-    arena::{ArenaKey, Sp},
-    db::DB,
-    storable::Loader,
-};
+use storage::{Storable, arena::ArenaKey, arena::Sp, db::DB, storable::Loader};
 use transient_crypto::curve::FR_BYTES;
 
 /// A cost model for gas pricing of VM operations.

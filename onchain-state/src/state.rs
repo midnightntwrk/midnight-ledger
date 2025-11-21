@@ -711,13 +711,11 @@ impl Default for ContractMaintenanceAuthority {
     }
 }
 
-#[derive(Storable, Serialize, Deserialize)]
-#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Storable)]
+#[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[serde(bound(serialize = "", deserialize = ""))]
-#[serde(rename_all = "camelCase")]
-#[tag = "contract-state[v4]"]
+#[tag = "contract-state[v5]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -726,12 +724,10 @@ pub struct ContractState<D: DB> {
 }
 tag_enforcement_test!(ContractState<InMemoryDB>);
 
-#[derive(Storable, Serialize, Deserialize)]
-#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Storable)]
+#[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[serde(bound(serialize = "", deserialize = ""))]
-#[serde(rename_all = "camelCase")]
 #[tag = "charged-state[v1]"]
 pub struct ChargedState<D: DB> {
     pub(crate) state: Sp<StateValue<D>, D>,
@@ -761,7 +757,7 @@ impl<D: DB> ChargedState<D> {
     pub fn new(state: StateValue<D>) -> Self {
         let state = Sp::new(state);
         let charged_keys =
-            initial_write_delete_costs(&[state.hash().into()].into_iter().collect(), |_, _| {
+            initial_write_delete_costs(&[state.as_child()].into_iter().collect(), |_, _| {
                 Default::default()
             })
             .updated_charged_keys;
@@ -800,7 +796,7 @@ impl<D: DB> ChargedState<D> {
         let new_state = Sp::new(new_state);
         let results = incremental_write_delete_costs(
             &self.charged_keys,
-            &[new_state.hash().into()].into_iter().collect(),
+            &[new_state.as_child()].into_iter().collect(),
             cpu_cost,
             gc_limit,
         );
@@ -852,7 +848,7 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v2]"]
+#[tag = "contract-operation[v3]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
@@ -984,6 +980,8 @@ mod tests {
 
     #[test]
     fn test_state_ser() {
+        let cs = ChargedState::<InMemoryDB>::new(StateValue::Null);
+        test_ser::<RcMap<InMemoryDB>>(cs.charged_keys);
         test_ser::<ContractState<InMemoryDB>>(ContractState::default());
         test_ser::<StateValue<InMemoryDB>>(stval!((512u64)));
         test_ser::<StateValue<InMemoryDB>>(stval!({ 512u64 => (12u64) }));

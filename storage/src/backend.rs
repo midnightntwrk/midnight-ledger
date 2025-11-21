@@ -21,7 +21,7 @@
 
 use crate::{
     WellBehavedHasher,
-    arena::ArenaKey,
+    arena::{ArenaHash, ArenaKey},
     cache::Cache,
     db::{DB, Update},
 };
@@ -33,7 +33,7 @@ use std::{
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
-/// A non-trivial update delta for a value stored under an [`ArenaKey`] in
+/// A non-trivial update delta for a value stored under an [`ArenaHash`] in
 /// memory in [`StorageBackend`].
 ///
 /// Invariant: at least one of `ref_delta` and `root_delta` are non-zero. This
@@ -78,7 +78,7 @@ impl Delta {
 }
 
 #[derive(PartialEq, Debug, Clone)]
-/// A value stored under an [`ArenaKey`] in memory in [`StorageBackend`].
+/// A value stored under an [`ArenaHash`] in memory in [`StorageBackend`].
 ///
 /// Contains an underlying object, which is the canonical version of that
 /// object, and includes any pending updates specified by `delta`.
@@ -153,7 +153,7 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 
 #[derive(Debug)]
 /// A storage back-end, that wraps interactions with the database and provides
-/// in-memory caching. Its public API provides a mapping from `ArenaKey` keys
+/// in-memory caching. Its public API provides a mapping from `ArenaHash` keys
 /// to `OnDiskObject` objects, and a way to persist such objects to the DB,
 /// taking care of reference counting along the way.
 ///
@@ -269,7 +269,7 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// but falls back on any existing version already in memory or the DB. The
 /// `uncache` API informs the back-end that an object is no longer of interest to
 /// the caller, which allows the back-end to remove it from memory if it has no
-/// references or pending updates in memory. These APIs act on `ArenaKey` keys
+/// references or pending updates in memory. These APIs act on `ArenaHash` keys
 /// and `OnDiskObject` values, but internally manipulate more complex states, in
 /// the form of `CacheValue` values.
 pub struct StorageBackend<D: DB> {
@@ -284,17 +284,17 @@ pub struct StorageBackend<D: DB> {
     /// end when the cache is at capacity.
     ///
     /// This cache *only* contains `CacheValue::Read` values.
-    read_cache: Cache<ArenaKey<D::Hasher>, CacheValue<D::Hasher>>,
+    read_cache: Cache<ArenaHash<D::Hasher>, CacheValue<D::Hasher>>,
     /// Un-bounded, in-memory LRU write cache. The place where new in-memory
     /// objects go initially. This cache is brought down to `self.cache_size`
     /// when a `self.flush_*` operation is run, and we refer to objects flushed
     /// this way as "evictions".
     ///
     /// This cache *never* contains `CacheValue::Read` values.
-    write_cache: Cache<ArenaKey<D::Hasher>, CacheValue<D::Hasher>>,
+    write_cache: Cache<ArenaHash<D::Hasher>, CacheValue<D::Hasher>>,
     /// Keys that have been `cache`d but not `uncached`. Used as additional,
     /// temporary GC roots.
-    live_inserts: HashSet<ArenaKey<D::Hasher>>,
+    live_inserts: HashSet<ArenaHash<D::Hasher>>,
     /// Run-time stats to help with performance tuning.
     // Use interior mutability to allow updating stats in "pure" functions.
     stats: RefCell<StorageBackendStats>,
@@ -355,7 +355,7 @@ impl<D: DB> StorageBackend<D> {
     /// but is still in memory because it's still referenced, will not cause
     /// that temp object to continue to exist if its ref count goes to zero. If
     /// you want that, then call `cache` instead!
-    pub(crate) fn get(&mut self, key: &ArenaKey<D::Hasher>) -> Option<&OnDiskObject<D::Hasher>> {
+    pub(crate) fn get(&mut self, key: &ArenaHash<D::Hasher>) -> Option<&OnDiskObject<D::Hasher>> {
         // If already in memory, move to the front of cache.
         if self.peek_from_memory(key).is_some() {
             self.stats.borrow_mut().get_cache_hits += 1;
@@ -390,7 +390,7 @@ impl<D: DB> StorageBackend<D> {
     }
 
     /// Get the root count for `key`, incorporating any pending in-memory updates.
-    pub(crate) fn get_root_count(&self, key: &ArenaKey<D::Hasher>) -> u32 {
+    pub(crate) fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);
         let mem_root_delta = match self.peek_from_memory(key) {
             Some(CacheValue::Read { .. }) => 0,
@@ -419,7 +419,7 @@ impl<D: DB> StorageBackend<D> {
     ///
     /// As implemented, this function assumes no concurrent modification of the
     /// roots in the DB while the root collection is being computed.
-    pub fn get_roots(&self) -> HashMap<ArenaKey<D::Hasher>, u32> {
+    pub fn get_roots(&self) -> HashMap<ArenaHash<D::Hasher>, u32> {
         // To be a root, a key must be stored in the DB as a root, or have
         // pending root-count updates in memory. However, we need to be careful
         // to handle the case where a key is a root in the DB, but it also has
@@ -463,7 +463,7 @@ impl<D: DB> StorageBackend<D> {
     /// first.
     pub(crate) fn cache(
         &mut self,
-        key: ArenaKey<D::Hasher>,
+        key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ArenaKey<D::Hasher>>,
     ) {
@@ -543,7 +543,7 @@ impl<D: DB> StorageBackend<D> {
     /// It's an error to `uncache` an object that hasn't been `cache`d first,
     /// and an error to `uncache` an `cache`d object a second time without
     /// re-`cache`ing it.
-    pub(crate) fn uncache(&mut self, key: &ArenaKey<D::Hasher>) {
+    pub(crate) fn uncache(&mut self, key: &ArenaHash<D::Hasher>) {
         assert!(
             self.live_inserts.contains(key),
             "a key can't be uncached more times than it was cached (0 or 1)"
@@ -581,8 +581,8 @@ impl<D: DB> StorageBackend<D> {
     }
 
     /// Un-mark `key` as GC root. See [`Self::persist`].
-    pub fn unpersist(&mut self, key: &ArenaKey<D::Hasher>) {
-        self.update_counts(&[key.clone()], Delta::new_root_delta(-1));
+    pub fn unpersist(&mut self, key: &ArenaHash<D::Hasher>) {
+        self.update_counts(&[ArenaKey::Ref(key.clone())], Delta::new_root_delta(-1));
     }
 
     /// Mark `key` as a GC root, meaning it will be persisted across GC runs,
@@ -592,8 +592,8 @@ impl<D: DB> StorageBackend<D> {
     /// needs to be `unpersist`ed the same number of times to stop being treated as
     /// a GC root. In other words, the GC-root status of a key is a non-negative
     /// int, not a bool.
-    pub fn persist(&mut self, key: &ArenaKey<D::Hasher>) {
-        self.update_counts(&[key.clone()], Delta::new_root_delta(1));
+    pub fn persist(&mut self, key: &ArenaHash<D::Hasher>) {
+        self.update_counts(&[ArenaKey::Ref(key.clone())], Delta::new_root_delta(1));
     }
 
     /// Load DAG rooted at `key` into the cache from the DB.
@@ -609,7 +609,7 @@ impl<D: DB> StorageBackend<D> {
     /// nodes).
     pub fn pre_fetch(
         &mut self,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
         max_depth: Option<usize>,
         truncate: bool,
     ) {
@@ -650,7 +650,7 @@ impl<D: DB> StorageBackend<D> {
     /// the cache before calling this function!
     fn flush_to_db<I>(&mut self, writes: I)
     where
-        I: Iterator<Item = (ArenaKey<D::Hasher>, CacheValue<D::Hasher>)>,
+        I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
         let mut updates = vec![];
         for (k, v) in writes {
@@ -810,7 +810,7 @@ impl<D: DB> StorageBackend<D> {
             // Decrement child ref counts, and mark unreachable any children
             // whose ref count goes to zero.
             self.update_counts(&node.children, Delta::new_ref_delta(-1));
-            for child_key in &node.children {
+            for child_key in node.children.iter().flat_map(ArenaKey::refs) {
                 // Unless the cache is unreasonably small, all of the children
                 // will already be in memory from the `pre_fetch` above, so this
                 // `get` won't trigger any full pre-fetches.
@@ -831,7 +831,7 @@ impl<D: DB> StorageBackend<D> {
     }
 
     /// Attempt to get in-memory value, without updating cache ordering.
-    fn peek_from_memory(&self, key: &ArenaKey<D::Hasher>) -> Option<&CacheValue<D::Hasher>> {
+    fn peek_from_memory(&self, key: &ArenaHash<D::Hasher>) -> Option<&CacheValue<D::Hasher>> {
         // Here `peek` gets a key from the cache without moving it to the front.
         if let Some(value) = self.write_cache.peek(key) {
             return Some(value);
@@ -845,7 +845,7 @@ impl<D: DB> StorageBackend<D> {
     /// Attempt to get in-memory value, without updating cache ordering.
     fn peek_mut_from_memory(
         &mut self,
-        key: &ArenaKey<D::Hasher>,
+        key: &ArenaHash<D::Hasher>,
     ) -> Option<&mut CacheValue<D::Hasher>> {
         // Here `peek` gets a key from the cache without moving it to the front.
         if let Some(value) = self.write_cache.peek_mut(key) {
@@ -859,7 +859,7 @@ impl<D: DB> StorageBackend<D> {
 
     /// Remove value stored in memory under `key`. Panics if `key` is not in
     /// memory.
-    fn remove_from_memory(&mut self, key: &ArenaKey<D::Hasher>) -> CacheValue<D::Hasher> {
+    fn remove_from_memory(&mut self, key: &ArenaHash<D::Hasher>) -> CacheValue<D::Hasher> {
         self.write_cache
             .remove(key)
             .or_else(|| self.read_cache.remove(key))
@@ -867,10 +867,10 @@ impl<D: DB> StorageBackend<D> {
             .1
     }
 
-    /// Update ref and root counts for `keys`, e.g. for `key = obj.children` when `obj`
+    /// Update ref and root counts for `children`, e.g. for `children = obj.children` when `obj`
     /// is created or destroyed.
-    fn update_counts(&mut self, keys: &[ArenaKey<D::Hasher>], delta: Delta) {
-        for key in keys {
+    fn update_counts(&mut self, children: &[ArenaKey<D::Hasher>], delta: Delta) {
+        for key in children.iter().flat_map(ArenaKey::refs) {
             if let Some(cache_val) = self.peek_mut_from_memory(key) {
                 // Safe because we will only use this is get an owned copy of cache_val before
                 // overwriting it.
@@ -972,7 +972,7 @@ impl<D: DB> StorageBackend<D> {
         }
     }
 
-    fn promote(&mut self, key: &ArenaKey<D::Hasher>) {
+    fn promote(&mut self, key: &ArenaHash<D::Hasher>) {
         let _ = self.write_cache.promote(key) || self.read_cache.promote(key);
     }
 
@@ -982,7 +982,7 @@ impl<D: DB> StorageBackend<D> {
     /// # Panics
     ///
     /// Panics if `key` is already in memory.
-    fn cache_insert_new_key(&mut self, key: ArenaKey<D::Hasher>, value: CacheValue<D::Hasher>) {
+    fn cache_insert_new_key(&mut self, key: ArenaHash<D::Hasher>, value: CacheValue<D::Hasher>) {
         debug_assert!(
             self.peek_from_memory(&key).is_none(),
             "key must not already be in memory"
@@ -1116,22 +1116,22 @@ impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
     /// Generate a random `OnDiskObject` with small internal vectors.
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> OnDiskObject<H> {
         // Generate a vector of length at most 10.
-        fn rand_vec<T, R: rand::prelude::Rng + ?Sized>(rng: &mut R) -> std::vec::Vec<T>
-        where
-            Standard: Distribution<T>,
-        {
+        fn rand_vec<T, R: rand::prelude::Rng + ?Sized>(
+            rng: &mut R,
+            f: impl Fn(&mut R) -> T,
+        ) -> std::vec::Vec<T> {
             const MAX_LEN: usize = 10;
             let len = rng.gen_range(0..MAX_LEN);
             let mut v = std::vec::Vec::with_capacity(len);
             for _ in 0..len {
-                v.push(rng.r#gen());
+                v.push(f(rng));
             }
             v
         }
         OnDiskObject {
-            data: rand_vec(rng),
+            data: rand_vec(rng, |r| r.r#gen()),
             ref_count: rng.r#gen(),
-            children: rand_vec(rng),
+            children: rand_vec(rng, |r| ArenaKey::Ref(r.r#gen())),
         }
     }
 }
@@ -1147,7 +1147,7 @@ pub(crate) mod raw_node {
     /// we derive the `data` from the `key`.
     #[derive(Debug, Clone)]
     pub(crate) struct RawNode<H: WellBehavedHasher = DefaultHasher> {
-        pub(crate) key: ArenaKey<H>,
+        pub(crate) key: ArenaHash<H>,
         // This field is useful for debugging.
         #[allow(dead_code)]
         pub(crate) data: std::vec::Vec<u8>,
@@ -1162,8 +1162,11 @@ pub(crate) mod raw_node {
             children: std::vec::Vec<&RawNode<H>>,
         ) -> Self {
             let data = key.to_vec();
-            let key = ArenaKey::_from_bytes(key);
-            let children = children.into_iter().map(|n| n.key.clone()).collect();
+            let key = ArenaHash::_from_bytes(key);
+            let children = children
+                .into_iter()
+                .map(|n| ArenaKey::Ref(n.key.clone()))
+                .collect();
             RawNode {
                 key,
                 data,
@@ -1198,7 +1201,7 @@ pub(crate) mod raw_node {
 
 #[cfg(test)]
 mod tests {
-    use crate as storage;
+    use crate::{self as storage, storable::child_from};
     use crypto::digest::Digest;
     use derive_where::derive_where;
     use raw_node::RawNode;
@@ -1212,7 +1215,7 @@ mod tests {
 
     use super::*;
 
-    fn childless_hash<D: DB, T: Storable<D>>(val: &T) -> ArenaKey<D::Hasher> {
+    fn childless_hash<D: DB, T: Storable<D>>(val: &T) -> ArenaHash<D::Hasher> {
         let mut hasher = D::Hasher::default();
         let mut bytes: std::vec::Vec<u8> = std::vec::Vec::new();
         val.to_binary_repr(&mut bytes)
@@ -1220,7 +1223,7 @@ mod tests {
 
         hasher.update(bytes);
 
-        ArenaKey(hasher.finalize())
+        ArenaHash(hasher.finalize())
     }
 
     #[test]
@@ -1267,11 +1270,13 @@ mod tests {
         assert!(backend.write_cache.peek(&k3).is_some());
     }
 
-    fn in_database_repr<D: DB, T: Storable<D>>(val: T) -> (ArenaKey<D::Hasher>, std::vec::Vec<u8>) {
+    fn in_database_repr<D: DB, T: Storable<D>>(
+        val: T,
+    ) -> (ArenaHash<D::Hasher>, std::vec::Vec<u8>) {
         let mut bytes: std::vec::Vec<u8> = std::vec::Vec::new();
         Storable::to_binary_repr(&val, &mut bytes)
             .expect("Failed to serialize to 'std::vec::Vec<u8>'!");
-        let key = hash::<D>(&bytes, &val.children());
+        let key = hash::<D::Hasher>(&bytes, val.children().iter().map(ArenaKey::hash));
         (key, bytes)
     }
 
@@ -1413,35 +1418,52 @@ mod tests {
         };
         let (child_key, child_bytes) = in_database_repr(child.clone());
         let (parent_key, parent_bytes) = in_database_repr(parent.clone());
-        let (_gp_key, gp_bytes) = in_database_repr(gp.clone());
+        let (gp_key, gp_bytes) = in_database_repr(gp.clone());
+
+        let child_child_repr = child_from(&child_bytes, &[]);
+        let parent_child_repr = child_from(&parent_bytes, &[child_child_repr.clone()]);
+        let gp_child_repr = child_from(
+            &gp_bytes,
+            &[parent_child_repr.clone(), child_child_repr.clone()],
+        );
+
+        let keys_to_childref = HashMap::from([
+            (child_key.clone(), child_child_repr.clone()),
+            (parent_key.clone(), parent_child_repr.clone()),
+            (gp_key.clone(), gp_child_repr.clone()),
+        ]);
 
         // Test that `Storable` is implemented correctly on `TestNode`.
         let child_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut child_bytes.clone().as_slice(),
             &mut vec![].into_iter(),
-            &IrLoader::new(arena, &HashMap::new()),
+            &IrLoader::new(arena, &HashMap::new(), HashMap::new()),
         )
         .unwrap();
         assert_eq!(child_reconstructed, child);
-        let all: HashMap<ArenaKey<D::Hasher>, IntermediateRepr<D>> = HashMap::from([(
+        let all: HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>> = HashMap::from([(
             child_key.clone(),
             IntermediateRepr::<D>::from_storable(&child),
         )]);
         let parent_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut parent_bytes.clone().as_slice(),
-            &mut vec![child_key.clone()].into_iter(),
-            &IrLoader::new(arena, &all),
+            &mut vec![ArenaKey::Ref(child_key.clone())].into_iter(),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(parent_reconstructed, parent);
-        let all: HashMap<ArenaKey<D::Hasher>, IntermediateRepr<D>> = HashMap::from([
+        let all: HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>> = HashMap::from([
             (child_key.clone(), IntermediateRepr::from_storable(&child)),
             (parent_key.clone(), IntermediateRepr::from_storable(&parent)),
         ]);
         let gp_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut gp_bytes.clone().as_slice(),
-            &mut vec![parent_key.clone(), child_key.clone()].into_iter(),
-            &IrLoader::new(arena, &all),
+            &mut vec![
+                ArenaKey::Ref(parent_key.clone()),
+                ArenaKey::Ref(child_key.clone()),
+            ]
+            .into_iter(),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(gp_reconstructed, gp);
@@ -1455,7 +1477,7 @@ mod tests {
         storage_backend.cache(
             parent_key.clone(),
             parent_bytes.clone(),
-            vec![child_key.clone()],
+            vec![ArenaKey::Ref(child_key.clone())],
         );
 
         assert_eq!(storage_backend.get(&child_key).unwrap().data, child_bytes);

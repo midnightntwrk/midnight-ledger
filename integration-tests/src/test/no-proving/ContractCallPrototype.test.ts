@@ -18,10 +18,16 @@ import {
   ContractCallPrototype,
   ContractOperation,
   type PreBinding,
-  type Transcript
+  type Transcript,
+  Intent,
+  Transaction,
+  rawTokenType as createRawTokenType,
+  nativeToken,
+  dummyContractAddress,
+  type ShieldedTokenType
 } from '@midnight-ntwrk/ledger';
 
-import { Random } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random } from '@/test-objects';
 
 describe('Ledger API - ContractCallPrototype', () => {
   let transcript: Transcript<AlignedValue>;
@@ -243,5 +249,35 @@ describe('Ledger API - ContractCallPrototype', () => {
     expect(contractCall.communicationCommitment).toBeDefined();
     expect(contractCall.proof).toBeDefined();
     expect(contractCall.entryPoint).toEqual('entry');
+  });
+
+  test('should correctly construct the token type in effects', () => {
+    const contractAddress = dummyContractAddress();
+    const domainSep = Buffer.from(nativeToken().raw, 'hex');
+    const token = createRawTokenType(domainSep, contractAddress);
+
+    const call = new ContractCallPrototype(
+      contractAddress,
+      '',
+      new ContractOperation(),
+      { ...transcript, effects: { ...transcript.effects, shieldedMints: new Map([[nativeToken().raw, 1n]]) } },
+      undefined,
+      [alignedValue],
+      alignedValue,
+      alignedValue,
+      communicationCommitmentRandomness(),
+      'location'
+    );
+
+    const tx = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      undefined,
+      undefined,
+      Intent.new(new Date(3600)).addCall(call)
+    );
+
+    // tx.imbalances(0) returns combined values with the data coming from the effects.shieldedMints
+    expect((tx.imbalances(0).keys().next()?.value as ShieldedTokenType).raw).toEqual(token);
+    expect(tx.imbalances(0).values().next()?.value).toEqual(1n);
   });
 });

@@ -1304,11 +1304,11 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
         match self {
             Node::Empty => std::vec::Vec::new(),
-            Node::Leaf { value, .. } => vec![value.root.clone()],
-            Node::Branch { children, .. } => children.iter().map(|sp| sp.root.clone()).collect(),
-            Node::Extension { child, .. } => vec![child.root.clone()],
+            Node::Leaf { value, .. } => vec![value.as_child()],
+            Node::Branch { children, .. } => children.iter().map(Sp::as_child).collect(),
+            Node::Extension { child, .. } => vec![child.as_child()],
             Node::MidBranchLeaf { child, value, .. } => {
-                vec![value.root.clone(), child.root.clone()]
+                vec![value.as_child(), child.as_child()]
             }
         }
     }
@@ -1485,6 +1485,7 @@ mod tests {
     use crate::{
         Storage,
         db::InMemoryDB,
+        storable::SMALL_OBJECT_LIMIT,
         storage::{WrappedDB, default_storage, set_default_storage},
     };
 
@@ -1524,14 +1525,14 @@ mod tests {
         struct Tag;
         type D = WrappedDB<DefaultDB, Tag>;
         let _ = set_default_storage::<D>(Storage::default);
-        let mut mpt = MerklePatriciaTrie::<u64, D>::new();
-        mpt = mpt.insert(&([1, 2, 3]), 100);
-        mpt = mpt.insert(&([1, 2, 2]), 100);
-        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&100));
-        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&100));
+        let mut mpt = MerklePatriciaTrie::<[u8; SMALL_OBJECT_LIMIT], D>::new();
+        mpt = mpt.insert(&([1, 2, 3]), [100; SMALL_OBJECT_LIMIT]);
+        mpt = mpt.insert(&([1, 2, 2]), [100; SMALL_OBJECT_LIMIT]);
+        assert_eq!(mpt.lookup(&([1, 2, 3])), Some(&[100; SMALL_OBJECT_LIMIT]));
+        assert_eq!(mpt.lookup(&([1, 2, 2])), Some(&[100; SMALL_OBJECT_LIMIT]));
         assert_eq!(mpt.size(), 2);
         dbg!(&mpt.0.arena);
-        assert_eq!(mpt.0.arena.size(), 5);
+        assert_eq!(mpt.0.arena.size(), 1);
     }
 
     #[test]
@@ -1558,12 +1559,13 @@ mod tests {
         let _ = set_default_storage::<D>(Storage::default);
         let arena = &default_storage::<D>().arena;
         {
-            let mut mpt: MerklePatriciaTrie<u64, D> = MerklePatriciaTrie::new();
-            mpt = mpt.insert(&([1, 2, 3]), 100);
-            mpt = mpt.insert(&([1, 2, 4]), 104);
-            mpt = mpt.insert(&([2, 2, 4]), 105);
-            assert_eq!(arena.size(), 11);
-            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&105));
+            let mut mpt: MerklePatriciaTrie<[u8; SMALL_OBJECT_LIMIT], D> =
+                MerklePatriciaTrie::new();
+            mpt = mpt.insert(&([1, 2, 3]), [100; SMALL_OBJECT_LIMIT]);
+            mpt = mpt.insert(&([1, 2, 4]), [104; SMALL_OBJECT_LIMIT]);
+            mpt = mpt.insert(&([2, 2, 4]), [105; SMALL_OBJECT_LIMIT]);
+            assert_eq!(arena.size(), 3);
+            assert_eq!(mpt.lookup(&([2, 2, 4])), Some(&[105; SMALL_OBJECT_LIMIT]))
         }
         assert_eq!(arena.size(), 0);
     }
