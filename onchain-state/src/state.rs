@@ -187,7 +187,7 @@ impl<D: DB> FieldRepr for StateValue<D> {
             BoundedMerkleTree(t) => {
                 let entries = t.iter().collect::<Vec<_>>();
                 writer.write(&[(4u128
-                    | ((t.height() as u128) << 4)
+                    | ((t.height() as u128).saturating_sub(1) << 4)
                     | ((entries.len() as u128) << 12))
                     .into()]);
                 for entry in entries.into_iter() {
@@ -418,7 +418,13 @@ impl<D: DB> StateValue<D> {
                 if bmt.height() > 32 {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "BMT eceeded maximum height of 32",
+                        "BMT exceeded maximum height of 32",
+                    ));
+                }
+                if bmt.height() == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "BMT has invalid height of 0",
                     ));
                 }
                 if bmt.root().is_none() {

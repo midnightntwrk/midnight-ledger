@@ -461,7 +461,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     3u8 => {
                         let gas = incr_gas(gas, cost_model.new_array)?;
                         // Container size in upper 5 bits.
-                        let size = val >> 3;
+                        let size = val >> 3 + 1;
                         if size > 16 {
                             return Err(OnchainProgramError::InvalidArgs(format!(
                                 "new: array length > 16: {size}"
@@ -474,7 +474,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     }
                     4u8 => (
                         incr_gas(gas, cost_model.new_bmt)?,
-                        StateValue::BoundedMerkleTree(MerkleTree::blank(val >> 3)),
+                        StateValue::BoundedMerkleTree(MerkleTree::blank((val >> 3) + 1)),
                     ),
                     tag => {
                         return Err(OnchainProgramError::InvalidArgs(format!(
