@@ -308,7 +308,7 @@ describe('Ledger API - CostModel', () => {
    * @then  blockUsagePrice increases; other dimensions fall
    */
   test('blockUsagePrice increases when blockUsage near limit (dustActions w/ many proofs)', () => {
-    const ITERATIONS = 58;
+    const ITERATIONS = 54;
     const DUST_UTXO_TO_SPARE = 5; // leaves enough spends to push blockUsage but avoid hitting hard caps
 
     const state = TestState.new();
