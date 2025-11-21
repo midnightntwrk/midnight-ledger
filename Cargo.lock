@@ -2693,9 +2693,9 @@ dependencies = [
 
 [[package]]
 name = "log"
-version = "0.4.27"
+version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13dc2df351e3202783a1fe0d44375f7295ffb4049267b0f3018346dc122a1d94"
+checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
 
 [[package]]
 name = "lru"
@@ -2758,7 +2758,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2788,11 +2788,12 @@ dependencies = [
  "sha2",
  "signature",
  "tracing",
+ "zeroize",
 ]
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -2827,7 +2828,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2841,6 +2842,7 @@ dependencies = [
  "proptest-derive",
  "rand 0.8.5",
  "serde",
+ "zeroize",
 ]
 
 [[package]]
@@ -2864,13 +2866,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "anyhow",
  "criterion",
  "derive-where",
  "fake",
  "futures",
+ "hex",
  "introspection",
  "introspection-derive",
  "is_sorted",
@@ -2879,6 +2882,7 @@ dependencies = [
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-ledger",
+ "midnight-ledger-static",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
@@ -2891,16 +2895,26 @@ dependencies = [
  "rayon",
  "reqwest",
  "serde",
+ "serde_json",
  "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 
 [[package]]
+name = "midnight-ledger-static"
+version = "1.0.0-alpha.4"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.40",
+]
+
+[[package]]
 name = "midnight-ledger-wasm"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -2923,11 +2937,12 @@ dependencies = [
  "serde_bytes",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "zeroize",
 ]
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2958,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2978,7 +2993,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "fake",
@@ -2999,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "fake",
@@ -3023,7 +3038,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3083,7 +3098,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "crypto",
  "konst",
@@ -3100,7 +3115,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-alpha.1"
+version = "1.0.0-alpha.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.40",
@@ -3109,7 +3124,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "archery",
  "criterion",
@@ -3147,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3164,7 +3179,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.4"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3201,6 +3216,7 @@ dependencies = [
  "signature",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
 ]
 
 [[package]]
@@ -3229,7 +3245,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.1.0-alpha.2"
+version = "6.1.0-alpha.4"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3241,6 +3257,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
+ "midnight-ledger-static",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
@@ -3253,6 +3270,7 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
+ "zeroize",
  "zkir",
 ]
 

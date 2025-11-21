@@ -14,9 +14,9 @@
 use crate::contract::ContractAddress;
 use crate::hash_serde;
 use crate::transfer::{Recipient, SenderEvidence};
-use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueSlice};
-use base_crypto::hash::BLANK_HASH;
+use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAtom, ValueSlice};
 use base_crypto::hash::persistent_hash;
+use base_crypto::hash::{BLANK_HASH, PERSISTENT_HASH_BYTES};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
 use base_crypto::signatures::VerifyingKey;
 use fake::Dummy;
@@ -33,6 +33,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;
 use transient_crypto::hash::{degrade_to_transient, transient_hash, upgrade_from_transient};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
+use zeroize::Zeroize;
 
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
@@ -147,6 +148,7 @@ impl rand::distributions::Distribution<Nonce> for rand::distributions::Standard 
     BinaryHashRepr,
     Serializable,
     Dummy,
+    Zeroize,
 )]
 #[tag = "zswap-coin-secret-key[v1]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -168,6 +170,20 @@ impl SecretKey {
         self.binary_repr(&mut data);
         data.extend(b"mdn:pk");
         PublicKey(persistent_hash(&data))
+    }
+}
+
+impl TryFrom<&ValueAtom> for SecretKey {
+    type Error = InvalidBuiltinDecode;
+
+    fn try_from(value: &ValueAtom) -> Result<SecretKey, InvalidBuiltinDecode> {
+        let mut buf = [0u8; PERSISTENT_HASH_BYTES];
+        if value.0.len() <= PERSISTENT_HASH_BYTES {
+            buf[..value.0.len()].copy_from_slice(&value.0[..]);
+            Ok(SecretKey(HashOutput(buf)))
+        } else {
+            Err(InvalidBuiltinDecode("SecretKey"))
+        }
     }
 }
 

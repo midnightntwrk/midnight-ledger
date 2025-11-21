@@ -914,10 +914,10 @@ impl<D: DB> LedgerState<D> {
                 // process fees and dust actions first. This is not in the segment part of
                 // `apply_segment`, as they are not processed segment-by-segment.
                 //
-                // NOTE: The `ok_or` is safe here, as fees have already been
+                // NOTE: The `unwrap_or` is safe here, as fees have already been
                 // checked during well-formedness.
                 let mut fees_remaining = Transaction::Standard(tx.clone())
-                    .fees(&self.parameters)
+                    .fees(&self.parameters, true)
                     .unwrap_or(0);
                 // apply spends first, to make sure registration outputs get the maximum dust they can.
                 let intents = tx.intents.sorted_iter().collect::<Vec<_>>();
@@ -973,7 +973,6 @@ impl<D: DB> LedgerState<D> {
                         }
                     }
                 }
-                #[cfg(not(feature = "test-utilities"))]
                 if fees_remaining != 0 {
                     error!(
                         "Reached end of fee accounting stage with {fees_remaining} SPECKs of Dust not paid. This is either a ledger accounting bug, `well_formed` was not checked correctly, or the fee parameters changed after it was checked."

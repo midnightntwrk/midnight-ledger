@@ -29,7 +29,6 @@ use midnight_ledger::semantics::TransactionResult;
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Transaction,
 };
-#[cfg(feature = "proving")]
 use midnight_ledger::test_utilities::PUBLIC_PARAMS;
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
@@ -51,7 +50,6 @@ use transient_crypto::commitment::PedersenRandomness;
 use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::KeyLocation;
-#[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProvingKeyMaterial, Resolver as ResolverT};
 use zswap::Delta;
 use zswap::{Offer, Output, Transient};
@@ -63,7 +61,6 @@ lazy_static! {
     static ref RESOLVER_BURN: Resolver = test_resolver("composable-burn");
 }
 
-#[cfg(feature = "proving")]
 async fn resolve_any(key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
     let resolvers = [
         &*RESOLVER_INNER,
@@ -79,7 +76,6 @@ async fn resolve_any(key: KeyLocation) -> std::io::Result<Option<ProvingKeyMater
     Ok(None)
 }
 
-#[cfg(feature = "proving")]
 lazy_static! {
     static ref RESOLVER: Resolver = Resolver::new(
         PUBLIC_PARAMS.clone(),
@@ -93,11 +89,6 @@ lazy_static! {
         ),
         Box::new(|inp| Box::pin(resolve_any(inp))),
     );
-}
-
-#[cfg(not(feature = "proving"))]
-lazy_static! {
-    static ref RESOLVER: Resolver = ();
 }
 
 fn program_with_results<D: DB>(

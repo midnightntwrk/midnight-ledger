@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.5**](../README.md)
 
 ***
 
@@ -206,7 +206,7 @@ spend(
    secretKeys, 
    coin, 
    segment, 
-   ttl?): [ZswapLocalState, ZswapInput<PreProof>];
+   ttl?): [ZswapLocalState, UnprovenInput];
 ```
 
 Initiates a new spend of a specific coin, outputting the corresponding
@@ -233,7 +233,7 @@ in-flight.
 
 #### Returns
 
-\[`ZswapLocalState`, [`ZswapInput`](ZswapInput.md)\<[`PreProof`](PreProof.md)\>\]
+\[`ZswapLocalState`, [`UnprovenInput`](../type-aliases/UnprovenInput.md)\]
 
 ***
 
@@ -245,7 +245,7 @@ spendFromOutput(
    coin, 
    segment, 
    output, 
-   ttl?): [ZswapLocalState, ZswapTransient<PreProof>];
+   ttl?): [ZswapLocalState, UnprovenTransient];
 ```
 
 Initiates a new spend of a new-yet-received output, outputting the
@@ -268,7 +268,7 @@ this coin as in-flight.
 
 ##### output
 
-[`ZswapOutput`](ZswapOutput.md)\<[`PreProof`](PreProof.md)\>
+[`UnprovenOutput`](../type-aliases/UnprovenOutput.md)
 
 ##### ttl?
 
@@ -276,7 +276,7 @@ this coin as in-flight.
 
 #### Returns
 
-\[`ZswapLocalState`, [`ZswapTransient`](ZswapTransient.md)\<[`PreProof`](PreProof.md)\>\]
+\[`ZswapLocalState`, [`UnprovenTransient`](../type-aliases/UnprovenTransient.md)\]
 
 ***
 

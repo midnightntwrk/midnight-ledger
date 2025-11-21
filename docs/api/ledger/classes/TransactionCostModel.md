@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.5**](../README.md)
 
 ***
 
@@ -7,6 +7,16 @@
 # Class: TransactionCostModel
 
 ## Properties
+
+### baselineCost
+
+```ts
+readonly baselineCost: RunningCost;
+```
+
+A baseline cost to begin with
+
+***
 
 ### inputFeeOverhead
 
@@ -25,6 +35,16 @@ readonly outputFeeOverhead: bigint;
 ```
 
 The increase in fees to expect from adding a new output to a transaction
+
+***
+
+### runtimeCostModel
+
+```ts
+readonly runtimeCostModel: CostModel;
+```
+
+A cost model for calculating transaction fees
 
 ## Methods
 

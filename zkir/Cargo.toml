@@ -1,6 +1,6 @@
 [package]
 name = "zkir"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 edition = "2024"
 license.workspace = true
 
@@ -41,7 +41,7 @@ rand = "^0.8.0"
 rand_chacha = "^0.3.1"
 tracing = { version = "^0.1.41" }
 
-log = { version = "^0.4.27", optional = true }
+log = { version = "^0.4.28", optional = true }
 tracing-subscriber = { version = "^0.3.19", optional = true }
 clap = { version = "^4.5.40", features = ["derive"], optional = true }
 env_logger = { version = "^0.11.8", optional = true }

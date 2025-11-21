@@ -15,14 +15,14 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Setup GitHub Credentials
-        uses: extractions/netrc@v2
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
         with:
           machine: github.com
           username: ${{ secrets.GH_USERNAME }}
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Setup API Credentials
-        uses: extractions/netrc@v2
+        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
         with:
           machine: api.github.com
           username: ${{ secrets.GH_USERNAME }}
@@ -36,7 +36,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Set up Node.js
-        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # ratchet:actions/setup-node@v4
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903  # v6.0.0
         with:
           always-auth: true
           registry-url: https://npm.pkg.github.com/
@@ -45,7 +45,7 @@ jobs:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
       - name: Install Nix
-        uses: cachix/install-nix-action@v30
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
         with:
           extra_nix_config: |
             netrc-file = ~/.netrc
@@ -60,20 +60,20 @@ jobs:
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
-          cache: midnight
+          cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
-      
+
       - name: Get project versions
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
             cd "$project"
-            VERSION=$(grep '^version =' Cargo.toml | awk -F '"' '{print $2}')
+            VERSION=$((grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml)| awk -F '"' '{print $2}')
             echo "$project version: $VERSION"
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
             echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
             cd ..
             done
-      
+
       - name: Add tags for upstream crates
         run: |
           git config --global user.name 'MidnightCI'
@@ -105,14 +105,13 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "LEDGER_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="ledger-${VERSION}"
-          SHORT_TAG_NAME="ledger-${SHORT_VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
           else
-            cd ledger-wasm 
+            cd ledger-wasm
             cargo check
             npm install
             npm run build:markdown-docs
@@ -130,8 +129,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger@${{ env.LEDGER_WASM_VERSION }}
+            npm publish midnight-ledger-v"${SHORT_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/ledger-v"${SHORT_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
@@ -148,9 +147,8 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "ONCHAIN_RUNTIME_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
-          SHORT_TAG_NAME="onchain-runtime-${SHORT_VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
@@ -173,8 +171,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-onchain-runtime-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/onchain-runtime@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            npm publish midnight-onchain-runtime-v"${SHORT_VERSION}"-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/onchain-runtime-v"${SHORT_VERSION}"@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
@@ -191,9 +189,8 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "ZKIR_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
           TAG_NAME="zkir-${VERSION}"
-          SHORT_TAG_NAME="zkir-${SHORT_VERSION}"
+          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
@@ -216,8 +213,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-zkir-v2-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/zkir@${{ env.ZKIR_WASM_VERSION }}
+            npm publish midnight-zkir-v"${SHORT_VERSION}"-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/zkir-v"${SHORT_VERSION}"@${{ env.ZKIR_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
@@ -234,5 +231,3 @@ jobs:
       ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
       GH_USERNAME: ${{ secrets.GH_USERNAME }}
       GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
-      
-  

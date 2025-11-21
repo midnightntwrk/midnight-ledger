@@ -10,19 +10,12 @@ specification](./spec/).
 
 ## Quick Start
 
-> [!WARNING]
->
-> We are in the process of open-sourcing. During this process, some of our
-> internal dependencies might not yet be public, and some of the build plumbing
-> may be broken. Please be patient while we iron things out; if you hit
-> authentication issues these should be resolved soon.
->
-> This message will be removed once this repository can be built without
-> additional credentials.
-
 The ledger currently requires [Nix](https://nixos.org/) to build and bootstrap.
-Once nix is installed, the development shell of the ledger can be entered
-simply with:
+We use the [flakes](https://nixos.wiki/wiki/Flakes) experimental features for
+nix, which can be enable as part of the nix configuration, or by adding
+`--extra-experimental-features 'nix-command flakes'` to the below `nix`
+commands. Once nix is installed, the development shell of the ledger can be
+entered simply with:
 
 ```console
 $ nix develop
@@ -146,7 +139,7 @@ Some of these rust crates use feature flags. For the most part, using default fe
 | `proving` | Enables proofs in tests and benchmarks. Note that the library *will* have proving capability, even when not enabled. |
 | `stress-test` | Enables expensive storage tests. |
 | `sqlite` | Enables the [SQLite](https://sqlite.org) storage backend. |
-| `test-utilities` | Enables testing helpers in the `ledger` crate, and loosens some well-formedness checks very slightly. |
+| `test-utilities` | Enables testing helpers in the `ledger` crate. |
 | `unstable` | Enabled transitively for unstable feature flags, and refuses to build unless the `MIDNIGHT_LEDGER_EXPERIMENTAL` environment variable is set. |
 | `vendored` | A feature of `onchain-runtime` that will skip the build of compact macros that would require scheme dependencies for downstream crates otherwise. Enabled by default. |
 

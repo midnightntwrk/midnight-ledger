@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.1**](../README.md)
+[**@midnight/ledger v6.1.0-alpha.5**](../README.md)
 
 ***
 
@@ -39,6 +39,22 @@ readonly encryptionSecretKey: EncryptionSecretKey;
 ```
 
 ## Methods
+
+### clear()
+
+```ts
+clear(): void;
+```
+
+Clears the secret keys, so that they are no longer usable nor held in memory
+Note: it does not clear copies of the keys - which is particularly relevant for proof preimages
+Note: this will cause all other operations to fail
+
+#### Returns
+
+`void`
+
+***
 
 ### fromSeed()
 

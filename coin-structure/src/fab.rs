@@ -17,7 +17,7 @@ use crate::coin::{
     UnshieldedTokenType,
 };
 use crate::contract::ContractAddress;
-use crate::transfer::Recipient;
+use crate::transfer::{Recipient, SenderEvidence};
 use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAtom, ValueSlice};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES as PHB};
 
@@ -191,6 +191,25 @@ impl TryFrom<&ValueSlice> for Recipient {
             }
         } else {
             Err(InvalidBuiltinDecode("Recipient"))
+        }
+    }
+}
+
+impl TryFrom<&ValueSlice> for SenderEvidence {
+    type Error = InvalidBuiltinDecode;
+
+    fn try_from(value: &ValueSlice) -> Result<SenderEvidence, InvalidBuiltinDecode> {
+        if value.0.len() == 3 {
+            let is_left: bool = (&value.0[0]).try_into()?;
+            if is_left {
+                <()>::try_from(&value.0[2])?;
+                Ok(SenderEvidence::User((&value.0[1]).try_into()?))
+            } else {
+                <()>::try_from(&value.0[1])?;
+                Ok(SenderEvidence::Contract((&value.0[2]).try_into()?))
+            }
+        } else {
+            Err(InvalidBuiltinDecode("SenderEvidence"))
         }
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.2"
+version = "1.0.0-alpha.5"
 edition = "2024"
 license.workspace = true
 
@@ -17,6 +17,7 @@ lazy_static = "^1.5.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
+zeroize = "^1.8.0"
 
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 fake = { version = "^2.10.0", features = ["derive"] }

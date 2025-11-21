@@ -14,42 +14,42 @@
 import {
   type AlignedValue,
   type BlockContext,
-  type ShieldedCoinInfo,
-  type RawTokenType,
   type CoinPublicKey,
   type ContractAddress,
-  type EncPublicKey,
-  shieldedToken,
-  type Nonce,
-  type Op,
-  type QualifiedShieldedCoinInfo,
-  Transaction,
-  sampleCoinPublicKey,
-  sampleEncryptionPublicKey,
-  sampleSigningKey,
-  sampleContractAddress,
-  sampleUserAddress,
-  type SigningKey,
-  type TokenType,
-  ZswapOffer,
+  ContractDeploy,
+  ContractState,
   createShieldedCoinInfo,
-  ZswapOutput,
   dummyContractAddress,
   dummyUserAddress,
-  ContractState,
-  ContractDeploy,
+  DustParameters,
+  type EncPublicKey,
   Intent,
-  ZswapSecretKeys,
-  type PreProof,
-  type PreBinding,
-  type SignatureEnabled,
-  type PublicAddress,
   type IntentHash,
-  UnshieldedOffer,
-  signData,
-  signatureVerifyingKey,
+  type Nonce,
+  type Op,
+  type PreBinding,
+  type PreProof,
+  type PublicAddress,
+  type QualifiedShieldedCoinInfo,
+  type RawTokenType,
+  sampleCoinPublicKey,
+  sampleContractAddress,
+  sampleEncryptionPublicKey,
   sampleIntentHash,
-  DustParameters
+  sampleSigningKey,
+  sampleUserAddress,
+  type ShieldedCoinInfo,
+  shieldedToken,
+  type SignatureEnabled,
+  signatureVerifyingKey,
+  signData,
+  type SigningKey,
+  type TokenType,
+  Transaction,
+  UnshieldedOffer,
+  ZswapOffer,
+  ZswapOutput,
+  ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import crypto from 'node:crypto';
 import { generateHex, loadBinaryFile } from './test-utils';
@@ -60,7 +60,7 @@ export const PERSISTENT_HASH_BYTES = 32;
 export const BOOLEAN_HASH_BYTES = 1;
 export const U128_HASH_BYTES = 16;
 export const LOCAL_TEST_NETWORK_ID = 'local-test';
-export const NIGHT_TOKEN_TYPE = Buffer.from(new Uint8Array(32)).toString('hex');
+export const DEFAULT_TOKEN_TYPE = Buffer.from(new Uint8Array(32)).toString('hex');
 export const NIGHT_DUST_RATIO = 5_000_000_000n;
 export const GENERATION_DECAY_RATE = 8_267n;
 export const DUST_GRACE_PERIOD_IN_SECONDS = 3n * 60n * 60n;
@@ -110,7 +110,7 @@ export class Random {
     raw: Random.hex(64)
   });
 
-  static domainSep = (): Buffer => {
+  static generate32Bytes = (): Buffer => {
     const bytes = new Uint8Array(32);
     crypto.getRandomValues(bytes);
     return Buffer.from(bytes);
@@ -141,6 +141,10 @@ export class Random {
 }
 
 export class Static {
+  static encodeFromHex = (hex: string) => Buffer.from(hex, 'hex');
+
+  static encodeFromText = (text: string) => new TextEncoder().encode(text);
+
   static hex = (length: number = 64, seed: number = 42) =>
     Array.from({ length }, (_, i) => ((seed + i) % 16).toString(16)).join('');
 
@@ -285,6 +289,16 @@ export class Static {
     }
     return value.slice(0, end);
   }
+
+  static defaultShieldedTokenType = (): ShieldedTokenType => ({
+    tag: 'shielded',
+    raw: DEFAULT_TOKEN_TYPE
+  });
+
+  static defaultUnshieldedTokenType = (): UnshieldedTokenType => ({
+    tag: 'unshielded',
+    raw: DEFAULT_TOKEN_TYPE
+  });
 }
 
 export const addressToPublic = (address: string, tag: 'user' | 'contract'): PublicAddress => ({

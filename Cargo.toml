@@ -1,6 +1,6 @@
 [workspace]
 package.license = "Apache-2.0"
-package.version = "6.1.0-alpha.2"
+package.version = "6.1.0-alpha.5"
 members = [
     "zswap",
     "ledger",
@@ -21,6 +21,7 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
+    "static",
 ]
 default-members = [
     "zswap",

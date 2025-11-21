@@ -12,14 +12,12 @@
 // limitations under the License.
 
 use crate::construct::ContractCallPrototype;
-#[cfg(feature = "proving")]
 use crate::dust::DustResolver;
 use crate::dust::{
     DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
-#[cfg(feature = "proving")]
 pub use crate::prove::Resolver;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::INITIAL_PARAMETERS;
@@ -35,7 +33,6 @@ use crate::structure::{INITIAL_LIMITS, SPECKS_PER_DUST};
 use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
 use base_crypto::cost_model::SyntheticCost;
-#[cfg(feature = "proving")]
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
 use base_crypto::signatures::{Signature, SigningKey};
@@ -44,7 +41,6 @@ use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
 };
 use derive_where::derive_where;
-#[cfg(feature = "proving")]
 use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
@@ -56,7 +52,6 @@ use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::collections::HashMap;
-#[cfg(feature = "proving")]
 use std::env;
 use std::io;
 use storage::Storable;
@@ -68,7 +63,6 @@ use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 #[cfg(feature = "proving")]
 use transient_crypto::curve::Fr;
-#[cfg(feature = "proving")]
 use transient_crypto::proofs::KeyLocation;
 use transient_crypto::proofs::VerifierKey;
 #[cfg(feature = "proving")]
@@ -77,7 +71,6 @@ use transient_crypto::proofs::{ProverKey, ProvingProvider, Resolver as ResolverT
 use zkir_v2::{IrSource, LocalProvingProvider};
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
-#[cfg(feature = "proving")]
 use zswap::prove::ZswapResolver;
 use zswap::{Delta, Offer as ZswapOffer, Output as ZswapOutput};
 
@@ -96,10 +89,6 @@ pub type TxBound<S, D> = Transaction<S, ProofMarker, PureGeneratorPedersen, D>;
 #[cfg(not(any(feature = "proving")))]
 pub type TxBound<S, D> = Transaction<S, (), Pedersen, D>;
 
-#[cfg(not(feature = "proving"))]
-pub type Resolver = ();
-
-#[cfg(feature = "proving")]
 lazy_static! {
     pub static ref PUBLIC_PARAMS: ZswapResolver = ZswapResolver(
         MidnightDataProvider::new(
@@ -404,11 +393,11 @@ impl<D: DB> TestState<D> {
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters)).ok();
+        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
         dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
         dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
         dbg!(
-            tx.cost(&self.ledger.parameters)
+            tx.cost(&self.ledger.parameters, false)
                 .ok()
                 .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
         );
@@ -516,7 +505,7 @@ impl<D: DB> TestState<D> {
         let old_dust = self.dust.clone();
         let mut last_dust = 0;
         while let Some(mut dust) = merged_tx
-            .balance(Some(merged_tx.fees(&self.ledger.parameters)?))?
+            .balance(Some(merged_tx.fees(&self.ledger.parameters, false)?))?
             .get(&(TokenType::Dust, 0))
             .and_then(|bal| (*bal < 0).then_some((-*bal) as u128))
         {
@@ -571,12 +560,6 @@ impl<D: DB> TestState<D> {
     }
 }
 
-#[cfg(not(feature = "proving"))]
-pub fn test_resolver(_test_name: &'static str) -> Resolver {
-    ()
-}
-
-#[cfg(feature = "proving")]
 pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<VerifierKey> {
     use serialize::tagged_deserialize;
     use transient_crypto::proofs::Resolver;
@@ -587,12 +570,6 @@ pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<Ver
     tagged_deserialize(&mut &proof_data.verifier_key[..]).ok()
 }
 
-#[cfg(not(feature = "proving"))]
-pub async fn verifier_key(_resolver: &Resolver, _name: &'static str) -> Option<VerifierKey> {
-    None
-}
-
-#[cfg(feature = "proving")]
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
@@ -710,8 +687,8 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
                         .into_atomic_units(SPECKS_PER_DUST)
                 })
                 .unwrap_or(u128::MAX);
-                let mocked_fees = mocked.fees(&INITIAL_PARAMETERS);
-                let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS);
+                let mocked_fees = mocked.fees(&INITIAL_PARAMETERS, false);
+                let real_fees = proven.seal(_rng.split()).fees(&INITIAL_PARAMETERS, false);
                 if let (Ok(real_fees), Ok(mocked_fees)) = (real_fees, mocked_fees) {
                     assert!(real_fees <= mocked_fees);
                     assert!(mocked_fees <= real_fees + allowed_error_margin);

@@ -15,6 +15,7 @@ coin-structure = { path = "../coin-structure", package = "midnight-coin-structur
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 midnight-onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
+midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
@@ -23,6 +24,7 @@ is_sorted = "^0.1.1"
 lazy_static = "^1.5.0"
 tracing = { version = "^0.1.41" }
 itertools = "^0.14.0"
+zeroize = "^1.8.0"
 
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }

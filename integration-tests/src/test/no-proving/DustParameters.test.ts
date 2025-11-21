@@ -29,15 +29,13 @@ describe('Ledger API - DustParameters', () => {
    * @then Should return formatted string with default values
    */
   test('should print out information as string', () => {
-    const expected = `DustParameters(
-    DustParameters {
-        night_dust_ratio: ${NIGHT_DUST_RATIO},
-        generation_decay_rate: ${GENERATION_DECAY_RATE},
-        dust_grace_period: Duration(
-            ${DUST_GRACE_PERIOD_IN_SECONDS},
-        ),
-    },
-)`;
+    const expected = `DustParameters {
+    night_dust_ratio: ${NIGHT_DUST_RATIO},
+    generation_decay_rate: ${GENERATION_DECAY_RATE},
+    dust_grace_period: Duration(
+        ${DUST_GRACE_PERIOD_IN_SECONDS},
+    ),
+}`;
 
     expect(initialParameters.toString()).toEqual(expected);
   });

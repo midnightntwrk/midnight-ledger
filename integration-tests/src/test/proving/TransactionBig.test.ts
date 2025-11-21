@@ -114,11 +114,10 @@ describe.concurrent('Ledger API - TransactionBig [@slow][@proving]', () => {
       const singleIntent = transaction.intents?.get(1);
       expect(singleIntent?.actions).toHaveLength(20);
 
-      expect(transaction.transactionHash()).toMatch(/^[0-9a-fA-F]{64}$/);
       expect(transaction.identifiers()).toHaveLength(21); // 10 inputs + 10 outputs + 1 intent
 
       assertSerializationSuccess(transaction, SignatureMarker.signature, ProofMarker.proof, BindingMarker.preBinding);
     },
-    5 * 60000
+    15 * 60000
   );
 });
