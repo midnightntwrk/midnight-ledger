@@ -26,6 +26,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add endpoints for estimating fees with a margin depending on allowed
   block adjustment
 - fix: fix balancing bug in contracts with multiple intents
+- fix: remove special casing of checks on test-utilities feature
 
 ## 6.0.0
 

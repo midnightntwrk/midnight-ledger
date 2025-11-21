@@ -1,11 +1,14 @@
 [package]
 name = "midnight-zkir-wasm"
-version = "2.0.0-alpha.4"
+version = "2.0.0-alpha.5"
 edition = "2024"
 license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+proptest = []
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }

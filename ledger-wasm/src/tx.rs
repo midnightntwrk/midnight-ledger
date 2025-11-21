@@ -248,7 +248,7 @@ impl Transaction {
             return Err(JsError::new("Intent offer must be unproven."));
         }
 
-        let segment_id = OsRng.gen_range(1..u16::MAX);
+        let segment_id = OsRng.gen_range(2..u16::MAX);
         let mut intents = vec![];
         if intent.is_some() {
             intents.push((segment_id, intent.unwrap().clone().try_into()?));
