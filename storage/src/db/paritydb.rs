@@ -21,7 +21,7 @@ use serialize::{Deserializable, Serializable};
 use parity_db;
 use sha2::digest::generic_array::GenericArray;
 
-use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaKey, backend::OnDiskObject};
+use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject};
 
 #[cfg(feature = "proptest")]
 use super::DummyDBStrategy;
@@ -63,7 +63,7 @@ fn serialize_node<H: WellBehavedHasher>(node: &OnDiskObject<H>) -> Vec<u8> {
     bytes
 }
 
-fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaKey<H> {
+fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaHash<H> {
     if key_bytes.len() != <H as OutputSizeUser>::output_size() {
         panic!(
             "incorrect length for gc_root key: found {}, expected {}",
@@ -71,7 +71,7 @@ fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaKey<H> {
             <H as OutputSizeUser>::output_size()
         );
     }
-    ArenaKey(GenericArray::from_iter(key_bytes))
+    ArenaHash(GenericArray::from_iter(key_bytes))
 }
 
 impl<H: WellBehavedHasher> ParityDb<H> {
@@ -129,7 +129,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     type Hasher = H;
 
     /// Note: If the key was recently deleted, this may still return Some(_).
-    fn get_node(&self, key: &ArenaKey<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
+    fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
         self.db
             .get(NODE_COLUMN, &key.0)
             .expect("failed to get from db")
@@ -139,7 +139,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             })
     }
 
-    fn get_unreachable_keys(&self) -> Vec<ArenaKey<Self::Hasher>> {
+    fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
         let mut it = self
             .db
             .iter(REF_COUNT_ZERO)
@@ -157,7 +157,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
 
     fn insert_node(
         &mut self,
-        key: crate::arena::ArenaKey<Self::Hasher>,
+        key: crate::arena::ArenaHash<Self::Hasher>,
         object: OnDiskObject<Self::Hasher>,
     ) {
         let mut ops = vec![(
@@ -175,7 +175,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
         self.db.commit_changes(ops).expect("Failed to commit to db");
     }
 
-    fn delete_node(&mut self, key: &crate::arena::ArenaKey<Self::Hasher>) {
+    fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
         let ops = vec![
             (
                 NODE_COLUMN,
@@ -191,7 +191,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
 
     fn batch_update<I>(&mut self, iter: I)
     where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, Update<Self::Hasher>)>,
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>,
     {
         let mut ops = Vec::new();
         for (key, update) in iter {
@@ -238,14 +238,14 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     fn batch_get_nodes<I>(
         &self,
         keys: I,
-    ) -> Vec<(ArenaKey<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
+    ) -> Vec<(ArenaHash<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
     where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>,
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         crate::db::dubious_batch_get_nodes(self, keys)
     }
 
-    fn get_root_count(&self, key: &crate::arena::ArenaKey<Self::Hasher>) -> u32 {
+    fn get_root_count(&self, key: &crate::arena::ArenaHash<Self::Hasher>) -> u32 {
         self.db
             .get(GC_ROOT_COLUMN, &key.0)
             .expect("failed to get from db")
@@ -255,7 +255,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             .unwrap_or(0)
     }
 
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
+    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         let ops = vec![(
             GC_ROOT_COLUMN,
             if count == 0 {
@@ -267,7 +267,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
         self.db.commit_changes(ops).expect("Failed to commit to db");
     }
 
-    fn get_roots(&self) -> HashMap<ArenaKey<Self::Hasher>, u32> {
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         let mut it = self
             .db
             .iter(GC_ROOT_COLUMN)

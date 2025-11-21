@@ -27,8 +27,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{Add, Sub};
 use storage::Storable;
-use storage::arena::ArenaKey;
 use storage::arena::Sp;
+use storage::arena::{ArenaHash, ArenaKey};
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
@@ -44,9 +44,9 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("zswap/", include_str!("../../static/version"), "/", $name),
+            concat!("zswap/", midnight_ledger_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
-                &include_bytes!(concat!("../../static/zswap/", $name, ".sha256"))
+                &include_bytes!(concat!("../static/", $name, ".sha256"))
                     .split_at(64)
                     .0,
             ),
