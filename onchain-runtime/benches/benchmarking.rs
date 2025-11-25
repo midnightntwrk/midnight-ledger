@@ -282,7 +282,6 @@ fn choose_aligned_values(num: usize, map: &StateValueMap) -> Vec<AlignedValue> {
     let size = avs.len();
     let half_size = size / 2;
     let mut results = vec![];
-    // Here ((num+1)/2) = ceil(num/2).
     for i in 0..num.div_ceil(2) {
         // Even steps thru the first half of the range
         results.push(avs[(size / num) * i].clone())

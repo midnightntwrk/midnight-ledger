@@ -158,7 +158,6 @@ impl<T: Deserializable> Deserializable for Arc<T> {
 }
 
 impl<const N: usize> Deserializable for [u8; N] {
-    #[allow(clippy::uninit_assumed_init)]
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
         unsafe {
             let mut res = std::mem::MaybeUninit::<[u8; N]>::uninit().assume_init();

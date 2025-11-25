@@ -132,7 +132,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
     let state_pairs = generate_state_pairs();
     let mut benchmark_data = Vec::new();
 
-    for (uid, (i, (old_map, new_map, relationship))) in state_pairs.iter().enumerate().enumerate() {
+    for (i, (old_map, new_map, relationship)) in state_pairs.iter().enumerate() {
         println!("compute_benchmark_data: {i}/{}", state_pairs.len());
         let old_sp = arena.alloc(StateValue::Map(old_map.clone()));
         let new_sp = arena.alloc(StateValue::Map(new_map.clone()));
@@ -163,7 +163,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             "keys_added_size": keys_added.len(),
             "keys_removed_size": keys_removed.len(),
             "relationship": relationship,
-            "uid": uid,
+            "uid": i,
         });
 
         benchmark_data.push(BenchmarkData {
