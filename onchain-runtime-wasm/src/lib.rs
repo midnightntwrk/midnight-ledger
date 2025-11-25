@@ -78,7 +78,7 @@ pub fn from_value_hex_ser<T: Deserializable>(data: &str) -> Result<T, wasm_bindg
 fn from_hex_ser_checked<T: Deserializable, R: Read>(mut bytes: R) -> Result<T, std::io::Error> {
     let value = T::deserialize(&mut bytes, 0)?;
 
-    let count = std::io::BufReader::new(bytes).bytes().count();
+    let count = bytes.bytes().count();
 
     if count == 0 {
         return Ok(value);

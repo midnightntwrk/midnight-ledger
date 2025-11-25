@@ -15,7 +15,6 @@ use crate::VecExt;
 use crate::serializable::GLOBAL_TAG;
 use crate::tagged::Tagged;
 use std::borrow::Cow;
-use std::io::BufReader;
 use std::io::Read;
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -53,7 +52,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
-    let count = BufReader::new(reader).bytes().count();
+    let count = reader.bytes().count();
 
     if count == 0 {
         return Ok(value);
