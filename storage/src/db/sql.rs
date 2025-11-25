@@ -476,7 +476,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
                     let children: Vec<ArenaKey<H>> =
-                        children.0.into_iter().map(Into::into).collect();
+                        children.0.into_iter().collect();
                     Ok(OnDiskObject {
                         data,
                         ref_count,
@@ -526,7 +526,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
                         let children: Vec<ArenaKey<H>> =
-                            children.0.into_iter().map(Into::into).collect();
+                            children.0.into_iter().collect();
                         let obj = OnDiskObject {
                             data,
                             ref_count,

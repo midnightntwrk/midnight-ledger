@@ -21,7 +21,6 @@ use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
 use serialize::{Deserializable, Serializable, Tagged};
-use std::any::Any;
 #[cfg(test)]
 use std::collections::HashMap;
 use std::collections::HashSet as StdHashSet;

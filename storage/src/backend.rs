@@ -30,7 +30,6 @@ use serialize::{Deserializable, Serializable};
 use std::{
     cell::RefCell,
     collections::{HashMap, HashSet},
-    slice,
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -1416,7 +1415,7 @@ mod tests {
         let (gp_key, gp_bytes) = in_database_repr(gp.clone());
 
         let child_child_repr = child_from(&child_bytes, &[]);
-        let parent_child_repr = child_from(&parent_bytes, &[child_child_repr.clone()]);
+        let parent_child_repr = child_from(&parent_bytes, std::slice::from_ref(&child_child_repr));
         let gp_child_repr = child_from(
             &gp_bytes,
             &[parent_child_repr.clone(), child_child_repr.clone()],
