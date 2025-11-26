@@ -227,7 +227,9 @@ fn idx<D: DB>(
                 ))
             }
         }
-        _ => Err(OnchainProgramError::TypeError("tried to idx, only map, array, and bmt are supported".to_string())),
+        _ => Err(OnchainProgramError::TypeError(
+            "tried to idx, only map, array, and bmt are supported".to_string(),
+        )),
     }
 }
 
@@ -312,9 +314,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
     let incr_gas_full = |mut gas: RunningCost, by: RunningCost| {
         gas += by;
         if let Some(limit) = gas_limit
-            && (gas.compute_time > limit.compute_time || gas.read_time > limit.read_time) {
-                return Err(OnchainProgramError::OutOfGas);
-            }
+            && (gas.compute_time > limit.compute_time || gas.read_time > limit.read_time)
+        {
+            return Err(OnchainProgramError::OutOfGas);
+        }
         Ok(gas)
     };
     let incr_gas = |gas: RunningCost, by: CostDuration| {
@@ -332,9 +335,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
 
     while !program.is_empty() {
         if let Some(limit) = step_limit
-            && steps_executed >= limit {
-                break;
-            }
+            && steps_executed >= limit
+        {
+            break;
+        }
         steps_executed += 1;
 
         let op = &program[0];
@@ -429,7 +433,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     }
                     StateValue::Array(a) => (incr_gas(gas, cost_model.size_array)?, a.len() as u64),
                     _ => {
-                        return Err(OnchainProgramError::TypeError("attempted to take size, only map, array, and bmt are supported".to_string()));
+                        return Err(OnchainProgramError::TypeError(
+                            "attempted to take size, only map, array, and bmt are supported"
+                                .to_string(),
+                        ));
                     }
                 };
                 gas = new_gas;
@@ -676,7 +683,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         AlignedValue::from(match &map {
                             StateValue::Map(map) => map.contains_key(&key),
                             _ => {
-                                return Err(OnchainProgramError::TypeError("attempted to check membership, only map is supported".to_string()));
+                                return Err(OnchainProgramError::TypeError(
+                                    "attempted to check membership, only map is supported"
+                                        .to_string(),
+                                ));
                             }
                         })
                         .into(),
@@ -731,7 +741,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                             .rehash(),
                     ),
                     _ => {
-                        return Err(OnchainProgramError::TypeError("attempted to rem, only map and bmt are supported".to_string()));
+                        return Err(OnchainProgramError::TypeError(
+                            "attempted to rem, only map and bmt are supported".to_string(),
+                        ));
                     }
                 };
                 stack.push((vnew(container.0.strength, container_nxt), container.1));
@@ -980,7 +992,10 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                             }
                         }
                         _ => {
-                            return Err(OnchainProgramError::TypeError("attempted to ins, only array, map, and bmt are supported".to_string()));
+                            return Err(OnchainProgramError::TypeError(
+                                "attempted to ins, only array, map, and bmt are supported"
+                                    .to_string(),
+                            ));
                         }
                     };
                     curr.0 = vnew(curr.0.strength & container_str, next);

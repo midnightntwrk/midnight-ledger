@@ -799,37 +799,34 @@ impl<D: DB> TryFrom<VmValue<D>> for Effects<D> {
             }
         }
         if let StateValue::Array(arr) = &val.value
-            && arr.len() == 9 {
-                return Ok(Effects {
-                    claimed_nullifiers: map_from::<Nullifier, (), D>(arr.get(0).unwrap())?
-                        .iter()
-                        .map(|x| *x.0)
-                        .collect(),
-                    claimed_shielded_receives: map_from::<CoinCommitment, (), D>(
-                        arr.get(1).unwrap(),
-                    )?
+            && arr.len() == 9
+        {
+            return Ok(Effects {
+                claimed_nullifiers: map_from::<Nullifier, (), D>(arr.get(0).unwrap())?
                     .iter()
                     .map(|x| *x.0)
                     .collect(),
-                    claimed_shielded_spends: map_from::<CoinCommitment, (), D>(
-                        arr.get(2).unwrap(),
-                    )?
+                claimed_shielded_receives: map_from::<CoinCommitment, (), D>(arr.get(1).unwrap())?
                     .iter()
                     .map(|x| *x.0)
                     .collect(),
-                    claimed_contract_calls: map_from::<ClaimedContractCallsValue, (), D>(
-                        arr.get(3).unwrap(),
-                    )?
+                claimed_shielded_spends: map_from::<CoinCommitment, (), D>(arr.get(2).unwrap())?
                     .iter()
-                    .map(|x| (*x.0).clone())
+                    .map(|x| *x.0)
                     .collect(),
-                    shielded_mints: map_from(arr.get(4).unwrap())?,
-                    unshielded_mints: map_from(arr.get(5).unwrap())?,
-                    unshielded_inputs: map_from(arr.get(6).unwrap())?,
-                    unshielded_outputs: map_from(arr.get(7).unwrap())?,
-                    claimed_unshielded_spends: map_from(arr.get(8).unwrap())?,
-                });
-            }
+                claimed_contract_calls: map_from::<ClaimedContractCallsValue, (), D>(
+                    arr.get(3).unwrap(),
+                )?
+                .iter()
+                .map(|x| (*x.0).clone())
+                .collect(),
+                shielded_mints: map_from(arr.get(4).unwrap())?,
+                unshielded_mints: map_from(arr.get(5).unwrap())?,
+                unshielded_inputs: map_from(arr.get(6).unwrap())?,
+                unshielded_outputs: map_from(arr.get(7).unwrap())?,
+                claimed_unshielded_spends: map_from(arr.get(8).unwrap())?,
+            });
+        }
         Err(TranscriptRejected::EffectDecodeError)
     }
 }
@@ -957,11 +954,12 @@ impl<D: DB> QueryContext<D> {
         state.state = new_charged_state;
         let gas_cost = res.gas_cost + state_cost;
         if let Some(gas_limit) = gas_limit
-            && gas_cost > gas_limit {
-                // TODO?: return a more specific error, explaining that gas
-                // limit was exceeded by write+delete vs by cpu during vm eval?
-                return Err(TranscriptRejected::Execution(OnchainProgramError::OutOfGas));
-            }
+            && gas_cost > gas_limit
+        {
+            // TODO?: return a more specific error, explaining that gas
+            // limit was exceeded by write+delete vs by cpu during vm eval?
+            return Err(TranscriptRejected::Execution(OnchainProgramError::OutOfGas));
+        }
 
         trace!("transcript application successful");
         Ok(QueryResults {

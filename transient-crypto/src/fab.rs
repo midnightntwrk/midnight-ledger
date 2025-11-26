@@ -105,7 +105,9 @@ impl<T: DynAligned> DynAligned for MerklePath<T> {
     fn dyn_alignment(&self) -> Alignment {
         let leaf_align = self.leaf.dyn_alignment();
         let entry_align = Alignment::concat([&MerkleTreeDigest::alignment(), &bool::alignment()]);
-        Alignment::concat(once(&leaf_align).chain(std::iter::repeat_n(&entry_align, self.path.len())))
+        Alignment::concat(
+            once(&leaf_align).chain(std::iter::repeat_n(&entry_align, self.path.len())),
+        )
     }
 }
 

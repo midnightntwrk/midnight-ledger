@@ -23,9 +23,10 @@ use syn::{
 fn add_trait_bounds(mut generics: Generics, phantom: &[Ident], db: &Ident) -> Generics {
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param
-            && !phantom.contains(&type_param.ident) {
-                type_param.bounds.push(parse_quote!(Storable<#db>));
-            }
+            && !phantom.contains(&type_param.ident)
+        {
+            type_param.bounds.push(parse_quote!(Storable<#db>));
+        }
     }
     generics
 }
@@ -33,9 +34,10 @@ fn add_trait_bounds(mut generics: Generics, phantom: &[Ident], db: &Ident) -> Ge
 fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param
-            && !phantom.contains(&type_param.ident) {
-                type_param.bounds.push(parse_quote!(Tagged));
-            }
+            && !phantom.contains(&type_param.ident)
+        {
+            type_param.bounds.push(parse_quote!(Tagged));
+        }
     }
     generics
 }

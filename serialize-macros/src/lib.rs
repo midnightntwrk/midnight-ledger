@@ -26,9 +26,10 @@ use syn::{
 fn deserializable_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param
-            && !phantom.contains(&type_param.ident) {
-                type_param.bounds.push(parse_quote!(Deserializable));
-            }
+            && !phantom.contains(&type_param.ident)
+        {
+            type_param.bounds.push(parse_quote!(Deserializable));
+        }
     }
     generics
 }
@@ -36,9 +37,10 @@ fn deserializable_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) ->
 fn tagged_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param
-            && !phantom.contains(&type_param.ident) {
-                type_param.bounds.push(parse_quote!(Tagged));
-            }
+            && !phantom.contains(&type_param.ident)
+        {
+            type_param.bounds.push(parse_quote!(Tagged));
+        }
     }
     generics
 }
@@ -200,9 +202,10 @@ fn tag_factors(data: &Data) -> TokenStream {
 fn serializable_add_trait_bounds(mut generics: Generics, phantom: &[Ident]) -> Generics {
     for param in &mut generics.params {
         if let GenericParam::Type(ref mut type_param) = *param
-            && !phantom.contains(&type_param.ident) {
-                type_param.bounds.push(parse_quote!(Serializable));
-            }
+            && !phantom.contains(&type_param.ident)
+        {
+            type_param.bounds.push(parse_quote!(Serializable));
+        }
     }
     generics
 }

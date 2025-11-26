@@ -405,9 +405,10 @@ impl<H: WellBehavedHasher> SqlDB<H> {
 impl<H: WellBehavedHasher> Drop for SqlDB<H> {
     fn drop(&mut self) {
         if let Some(lock_file) = &self.lock_file
-            && let Err(e) = fs2::FileExt::unlock(lock_file) {
-                eprintln!("Failed to unlock mutex file: {:?}", e);
-            }
+            && let Err(e) = fs2::FileExt::unlock(lock_file)
+        {
+            eprintln!("Failed to unlock mutex file: {:?}", e);
+        }
     }
 }
 
@@ -475,8 +476,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children: Vec<ArenaKey<H>> =
-                        children.0.into_iter().collect();
+                    let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                     Ok(OnDiskObject {
                         data,
                         ref_count,
@@ -525,8 +525,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children: Vec<ArenaKey<H>> =
-                            children.0.into_iter().collect();
+                        let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                         let obj = OnDiskObject {
                             data,
                             ref_count,

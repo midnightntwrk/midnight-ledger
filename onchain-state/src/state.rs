@@ -555,9 +555,10 @@ fn maybe_str(buf: &[u8]) -> MaybeStr<'_> {
         c.is_ascii_alphanumeric() || b"'+-_\":/\\?#$^*&.".contains(&c)
     }
     if buf.iter().copied().all(permitted)
-        && let Ok(s) = std::str::from_utf8(buf) {
-            return MaybeStr::Str(s);
-        }
+        && let Ok(s) = std::str::from_utf8(buf)
+    {
+        return MaybeStr::Str(s);
+    }
     MaybeStr::Bytes(buf)
 }
 

@@ -355,9 +355,7 @@ impl Serialize for TokenType {
         S: serde::Serializer,
     {
         let bytes = match self {
-            TokenType::Unshielded(data) => {
-                once(UNSHIELDED_TAG).chain(data.0.0).collect()
-            }
+            TokenType::Unshielded(data) => once(UNSHIELDED_TAG).chain(data.0.0).collect(),
             TokenType::Shielded(data) => once(SHIELDED_TAG).chain(data.0.0).collect(),
             TokenType::Dust => vec![DUST_TAG],
         };
