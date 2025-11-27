@@ -855,10 +855,9 @@ impl<D: DB> Arena<D> {
             let children = children
                 .iter()
                 .map(|h| {
-                    key_to_child_repr.get(h).ok_or(std::io::Error::new(
-                        std::io::ErrorKind::Other,
-                        "child not in key_to_child_repr",
-                    ))
+                    key_to_child_repr
+                        .get(h)
+                        .ok_or(std::io::Error::other("child not in key_to_child_repr"))
                 })
                 .map(|r| r.cloned())
                 .collect::<Result<Vec<_>, _>>()?;
@@ -1065,7 +1064,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             ArenaKey::Direct(child) => {
                 let value = T::from_binary_repr(
                     &mut &child.data[..],
-                    &mut child.children.iter().map(|child| child.clone()),
+                    &mut child.children.iter().cloned(),
                     self,
                 )?;
                 return Ok(self.arena.alloc(value));
@@ -1099,10 +1098,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             "IR not found in `all` map",
         ))?;
         if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Reached recursion limit".to_string(),
-            ));
+            return Err(std::io::Error::other("Reached recursion limit".to_string()));
         }
         let loader = IrLoader {
             arena: self.arena,
@@ -1359,7 +1355,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             max_depth,
             recursion_depth: 0,
         };
-        loader.get(&key)
+        loader.get(key)
     }
 }
 
@@ -1448,7 +1444,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             self.child_repr
                 .refs()
                 .into_iter()
-                .for_each(|ref_| backend.persist(&ref_))
+                .for_each(|ref_| backend.persist(ref_))
         });
     }
 
@@ -1461,7 +1457,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             self.child_repr
                 .refs()
                 .into_iter()
-                .for_each(|ref_| backend.unpersist(&ref_))
+                .for_each(|ref_| backend.unpersist(ref_))
         });
     }
 
@@ -1606,7 +1602,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 ArenaKey::Ref(ref key) => arena
                     .lock_backend()
                     .borrow_mut()
-                    .get(&key)
+                    .get(key)
                     .expect("Arena should contain current serialization target")
                     .clone(),
                 ArenaKey::Direct(ref d) => OnDiskObject {
@@ -1635,7 +1631,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             list_indices.insert(node.clone(), list_indices.len() as u64);
             for child in disk.children.iter() {
                 let incoming = incoming_vertices
-                    .get_mut(&child)
+                    .get_mut(child)
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
@@ -1657,7 +1653,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_indices: disk
                     .children
                     .iter()
-                    .map(|child| len as u64 - 1 - list_indices[&child])
+                    .map(|child| len as u64 - 1 - list_indices[child])
                     .collect(),
                 data: disk.data,
             };
@@ -1766,7 +1762,7 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
     }
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        T::check_invariant(&self)
+        T::check_invariant(self)
     }
 }
 
@@ -2693,7 +2689,7 @@ mod tests {
     fn dedup() {
         let val = [0; SMALL_OBJECT_LIMIT];
         let map = new_arena();
-        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val.clone());
+        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         let _malloced_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         assert_eq!(map.size(), 1)
     }
@@ -2988,7 +2984,7 @@ mod tests {
 
             let key = bt1.as_typed_key();
             bt1.unload();
-            let bt2 = arena.get_lazy::<BinTree>(&key.into()).unwrap();
+            let bt2 = arena.get_lazy::<BinTree>(&key).unwrap();
 
             // Walk down the left and right fringes in lock step, checking that
             // nothing is forced prematurely, and that Arcs are shared as
@@ -3442,7 +3438,7 @@ mod tests {
     #[test]
     fn serialize_small_sp() {
         let arena = new_arena();
-        let mut sp = arena.alloc(42u32);
+        let sp = arena.alloc(42u32);
         let mut bytes: Vec<u8> = vec![];
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();

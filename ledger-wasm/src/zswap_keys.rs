@@ -61,7 +61,7 @@ impl TryInto<zswap::keys::SecretKeys> for &SecretKeysWrapper {
 
 impl Zeroize for SecretKeysWrapper {
     fn zeroize(&mut self) {
-        let _ = self.clear();
+        self.clear();
     }
 }
 
@@ -118,7 +118,9 @@ impl ZswapSecretKeys {
 
     #[wasm_bindgen(js_name = "clear")]
     pub fn clear(&mut self) {
-        self.0.as_mut().map(|wrapper| wrapper.clear());
+        if let Some(wrapper) = self.0.as_mut() {
+            wrapper.clear();
+        }
         self.0 = None;
     }
 
@@ -144,11 +146,10 @@ impl ZswapSecretKeys {
 
     #[wasm_bindgen(getter, js_name = "encryptionSecretKey")]
     pub fn encryption_secret_key(&self) -> Result<EncryptionSecretKey, JsError> {
-        return self
-            .0
+        self.0
             .as_ref()
             .map(|wrapper| wrapper.encryption_secret_key.clone())
-            .ok_or(JsError::new("Secret keys were cleared"));
+            .ok_or(JsError::new("Secret keys were cleared"))
     }
 
     #[wasm_bindgen(getter, js_name = "coinSecretKey")]
@@ -377,8 +378,7 @@ impl EncryptionSecretKey {
                     ErrorKind::InvalidData,
                     format!(
                         "Unable to deserialize {}. Error: {}",
-                        "EncryptionSecretKey",
-                        e.to_string()
+                        "EncryptionSecretKey", e
                     ),
                 )
             })?;

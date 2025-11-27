@@ -189,7 +189,7 @@ impl QueryContext {
     pub fn qualify(&self, coin: JsValue) -> Result<JsValue, JsError> {
         let coin: fab::Value = from_value(coin)?;
         match self.0.qualify(&(&*coin).try_into()?) {
-            Some(qci) => Ok(to_value(&fab::Value::try_from(qci)?)?),
+            Some(qci) => Ok(to_value(&fab::Value::from(qci))?),
             None => Ok(JsValue::UNDEFINED),
         }
     }

@@ -13,7 +13,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE : full
+  RUST_BACKTRACE: full
 
 jobs:
   nix-build:
@@ -40,7 +40,7 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
       - name: Install Nix
         uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
@@ -80,7 +80,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
         with:
-         node-version: 22
+          node-version: 22
 
       - name: Run integration tests
         run: |
@@ -96,8 +96,8 @@ jobs:
       - name: Upload Logs
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-         name: logs-${{ matrix.os }}
-         path: integration-tests/logs/
+          name: logs-${{ matrix.os }}
+          path: integration-tests/logs/
 
       #- name: Publish IT Test Report
       #  uses: mikepenz/action-junit-report@97744eca465b8df9e6e33271cb155003f85327f1
@@ -148,13 +148,13 @@ jobs:
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # ratchet:actions/upload-artifact@v4
         if: always()
         with:
-          name: 'ledger-wasm-test-results-ctrf-${{ matrix.os }}'
-          path: './integration-tests/reports/ctrf-report.json'
+          name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
+          path: "./integration-tests/reports/ctrf-report.json"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: 'ledger-wasm-test-results-junit-${{ matrix.os }}'
+          name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
           path: ./integration-tests/reports/test-report.xml
 
   build:
@@ -172,7 +172,7 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
       - name: Install Nix (2)
         uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
@@ -210,14 +210,16 @@ jobs:
           which git
           git --version
 
-
-      # Cargo check the whole workspace with all features. This is important to
-      # avoid bitrot of code that is feature gated behind non-default features
+      # Run Cargo Clippy on the whole workspace with all features. This is important
+      # to avoid bitrot of code that is feature gated behind non-default features
       # or in pkgs which aren't in Cargo.toml#default-members, since we don't
       # include --workspace or --all-features in ouor build-and-test recipe
       # below.
-      - name: Cargo check (--workspace --all-features)
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo check --all-targets --workspace --all-features
+      # We still permit certain Clippy rules with `-A` args. since they will be
+      # addressed in upcoming PRs and changes that are currently in progress. This
+      # allows us to start running these checks even before they are fully implemented.
+      - name: Cargo clippy (--all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::large_enum_variant -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes -Aclippy::uninit_assumed_init)
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::large_enum_variant -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes -Aclippy::uninit_assumed_init
 
       - name: Build and Test (default features)
         run: |
@@ -269,5 +271,5 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         with:
-          name: 'proof-server-test-results-${{ matrix.os }}'
+          name: "proof-server-test-results-${{ matrix.os }}"
           path: target/test-*

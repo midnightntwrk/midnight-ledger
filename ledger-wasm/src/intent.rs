@@ -1129,7 +1129,7 @@ impl Intent {
     }
 
     #[wasm_bindgen(setter, js_name = "ttl")]
-    pub fn set_ttl(&mut self, ttl: &Date) -> () {
+    pub fn set_ttl(&mut self, ttl: &Date) {
         let ttl = Timestamp::from_secs(js_date_to_seconds(ttl));
         use IntentTypes::*;
         match &mut self.0 {
@@ -1144,7 +1144,6 @@ impl Intent {
             ProofErasedWithSignatureNoBinding(val) => val.ttl = ttl,
             ProofErasedWithSignatureErasedNoBinding(val) => val.ttl = ttl,
         }
-        ()
     }
 
     #[wasm_bindgen(getter)]
@@ -1153,34 +1152,32 @@ impl Intent {
         use IntentTypes::*;
         Ok(match &self.0 {
             UnprovenWithSignaturePreBinding(val) => {
-                JsValue::from(PreBinding(val.binding_commitment.clone()))
+                JsValue::from(PreBinding(val.binding_commitment))
             }
             UnprovenWithSignatureBinding(val) => {
                 JsValue::from(Binding(val.binding_commitment.clone()))
             }
             UnprovenWithSignatureErasedPreBinding(val) => {
-                JsValue::from(PreBinding(val.binding_commitment.clone()))
+                JsValue::from(PreBinding(val.binding_commitment))
             }
             UnprovenWithSignatureErasedBinding(val) => {
                 JsValue::from(Binding(val.binding_commitment.clone()))
             }
-            ProvenWithSignaturePreBinding(val) => {
-                JsValue::from(PreBinding(val.binding_commitment.clone()))
-            }
+            ProvenWithSignaturePreBinding(val) => JsValue::from(PreBinding(val.binding_commitment)),
             ProvenWithSignatureBinding(val) => {
                 JsValue::from(Binding(val.binding_commitment.clone()))
             }
             ProvenWithSignatureErasedPreBinding(val) => {
-                JsValue::from(PreBinding(val.binding_commitment.clone()))
+                JsValue::from(PreBinding(val.binding_commitment))
             }
             ProvenWithSignatureErasedBinding(val) => {
                 JsValue::from(Binding(val.binding_commitment.clone()))
             }
             ProofErasedWithSignatureNoBinding(val) => {
-                JsValue::from(NoBinding(val.binding_commitment.clone()))
+                JsValue::from(NoBinding(val.binding_commitment))
             }
             ProofErasedWithSignatureErasedNoBinding(val) => {
-                JsValue::from(NoBinding(val.binding_commitment.clone()))
+                JsValue::from(NoBinding(val.binding_commitment))
             }
         })
     }

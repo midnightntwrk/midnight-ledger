@@ -40,7 +40,7 @@ fn try_to_string(jsv: JsValue) -> String {
 }
 
 fn err(msg: impl Into<String>) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
+    std::io::Error::other(msg.into())
 }
 
 impl ParamsProverProvider for JsKeyProvider {

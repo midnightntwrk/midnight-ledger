@@ -30,7 +30,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     let tag_expected = format!("{GLOBAL_TAG}{}:", T::tag());
     let mut read_tag = vec![0u8; tag_expected.len()];
     let mut remaining_tag_buf = &mut read_tag[..];
-    while remaining_tag_buf.len() > 0 {
+    while !remaining_tag_buf.is_empty() {
         let read = reader.read(remaining_tag_buf)?;
         if read == 0 {
             let rem = remaining_tag_buf.len();
