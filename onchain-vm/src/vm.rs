@@ -418,7 +418,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     StateValue::Null => (1, cost_model.type_null),
                     StateValue::Map(_) => (2, cost_model.type_map),
                     StateValue::Array(a) => (3 + a.len() as u8 * 8, cost_model.type_array),
-                    StateValue::BoundedMerkleTree(t) => (4 + t.height() * 8, cost_model.type_bmt),
+                    StateValue::BoundedMerkleTree(t) => (4 + t.height().saturating_sub(1) * 8, cost_model.type_bmt),
                     x => panic!("unhandled StateValue variant {x:?}"),
                 };
                 gas = incr_gas(gas, cost)?;
@@ -461,7 +461,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     3u8 => {
                         let gas = incr_gas(gas, cost_model.new_array)?;
                         // Container size in upper 5 bits.
-                        let size = val >> 3 + 1;
+                        let size = val >> 3;
                         if size > 16 {
                             return Err(OnchainProgramError::InvalidArgs(format!(
                                 "new: array length > 16: {size}"
