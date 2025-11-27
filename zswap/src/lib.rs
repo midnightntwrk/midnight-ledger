@@ -26,7 +26,12 @@ pub(crate) fn ciphertext_to_field(c: &CoinCiphertext) -> transient_crypto::curve
     use transient_crypto::hash::{transient_commit, transient_hash};
     transient_commit(
         &c.ciph[..],
-        transient_hash(&[c.c.x().unwrap_or(0.into()), c.c.y().unwrap_or(0.into())]),
+        transient_hash(&[
+            transient_crypto::curve::Fr::from_le_bytes(b"midnight::zswap::ciphertext")
+                .expect("Domain sep should be in range for field"),
+            c.c.x().unwrap_or(0.into()),
+            c.c.y().unwrap_or(0.into()),
+        ]),
     )
 }
 

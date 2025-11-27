@@ -508,7 +508,7 @@ impl<D: DB> DustSpend<ProofPreimageMarker, D> {
         let proof = prover
             .prove(
                 &self.proof,
-                Some(transient_hash(&(segment_id, binding).field_vec())),
+                Some(transient_hash(&(Fr::from_le_bytes(b"midnight::dust::proof"), segment_id, binding).field_vec())),
             )
             .await?;
         Ok(DustSpend {
@@ -595,7 +595,7 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 ));
 
                 let mut pis = vec![];
-                pis.push(transient_hash(&(segment_id, binding).field_vec()));
+                pis.push(transient_hash(&(Fr::from_le_bytes(b"midnight::dust::proof"), segment_id, binding).field_vec()));
                 for op in with_outputs(
                     prog.into_iter(),
                     [
