@@ -196,7 +196,7 @@ impl<D: DB> FieldRepr for StateValue<D> {
             BoundedMerkleTree(t) => {
                 let entries = t.iter().collect::<Vec<_>>();
                 writer.write(&[(4u128
-                    | ((t.height() as u128).saturating_sub(1) << 4)
+                    | ((t.height() as u128) << 4)
                     | ((entries.len() as u128) << 12))
                     .into()]);
                 for entry in entries.into_iter() {
