@@ -56,7 +56,7 @@ use std::iter::once;
     Dummy,
 )]
 #[storable(base)]
-#[tag = "zswap-nullifier[v1]"]
+#[tag = "zswap-nullifier[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Nullifier(pub HashOutput);
 tag_enforcement_test!(Nullifier);
@@ -88,7 +88,7 @@ randomised_serialization_test!(Nullifier);
     Dummy,
 )]
 #[storable(base)]
-#[tag = "zswap-coin-commitment[v1]"]
+#[tag = "zswap-coin-commitment[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Commitment(pub HashOutput);
 tag_enforcement_test!(Commitment);
@@ -159,9 +159,9 @@ impl Debug for SecretKey {
 
 impl SecretKey {
     pub fn public_key(&self) -> PublicKey {
-        let mut data = Vec::with_capacity(38);
+        let mut data = Vec::with_capacity(21 + 32);
+        data.extend(b"midnight:zswap-pk[v1]");
         self.binary_repr(&mut data);
-        data.extend(b"mdn:pk");
         PublicKey(persistent_hash(&data))
     }
 }
@@ -196,7 +196,7 @@ impl TryFrom<&ValueAtom> for SecretKey {
     Serializable,
     Dummy,
 )]
-#[tag = "zswap-coin-public-key[v1]"]
+#[tag = "zswap-coin-public-key[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct PublicKey(pub HashOutput);
 tag_enforcement_test!(PublicKey);
@@ -626,24 +626,24 @@ impl Info {
     }
 
     pub fn commitment(&self, recipient: &Recipient) -> Commitment {
-        let mut data = Vec::with_capacity(119);
+        let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
+        data.extend(b"midnight:zswap-cc[v1]");
         self.binary_repr(&mut data);
         match &recipient {
             Recipient::User(d) => (true, d.0).binary_repr(&mut data),
             Recipient::Contract(d) => (false, d.0).binary_repr(&mut data),
         }
-        data.extend(b"mdn:cc");
         Commitment(persistent_hash(&data))
     }
 
     pub fn nullifier(&self, se: &SenderEvidence) -> Nullifier {
-        let mut data = Vec::with_capacity(119);
+        let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
+        data.extend(b"midnight:zswap-cn[v1]");
         self.binary_repr(&mut data);
         match &se {
             SenderEvidence::User(d) => (true, d.0).binary_repr(&mut data),
             SenderEvidence::Contract(d) => (false, d.0).binary_repr(&mut data),
         }
-        data.extend(b"mdn:cn");
         Nullifier(persistent_hash(&data))
     }
 

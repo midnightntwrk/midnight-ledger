@@ -43,7 +43,7 @@ use crate::structure::*;
 #[derive(Debug, Storable)]
 #[derive_where(Clone)]
 #[storable(db = D)]
-#[tag = "zswap-local-state[v5]"]
+#[tag = "zswap-local-state[v6]"]
 #[must_use]
 pub struct State<D: DB> {
     pub coins: Map<Nullifier, QualifiedCoinInfo, D>,

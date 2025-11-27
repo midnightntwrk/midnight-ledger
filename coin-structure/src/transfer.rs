@@ -26,7 +26,7 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Dummy, Serializable)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "recipient[v1]"]
+#[tag = "recipient[v2]"]
 pub enum Recipient {
     User(PublicKey),
     Contract(ContractAddress),

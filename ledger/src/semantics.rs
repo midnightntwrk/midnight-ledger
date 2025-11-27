@@ -39,7 +39,7 @@ use itertools::Either;
 use onchain_runtime::context::{BlockContext, QueryContext};
 use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng};
-use serialize::{Deserializable, Serializable};
+use serialize::{Deserializable, Serializable, Tagged};
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
@@ -830,7 +830,7 @@ impl<D: DB> LedgerState<D> {
     fn apply_section<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
     >(
         &self,
         tx: &StandardTransaction<S, P, B, D>,

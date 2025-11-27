@@ -633,7 +633,7 @@ impl Distribution<ClaimedContractCallsValue> for Standard {
 #[derive_where(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
-#[tag = "contract-effects[v2]"]
+#[tag = "contract-effects[v3]"]
 pub struct Effects<D: DB> {
     pub claimed_nullifiers: storage::storage::HashSet<Nullifier, D>,
     pub claimed_shielded_receives: storage::storage::HashSet<CoinCommitment, D>,

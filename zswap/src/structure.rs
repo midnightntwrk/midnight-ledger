@@ -188,7 +188,7 @@ impl From<CoinCiphertext> for encryption::Ciphertext {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serializable, Serialize)]
-#[tag = "zswap-authorized-claim[v2]"]
+#[tag = "zswap-authorized-claim[v3]"]
 /// A claim to a specific public key, authorized by the user's private key.
 pub struct AuthorizedClaim<P> {
     pub coin: CoinInfo,
@@ -209,7 +209,7 @@ impl<P> AuthorizedClaim<P> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-input[v1]"]
+#[tag = "zswap-input[v2]"]
 #[storable(db = D)]
 pub struct Input<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
@@ -284,7 +284,7 @@ impl<D: DB> Input<ProofPreimage, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-output[v1]"]
+#[tag = "zswap-output[v2]"]
 #[storable(db = D)]
 pub struct Output<P: Storable<D>, D: DB> {
     pub coin_com: Commitment,
@@ -348,7 +348,7 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
-#[tag = "zswap-transient[v1]"]
+#[tag = "zswap-transient[v2]"]
 #[storable(db = D)]
 pub struct Transient<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
@@ -442,7 +442,7 @@ tag_enforcement_test!(Delta);
 
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
-#[tag = "zswap-offer[v4]"]
+#[tag = "zswap-offer[v5]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
 /// inputs/outputs.
