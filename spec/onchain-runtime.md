@@ -18,7 +18,7 @@ The `StateValue` data type is defined as a disjoint union of the following types
 * `Null`: An empty value.
 * `Cell`: memory cell containing a single FAB `AlignedValue`
 * `Map`: key-value map from FAB `AlignedValue`s to state values.
-* `Array(n)` for `n <= 15`: fixed-length array of state values
+* `Array(n)` for `n <= 16`: fixed-length array of state values
 * `BoundedMerkleTree(n)` for `0 < n <= 32`: depth-`n` Merkle tree of leaf hash values.
 
 Note: we will want to add in a future version:
@@ -41,37 +41,6 @@ The on-the-wire representations make use of [FAB](field-aligned-binary.md)
 representations. We represent both *state value*, and *programs*.
 
 ##### State value representation
-
-###### In Binary
-
-The first byte `b` of the state value distinguishes its type, and how it is further
-processed. In binary, MSB first, `b = xyab cddd`.
-
-* `xy != 11` encodes a `Cell`, represented as its on-the-wire FAB value.
-* `xya = 110` encodes a `BoundedMerkleTree([bcddd] + 1)`. It is followed by:
-  * An unsigned integer length `n`
-  * `n` times, in sorted order:
-    * An unsigned integer index `i`
-    * A 32-byte hash value `h`
-* `xyab = 1110` encodes an `Array([cddd])`. It is followed by `[cddd]`
-  encodings of on-the-wire state value representations.
-* `xyab cddd = 1111 0000` encodes `Null`
-* `xyab cddd = 1111 0001` encodes a `Map`. It is followed by:
-  * An unsigned integer length `n`
-  * `n` times, in sorted order:
-    * A FAB aligned value `key`
-    * A state value `value`
-
-Unsigned integers are represented as themselves if they are <128, otherwise
-follow the following correspondence (as integers with flags in FAB, but without
-the flags):
-
-```
-0aaa aaaa                     ~ [a]
-1aaa aaaa 0bbb bbbb           ~ [a] + [b] << 7
-1aaa aaaa 1bbb bbbb 0ccc cccc ~ [a] + [b] << 7 + [c] << 14
-1--- ---- 1--- ---- 1--- ---- reserved
-```
 
 ###### As field elements
 
@@ -99,22 +68,6 @@ to this instruction.
 To define program representations, we first define a common argument type:
 `path(n)`, an array with `n` path entries, each being either a FAB `AlignedValue`, or
 the symbol `stack`.
-
-###### In Binary
-
-An instruction is encoded by a single byte of its opcode, followed by encoding
-its arguments (if any), followed by encoding its results (if any).
-
-In the below, the following data may appear as arguments or results:
-* `u8` (>0 or not)
-* `u21`
-* `Adt`
-
-`u8` and `Adt` are encoded in the straightforward way, with `u21` being encoded
-as unsigned integers above.
-
-A `path(n)` is encoded by encoding each entry in turn. The symbol `stack` is
-encoded as `0xff`, while FAB `AlignedValue`s are encoded directly.
 
 ###### As Field Elements
 
@@ -210,8 +163,8 @@ not specified, result values are placed in a `Cell`, and encoded as FAB values.
   * `Cell`: 0
   * `Null`: 1
   * `Map`: 2
-  * `Array(n)`: 3 + n * 32
-  * `BoundedMerkleTree(n)`: 4 + n * 32
+  * `Array(n)`: 3 + n * 8
+  * `BoundedMerkleTree(n+1)`: 4 + n * 8
 * `size(a)` returns the number of non-null entries is a `Map`, `n` for
   an `Array(n)` or `BoundedMerkleTree(n)`.
 * `has_key(a, b)` returns `true` if `b` is a key to a non-null value in the
@@ -249,36 +202,14 @@ context}`. When the program finishes executing, it should leave a stack of
 `effects'` must adhere to the structure given here, specifying the effects of
 the operation.
 
-The `context` is an `Array(_)`, with the following entries, in order:
+The `context` is an `Array(_)`, encoding the [`CallContext`](./contracts.md#context).
+This may be extended in the future in a minor version increment.
 
-1. A `Cell` containing the 32-byte aligned current contract's address.
-2. A `Map` from `CoinCommitment` keys to 64-bit aligned Merkle tree indicies,
-   for all newly allocated coins.
-3. A `Cell` containing the block's 64-bit aligned seconds since the UNIX epoch
-   approximation.
-4. A `Cell` containing the block's 32-bit aligned seconds indicating the
-   maximum amount that the former value may diverge.
-5. A `Cell` containing the blocks's 32-bytes hash.
-
-This list may be extended in the future in a minor version increment.
-
-The `effects` is an `Array(_)`, with the following entries, in order:
-
-1. A `Map` from `Nullifier`s to `Null`s, representing a set of claimed nullifiers.
-2. A `Map` from `CoinCommitment`s to `Null`s, representing a set of received coins claimed.
-3. A `Map` from `CoinCommitment`s to `Null`s, representing a set of spent coins claimed.
-4. A `Map` from `(Address, Bytes(32), Field)` to `Null`, representing the contract calls claimed.
-5. A `Map` from `Bytes(32)` to `Cell`s of `u64`, representing coins minted for any specialization hash.
-
-This list may be extended in the future in a minor version increment.
-
-`effects` is initialized to `[{}, {}, {}, {}, {}]`.
+The `effects` is an `Array(_)`, encoding the [contract `Effects`](./contracts.md#effects).
+This may be extended in the future in a minor version increment.
 
 All of `context` and `effects` may be considered cached. To prevent cheaply
 copying data into contract state with as little as two opcodes, both are
 flagged as *tainted*, and any operations performed with them, that are not
 size-bounded (such as `add`) will return a tainted value. If the final `state'`
 is tainted, the transaction fails.
-
-We will use a fixed bound of `d = 8` for all claims; note that these *are*
-cheap due to being guaranteed in-cache.

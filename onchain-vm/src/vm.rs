@@ -167,10 +167,10 @@ fn eq_valid_input(x: &AlignedValue) -> bool {
 }
 
 fn eq<D: DB>(a: &AlignedValue, b: &AlignedValue) -> Result<AlignedValue, OnchainProgramError<D>> {
-    if !eq_valid_input(a) || !eq_valid_input(b) {
-        Err(OnchainProgramError::TooLongForEqual)
-    } else {
-        Ok((a == b).into())
+    match (eq_valid_input(a), eq_valid_input(b)) {
+        (false, false) => Err(OnchainProgramError::TooLongForEqual),
+        (false, true) | (true, false) => Ok(false.into()),
+        (true, true) => Ok((a == b).into()),
     }
 }
 
@@ -523,7 +523,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     match &val {
                         StateValue::Null => {
                             cost_model.log_null_constant
-                                + cost_model.log_array_coeff_value_size * size
+                                + cost_model.log_null_coeff_value_size * size
                         }
                         StateValue::Cell(_) => {
                             cost_model.log_cell_constant
