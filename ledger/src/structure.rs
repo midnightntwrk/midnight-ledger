@@ -1476,7 +1476,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
                     .map(move |act| (segment_id, act))
             })
             .filter_map(|(segment_id, action)| match action {
-                ContractAction::Deploy(d) => Some((segment_id, d)),
+                ContractAction::Deploy(d) => Some((segment_id, (*d).clone())),
                 _ => None,
             })
     }
@@ -2613,7 +2613,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
-    Deploy(ContractDeploy<D>),
+    Deploy(Sp<ContractDeploy<D>, D>),
     Maintain(MaintenanceUpdate<D>),
 }
 tag_enforcement_test!(ContractAction<(), InMemoryDB>);
@@ -2626,7 +2626,7 @@ impl<P: ProofKind<D>, D: DB> From<ContractCall<P, D>> for ContractAction<P, D> {
 
 impl<P: ProofKind<D>, D: DB> From<ContractDeploy<D>> for ContractAction<P, D> {
     fn from(deploy: ContractDeploy<D>) -> Self {
-        ContractAction::Deploy(deploy)
+        ContractAction::Deploy(Sp::new(deploy))
     }
 }
 
