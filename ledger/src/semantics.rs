@@ -122,7 +122,7 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
         tx: &Transaction<S, P, B, D>,
         res: ErasedTransactionResult,
     ) -> Self;
-    #[must_use]
+    #[must_use = "return value must be used"]
     fn replay_events<'a>(
         &self,
         secret_keys: &SecretKeys,
@@ -231,8 +231,8 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     nullifier,
                     contract: None,
                 } => {
-                    state.coins = state.coins.remove(&nullifier);
-                    state.pending_spends = state.pending_spends.remove(&nullifier);
+                    state.coins = state.coins.remove(nullifier);
+                    state.pending_spends = state.pending_spends.remove(nullifier);
                     Ok(state)
                 }
                 EventDetails::ZswapOutput {
@@ -250,11 +250,11 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     }
                     state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
                     state.first_free += 1;
-                    if let Some(ci) = state.pending_outputs.get(&commitment) {
+                    if let Some(ci) = state.pending_outputs.get(commitment) {
                         let nullifier = ci
                             .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone()));
                         let qci = ci.qualify(*mt_index);
-                        state.pending_outputs = state.pending_outputs.remove(&commitment);
+                        state.pending_outputs = state.pending_outputs.remove(commitment);
                         state.coins = state.coins.insert(nullifier, qci);
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
                         let nullifier = ci
@@ -290,7 +290,7 @@ impl<D: DB> LedgerState<D> {
         mut event_push: impl FnMut(Event<D>),
     ) -> Result<Self, TransactionInvalid<D>> {
         let mut state = self.clone();
-        let (new_zswap, new_com_indices) = state.zswap.try_apply(&offer, whitelist)?;
+        let (new_zswap, new_com_indices) = state.zswap.try_apply(offer, whitelist)?;
 
         state.zswap = Sp::new(new_zswap);
         *com_indices = new_com_indices;
@@ -327,7 +327,7 @@ impl<D: DB> LedgerState<D> {
                 content: EventDetails::ZswapOutput {
                     commitment: output.coin_com,
                     preimage_evidence: match &output.ciphertext {
-                        Some(ciph) => ZswapPreimageEvidence::Ciphertext((**ciph).clone()),
+                        Some(ciph) => ZswapPreimageEvidence::Ciphertext(Box::new((**ciph).clone())),
                         None => ZswapPreimageEvidence::None,
                     },
                     contract: output.contract_address.clone(),
@@ -438,7 +438,7 @@ impl<D: DB> LedgerState<D> {
                     state,
                     vec![Event {
                         source: tx.event_source(),
-                        content: EventDetails::ParamChange(new_params.clone()).clone(),
+                        content: EventDetails::ParamChange(Sp::new(new_params.clone())),
                     }],
                 );
                 Ok(res)
@@ -540,7 +540,7 @@ impl<D: DB> LedgerState<D> {
                                 .copied()
                                 .unwrap_or(0);
                             let bridge_receiving = state.bridge_receiving.insert(
-                                target_address.clone(),
+                                *target_address,
                                 curr_value.saturating_add(post_fee_amount),
                             );
 
@@ -772,7 +772,7 @@ impl<D: DB> LedgerState<D> {
                                 .generation
                                 .generating_tree
                                 .index(*idx)
-                                .map(|gen_info| gen_info.1.clone())
+                                .map(|gen_info| *gen_info.1)
                             else {
                                 error!(
                                     ?action,
@@ -852,7 +852,7 @@ impl<D: DB> LedgerState<D> {
             let mut com_indices = Map::new();
             if let Some(offer) = &tx.guaranteed_coins {
                 state = state.apply_zswap(
-                    &offer,
+                    offer,
                     context.whitelist.clone(),
                     &mut com_indices,
                     transaction_hash,
@@ -1036,8 +1036,7 @@ impl<D: DB> LedgerState<D> {
         state.check_night_balance_invariant()?;
 
         trace!("transaction phase {segment} successfully applied");
-        let res = Ok((state, events));
-        res
+        Ok((state, events))
     }
 
     pub fn batch_apply_independant(
@@ -1079,7 +1078,7 @@ impl<D: DB> LedgerState<D> {
         context: &TransactionContext<D>,
     ) -> Result<
         (Self, Vec<TransactionResult<D>>),
-        (
+        Box<(
             // The state before the first failure
             Self,
             // The results up to the failure
@@ -1088,14 +1087,14 @@ impl<D: DB> LedgerState<D> {
             TransactionInvalid<D>,
             // The remaining transactions, including the failing one
             &'a [VerifiedTransaction<D>],
-        ),
+        )>,
     > {
         let mut state = self.clone();
         let mut res = Vec::with_capacity(txs.len());
         for (i, tx) in txs.iter().enumerate() {
             let (state2, txres) = state.apply(tx, context);
             if let TransactionResult::Failure(err) = txres {
-                return Err((state, res, err, &txs[i..]));
+                return Err(Box::new((state, res, err, &txs[i..])));
             } else {
                 res.push(txres);
             }
@@ -1136,15 +1135,14 @@ impl<D: DB> LedgerState<D> {
                     }
                 }
 
-                let res = (
+                (
                     new_st,
                     if total_success {
                         TransactionResult::Success(events)
                     } else {
                         TransactionResult::PartialSuccess(segment_success, events)
                     },
-                );
-                res
+                )
             }
             Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
                 self,
@@ -1207,7 +1205,7 @@ impl<D: DB> LedgerState<D> {
                                     token_type,
                                     bal.checked_add(val).ok_or(
                                         TransactionInvalid::BalanceCheckOutOfBounds {
-                                            token_type: token_type,
+                                            token_type,
                                             current_balance: bal,
                                             operation_value: val,
                                             operation: BalanceOperation::Addition,
@@ -1327,7 +1325,6 @@ impl<D: DB> LedgerState<D> {
         Ok(res)
     }
 
-    #[must_use]
     pub fn post_block_update(
         &self,
         tblock: Timestamp,
@@ -1525,7 +1522,9 @@ impl<D: DB> UtxoState<D> {
             let input_utxo = Utxo::from(input.clone());
             let is_member = res.utxos.contains_key(&input_utxo);
             if !is_member {
-                return Err(TransactionInvalid::InputNotInUtxos(input_utxo.clone()));
+                return Err(TransactionInvalid::InputNotInUtxos(Box::new(
+                    input_utxo.clone(),
+                )));
             }
 
             // self.utxos -= inputs;
@@ -1554,7 +1553,7 @@ impl<D: DB> UtxoState<D> {
             let meta = UtxoMeta {
                 ctime: context.block_context.tblock,
             };
-            res = res.insert((&**output).clone(), meta);
+            res = res.insert((**output).clone(), meta);
         }
         Ok(res)
     }
@@ -1629,7 +1628,6 @@ impl<D: DB> ReplayProtectionState<D> {
             })
     }
 
-    #[must_use]
     pub fn post_block_update(&self, tblock: Timestamp) -> Self {
         ReplayProtectionState {
             time_filter_map: self.time_filter_map.filter(tblock),

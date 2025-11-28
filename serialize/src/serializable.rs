@@ -148,11 +148,11 @@ impl Serializable for str {
 
 impl Serializable for String {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        str::serialize(&self, writer)
+        str::serialize(self, writer)
     }
 
     fn serialized_size(&self) -> usize {
-        str::serialized_size(&self)
+        str::serialized_size(self)
     }
 }
 
@@ -186,19 +186,19 @@ impl<T> Serializable for PhantomData<T> {
 
 impl<T: Serializable> Serializable for Box<T> {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        T::serialize(&self, writer)
+        T::serialize(self, writer)
     }
     fn serialized_size(&self) -> usize {
-        T::serialized_size(&self)
+        T::serialized_size(self)
     }
 }
 
 impl<T: Serializable> Serializable for Arc<T> {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        T::serialize(&self, writer)
+        T::serialize(self, writer)
     }
     fn serialized_size(&self) -> usize {
-        T::serialized_size(&self)
+        T::serialized_size(self)
     }
 }
 
@@ -207,10 +207,10 @@ where
     T: Serializable,
 {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        T::serialize(&self, writer)
+        T::serialize(self, writer)
     }
     fn serialized_size(&self) -> usize {
-        T::serialized_size(&self)
+        T::serialized_size(self)
     }
 }
 

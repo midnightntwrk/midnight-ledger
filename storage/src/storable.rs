@@ -13,8 +13,7 @@
 
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
-use crate::DefaultHasher;
-use crate::arena::{ArenaHash, ArenaKey, DirectChildNode, Sp, hash};
+use crate::arena::{ArenaKey, DirectChildNode, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -24,16 +23,12 @@ use base_crypto::{
     hash::HashOutput,
 };
 use crypto::digest::Digest;
-use derive_where::derive_where;
-use macros::Storable;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use rand::prelude::Distribution;
-use rand::{Rng, distributions::Standard};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::fmt::Debug;
@@ -145,7 +140,7 @@ pub(crate) fn child_from<H: WellBehavedHasher>(
     if is_in_small_object_limit(data, children) {
         ArenaKey::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
     } else {
-        ArenaKey::Ref(hash(&data, children.iter().map(ArenaKey::hash)))
+        ArenaKey::Ref(hash(data, children.iter().map(ArenaKey::hash)))
     }
 }
 

@@ -128,7 +128,6 @@ fn generate_state_pairs() -> Vec<(
 
 // Compute benchmark data from state pairs
 fn compute_benchmark_data() -> Vec<BenchmarkData> {
-    let mut uid = 0;
     let arena = &midnight_storage::storage::default_storage::<InMemoryDB>().arena;
     let state_pairs = generate_state_pairs();
     let mut benchmark_data = Vec::new();
@@ -164,7 +163,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             "keys_added_size": keys_added.len(),
             "keys_removed_size": keys_removed.len(),
             "relationship": relationship,
-            "uid": uid,
+            "uid": i,
         });
 
         benchmark_data.push(BenchmarkData {
@@ -176,7 +175,6 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             _old_sp: old_sp,
             _new_sp: new_sp,
         });
-        uid += 1;
     }
 
     benchmark_data

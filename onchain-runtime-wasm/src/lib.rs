@@ -65,11 +65,7 @@ pub fn from_value_ser<T: Deserializable + Tagged>(
         tagged_deserialize(&mut data.to_vec().as_slice()).map_err(|e| {
             Error::new(
                 ErrorKind::InvalidData,
-                format!(
-                    "Unable to deserialize {}. Error: {}",
-                    struct_name,
-                    e.to_string()
-                ),
+                format!("Unable to deserialize {}. Error: {}", struct_name, e),
             )
         })?,
     )

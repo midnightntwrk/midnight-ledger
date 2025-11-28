@@ -185,17 +185,17 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     assert!(
         k1.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 1)
+            .all(|r| test_helpers::get_root_count(arena, r) == 1)
     );
     assert!(
         k2.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 1)
+            .all(|r| test_helpers::get_root_count(arena, r) == 1)
     );
     assert!(
         k3.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 0)
+            .all(|r| test_helpers::get_root_count(arena, r) == 0)
     );
 
     // Commit the gc root updates.
@@ -205,17 +205,17 @@ pub fn test_gc_root_update_queue_delayed_effect() {
     assert!(
         k1.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 2)
+            .all(|r| test_helpers::get_root_count(arena, r) == 2)
     );
     assert!(
         k2.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 0)
+            .all(|r| test_helpers::get_root_count(arena, r) == 0)
     );
     assert!(
         k3.refs()
             .iter()
-            .all(|r| test_helpers::get_root_count(arena, &r) == 2)
+            .all(|r| test_helpers::get_root_count(arena, r) == 2)
     );
 }
 
@@ -237,13 +237,13 @@ pub fn test_gc_root_update_queue_no_leak() {
         key_child
             .refs()
             .iter()
-            .all(|r| test_helpers::read_sp_cache::<_, u32>(arena, &r).is_none())
+            .all(|r| test_helpers::read_sp_cache::<_, u32>(arena, r).is_none())
     );
     assert!(
         key_parent
             .refs()
             .iter()
-            .all(|r| test_helpers::read_sp_cache::<_, Option<Sp<u32>>>(arena, &r).is_none())
+            .all(|r| test_helpers::read_sp_cache::<_, Option<Sp<u32>>>(arena, r).is_none())
     );
 }
 

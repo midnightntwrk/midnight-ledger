@@ -44,16 +44,15 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    let res = prog
-        .iter()
+
+    prog.iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
             Op::Idx { path, .. } => !path.is_empty(),
             Op::Ins { n, .. } => *n != 0,
             _ => true,
         })
-        .collect::<Vec<_>>();
-    res
+        .collect::<Vec<_>>()
 }
 
 #[tokio::test]

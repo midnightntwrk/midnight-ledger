@@ -404,10 +404,10 @@ impl<H: WellBehavedHasher> SqlDB<H> {
 
 impl<H: WellBehavedHasher> Drop for SqlDB<H> {
     fn drop(&mut self) {
-        if let Some(lock_file) = &self.lock_file {
-            if let Err(e) = fs2::FileExt::unlock(lock_file) {
-                eprintln!("Failed to unlock mutex file: {:?}", e);
-            }
+        if let Some(lock_file) = &self.lock_file
+            && let Err(e) = fs2::FileExt::unlock(lock_file)
+        {
+            eprintln!("Failed to unlock mutex file: {:?}", e);
         }
     }
 }
@@ -476,8 +476,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children: Vec<ArenaKey<H>> =
-                        children.0.into_iter().map(Into::into).collect();
+                    let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                     Ok(OnDiskObject {
                         data,
                         ref_count,
@@ -526,8 +525,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children: Vec<ArenaKey<H>> =
-                            children.0.into_iter().map(Into::into).collect();
+                        let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                         let obj = OnDiskObject {
                             data,
                             ref_count,
@@ -777,7 +775,7 @@ mod tests {
         mut db: SqlDB<H>,
     ) {
         let u = InsertNode(v);
-        let iter = std::iter::repeat((k.clone(), u.clone())).take(ITERS_PER_JOB);
+        let iter = std::iter::repeat_n((k.clone(), u.clone()), ITERS_PER_JOB);
         db.batch_update(iter);
         db.delete_node(&k);
     }

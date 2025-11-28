@@ -130,20 +130,17 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
         let _guard = tokio_handle.as_ref().map(Handle::enter);
         let mut proven = futures::executor::block_on(self.prove(MockProver, &INITIAL_COST_MODEL))?
             .seal(StdRng::seed_from_u64(0x00));
-        match proven {
-            Transaction::Standard(ref mut stx) => {
-                let intents = stx
-                    .intents
-                    .iter()
-                    .map(|segintent| {
-                        let mut intent = (&*segintent.1).clone();
-                        intent.binding_commitment = PureGeneratorPedersen::largest_representable();
-                        (*segintent.0, intent)
-                    })
-                    .collect();
-                stx.intents = intents;
-            }
-            _ => {}
+        if let Transaction::Standard(ref mut stx) = proven {
+            let intents = stx
+                .intents
+                .iter()
+                .map(|segintent| {
+                    let mut intent = (*segintent.1).clone();
+                    intent.binding_commitment = PureGeneratorPedersen::largest_representable();
+                    (*segintent.0, intent)
+                })
+                .collect();
+            stx.intents = intents;
         }
         Ok(proven)
     }
@@ -258,7 +255,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
         cost_model: &CostModel,
     ) -> Result<ContractCall<ProofMarker, D>, TransactionProvingError<D>> {
         let active_calls = match &self.proof {
-            ProofPreimageVersioned::V1(proof) => prover.check(&proof).await?,
+            ProofPreimageVersioned::V1(proof) => prover.check(proof).await?,
         };
         let mut remaining_active_calls = &active_calls[..];
 
@@ -358,7 +355,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
             ProofPreimageVersioned::V1(preimage) => ProofVersioned::V1(
                 prover
                     .prove(
-                        &preimage,
+                        preimage,
                         Some(intermediate_call.binding_input(binding_commitment)),
                     )
                     .await?,
@@ -487,7 +484,7 @@ mod tests {
             {
                 println!("  '{name}'");
             }
-            assert!(false);
+            panic!();
         }
     }
 }
