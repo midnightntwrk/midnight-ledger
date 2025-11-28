@@ -31,7 +31,7 @@ use zswap::Delta;
 
 pub enum ZswapTransientTypes {
     ProvenTransient(zswap::Transient<Proof, InMemoryDB>),
-    UnprovenTransient(zswap::Transient<ProofPreimage, InMemoryDB>),
+    UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>),
     ProofErasedTransient(zswap::Transient<(), InMemoryDB>),
 }
 
@@ -41,7 +41,7 @@ pub struct ZswapTransient(ZswapTransientTypes);
 
 impl From<zswap::Transient<ProofPreimage, InMemoryDB>> for ZswapTransient {
     fn from(inner: zswap::Transient<ProofPreimage, InMemoryDB>) -> ZswapTransient {
-        ZswapTransient(ZswapTransientTypes::UnprovenTransient(inner))
+        ZswapTransient(ZswapTransientTypes::UnprovenTransient(Box::new(inner)))
     }
 }
 impl From<zswap::Transient<Proof, InMemoryDB>> for ZswapTransient {
@@ -74,12 +74,12 @@ impl ZswapTransient {
             ZswapOutputTypes::UnprovenOutput(val) => {
                 let coin = value_to_qualified_shielded_coininfo(coin)?;
                 Ok(ZswapTransient(ZswapTransientTypes::UnprovenTransient(
-                    zswap::Transient::new_from_contract_owned_output(
+                    Box::new(zswap::Transient::new_from_contract_owned_output(
                         &mut OsRng,
                         &coin,
                         segment,
                         val.clone(),
-                    )?,
+                    )?),
                 )))
             }
             _ => Err(JsError::new(
@@ -617,7 +617,7 @@ impl ZswapOffer {
                 Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
                     inputs: vec![].into(),
                     outputs: vec![].into(),
-                    transient: vec![val.clone()].into(),
+                    transient: vec![(**val).clone()].into(),
                     deltas: vec![].into(),
                 })))
             }

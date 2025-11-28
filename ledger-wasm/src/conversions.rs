@@ -524,7 +524,7 @@ where
 {
     match action {
         ContractAction::Call(call) => JsValue::from(ContractCall::from((**call).clone())),
-        ContractAction::Deploy(deploy) => JsValue::from(ContractDeploy(deploy.clone())),
+        ContractAction::Deploy(deploy) => JsValue::from(ContractDeploy((**deploy).clone())),
         ContractAction::Maintain(upd) => JsValue::from(MaintenanceUpdate(upd.clone())),
     }
 }

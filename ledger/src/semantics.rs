@@ -327,7 +327,7 @@ impl<D: DB> LedgerState<D> {
                 content: EventDetails::ZswapOutput {
                     commitment: output.coin_com,
                     preimage_evidence: match &output.ciphertext {
-                        Some(ciph) => ZswapPreimageEvidence::Ciphertext((**ciph).clone()),
+                        Some(ciph) => ZswapPreimageEvidence::Ciphertext(Box::new((**ciph).clone())),
                         None => ZswapPreimageEvidence::None,
                     },
                     contract: output.contract_address.clone(),
@@ -438,7 +438,7 @@ impl<D: DB> LedgerState<D> {
                     state,
                     vec![Event {
                         source: tx.event_source(),
-                        content: EventDetails::ParamChange(new_params.clone()).clone(),
+                        content: EventDetails::ParamChange(Sp::new(new_params.clone())),
                     }],
                 );
                 Ok(res)
