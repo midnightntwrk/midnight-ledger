@@ -186,7 +186,13 @@ export class TestState {
 
     const balancedTx = this.balanceTx(tx.eraseProofs());
     const detailedBlockFullness = this.ledger.parameters.normalizeFullness(balancedTx.cost(this.ledger.parameters));
-    const overallBlockFullness = Math.max(detailedBlockFullness.readTime, detailedBlockFullness.computeTime, detailedBlockFullness.blockUsage, detailedBlockFullness.bytesWritten, detailedBlockFullness.bytesChurned);
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
     this.assertApply(balancedTx, new WellFormedStrictness(), detailedBlockFullness, overallBlockFullness);
   }
 
@@ -199,12 +205,15 @@ export class TestState {
     return new TransactionContext(this.ledger, block);
   }
 
-  assertApplyTxFullness(
-    tx: Transaction<Signaturish, Proofish, Bindingish>,
-    strictness: WellFormedStrictness,
-  ) {
+  assertApplyTxFullness(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness) {
     const detailedBlockFullness = this.ledger.parameters.normalizeFullness(tx.cost(this.ledger.parameters));
-    const overallBlockFullness = Math.max(detailedBlockFullness.readTime, detailedBlockFullness.computeTime, detailedBlockFullness.blockUsage, detailedBlockFullness.bytesWritten, detailedBlockFullness.bytesChurned);
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
     this.assertApply(tx, strictness, detailedBlockFullness, overallBlockFullness);
   }
 
@@ -212,18 +221,28 @@ export class TestState {
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
     detailedBlockFullness?: NormalizedCost,
-    overallBlockFullness?: number,
+    overallBlockFullness?: number
   ) {
     const result = this.apply(tx, strictness, detailedBlockFullness, overallBlockFullness);
     expect(result.type, `result type was: ${result.type}, and error: ${result.error}`).toEqual('success');
   }
 
   fastForward(dur: bigint, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
+    let computedBlockFullness = overallBlockFullness;
+    if (detailedBlockFullness !== undefined && overallBlockFullness === undefined) {
+      computedBlockFullness = Math.max(
+        detailedBlockFullness.readTime,
+        detailedBlockFullness.computeTime,
+        detailedBlockFullness.blockUsage,
+        detailedBlockFullness.bytesWritten,
+        detailedBlockFullness.bytesChurned
+      );
+    }
     const currSeconds = BigInt(Math.floor(this.time.getTime() / 1000)) + dur;
     const ttl = new Date(Number(currSeconds) * 1000);
     this.time = ttl;
 
-    this.ledger = this.ledger.postBlockUpdate(ttl, detailedBlockFullness, overallBlockFullness);
+    this.ledger = this.ledger.postBlockUpdate(ttl, detailedBlockFullness, computedBlockFullness);
     this.dust = this.dust.processTtls(ttl);
   }
 
@@ -236,7 +255,7 @@ export class TestState {
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
     detailedBlockFullness?: NormalizedCost,
-    overallBlockFullness?: number,
+    overallBlockFullness?: number
   ): TransactionResult {
     const context = this.context();
     const vtx = tx.wellFormed(this.ledger, strictness, this.time);
@@ -347,9 +366,9 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
-  static getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
+  getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
     const guaranteesSegment = 0;
-    const fees = mergedTx.fees(LedgerParameters.initialParameters());
+    const fees = mergedTx.fees(this.ledger.parameters);
     const imbalances = mergedTx.imbalances(guaranteesSegment, fees);
     if (!imbalances) return undefined;
     const dustImbalance = Array.from(imbalances.entries()).find(([tt, bal]) => tt.tag === 'dust' && bal < 0n);
@@ -437,7 +456,7 @@ export class TestState {
     const oldDust = this.dust;
     let lastDust = 0n;
 
-    let dust = TestState.getDustImbalance(mergedTx);
+    let dust = this.getDustImbalance(mergedTx);
     while (dust !== undefined) {
       dust += lastDust;
       lastDust = dust;
@@ -491,7 +510,7 @@ export class TestState {
       mergedTx = tx.merge(tx2Unproven.eraseProofs());
       unprovenBal = tx2Unproven;
 
-      dust = TestState.getDustImbalance(mergedTx);
+      dust = this.getDustImbalance(mergedTx);
     }
     if (unprovenBal) {
       mergedTx = tx.merge(unprovenBal.eraseProofs());
