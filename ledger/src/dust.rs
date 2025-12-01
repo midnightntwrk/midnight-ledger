@@ -509,45 +509,45 @@ impl<D: DB> DustSpend<ProofPreimageMarker, D> {
             .prove(
                 &self.proof,
                 Some(transient_hash(&(Fr::from_le_bytes(b"midnight:dust:proof"), segment_id, binding).field_vec())),
-            )                       	
-            .await?;                	
-        Ok(DustSpend {              	
-            v_fee: self.v_fee,      	
-            old_nullifier: self.old_	nullifier,
-            new_commitment: self.new	_commitment,
-            proof,                  	
-        })                          	
-    }                               	
-}                                   	
-                                    	
-impl<P: ProofKind<D>, D: DB> DustSpe	nd<P, D> {
-    pub(crate) fn erase_proofs(&self	) -> DustSpend<(), D> {
-        DustSpend {                 	
-            v_fee: self.v_fee,      	
-            old_nullifier: self.old_	nullifier,
-            new_commitment: self.new	_commitment,
-            proof: (),              	
-        }                           	
-    }                               	
-                                    	
-    #[cfg(not(feature = "proof-verif	ying"))]
-    pub(crate) fn well_formed(      	
-        &self,                      	
-        _state_ref: &impl StateRefer	ence<D>,
-        _segment_id: u16,           	
-        _binding: Pedersen,         	
-        _strictness: WellFormedStric	tness,
-        _ctime: Timestamp,          	
-    ) -> Result<(), MalformedTransac	tion<D>> {
-        Ok(())                      	
-    }                               	
-                                    	
-    #[cfg(feature = "proof-verifying	")]
-    pub(crate) fn well_formed(      	
-        &self,                      	
-        state_ref: &impl StateRefere	nce<D>,
-        segment_id: u16,            	
-        binding: Pedersen,          	
+            )
+            .await?;
+        Ok(DustSpend {
+            v_fee: self.v_fee,
+            old_nullifier: self.old_nullifier,
+            new_commitment: self.new_commitment,
+            proof,
+        })
+    }
+}
+
+impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
+    pub(crate) fn erase_proofs(&self) -> DustSpend<(), D> {
+        DustSpend {
+            v_fee: self.v_fee,
+            old_nullifier: self.old_nullifier,
+            new_commitment: self.new_commitment,
+            proof: (),
+        }
+    }
+
+    #[cfg(not(feature = "proof-verifying"))]
+    pub(crate) fn well_formed(
+        &self,
+        _state_ref: &impl StateReference<D>,
+        _segment_id: u16,
+        _binding: Pedersen,
+        _strictness: WellFormedStrictness,
+        _ctime: Timestamp,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+
+    #[cfg(feature = "proof-verifying")]
+    pub(crate) fn well_formed(
+        &self,
+        state_ref: &impl StateReference<D>,
+        segment_id: u16,
+        binding: Pedersen,
         strictness: WellFormedStrictness,
         ctime: Timestamp,
     ) -> Result<(), MalformedTransaction<D>> {
