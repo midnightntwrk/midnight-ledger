@@ -32,7 +32,7 @@ use crate::structure::{INITIAL_LIMITS, SPECKS_PER_DUST};
 #[cfg(feature = "proving")]
 use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
-use base_crypto::cost_model::SyntheticCost;
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
 use base_crypto::signatures::{Signature, SigningKey};
@@ -272,13 +272,13 @@ impl<D: DB> TestState<D> {
         self.time += dur;
         self.ledger = self
             .ledger
-            .post_block_update(self.time, self.balanced_block_fullness())
+            .post_block_update(
+                self.time,
+                NormalizedCost::ZERO,
+                FixedPoint::from_u64_div(1, 2),
+            )
             .unwrap();
         self.dust = self.dust.process_ttls(self.time);
-    }
-
-    fn balanced_block_fullness(&self) -> SyntheticCost {
-        self.ledger.parameters.limits.block_limits * 0.5
     }
 
     pub fn step(&mut self) {
@@ -679,7 +679,7 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
             // If it does, the fees associated with the mocked proof should
             // match the real one.
             if let Ok(mocked) = tx.mock_prove() {
-                let allowed_error_margin: u128 = SyntheticCost {
+                let allowed_error_margin: u128 = base_crypto::cost_model::SyntheticCost {
                     block_usage: 5,
                     ..Default::default()
                 }

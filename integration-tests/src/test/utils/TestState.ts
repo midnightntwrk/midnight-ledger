@@ -40,7 +40,7 @@ import {
   type Signature,
   type Signaturish,
   type SigningKey,
-  type SyntheticCost,
+  type NormalizedCost,
   type TokenType,
   Transaction,
   TransactionContext,
@@ -185,7 +185,9 @@ export class TestState {
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
     const balancedTx = this.balanceTx(tx.eraseProofs());
-    this.assertApply(balancedTx, new WellFormedStrictness(), balancedTx.cost(this.ledger.parameters));
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(balancedTx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(detailedBlockFullness.readTime, detailedBlockFullness.computeTime, detailedBlockFullness.blockUsage, detailedBlockFullness.bytesWritten, detailedBlockFullness.bytesChurned);
+    this.assertApply(balancedTx, new WellFormedStrictness(), detailedBlockFullness, overallBlockFullness);
   }
 
   context() {
@@ -197,33 +199,44 @@ export class TestState {
     return new TransactionContext(this.ledger, block);
   }
 
+  assertApplyTxFullness(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    strictness: WellFormedStrictness,
+  ) {
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(tx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(detailedBlockFullness.readTime, detailedBlockFullness.computeTime, detailedBlockFullness.blockUsage, detailedBlockFullness.bytesWritten, detailedBlockFullness.bytesChurned);
+    this.assertApply(tx, strictness, detailedBlockFullness, overallBlockFullness);
+  }
+
   assertApply(
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
-    blockFullness?: SyntheticCost
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number,
   ) {
-    const result = this.apply(tx, strictness, blockFullness);
+    const result = this.apply(tx, strictness, detailedBlockFullness, overallBlockFullness);
     expect(result.type, `result type was: ${result.type}, and error: ${result.error}`).toEqual('success');
   }
 
-  fastForward(dur: bigint, blockFullness?: SyntheticCost) {
+  fastForward(dur: bigint, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
     const currSeconds = BigInt(Math.floor(this.time.getTime() / 1000)) + dur;
     const ttl = new Date(Number(currSeconds) * 1000);
     this.time = ttl;
 
-    this.ledger = this.ledger.postBlockUpdate(ttl, blockFullness);
+    this.ledger = this.ledger.postBlockUpdate(ttl, detailedBlockFullness, overallBlockFullness);
     this.dust = this.dust.processTtls(ttl);
   }
 
-  step(blockFullness?: SyntheticCost) {
+  step(detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
     const tenSeconds = 10n;
-    this.fastForward(tenSeconds, blockFullness);
+    this.fastForward(tenSeconds, detailedBlockFullness, overallBlockFullness);
   }
 
   apply(
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
-    blockFullness?: SyntheticCost
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number,
   ): TransactionResult {
     const context = this.context();
     const vtx = tx.wellFormed(this.ledger, strictness, this.time);
@@ -237,7 +250,7 @@ export class TestState {
         .map((utxo) => structuredClone(utxo))
         .filter((utxo) => utxo.owner === pk)
     );
-    this.step(blockFullness);
+    this.step(detailedBlockFullness, overallBlockFullness);
     return result;
   }
 

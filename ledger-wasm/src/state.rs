@@ -18,6 +18,7 @@ use crate::onchain_runtime::{ContractState, value_to_token_type};
 use crate::tx::{SystemTransaction, TransactionContext, TransactionResult, VerifiedTransaction};
 use crate::zswap_state::*;
 use crate::zswap_wasm::*;
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use js_sys::{Array, BigInt, Date, Function, Map, Set, Uint8Array};
@@ -62,16 +63,27 @@ impl LedgerState {
     pub fn post_block_update(
         &self,
         tblock: &Date,
-        fullness: JsValue,
+        detailed_fullness: JsValue,
+        overall_fullness: JsValue,
     ) -> Result<LedgerState, JsError> {
-        let fullness = if fullness.is_null() || fullness.is_undefined() {
-            self.0.parameters.limits.block_limits * 0.5
+        let detailed_fullness = if detailed_fullness.is_null() || detailed_fullness.is_undefined() {
+            NormalizedCost::ZERO
         } else {
-            from_value(fullness)?
+            from_value(detailed_fullness)?
+        };
+        let overall_fullness = if overall_fullness.is_null() || overall_fullness.is_undefined() {
+            FixedPoint::from_u64_div(1, 2)
+        } else if let Some(f) = overall_fullness.as_f64() {
+            FixedPoint::from(f)
+        } else {
+            return Err(JsError::new(
+                "expected number or undefined for overall fullness",
+            ));
         };
         Ok(LedgerState(self.0.post_block_update(
             Timestamp::from_secs(js_date_to_seconds(tblock)),
-            fullness,
+            detailed_fullness,
+            overall_fullness,
         )?))
     }
 

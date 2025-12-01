@@ -172,13 +172,10 @@ describe('Ledger API - CostModel', () => {
 
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -193,7 +190,7 @@ describe('Ledger API - CostModel', () => {
 
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const baseFee = balanced.fees(state.ledger.parameters);
     const feesWithMargin0 = balanced.feesWithMargin(state.ledger.parameters, 0);
@@ -220,13 +217,10 @@ describe('Ledger API - CostModel', () => {
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
     });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxfullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -246,13 +240,10 @@ describe('Ledger API - CostModel', () => {
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
     });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -293,13 +284,10 @@ describe('Ledger API - CostModel', () => {
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeGreaterThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -330,13 +318,10 @@ describe('Ledger API - CostModel', () => {
 
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeGreaterThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
