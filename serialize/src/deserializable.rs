@@ -159,11 +159,9 @@ impl<T: Deserializable> Deserializable for Arc<T> {
 
 impl<const N: usize> Deserializable for [u8; N] {
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
-        unsafe {
-            let mut res = std::mem::MaybeUninit::<[u8; N]>::uninit().assume_init();
-            reader.read_exact(&mut res[..])?;
-            Ok(res)
-        }
+        let mut res = [0u8; N];
+        reader.read_exact(&mut res[..])?;
+        Ok(res)
     }
 }
 
