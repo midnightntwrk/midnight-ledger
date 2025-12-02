@@ -1,6 +1,6 @@
 [package]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.5"
+version = "1.0.0-alpha.5-hard-fork-test"
 edition = "2024"
 license.workspace = true
 
