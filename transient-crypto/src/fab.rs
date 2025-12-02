@@ -510,7 +510,7 @@ impl ValueAtomExt for ValueAtom {
                 writer.write(&vec![Fr::from(0); prepend_zeros]);
                 writer.write(&raw.collect::<Vec<_>>());
             }
-            AlignmentAtom::Field => writer.write(&[value_atom_as_field(&self)]),
+            AlignmentAtom::Field => writer.write(&[value_atom_as_field(self)]),
         }
     }
 
@@ -526,7 +526,7 @@ impl ValueAtomExt for ValueAtom {
                 writer.write(&zeroes);
             }
             AlignmentAtom::Field => {
-                value_atom_as_field(&self).binary_repr(writer);
+                value_atom_as_field(self).binary_repr(writer);
             }
         }
     }

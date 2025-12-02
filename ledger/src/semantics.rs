@@ -556,7 +556,7 @@ impl<D: DB> LedgerState<D> {
 
                 state.check_night_balance_invariant()?;
 
-                return Ok((state, vec![]));
+                Ok((state, vec![]))
             }
             SystemTransaction::PayBlockRewardsToTreasury { amount } => {
                 if *amount > self.block_reward_pool {
@@ -821,7 +821,7 @@ impl<D: DB> LedgerState<D> {
 
                 new_st.check_night_balance_invariant()?;
 
-                return Ok((new_st, vec![]));
+                Ok((new_st, vec![]))
             }
         }
     }
