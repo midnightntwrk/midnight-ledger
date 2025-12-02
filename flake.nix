@@ -451,6 +451,7 @@
               pkgs.yarn
               pkgs.jq
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
               pkgs.git
               pkgs.cargo-spellcheck
@@ -469,6 +470,7 @@
               pkgs.jq
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
             ];
             buildInputs = [packages.public-params];
@@ -489,6 +491,7 @@
               pkgs.clang
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck

@@ -146,8 +146,8 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 
     #[instrument(skip(self, prover, cost_model))]
-    pub async fn prove<'a>(
-        &'a self,
+    pub async fn prove(
+        &self,
         mut prover: impl ProvingProvider,
         cost_model: &CostModel,
     ) -> Result<Transaction<S, ProofMarker, PedersenRandomness, D>, TransactionProvingError<D>>

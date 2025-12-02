@@ -20,6 +20,7 @@ use serialize::{Deserializable, tagged_deserialize, tagged_serialize};
 use std::fs::File;
 use std::future::Future;
 use std::io::{BufReader, Read};
+use std::sync::Arc;
 use storage::db::DB;
 use transient_crypto::proofs::{
     KeyLocation, ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, Resolver,
@@ -95,7 +96,7 @@ impl AuthorizedClaim<ProofPreimage> {
         Ok(AuthorizedClaim {
             coin: self.coin,
             recipient: self.recipient,
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -135,7 +136,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -150,7 +151,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -171,8 +172,8 @@ impl<D: DB> Transient<ProofPreimage, D> {
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof_input: proof_input?,
-            proof_output: proof_output?,
+            proof_input: Arc::new(proof_input?),
+            proof_output: Arc::new(proof_output?),
         })
     }
 }

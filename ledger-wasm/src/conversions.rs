@@ -62,7 +62,7 @@ pub trait TryRef: RefFromWasmAbi<Abi = u32> {
 #[macro_export]
 macro_rules! try_ref_for_exported {
     ($ty:ident) => {
-        paste::paste! {
+        pastey::paste! {
             // Re-import $ty from the wasm-output, and expose it as a function returning the class
             // object. This is necessary, as wasm-bindgen does not provide a means to inspect the
             // class object itself, and just declaring `extern "C" type $ty;` will complain about a

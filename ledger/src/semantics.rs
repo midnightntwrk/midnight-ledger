@@ -39,7 +39,7 @@ use itertools::Either;
 use onchain_runtime::context::{BlockContext, QueryContext};
 use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng};
-use serialize::{Deserializable, Serializable};
+use serialize::{Deserializable, Serializable, Tagged};
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
@@ -154,7 +154,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                         &AuthorizedClaim {
                             coin,
                             recipient: *target_address,
-                            proof: (),
+                            proof: std::sync::Arc::new(()),
                         },
                     );
                 }
@@ -251,14 +251,14 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
                     state.first_free += 1;
                     if let Some(ci) = state.pending_outputs.get(commitment) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                        let nullifier = ci
+                            .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone()));
                         let qci = ci.qualify(*mt_index);
                         state.pending_outputs = state.pending_outputs.remove(commitment);
                         state.coins = state.coins.insert(nullifier, qci);
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                        let nullifier = ci
+                            .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key.clone()));
                         let qci = ci.qualify(*mt_index);
                         state.coins = state.coins.insert(nullifier, qci);
                     } else {
@@ -556,7 +556,7 @@ impl<D: DB> LedgerState<D> {
 
                 state.check_night_balance_invariant()?;
 
-                return Ok((state, vec![]));
+                Ok((state, vec![]))
             }
             SystemTransaction::PayBlockRewardsToTreasury { amount } => {
                 if *amount > self.block_reward_pool {
@@ -786,13 +786,14 @@ impl<D: DB> LedgerState<D> {
                             dust_state.generation.generating_tree = dust_state
                                 .generation
                                 .generating_tree
-                                .update_hash(*idx, gen_info.merkle_hash(), gen_info);
+                                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .rehash();
                             event_push(EventDetails::DustGenerationDtimeUpdate {
                                 update: dust_state
                                     .generation
                                     .generating_tree
                                     .insertion_evidence(*idx)
-                                    .expect("must be able to produce evidence for udpated path"),
+                                    .expect("must be able to produce evidence for updated path"),
                                 block_time: tblock,
                             });
                         }
@@ -821,7 +822,7 @@ impl<D: DB> LedgerState<D> {
 
                 new_st.check_night_balance_invariant()?;
 
-                return Ok((new_st, vec![]));
+                Ok((new_st, vec![]))
             }
         }
     }
@@ -830,7 +831,7 @@ impl<D: DB> LedgerState<D> {
     fn apply_section<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
     >(
         &self,
         tx: &StandardTransaction<S, P, B, D>,

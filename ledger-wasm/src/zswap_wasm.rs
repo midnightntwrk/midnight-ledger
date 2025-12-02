@@ -181,8 +181,10 @@ impl ZswapTransient {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapTransientTypes::*;
         Ok(match &self.0 {
-            ProvenTransient(val) => JsValue::from(Proof(val.proof_input.clone().into())),
-            UnprovenTransient(val) => JsValue::from(PreProof(val.proof_input.clone().into())),
+            ProvenTransient(val) => JsValue::from(Proof(val.proof_input.deref().clone().into())),
+            UnprovenTransient(val) => {
+                JsValue::from(PreProof(val.proof_input.deref().clone().into()))
+            }
             ProofErasedTransient(_) => JsValue::from(NoProof()),
         })
     }
@@ -192,8 +194,10 @@ impl ZswapTransient {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapTransientTypes::*;
         Ok(match &self.0 {
-            ProvenTransient(val) => JsValue::from(Proof(val.proof_output.clone().into())),
-            UnprovenTransient(val) => JsValue::from(PreProof(val.proof_output.clone().into())),
+            ProvenTransient(val) => JsValue::from(Proof(val.proof_output.deref().clone().into())),
+            UnprovenTransient(val) => {
+                JsValue::from(PreProof(val.proof_output.deref().clone().into()))
+            }
             ProofErasedTransient(_) => JsValue::from(NoProof()),
         })
     }
@@ -353,8 +357,8 @@ impl ZswapOutput {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapOutputTypes::*;
         Ok(match &self.0 {
-            ProvenOutput(val) => JsValue::from(Proof(val.proof.clone().into())),
-            UnprovenOutput(val) => JsValue::from(PreProof(val.proof.clone().into())),
+            ProvenOutput(val) => JsValue::from(Proof(val.proof.deref().clone().into())),
+            UnprovenOutput(val) => JsValue::from(PreProof(val.proof.deref().clone().into())),
             ProofErasedOutput(_) => JsValue::from(NoProof()),
         })
     }
@@ -485,8 +489,8 @@ impl ZswapInput {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapInputTypes::*;
         Ok(match &self.0 {
-            ProvenInput(val) => JsValue::from(Proof(val.proof.clone().into())),
-            UnprovenInput(val) => JsValue::from(PreProof(val.proof.clone().into())),
+            ProvenInput(val) => JsValue::from(Proof(val.proof.deref().clone().into())),
+            UnprovenInput(val) => JsValue::from(PreProof(val.proof.deref().clone().into())),
             ProofErasedInput(_) => JsValue::from(NoProof()),
         })
     }

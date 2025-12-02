@@ -280,7 +280,9 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                 let proof = match ppi {
                     ProofPreimageVersioned::V1(mut ppi) => {
                         if let Some(binding_input) = binding_input {
-                            ppi.binding_input = binding_input;
+                            let mut inner = (*ppi).clone();
+                            inner.binding_input = binding_input;
+                            ppi = Arc::new(inner);
                         }
                         ProofVersioned::V1(
                             ppi.prove::<ZkirV2>(OsRng, &*PUBLIC_PARAMS, &resolver)

@@ -1035,7 +1035,7 @@ pub struct OnDiskObject<H: WellBehavedHasher> {
     /// `persist`ed. Note that the `persist` counts are stored separately -- see
     /// `StorageBackend::get_root_count` for details -- but not here in the
     /// object!
-    pub(crate) ref_count: u32,
+    pub(crate) ref_count: u64,
     pub(crate) children: std::vec::Vec<ArenaKey<H>>,
 }
 
@@ -1076,9 +1076,10 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     /// This ignores any `delta.root_delta`, since the `OnDiskObject` is not
     /// concerned with root counts.
     fn apply_delta(self, delta: Delta) -> Self {
-        let ref_count = self.ref_count as i32 + delta.ref_delta;
-        assert!(ref_count >= 0, "ref count can't be negative");
-        let ref_count = ref_count as u32;
+        let ref_count = self
+            .ref_count
+            .checked_add_signed(delta.ref_delta as i64)
+            .expect("ref count can't go out of u64 bounds");
         OnDiskObject {
             data: self.data,
             children: self.children,
@@ -1146,13 +1147,13 @@ pub(crate) mod raw_node {
         #[allow(dead_code)]
         pub(crate) data: std::vec::Vec<u8>,
         pub(crate) children: std::vec::Vec<ArenaKey<H>>,
-        pub(crate) ref_count: u32,
+        pub(crate) ref_count: u64,
     }
 
     impl<H: WellBehavedHasher> RawNode<H> {
         pub(crate) fn new(
             key: &[u8],
-            ref_count: u32,
+            ref_count: u64,
             children: std::vec::Vec<&RawNode<H>>,
         ) -> Self {
             let data = key.to_vec();

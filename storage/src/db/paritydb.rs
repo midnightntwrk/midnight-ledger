@@ -19,6 +19,7 @@ use proptest::prelude::*;
 use serialize::{Deserializable, Serializable};
 
 use parity_db;
+#[allow(deprecated)]
 use sha2::digest::generic_array::GenericArray;
 
 use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject};
@@ -71,6 +72,8 @@ fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaHash<H> 
             <H as OutputSizeUser>::output_size()
         );
     }
+
+    #[allow(deprecated)]
     ArenaHash(GenericArray::from_iter(key_bytes))
 }
 

@@ -9,7 +9,7 @@ interact with other parts of the ledger.
 At it's core, a contract has an *internal state type*, which we refer to as
 `StateValue`. This type is left unspecified in this spec, however in practice
 it is an [onchain runtime state
-value](../apis-and-common-types/onchain-runtime/README.md#values).
+value](onchain-runtime.md#values).
 
 ```rust
 type StateValue;
@@ -139,7 +139,7 @@ struct Transcript {
 ```
 
 Note that the real program is a program as described in the [onchain runtime
-specification](../apis-and-common-types/onchain-runtime/README.md).
+specification](onchain-runtime.md).
 
 ### Effects
 

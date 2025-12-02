@@ -1869,6 +1869,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
         let mut binding_input = Vec::new();
 
+        binding_input.extend(b"midnight:binding-input[v1]");
         let _ = Serializable::serialize(&self.address, &mut binding_input);
         let _ = Serializable::serialize(&self.entry_point, &mut binding_input);
         let _ = Serializable::serialize(
