@@ -6,11 +6,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
-- Remove special-casing of validation behaviour depending on the
-  `test-utilities` feature being present.
-
 ## 6.1.0
 
+- breaking: remove special-casing of validation behaviour depending on the
+  `test-utilities` feature being present.
+- fix: correctly rehash generation Merkle tree on cNgD processing.
 - breaking: feat: Add real cost model
   - `dummy` prefixes of cost model/limits changed to `initial` prefix
   - Costs are now given in different dimensions instead of a single gas cost

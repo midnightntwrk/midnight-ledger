@@ -786,13 +786,14 @@ impl<D: DB> LedgerState<D> {
                             dust_state.generation.generating_tree = dust_state
                                 .generation
                                 .generating_tree
-                                .update_hash(*idx, gen_info.merkle_hash(), gen_info);
+                                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .rehash();
                             event_push(EventDetails::DustGenerationDtimeUpdate {
                                 update: dust_state
                                     .generation
                                     .generating_tree
                                     .insertion_evidence(*idx)
-                                    .expect("must be able to produce evidence for udpated path"),
+                                    .expect("must be able to produce evidence for updated path"),
                                 block_time: tblock,
                             });
                         }

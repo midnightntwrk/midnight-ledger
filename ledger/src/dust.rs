@@ -1177,7 +1177,7 @@ impl<D: DB> DustState<D> {
                     .generation
                     .generating_tree
                     .insertion_evidence(*idx)
-                    .expect("must be able to produce evidence for udpated path"),
+                    .expect("must be able to produce evidence for updated path"),
                 block_time: context.block_context.tblock,
             });
         }
@@ -1667,6 +1667,7 @@ impl<D: DB> DustLocalState<D> {
                     Ok((state, gen_collapses))
                 }
                 EventDetails::DustGenerationDtimeUpdate { update, block_time } => {
+                    debug_assert!(update.path.iter().all(|entry| entry.hash.is_some()));
                     state.generating_tree =
                         state.generating_tree.update_from_evidence(update.clone())?;
                     if *block_time < state.sync_time {
