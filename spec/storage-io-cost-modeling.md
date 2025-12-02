@@ -10,9 +10,9 @@ Below we distinguish between "global" costing, meaning at the end of a tx, befor
 
 ## Summary of clarifications vs [cost model spec](./cost-model.md)
 
-- io write+delete costing *only* happens *globally*, never locally.
-- io read costing *only* happens *locally*, never globally.
-- in all cases for cpu costing, and whenever possible for reads (everywhere except `idx`? see details in [costing reads](#costing-reads)) we want to cost *before* evaluating the vm op, and fail fast if the incremental cost would exceed the budget.
+- io write+delete costing _only_ happens _globally_, never locally.
+- io read costing _only_ happens _locally_, never globally.
+- in all cases for cpu costing, and whenever possible for reads (everywhere except `idx`? see details in [costing reads](#costing-reads)) we want to cost _before_ evaluating the vm op, and fail fast if the incremental cost would exceed the budget.
 - crypto operations: there is no io read costing, only cpu costing, associated with crypto operations (e.g. `CostModel::proof_verify`, `::verifier_key_load`, `::transient_hash`).
 - `tree_copy`: nothing to model! There is no io read costing or cpu costing of the `tree_copy` operation. Rather, it will only be costed globally as a write (the implicit cpu cost of setting up this write will be covered by the relatively expensive write cost itself, and will only happen after committing the tx anyway). The cost model should still have a `tree_copy` costing function, but it will return the "identity" cost.
 - `time_filter_map`: unlike for the container data structures (`bmt`, `array`, `map`), the `time_filter_map_*` costing is not related to vm operations:
@@ -23,13 +23,14 @@ Below we distinguish between "global" costing, meaning at the end of a tx, befor
 
 Here's a solution to our "bounding bytes written and deleted" problem[^problem], that allows for zero cost rollbacks to earlier committed chain states[^rollback]. The key insight is that we can completely separate logical gc for costing from actual gc that mutates db: in the tx we estimate the gc that will happen later in the future once the current tx falls out of the rollback window, but actually performing that gc is outside of any tx and not part of consensus (I think we prefer this anyway).
 
-[^problem]: The high-level cost-model spec in PR#141 assumed that we could do *incremental* costing of writes and deletes. However, because our state data structures are implemented using shared Merkle dags -- to allow for cheap state copies, for example -- it's not possible to efficiently predict the incremental writes+deletes effect of a state-changing vm operation, because the writes+deletes effect depends on the current state of the *full* underlying Merkle dag. So, we moved to a solution that does whole-tx write+delete costing, using metadata about the full Merkle dag referenced by the tx to achieve sufficient time efficiency.
+[^problem]: The high-level cost-model spec in PR#141 assumed that we could do _incremental_ costing of writes and deletes. However, because our state data structures are implemented using shared Merkle dags -- to allow for cheap state copies, for example -- it's not possible to efficiently predict the incremental writes+deletes effect of a state-changing vm operation, because the writes+deletes effect depends on the current state of the _full_ underlying Merkle dag. So, we moved to a solution that does whole-tx write+delete costing, using metadata about the full Merkle dag referenced by the tx to achieve sufficient time efficiency.
 
 [^rollback]: I'm assuming a "rollback window" of some previous blocks as the possible states to rollback to. For each of these blocks, the only requirement is that the roots of the contract states at the end of those blocks are still in the db. This implies that outside of consensus, nodes maintain a set of gc roots for their underlying db, corresponding to state roots in blocks the node wants to be able to rollback to.
 
 ## Assumptions
 
 I'm assuming our current storage, as currently implemented:
+
 - Merkle dags, where hashing captures graph structure, but not ref counts; indeed, the underlying db having ref counts is not relevant here for costing, since we compute our own ref counts from the point of view of isolated contract states, whereas the underlying db shares nodes that occur in the storage of distinct contracts.
 - persisted gc roots, which prevent the underlying (out of consensus) gc from cleaning up any nodes reachable from these roots.
 - possible tmp objects -- i.e. nodes that are not reachable from any currently persisted gc roots; an earlier version of this proposal needed to disallow tmp objects.
@@ -37,6 +38,7 @@ I'm assuming our current storage, as currently implemented:
 I'm assuming txs can only lookup keys in their local state, and that local state must be computed by the contract itself, locally. In particular, I'm assuming txs cannot lookup arbitrary keys in the underlying global storage.
 
 I also need to make one addition to the consensus state of each contract:
+
 - a set `K` of all keys that the contract is currently "charged for", along with some metadata about these "charged" keys.
 
 But first before describing the costing solution, let's motivate why we need `K`, by considering an idealized version of our problem.
@@ -54,17 +56,19 @@ More precisely, let `reachable(keys: Set<Key>) -> Set<Key>` be a function that c
 
 [^keypun]: Here and elsewhere we pun the distinction between keys and nodes, since they're in 1-to-1 correspondence. I.e., here, by "following an edge from a key" we of course mean following an edge from the node with that key.
 
-Unfortunately, this simple goal is not feasible in practice, because a tx can induce an unbounded number of deleted nodes by dropping a very large contract state that was built up over many prior txs. I.e., we can't in general hope to compute the set `deleted_keys`. So, we need to approximate, and because we need to protect against malicious txs, we over approximate, meaning that at all times a contract is charged for *at least* as many bytes as it's currently storing.
+Unfortunately, this simple goal is not feasible in practice, because a tx can induce an unbounded number of deleted nodes by dropping a very large contract state that was built up over many prior txs. I.e., we can't in general hope to compute the set `deleted_keys`. So, we need to approximate, and because we need to protect against malicious txs, we over approximate, meaning that at all times a contract is charged for _at least_ as many bytes as it's currently storing.
 
-So, we introduce a *consensus* set `K` of keys the contract is currently charged for, meaning all keys whose nodes have been costed as writes, but not credited as deletes. This set can be large -- it includes all keys in the state of the contract -- but it's only a fraction of the size of the state itself (no payloads or children), so hopefully this additional storage is acceptable. We can represent `K` using a Merkle dag, and store it in the underlying db just like our other Merkle dags, and making `K` part of consensus amounts to making the root key of `K` part of consensus. But in the discussion that follows, any mention of root keys (e.g. `R`, `R0`, `R1`) refers to the root keys corresponding to the contract state itself, not this additional metadata in `K`.
+So, we introduce a _consensus_ set `K` of keys the contract is currently charged for, meaning all keys whose nodes have been costed as writes, but not credited as deletes. This set can be large -- it includes all keys in the state of the contract -- but it's only a fraction of the size of the state itself (no payloads or children), so hopefully this additional storage is acceptable. We can represent `K` using a Merkle dag, and store it in the underlying db just like our other Merkle dags, and making `K` part of consensus amounts to making the root key of `K` part of consensus. But in the discussion that follows, any mention of root keys (e.g. `R`, `R0`, `R1`) refers to the root keys corresponding to the contract state itself, not this additional metadata in `K`.
 
 Because any new nodes in the final state of a tx must have been computed by the tx itself -- a tx cannot insert arbitrary keys into its state, but instead must compute its final state from its starting state using simple vm operations -- we can compute a sound approximation to new keys `written_keys` in `O(time taken by tx)` by simple graph search from roots in `R1`, truncating our search whenever we reach a key in the currently charged set `K`, which itself contains `R0`: this may skip some keys that were not reachable from `R0`, but since they're in `K` they're currently charged and don't need to be charged again. But when trying to approximate `deleted_keys`, not only can't we compute the whole set, but worse, we don't a priori have any efficient test to tell if some key in `reachable(R0)` is not in `reachable(R1)`. To get an efficient test, we extend `K` with metadata about currently costed keys, including their reference counts from the point of view of `K`.
 
 I.e., the metadata we need for the keys in `K` are:
+
 - contract-local ref counts (explained in "invariants" below), and so `K: RcMap` where we can lookup the contract-local ref count of key `k` as `K[k]: RefCount`, where `RefCount` is some unsigned int type.
 - a way to efficiently find the keys in `K` with ref count zero, i.e. keys `k` s.t. `K[k] == 0`, which we call "unreachable keys"; for simplicity in the pseudo code presentation below, we pretend `K` is a simple map, but in the implementation we'll need something more complex[^rcmap-opt][^rcmap-ref].
 
-[^rcmap-opt]: The simplest thing with sufficient performance would be something like `struct RcMap { rcs: Map<Key, RefCount>, unreachable: Set<Key> }`. However, if we also want to optimize the storage size of `RcMap`s -- they are part of consensus -- something like
+[^rcmap-opt]:
+    The simplest thing with sufficient performance would be something like `struct RcMap { rcs: Map<Key, RefCount>, unreachable: Set<Key> }`. However, if we also want to optimize the storage size of `RcMap`s -- they are part of consensus -- something like
 
     ```
     struct RcMap {
@@ -79,13 +83,15 @@ I.e., the metadata we need for the keys in `K` are:
 
     would be better: we don't waste space storing rcs of zero or one, which are the most common cases, and only store actual rcs which are at least 2, which should be relatively rare.
 
-[^rcmap-ref]: The `RcMap` implementation requires careful handling to ensure that the dag node info for charged keys remain accessible. There are two approaches to address this:
+[^rcmap-ref]:
+    The `RcMap` implementation requires careful handling to ensure that the dag node info for charged keys remain accessible. There are two approaches to address this:
 
     1. Backend persistence approach: ensure that storage of a key in the `RcMap` implies it remains in the backend storage. By using an `ArenaKey` wrapper with a custom `Storable` implementation, we can do this with zero storage overhead in the `RcMap`. The first implementation took this approach.
 
     2. Self-contained approach: avoid backend dependency entirely by storing the key, its children, and node size directly in the `RcMap`. This allows garbage collection to operate purely on the `RcMap` data without backend lookups, but significantly increases the size of the `RcMap`.
 
 We also need some invariants on `K`, where we pun `K` as a simple set of keys as needed:
+
 - `K` is **child-closed**, which we define by `reachable(K) == K`.
 - the ref counts in `K` correspond to the graph induced by `K`: if `k` in `K`, then `K[k] = |{ l in K: k in l.children }|.
 - `K` soundly approximates the contract state; i.e. if the contract state has root set `R`, then we require `reachable(R) ⊆ K`.
@@ -93,6 +99,7 @@ We also need some invariants on `K`, where we pun `K` as a simple set of keys as
 ## Real solution using `K`
 
 Suppose we evaluate a new tx for some contract with current charged keys `K0: RcMap` and current root set `R0: Set<Key>`, and at the end of the tx we have the new root set `R1: Set<Key>`. Our goal is
+
 - compute a new key set `K1: RcMap` satisfying the invariants w.r.t `R1`, in particular s.t. `reachable(R1) ⊆ K1`.
 - compute newly written nodes as `K1 \ K0`, and charge the tx for their bytes.
 - compute newly deleted nodes as `K0 \ K1`, and credit the tx for their bytes.
@@ -124,6 +131,7 @@ We can then compute the write+delete counts and new charged-key set `K1` as foll
     bytes_deleted += keys_removed.length() * bytes_per_key_in_K
 
 To implement `get_writes(K0, R1)`, note that
+
 - since `K0` is child-closed, and all keys in `K0` are charged, the uncharged writes are `reachable(R1) \ K0`, which we can compute by graph search from `R1`, truncating the search at nodes in `K0`.
 - any new nodes in `reachable(R1) \ K0` were constructed while the tx was running, so we have time to run this graph search to completion.
 
@@ -161,6 +169,7 @@ for k in keys:
 ```
 
 Why is this correct:
+
 - every key in `m` needs an entry in `m`, so we initialize all entries to zero.
 - since `keys` is child-closed, we know that for all `k` in `keys`, all keys in `k.children` are also in `keys`. So, the lookups `m[c]` in the increments are well defined.
 - the `m[c] += 1` increments the ref count of `c` for each incoming edge to `c` induced by keys in `keys`, so each edge in the graph induced by `keys` is accounted for.
@@ -185,6 +194,7 @@ fn update_rcmap(K0: RcMap, keys_added: Set<Key>) -> RcMap:
 ```
 
 Finally, we need to define `gc_rcmap`:
+
 - given `K: RcMap`, the goal of `gc_rcmap(K, R1)` is to compute nodes in the graph induced by `K` that are not reachable from `R1`, remove those nodes from `K`, and return the removed nodes along with the updated `K`.
 - because it might not be possible to compute all such nodes fast enough, `gc_rcmap` need to work iteratively and quit early if resource limits are reached.
 - because `K` contains accurate ref counts for the graph induced by its keys, we proceed by simulating incremental gc on `K`, removing zero ref-count nodes which aren't in `R1`, and decrementing the ref counts of their children.
@@ -231,12 +241,22 @@ fn gc_rcmap(K: RcMap, R1: Set<Key>) -> (RcMap, Set<Key>):
 And that's it!
 
 Some notes:
+
 - when we call `gc_rcmap(K, R1)` in the cost calcuation, everything in `K0` is currently charged, and we're in the process of charging the keys `keys_added`, so the keys in `K = update_rcmap(K0, keys_added)` are considered charged.
 - a later tx may add back some keys to the state `reachable(R1)` which are not in `reachable(R0)` without paying for them, but this is ok, because those keys are still in `K0`, meaning still charged but not credited; as mentioned before, the full `gc_rcmap()` computation can be `Omega(|state reachable from R0|)` in time, which is not bounded by `O(time taken by tx)`, and so we can't assume we can run it to completion.
 
 ## Implementation notes
 
-Above we described ideas for implementing the `RcMap` data structure, including optimizations. There is also the question of *where* the global write+delete cost calculations will happen. The answer is that these should happen at the level where the vm is called: the input to the vm includes a starting stack with the starting contract state, and the output of the vm is a final stack which includes the ending contract state. So assuming we've plumbed the rcmap `K0` to the place where the vm is run, we can do the write+delete computations described above in the same place.
+Above we described ideas for implementing the `RcMap` data structure, including optimizations. There is also the question of _where_ the global write+delete cost calculations will happen. The answer is that these should happen at the level where the vm is called: the input to the vm includes a starting stack with the starting contract state, and the output of the vm is a final stack which includes the ending contract state. So assuming we've plumbed the rcmap `K0` to the place where the vm is run, we can do the write+delete computations described above in the same place.
+
+Costs will be taken from _some_ transaction in a given block that interacts with the given
+contract. Freed data can be paid for by subsequent transactions that perform
+writes, exchanging the data "write" for data "churn" - as an input to the
+transaction you can specify the amount of garbage collection you wish to pay
+for, thereby exchanging computation costs for storage costs. A transaction that does
+not provide enough gas to cover a large data free could have said data stuck in
+the garbage collector indefinitely - which is okay, as it is costed as
+persistent storage.
 
 # Costing reads
 
@@ -247,9 +267,10 @@ At a high level, the io read costing will be in terms of number and size of sync
 with the idea that a sync read itself is expensive, but then adding more blocks to an existing read is relatively cheap.
 
 For io read costing container ops (e.g. map insert, delete, lookup), we want to estimate the total number and size of these sync reads. We can think about this in terms of paths in the underlying mpt: to lookup, insert, or delete, we need to traverse a path in the mpt, and read the nodes on that path one-by-one in sync reads. Finally, in the case of lookup, we need to read the root node of the result.
+
 - for the path traversal, we'll assume all nodes fit in a single block and charge one sync read of one block per node.
 - for lookup (`idx`) specifically, we'll cost the value looked up as the size in blocks (i.e. `ceil(size in bytes / 4k)`) of the root node of the result. If the result is a cell, then the root node will be the whole cell, and may be up to 32KiB (as defined by `onchain-state::state::CELL_BOUND`). If the result is a container, then we can just assume the root node fits in a single block (altho if we're measuring cell results anyway, might be simpler implementation wise to just measure uniformly, indep of result type).
 
-The vm has a notion of cached reads, and for these we assume they're cached in memory and induce *no* io read cost. The vm knows what's cached and can compute accordingly. TODO: clarify implications for cost-modeling with per-container-op costing - does this costing depend on vm state, or is it separate from vm op costing and assumes no caching?
+The vm has a notion of cached reads, and for these we assume they're cached in memory and induce _no_ io read cost. The vm knows what's cached and can compute accordingly. TODO: clarify implications for cost-modeling with per-container-op costing - does this costing depend on vm state, or is it separate from vm op costing and assumes no caching?
 
-In the vm, for per-vm-op costing, we'll compute cpu cost and io read cost separately: the cpu cost will be computed *before* evaluating the vm op, but the io read cost will be computed *after* for `idx`, since we need the actual value looked up in the case of `idx`. In most (all?) other cases we can compute both cpu and io-read cost *before* executing the vm op (for path lengths we just estimate by the log size of the container, ignoring the actual key/path being looked up).
+In the vm, for per-vm-op costing, we'll compute cpu cost and io read cost separately: the cpu cost will be computed _before_ evaluating the vm op, but the io read cost will be computed _after_ for `idx`, since we need the actual value looked up in the case of `idx`. In most (all?) other cases we can compute both cpu and io-read cost _before_ executing the vm op (for path lengths we just estimate by the log size of the container, ignoring the actual key/path being looked up).

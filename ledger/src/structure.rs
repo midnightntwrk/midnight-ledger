@@ -929,15 +929,6 @@ pub struct TransactionCostModel {
     pub baseline_cost: RunningCost,
 }
 
-/// # Garbage Collection Policy
-///
-/// One transaction interacting with a contract will pay for garbage collection.
-/// It may be in the transaction that caused the data to be freed, but this may
-/// not necesserily be the case (perticularly for large frees). Garbage collection
-/// is estimated accurately as part of the block cost.
-///
-/// Note: This is seperate to the _actual_ garbage collection done by
-/// `midnight_storage::DB`, which is guaranteed to eventually complete.
 impl TransactionCostModel {
     fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
