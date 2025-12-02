@@ -57,9 +57,10 @@ describe('Ledger API - CostModel', () => {
    * 2. Each dimension increases if its utilization exceeds the target,
    * decreases if below, and remains steady near the target.
    * 3. Overall price is adjusted based on the overall fullness:
-   *    - Price movement per block is multiplicatively bounded by `maxPriceAdjustment()` (~1.045). This cap limits how fast prices
+   *    - Price movement per block is multiplicatively bounded by
+   *      `maxPriceAdjustment()` (~1.045). This cap limits how fast prices can
+   *      change upward or downward between consecutive blocks.
    *    - Overall price will always stay > 0
-   * can change upward or downward between consecutive blocks.
    * 4. Dimensions are *decoupled*, but *normalized*:
    *    – High compute usage raises only computeFactor.
    *    – High block usage (many proofs) raises only blockUsageFactor.
