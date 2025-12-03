@@ -14,6 +14,7 @@
 use crate::conversions::*;
 use crate::dust::DustParameters;
 use crate::zswap_state::ZswapChainState;
+use base_crypto::cost_model::SyntheticCost;
 use base_crypto::hash::HashOutput;
 use coin_structure::coin::ShieldedTokenType;
 use js_sys::{JsString, Map, Uint8Array};
@@ -855,6 +856,15 @@ impl LedgerParameters {
         TransactionCostModel(self.0.cost_model.clone())
     }
 
+    #[wasm_bindgen(js_name = "normalizeFullness")]
+    pub fn normalize_fullness(&self, fullness: JsValue) -> Result<JsValue, JsError> {
+        let synthetic: SyntheticCost = from_value(fullness)?;
+        let normalized = synthetic
+            .normalize(self.0.limits.block_limits)
+            .ok_or(JsError::new("exceeded block limits"))?;
+        Ok(to_value(&normalized)?)
+    }
+
     #[wasm_bindgen(getter)]
     pub fn dust(&self) -> Result<DustParameters, JsError> {
         Ok(DustParameters(self.0.dust))
@@ -881,7 +891,7 @@ impl LedgerParameters {
 
     #[wasm_bindgen(getter, js_name = "feePrices")]
     pub fn fee_prices(&self) -> Result<JsValue, JsError> {
-        fee_prices_to_value(&self.0.fee_prices)
+        Ok(to_value(&self.0.fee_prices)?)
     }
 }
 

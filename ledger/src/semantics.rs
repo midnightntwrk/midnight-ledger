@@ -26,7 +26,7 @@ use crate::structure::{
 };
 use crate::structure::{OutputInstructionShielded, TransactionHash};
 use crate::utils::{KeySortedIter, SortedIter, sorted};
-use base_crypto::cost_model::SyntheticCost;
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
@@ -1332,14 +1332,27 @@ impl<D: DB> LedgerState<D> {
     pub fn post_block_update(
         &self,
         tblock: Timestamp,
-        block_fullness: SyntheticCost,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
     ) -> Result<Self, BlockLimitExceeded> {
         let mut new_st = self.clone();
-        let block_fullness = block_fullness
-            .normalize(self.parameters.limits.block_limits)
-            .ok_or(BlockLimitExceeded)?;
+        let values = [
+            &detailed_block_fullness.read_time,
+            &detailed_block_fullness.compute_time,
+            &detailed_block_fullness.block_usage,
+            &detailed_block_fullness.bytes_written,
+            &detailed_block_fullness.bytes_churned,
+            &overall_block_fullness,
+        ];
+        if values
+            .iter()
+            .any(|v| **v < FixedPoint::ZERO || **v > FixedPoint::ONE)
+        {
+            return Err(BlockLimitExceeded);
+        }
         let fee_prices = self.parameters.fee_prices.update_from_fullness(
-            block_fullness,
+            detailed_block_fullness,
+            overall_block_fullness,
             self.parameters.cost_dimension_min_ratio,
             self.parameters.price_adjustment_a_parameter,
         );

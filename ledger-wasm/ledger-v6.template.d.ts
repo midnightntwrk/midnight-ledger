@@ -198,6 +198,32 @@ export type SyntheticCost = {
 };
 
 /**
+ * A normalized form of {@link SyntheticCost}.
+ */
+export type NormalizedCost = {
+  /**
+   * The amount of (modelled) time spent reading from disk, measured in picoseconds.
+   */
+  readTime: number,
+  /**
+   * The amount of (modelled) time spent in single-threaded compute, measured in picoseconds.
+   */
+  computeTime: number,
+  /**
+   * The number of bytes of blockspace used
+   */
+  blockUsage: number,
+  /**
+   * The net number of (modelled) bytes written, i.e. max(0, absolute written bytes less deleted bytes).
+   */
+  bytesWritten: number,
+  /**
+   * The number of (modelled) bytes written temporarily or overwritten.
+   */
+  bytesChurned: number,
+};
+
+/**
  * An event emitted by the ledger
  */
 export class Event {
@@ -438,7 +464,7 @@ export class LedgerState {
    * Typically, `postBlockUpdate` should be run after any (sequence of)
    * (system)-transaction application(s).
    */
-  postBlockUpdate(tblock: Date, blockFullness?: SyntheticCost): LedgerState;
+  postBlockUpdate(tblock: Date, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number): LedgerState;
 
   /**
    * Retrieves the balance of the treasury for a specific token type.
@@ -1273,6 +1299,13 @@ export class LedgerParameters {
   static deserialize(raw: Uint8Array): LedgerParameters;
 
   toString(compact?: boolean): string;
+
+  /**
+   * Normalizes a detailed block fullness cost to the block limits.
+   *
+   * @throws if any of the block limits is exceeded
+   */
+  normalizeFullness(fullness: SyntheticCost): NormalizedCost;
 
   /**
    * The fee prices for transaction

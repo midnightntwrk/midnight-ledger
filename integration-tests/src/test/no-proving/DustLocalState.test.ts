@@ -281,7 +281,15 @@ describe('Ledger API - DustLocalState', () => {
     intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
     const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const balancedTx = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balancedTx, new WellFormedStrictness(), balancedTx.cost(state.ledger.parameters));
+    const normalizedCost = state.ledger.parameters.normalizeFullness(balancedTx.cost(state.ledger.parameters));
+    const overallCost = Math.max(
+      normalizedCost.readTime,
+      normalizedCost.computeTime,
+      normalizedCost.blockUsage,
+      normalizedCost.bytesWritten,
+      normalizedCost.bytesChurned
+    );
+    state.assertApply(balancedTx, new WellFormedStrictness(), normalizedCost, overallCost);
 
     expect(state.dust.utxos.length).toEqual(1);
     expect(state.dust.generationInfo(state.dust.utxos[0])!.dtime).toBeInstanceOf(Date);

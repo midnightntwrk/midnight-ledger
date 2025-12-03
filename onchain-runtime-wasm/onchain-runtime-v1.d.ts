@@ -92,21 +92,25 @@ export type RunningCost = {
  */
 export type FeePrices = {
   /**
-   * The price of time spent reading from disk.
+   * The overall price of a full block in an average cost dimension.
    */
-  readPrice: number,
+  overallPrice: number,
   /**
-   * The price of time spent in single-threaded compute.
+   * The price factor of time spent reading from disk.
    */
-  computePrice: number,
+  readFactor: number,
   /**
-   * The price of block usage.
+   * The price factor of time spent in single-threaded compute.
    */
-  blockUsagePrice: number,
+  computeFactor: number,
   /**
-   * The price of time spent writing to disk.
+   * The price factor of block usage.
    */
-  writePrice: number,
+  blockUsageFactor: number,
+  /**
+   * The price factor of time spent writing to disk.
+   */
+  writeFactor: number,
 }
 
 /**

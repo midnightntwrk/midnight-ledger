@@ -161,10 +161,46 @@ let block_limits: SyntheticCost {
 ```
 
 A `SyntheticCost` must then be converted into a *fee* denominated in Dust. This
-fee is floating, and is dynamically adjusted to target 50% fullness *on each of
-the primary dimensions*. Each primary dimension has its own *price* for
-fractional block capacity, and this is adjusted upward if blocks are more than
-50% full, and downward is they are less than 50% full.
+fee is floating, and is dynamically in two separate ways, through a
+per-dimension pricing factor, and an overall price. Both are adjusted to target
+50% fullness either in the relevant primary dimension, or the overall block
+fullness. Each primary dimension has its own *price factor* for fractional
+block capacity, and this is adjusted upward if blocks are more than 50% full,
+and downward is they are less than 50% full. The dimension price factors are
+normalized to 1, and further adjusted by a global price.
+
+A helpful mental model is that the fee adjustment is adjusting an
+`n`-dimensional pricing vector, and that this is being adjusted as a polar
+coordiate -- a scalar multiplied by vector on the unit sphere(-segment). Note
+that the most important part here is the scalar adjustment, and we do not
+believe that  the described mechanism for the 'angular' adjustment is ideal --
+it is, however, acceptable, because it fulfils the primary function of not
+moving too fast, and we leave a better theoretic implementation for the future.
+
+The global fullness function is deliberately left undefined here, as it depends
+on the node's transaction selection (specifically, a block is full iff the
+node could not fit anything else into it, and this may happen because it gives
+up on the packing problem, or simplifies it, rather than due to it being 'full'
+from the ledger's perspective).
+
+The node *will* need to do its own book-keeping to determine the overall
+fullness of blocks, and it must guarantee the following for this fullness:
+- It must be in the range \[0, 1\].
+- The fullness of a block must be at least the maximum of the dimensions in the
+  `NormalizedCost` given by summing the costs of all transactions in a block, and
+  normalizing to the block limits.
+Note that this guarantees that the adjustment given by the overall fullness
+will never be less than if individual dimensions had been adjusted.
+
+In practice, this is to ensure that there is no mismatch between how the node
+selects transactions, and how the ledger adjusts its pricing -- for the time
+being, the node is likely to perform transaction selection through a
+one-dimensional packing problem: It keeps adding transactions until no
+transaction fits into a linear budget. This is at odds with the ledger's
+`n`-dimensional packing problem, where each dimension should be maximised. As a
+result, the node will report the one-dimensional proxy it uses as 'overall
+fullness', and the proxy suggested is the maximum of all (normalized) ledger
+dimensions.
 
 As some dimensions may be consistently less than 50% full other dimensions
 dominating demand, we do not wish these to become effectively free. To prevent
@@ -177,6 +213,7 @@ price determined exclusively by the relation of the corresponding block limits.
 
 ```rust
 struct FeePrices {
+    overall_price: FixedPoint,
     read_time: FixedPoint,
     compute_time: FixedPoint,
     block_usage: FixedPoint,
@@ -216,10 +253,11 @@ impl SyntheticCost {
 }
 
 const INITIAL_PRICES: FeePrices {
-    read_time: 10,
-    compute_time: 10,
-    block_usage: 10,
-    bytes_written: 10,
+    overall_price: 10,
+    read_time: 1,
+    compute_time: 1,
+    block_usage: 1,
+    bytes_written: 1,
     min_ratio = 0.25;
 }
 
@@ -228,8 +266,17 @@ const INITIAL_PRICES: FeePrices {
 fn normalized_scaling_curve(inp: FixedPoint) -> FixedPoint;
 
 impl FeePrices {
-    fn update(self, block_sum: NormalizedCost) -> Self {
+    // Updates the pricing based on the normalized sum of costs across a block,
+    // and an overall fullness aggregate. The aggregate is deliberately not
+    // defined here, as the node may decide to increase it to account for
+    // different transaction selection policies, and for work done outside of the
+    // ledger.
+    //
+    // It should be no less than the average value of the dimension in
+    // `block_sum`.
+    fn update(self, block_sum: NormalizedCost, overall_fullness: FixedPoint) -> Self {
         let mut updated = FeePrices {
+            overall_price: self.overall_price * normalized_scaling_curve(overall_fullness),
             read_time: self.read_time * normalized_scaling_curve(block_sum.read_time),
             compute_time: self.compute_time * normalized_scaling_curve(block_sum.compute_time),
             block_usage: self.block_usage * normalized_scaling_curve(block_sum.block_usage),
@@ -237,10 +284,17 @@ impl FeePrices {
             bytes_written: self.bytes_written * normalized_scaling_curve(max(block_sum.bytes_written, block_sum.bytes_churned)),
             min_ratio: self.min_ratio,
         };
-        let mut most_expensive_dimension = max(updated.read_time, updated.compute_time, updated.block_usage, updated.bytes_written);
-        for dimension = [&mut updated.read_time, &mut updated.compute_time, &mut updated.block_usage, &mut updated.bytes_written] {
+        let dimensions = [&mut updated.read_time, &mut updated.compute_time, &mut updated.block_usage, &mut updated.bytes_written];
+        let mut most_expensive_dimension = max(dimensions);
+        for dimension in dimensions {
             // We use a MIN_COST constant here which still allows upwards adjustment. If this was just MIN_POSITIVE, we might get stuck due to rounding.
             *dimension = max(*dimension, most_expensive_dimension * self.min_ratio, FixedPoint::MIN_COST);
+        }
+        let dim_average = dimensions.sum() / dimensions.len();
+        for dimension in dimensions {
+            // Normalize dimension average to 1, making these all factors to
+            // the overall price.
+            *dimension = *dimension / dim_average
         }
         updated
     }
@@ -292,7 +346,7 @@ impl FeePrices {
         let churn_cost = self.bytes_written * tx_normalized.bytes_churned;
 
         let utilization_cost = max(read_cost, compute_cost, block_cost);
-        ((utilization_cost + write_cost + churn_cost) * SPECS_PER_DUST).ceil()
+        ((utilization_cost + write_cost + churn_cost) * self.overall_price * SPECS_PER_DUST).ceil()
     }
 }
 ```

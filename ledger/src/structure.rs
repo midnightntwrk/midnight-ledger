@@ -620,7 +620,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v5]"]
+#[tag = "system-transaction[v6]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -1088,7 +1088,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
-#[tag = "ledger-parameters[v4]"]
+#[tag = "ledger-parameters[v5]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1153,10 +1153,11 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
     limits: INITIAL_LIMITS,
     dust: INITIAL_DUST_PARAMETERS,
     fee_prices: FeePrices {
-        read_price: FixedPoint::from_u64_div(10, 1),
-        compute_price: FixedPoint::from_u64_div(10, 1),
-        block_usage_price: FixedPoint::from_u64_div(10, 1),
-        write_price: FixedPoint::from_u64_div(10, 1),
+        overall_price: FixedPoint::from_u64_div(10, 1),
+        read_factor: FixedPoint::ONE,
+        compute_factor: FixedPoint::ONE,
+        block_usage_factor: FixedPoint::ONE,
+        write_factor: FixedPoint::ONE,
     },
     global_ttl: Duration::from_secs(3600),
     cardano_to_midnight_bridge_fee_basis_points: 500,
@@ -2855,7 +2856,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v11]"]
+#[tag = "ledger-state[v12]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
