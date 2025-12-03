@@ -1,8 +1,8 @@
-[**@midnight/ledger v6.1.0-alpha.5**](README.md)
+[**@midnight/ledger v6.2.0-rc.1**](README.md)
 
 ***
 
-# @midnight/ledger v6.1.0-alpha.5
+# @midnight/ledger v6.2.0-rc.1
 
 ## Classes
 
@@ -108,6 +108,7 @@
 - [IntentHash](type-aliases/IntentHash.md)
 - [Key](type-aliases/Key.md)
 - [Nonce](type-aliases/Nonce.md)
+- [NormalizedCost](type-aliases/NormalizedCost.md)
 - [Nullifier](type-aliases/Nullifier.md)
 - [Op](type-aliases/Op.md)
 - [PartitionedTranscript](type-aliases/PartitionedTranscript.md)

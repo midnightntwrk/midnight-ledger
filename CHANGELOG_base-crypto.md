@@ -4,6 +4,13 @@
 
 - version bump in preparation for full stablisation
 - feat: add cost model abstractions and primitives
+- addressed audit issues:
+  - bugfix: `HashOutput` equality has been replaced with a constant-time comparison
+  - bugfix: The cursor advancement in this branch of `repr_traverse` has been fixed.
+  - bugfix: Field elements permitted in the low-level encoding would cause a
+  higher-level panic
+  - bugfix: For the `Option` case, we were incorrectly ommitting the discriminant
+  from field and binary representations.
 
 ## Version `0.5.0`
 
