@@ -119,8 +119,9 @@ pub fn coin_nullifier(
     coin_secret_key: &CoinSecretKey,
 ) -> Result<String, JsError> {
     let coin_info_parsed = value_to_shielded_coininfo(coin_info)?;
-    let nullifier =
-        coin_info_parsed.nullifier(&SenderEvidence::User(coin_secret_key.try_unwrap()?));
+    let nullifier = coin_info_parsed.nullifier(&SenderEvidence::User(std::borrow::Cow::Borrowed(
+        &coin_secret_key.try_unwrap()?,
+    )));
     to_value_hex_ser(&nullifier)
 }
 
