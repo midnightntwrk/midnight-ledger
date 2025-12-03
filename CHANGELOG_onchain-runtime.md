@@ -2,8 +2,10 @@
 
 ## Unreleased
 
-- breaking: fix: disallow Merkle trees of height 0, as per spec
-- breaking: fix: fix off-by-one error in Merkle tree `new` operation
+- addressed audit issues:
+  - bugfix: VM checks the max stack depth after each instruction
+  - breaking: fix: disallow Merkle trees of height 0, as per spec
+  - breaking: fix: fix off-by-one error in Merkle tree `new` operation
 
 ## Version `1.0.0`
 

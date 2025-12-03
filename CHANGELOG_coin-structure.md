@@ -4,6 +4,9 @@
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
+- addressed audit issues:
+  - bugfix: Correct TokenType length in BinaryHashRepr to 33
+  - bugfix: Check `TokenType` tag validity before length
 
 ## Version `0.5.0`
 
