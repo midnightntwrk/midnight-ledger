@@ -13,6 +13,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: correctly rehash generation Merkle tree on cNgD processing.
 - Pulled in updates to `midnight-zk`
 - bugfix: various fixes for `ClaimRewardsTransaction`
+- bugfix: updated pricing structure w/ overall cost and dimension weightings
 - addressed audit issues:
   - bugfix: zeroizes witness/key material more reliably
   - bugfix: rejects identity ciphertext challenges
