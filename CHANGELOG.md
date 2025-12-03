@@ -11,6 +11,14 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
 - Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to now hold its data value on the heap (to reduce Enum size), i.e. this variant is now defined as: `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
 - fix: correctly rehash generation Merkle tree on cNgD processing.
+- Pulled in updates to `midnight-zk`
+- bugfix: various fixes for `ClaimRewardsTransaction`
+- addressed audit issues:
+  - bugfix: zeroizes witness/key material more reliably
+  - bugfix: rejects identity ciphertext challenges
+  - bugfix: Correctly use >= instead of > during modulus reduction. p = 0 mod p!
+  - bugfix: An accross-the-board package update resolves the vulnerable `tracing-subscriber` instance.
+  - breaking: improved domain seperators across the board
 
 ## 6.1.0
 
