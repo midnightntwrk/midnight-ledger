@@ -473,7 +473,7 @@ fn value_atom_as_field(atom: &ValueAtom) -> Fr {
     assert!(atom.0.len() <= FIELD_BYTE_LIMIT);
     bytes[..atom.0.len()].copy_from_slice(&atom.0);
     // A white lie -- we aren't inputting uniform bytes, but we are of the
-    // correct length, and this function does the right modolus reduction.
+    // correct length, and this function does the right modulus reduction.
     Fr::from_uniform_bytes(&bytes)
 }
 

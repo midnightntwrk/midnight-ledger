@@ -634,7 +634,7 @@ impl Info {
         Commitment(persistent_hash(&data))
     }
 
-    pub fn nullifier(&self, se: &SenderEvidence) -> Nullifier {
+    pub fn nullifier(&self, se: &SenderEvidence<'_>) -> Nullifier {
         let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
         data.extend(b"midnight:zswap-cn[v1]");
         self.binary_repr(&mut data);
@@ -642,7 +642,9 @@ impl Info {
             SenderEvidence::User(d) => (true, d.0).binary_repr(&mut data),
             SenderEvidence::Contract(d) => (false, d.0).binary_repr(&mut data),
         }
-        Nullifier(persistent_hash(&data))
+        let res = Nullifier(persistent_hash(&data));
+        data.zeroize();
+        res
     }
 
     pub fn qualify(&self, mt_index: u64) -> QualifiedInfo {

@@ -184,7 +184,7 @@ A `AlignedValue` can be completely encoded into field elements as follows:
 
 Field-Aligned Binary does not contain sufficient structural information to
 output high-level JS values, such as objects, but with type information the
-Abcird compiler should be able to perform automatic mappings between some
+Compact (soon to be Minokawa) compiler should be able to perform automatic mappings between some
 typescript types and the low-level JS values listed above. 
 
 The high(er)-level typescript types understood are:
@@ -199,12 +199,16 @@ The high(er)-level typescript types understood are:
 
 Encoding is straight-forward:
 
-* Plain objects are encoded by encoding their fields in sequence.
+* Plain objects are encoded by encoding their fields in sequence (in the order
+  specified in the Compact type declaration)
 * Arrays are encoded by encoding their elements in sequence.
 * Unsigned integers are encoded as a singleton array of a little-endian byte array.
 * `true` is encoded as `[[1]]`, and `false` as `[[]]`.
 * Tagged unions are encoded as the encoding of their tag's index in the type,
-  followed by encoding of the remaining fields in sequence.
+  followed by encoding of the remaining fields in sequence. Note that Compact
+  currently does not offer disjoint/tagged union support, but if it were added
+  in the future, the tag index would be derived from the order in the Compact
+  type declaration.
 * `string`s are encoded in utf-8 as a singleton byte array.
 * `Uint8Array`s are encoded as a singleton of themselves.
 * Arbitrary types are encoded with `.encode`.
