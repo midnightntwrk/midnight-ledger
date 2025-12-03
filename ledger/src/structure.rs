@@ -78,7 +78,7 @@ use zswap::error::MalformedOffer;
 use zswap::{Input, Offer as ZswapOffer, Output, Transient};
 
 /// A trait for things that can fit into `Signature` shaped holes
-pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + 'static {
+pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
     /// The type of the `Signature` shaped thing
     type Signature<T>: Ord + Serializable + Deserializable + Storable<D> + Debug + Tagged;
 
@@ -224,7 +224,7 @@ impl<D: DB> PedersenDowngradeable<D> for Pedersen {
 #[tag = "proof-preimage-versioned"]
 #[non_exhaustive]
 pub enum ProofPreimageVersioned {
-    V1(ProofPreimage),
+    V1(std::sync::Arc<ProofPreimage>),
 }
 tag_enforcement_test!(ProofPreimageVersioned);
 
@@ -409,7 +409,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
 
 impl From<ProofPreimage> for ProofPreimageVersioned {
     fn from(proof: ProofPreimage) -> Self {
-        Self::V1(proof)
+        Self::V1(std::sync::Arc::new(proof))
     }
 }
 
@@ -525,7 +525,7 @@ impl<D: DB> ProofKind<D> for () {
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
 #[storable(base)]
-#[tag = "output-instruction-shielded[v1]"]
+#[tag = "output-instruction-shielded[v2]"]
 pub struct OutputInstructionShielded {
     pub amount: u128,
     pub target_key: coin_structure::coin::PublicKey,
@@ -574,7 +574,7 @@ tag_enforcement_test!(OutputInstructionUnshielded);
 impl OutputInstructionUnshielded {
     pub fn to_hash_data(self, tt: UnshieldedTokenType) -> Vec<u8> {
         let mut data = Vec::new();
-        data.extend(b"midnight: hash-output-instruction-unshielded:");
+        data.extend(b"midnight:hash-output-instruction-unshielded:");
         Serializable::serialize(&tt, &mut data).expect("In-memory serialization should succeed");
         Serializable::serialize(&self.amount, &mut data)
             .expect("In-memory serialization should succeed");
@@ -620,7 +620,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v4]"]
+#[tag = "system-transaction[v5]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -746,7 +746,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v4]"]
+#[tag = "intent[v5]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1168,7 +1168,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v7]"]
+#[tag = "transaction[v8]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1442,7 +1442,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v7]"]
+#[tag = "standard-transaction[v8]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
@@ -2075,12 +2075,12 @@ where
     }
 }
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Storable<D>, D: DB>
+impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D>, D: DB>
     Transaction<S, P, B, D>
 {
     pub fn transaction_hash(&self) -> TransactionHash {
         let mut hasher = Sha256::new();
-        Serializable::serialize(self, &mut hasher).expect("In-memory serialization must succeed");
+        tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
         TransactionHash(HashOutput(hasher.finalize().into()))
     }
 }
@@ -2263,7 +2263,7 @@ impl rand::distributions::Distribution<ContractCall<(), InMemoryDB>>
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; P)]
 #[storable(db = D)]
-#[tag = "contract-call[v2]"]
+#[tag = "contract-call[v3]"]
 pub struct ContractCall<P: ProofKind<D>, D: DB> {
     pub address: ContractAddress,
     pub entry_point: EntryPointBuf,
@@ -2396,7 +2396,7 @@ impl<D: DB> Debug for ContractDeploy<D> {
 impl<D: DB> ContractDeploy<D> {
     pub fn address(&self) -> ContractAddress {
         let mut writer = Sha256::new();
-        let _ = Serializable::serialize(&self, &mut writer);
+        tagged_serialize(self, &mut writer).expect("In-memory serialization should succeed");
         ContractAddress(HashOutput(writer.finalize().into()))
     }
 }
@@ -2609,7 +2609,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v4]"]
+#[tag = "contract-action[v5]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -2855,7 +2855,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v10]"]
+#[tag = "ledger-state[v11]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,

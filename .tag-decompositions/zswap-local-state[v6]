@@ -1,0 +1,1 @@
+((mpt-map(zswap-nullifier[v2],shielded-qualified-coin-info[v2],size-annotation),mpt-map(zswap-nullifier[v2],shielded-qualified-coin-info[v2],size-annotation),mpt-map(zswap-coin-commitment[v2],shielded-coin-info[v2],size-annotation),merkle-tree[v1](()),u64))

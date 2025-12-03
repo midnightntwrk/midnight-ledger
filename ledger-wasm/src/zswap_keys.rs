@@ -38,7 +38,7 @@ struct SecretKeysWrapper {
 impl SecretKeysWrapper {
     pub fn wrap(keys: zswap::keys::SecretKeys) -> Self {
         SecretKeysWrapper {
-            coin_secret_key: CoinSecretKey::wrap(keys.coin_secret_key),
+            coin_secret_key: CoinSecretKey::wrap(keys.coin_secret_key.clone()),
             encryption_secret_key: EncryptionSecretKey::wrap(keys.encryption_secret_key),
         }
     }

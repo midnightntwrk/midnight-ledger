@@ -469,6 +469,21 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
     }
 }
 
+fn extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
+    path: Vec<u8>,
+    child: Sp<Node<T, D, A>, D>,
+) -> Sp<Node<T, D, A>, D> {
+    let mut cur = child;
+    for working_path in path.chunks(255).rev() {
+        cur = Sp::new(Node::Extension {
+            ann: cur.ann(),
+            compressed_path: working_path.to_vec(),
+            child: cur.clone(),
+        });
+    }
+    cur
+}
+
 impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D> {
     fn lookup_sp(&self, path: &[u8]) -> Option<Sp<T, D>> {
         self.lookup_with(path, Clone::clone)
@@ -610,23 +625,15 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                                 child,
                                 ..
                             } => (
-                                Sp::new(Node::Extension {
-                                    ann: ann.clone(),
-                                    compressed_path: once(path_head as u8)
+                                extension(
+                                    once(path_head as u8)
                                         .chain(compressed_path.iter().copied())
                                         .collect(),
-                                    child: child.clone(),
-                                }),
+                                    child.clone(),
+                                ),
                                 pruned,
                             ),
-                            _ => (
-                                Sp::new(Node::Extension {
-                                    compressed_path: vec![path_head as u8],
-                                    child,
-                                    ann,
-                                }),
-                                pruned,
-                            ),
+                            _ => (extension(vec![path_head as u8], child), pruned),
                         }
                     }
                     _ => (Sp::new(Node::Branch { children, ann }), pruned),
@@ -653,15 +660,14 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                                 child,
                                 ..
                             } => (
-                                Sp::new(Node::Extension {
-                                    ann: child.ann(),
-                                    compressed_path: compressed_path
+                                extension(
+                                    compressed_path
                                         .iter()
                                         .chain(cpath2.iter())
                                         .copied()
                                         .collect(),
-                                    child: child.clone(),
-                                }),
+                                    child.clone(),
+                                ),
                                 pruned,
                             ),
                             _ => (
@@ -942,43 +948,30 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
         match self.deref() {
             Node::Empty => {
                 let value_sp = self.arena.alloc(value.clone());
-                let mut child = self.arena.alloc(Node::Leaf {
+                let child = Sp::new(Node::Leaf {
                     ann: Annotation::<T>::from_value(&value),
                     value: value_sp,
                 });
-
-                for working_path in path.chunks(255).rev() {
-                    child = self.arena.alloc(Node::Extension {
-                        ann: child.ann(),
-                        compressed_path: working_path.to_vec(),
-                        child: child.clone(),
-                    });
-                }
-                (child, None)
+                let res = extension(path.to_vec(), child);
+                (res, None)
             }
             Node::Leaf {
                 ann: existing_ann,
                 value: self_value,
                 ..
             } => {
-                let mut child = self.arena.alloc(Node::Leaf {
+                let child = Sp::new(Node::Leaf {
                     ann: A::from_value(&value),
                     value: self.arena.alloc(value.clone()),
                 });
-                for chunk in path.chunks(255).rev() {
-                    child = self.arena.alloc(Node::Extension {
-                        ann: child.ann(),
-                        compressed_path: chunk.to_vec(),
-                        child,
-                    });
-                }
+                let ext = extension(path.to_vec(), child);
 
                 let branch_ann = A::from_value(&value).append(existing_ann);
                 (
                     self.arena.alloc(Node::MidBranchLeaf {
                         ann: branch_ann,
                         value: self_value.clone(),
-                        child,
+                        child: ext,
                     }),
                     None,
                 )
@@ -1179,21 +1172,10 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                         } => {
                             let mut new_compressed_path = vec![only_child_index as u8];
                             new_compressed_path.append(&mut compressed_path);
-                            (
-                                self.arena.alloc(Node::Extension {
-                                    ann: child.ann(),
-                                    compressed_path: new_compressed_path,
-                                    child,
-                                }),
-                                removed,
-                            )
+                            (extension(new_compressed_path, child), removed)
                         }
                         _ => (
-                            self.arena.alloc(Node::Extension {
-                                ann: only_child.ann(),
-                                compressed_path: vec![only_child_index as u8],
-                                child: only_child.clone(),
-                            }),
+                            extension(vec![only_child_index as u8], only_child.clone()),
                             removed,
                         ),
                     }
@@ -1240,18 +1222,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                         let mut new_compressed_path = compressed_path.clone();
                         new_compressed_path.append(&mut p.clone());
 
-                        let mut child = c.clone();
-                        for path_chunk in new_compressed_path.chunks(255).rev() {
-                            child = if path_chunk.is_empty() {
-                                child
-                            } else {
-                                self.arena.alloc(Node::Extension {
-                                    ann: new_ann.clone(),
-                                    compressed_path: path_chunk.to_vec(),
-                                    child: child.clone(),
-                                })
-                            };
-                        }
+                        let child = extension(new_compressed_path, c.clone());
                         (child, removed)
                     }
                     _ => (
@@ -1347,7 +1318,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             Node::Branch { ann, children } => {
                 let non_empty_children = children
                     .iter()
-                    .filter(|child| matches!(***child, Node::Empty))
+                    .filter(|child| !matches!(***child, Node::Empty))
                     .count();
                 if non_empty_children < 2 {
                     return Err(std::io::Error::new(

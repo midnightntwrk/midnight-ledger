@@ -34,6 +34,7 @@ use sha2::Sha256;
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
+use std::sync::Arc;
 
 pub(crate) const SMALL_OBJECT_LIMIT: usize = 1024;
 
@@ -312,6 +313,31 @@ impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {
     }
 }
 
+impl<T: Storable<D>, D: DB> Storable<D> for Arc<T> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        T::children(self)
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::to_binary_repr(self, writer)
+    }
+    fn check_invariant(&self) -> Result<(), std::io::Error> {
+        T::check_invariant(self)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::from_binary_repr(reader, child_hashes, loader).map(Arc::new)
+    }
+}
+
 impl<T: Storable<D>, D: DB> Storable<D> for Option<Sp<T, D>> {
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
         self.clone().map_or(vec![], |sp| vec![sp.as_child()])
@@ -505,7 +531,7 @@ tuple_storable!(
 macro_rules! randomised_storable_test {
     ($type:ty) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             /// Test that `to_binary_repr` followed by `from_binary_repr` is the identity
             /// for argument value.
             #[allow(non_snake_case)]

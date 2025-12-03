@@ -145,8 +145,8 @@ fn fab_decode_to_bytes_atom(
             }
             for i in 0..chunks {
                 bytes_from(res, FR_BYTES_STORED, inputs[chunks - 1 - i].clone())?;
-                *inputs = &inputs[1..];
             }
+            *inputs = &inputs[chunks..];
             res.extend(res_vec);
             Ok(())
         }
@@ -550,6 +550,7 @@ impl Relation for IrSource {
                 .error_if_known_and(|(preproc, v)| {
                     if idx < seq(preproc).len() && seq(preproc)[idx] != **v {
                         error!(prepare = ?seq(preproc), ?idx, ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
+                        eprintln!("Misalignment between `prepare` and `synthesize` runs. This is a bug.");
                         true
                     } else {
                         false

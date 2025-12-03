@@ -769,7 +769,9 @@ impl ProvingProvider for ProofServerProvider<'_> {
         preimage: &transient_crypto::proofs::ProofPreimage,
     ) -> Result<Vec<Option<usize>>, anyhow::Error> {
         let ser = self
-            .check_request_body(&ProofPreimageVersioned::V1(preimage.clone()))
+            .check_request_body(&ProofPreimageVersioned::V1(std::sync::Arc::new(
+                preimage.clone(),
+            )))
             .await?;
         println!("    Check request: {} bytes", ser.len());
         let resp = Client::new()
@@ -796,7 +798,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
     ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
         let ser = self
             .proving_request_body(
-                &ProofPreimageVersioned::V1(preimage.clone()),
+                &ProofPreimageVersioned::V1(std::sync::Arc::new(preimage.clone())),
                 overwrite_binding_input,
             )
             .await?;

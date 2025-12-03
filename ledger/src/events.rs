@@ -36,7 +36,7 @@ use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event[v6]"]
+#[tag = "event[v7]"]
 pub struct Event<D: DB> {
     pub source: EventSource,
     pub content: EventDetails<D>,
@@ -55,7 +55,7 @@ tag_enforcement_test!(EventSource);
 
 #[derive(PartialEq, Eq, Clone, Debug, Serializable, Storable)]
 #[storable(base)]
-#[tag = "zswap-preimage-evidence[v1]"]
+#[tag = "zswap-preimage-evidence[v2]"]
 pub enum ZswapPreimageEvidence {
     Ciphertext(Box<CoinCiphertext>),
     PublicPreimage {
@@ -82,7 +82,7 @@ impl ZswapPreimageEvidence {
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event-details[v6]"]
+#[tag = "event-details[v7]"]
 #[non_exhaustive]
 pub enum EventDetails<D: DB> {
     ZswapInput {

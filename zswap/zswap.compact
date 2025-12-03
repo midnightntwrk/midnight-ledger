@@ -18,10 +18,10 @@ struct ZswapCoinSecretKey {
 }
 
 struct CoinPreimage {
+  sep: Bytes<21>,
   info: ShieldedCoinInfo,
   dataType: Boolean,
   data: Bytes<32>,
-  sep: Bytes<6>,
 }
 
 ledger merkleTree: HistoricMerkleTree<32, Bytes<32>>;
@@ -41,19 +41,19 @@ export circuit spend(
   const pk = derivePublicKey(sk.left);
   const coinCom = persistentHash<CoinPreimage>(
     CoinPreimage {
+      sep: "midnight:zswap-cc[v1]",
       info: coin,
       dataType: sk.is_left,
       data: sk.is_left? pk.bytes : sk.right.bytes,
-      sep: "mdn:cc"
     });
   assert(coinCom == path.leaf, "Path must be to coin commitment");
 
   const nul = persistentHash<CoinPreimage>(
       CoinPreimage {
+        sep: "midnight:zswap-cn[v1]",
         info: coin,
         dataType: sk.is_left,
         data: sk.is_left ? sk.left.bytes : sk.right.bytes,
-        sep: "mdn:cn"
       });
   nullifiers.insert(disclose(nul));
   if(!disclose(sk.is_left)) {
@@ -66,15 +66,15 @@ export circuit spend(
 }
 
 struct PublicKeyPreimage {
+  sep: Bytes<21>,
   secretKey: ZswapCoinSecretKey,
-  sep: Bytes<6>,
 }
 
 circuit derivePublicKey(secretKey: ZswapCoinSecretKey): ZswapCoinPublicKey {
   return ZswapCoinPublicKey {
     bytes: persistentHash<PublicKeyPreimage>(PublicKeyPreimage {
+      sep: "midnight:zswap-pk[v1]",
       secretKey: secretKey,
-      sep: "mdn:pk"
     })
   };
 }
@@ -86,10 +86,10 @@ export circuit output(
 ): [] {
   const coinCom = persistentHash<CoinPreimage>(
     CoinPreimage {
+      sep: "midnight:zswap-cc[v1]",
       info: coin,
       dataType: pk.is_left,
       data: pk.is_left ? pk.left.bytes : pk.right.bytes,
-      sep: "mdn:cc"
     });
   merkleTree.insertHash(disclose(coinCom));
   if(!disclose(pk.is_left)) {

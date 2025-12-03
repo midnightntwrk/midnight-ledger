@@ -1,5 +1,10 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- breaking: fix: disallow Merkle trees of height 0, as per spec
+- breaking: fix: fix off-by-one error in Merkle tree `new` operation
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation

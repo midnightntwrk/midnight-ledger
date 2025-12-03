@@ -167,10 +167,10 @@ fn eq_valid_input(x: &AlignedValue) -> bool {
 }
 
 fn eq<D: DB>(a: &AlignedValue, b: &AlignedValue) -> Result<AlignedValue, OnchainProgramError<D>> {
-    if !eq_valid_input(a) || !eq_valid_input(b) {
-        Err(OnchainProgramError::TooLongForEqual)
-    } else {
-        Ok((a == b).into())
+    match (eq_valid_input(a), eq_valid_input(b)) {
+        (false, false) => Err(OnchainProgramError::TooLongForEqual),
+        (false, true) | (true, false) => Ok(false.into()),
+        (true, true) => Ok((a == b).into()),
     }
 }
 
@@ -418,7 +418,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     StateValue::Null => (1, cost_model.type_null),
                     StateValue::Map(_) => (2, cost_model.type_map),
                     StateValue::Array(a) => (3 + a.len() as u8 * 8, cost_model.type_array),
-                    StateValue::BoundedMerkleTree(t) => (4 + t.height() * 8, cost_model.type_bmt),
+                    StateValue::BoundedMerkleTree(t) => {
+                        (4 + t.height().saturating_sub(1) * 8, cost_model.type_bmt)
+                    }
                     x => panic!("unhandled StateValue variant {x:?}"),
                 };
                 gas = incr_gas(gas, cost)?;
@@ -475,7 +477,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     }
                     4u8 => (
                         incr_gas(gas, cost_model.new_bmt)?,
-                        StateValue::BoundedMerkleTree(MerkleTree::blank(val >> 3)),
+                        StateValue::BoundedMerkleTree(MerkleTree::blank((val >> 3) + 1)),
                     ),
                     tag => {
                         return Err(OnchainProgramError::InvalidArgs(format!(
@@ -524,7 +526,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     match &val {
                         StateValue::Null => {
                             cost_model.log_null_constant
-                                + cost_model.log_array_coeff_value_size * size
+                                + cost_model.log_null_coeff_value_size * size
                         }
                         StateValue::Cell(_) => {
                             cost_model.log_cell_constant
@@ -1018,6 +1020,9 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
         };
         if skip > program.len() {
             return Err(OnchainProgramError::RanPastProgramEnd);
+        }
+        if stack.len() > MAX_STACK_HEIGHT as usize {
+            return Err(OnchainProgramError::StackOverflow);
         }
         program = &program[skip..];
     }
