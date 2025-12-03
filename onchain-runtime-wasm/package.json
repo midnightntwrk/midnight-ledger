@@ -1,7 +1,7 @@
 {
   "name": "@midnight-ntwrk/onchain-runtime",
   "license": "Apache-2.0",
-  "version": "1.0.0-alpha.5",
+  "version": "1.0.0-rc.0",
   "scripts": {
 	  "build:markdown-docs": "rm -rf ../docs/api/midnight-onchain-runtime && npx typedoc onchain-runtime-v1.d.ts --plugin typedoc-plugin-markdown"
   },
