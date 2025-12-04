@@ -23,9 +23,9 @@ use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::INITIAL_PARAMETERS;
 use crate::structure::{
     BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerState,
-    MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
-    ProofPreimageMarker, SignatureKind, SystemTransaction, Transaction, UnshieldedOffer, Utxo,
-    UtxoOutput,
+    MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable,
+    PedersenRandomnessIntent, ProofKind, ProofPreimageMarker, SignatureKind, SystemTransaction,
+    Transaction, UnshieldedOffer, Utxo, UtxoOutput,
 };
 #[cfg(feature = "proving")]
 use crate::structure::{INITIAL_LIMITS, SPECKS_PER_DUST};
@@ -1000,7 +1000,7 @@ pub fn test_intents<D: DB, R: Rng + CryptoRng + ?Sized>(
 pub fn test_intents_adv<S: SignatureKind<D>, D: DB, R: Rng + CryptoRng + ?Sized>(
     orig_intents: storage::storage::HashMap<
         u16,
-        Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
+        PedersenRandomnessIntent<S, ProofPreimageMarker, D>,
         D,
     >,
     rng: &mut R,
@@ -1009,7 +1009,7 @@ pub fn test_intents_adv<S: SignatureKind<D>, D: DB, R: Rng + CryptoRng + ?Sized>
     updates: Vec<MaintenanceUpdate<D>>,
     deploys: Vec<ContractDeploy<D>>,
     tblock: Timestamp,
-) -> storage::storage::HashMap<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D> {
+) -> storage::storage::HashMap<u16, PedersenRandomnessIntent<S, ProofPreimageMarker, D>, D> {
     let mut intents = storage::storage::HashMap::new();
     intents = intents.insert(
         segment,

@@ -697,17 +697,22 @@ pub struct SubsetCheckFailure<T> {
     pub subset: Vec<T>,
 }
 
+/// Type alias for a tuple containing a segment ID and contract call details.
+/// The inner tuple holds the contract address, a hash output (such as a commitment or nullifier),
+/// and a field element (Fr), which may represent a value or cryptographic proof.
+/// This structure is commonly used to identify and track contract calls within a specific segment.
+pub type SegmentContractCall = (u16, (ContractAddress, HashOutput, Fr));
+
 #[derive(Clone, Debug)]
 pub enum EffectsCheckError {
-    RealCallsSubsetCheckFailure(SubsetCheckFailure<(u16, (ContractAddress, HashOutput, Fr))>),
+    RealCallsSubsetCheckFailure(SubsetCheckFailure<SegmentContractCall>),
     AllCommitmentsSubsetCheckFailure(SubsetCheckFailure<(u16, Commitment)>),
     #[allow(clippy::type_complexity)]
     RealUnshieldedSpendsSubsetCheckFailure(
         SubsetCheckFailure<((u16, bool), ((TokenType, PublicAddress), u128))>,
     ),
     ClaimedUnshieldedSpendsUniquenessFailure(Vec<((u16, Commitment), usize)>),
-    #[allow(clippy::type_complexity)]
-    ClaimedCallsUniquenessFailure(Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)>),
+    ClaimedCallsUniquenessFailure(Vec<(SegmentContractCall, usize)>),
     NullifiersNEClaimedNullifiers {
         nullifiers: Vec<(u16, Nullifier, ContractAddress)>,
         claimed_nullifiers: Vec<(u16, Nullifier, ContractAddress)>,
