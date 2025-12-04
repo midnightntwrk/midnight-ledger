@@ -81,12 +81,18 @@ fn generate_state_pool() -> Vec<HashMap<AlignedValue, StateValue>> {
     pool
 }
 
-// Generate state pairs with four relationship types
-fn generate_state_pairs() -> Vec<(
+// StatePair represents a tuple containing:
+// - an old state map,
+// - a new state map,
+// - and a description string for the state transition scenario.
+type StatePair = (
     HashMap<AlignedValue, StateValue>,
     HashMap<AlignedValue, StateValue>,
     &'static str,
-)> {
+);
+
+// Generate state pairs with four relationship types
+fn generate_state_pairs() -> Vec<StatePair> {
     let mut rng = StdRng::seed_from_u64(0x42);
     let pool = generate_state_pool();
     let mut pairs = Vec::new();

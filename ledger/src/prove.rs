@@ -14,8 +14,9 @@
 use crate::dust::DustResolver;
 use crate::error::TransactionProvingError;
 use crate::structure::{
-    ContractAction, ContractCall, Intent, ProofMarker, ProofPreimageMarker, ProofPreimageVersioned,
-    ProofVersioned, SignatureKind, StandardTransaction, Transaction,
+    ContractAction, ContractCall, Intent, PedersenRandomnessIntent, ProofMarker,
+    ProofPreimageMarker, ProofPreimageVersioned, ProofVersioned, SignatureKind,
+    StandardTransaction, Transaction,
 };
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use futures::future::join_all;
@@ -86,19 +87,20 @@ impl transient_crypto::proofs::Resolver for Resolver {
     }
 }
 
+// Map of prooved intents
+type ProovedIntents<S, D> =
+    storage::storage::HashMap<u16, PedersenRandomnessIntent<S, ProofMarker, D>, D>;
+
 #[instrument(skip(prover, cost_model))]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
     intents: &storage::storage::HashMap<
         u16,
-        Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
+        PedersenRandomnessIntent<S, ProofPreimageMarker, D>,
         D,
     >,
     mut prover: impl ProvingProvider,
     cost_model: &CostModel,
-) -> Result<
-    storage::storage::HashMap<u16, Intent<S, ProofMarker, PedersenRandomness, D>, D>,
-    ProvingError,
-> {
+) -> Result<ProovedIntents<S, D>, ProvingError> {
     let res = join_all(intents.iter().map(|seg_x_intent| {
         let split_prover = prover.split();
         async move {
@@ -192,7 +194,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+impl<S: SignatureKind<D>, D: DB> PedersenRandomnessIntent<S, ProofPreimageMarker, D> {
     #[instrument(skip(self, prover, cost_model))]
     #[allow(clippy::type_complexity)]
     pub async fn prove(
@@ -200,7 +202,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         segment_id: u16,
         mut prover: impl ProvingProvider,
         cost_model: &CostModel,
-    ) -> Result<(u16, Intent<S, ProofMarker, PedersenRandomness, D>), ProvingError> {
+    ) -> Result<(u16, PedersenRandomnessIntent<S, ProofMarker, D>), ProvingError> {
         let actions =
             join_all(self.actions.iter_deref().map(|call| {
                 call.prove(prover.split(), self.binding_commitment.into(), cost_model)

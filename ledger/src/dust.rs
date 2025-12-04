@@ -18,7 +18,7 @@ use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    STARS_PER_NIGHT, SegIntent, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
@@ -646,7 +646,7 @@ pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
     pub night_key: VerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
-    pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
+    pub signature: Option<Sp<S::Signature<SegIntent<D>>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
 

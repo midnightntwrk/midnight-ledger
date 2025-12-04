@@ -384,7 +384,14 @@ mod tests {
     // "doesn't have sideways or back edges". The tests are mostly agnostic to
     // the structure here, altho they often assume that (0,1) and (0,2) are
     // valid nodes with large descendant subgraphs.
-    fn test_dag_adjacency() -> Vec<((u8, u8), Vec<(u8, u8)>)> {
+
+    // Type alias for the adjacency list returned by `test_dag_adjacency`.
+    // Each entry represents a node in the DAG as a tuple `(layer, node_id)`,
+    // and holds a vector of its adjacent nodes (children), also as `(layer, node_id)` tuples.
+    // This structure is used only herein for representing layered DAGs in tests.
+    type DagAdjacency = Vec<((u8, u8), Vec<(u8, u8)>)>;
+
+    fn test_dag_adjacency() -> DagAdjacency {
         vec![
             // Layer 0: roots
             ((0, 1), vec![(1, 1), (1, 2), (2, 1), (3, 1)]),

@@ -218,8 +218,8 @@ jobs:
       # We still permit certain Clippy rules with `-A` args. since they will be
       # addressed in upcoming PRs and changes that are currently in progress. This
       # allows us to start running these checks even before they are fully implemented.
-      - name: Cargo clippy (--all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes)
-        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
+      - name: Cargo clippy (--all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes)
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
 
       - name: Cargo audit
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit

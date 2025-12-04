@@ -249,6 +249,9 @@ where
     fn set_size(&self, x: u64) -> Self;
 }
 
+// Type alias for the most common Node usage to reduce type complexity.
+pub(crate) type SpNode<T, D, A> = Sp<Node<T, D, A>, D>;
+
 // The MPT node
 #[derive(Debug, Default)]
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
@@ -267,17 +270,17 @@ pub(crate) enum Node<
     },
     Branch {
         ann: A,
-        children: Box<[Sp<Node<T, D, A>, D>; 16]>,
+        children: Box<[SpNode<T, D, A>; 16]>,
     },
     Extension {
         ann: A,
         compressed_path: std::vec::Vec<u8>, // with a length no longer than 255
-        child: Sp<Node<T, D, A>, D>,
+        child: SpNode<T, D, A>,
     },
     MidBranchLeaf {
         ann: A,
         value: Sp<T, D>,
-        child: Sp<Node<T, D, A>, D>, // should only be an `Extension` or `Branch`
+        child: SpNode<T, D, A>, // should only be an `Extension` or `Branch`
     },
 }
 
@@ -484,7 +487,7 @@ fn extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
     cur
 }
 
-impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D> {
+impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> SpNode<T, D, A> {
     fn lookup_sp(&self, path: &[u8]) -> Option<Sp<T, D>> {
         self.lookup_with(path, Clone::clone)
     }
@@ -1033,7 +1036,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
                     };
 
                     let compressed_path_index: usize = compressed_path[index].into();
-                    let mut children: [Sp<Node<T, D, A>, D>; 16] =
+                    let mut children: [SpNode<T, D, A>; 16] =
                         core::array::from_fn(|_| self.arena.alloc(Node::Empty));
                     children[compressed_path_index] = remaining;
 
@@ -1408,7 +1411,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             2 => {
                 let ann = A::deserialize(reader, 0)?;
-                let mut children: [Sp<Node<T, D, A>, D>; 16] =
+                let mut children: [SpNode<T, D, A>; 16] =
                     core::array::from_fn(|_| loader.alloc(Node::Empty));
 
                 #[allow(clippy::needless_range_loop)]
@@ -1426,7 +1429,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
                 let len = u8::deserialize(reader, 0)?;
                 let path =
                     expand_nibbles(&std::vec::Vec::<u8>::deserialize(reader, 0)?, len as usize);
-                let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
+                let child: SpNode<T, D, A> = loader.get_next(child_hashes)?;
                 Ok(Node::Extension {
                     ann,
                     compressed_path: path,
@@ -1436,7 +1439,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             4 => {
                 let ann = A::deserialize(reader, 0)?;
                 let value: Sp<T, D> = loader.get_next(child_hashes)?;
-                let child: Sp<Node<T, D, A>, D> = loader.get_next(child_hashes)?;
+                let child: SpNode<T, D, A> = loader.get_next(child_hashes)?;
                 Ok(Node::MidBranchLeaf { ann, value, child })
             }
             _ => Err(std::io::Error::new(
