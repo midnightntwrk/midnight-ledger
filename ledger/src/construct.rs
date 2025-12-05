@@ -13,6 +13,7 @@
 
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
+use crate::prove::UnprovenIntent;
 use crate::structure::SegIntent;
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MaintenanceUpdate,
@@ -53,11 +54,7 @@ use zswap::Offer as ZswapOffer;
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     pub fn from_intents(
         network_id: impl Into<String>,
-        intents: storage::storage::HashMap<
-            u16,
-            Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-            D,
-        >,
+        intents: storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
     ) -> Self {
         Self::new(network_id, intents, None, std::collections::HashMap::new())
     }
@@ -68,11 +65,7 @@ impl<S: SignatureKind<D>, D: DB>
 {
     pub fn new(
         network_id: impl Into<String>,
-        intents: storage::storage::HashMap<
-            u16,
-            Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-            D,
-        >,
+        intents: storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
         guaranteed_coins: Option<Offer<ProofPreimage, D>>,
         fallible_coins: std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
     ) -> Self {
@@ -92,11 +85,7 @@ impl<S: SignatureKind<D>, D: DB>
     fn binding_randomness(
         guaranteed_coins: &Option<Offer<ProofPreimage, D>>,
         fallible_coins: &std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
-        intents: &storage::storage::HashMap<
-            u16,
-            Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-            D,
-        >,
+        intents: &storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
     ) -> PedersenRandomness {
         guaranteed_coins
             .as_ref()
@@ -145,11 +134,8 @@ impl<D: DB> MaintenanceUpdate<D> {
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
-    pub fn empty<R: Rng + CryptoRng + ?Sized>(
-        rng: &mut R,
-        ttl: Timestamp,
-    ) -> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+impl<S: SignatureKind<D>, D: DB> UnprovenIntent<S, D> {
+    pub fn empty<R: Rng + CryptoRng + ?Sized>(rng: &mut R, ttl: Timestamp) -> UnprovenIntent<S, D> {
         Intent::new(rng, None, None, vec![], vec![], vec![], None, ttl)
     }
 
@@ -162,7 +148,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         deploys: Vec<ContractDeploy<D>>,
         dust_actions: Option<DustActions<S, ProofPreimageMarker, D>>,
         ttl: Timestamp,
-    ) -> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+    ) -> UnprovenIntent<S, D> {
         let intent = Intent {
             guaranteed_unshielded_offer: guaranteed_unshielded_offer.map(|x| Sp::new(x)),
             fallible_unshielded_offer: fallible_unshielded_offer.map(|x| Sp::new(x)),
@@ -267,11 +253,7 @@ impl<
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     pub fn new(
         network_id: impl Into<String>,
-        intents: storage::storage::HashMap<
-            u16,
-            Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-            D,
-        >,
+        intents: storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
         fallible_coins: std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
     ) -> Self {
@@ -392,7 +374,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+impl<S: SignatureKind<D>, D: DB> UnprovenIntent<S, D> {
     pub fn add_call<P>(&self, call: ContractCallPrototype<D>) -> Self
     where
         P: ContractCallExt<D>,
