@@ -6,6 +6,16 @@ version.workspace = true
 
 [features]
 default = []
+# GPU acceleration (passed through entire dependency chain)
+gpu = ["midnight-proofs/gpu", "zkir_v2/gpu", "transient-crypto/gpu"]
+gpu-cuda = ["midnight-proofs/gpu-cuda", "zkir_v2/gpu-cuda", "transient-crypto/gpu-cuda"]
+
+# Performance tracing features (passed through to midnight-proofs)
+trace-msm = ["midnight-proofs/trace-msm"]
+trace-fft = ["midnight-proofs/trace-fft"]
+trace-phases = ["midnight-proofs/trace-phases"]
+trace-kzg = ["midnight-proofs/trace-kzg"]
+trace-all = ["trace-msm", "trace-fft", "trace-phases", "trace-kzg"]
 
 [dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger", default-features = false, features = ["proving"] }
@@ -16,6 +26,10 @@ storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 zkir_v2 = { path = "../zkir", package = "zkir" }
+
+# Dependencies for GPU features and benchmarks
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "main", package = "midnight-proofs" }
+midnight-curves = { git = "https://github.com/riusricardo/midnight-zk", branch = "main", package = "midnight-curves" }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
@@ -43,6 +57,10 @@ ledger = { path = "../ledger", package = "midnight-ledger", features = ["test-ut
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "main", package = "midnight-proofs" }
+midnight-curves = { git = "https://github.com/riusricardo/midnight-zk", branch = "main", package = "midnight-curves" }
+ff = "0.13"
+blake2b_simd = "1.0"
 env_logger = "^0.11"
 log = "^0.4.28"
 function_name = "^0.3.0"
