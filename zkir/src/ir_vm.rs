@@ -99,7 +99,7 @@ fn fab_decode_to_bytes_inner(
             }
             AlignmentSegment::Option(_) => {
                 error!("in-circuit decoding of alignment options is not yet implemented!");
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis("in-circuit decoding of alignment options is not yet implemented".to_string()));
             }
         }
     }
@@ -116,7 +116,7 @@ fn fab_decode_to_bytes_atom(
     match align {
         AlignmentAtom::Field => {
             if inputs.is_empty() {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis("Empty inputs when decoding field".to_string()));
             }
             let value = &inputs[0];
             *inputs = &inputs[1..];
@@ -136,7 +136,7 @@ fn fab_decode_to_bytes_atom(
                     Ok::<_, Error>(())
                 };
             if inputs.len() < expected_size {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(format!("Insufficient inputs: expected {}, got {}", expected_size, inputs.len())));
             }
             let mut res_vec = Vec::with_bounded_capacity(*length as usize - stray);
             if stray > 0 {
@@ -152,7 +152,7 @@ fn fab_decode_to_bytes_atom(
         }
         AlignmentAtom::Compress => {
             error!("Cannot decode compressed value from field elements");
-            Err(Error::Synthesis)
+            Err(Error::Synthesis("Cannot decode compressed value from field elements".to_string()))
         }
     }
 }
@@ -506,8 +506,8 @@ impl Relation for IrSource {
 
     type Witness = Preprocessed;
 
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.clone()
+    fn format_instance(instance: &Self::Instance) -> Result<Vec<outer::Scalar>, Error> {
+        Ok(instance.clone())
     }
 
     fn circuit(
@@ -537,7 +537,7 @@ impl Relation for IrSource {
             memory: &[AssignedNative<outer::Scalar>],
             i: u32,
         ) -> Result<&AssignedNative<outer::Scalar>, Error> {
-            memory.get(i as usize).ok_or(Error::Synthesis)
+            memory.get(i as usize).ok_or(Error::Synthesis("Memory index out of bounds".to_string()))
         }
         let seq_push = |cell: AssignedNative<outer::Scalar>,
                         mem: &mut Vec<AssignedNative<outer::Scalar>>,
@@ -577,7 +577,7 @@ impl Relation for IrSource {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc".to_string())
                 })
                 .unwrap()
                 .0
@@ -757,7 +757,7 @@ impl Relation for IrSource {
             let comm_comm_rand_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc".to_string())
                 })
                 .unwrap()
                 .1
@@ -805,6 +805,7 @@ impl Relation for IrSource {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
             sha256,
+            sha512: false,
             nr_pow2range_cols: 4, // TODO: Get this programmatically, not as a magic constant from Miguel :)
             secp256k1: false,
             bls12_381: false,

@@ -443,8 +443,8 @@ struct DummyRelation;
 impl Relation for DummyRelation {
     type Instance = Vec<outer::Scalar>;
     type Witness = ();
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.clone()
+    fn format_instance(instance: &Self::Instance) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.clone())
     }
     fn circuit(
         &self,

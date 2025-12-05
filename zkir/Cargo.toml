@@ -19,14 +19,17 @@ proptest = [
   "transient-crypto/proptest",
   "serialize/proptest",
 ]
+# GPU acceleration (passed through to midnight-proofs)
+gpu = ["midnight-proofs/gpu", "transient-crypto/gpu"]
+gpu-cuda = ["midnight-proofs/gpu-cuda", "transient-crypto/gpu-cuda"]
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "main" }
+midnight-circuits = { git = "https://github.com/riusricardo/midnight-zk", branch = "main" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"

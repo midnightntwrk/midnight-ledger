@@ -1,0 +1,100 @@
+[Unit]
+Description=Midnight Proof Server with GPU Acceleration
+Documentation=https://github.com/midnightntwrk/midnight-ledger
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=midnight
+Group=midnight
+WorkingDirectory=/opt/midnight/proof-server
+
+# Binary and configuration
+# Adjust paths and parameters based on your deployment:
+# - Binary path: Update to match your installation location
+# - Workers: Set based on CPU cores (recommend 1-2 per core)
+# - Job capacity: 0 = unlimited, or set limit based on memory
+ExecStart=/opt/midnight/proof-server/target/release/midnight-proof-server \
+    --port 6300 \
+    --num-workers 4 \
+    --job-capacity 100 \
+    --job-timeout 600.0
+
+# Restart behavior
+Restart=always
+RestartSec=10
+StartLimitInterval=60
+StartLimitBurst=3
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+TasksMax=4096
+
+# Memory and CPU limits
+MemoryMax=16G
+MemoryHigh=14G
+CPUQuota=400%
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/log/midnight /var/lib/midnight /tmp
+
+# Capabilities (empty = drop all capabilities)
+CapabilityBoundingSet=
+AmbientCapabilities=
+
+# Allow access to /dev for GPU (video devices, dri, nvidia*)
+DeviceAllow=/dev/dri rw
+DeviceAllow=/dev/nvidia* rw
+DevicePolicy=closed
+
+# System call filtering
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+# Network
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+# Process isolation
+# NOTE: PrivateDevices must be false for GPU access
+# Ensure the 'midnight' user is in the 'video' and 'render' groups for GPU access:
+#   sudo usermod -aG video,render midnight
+PrivateDevices=false
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+# Environment variables
+Environment="RUST_BACKTRACE=1"
+Environment="RUST_LOG=info"
+Environment="MIDNIGHT_PROOF_SERVER_PORT=6300"
+Environment="MIDNIGHT_PROOF_SERVER_NUM_WORKERS=4"
+Environment="MIDNIGHT_PROOF_SERVER_JOB_CAPACITY=100"
+Environment="MIDNIGHT_PROOF_SERVER_JOB_TIMEOUT=600.0"
+
+# GPU Support - ICICLE library paths (if built with GPU features)
+# IMPORTANT: Do NOT set ICICLE_BACKEND_INSTALL_DIR - it interferes with automatic backend discovery
+# The frontend (cargo-built) dynamically loads the backend from system paths
+Environment="LD_LIBRARY_PATH=/opt/midnight/proof-server/target/release/deps/icicle/lib:/opt/icicle/lib/backend/bls12_381/cuda:/usr/local/cuda/lib64:/usr/local/cuda-13.0/lib64"
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=midnight-proof-server
+
+# Health check with proper wait time for initialization
+ExecStartPost=/bin/sleep 10
+# Optional: Add health check verification (requires curl installed)
+# ExecStartPost=/usr/bin/curl -f http://localhost:6300/health || exit 1
+
+[Install]
+WantedBy=multi-user.target
