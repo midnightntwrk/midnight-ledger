@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::construct::ContractCallPrototype;
+use crate::construct::{ContractCallPrototype, IntentParams};
 use crate::dust::DustResolver;
 use crate::dust::{
     DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
@@ -983,13 +983,15 @@ pub fn test_intents<D: DB, R: Rng + CryptoRng + ?Sized>(
         1,
         Intent::new(
             rng,
-            None,
-            None,
-            calls,
-            updates,
-            deploys,
-            None,
-            tblock + Duration::from_secs(3600),
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                calls,
+                updates,
+                deploys,
+                dust_actions: None,
+                ttl: tblock + Duration::from_secs(3600),
+            },
         ),
     )
 }
@@ -1012,13 +1014,15 @@ pub fn test_intents_adv<S: SignatureKind<D>, D: DB, R: Rng + CryptoRng + ?Sized>
         segment,
         Intent::new(
             rng,
-            None,
-            None,
-            calls,
-            updates,
-            deploys,
-            None,
-            tblock + Duration::from_secs(3600),
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                calls,
+                updates,
+                deploys,
+                dust_actions: None,
+                ttl: tblock + Duration::from_secs(3600),
+            },
         ),
     );
 

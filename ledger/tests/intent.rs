@@ -31,7 +31,7 @@ use midnight_ledger::structure::{
     UtxoOutput, UtxoSpend,
 };
 use midnight_ledger::test_utilities::{test_intents, test_resolver, tx_prove, verifier_key};
-use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger::{construct::IntentParams, verify::WellFormedStrictness};
 use midnight_ledger::{structure::StandardTransaction, test_utilities::TestState};
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use onchain_runtime::ops::Key;
@@ -94,13 +94,15 @@ async fn well_formed() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -150,13 +152,15 @@ async fn well_formed_sign_wrong_key() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -212,13 +216,15 @@ async fn well_formed_signature_verification_failure_all() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -320,13 +326,15 @@ async fn unsealed_no_signature_check() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -416,13 +424,15 @@ async fn well_formed_failure_segment_guaranteed() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -480,13 +490,15 @@ async fn merge_failure_segment_clash() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let tx = Transaction::new(
@@ -667,13 +679,15 @@ async fn balanced_utxos_1_intent() {
         1,
         Intent::new(
             &mut rng,
-            guaranteed_unshielded_offer,
-            fallible_unshielded_offer,
-            vec![call],
-            Vec::new(),
-            Vec::new(),
-            None,
-            state.time,
+            IntentParams {
+                guaranteed_unshielded_offer,
+                fallible_unshielded_offer,
+                calls: vec![call],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl: state.time,
+            },
         ),
     );
 
@@ -945,13 +959,15 @@ async fn intents_cannot_balance_across_segments() {
         1,
         Intent::new(
             &mut rng,
-            guaranteed_unshielded_offer_1,
-            fallible_unshielded_offer_1,
-            vec![call_1],
-            Vec::new(),
-            Vec::new(),
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer: guaranteed_unshielded_offer_1,
+                fallible_unshielded_offer: fallible_unshielded_offer_1,
+                calls: vec![call_1],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -959,13 +975,15 @@ async fn intents_cannot_balance_across_segments() {
         2,
         Intent::new(
             &mut rng,
-            None,
-            fallible_unshielded_offer_2,
-            vec![call_2],
-            Vec::new(),
-            Vec::new(),
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: fallible_unshielded_offer_2,
+                calls: vec![call_2],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -1251,13 +1269,15 @@ async fn causality_check_sanity_check() {
         1,
         Intent::new(
             &mut rng,
-            guaranteed_unshielded_offer_1,
-            fallible_unshielded_offer_1,
-            vec![call_1],
-            Vec::new(),
-            Vec::new(),
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer: guaranteed_unshielded_offer_1,
+                fallible_unshielded_offer: fallible_unshielded_offer_1,
+                calls: vec![call_1],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -1265,13 +1285,15 @@ async fn causality_check_sanity_check() {
         2,
         Intent::new(
             &mut rng,
-            None,
-            fallible_unshielded_offer_2,
-            vec![call_2],
-            Vec::new(),
-            Vec::new(),
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: fallible_unshielded_offer_2,
+                calls: vec![call_2],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -1448,13 +1470,15 @@ async fn imbalanced_utxos_1_intent() {
         1,
         Intent::new(
             &mut rng,
-            guaranteed_unshielded_offer,
-            None,
-            vec![call],
-            Vec::new(),
-            vec![],
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer,
+                fallible_unshielded_offer: None,
+                calls: vec![call],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -1632,13 +1656,15 @@ async fn imbalanced_utxos_1_intent_fallible() {
         1,
         Intent::new(
             &mut rng,
-            None,
-            fallible_unshielded_offer,
-            vec![call],
-            Vec::new(),
-            vec![],
-            None,
-            ttl,
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer,
+                calls: vec![call],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
         ),
     );
 
@@ -1701,13 +1727,15 @@ async fn apply() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -1767,13 +1795,15 @@ async fn apply_duplicate_failure() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -1850,13 +1880,15 @@ async fn apply_expired_ttl_failure() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent
@@ -1923,13 +1955,15 @@ async fn apply_ttl_in_future_failure() {
 
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
-        fallible_unshielded_offer,
-        vec![call],
-        Vec::new(),
-        Vec::new(),
-        None,
-        ttl,
+        IntentParams {
+            guaranteed_unshielded_offer,
+            fallible_unshielded_offer,
+            calls: vec![call],
+            updates: vec![],
+            deploys: vec![],
+            dust_actions: None,
+            ttl,
+        },
     );
 
     let (_, intent_proven) = intent.prove(0, prover, &INITIAL_COST_MODEL).await.unwrap();
