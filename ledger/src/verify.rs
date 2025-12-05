@@ -14,8 +14,8 @@
 use crate::dust::DustParameters;
 use crate::error::MalformedContractDeploy;
 use crate::error::{
-    BalanceOperation, DisjointCheckError, EffectsCheckError, MalformedTransaction,
-    SegmentContractCall, SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
+    BalanceOperation, ContractCallReference, DisjointCheckError, EffectsCheckError,
+    MalformedTransaction, SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
 };
 use crate::primitive::MultiSet;
 use crate::structure::{
@@ -1540,7 +1540,7 @@ impl<
                 }),
             ));
         }
-        let claimed_calls: MultiSet<SegmentContractCall> = transcripts
+        let claimed_calls: MultiSet<ContractCallReference> = transcripts
             .iter()
             .flat_map(|(segment, _, t, _)| {
                 t.effects.claimed_contract_calls.iter().map(|call| {
@@ -1550,7 +1550,7 @@ impl<
             })
             .collect();
 
-        let duplicate_claimed_calls: Vec<(SegmentContractCall, usize)> = claimed_calls
+        let duplicate_claimed_calls: Vec<(ContractCallReference, usize)> = claimed_calls
             .clone()
             .into_iter()
             .filter(|(_, count)| count > &1)
@@ -1562,7 +1562,7 @@ impl<
             ));
         }
 
-        let real_calls: MultiSet<SegmentContractCall> = calls
+        let real_calls: MultiSet<ContractCallReference> = calls
             .iter()
             .map(|(segment, call)| {
                 (

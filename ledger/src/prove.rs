@@ -14,9 +14,8 @@
 use crate::dust::DustResolver;
 use crate::error::TransactionProvingError;
 use crate::structure::{
-    ContractAction, ContractCall, Intent, PedersenRandomnessIntent, ProofMarker,
-    ProofPreimageMarker, ProofPreimageVersioned, ProofVersioned, SignatureKind,
-    StandardTransaction, Transaction,
+    ContractAction, ContractCall, Intent, ProofMarker, ProofPreimageMarker, ProofPreimageVersioned,
+    ProofVersioned, SignatureKind, StandardTransaction, Transaction,
 };
 use base_crypto::cost_model::{CostDuration, RunningCost};
 use futures::future::join_all;
@@ -87,20 +86,17 @@ impl transient_crypto::proofs::Resolver for Resolver {
     }
 }
 
-// Map of prooved intents
-type ProovedIntents<S, D> =
-    storage::storage::HashMap<u16, PedersenRandomnessIntent<S, ProofMarker, D>, D>;
+// A yet unproven Intent with a PedersenRandomness
+pub(crate) type UnprovenIntent<S, D> = Intent<S, ProofPreimageMarker, PedersenRandomness, D>;
+// A proven Intent with a PedersenRandomness
+type ProvenIntent<S, D> = Intent<S, ProofMarker, PedersenRandomness, D>;
 
 #[instrument(skip(prover, cost_model))]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
-    intents: &storage::storage::HashMap<
-        u16,
-        PedersenRandomnessIntent<S, ProofPreimageMarker, D>,
-        D,
-    >,
+    intents: &storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
     mut prover: impl ProvingProvider,
     cost_model: &CostModel,
-) -> Result<ProovedIntents<S, D>, ProvingError> {
+) -> Result<storage::storage::HashMap<u16, ProvenIntent<S, D>, D>, ProvingError> {
     let res = join_all(intents.iter().map(|seg_x_intent| {
         let split_prover = prover.split();
         async move {
@@ -194,7 +190,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> PedersenRandomnessIntent<S, ProofPreimageMarker, D> {
+impl<S: SignatureKind<D>, D: DB> UnprovenIntent<S, D> {
     #[instrument(skip(self, prover, cost_model))]
     #[allow(clippy::type_complexity)]
     pub async fn prove(
@@ -202,7 +198,7 @@ impl<S: SignatureKind<D>, D: DB> PedersenRandomnessIntent<S, ProofPreimageMarker
         segment_id: u16,
         mut prover: impl ProvingProvider,
         cost_model: &CostModel,
-    ) -> Result<(u16, PedersenRandomnessIntent<S, ProofMarker, D>), ProvingError> {
+    ) -> Result<(u16, ProvenIntent<S, D>), ProvingError> {
         let actions =
             join_all(self.actions.iter_deref().map(|call| {
                 call.prove(prover.split(), self.binding_commitment.into(), cost_model)
