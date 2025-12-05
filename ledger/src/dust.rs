@@ -934,6 +934,39 @@ pub struct DustState<D: DB> {
 }
 tag_enforcement_test!(DustState<InMemoryDB>);
 
+/// Parameters required to apply a registration.
+pub(crate) struct ApplyRegistrationParams<'a, S: SignatureKind<D>, D: DB> {
+    /// The current UTXO state.
+    pub utxo: &'a UtxoState<D>,
+    /// The remaining fees available for the transaction.
+    pub fees_remaining: u128,
+    /// The parent intent associated with this registration.
+    pub parent_intent: &'a ErasedIntent<D>,
+    /// The dust registration details.
+    pub registration: &'a DustRegistration<S, D>,
+    /// Parameters related to dust output.
+    pub dust_params: &'a DustParameters,
+    /// The current timestamp.
+    pub tnow: Timestamp,
+    /// The transaction context.
+    pub context: &'a TransactionContext<D>,
+}
+
+pub(crate) struct FreshDustOutputParams {
+    /// The initial nonce used for output generation, ensuring uniqueness.
+    pub initial_nonce: InitialNonce,
+    /// The starting value for the dust output.
+    pub initial_value: u128,
+    /// The value associated with the "night" phase or calculation.
+    pub night_value: u128,
+    /// The public key/address where the dust output will be sent.
+    pub dust_addr: DustPublicKey,
+    /// The current timestamp, representing "now".
+    pub tnow: Timestamp,
+    /// The timestamp of the relevant block.
+    pub tblock: Timestamp,
+}
+
 impl<D: DB> DustState<D> {
     pub(crate) fn apply_spend<P: ProofKind<D>>(
         &self,
@@ -966,20 +999,14 @@ impl<D: DB> DustState<D> {
         Ok(state)
     }
 
-    pub(crate) fn apply_registration<S: SignatureKind<D>>(
+    pub(crate) fn apply_registration<'a, S: SignatureKind<D>>(
         &self,
-        utxo: &UtxoState<D>,
-        mut fees_remaining: u128,
-        parent_intent: &ErasedIntent<D>,
-        registration: &DustRegistration<S, D>,
-        dust_params: &DustParameters,
-        tnow: Timestamp,
-        context: &TransactionContext<D>,
+        mut params: ApplyRegistrationParams<'a, S, D>,
         mut event_push: impl FnMut(EventDetails<D>),
     ) -> Result<(Self, u128), TransactionInvalid<D>> {
-        let night_address = UserAddress::from(registration.night_key.clone());
+        let night_address = UserAddress::from(params.registration.night_key.clone());
         let mut state = self.clone();
-        match registration.dust_address.as_ref() {
+        match params.registration.dust_address.as_ref() {
             None => {
                 if !state
                     .generation
@@ -1001,25 +1028,26 @@ impl<D: DB> DustState<D> {
                     .insert(night_address, **dust_address);
             }
         }
-        let owned_outputs = parent_intent
+        let owned_outputs = params
+            .parent_intent
             .guaranteed_unshielded_offer
             .iter()
             .flat_map(|o| o.outputs.iter_deref().enumerate())
             .filter(|(_, o)| o.owner == night_address && o.type_ == NIGHT)
             .collect::<Vec<_>>();
         let dust_in = self.generationless_fee_availability(
-            utxo,
-            parent_intent,
-            &registration.night_key,
-            dust_params,
+            params.utxo,
+            params.parent_intent,
+            &params.registration.night_key,
+            params.dust_params,
         );
         let fee_paid = u128::min(
-            fees_remaining,
-            u128::min(registration.allow_fee_payment, dust_in),
+            params.fees_remaining,
+            u128::min(params.registration.allow_fee_payment, dust_in),
         );
-        fees_remaining -= fee_paid; // subtraction safe due to `min` above
+        params.fees_remaining -= fee_paid; // subtraction safe due to `min` above
         let dust_out = dust_in - fee_paid;
-        if let Some(dust_addr) = registration.dust_address.as_ref() {
+        if let Some(dust_addr) = params.registration.dust_address.as_ref() {
             let output_sum = owned_outputs
                 .iter()
                 .map(|(_, o)| o.value)
@@ -1033,36 +1061,40 @@ impl<D: DB> DustState<D> {
                 let ratio = output.value.saturating_mul(DISTRIBUTION_RESOLUTION) / output_sum;
                 let initial_value = ratio.saturating_mul(dust_out) / DISTRIBUTION_RESOLUTION;
                 state = state.fresh_dust_output(
-                    initial_nonce(output_no as u32, parent_intent.intent_hash(0)),
-                    initial_value,
-                    output.value,
-                    **dust_addr,
-                    tnow,
-                    context.block_context.tblock,
+                    FreshDustOutputParams {
+                        initial_nonce: initial_nonce(
+                            output_no as u32,
+                            params.parent_intent.intent_hash(0),
+                        ),
+                        initial_value,
+                        night_value: output.value,
+                        dust_addr: **dust_addr,
+                        tnow: params.tnow,
+                        tblock: params.context.block_context.tblock,
+                    },
                     &mut event_push,
                 )?;
             }
         }
-        Ok((state, fees_remaining))
+        Ok((state, params.fees_remaining))
     }
 
     pub(crate) fn fresh_dust_output(
         &self,
-        initial_nonce: InitialNonce,
-        initial_value: u128,
-        night_value: u128,
-        dust_addr: DustPublicKey,
-        tnow: Timestamp,
-        tblock: Timestamp,
+        params: FreshDustOutputParams,
         mut event_push: impl FnMut(EventDetails<D>),
     ) -> Result<Self, GenerationInfoAlreadyPresentError> {
         let mut state = self.clone();
         let seq = 0u32;
         let dust_pre_projection = DustPreProjection {
-            initial_value,
-            owner: dust_addr,
-            nonce: transient_hash((initial_nonce, seq, dust_addr).field_vec().as_ref()),
-            ctime: tnow,
+            initial_value: params.initial_value,
+            owner: params.dust_addr,
+            nonce: transient_hash(
+                (params.initial_nonce, seq, params.dust_addr)
+                    .field_vec()
+                    .as_ref(),
+            ),
+            ctime: params.tnow,
         };
         let dust_commitment = dust_pre_projection.commitment();
         state.utxo.commitments = state.utxo.commitments.update_hash(
@@ -1072,9 +1104,9 @@ impl<D: DB> DustState<D> {
         );
         state.utxo.commitments_first_free += 1;
         let gen_info = DustGenerationInfo {
-            value: night_value,
-            owner: dust_addr,
-            nonce: initial_nonce,
+            value: params.night_value,
+            owner: params.dust_addr,
+            nonce: params.initial_nonce,
             dtime: Timestamp::MAX,
         };
         if self.generation.generating_set.member(&gen_info.into()) {
@@ -1087,25 +1119,25 @@ impl<D: DB> DustState<D> {
             gen_info.merkle_hash(),
             gen_info,
         );
-        state.generation.night_indices = state
-            .generation
-            .night_indices
-            .insert(initial_nonce, self.generation.generating_tree_first_free);
+        state.generation.night_indices = state.generation.night_indices.insert(
+            params.initial_nonce,
+            self.generation.generating_tree_first_free,
+        );
         state.generation.generating_tree_first_free += 1;
 
         event_push(EventDetails::DustInitialUtxo {
             output: QualifiedDustOutput {
-                initial_value,
-                owner: dust_addr,
+                initial_value: params.initial_value,
+                owner: params.dust_addr,
                 nonce: dust_pre_projection.nonce,
                 seq: 0,
-                ctime: tnow,
-                backing_night: initial_nonce,
+                ctime: params.tnow,
+                backing_night: params.initial_nonce,
                 mt_index: state.utxo.commitments_first_free - 1,
             },
             generation: gen_info,
             generation_index: state.generation.generating_tree_first_free - 1,
-            block_time: tblock,
+            block_time: params.tblock,
         });
 
         Ok(state)
@@ -1211,12 +1243,14 @@ impl<D: DB> DustState<D> {
                     .any(|reg| output.owner == reg.night_key.clone().into());
             if !handled_by_registration {
                 state = state.fresh_dust_output(
-                    initial_nonce(output_no as u32, parent.intent_hash(segment)),
-                    0,
-                    output.value,
-                    *dust_addr,
-                    context.block_context.tblock,
-                    context.block_context.tblock,
+                    FreshDustOutputParams {
+                        initial_nonce: initial_nonce(output_no as u32, parent.intent_hash(segment)),
+                        initial_value: 0,
+                        night_value: output.value,
+                        dust_addr: *dust_addr,
+                        tnow: context.block_context.tblock,
+                        tblock: context.block_context.tblock,
+                    },
                     &mut event_push,
                 )?;
             }

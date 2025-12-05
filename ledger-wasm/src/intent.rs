@@ -18,7 +18,10 @@ use crate::unshielded::UnshieldedOffer;
 use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use js_sys::{Date, Uint8Array};
-use ledger::structure::{ErasedIntent, Intent as LedgerIntent, ProofMarker, ProofPreimageMarker};
+use ledger::{
+    construct::IntentParams,
+    structure::{ErasedIntent, Intent as LedgerIntent, ProofMarker, ProofPreimageMarker},
+};
 use onchain_runtime_wasm::from_value_ser;
 use serialize::tagged_serialize;
 use std::ops::Deref;
@@ -238,7 +241,18 @@ impl Intent {
     pub fn new(ttl: &Date) -> Result<Intent, JsError> {
         let ttl = Timestamp::from_secs(js_date_to_seconds(ttl));
         Ok(Intent(IntentTypes::UnprovenWithSignaturePreBinding(
-            LedgerIntent::new(&mut OsRng, None, None, vec![], vec![], vec![], None, ttl),
+            LedgerIntent::new(
+                &mut OsRng,
+                IntentParams {
+                    guaranteed_unshielded_offer: None,
+                    fallible_unshielded_offer: None,
+                    calls: vec![],
+                    updates: vec![],
+                    deploys: vec![],
+                    dust_actions: None,
+                    ttl,
+                },
+            ),
         )))
     }
 

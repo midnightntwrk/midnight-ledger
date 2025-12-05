@@ -50,6 +50,24 @@ use transient_crypto::repr::FieldRepr;
 use zswap::Offer;
 use zswap::Offer as ZswapOffer;
 
+/// Arguments for constructing an Intent
+pub struct IntentParams<S: SignatureKind<D>, D: DB> {
+    /// An offer that is guaranteed to be unshielded, if present
+    pub guaranteed_unshielded_offer: Option<UnshieldedOffer<S, D>>,
+    /// An offer that may be unshielded, if present
+    pub fallible_unshielded_offer: Option<UnshieldedOffer<S, D>>,
+    /// List of contract call prototypes to execute
+    pub calls: Vec<ContractCallPrototype<D>>,
+    /// List of maintenance updates to apply
+    pub updates: Vec<MaintenanceUpdate<D>>,
+    /// List of contract deployments to perform
+    pub deploys: Vec<ContractDeploy<D>>,
+    /// Optional dust actions to process
+    pub dust_actions: Option<DustActions<S, ProofPreimageMarker, D>>,
+    /// Time-to-live for the intent
+    pub ttl: Timestamp,
+}
+
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     pub fn from_intents(
         network_id: impl Into<String>,
@@ -150,37 +168,47 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         rng: &mut R,
         ttl: Timestamp,
     ) -> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
-        Intent::new(rng, None, None, vec![], vec![], vec![], None, ttl)
+        Intent::new(
+            rng,
+            IntentParams {
+                guaranteed_unshielded_offer: None,
+                fallible_unshielded_offer: None,
+                calls: vec![],
+                updates: vec![],
+                deploys: vec![],
+                dust_actions: None,
+                ttl,
+            },
+        )
     }
 
     pub fn new<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
-        guaranteed_unshielded_offer: Option<UnshieldedOffer<S, D>>,
-        fallible_unshielded_offer: Option<UnshieldedOffer<S, D>>,
-        calls: Vec<ContractCallPrototype<D>>,
-        updates: Vec<MaintenanceUpdate<D>>,
-        deploys: Vec<ContractDeploy<D>>,
-        dust_actions: Option<DustActions<S, ProofPreimageMarker, D>>,
-        ttl: Timestamp,
+        params: IntentParams<S, D>,
     ) -> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
         let intent = Intent {
-            guaranteed_unshielded_offer: guaranteed_unshielded_offer.map(|x| Sp::new(x)),
-            fallible_unshielded_offer: fallible_unshielded_offer.map(|x| Sp::new(x)),
+            guaranteed_unshielded_offer: params.guaranteed_unshielded_offer.map(|x| Sp::new(x)),
+            fallible_unshielded_offer: params.fallible_unshielded_offer.map(|x| Sp::new(x)),
             actions: vec![].into(),
-            dust_actions: dust_actions.map(Sp::new),
-            ttl,
+            dust_actions: params.dust_actions.map(Sp::new),
+            ttl: params.ttl,
             binding_commitment: rng.r#gen(),
         };
 
-        let intent = calls
+        let intent = params
+            .calls
             .into_iter()
             .fold(intent, |acc, x| acc.add_call::<ProofPreimage>(x));
 
-        let intent = updates
+        let intent = params
+            .updates
             .into_iter()
             .fold(intent, |acc, x| acc.add_maintenance_update(x));
 
-        deploys.into_iter().fold(intent, |acc, x| acc.add_deploy(x))
+        params
+            .deploys
+            .into_iter()
+            .fold(intent, |acc, x| acc.add_deploy(x))
     }
 }
 

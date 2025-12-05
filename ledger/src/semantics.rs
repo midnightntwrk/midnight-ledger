@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::dust::{ApplyRegistrationParams, FreshDustOutputParams};
 use crate::error::EventReplayError;
 use crate::error::{
     BalanceOperation, BlockLimitExceeded, InvariantViolation, SystemTransactionError,
@@ -724,12 +725,14 @@ impl<D: DB> LedgerState<D> {
                             })
                         };
                         state.dust = Sp::new(state.dust.fresh_dust_output(
-                            crate::dust::initial_nonce(i as u32, hash),
-                            0,
-                            utxo.value,
-                            *dust_addr,
-                            tblock,
-                            tblock,
+                            FreshDustOutputParams {
+                                initial_nonce: crate::dust::initial_nonce(i as u32, hash),
+                                initial_value: 0,
+                                night_value: utxo.value,
+                                dust_addr: *dust_addr,
+                                tnow: tblock,
+                                tblock,
+                            },
                             &mut event_push,
                         )?);
                     }
@@ -755,12 +758,14 @@ impl<D: DB> LedgerState<D> {
                     match action.action {
                         Create => {
                             dust_state = dust_state.fresh_dust_output(
-                                action.nonce,
-                                0,
-                                action.value,
-                                action.owner,
-                                action.time,
-                                tblock,
+                                FreshDustOutputParams {
+                                    initial_nonce: action.nonce,
+                                    initial_value: 0,
+                                    night_value: action.value,
+                                    dust_addr: action.owner,
+                                    tnow: action.time,
+                                    tblock,
+                                },
                                 &mut event_push,
                             )?;
                         }
@@ -954,13 +959,15 @@ impl<D: DB> LedgerState<D> {
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
-                                &state.utxo,
-                                fees_remaining,
-                                &erased,
-                                reg,
-                                &state.parameters.dust,
-                                da.ctime,
-                                context,
+                                ApplyRegistrationParams {
+                                    utxo: &state.utxo,
+                                    fees_remaining,
+                                    parent_intent: &erased,
+                                    registration: reg,
+                                    dust_params: &state.parameters.dust,
+                                    tnow: da.ctime,
+                                    context,
+                                },
                                 |content| {
                                     events.push(Event {
                                         source: EventSource {
@@ -1504,12 +1511,14 @@ fn claim_unshielded<D: DB>(
             })
         };
         let new_dust = match state.dust.fresh_dust_output(
-            crate::dust::initial_nonce(0, hash),
-            0,
-            output.value,
-            *dust_addr,
-            context.tblock,
-            context.tblock,
+            FreshDustOutputParams {
+                initial_nonce: crate::dust::initial_nonce(0, hash),
+                initial_value: 0,
+                night_value: output.value,
+                dust_addr: *dust_addr,
+                tnow: context.tblock,
+                tblock: context.tblock,
+            },
             &mut event_push,
         ) {
             Ok(v) => v,
