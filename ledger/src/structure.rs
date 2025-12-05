@@ -850,9 +850,6 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
 }
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
-// Intent with a PedersenRandomness
-pub(crate) type PedersenRandomnessIntent<S, P, D> = Intent<S, P, PedersenRandomness, D>;
-
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B, D> {
     pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
         let mut data = ContractAction::challenge_pre_for(Vec::from(&self.actions).as_slice());

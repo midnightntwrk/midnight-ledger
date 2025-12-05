@@ -18,8 +18,8 @@ use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
-    UtxoState, SegIntent
+    STARS_PER_NIGHT, SegIntent, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo,
+    UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
