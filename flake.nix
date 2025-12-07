@@ -20,12 +20,14 @@
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
     #compactc = {
-    #  url = "github:midnightntwrk/compactc";
+    #  url = "github:midnightntwrk/compact-export";
     #  inputs.zkir.follows = "zkir";
     #  inputs.onchain-runtime.follows = "";
     #};
+    # Use local path for development instead of fetching from GitHub
+    # Original: url = "github:riusricardo/midnight-ledger/e6e21e6e7173a17a6afcd7aa6471b6c7b29cf070";
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/1512ab5fd63cb423a5d8c17cf956ad33b1eec087";
+      url = "path:.";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -49,29 +51,39 @@
           stdenv = pkgs.clangStdenv;
         };
         isDarwin = pkgs.lib.hasSuffix "-darwin" system;
-        rustWorkspaceSrc = inclusive.lib.inclusive ./. [
-          ./Cargo.toml
-          ./Cargo.lock
-          ./static
-          ./zswap
-          ./ledger
-          ./ledger-wasm
-          ./proof-server
-          ./storage
-          ./zkir
-          ./base-crypto-derive
-          ./base-crypto
-          ./transient-crypto
-          ./coin-structure
-          ./serialize
-          ./onchain-vm
-          ./onchain-state
-          ./onchain-runtime
-          ./onchain-runtime-wasm
-          ./generate-cost-model
-          ./rustfmt.toml
-          ./wasm-proving-demos/zkir-mt
-        ];
+        # Fetch midnight-zk from its local git repo
+        midnightZkSrc = builtins.fetchGit {
+          url = "/home/ricardo/.dev/midnight-ledger/midnight-zk";
+          ref = "gpu-integration-v5.0.2";
+        };
+        # Combine the main workspace with midnight-zk
+        rustWorkspaceSrc = pkgs.runCommand "rust-workspace-src" {} ''
+          mkdir -p $out
+          cp -r ${inclusive.lib.inclusive ./. [
+            ./Cargo.toml
+            ./Cargo.lock
+            ./static
+            ./zswap
+            ./ledger
+            ./ledger-wasm
+            ./proof-server
+            ./storage
+            ./zkir
+            ./base-crypto-derive
+            ./base-crypto
+            ./transient-crypto
+            ./coin-structure
+            ./serialize
+            ./onchain-vm
+            ./onchain-state
+            ./onchain-runtime
+            ./onchain-runtime-wasm
+            ./generate-cost-model
+            ./rustfmt.toml
+            ./wasm-proving-demos/zkir-mt
+          ]}/* $out/
+          cp -r ${midnightZkSrc} $out/midnight-zk
+        '';
         rust = fenix.packages.${system};
         bagel-wasm = (import ./bagel.nix) {
           inherit system nixpkgs;
@@ -316,7 +328,7 @@
             buildPhase = ''
               mkdir -p zswap/zkir
               mkdir -p zswap/keys
-              cp zkir-precompiles/zswap/* zswap/zkir
+              cp -r zkir-precompiles/zswap/*.zkir zswap/zkir/
               zkir compile-many zswap/zkir zswap/keys
               #compactc --no-communications-commitment zswap/zswap.compact zswap
               for file in zswap/keys/* zswap/zkir/*; do
@@ -324,7 +336,7 @@
               done
               mkdir -p dust/zkir
               mkdir -p dust/keys
-              cp zkir-precompiles/dust/* dust/zkir
+              cp -r zkir-precompiles/dust/*.zkir dust/zkir/
               zkir compile-many dust/zkir dust/keys
               #compactc --no-communications-commitment ledger/dust.compact dust
               for file in dust/keys/* dust/zkir/*; do

@@ -24,9 +24,9 @@ storage = { path = "../storage", package = "midnight-storage" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
-midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.1" }
+midnight-curves = { path = "../midnight-zk/curves" }
+midnight-proofs = { path = "../midnight-zk/proofs" }
+midnight-circuits = { path = "../midnight-zk/circuits" }
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 
