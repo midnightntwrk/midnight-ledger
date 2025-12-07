@@ -15,6 +15,7 @@ proptest = [
   "storage/proptest",
 ]
 mock-verify = []
+gpu = ["midnight-proofs/gpu"]
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
