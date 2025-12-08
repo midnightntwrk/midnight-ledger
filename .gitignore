@@ -19,3 +19,4 @@ vendor
 # Generated zkir keys (build artifacts)
 zkir-precompiles/*/keys/
 zkir-precompiles/*/zkir/
+zkir-precompiles/*/*.bzkir
