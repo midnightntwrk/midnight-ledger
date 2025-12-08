@@ -129,7 +129,20 @@ impl Sub<Duration> for Timestamp {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serializable, Hash, Default)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Serializable,
+    Hash,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[tag = "duration"]
 /// Some duration of time in seconds
 pub struct Duration(i128);

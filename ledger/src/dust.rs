@@ -43,6 +43,7 @@ use onchain_runtime::{
     state::StateValue,
 };
 use rand::{CryptoRng, Rng};
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "proof-verifying")]
 use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
@@ -817,7 +818,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, Serialize, Deserialize)]
 #[storable(base)]
 #[tag = "dust-parameters[v1]"]
 pub struct DustParameters {

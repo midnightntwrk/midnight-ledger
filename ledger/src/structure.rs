@@ -921,7 +921,7 @@ impl<D: DB> Default for ReplayProtectionState<D> {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serializable)]
+#[derive(Clone, Debug, PartialEq, Eq, Serializable, Serialize, Deserialize)]
 #[tag = "transaction-cost-model[v4]"]
 pub struct TransactionCostModel {
     pub runtime_cost_model: onchain_runtime::cost_model::CostModel,
@@ -1059,7 +1059,7 @@ pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCost
     },
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serializable)]
+#[derive(Clone, Debug, PartialEq, Eq, Serializable, Serialize, Deserialize)]
 #[tag = "transaction-limits[v2]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
@@ -1087,7 +1087,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
+#[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable, Serialize, Deserialize)]
 #[tag = "ledger-parameters[v5]"]
 #[storable(base)]
 pub struct LedgerParameters {
