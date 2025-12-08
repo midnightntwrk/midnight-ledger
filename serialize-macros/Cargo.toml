@@ -1,6 +1,6 @@
 [package]
 name = "midnight-serialize-macros"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.1"
 edition = "2024"
 license.workspace = true
 

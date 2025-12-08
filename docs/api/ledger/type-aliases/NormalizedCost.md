@@ -2,28 +2,28 @@
 
 ***
 
-[@midnight/ledger](../globals.md) / SyntheticCost
+[@midnight/ledger](../globals.md) / NormalizedCost
 
-# Type Alias: SyntheticCost
+# Type Alias: NormalizedCost
 
 ```ts
-type SyntheticCost = {
-  blockUsage: bigint;
-  bytesChurned: bigint;
-  bytesWritten: bigint;
-  computeTime: bigint;
-  readTime: bigint;
+type NormalizedCost = {
+  blockUsage: number;
+  bytesChurned: number;
+  bytesWritten: number;
+  computeTime: number;
+  readTime: number;
 };
 ```
 
-A modelled cost of a transaction or block.
+A normalized form of [SyntheticCost](SyntheticCost.md).
 
 ## Properties
 
 ### blockUsage
 
 ```ts
-blockUsage: bigint;
+blockUsage: number;
 ```
 
 The number of bytes of blockspace used
@@ -33,7 +33,7 @@ The number of bytes of blockspace used
 ### bytesChurned
 
 ```ts
-bytesChurned: bigint;
+bytesChurned: number;
 ```
 
 The number of (modelled) bytes written temporarily or overwritten.
@@ -43,7 +43,7 @@ The number of (modelled) bytes written temporarily or overwritten.
 ### bytesWritten
 
 ```ts
-bytesWritten: bigint;
+bytesWritten: number;
 ```
 
 The net number of (modelled) bytes written, i.e. max(0, absolute written bytes less deleted bytes).
@@ -53,7 +53,7 @@ The net number of (modelled) bytes written, i.e. max(0, absolute written bytes l
 ### computeTime
 
 ```ts
-computeTime: bigint;
+computeTime: number;
 ```
 
 The amount of (modelled) time spent in single-threaded compute, measured in picoseconds.
@@ -63,7 +63,7 @@ The amount of (modelled) time spent in single-threaded compute, measured in pico
 ### readTime
 
 ```ts
-readTime: bigint;
+readTime: number;
 ```
 
 The amount of (modelled) time spent reading from disk, measured in picoseconds.
