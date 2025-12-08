@@ -3046,7 +3046,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "thread 'main' has overflowed its stack"]
+    #[should_panic = "has overflowed its stack"]
     fn drop_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.
@@ -3057,7 +3057,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "thread 'main' has overflowed its stack"]
+    #[should_panic = "has overflowed its stack"]
     fn serialize_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.

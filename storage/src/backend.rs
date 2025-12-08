@@ -1125,7 +1125,8 @@ impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
         }
         OnDiskObject {
             data: rand_vec(rng, |r| r.r#gen()),
-            ref_count: rng.r#gen(),
+            // u64 is too big to fit into i64 (SQLite INTEGER) so we need to slightly adjust it
+            ref_count: rng.gen_range(0..=i64::MAX as u64),
             children: rand_vec(rng, |r| ArenaKey::Ref(r.r#gen())),
         }
     }
