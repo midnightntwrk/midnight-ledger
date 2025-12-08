@@ -12,7 +12,7 @@
 # limitations under the License.
 
 {
-  description = "Midnight ledger prototype";
+  description = "Midnight ledger";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
