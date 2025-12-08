@@ -15,3 +15,7 @@ logs
 **/.yarn/install-state.gz
 **/.yarn/cache
 vendor
+
+# Generated zkir keys (build artifacts)
+zkir-precompiles/*/keys/
+zkir-precompiles/*/zkir/
