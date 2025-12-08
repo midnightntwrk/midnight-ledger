@@ -5,6 +5,9 @@
 - breaking: pull in breaking serialization changes.
 - breaking: move the IR itself into the scope of `zkir`
 - feat: add a wasm API to IR proving/checking
+- addressed audit issues:
+  - bugfix: correctly update the sliding window for in-circuit FAB bytes
+    decoding only after the reversed iteration.
 
 ## Version `1.3.0`
 
