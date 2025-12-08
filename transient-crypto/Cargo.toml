@@ -16,6 +16,7 @@ proptest = [
 ]
 mock-verify = []
 gpu = ["midnight-proofs/gpu"]
+trace-msm = ["midnight-proofs/trace-msm"]
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
@@ -25,9 +26,9 @@ storage = { path = "../storage", package = "midnight-storage" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
-midnight-curves = { path = "../midnight-zk/curves" }
-midnight-proofs = { path = "../midnight-zk/proofs" }
-midnight-circuits = { path = "../midnight-zk/circuits" }
+midnight-curves = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2" }
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2" }
+midnight-circuits = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2" }
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 

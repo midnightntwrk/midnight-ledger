@@ -23,11 +23,6 @@ members = [
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
     "static",
-    # midnight-zk workspace members
-    "midnight-zk/proofs",
-    "midnight-zk/curves",
-    "midnight-zk/circuits",
-    "midnight-zk/aggregator",
 ]
 default-members = [
     "zswap",

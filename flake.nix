@@ -51,9 +51,9 @@
           stdenv = pkgs.clangStdenv;
         };
         isDarwin = pkgs.lib.hasSuffix "-darwin" system;
-        # Fetch midnight-zk from its local git repo
+        # Fetch midnight-zk from GitHub
         midnightZkSrc = builtins.fetchGit {
-          url = "/home/ricardo/.dev/midnight-ledger/midnight-zk";
+          url = "https://github.com/riusricardo/midnight-zk";
           ref = "gpu-integration-v5.0.2";
         };
         # Combine the main workspace with midnight-zk

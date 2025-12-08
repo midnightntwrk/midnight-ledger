@@ -60,6 +60,19 @@ struct Args {
 async fn main() -> std::io::Result<()> {
     let args = Args::parse();
     init_logging(args.verbose);
+    
+    // Warmup GPU backend before starting server (if gpu feature enabled)
+    // This avoids ~500-1000ms latency on the first proof request
+    #[cfg(feature = "gpu")]
+    {
+        info!("Initializing GPU backend...");
+        if let Some(duration) = transient_crypto::gpu::warmup_gpu() {
+            info!("GPU backend ready in {:?}", duration);
+        } else {
+            info!("GPU backend not available, using CPU");
+        }
+    }
+    
     if !args.no_fetch_params {
         info!("Ensuring zswap key material is available...");
         let resolver = Resolver::new(

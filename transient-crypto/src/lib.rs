@@ -34,3 +34,13 @@ pub mod merkle_tree;
 pub mod mock_verify;
 pub mod proofs;
 pub mod repr;
+
+/// GPU acceleration support (re-exported from midnight-proofs)
+#[cfg(feature = "gpu")]
+pub mod gpu {
+    //! GPU acceleration for proof generation
+    //! 
+    //! Call `warmup_gpu()` at application startup to avoid first-request latency.
+    
+    pub use midnight_proofs::gpu::{warmup_gpu, is_gpu_available, GPU_SUPPORT, DeviceType, GpuConfig};
+}
