@@ -553,7 +553,18 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
         ctime: Timestamp,
     ) -> Result<(), MalformedTransaction<D>> {
         if strictness.verify_native_proofs {
+            // Debug logging for dust spend proof verification (block 8226 investigation)
+            tracing::debug!(
+                target: "midnight_ledger",
+                "DustSpend::well_formed: segment_id={}, ctime={:?}, v_fee={}, old_nullifier={:x?}, new_commitment={:x?}",
+                segment_id, ctime, self.v_fee, self.old_nullifier.0, self.new_commitment.0
+            );
             state_ref.dust_spend_check(ctime, |params, commitment_root, generation_root| {
+                tracing::debug!(
+                    target: "midnight_ledger",
+                    "DustSpend verification: params={:?}, commitment_root={:x?}, generation_root={:x?}",
+                    params, commitment_root, generation_root
+                );
                 let mut prog = Vec::new();
                 // Check commitment merkle tree root
                 prog.extend::<[Op<ResultModeGather, D>; 6]>(HistoricMerkleTree_check_root!(
@@ -612,12 +623,33 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                P::latest_proof_verify(
+                tracing::debug!(
+                    target: "midnight_ledger",
+                    "DustSpend proof verification: pis_len={}, mode={:?}",
+                    pis.len(), strictness.proof_verification_mode
+                );
+                let result = P::latest_proof_verify(
                     &*SPEND_VK,
                     &self.proof,
                     pis,
                     strictness.proof_verification_mode,
-                )
+                );
+                match &result {
+                    Ok(()) => {
+                        tracing::debug!(
+                            target: "midnight_ledger",
+                            "DustSpend proof verification SUCCEEDED"
+                        );
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            target: "midnight_ledger",
+                            "DustSpend proof verification FAILED: {:?}",
+                            e
+                        );
+                    }
+                }
+                result
             })
         } else {
             Ok(())

@@ -190,6 +190,14 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             .get(ctime)
             .map(|x| x.0)
             .unwrap_or_default();
+
+        // Debug logging for dust proof verification debugging (block 8226 investigation)
+        tracing::debug!(
+            target: "midnight_ledger",
+            "dust_spend_check: ctime={:?}, commitment_root={:x?}, generation_root={:x?}",
+            ctime, commitment_root, generation_root
+        );
+
         check(params, commitment_root, generation_root)
     }
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
