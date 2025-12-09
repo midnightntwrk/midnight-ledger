@@ -26,6 +26,7 @@ use crate::structure::{
     SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
 use crate::utils::{KeySortedIter, SortedIter, sorted};
+use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
@@ -127,6 +128,12 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError>;
+    #[must_use = "return value must be used"]
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError>;
 }
 
 impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
@@ -225,18 +232,40 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError> {
+        self.replay_events_with_changes(secret_keys, events)
+            .map(|w| w.result)
+    }
+
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError> {
         use coin_structure::transfer::SenderEvidence;
 
-        let mut res = events
-            .into_iter()
-            .try_fold(self.clone(), |mut state, event| match &event.content {
+        let mut res = events.into_iter().try_fold(
+            WithZswapStateChanges::new(self.clone()),
+            |mut acc, event| match &event.content {
                 EventDetails::ZswapInput {
                     nullifier,
                     contract: None,
                 } => {
-                    state.coins = state.coins.remove(nullifier);
-                    state.pending_spends = state.pending_spends.remove(nullifier);
-                    Ok(state)
+                    let maybe_change = if acc.result.coins.contains_key(nullifier) {
+                        acc.result
+                            .coins
+                            .get(nullifier)
+                            .map(|qci| ZswapStateChanges {
+                                received_coins: vec![],
+                                spent_coins: vec![*qci],
+                                source: event.source.transaction_hash,
+                            })
+                    } else {
+                        None
+                    };
+                    acc.result.coins = acc.result.coins.remove(nullifier);
+                    acc.result.pending_spends = acc.result.pending_spends.remove(nullifier);
+
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 EventDetails::ZswapOutput {
                     commitment,
@@ -244,37 +273,55 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     mt_index,
                     ..
                 } => {
-                    if *mt_index != state.first_free {
+                    if *mt_index != acc.result.first_free {
                         return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.first_free,
+                            expected_next: acc.result.first_free,
                             received: *mt_index,
                             tree_name: "zswap commitment",
                         });
                     }
-                    state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
-                    state.first_free += 1;
-                    if let Some(ci) = state.pending_outputs.get(commitment) {
+                    acc.result.merkle_tree =
+                        acc.result
+                            .merkle_tree
+                            .update_hash(*mt_index, commitment.0, ());
+                    acc.result.first_free += 1;
+                    let maybe_change = if let Some(ci) = acc.result.pending_outputs.get(commitment)
+                    {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
                         let qci = ci.qualify(*mt_index);
-                        state.pending_outputs = state.pending_outputs.remove(commitment);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.pending_outputs = acc.result.pending_outputs.remove(commitment);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
                         let qci = ci.qualify(*mt_index);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else {
-                        state.merkle_tree = state.merkle_tree.collapse(*mt_index, *mt_index);
-                    }
-                    Ok(state)
+                        acc.result.merkle_tree =
+                            acc.result.merkle_tree.collapse(*mt_index, *mt_index);
+                        None
+                    };
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 #[allow(unreachable_patterns)]
-                _ => Ok(state),
-            })?;
-        res.merkle_tree = res.merkle_tree.rehash();
+                _ => Ok(acc),
+            },
+        )?;
+        res.result.merkle_tree = res.result.merkle_tree.rehash();
+
         Ok(res)
     }
 }
