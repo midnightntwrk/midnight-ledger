@@ -18,7 +18,8 @@ use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
+    UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
@@ -1326,6 +1327,71 @@ pub struct DustLocalState<D: DB> {
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 
+#[derive(Clone)]
+pub struct DustStateChanges {
+    pub received_utxos: Vec<QualifiedDustOutput>,
+    pub spent_utxos: Vec<QualifiedDustOutput>,
+    pub source: TransactionHash,
+}
+
+impl DustStateChanges {
+    pub fn can_merge(&self, other: &DustStateChanges) -> bool {
+        self.source == other.source
+    }
+
+    pub fn merge(&mut self, other: DustStateChanges) {
+        self.received_utxos.extend(other.received_utxos);
+        self.spent_utxos.extend(other.spent_utxos);
+    }
+}
+
+pub struct WithDustStateChanges<T> {
+    pub changes: Vec<DustStateChanges>,
+    pub result: T,
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn new(result: T) -> WithDustStateChanges<T> {
+        WithDustStateChanges {
+            changes: Vec::new(),
+            result,
+        }
+    }
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn add_change(mut self, change: DustStateChanges) -> Self {
+        if let Some(last_change) = self.changes.last_mut() {
+            if last_change.can_merge(&change) {
+                last_change.merge(change);
+            } else {
+                self.changes.push(change);
+            }
+        } else {
+            self.changes.push(change);
+        }
+
+        WithDustStateChanges {
+            changes: self.changes,
+            result: self.result,
+        }
+    }
+
+    pub fn maybe_add_change(self, maybe_change: Option<DustStateChanges>) -> Self {
+        match maybe_change {
+            Some(change) => self.add_change(change),
+            None => self,
+        }
+    }
+
+    pub fn with_result(self, result: T) -> Self {
+        WithDustStateChanges {
+            changes: self.changes,
+            result,
+        }
+    }
+}
+
 impl<D: DB> DustLocalState<D> {
     pub fn new(params: DustParameters) -> Self {
         DustLocalState {
@@ -1548,165 +1614,200 @@ impl<D: DB> DustLocalState<D> {
         sk: &DustSecretKey,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError> {
+        self.replay_events_with_changes(sk, events)
+            .map(|w| w.result)
+    }
+
+    pub fn replay_events_with_changes<'a>(
+        &self,
+        sk: &DustSecretKey,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithDustStateChanges<Self>, EventReplayError> {
         let pk = DustPublicKey::from(sk.clone());
         let (mut res, gen_collapses) = events.into_iter().try_fold(
-            ((*self).clone(), Vec::new()),
-            |(mut state, mut gen_collapses), event| match &event.content {
-                EventDetails::DustInitialUtxo {
-                    output,
-                    generation,
-                    generation_index,
-                    block_time,
-                } => {
-                    if *generation_index != state.generating_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.generating_tree_first_free,
-                            received: *generation_index,
-                            tree_name: "dust generation",
-                        });
-                    }
-                    state.generating_tree = state.generating_tree.update_hash(
-                        *generation_index,
-                        generation.merkle_hash(),
-                        *generation,
-                    );
-                    state.generating_tree_first_free += 1;
-                    if output.mt_index != state.commitment_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.commitment_tree_first_free,
-                            received: output.mt_index,
-                            tree_name: "dust commitment",
-                        });
-                    }
-                    state.commitment_tree = state.commitment_tree.update_hash(
-                        output.mt_index,
-                        output.commitment().into(),
-                        (),
-                    );
-                    state.commitment_tree_first_free += 1;
-                    if pk == output.owner {
-                        state.night_indices = state
-                            .night_indices
-                            .insert(output.backing_night, *generation_index);
-                        state.dust_utxos = state.dust_utxos.insert(
-                            output.nullifier(sk),
-                            DustWalletUtxoState {
-                                utxo: *output,
-                                pending_until: None,
-                            },
+            (WithDustStateChanges::new((*self).clone()), Vec::new()),
+            |(mut acc, mut gen_collapses), event| {
+                let maybe_change = match &event.content {
+                    EventDetails::DustInitialUtxo {
+                        output,
+                        generation,
+                        generation_index,
+                        block_time,
+                    } => {
+                        if *generation_index != acc.result.generating_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.generating_tree_first_free,
+                                received: *generation_index,
+                                tree_name: "dust generation",
+                            });
+                        }
+                        acc.result.generating_tree = acc.result.generating_tree.update_hash(
+                            *generation_index,
+                            generation.merkle_hash(),
+                            *generation,
                         );
-                    } else {
-                        // Carry out generation collapses *after* applying all the events,
-                        // because otherwise we might not have information around to process
-                        // partial dtime updates due to these only being rehashed on block
-                        // boundaries.
-                        gen_collapses.push(*generation_index);
-                        state.commitment_tree = state
-                            .commitment_tree
-                            .collapse(output.mt_index, output.mt_index);
-                    }
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
-                    }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::ParamChange(params) => {
-                    state.params = params.dust;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::DustSpendProcessed {
-                    commitment,
-                    commitment_index,
-                    nullifier,
-                    v_fee,
-                    declared_time,
-                    block_time,
-                } => {
-                    if *commitment_index != state.commitment_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.commitment_tree_first_free,
-                            received: *commitment_index,
-                            tree_name: "dust commitment",
-                        });
-                    }
-                    state.commitment_tree = state.commitment_tree.update_hash(
-                        *commitment_index,
-                        (*commitment).into(),
-                        (),
-                    );
-                    state.commitment_tree_first_free += 1;
-                    if let Some(utxo) = state.dust_utxos.get(nullifier) {
-                        if let Some(gen_idx) = state.night_indices.get(&utxo.utxo.backing_night) {
-                            let gen_info = state.generating_tree.index(*gen_idx).unwrap().1;
-                            let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
-                                gen_info,
-                                *declared_time,
-                                &self.params,
-                            );
-                            let v_now = v_pre_spend.saturating_sub(*v_fee);
-                            state.dust_utxos = state.dust_utxos.remove(nullifier);
-                            let qdo_new = QualifiedDustOutput {
-                                backing_night: utxo.utxo.backing_night,
-                                ctime: *declared_time,
-                                initial_value: v_now,
-                                seq: utxo.utxo.seq + 1,
-                                nonce: transient_hash(
-                                    (utxo.utxo.backing_night, utxo.utxo.seq + 1, sk.0)
-                                        .field_vec()
-                                        .as_ref(),
-                                ),
-                                owner: utxo.utxo.owner,
-                                mt_index: *commitment_index,
-                            };
-                            state.dust_utxos = state.dust_utxos.insert(
-                                qdo_new.nullifier(sk),
+                        acc.result.generating_tree_first_free += 1;
+                        if output.mt_index != acc.result.commitment_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.commitment_tree_first_free,
+                                received: output.mt_index,
+                                tree_name: "dust commitment",
+                            });
+                        }
+                        acc.result.commitment_tree = acc.result.commitment_tree.update_hash(
+                            output.mt_index,
+                            output.commitment().into(),
+                            (),
+                        );
+                        acc.result.commitment_tree_first_free += 1;
+                        let maybe_change = if pk == output.owner {
+                            acc.result.night_indices = acc
+                                .result
+                                .night_indices
+                                .insert(output.backing_night, *generation_index);
+                            acc.result.dust_utxos = acc.result.dust_utxos.insert(
+                                output.nullifier(sk),
                                 DustWalletUtxoState {
-                                    utxo: qdo_new,
+                                    utxo: *output,
                                     pending_until: None,
                                 },
                             );
+                            Some(DustStateChanges {
+                                received_utxos: vec![*output],
+                                spent_utxos: vec![],
+                                source: event.source.transaction_hash,
+                            })
                         } else {
-                            error!("Unable to find backing NIGHT");
+                            // Carry out generation collapses *after* applying all the events,
+                            // because otherwise we might not have information around to process
+                            // partial dtime updates due to these only being rehashed on block
+                            // boundaries.
+                            gen_collapses.push(*generation_index);
+                            acc.result.commitment_tree = acc
+                                .result
+                                .commitment_tree
+                                .collapse(output.mt_index, output.mt_index);
+                            None
+                        };
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
                         }
-                    } else {
-                        state.commitment_tree = state
-                            .commitment_tree
-                            .collapse(*commitment_index, *commitment_index);
+                        acc.result.sync_time = *block_time;
+                        maybe_change
                     }
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
+                    EventDetails::ParamChange(params) => {
+                        acc.result.params = params.dust;
+                        None
                     }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::DustGenerationDtimeUpdate { update, block_time } => {
-                    debug_assert!(update.path.iter().all(|entry| entry.hash.is_some()));
-                    state.generating_tree =
-                        state.generating_tree.update_from_evidence(update.clone())?;
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
+                    EventDetails::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        declared_time,
+                        block_time,
+                    } => {
+                        if *commitment_index != acc.result.commitment_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.commitment_tree_first_free,
+                                received: *commitment_index,
+                                tree_name: "dust commitment",
+                            });
+                        }
+                        acc.result.commitment_tree = acc.result.commitment_tree.update_hash(
+                            *commitment_index,
+                            (*commitment).into(),
+                            (),
+                        );
+                        acc.result.commitment_tree_first_free += 1;
+                        let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)
+                        {
+                            if let Some(gen_idx) =
+                                acc.result.night_indices.get(&utxo.utxo.backing_night)
+                            {
+                                let gen_info =
+                                    acc.result.generating_tree.index(*gen_idx).unwrap().1;
+                                let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
+                                    gen_info,
+                                    *declared_time,
+                                    &acc.result.params,
+                                );
+                                let v_now = v_pre_spend.saturating_sub(*v_fee);
+                                let spent_utxo = utxo.utxo;
+                                acc.result.dust_utxos = acc.result.dust_utxos.remove(nullifier);
+                                let qdo_new = QualifiedDustOutput {
+                                    backing_night: spent_utxo.backing_night,
+                                    ctime: *declared_time,
+                                    initial_value: v_now,
+                                    seq: spent_utxo.seq + 1,
+                                    nonce: transient_hash(
+                                        (spent_utxo.backing_night, spent_utxo.seq + 1, sk.0)
+                                            .field_vec()
+                                            .as_ref(),
+                                    ),
+                                    owner: spent_utxo.owner,
+                                    mt_index: *commitment_index,
+                                };
+                                acc.result.dust_utxos = acc.result.dust_utxos.insert(
+                                    qdo_new.nullifier(sk),
+                                    DustWalletUtxoState {
+                                        utxo: qdo_new,
+                                        pending_until: None,
+                                    },
+                                );
+                                Some(DustStateChanges {
+                                    received_utxos: vec![qdo_new],
+                                    spent_utxos: vec![spent_utxo],
+                                    source: event.source.transaction_hash,
+                                })
+                            } else {
+                                error!("Unable to find backing NIGHT");
+                                None
+                            }
+                        } else {
+                            acc.result.commitment_tree = acc
+                                .result
+                                .commitment_tree
+                                .collapse(*commitment_index, *commitment_index);
+                            None
+                        };
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
+                        }
+                        acc.result.sync_time = *block_time;
+                        maybe_change
                     }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                _ => Ok((state, gen_collapses)),
+                    EventDetails::DustGenerationDtimeUpdate { update, block_time } => {
+                        debug_assert!(update.path.iter().all(|entry| entry.hash.is_some()));
+                        acc.result.generating_tree = acc
+                            .result
+                            .generating_tree
+                            .update_from_evidence(update.clone())?;
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
+                        }
+                        acc.result.sync_time = *block_time;
+                        None
+                    }
+                    _ => None,
+                };
+                Ok((acc.maybe_add_change(maybe_change), gen_collapses))
             },
         )?;
         for collapse in gen_collapses {
-            res.generating_tree = res.generating_tree.collapse(collapse, collapse);
+            res.result.generating_tree = res.result.generating_tree.collapse(collapse, collapse);
         }
-        res.commitment_tree = res.commitment_tree.rehash();
-        res.generating_tree = res.generating_tree.rehash();
+        res.result.commitment_tree = res.result.commitment_tree.rehash();
+        res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
     }
 }

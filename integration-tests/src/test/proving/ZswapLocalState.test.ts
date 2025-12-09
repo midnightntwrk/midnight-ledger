@@ -19,10 +19,12 @@ import {
   ZswapSecretKeys,
   LedgerState,
   TransactionContext,
-  WellFormedStrictness
+  WellFormedStrictness,
+  ZswapOffer,
+  ZswapOutput
 } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { Static } from '@/test-objects';
+import { Static, getQualifiedShieldedCoinInfo } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess } from '@/test-utils';
 
@@ -156,6 +158,51 @@ describe.concurrent('Ledger API - ZswapLocalStateX [@slow][@proving]', () => {
 
     expect(localStateAfter.toString()).not.toEqual(localState.toString());
     expect(localStateAfter.firstFree).toEqual(1n);
+    assertSerializationSuccess(localStateAfter);
+  });
+
+  /**
+   * Test replayEventsWithChanges with proven transactions.
+   *
+   * @given A ZswapLocalState and a proven transaction that receives coins
+   * @when Replaying events with changes on the transaction
+   * @then Should track and confirm received coins in changes, and update local state correctly
+   */
+  test('replayEventsWithChanges', async () => {
+    const localState = new ZswapLocalState();
+    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const coinInfo = Static.shieldedCoinInfo(10n);
+    const qualifiedCoinInfo = getQualifiedShieldedCoinInfo(coinInfo);
+    const unprovenOffer = ZswapOffer.fromOutput(
+      ZswapOutput.new(coinInfo, 0, secretKeys.coinPublicKey, secretKeys.encryptionPublicKey),
+      coinInfo.type,
+      coinInfo.value
+    );
+    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOffer);
+    const transaction = await prove(unprovenTransaction);
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+    const verifiedTransaction = transaction.wellFormed(ledgerState, strictness, new Date(0));
+
+    const transactionContext = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
+    const res = ledgerState.apply(verifiedTransaction, transactionContext)[1];
+    console.log(res.toString());
+    expect(res.type).toEqual('success');
+    const { events } = res;
+    const withChanges = localState.replayEventsWithChanges(secretKeys, events);
+    const localStateAfter = withChanges.state;
+
+    expect(localStateAfter.toString()).not.toEqual(localState.toString());
+    expect(localStateAfter.firstFree).toEqual(1n);
+
+    // Verify state changes - should have received coins but no spent coins
+    expect(withChanges.changes.length).toBeGreaterThan(0);
+    const allReceivedCoins = withChanges.changes.flatMap((change) => change.receivedCoins);
+    const allSpentCoins = withChanges.changes.flatMap((change) => change.spentCoins);
+
+    expect(allReceivedCoins).toEqual([qualifiedCoinInfo]);
+    expect(allSpentCoins.length).toEqual(0);
+
     assertSerializationSuccess(localStateAfter);
   });
 });
