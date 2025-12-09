@@ -18,6 +18,7 @@ pub mod crypto;
 pub mod dust;
 pub mod intent;
 pub mod state;
+pub mod state_changes;
 pub mod transcript;
 pub mod tx;
 pub mod unshielded;
