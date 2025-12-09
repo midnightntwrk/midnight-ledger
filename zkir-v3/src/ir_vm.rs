@@ -683,11 +683,9 @@ impl Relation for IrSource {
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) {
-                        if *expected != **v {
-                            error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
-                            return true;
-                        }
+                    if let Some(expected) = preproc.memory.get(&id) && *expected != **v  {
+                        error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
+                        return true;
                     }
                     false
                 })?;

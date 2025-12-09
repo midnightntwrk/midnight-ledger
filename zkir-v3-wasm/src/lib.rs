@@ -24,7 +24,6 @@ use transient_crypto::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use zkir_v3;
 
 struct JsKeyProvider(JsValue);
 
@@ -40,7 +39,7 @@ fn try_to_string(jsv: JsValue) -> String {
 }
 
 fn err(msg: impl Into<String>) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
+    std::io::Error::other(msg.into())
 }
 
 impl ParamsProverProvider for JsKeyProvider {

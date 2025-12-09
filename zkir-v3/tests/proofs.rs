@@ -25,7 +25,6 @@ mod proof_tests {
     use transient_crypto::curve::EmbeddedGroupAffine;
     use transient_crypto::hash::transient_hash;
     #[cfg(feature = "proptest")]
-    use transient_crypto::proofs::Proof;
     use transient_crypto::proofs::{
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,

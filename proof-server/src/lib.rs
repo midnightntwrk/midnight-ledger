@@ -46,7 +46,6 @@ use transient_crypto::proofs::{
 };
 use worker_pool::{JobStatus, WorkError, WorkerPool};
 use zkir as zkir_v2;
-use zkir_v3;
 use zswap::prove::ZswapResolver;
 
 pub mod worker_pool;
@@ -273,6 +272,8 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
         Option<ProvingKeyMaterial>,
         Option<Fr>,
     ) = tagged_deserialize(&request[..]).map_err(ErrorBadRequest)?;
+
+    let data_resolver = data.clone();
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
@@ -290,7 +291,9 @@ async fn prove(pool: Data<Arc<WorkerPool>>, payload: Payload) -> Result<HttpResp
                         )
                         .expect("data provider initialization failed"),
                     ),
-                    Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(data.clone())))),
+                    Box::new(move |_: KeyLocation| {
+                        Box::pin(std::future::ready(Ok(data_resolver.clone())))
+                    }),
                 );
                 let proof = match ppi {
                     ProofPreimageVersioned::V1(mut ppi) => {
