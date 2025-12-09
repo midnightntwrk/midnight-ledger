@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
+use crate::state_changes::DustStateChanges;
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
@@ -1252,6 +1253,29 @@ impl DustSecretKey {
 }
 
 #[wasm_bindgen]
+pub struct DustLocalStateWithChanges {
+    pub(crate) inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+}
+
+#[wasm_bindgen]
+impl DustLocalStateWithChanges {
+    #[wasm_bindgen(getter)]
+    pub fn state(&self) -> DustLocalState {
+        DustLocalState(self.inner.result.clone())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn changes(&self) -> Vec<DustStateChanges> {
+        self.inner
+            .changes
+            .iter()
+            .cloned()
+            .map(DustStateChanges::from)
+            .collect()
+    }
+}
+
+#[wasm_bindgen]
 #[derive(Debug)]
 pub struct DustLocalState(pub(crate) LedgerDustLocalState<InMemoryDB>);
 
@@ -1313,10 +1337,13 @@ impl DustLocalState {
         &self,
         sk: &DustSecretKey,
         events: Vec<Event>,
-    ) -> Result<DustLocalState, JsError> {
+    ) -> Result<DustLocalStateWithChanges, JsError> {
         let sk = sk.try_unwrap()?;
         let events = events.iter().map(|event| &event.0);
-        Ok(DustLocalState(self.0.replay_events(&sk, events)?))
+        let with_changes = self.0.replay_events(&sk, events)?;
+        Ok(DustLocalStateWithChanges {
+            inner: with_changes,
+        })
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
