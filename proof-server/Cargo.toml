@@ -6,6 +6,7 @@ version.workspace = true
 
 [features]
 default = []
+experimental = []
 
 [dependencies]
 ledger = { path = "../ledger", package = "midnight-ledger", default-features = false, features = ["proving"] }
