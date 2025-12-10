@@ -18,7 +18,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 
-derive-where = "^1.5.0"
+derive-where = "^1.6.0"
 enum_index = "^0.2.0"
 enum_index_derive = "^0.2.0"
 
