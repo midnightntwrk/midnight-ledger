@@ -6081,6 +6081,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-transient-crypto",
  "paste",
+ "pastey",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",

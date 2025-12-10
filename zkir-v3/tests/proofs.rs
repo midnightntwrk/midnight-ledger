@@ -24,6 +24,7 @@ mod proof_tests {
     use std::io::BufReader;
     use transient_crypto::curve::EmbeddedGroupAffine;
     use transient_crypto::hash::transient_hash;
+    use transient_crypto::proofs::Proof;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::{
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
