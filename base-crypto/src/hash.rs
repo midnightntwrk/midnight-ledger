@@ -29,7 +29,6 @@ use zeroize::Zeroize;
 pub const PERSISTENT_HASH_BYTES: usize = 32;
 
 /// A wrapper around hash outputs.
-#[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(
     Copy,
     Clone,

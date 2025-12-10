@@ -52,7 +52,6 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
-    #[allow(clippy::unbuffered_bytes)]
     let count = reader.bytes().count();
 
     if count == 0 {
