@@ -14,8 +14,8 @@
 use crate::dust::DustParameters;
 use crate::error::MalformedContractDeploy;
 use crate::error::{
-    BalanceOperation, DisjointCheckError, EffectsCheckError, MalformedTransaction,
-    SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
+    BalanceOperation, ContractCallReference, DisjointCheckError, EffectsCheckError,
+    MalformedTransaction, SequencingCheckError, SubsetCheckFailure, TransactionApplicationError,
 };
 use crate::primitive::MultiSet;
 use crate::structure::{
@@ -970,11 +970,17 @@ fn sequencing_correlation_check<D: DB>(
     Ok(())
 }
 
+// Type alias for mapping contract call keys to a list of call nodes and their context.
+// The key (`CallKey`) uniquely identifies a contract call (address, entrypoint hash, commitment).
+// The value is a vector of tuples, each containing a `CallNode` (with segment, address, and index)
+// and a boolean indicating whether the call is in a guaranteed context (`true`) or fallible context (`false`).
+type CallNodeMap = std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>;
+
 fn sequencing_context_check<P: ProofKind<D>, D: DB>(
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
     calls_in_intent: std::collections::HashMap<u32, &ContractCall<P, D>>,
-    callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>,
+    callers_for_addr: CallNodeMap,
 ) -> Result<(), MalformedTransaction<D>> {
     // If a calls `b`, `b` must be contained within the 'lifetime' of the
     // call instruction in `a`.
@@ -1047,10 +1053,9 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
     calls_in_intent: &std::collections::HashMap<u32, &ContractCall<P, D>>,
-) -> Result<std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>, MalformedTransaction<D>> {
+) -> Result<CallNodeMap, MalformedTransaction<D>> {
     // A map from (address, entry_point_hash, commitment) to caller nodes (+ guaranteed flag)
-    let mut callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>> =
-        std::collections::HashMap::new();
+    let mut callers_for_addr: CallNodeMap = std::collections::HashMap::new();
 
     for (cid, call) in calls_in_intent {
         let this_node: CallNode = CallNode {
@@ -1535,7 +1540,7 @@ impl<
                 }),
             ));
         }
-        let claimed_calls: MultiSet<(u16, (ContractAddress, HashOutput, Fr))> = transcripts
+        let claimed_calls: MultiSet<ContractCallReference> = transcripts
             .iter()
             .flat_map(|(segment, _, t, _)| {
                 t.effects.claimed_contract_calls.iter().map(|call| {
@@ -1545,12 +1550,11 @@ impl<
             })
             .collect();
 
-        let duplicate_claimed_calls: Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)> =
-            claimed_calls
-                .clone()
-                .into_iter()
-                .filter(|(_, count)| count > &1)
-                .collect();
+        let duplicate_claimed_calls: Vec<(ContractCallReference, usize)> = claimed_calls
+            .clone()
+            .into_iter()
+            .filter(|(_, count)| count > &1)
+            .collect();
 
         if !(duplicate_claimed_calls.is_empty()) {
             return Err(MalformedTransaction::EffectsCheckFailure(
@@ -1558,7 +1562,7 @@ impl<
             ));
         }
 
-        let real_calls: MultiSet<(u16, (ContractAddress, HashOutput, Fr))> = calls
+        let real_calls: MultiSet<ContractCallReference> = calls
             .iter()
             .map(|(segment, call)| {
                 (
@@ -1580,57 +1584,61 @@ impl<
                 }),
             ));
         }
-        let claimed_unshielded_spends: MultiSet<((u16, bool), ((TokenType, PublicAddress), u128))> =
-            transcripts
-                .iter()
-                .flat_map(|(intent_seg, logical_seg, t, _)| {
-                    t.effects.claimed_unshielded_spends.iter().map(|sp| {
-                        let (sp, i) = sp.deref();
-                        (
-                            (**intent_seg, **logical_seg == 0),
-                            ((sp.deref().0, sp.deref().1), *(*i).deref()),
-                        )
-                    })
+
+        // Type alias for a tuple representing a contract call with metadata and value.
+        // The outer tuple holds a segment ID and a boolean indicating a special property (e.g., guaranteed or fallible context).
+        // The inner tuple contains a token type and public address (identifying the asset and recipient), along with a value (u128) representing the amount.
+        // This structure is useful for tracking contract calls, their context, and associated asset transfers.
+        type ContractCallInfo = ((u16, bool), ((TokenType, PublicAddress), u128));
+        let claimed_unshielded_spends: MultiSet<ContractCallInfo> = transcripts
+            .iter()
+            .flat_map(|(intent_seg, logical_seg, t, _)| {
+                t.effects.claimed_unshielded_spends.iter().map(|sp| {
+                    let (sp, i) = sp.deref();
+                    (
+                        (**intent_seg, **logical_seg == 0),
+                        ((sp.deref().0, sp.deref().1), *(*i).deref()),
+                    )
                 })
-                .collect();
-        let real_unshielded_spends: MultiSet<((u16, bool), ((TokenType, PublicAddress), u128))> =
-            transcripts
-                .iter()
-                .flat_map(|(intent_seg, logical_seg, t, addr)| {
-                    t.effects.unshielded_inputs.iter().map(move |sp| {
+            })
+            .collect();
+        let real_unshielded_spends: MultiSet<ContractCallInfo> = transcripts
+            .iter()
+            .flat_map(|(intent_seg, logical_seg, t, addr)| {
+                t.effects.unshielded_inputs.iter().map(move |sp| {
+                    (
+                        (**intent_seg, **logical_seg == 0),
                         (
-                            (**intent_seg, **logical_seg == 0),
+                            (*sp.deref().0.deref(), PublicAddress::Contract(*addr)),
+                            *sp.deref().1.deref(),
+                        ),
+                    )
+                })
+            })
+            .chain(self.intents.iter().flat_map(|sp| {
+                let intent = &sp.clone().1;
+                let segment = *sp.0;
+                let guaranteed_outputs = intent.guaranteed_outputs();
+                let fallible_outputs = intent.fallible_outputs();
+                guaranteed_outputs
+                    .iter()
+                    .map(|o| (true, o))
+                    .chain(fallible_outputs.iter().map(|o| (false, o)))
+                    .map(move |(guaranteed, output)| {
+                        (
+                            (segment, guaranteed),
                             (
-                                (*sp.deref().0.deref(), PublicAddress::Contract(*addr)),
-                                *sp.deref().1.deref(),
+                                (
+                                    TokenType::Unshielded(output.type_),
+                                    PublicAddress::User(output.owner),
+                                ),
+                                output.value,
                             ),
                         )
                     })
-                })
-                .chain(self.intents.iter().flat_map(|sp| {
-                    let intent = &sp.clone().1;
-                    let segment = *sp.0;
-                    let guaranteed_outputs = intent.guaranteed_outputs();
-                    let fallible_outputs = intent.fallible_outputs();
-                    guaranteed_outputs
-                        .iter()
-                        .map(|o| (true, o))
-                        .chain(fallible_outputs.iter().map(|o| (false, o)))
-                        .map(move |(guaranteed, output)| {
-                            (
-                                (segment, guaranteed),
-                                (
-                                    (
-                                        TokenType::Unshielded(output.type_),
-                                        PublicAddress::User(output.owner),
-                                    ),
-                                    output.value,
-                                ),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                }))
-                .collect();
+                    .collect::<Vec<_>>()
+            }))
+            .collect();
 
         if !(real_unshielded_spends.has_subset(&claimed_unshielded_spends)) {
             return Err(MalformedTransaction::EffectsCheckFailure(

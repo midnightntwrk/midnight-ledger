@@ -86,19 +86,17 @@ impl transient_crypto::proofs::Resolver for Resolver {
     }
 }
 
+// A yet unproven Intent with a PedersenRandomness
+pub(crate) type UnprovenIntent<S, D> = Intent<S, ProofPreimageMarker, PedersenRandomness, D>;
+// A proven Intent with a PedersenRandomness
+type ProvenIntent<S, D> = Intent<S, ProofMarker, PedersenRandomness, D>;
+
 #[instrument(skip(prover, cost_model))]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
-    intents: &storage::storage::HashMap<
-        u16,
-        Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-        D,
-    >,
+    intents: &storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
     mut prover: impl ProvingProvider,
     cost_model: &CostModel,
-) -> Result<
-    storage::storage::HashMap<u16, Intent<S, ProofMarker, PedersenRandomness, D>, D>,
-    ProvingError,
-> {
+) -> Result<storage::storage::HashMap<u16, ProvenIntent<S, D>, D>, ProvingError> {
     let res = join_all(intents.iter().map(|seg_x_intent| {
         let split_prover = prover.split();
         async move {
@@ -192,7 +190,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
-impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomness, D> {
+impl<S: SignatureKind<D>, D: DB> UnprovenIntent<S, D> {
     #[instrument(skip(self, prover, cost_model))]
     #[allow(clippy::type_complexity)]
     pub async fn prove(
@@ -200,7 +198,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         segment_id: u16,
         mut prover: impl ProvingProvider,
         cost_model: &CostModel,
-    ) -> Result<(u16, Intent<S, ProofMarker, PedersenRandomness, D>), ProvingError> {
+    ) -> Result<(u16, ProvenIntent<S, D>), ProvingError> {
         let actions =
             join_all(self.actions.iter_deref().map(|call| {
                 call.prove(prover.split(), self.binding_commitment.into(), cost_model)
