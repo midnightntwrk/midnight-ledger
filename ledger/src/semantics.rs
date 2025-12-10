@@ -423,7 +423,7 @@ impl<D: DB> LedgerState<D> {
         tx: &SystemTransaction,
         tblock: Timestamp,
     ) -> Result<MaybeEvents<D>, SystemTransactionError> {
-        match tx {
+        let res = match tx {
             SystemTransaction::OverwriteParameters(new_params) => {
                 if new_params.cardano_to_midnight_bridge_fee_basis_points > 10_000 {
                     return Err(SystemTransactionError::InvalidBasisPoints(
@@ -556,7 +556,7 @@ impl<D: DB> LedgerState<D> {
 
                 state.check_night_balance_invariant()?;
 
-                return Ok((state, vec![]));
+                Ok((state, vec![]))
             }
             SystemTransaction::PayBlockRewardsToTreasury { amount } => {
                 if *amount > self.block_reward_pool {
@@ -822,9 +822,29 @@ impl<D: DB> LedgerState<D> {
 
                 new_st.check_night_balance_invariant()?;
 
-                return Ok((new_st, vec![]));
+                Ok((new_st, vec![]))
+            }
+        };
+        match &res {
+            Ok(res) => {
+                debug!(
+                    "state transition: {:?} => {:?} [system transaction {:?}]",
+                    self.state_hash(),
+                    res.0.state_hash(),
+                    tx.transaction_hash().0
+                );
+                trace!(?tx, "system transaction details");
+            }
+            Err(e) => {
+                debug!(
+                    "system transaction rejection from state {:?} (system transaction {:?}): {e}",
+                    self.state_hash(),
+                    tx.transaction_hash().0
+                );
+                trace!(?tx, "system transaction details");
             }
         }
+        res
     }
 
     #[instrument(skip(self, tx, context))]
@@ -1111,7 +1131,7 @@ impl<D: DB> LedgerState<D> {
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        match &tx.0 {
+        let res = match &tx.0 {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
@@ -1157,7 +1177,19 @@ impl<D: DB> LedgerState<D> {
                     physical_segment: 0,
                 },
             ),
-        }
+        };
+        debug!(
+            "state transition: {:?} => {:?} [transaction {:?}]",
+            self.state_hash(),
+            res.0.state_hash(),
+            tx.transaction_hash().0
+        );
+        debug!(
+            "transaction result: {:?}",
+            ErasedTransactionResult::from(&res.1)
+        );
+        trace!(?tx, "transaction details");
+        res
     }
 
     fn apply_actions<P: ProofKind<D>>(
@@ -1329,15 +1361,26 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[must_use]
+    #[instrument(skip(self))]
     pub fn post_block_update(
         &self,
         tblock: Timestamp,
         block_fullness: SyntheticCost,
     ) -> Result<Self, BlockLimitExceeded> {
         let mut new_st = self.clone();
-        let block_fullness = block_fullness
+        let block_fullness = match block_fullness
             .normalize(self.parameters.limits.block_limits)
-            .ok_or(BlockLimitExceeded)?;
+            .ok_or(BlockLimitExceeded)
+        {
+            Ok(x) => x,
+            Err(e) => {
+                debug!(
+                    "post block update rejection at state {:?}: {e}",
+                    self.state_hash()
+                );
+                return Err(e);
+            }
+        };
         let fee_prices = self.parameters.fee_prices.update_from_fullness(
             block_fullness,
             self.parameters.cost_dimension_min_ratio,
@@ -1353,6 +1396,11 @@ impl<D: DB> LedgerState<D> {
             new_st
                 .dust
                 .post_block_update(tblock, self.parameters.global_ttl),
+        );
+        debug!(
+            "state transition: {:?} => {:?} [post block update]",
+            self.state_hash(),
+            new_st.state_hash()
         );
         Ok(new_st)
     }

@@ -2896,6 +2896,10 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
+    pub fn state_hash(&self) -> ArenaKey<D::Hasher> {
+        Sp::new(self.clone()).hash().into()
+    }
+
     pub fn index(&self, address: ContractAddress) -> Option<ContractState<D>> {
         self.contract.get(&address).cloned()
     }
