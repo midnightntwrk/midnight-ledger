@@ -18,7 +18,7 @@ def build_graph(log_path):
 
 def longest_path(graph):
     parents = defaultdict(list)
-    for (node, children) in graph.items():
+    for node, children in graph.items():
         for child in children:
             parents[child].append(node)
     genesis_points = [key for key in graph.keys() if len(parents[key]) == 0]
@@ -28,8 +28,8 @@ def longest_path(graph):
     frontier = genesis_points
     while len(frontier) != 0:
         curr = frontier.pop()
-        next = graph[curr]
-        for node in next:
+        nxt = graph[curr]
+        for node in nxt:
             new_dist = dists[curr][0] + 1
             if new_dist < dists[node][0]:
                 dists[node] = (new_dist, curr)
@@ -38,25 +38,21 @@ def longest_path(graph):
 
     curr = end
     path = []
-    while curr:
+    while curr is not None:
         path.append(curr[0])
-        next = curr[1][1]
-        if next:
-            curr = (next, dists[next])
+        nxt = curr[1][1]
+        if nxt:
+            curr = (nxt, dists[nxt])
         else:
             curr = None
     return list(reversed(path))
 
 def graph2set(graph):
     nodeset = []
-    for (key, values) in graph.items():
+    for key, values in graph.items():
         nodeset.append(key)
         nodeset.extend(values)
     return set(nodeset)
-
-def is_disjoint(graph1, graph2):
-    intersection = graph2set(graph1).intersection(graph2set(graph2))
-    return len(intersection) == 0
 
 def graph_size(graph):
     return len(graph2set(graph))
@@ -69,17 +65,17 @@ if len(sys.argv) != 3:
     print("building a tree graph for both, finding the longest path in both, and")
     print("finding the point these paths diverge")
 else:
-    print("parsing log 1...");
+    print("parsing log 1...")
     graph1 = build_graph(sys.argv[1])
-    print("parsing log 2...");
+    print("parsing log 2...")
     graph2 = build_graph(sys.argv[2])
-    if is_disjoint(graph1, graph2):
+    if graph2set(graph1).isdisjoint(graph2set(graph2)):
         print("graphs are disjoint!")
         print("total entries: {} / {}".format(graph_size(graph1), graph_size(graph2)))
     print("finding longest paths...")
     path1 = longest_path(graph1)
     path2 = longest_path(graph2)
-    (i, j, k) = difflib.SequenceMatcher(a=path1, b=path2).find_longest_match()
+    i, j, k = difflib.SequenceMatcher(a=path1, b=path2).find_longest_match()
     if k == 0:
         print("no common substring on longest paths")
     else:
