@@ -59,7 +59,7 @@ use std::iter::once;
 use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::Storable;
-use storage::arena::{ArenaKey, Sp};
+use storage::arena::{ArenaHash, ArenaKey, Sp};
 use storage::db::DB;
 use storage::db::InMemoryDB;
 use storage::merkle_patricia_trie::Annotation;
@@ -2905,8 +2905,8 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    pub fn state_hash(&self) -> ArenaKey<D::Hasher> {
-        Sp::new(self.clone()).hash().into()
+    pub fn state_hash(&self) -> ArenaHash<D::Hasher> {
+        Sp::new(self.clone()).hash()
     }
 
     pub fn index(&self, address: ContractAddress) -> Option<ContractState<D>> {
