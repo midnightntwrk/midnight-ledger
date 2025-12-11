@@ -2866,7 +2866,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.1.0-alpha.6"
+version = "6.1.0-alpha.6-debug.2"
 dependencies = [
  "anyhow",
  "criterion",
@@ -3029,7 +3029,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.1.0-alpha.6"
+version = "6.1.0-alpha.6-debug.2"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3236,7 +3236,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.1.0-alpha.6"
+version = "6.1.0-alpha.6-debug.2"
 dependencies = [
  "criterion",
  "derive-where",

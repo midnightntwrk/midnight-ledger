@@ -152,7 +152,7 @@ async fn micro_dao_replay() {
 
 #[allow(unused_assignments, clippy::redundant_clone)]
 async fn micro_dao_inner(mode: TestMode) {
-    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x42);
     //rayon::ThreadPoolBuilder::new().use_current_thread().num_threads(1).build_global().unwrap();
     lazy_static::initialize(&PARAMS_VERIFIER);
