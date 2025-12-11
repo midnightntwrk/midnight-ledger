@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
 use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
@@ -445,6 +445,10 @@ pub enum MalformedTransaction<D: DB> {
     },
     InvalidDustRegistrationSignature {
         registration: Box<DustRegistration<(), D>>,
+    },
+    InvalidDustSpendProof {
+        declared_time: Timestamp,
+        dust_spend: Box<DustSpend<(), D>>,
     },
     OutOfDustValidityWindow {
         dust_ctime: Timestamp,
@@ -881,6 +885,13 @@ impl<D: DB> Display for MalformedTransaction<D> {
             InvalidDustRegistrationSignature { registration } => write!(
                 formatter,
                 "failed to verify signature of dust registration: {registration:?}"
+            ),
+            InvalidDustSpendProof {
+                declared_time,
+                dust_spend,
+            } => write!(
+                formatter,
+                "dust spend proof failed to verify; this is just as likely a disagreement on dust state on the declared time ({declared_time:?}) as the proof being invalid: {dust_spend:?}"
             ),
             OutOfDustValidityWindow {
                 dust_ctime,
