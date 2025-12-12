@@ -90,7 +90,20 @@ impl MerkleTreeCollapsedUpdate {
 
 #[wasm_bindgen]
 pub struct ZswapLocalStateWithChanges {
-    pub(crate) inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>,
+    inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>,
+    changes: Vec<ZswapStateChanges>,
+}
+
+impl From<WithZswapStateChanges<zswap::local::State<InMemoryDB>>> for ZswapLocalStateWithChanges {
+    fn from(inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>) -> Self {
+        let changes = inner
+            .changes
+            .iter()
+            .cloned()
+            .map(ZswapStateChanges::from)
+            .collect();
+        ZswapLocalStateWithChanges { inner, changes }
+    }
 }
 
 #[wasm_bindgen]
@@ -102,12 +115,7 @@ impl ZswapLocalStateWithChanges {
 
     #[wasm_bindgen(getter)]
     pub fn changes(&self) -> Vec<ZswapStateChanges> {
-        self.inner
-            .changes
-            .iter()
-            .cloned()
-            .map(ZswapStateChanges::from)
-            .collect()
+        self.changes.clone()
     }
 }
 
@@ -180,9 +188,7 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalStateWithChanges, JsError> {
         let events = events.iter().map(|event| &event.0);
         let with_changes = self.0.replay_events(&secret_keys.try_into()?, events)?;
-        Ok(ZswapLocalStateWithChanges {
-            inner: with_changes,
-        })
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
     pub fn apply(

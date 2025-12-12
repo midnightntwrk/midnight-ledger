@@ -1254,7 +1254,24 @@ impl DustSecretKey {
 
 #[wasm_bindgen]
 pub struct DustLocalStateWithChanges {
-    pub(crate) inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+    inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+    changes: Vec<DustStateChanges>,
+}
+
+impl From<ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>>
+    for DustLocalStateWithChanges
+{
+    fn from(
+        inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+    ) -> Self {
+        let changes = inner
+            .changes
+            .iter()
+            .cloned()
+            .map(DustStateChanges::from)
+            .collect();
+        DustLocalStateWithChanges { inner, changes }
+    }
 }
 
 #[wasm_bindgen]
@@ -1266,12 +1283,7 @@ impl DustLocalStateWithChanges {
 
     #[wasm_bindgen(getter)]
     pub fn changes(&self) -> Vec<DustStateChanges> {
-        self.inner
-            .changes
-            .iter()
-            .cloned()
-            .map(DustStateChanges::from)
-            .collect()
+        self.changes.clone()
     }
 }
 
@@ -1341,9 +1353,7 @@ impl DustLocalState {
         let sk = sk.try_unwrap()?;
         let events = events.iter().map(|event| &event.0);
         let with_changes = self.0.replay_events(&sk, events)?;
-        Ok(DustLocalStateWithChanges {
-            inner: with_changes,
-        })
+        Ok(DustLocalStateWithChanges::from(with_changes))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
