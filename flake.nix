@@ -20,10 +20,12 @@
     fenix.url = "github:nix-community/fenix";
     inclusive.url = "github:input-output-hk/nix-inclusive";
     #compactc = {
-    #  url = "github:midnightntwrk/compactc";
+    #  url = "github:midnightntwrk/compact-export";
     #  inputs.zkir.follows = "zkir";
     #  inputs.onchain-runtime.follows = "";
     #};
+    # Use local path for development instead of fetching from GitHub
+    # Original: url = "github:riusricardo/midnight-ledger/e6e21e6e7173a17a6afcd7aa6471b6c7b29cf070";
     zkir = {
       url = "github:midnightntwrk/midnight-ledger/5a889f79251d6e8689aca0a72d328a84986a9971";
       # Have the self-recursion just be a fixpoint.
@@ -318,7 +320,7 @@
             buildPhase = ''
               mkdir -p zswap/zkir
               mkdir -p zswap/keys
-              cp zkir-precompiles/zswap/* zswap/zkir
+              cp -r zkir-precompiles/zswap/*.zkir zswap/zkir/
               zkir compile-many zswap/zkir zswap/keys
               #compactc --no-communications-commitment zswap/zswap.compact zswap
               for file in zswap/keys/* zswap/zkir/*; do
@@ -326,7 +328,7 @@
               done
               mkdir -p dust/zkir
               mkdir -p dust/keys
-              cp zkir-precompiles/dust/* dust/zkir
+              cp -r zkir-precompiles/dust/*.zkir dust/zkir/
               zkir compile-many dust/zkir dust/keys
               #compactc --no-communications-commitment ledger/dust.compact dust
               for file in dust/keys/* dust/zkir/*; do

@@ -6,6 +6,7 @@ version.workspace = true
 
 [features]
 default = []
+gpu = ["transient-crypto/gpu", "midnight-proofs/gpu", "midnight-proofs/cost-estimator"]
 experimental = ["dep:zkir-v3"]
 
 [dependencies]
@@ -45,6 +46,10 @@ ledger = { path = "../ledger", package = "midnight-ledger", features = ["test-ut
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2" }
+midnight-curves = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2" }
+ff = { workspace = true }
+group = { workspace = true }
 env_logger = "^0.11"
 log = "^0.4.28"
 function_name = "^0.3.0"

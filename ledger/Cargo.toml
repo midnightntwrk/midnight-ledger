@@ -14,6 +14,8 @@ proof-verifying = ["zswap/proof-verifying"]
 test-utilities = ["dep:reqwest", "dep:zkir_v2"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify"]
+trace-msm = ["transient-crypto/trace-msm"]
+gpu = ["transient-crypto/gpu"]
 
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
