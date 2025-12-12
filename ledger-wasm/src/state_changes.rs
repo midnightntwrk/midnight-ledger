@@ -22,6 +22,7 @@ use wasm_bindgen::prelude::*;
 
 /// WASM wrapper for ZswapStateChanges (used by Zswap)
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct ZswapStateChanges {
     pub(crate) inner: semantics::ZswapStateChanges,
 }
@@ -60,6 +61,7 @@ impl From<semantics::ZswapStateChanges> for ZswapStateChanges {
 
 // WASM wrapper for DustStateChanges (used by Dust)
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct DustStateChanges {
     pub(crate) inner: semantics::DustStateChanges,
 }
