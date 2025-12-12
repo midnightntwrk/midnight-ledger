@@ -276,18 +276,38 @@ impl SyntheticCost {
 pub struct FeePrices {
     /// The price in DUST of a full block for the average cost dimension
     #[serde(rename = "overallPrice")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
     pub overall_price: FixedPoint,
     /// The price factor applied to the read cost dimension
     #[serde(rename = "readFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
     pub read_factor: FixedPoint,
     /// The price in DUST of a block's full compute capacity
     #[serde(rename = "computeFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
     pub compute_factor: FixedPoint,
     /// The price in DUST of a block's full size capacity
     #[serde(rename = "blockUsageFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
     pub block_usage_factor: FixedPoint,
     /// The price in DUST of a block's full write allowance capacity
     #[serde(rename = "writeFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
     pub write_factor: FixedPoint,
 }
 
@@ -565,6 +585,28 @@ impl From<FixedPoint> for i128 {
 impl From<FixedPoint> for f64 {
     fn from(fp: FixedPoint) -> f64 {
         fp.0 as f64 / 2f64.powi(64)
+    }
+}
+
+/// Custom serde for the `FixedPoint` structure, sacrificing readability for precision
+pub mod fixed_point_custom_serde {
+    use super::FixedPoint;
+
+    /// serializing `FixedPoint`` structure
+    pub fn serialize<S>(value: &FixedPoint, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        s.serialize_i128(value.0)
+    }
+
+    /// deserializing `FixedPoint` structure
+    pub fn deserialize<'de, D>(d: D) -> Result<FixedPoint, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner_value = serde::Deserialize::deserialize(d)?;
+        Ok(FixedPoint(inner_value))
     }
 }
 
@@ -993,5 +1035,42 @@ mod tests {
         fn u128_div(a: u128, b in 1u128..u128::MAX) {
             within_permissible_error(a as f64 / b as f64, f64::from(FixedPoint::from_u128_div(a, b)), 1e-9f64);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "fixed-point-custom-serde")]
+    fn test_fixed_point_custom_serde() {
+        let expected_fee_prices = FeePrices {
+            overall_price: FixedPoint::ONE,
+            block_usage_factor: FixedPoint::MAX,
+            read_factor: FixedPoint::from_u64_div(3, 4),
+            write_factor: FixedPoint::from_u64_div(100, 1),
+            compute_factor: FixedPoint::ZERO,
+        };
+
+        let actual_fee_prices_str = r#"
+            {
+            "overallPrice": 18446744073709551616,
+            "readFactor": 13835058055282163712,
+            "computeFactor": 0,
+            "blockUsageFactor": 170141183460469231731687303715884105727,
+            "writeFactor": 1844674407370955161600
+            }
+        "#;
+
+        // test deserialize
+        let actual_fee_prices: FeePrices =
+            serde_json::from_str(actual_fee_prices_str).expect("failed to deserialize");
+        assert_eq!(actual_fee_prices, expected_fee_prices);
+
+        // test serialize
+        let clean_actual_fee_prices_str = actual_fee_prices_str
+            .replace(" ", "")
+            .replace("\t", "")
+            .replace("\n", "");
+
+        let expected_fee_prices_str =
+            serde_json::to_string(&expected_fee_prices).expect("failed to serialize");
+        assert_eq!(clean_actual_fee_prices_str, expected_fee_prices_str);
     }
 }

@@ -17,7 +17,7 @@ use base_crypto::{
 };
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test};
@@ -56,7 +56,7 @@ use transient_crypto::curve::FR_BYTES;
 /// practice are expected to be learned by linear regression against VM
 /// micro-benchmark data collected by
 /// `:/onchain-runtime/benches/benchmarking.rs`.
-#[derive(Clone, PartialEq, Eq, Debug, Serializable, Serialize, Storable)]
+#[derive(Clone, PartialEq, Eq, Debug, Serializable, Serialize, Deserialize, Storable)]
 #[storable(base)]
 #[tag = "impact-cost-model[v4]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
