@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.5**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v1.0.0-rc.2**](../README.md)
 
 ***
 
@@ -8,10 +8,11 @@
 
 ```ts
 type FeePrices: {
-  blockUsagePrice: number;
-  computePrice: number;
-  readPrice: number;
-  writePrice: number;
+  blockUsageFactor: number;
+  computeFactor: number;
+  overallPrice: number;
+  readFactor: number;
+  writeFactor: number;
 };
 ```
 
@@ -19,34 +20,42 @@ The fee prices for transaction
 
 ## Type declaration
 
-### blockUsagePrice
+### blockUsageFactor
 
 ```ts
-blockUsagePrice: number;
+blockUsageFactor: number;
 ```
 
-The price of block usage.
+The price factor of block usage.
 
-### computePrice
+### computeFactor
 
 ```ts
-computePrice: number;
+computeFactor: number;
 ```
 
-The price of time spent in single-threaded compute.
+The price factor of time spent in single-threaded compute.
 
-### readPrice
+### overallPrice
 
 ```ts
-readPrice: number;
+overallPrice: number;
 ```
 
-The price of time spent reading from disk.
+The overall price of a full block in an average cost dimension.
 
-### writePrice
+### readFactor
 
 ```ts
-writePrice: number;
+readFactor: number;
 ```
 
-The price of time spent writing to disk.
+The price factor of time spent reading from disk.
+
+### writeFactor
+
+```ts
+writeFactor: number;
+```
+
+The price factor of time spent writing to disk.

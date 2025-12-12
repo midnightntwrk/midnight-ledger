@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+set -e
+
 find . -type f -name "*.rs" \( -path "*/build.rs" -o -path "*/src/*" -o -path "*/tests/*" \) | while IFS= read -r file; do
 if ! grep -q "SPDX-License-Identifier" "$file"; then
 	echo "No license info: $file"

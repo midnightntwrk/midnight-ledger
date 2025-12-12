@@ -12,7 +12,7 @@
 # limitations under the License.
 
 {
-  description = "Midnight ledger prototype";
+  description = "Midnight ledger";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -27,7 +27,7 @@
     # Use local path for development instead of fetching from GitHub
     # Original: url = "github:riusricardo/midnight-ledger/e6e21e6e7173a17a6afcd7aa6471b6c7b29cf070";
     zkir = {
-      url = "path:.";
+      url = "github:midnightntwrk/midnight-ledger/5a889f79251d6e8689aca0a72d328a84986a9971";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -51,39 +51,30 @@
           stdenv = pkgs.clangStdenv;
         };
         isDarwin = pkgs.lib.hasSuffix "-darwin" system;
-        # Fetch midnight-zk from GitHub
-        midnightZkSrc = builtins.fetchGit {
-          url = "https://github.com/riusricardo/midnight-zk";
-          ref = "gpu-integration-v5.0.2";
-        };
-        # Combine the main workspace with midnight-zk
-        rustWorkspaceSrc = pkgs.runCommand "rust-workspace-src" {} ''
-          mkdir -p $out
-          cp -r ${inclusive.lib.inclusive ./. [
-            ./Cargo.toml
-            ./Cargo.lock
-            ./static
-            ./zswap
-            ./ledger
-            ./ledger-wasm
-            ./proof-server
-            ./storage
-            ./zkir
-            ./base-crypto-derive
-            ./base-crypto
-            ./transient-crypto
-            ./coin-structure
-            ./serialize
-            ./onchain-vm
-            ./onchain-state
-            ./onchain-runtime
-            ./onchain-runtime-wasm
-            ./generate-cost-model
-            ./rustfmt.toml
-            ./wasm-proving-demos/zkir-mt
-          ]}/* $out/
-          cp -r ${midnightZkSrc} $out/midnight-zk
-        '';
+        rustWorkspaceSrc = inclusive.lib.inclusive ./. [
+          ./Cargo.toml
+          ./Cargo.lock
+          ./static
+          ./zswap
+          ./ledger
+          ./ledger-wasm
+          ./proof-server
+          ./storage
+          ./zkir
+          ./zkir-v3
+          ./base-crypto-derive
+          ./base-crypto
+          ./transient-crypto
+          ./coin-structure
+          ./serialize
+          ./onchain-vm
+          ./onchain-state
+          ./onchain-runtime
+          ./onchain-runtime-wasm
+          ./generate-cost-model
+          ./rustfmt.toml
+          ./wasm-proving-demos/zkir-mt
+        ];
         rust = fenix.packages.${system};
         bagel-wasm = (import ./bagel.nix) {
           inherit system nixpkgs;
@@ -268,6 +259,7 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -360,6 +352,7 @@
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v6"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};

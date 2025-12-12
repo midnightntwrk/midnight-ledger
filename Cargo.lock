@@ -476,6 +476,15 @@ checksum = "0e050f626429857a27ddccb31e0aca21356bfa709c04041aefddac081a8f068a"
 [[package]]
 name = "bench_macros"
 version = "0.1.0"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+dependencies = [
+ "quote 1.0.42",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "bench_macros"
+version = "0.1.0"
 source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
 dependencies = [
  "quote 1.0.42",
@@ -1800,7 +1809,7 @@ dependencies = [
 
 [[package]]
 name = "generate-cost-model"
-version = "1.0.0-alpha.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "charming",
  "clap",
@@ -2734,7 +2743,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2770,7 +2779,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2780,18 +2789,42 @@ dependencies = [
 [[package]]
 name = "midnight-circuits"
 version = "5.0.2"
-source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "base64 0.13.1",
- "bench_macros",
+ "bench_macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
  "bincode 2.0.1",
  "blake2b_simd",
  "ff",
  "group",
  "halo2curves",
  "lazy_static",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-curves 0.1.1 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "midnight-proofs 0.5.2 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand 0.8.5",
+ "rustc-hash",
+ "sha2",
+ "subtle",
+]
+
+[[package]]
+name = "midnight-circuits"
+version = "5.0.2"
+source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+dependencies = [
+ "base64 0.13.1",
+ "bench_macros 0.1.0 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
+ "bincode 2.0.1",
+ "blake2b_simd",
+ "ff",
+ "group",
+ "halo2curves",
+ "lazy_static",
+ "midnight-curves 0.1.1 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
+ "midnight-proofs 0.5.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2803,7 +2836,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2818,6 +2851,25 @@ dependencies = [
  "rand 0.8.5",
  "serde",
  "zeroize",
+]
+
+[[package]]
+name = "midnight-curves"
+version = "0.1.1"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+dependencies = [
+ "bitvec",
+ "blst",
+ "byte-slice-cast",
+ "ff",
+ "getrandom 0.2.16",
+ "group",
+ "halo2curves",
+ "num-bigint",
+ "pairing",
+ "rand_core 0.6.4",
+ "serde",
+ "subtle",
 ]
 
 [[package]]
@@ -2841,7 +2893,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.1.0-alpha.5"
+version = "6.2.0-rc.2"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2881,7 +2933,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "1.0.0-alpha.4"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2889,7 +2941,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "6.1.0-alpha.5"
+version = "6.2.0-rc.2"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -2917,7 +2969,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2948,7 +3000,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2968,7 +3020,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -2989,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -3013,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.1.0-alpha.5"
+version = "6.2.0-rc.2"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3031,10 +3083,10 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-curves",
+ "midnight-curves 0.1.1 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "midnight-ledger",
  "midnight-onchain-runtime",
- "midnight-proofs",
+ "midnight-proofs 0.5.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
@@ -3052,6 +3104,28 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zkir",
+ "zkir-v3",
+]
+
+[[package]]
+name = "midnight-proofs"
+version = "0.5.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
+dependencies = [
+ "bench_macros 0.1.0 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "blake2b_simd",
+ "ff",
+ "getrandom 0.2.16",
+ "group",
+ "halo2curves",
+ "midnight-curves 0.1.1 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "num-bigint",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_derive",
+ "tracing",
 ]
 
 [[package]]
@@ -3059,7 +3133,7 @@ name = "midnight-proofs"
 version = "0.5.2"
 source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
 dependencies = [
- "bench_macros",
+ "bench_macros 0.1.0 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "blake2b_simd",
  "ff",
  "getrandom 0.2.16",
@@ -3068,7 +3142,7 @@ dependencies = [
  "icicle-bls12-381",
  "icicle-core",
  "icicle-runtime",
- "midnight-curves",
+ "midnight-curves 0.1.1 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "num-bigint",
  "once_cell",
  "rand_chacha 0.3.1",
@@ -3081,7 +3155,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "crypto",
  "konst",
@@ -3098,7 +3172,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3107,7 +3181,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "archery",
  "criterion",
@@ -3145,7 +3219,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3162,7 +3236,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-alpha.5"
+version = "1.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3180,9 +3254,9 @@ dependencies = [
  "lru",
  "midnight-base-crypto",
  "midnight-base-crypto-derive",
- "midnight-circuits",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-circuits 5.0.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
+ "midnight-curves 0.1.1 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
+ "midnight-proofs 0.5.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
@@ -3203,8 +3277,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-zkir-v3-wasm"
+version = "3.0.0-alpha.1"
+dependencies = [
+ "getrandom 0.2.16",
+ "hex",
+ "js-sys",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "rand 0.8.5",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "zkir-v3",
+]
+
+[[package]]
 name = "midnight-zkir-wasm"
-version = "2.0.0-alpha.5"
+version = "2.0.0-rc.2"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -3228,7 +3318,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.1.0-alpha.5"
+version = "6.2.0-rc.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -6055,7 +6145,7 @@ dependencies = [
 
 [[package]]
 name = "zkir"
-version = "2.0.0-alpha.5"
+version = "2.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -6069,8 +6159,8 @@ dependencies = [
  "indicatif",
  "log",
  "midnight-base-crypto",
- "midnight-circuits",
- "midnight-proofs",
+ "midnight-circuits 5.0.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
+ "midnight-proofs 0.5.2 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "midnight-serialize",
  "midnight-transient-crypto",
  "pastey",
@@ -6085,4 +6175,31 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zkir",
+]
+
+[[package]]
+name = "zkir-v3"
+version = "3.0.0-alpha.1"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "const-hex",
+ "group",
+ "hex",
+ "midnight-base-crypto",
+ "midnight-circuits 5.0.2 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "midnight-proofs 0.5.2 (git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2)",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "paste",
+ "pastey",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tracing",
+ "zkir-v3",
 ]

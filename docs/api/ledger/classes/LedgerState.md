@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.5**](../README.md)
+[**@midnight/ledger v6.2.0-rc.2**](../README.md)
 
 ***
 
@@ -215,7 +215,10 @@ Indexes into the contract state map with a given contract address
 ### postBlockUpdate()
 
 ```ts
-postBlockUpdate(tblock, blockFullness?): LedgerState;
+postBlockUpdate(
+   tblock, 
+   detailedBlockFullness?, 
+   overallBlockFullness?): LedgerState;
 ```
 
 Carries out a post-block update, which does amortized bookkeeping that
@@ -230,9 +233,13 @@ Typically, `postBlockUpdate` should be run after any (sequence of)
 
 `Date`
 
-##### blockFullness?
+##### detailedBlockFullness?
 
-[`SyntheticCost`](../type-aliases/SyntheticCost.md)
+[`NormalizedCost`](../type-aliases/NormalizedCost.md)
+
+##### overallBlockFullness?
+
+`number`
 
 #### Returns
 
