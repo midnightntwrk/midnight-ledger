@@ -8,6 +8,7 @@ license.workspace = true
 default = []
 proptest = ["dep:proptest", "dep:proptest-derive", "serialize/proptest"]
 cli = ["dep:indicatif"]
+fixed-point-custom-serde = []
 
 [dependencies]
 derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }

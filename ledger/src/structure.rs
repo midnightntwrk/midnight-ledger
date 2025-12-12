@@ -1059,7 +1059,8 @@ pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCost
     },
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serializable, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serializable)]
+#[cfg_attr(feature = "fixed-point-custom-serde", derive(Serialize, Deserialize))]
 #[tag = "transaction-limits[v2]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
@@ -1069,6 +1070,10 @@ pub struct TransactionLimits {
     /// The minimum amount of Night withdrawable from block rewards, as a
     /// multiple of the amount which would be able to pay the theoretical fees
     /// for the withdrawal when Dust reaches its cap.
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
+    )]
     pub block_withdrawal_minimum_multiple: FixedPoint,
 }
 tag_enforcement_test!(TransactionLimits);
@@ -1087,7 +1092,11 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
 };
 
-#[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
+#[cfg_attr(
+    feature = "fixed-point-custom-serde",
+    derive(serde::Serialize, serde::Deserialize)
+)]
 #[tag = "ledger-parameters[v5]"]
 #[storable(base)]
 pub struct LedgerParameters {
@@ -1097,7 +1106,15 @@ pub struct LedgerParameters {
     pub fee_prices: FeePrices,
     pub global_ttl: Duration,
     // Valid range of 0..1
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
+    )]
     pub cost_dimension_min_ratio: FixedPoint,
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
+    )]
     pub price_adjustment_a_parameter: FixedPoint,
     // Note: This is equivalent to `c_to_m_bridge_fee_percent` in the spec
     // Valid range of 0..10_000

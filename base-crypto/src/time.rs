@@ -143,6 +143,7 @@ impl Sub<Duration> for Timestamp {
     serde::Serialize,
     serde::Deserialize,
 )]
+#[serde(transparent)]
 #[tag = "duration"]
 /// Some duration of time in seconds
 pub struct Duration(i128);
