@@ -632,6 +632,10 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     pis,
                     strictness.proof_verification_mode,
                 )
+                .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
+                    declared_time: ctime,
+                    dust_spend: Box::new(self.erase_proofs()),
+                })
             })
         } else {
             Ok(())

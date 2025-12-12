@@ -1,0 +1,30 @@
+[package]
+name = "midnight-zkir-v3-wasm"
+version = "3.0.0-alpha.1"
+edition = "2024"
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+zkir-v3 = { path = "../zkir-v3" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+
+rand = { version = "^0.8.4", features = ["getrandom"] }
+getrandom = { version = "^0.2.8", features = ["js"] }
+wasm-bindgen = "=0.2.104"
+wasm-bindgen-futures = "^0.4.50"
+js-sys = "^0.3.61"
+hex = "^0.4.3"
+serde_json = "^1.0.0"
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['-O', '--enable-reference-types', '-g']
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ['-O', '--enable-reference-types']
+
+[features]
+proptest = ["zkir-v3/proptest"]

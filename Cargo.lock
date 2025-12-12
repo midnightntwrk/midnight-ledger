@@ -476,7 +476,7 @@ checksum = "0e050f626429857a27ddccb31e0aca21356bfa709c04041aefddac081a8f068a"
 [[package]]
 name = "bench_macros"
 version = "0.1.0"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "quote 1.0.42",
  "syn 2.0.111",
@@ -1800,7 +1800,7 @@ dependencies = [
 
 [[package]]
 name = "generate-cost-model"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "charming",
  "clap",
@@ -2688,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2724,7 +2724,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2733,8 +2733,8 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "5.0.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
+version = "5.0.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "base64 0.13.1",
  "bench_macros",
@@ -2757,7 +2757,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2777,7 +2777,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.1.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "bitvec",
  "blst",
@@ -2795,7 +2795,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.2.0-rc.1"
+version = "6.2.0-rc.2"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2835,7 +2835,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "1.0.0-alpha.4"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2843,7 +2843,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "6.2.0-rc.1"
+version = "6.2.0-rc.2"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -2871,7 +2871,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2902,7 +2902,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2922,7 +2922,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -2943,7 +2943,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "fake",
@@ -2967,7 +2967,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.2.0-rc.1"
+version = "6.2.0-rc.2"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3002,12 +3002,13 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "zkir",
+ "zkir-v3",
 ]
 
 [[package]]
 name = "midnight-proofs"
-version = "0.5.1"
-source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.1#54bd684da90b4c7a24cb9a40f447e6c06ee40a7a"
+version = "0.5.2"
+source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "bench_macros",
  "blake2b_simd",
@@ -3027,7 +3028,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "crypto",
  "konst",
@@ -3044,7 +3045,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3053,7 +3054,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "archery",
  "criterion",
@@ -3091,7 +3092,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3108,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-rc.1"
+version = "1.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3149,8 +3150,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-zkir-v3-wasm"
+version = "3.0.0-alpha.1"
+dependencies = [
+ "getrandom 0.2.16",
+ "hex",
+ "js-sys",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "rand 0.8.5",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "zkir-v3",
+]
+
+[[package]]
 name = "midnight-zkir-wasm"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -3174,7 +3191,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.2.0-rc.1"
+version = "6.2.0-rc.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -6001,7 +6018,7 @@ dependencies = [
 
 [[package]]
 name = "zkir"
-version = "2.0.0-rc.1"
+version = "2.0.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -6031,4 +6048,31 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zkir",
+]
+
+[[package]]
+name = "zkir-v3"
+version = "3.0.0-alpha.1"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "const-hex",
+ "group",
+ "hex",
+ "midnight-base-crypto",
+ "midnight-circuits",
+ "midnight-proofs",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "paste",
+ "pastey",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tracing",
+ "zkir-v3",
 ]

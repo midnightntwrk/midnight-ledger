@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/1512ab5fd63cb423a5d8c17cf956ad33b1eec087";
+      url = "github:midnightntwrk/midnight-ledger/5a889f79251d6e8689aca0a72d328a84986a9971";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -59,6 +59,7 @@
           ./proof-server
           ./storage
           ./zkir
+          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -256,6 +257,7 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -348,6 +350,7 @@
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v6"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
