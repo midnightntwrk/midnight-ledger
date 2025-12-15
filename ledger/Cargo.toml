@@ -14,13 +14,13 @@ proof-verifying = ["zswap/proof-verifying"]
 test-utilities = ["dep:reqwest", "dep:zkir_v2"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify"]
-fixed-point-custom-serde = []
+fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { path = "../zswap", package = "midnight-zswap" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto", features = ["fixed-point-custom-serde"]}
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto"}
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
