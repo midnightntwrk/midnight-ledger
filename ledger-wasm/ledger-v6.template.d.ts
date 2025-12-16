@@ -674,6 +674,20 @@ export class ContractCall<P extends Proofish> {
   readonly proof: P;
 }
 
+export class PrePartitionContractCall {
+  constructor(
+    address: ContractAddress,
+    entry_point: Uint8Array | string,
+    op: ContractOperation,
+    pre_transcript: PreTranscript,
+    private_transcript_outputs: AlignedValue[],
+    input: AlignedValue,
+    output: AlignedValue,
+    communication_commitment_rand: CommunicationCommitmentRand,
+    key_location: string
+  );
+}
+
 /**
  * A {@link ContractCall} still being assembled
  */
@@ -699,9 +713,7 @@ export class ContractCallPrototype {
     address: ContractAddress,
     entry_point: Uint8Array | string,
     op: ContractOperation,
-    guaranteed_public_transcript: Transcript<AlignedValue> | undefined,
-    fallible_public_transcript: Transcript<AlignedValue> | undefined,
-    private_transcript_outputs: AlignedValue[],
+    pre_transcript: PreTranscript,
     input: AlignedValue,
     output: AlignedValue,
     communication_commitment_rand: CommunicationCommitmentRand,
@@ -1001,6 +1013,8 @@ export type ProvingProvider = {
   ): Promise<Uint8Array>;
 };
 
+export type SegmentSpecifier = { tag: 'first' } | { tag: 'guaranteedOnly' } | { tag: 'random' } | { tag: 'specific', value: number };
+
 /**
  * A transaction that has been validated with `wellFormed`.
  **/
@@ -1059,6 +1073,21 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    * @throws If called on bound, proven, or proof-erased transactions.
    */
   prove(provider: ProvingProvider, cost_model: CostModel): Promise<Transaction<S, Proof, B>>;
+
+  /**
+   * Adds a set of new calls to the transaction.
+   *
+   * @throws If called on bound, proven, or proof-erased transactions.
+   */
+  addCalls(
+    segment: SegmentSpecifier,
+    calls: PrePartitionContractCall[],
+    params: LedgerParameters,
+    ttl: Date,
+    zswapInputs?: ZswapInput<PreProof>[],
+    zswapOutputs?: ZswapOutput<PreProof>[],
+    zswapTransient?: ZswapTransient<PreProof>[],
+  ): Transaction<S, P, B>;
 
   /**
    * Erases the proofs contained in this transaction

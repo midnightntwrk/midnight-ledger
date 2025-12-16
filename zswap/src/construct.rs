@@ -100,6 +100,42 @@ impl<D: DB> Input<ProofPreimage, D> {
         )
     }
 
+    pub fn retarget_segment(&self, new_segment: u16) -> Self {
+        // We redo the last two parts of the transcript which reference the segment, as well as the
+        // binding commitment.
+        let delta = self.delta();
+        let rc_e = self.binding_randomness();
+        let value_commitment =
+            Pedersen::commit(&(delta.token_type, new_segment), &delta.value.into(), &rc_e);
+        let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
+        public_transcript_prog.extend(
+            Cell_read!([Key::Value(5u8.into())], false, u16)
+                .into_iter()
+                .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
+        );
+        public_transcript_prog.extend(Cell_write!(
+            [Key::Value(2u8.into())],
+            false,
+            (Fr, Fr),
+            value_commitment.0
+        ));
+        let mut public_transcript_inputs_end = Vec::new();
+        for op in filter_invalid(public_transcript_prog.into_iter()) {
+            op.field_repr(&mut public_transcript_inputs_end);
+        }
+
+        let mut proof_preimage = self.proof.deref().clone();
+        let len = proof_preimage.public_transcript_inputs.len();
+        proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
+            .copy_from_slice(&public_transcript_inputs_end);
+
+        Input {
+            value_commitment,
+            proof: Arc::new(proof_preimage),
+            ..self.clone()
+        }
+    }
+
     pub(crate) fn new_from_secret_key<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
@@ -197,6 +233,45 @@ impl<D: DB> Output<ProofPreimage, D> {
     ) -> Result<Self, OfferCreationFailed> {
         let ciphertext = target_epk.map(|epk| CoinCiphertext::new(rng, coin, epk));
         Self::new_with_ciphertext::<R>(rng, coin, segment, target_cpk, ciphertext)
+    }
+
+    pub fn retarget_segment(&self, new_segment: u16) -> Self {
+        // We redo the last two parts of the transcript which reference the segment, as well as the
+        // binding commitment.
+        let delta = self.delta();
+        let rc_e = self.binding_randomness();
+        let value_commitment = Pedersen::commit(
+            &(delta.token_type, new_segment),
+            &delta.value.saturating_neg().into(),
+            &rc_e,
+        );
+        let mut public_transcript_prog = Vec::<Op<ResultModeVerify, D>>::new();
+        public_transcript_prog.extend(
+            Cell_read!([Key::Value(5u8.into())], false, u16)
+                .into_iter()
+                .map(|op: Op<ResultModeGather, _>| op.translate(|()| new_segment.into())),
+        );
+        public_transcript_prog.extend(Cell_write!(
+            [Key::Value(2u8.into())],
+            false,
+            (Fr, Fr),
+            value_commitment.0
+        ));
+        let mut public_transcript_inputs_end = Vec::new();
+        for op in filter_invalid(public_transcript_prog.into_iter()) {
+            op.field_repr(&mut public_transcript_inputs_end);
+        }
+
+        let mut proof_preimage = self.proof.deref().clone();
+        let len = proof_preimage.public_transcript_inputs.len();
+        proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
+            .copy_from_slice(&public_transcript_inputs_end);
+
+        Output {
+            value_commitment,
+            proof: Arc::new(proof_preimage),
+            ..self.clone()
+        }
     }
 
     #[instrument(skip(rng))]
@@ -323,6 +398,46 @@ impl<D: DB> Transient<ProofPreimage, D> {
             proof_output: output.proof,
         };
         Ok(io)
+    }
+
+    pub fn retarget_segment(&self, new_segment: u16) -> Self {
+        let input = self.as_input().retarget_segment(new_segment);
+        let output = self.as_output().retarget_segment(new_segment);
+        Transient {
+            nullifier: input.nullifier,
+            coin_com: output.coin_com,
+            value_commitment_input: input.value_commitment,
+            value_commitment_output: output.value_commitment,
+            contract_address: output.contract_address,
+            ciphertext: output.ciphertext,
+            proof_input: input.proof,
+            proof_output: output.proof,
+        }
+    }
+}
+
+impl<D: DB> Offer<ProofPreimage, D> {
+    pub fn new(
+        inputs: Vec<Input<ProofPreimage, D>>,
+        outputs: Vec<Output<ProofPreimage, D>>,
+        transient: Vec<Transient<ProofPreimage, D>>,
+    ) -> Option<Self> {
+        if inputs.is_empty() && outputs.is_empty() && transient.is_empty() {
+            return None;
+        }
+        let deltas = inputs
+            .iter()
+            .map(Input::delta)
+            .chain(outputs.iter().map(Output::delta))
+            .collect();
+        let mut res = Offer {
+            inputs: inputs.into_iter().collect(),
+            outputs: outputs.into_iter().collect(),
+            transient: transient.into_iter().collect(),
+            deltas,
+        };
+        res.normalize();
+        Some(res)
     }
 }
 

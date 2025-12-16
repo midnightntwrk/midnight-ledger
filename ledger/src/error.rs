@@ -34,6 +34,7 @@ use transient_crypto::curve::EmbeddedGroupAffine;
 use transient_crypto::curve::Fr;
 use transient_crypto::merkle_tree::InvalidUpdate;
 use transient_crypto::proofs::{KeyLocation, ProvingError, VerifyingError};
+use zswap::error::MalformedOffer;
 use zswap::{Input, Output};
 
 #[derive(Debug, Clone)]
@@ -1243,6 +1244,9 @@ impl<D: DB> From<ProvingError> for TransactionProvingError<D> {
 pub enum PartitionFailure<D: DB> {
     Transcript(TranscriptRejected<D>),
     NonForest,
+    GuaranteedOnlyUnsatisfied,
+    IllegalSegmentZero,
+    Merge(MalformedOffer),
 }
 
 impl<D: DB> From<TranscriptRejected<D>> for PartitionFailure<D> {
@@ -1258,6 +1262,14 @@ impl<D: DB> Display for PartitionFailure<D> {
                 write!(f, "call graph was not a forest; cannot partition")
             }
             PartitionFailure::Transcript(e) => e.fmt(f),
+            PartitionFailure::GuaranteedOnlyUnsatisfied => write!(
+                f,
+                "transaction could not be constructed to satisfy 'guaranteed only' segment specifier: the call was too expensive"
+            ),
+            PartitionFailure::IllegalSegmentZero => {
+                write!(f, "illegal manual specification of segment 0")
+            }
+            PartitionFailure::Merge(e) => write!(f, "failed zswap merge: {e}"),
         }
     }
 }
@@ -1266,6 +1278,7 @@ impl<D: DB> Error for PartitionFailure<D> {
     fn cause(&self) -> Option<&dyn Error> {
         match self {
             PartitionFailure::Transcript(err) => Some(err),
+            PartitionFailure::Merge(err) => Some(err),
             _ => None,
         }
     }
