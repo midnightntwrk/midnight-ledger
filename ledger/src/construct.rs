@@ -35,6 +35,7 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::{ContractOperation, ContractState, EntryPointBuf};
 use onchain_runtime::transcript::Transcript;
 use rand::{CryptoRng, Rng};
+use serde::{Deserialize, Serialize};
 use serialize::Serializable;
 use std::iter::once;
 use std::ops::Deref;
@@ -92,7 +93,7 @@ impl<S: SignatureKind<D>, D: DB>
         &self,
         rng: &mut (impl Rng + CryptoRng),
         segment: SegmentSpecifier,
-        calls: &[PrePartitionContractCall<'_, D>],
+        calls: &[PrePartitionContractCall<D>],
         params: &LedgerParameters,
         ttl: Timestamp,
         zswap_inputs: &[ZswapInput<ProofPreimage, D>],
@@ -441,8 +442,11 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
         let mut stx = StandardTransaction {
             network_id: network_id.into(),
             intents,
-            guaranteed_coins: guaranteed_coins.map(|x| Sp::new(x)),
-            fallible_coins: fallible_coins.into_iter().collect(),
+            guaranteed_coins: guaranteed_coins.map(|x| Sp::new(x.retarget_segment(0))),
+            fallible_coins: fallible_coins
+                .into_iter()
+                .map(|(seg, offer)| (seg, offer.retarget_segment(seg)))
+                .collect(),
             binding_randomness: Default::default(),
         };
         stx.recompute_binding_randomness();
@@ -450,12 +454,12 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct PrePartitionContractCall<'a, D: DB> {
+#[derive_where::derive_where(Clone, Debug)]
+pub struct PrePartitionContractCall<D: DB> {
     pub address: ContractAddress,
     pub entry_point: EntryPointBuf,
-    pub op: &'a ContractOperation,
-    pub pre_transcript: PreTranscript<'a, D>,
+    pub op: ContractOperation,
+    pub pre_transcript: PreTranscript<D>,
     pub private_transcript_outputs: Vec<AlignedValue>,
     pub input: AlignedValue,
     pub output: AlignedValue,
@@ -463,6 +467,8 @@ pub struct PrePartitionContractCall<'a, D: DB> {
     pub key_location: KeyLocation,
 }
 
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(tag = "tag", content = "value", rename_all = "camelCase")]
 pub enum SegmentSpecifier {
     First,
     GuaranteedOnly,
@@ -683,23 +689,23 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
 }
 
 #[derive(Debug)]
-pub struct PreTranscript<'a, D: DB> {
-    pub context: &'a QueryContext<D>,
-    pub program: &'a [Op<ResultModeVerify, D>],
+pub struct PreTranscript<D: DB> {
+    pub context: QueryContext<D>,
+    pub program: Vec<Op<ResultModeVerify, D>>,
     pub comm_comm: Option<Fr>,
 }
 
-impl<D: DB> Clone for PreTranscript<'_, D> {
+impl<D: DB> Clone for PreTranscript<D> {
     fn clone(&self) -> Self {
         PreTranscript {
-            context: self.context,
-            program: self.program,
+            context: self.context.clone(),
+            program: self.program.clone(),
             comm_comm: self.comm_comm,
         }
     }
 }
 
-impl<D: DB> PreTranscript<'_, D> {
+impl<D: DB> PreTranscript<D> {
     fn no_checkpoints(&self) -> usize {
         self.program
             .iter()
@@ -751,7 +757,7 @@ impl<D: DB> PreTranscript<'_, D> {
     ) -> Result<(Option<Transcript<D>>, Option<Transcript<D>>), TranscriptRejected<D>> {
         let mut prog_guaranteed = Vec::new();
         let mut prog_fallible = Vec::new();
-        for op in self.program {
+        for op in self.program.iter() {
             if n > 0 && matches!(op, Op::Ckpt) {
                 n -= 1;
             }
@@ -810,7 +816,7 @@ pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand:
 pub type TranscriptPair<D> = (Option<Transcript<D>>, Option<Transcript<D>>);
 
 pub fn partition_transcripts<D: DB>(
-    calls: &[PreTranscript<'_, D>],
+    calls: &[PreTranscript<D>],
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     let n = calls.len();

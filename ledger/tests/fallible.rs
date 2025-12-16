@@ -92,8 +92,8 @@ async fn fallible() {
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -106,8 +106,8 @@ async fn fallible() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),

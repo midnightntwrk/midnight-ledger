@@ -38,7 +38,9 @@ pub enum ZswapTransientTypes {
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapTransient(ZswapTransientTypes);
+pub struct ZswapTransient(pub(crate) ZswapTransientTypes);
+
+try_ref_for_exported!(ZswapTransient);
 
 impl From<zswap::Transient<ProofPreimage, InMemoryDB>> for ZswapTransient {
     fn from(inner: zswap::Transient<ProofPreimage, InMemoryDB>) -> ZswapTransient {
@@ -68,7 +70,7 @@ impl ZswapTransient {
     #[wasm_bindgen(js_name = "newFromContractOwnedOutput")]
     pub fn new_from_contract_owned_output(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         output: &ZswapOutput,
     ) -> Result<ZswapTransient, JsError> {
         match &output.0 {
@@ -213,7 +215,9 @@ pub enum ZswapOutputTypes {
 #[wasm_bindgen]
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct ZswapOutput(ZswapOutputTypes);
+pub struct ZswapOutput(pub(crate) ZswapOutputTypes);
+
+try_ref_for_exported!(ZswapOutput);
 
 impl From<zswap::Output<ProofPreimage, InMemoryDB>> for ZswapOutput {
     fn from(inner: zswap::Output<ProofPreimage, InMemoryDB>) -> ZswapOutput {
@@ -254,7 +258,7 @@ impl ZswapOutput {
 
     pub fn new(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         target_cpk: &str,
         target_epk: &str,
     ) -> Result<ZswapOutput, JsError> {
@@ -269,7 +273,7 @@ impl ZswapOutput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
     ) -> Result<ZswapOutput, JsError> {
         let coin = value_to_shielded_coininfo(coin)?;
@@ -372,7 +376,9 @@ pub enum ZswapInputTypes {
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapInput(ZswapInputTypes);
+pub struct ZswapInput(pub(crate) ZswapInputTypes);
+
+try_ref_for_exported!(ZswapInput);
 
 impl From<zswap::Input<ProofPreimage, InMemoryDB>> for ZswapInput {
     fn from(inner: zswap::Input<ProofPreimage, InMemoryDB>) -> ZswapInput {
@@ -402,7 +408,7 @@ impl ZswapInput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
         state: &ZswapChainState,
     ) -> Result<ZswapInput, JsError> {

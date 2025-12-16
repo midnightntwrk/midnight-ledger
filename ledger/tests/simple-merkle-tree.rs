@@ -101,8 +101,9 @@ async fn simple_merkle_tree() {
     let tx = {
         let transcripts = partition_transcripts(
             &[PreTranscript {
-                context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                program: &HistoricMerkleTree_insert!([key!(0u8)], false, 10, u32, entry1.clone()),
+                context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                program: HistoricMerkleTree_insert!([key!(0u8)], false, 10, u32, entry1.clone())
+                    .into(),
                 comm_comm: None,
             }],
             &INITIAL_PARAMETERS,
@@ -158,8 +159,8 @@ async fn simple_merkle_tree() {
     let tx_check = {
         let mut transcripts = partition_transcripts(
             &[PreTranscript {
-                context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                program: &program_with_results(
+                context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                program: program_with_results(
                     &HistoricMerkleTree_check_root!([key!(0u8)], false, 10, u32, path.root()),
                     &[true.into()],
                 ),
@@ -206,8 +207,8 @@ async fn simple_merkle_tree() {
     let entry2 = 42u32;
     let transcripts = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &HistoricMerkleTree_insert!([key!(0u8)], false, 10, u32, entry2.clone()),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: HistoricMerkleTree_insert!([key!(0u8)], false, 10, u32, entry2.clone()).into(),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,

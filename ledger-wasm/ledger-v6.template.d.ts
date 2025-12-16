@@ -686,6 +686,7 @@ export class PrePartitionContractCall {
     communication_commitment_rand: CommunicationCommitmentRand,
     key_location: string
   );
+  toString(compact?: boolean): string;
 }
 
 /**
@@ -713,7 +714,9 @@ export class ContractCallPrototype {
     address: ContractAddress,
     entry_point: Uint8Array | string,
     op: ContractOperation,
-    pre_transcript: PreTranscript,
+    guaranteed_public_transcript: Transcript<AlignedValue> | undefined,
+    fallible_public_transcript: Transcript<AlignedValue> | undefined,
+    private_transcript_outputs: AlignedValue[],
     input: AlignedValue,
     output: AlignedValue,
     communication_commitment_rand: CommunicationCommitmentRand,
@@ -1180,18 +1183,36 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   readonly rewards: ClaimRewardsTransaction<S> | undefined;
   /**
    * The intents contained in this transaction
+   *
+   * Note that writing to this re-computes binding information if and only if
+   * this transaction is unbound *and* unproven. If this is not the case,
+   * creating or removing intents will lead to a binding error down the line,
+   * but modifying existing intents will succeed.
+   *
    * @throws On writing if `B` is {@link Binding} or this is not a standard
    * transaction
    */
   intents: Map<number, Intent<S, P, B>> | undefined;
   /**
    * The fallible Zswap offer
+   *
+   * Note that writing to this re-computes binding information if and only if
+   * this transaction is unbound *and* unproven. If this is not the case,
+   * creating or removing offer components will lead to a binding error down
+   * the line.
+   *
    * @throws On writing if `B` is {@link Binding} or this is not a standard
    * transaction
    */
   fallibleOffer: Map<number, ZswapOffer<P>> | undefined;
   /**
    * The guaranteed Zswap offer
+   *
+   * Note that writing to this re-computes binding information if and only if
+   * this transaction is unbound *and* unproven. If this is not the case,
+   * creating or removing offer components will lead to a binding error down
+   * the line.
+   *
    * @throws On writing if `B` is {@link Binding} or this is not a standard
    * transaction
    */
@@ -1558,14 +1579,14 @@ export class ZswapLocalState {
    * {@link ZswapInput}, and the updated state marking this coin as
    * in-flight.
    */
-  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number, ttl?: Date): [ZswapLocalState, UnprovenInput];
+  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment?: number, ttl?: Date): [ZswapLocalState, UnprovenInput];
 
   /**
    * Initiates a new spend of a new-yet-received output, outputting the
    * corresponding {@link ZswapTransient}, and the updated state marking
    * this coin as in-flight.
    */
-  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
+  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment?: number, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
 
   /**
    * Adds a coin to the list of coins that are expected to be received
@@ -1609,7 +1630,7 @@ export class ZswapLocalState {
 export class ZswapInput<P extends Proofish> {
   private constructor();
 
-  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment: number, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
+  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment?: number, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
 
   serialize(): Uint8Array;
 
@@ -1644,7 +1665,7 @@ export class ZswapOutput<P extends Proofish> {
    * encryption public key, which may be omitted *only* if the {@link ShieldedCoinInfo}
    * is transferred to the recipient another way
    */
-  static new(coin: ShieldedCoinInfo, segment: number, target_cpk: CoinPublicKey, target_epk: EncPublicKey): UnprovenOutput;
+  static new(coin: ShieldedCoinInfo, segment?: number, target_cpk: CoinPublicKey, target_epk: EncPublicKey): UnprovenOutput;
 
   /**
    * Creates a new output, targeted to a smart contract
@@ -1652,7 +1673,7 @@ export class ZswapOutput<P extends Proofish> {
    * A contract must *also* explicitly receive a coin created in this way for
    * the output to be valid
    */
-  static newContractOwned(coin: ShieldedCoinInfo, segment: number, contract: ContractAddress): UnprovenOutput;
+  static newContractOwned(coin: ShieldedCoinInfo, segment?: number, contract: ContractAddress): UnprovenOutput;
 
   serialize(): Uint8Array;
 
@@ -1686,7 +1707,7 @@ export class ZswapTransient<P extends Proofish> {
    *
    * The {@link QualifiedShieldedCoinInfo} should have an `mt_index` of `0`
    */
-  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment: number, output: UnprovenOutput): UnprovenTransient;
+  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment?: number, output: UnprovenOutput): UnprovenTransient;
 
   serialize(): Uint8Array;
 

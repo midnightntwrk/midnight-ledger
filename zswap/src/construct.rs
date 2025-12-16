@@ -87,7 +87,7 @@ impl<D: DB> Input<ProofPreimage, D> {
     pub fn new_contract_owned<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         contract: ContractAddress,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
@@ -128,6 +128,7 @@ impl<D: DB> Input<ProofPreimage, D> {
         let len = proof_preimage.public_transcript_inputs.len();
         proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
             .copy_from_slice(&public_transcript_inputs_end);
+        proof_preimage.public_transcript_outputs = vec![true.into(), new_segment.into()];
 
         Input {
             value_commitment,
@@ -139,14 +140,18 @@ impl<D: DB> Input<ProofPreimage, D> {
     pub(crate) fn new_from_secret_key<A: Debug + Storable<D>, R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         sk: SenderEvidence<'_>,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
         let rc_e: EmbeddedFr = rng.r#gen();
         let rc = Fr::try_from(rc_e).expect("Fr should be larger than EmbeddedFr");
         let nullifier = CoinInfo::from(coin).nullifier(&sk);
-        let value_commitment = Pedersen::commit(&(coin.type_, segment), &coin.value.into(), &rc_e);
+        let value_commitment = Pedersen::commit(
+            &(coin.type_, segment.unwrap_or(0)),
+            &coin.value.into(),
+            &rc_e,
+        );
         let merkle_tree_root = tree.root().ok_or(OfferCreationFailed::TreeNotRehashed)?;
         debug!("spending contract-owned coin");
         let mut public_transcript_prog: Vec<Op<ResultModeVerify, D>> = Vec::new();
@@ -178,7 +183,7 @@ impl<D: DB> Input<ProofPreimage, D> {
         public_transcript_prog.extend(
             Cell_read!([Key::Value(5u8.into())], false, u16)
                 .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.into())),
+                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
         );
         public_transcript_prog.extend(Cell_write!(
             [Key::Value(2u8.into())],
@@ -202,7 +207,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,
-            public_transcript_outputs: vec![true.into(), segment.into()],
+            public_transcript_outputs: vec![true.into(), segment.unwrap_or(0).into()],
             binding_input: 0.into(),
             communications_commitment: None,
             key_location: KeyLocation(Cow::Borrowed("midnight/zswap/spend")),
@@ -227,7 +232,7 @@ impl<D: DB> Output<ProofPreimage, D> {
     pub fn new<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &CoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         target_cpk: &coin::PublicKey,
         target_epk: Option<encryption::PublicKey>,
     ) -> Result<Self, OfferCreationFailed> {
@@ -239,7 +244,9 @@ impl<D: DB> Output<ProofPreimage, D> {
         // We redo the last two parts of the transcript which reference the segment, as well as the
         // binding commitment.
         let delta = self.delta();
-        let rc_e = self.binding_randomness();
+        // NOTE: negated because `Output::binding_randomness` already negates it, but we need the
+        // positive variant.
+        let rc_e = -self.binding_randomness();
         let value_commitment = Pedersen::commit(
             &(delta.token_type, new_segment),
             &delta.value.saturating_neg().into(),
@@ -266,6 +273,7 @@ impl<D: DB> Output<ProofPreimage, D> {
         let len = proof_preimage.public_transcript_inputs.len();
         proof_preimage.public_transcript_inputs[len - public_transcript_inputs_end.len()..len]
             .copy_from_slice(&public_transcript_inputs_end);
+        proof_preimage.public_transcript_outputs = vec![new_segment.into()];
 
         Output {
             value_commitment,
@@ -278,7 +286,7 @@ impl<D: DB> Output<ProofPreimage, D> {
     pub fn new_with_ciphertext<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &CoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         target_cpk: &coin::PublicKey,
         ciph: Option<CoinCiphertext>,
     ) -> Result<Self, OfferCreationFailed> {
@@ -289,7 +297,7 @@ impl<D: DB> Output<ProofPreimage, D> {
     pub fn new_contract_owned<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &CoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         contract: ContractAddress,
     ) -> Result<Self, OfferCreationFailed> {
         Self::new_for_recipient::<R>(rng, coin, segment, Recipient::Contract(contract), None)
@@ -298,14 +306,18 @@ impl<D: DB> Output<ProofPreimage, D> {
     pub(crate) fn new_for_recipient<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &CoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         recipient: Recipient,
         ciphertext: Option<CoinCiphertext>,
     ) -> Result<Self, OfferCreationFailed> {
         let rc_e: EmbeddedFr = rng.r#gen();
         let rc = Fr::try_from(rc_e).expect("Fr should be within EmbeddedFr");
         let coin_com = coin.commitment(&recipient);
-        let value_commitment = Pedersen::commit(&(coin.type_, segment), &coin.value.into(), &rc_e);
+        let value_commitment = Pedersen::commit(
+            &(coin.type_, segment.unwrap_or(0)),
+            &coin.value.into(),
+            &rc_e,
+        );
         debug!("creating new contract-owned output coin");
         let mut public_transcript_prog = Vec::new();
         public_transcript_prog.extend::<[Op<ResultModeVerify, InMemoryDB>; 17]>(
@@ -328,7 +340,7 @@ impl<D: DB> Output<ProofPreimage, D> {
         public_transcript_prog.extend(
             Cell_read!([Key::Value(5u8.into())], false, u16)
                 .into_iter()
-                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.into())),
+                .map(|op: Op<ResultModeGather, _>| op.translate(|()| segment.unwrap_or(0).into())),
         );
         public_transcript_prog.extend(Cell_write!(
             [Key::Value(2u8.into())],
@@ -348,7 +360,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             inputs,
             private_transcript: Vec::new(),
             public_transcript_inputs,
-            public_transcript_outputs: vec![segment.into()],
+            public_transcript_outputs: vec![segment.unwrap_or(0).into()],
             binding_input: match &ciphertext {
                 Some(ciph) => ciphertext_to_field(ciph),
                 None => 0.into(),
@@ -376,7 +388,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
     pub fn new_from_contract_owned_output<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         output: Output<ProofPreimage, D>,
     ) -> Result<Self, OfferCreationFailed> {
         let tree = MerkleTree::<(), InMemoryDB>::blank(ZSWAP_TREE_HEIGHT)
@@ -439,6 +451,27 @@ impl<D: DB> Offer<ProofPreimage, D> {
         res.normalize();
         Some(res)
     }
+
+    pub fn retarget_segment(&self, new_segment: u16) -> Self {
+        Offer {
+            inputs: self
+                .inputs
+                .iter()
+                .map(|i| i.retarget_segment(new_segment))
+                .collect(),
+            outputs: self
+                .outputs
+                .iter()
+                .map(|o| o.retarget_segment(new_segment))
+                .collect(),
+            transient: self
+                .transient
+                .iter()
+                .map(|t| t.retarget_segment(new_segment))
+                .collect(),
+            deltas: self.deltas.clone(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -461,8 +494,9 @@ mod tests {
         };
         let pk = CoinPublicKey(rng.r#gen());
         let out: Output<ProofPreimage, InMemoryDB> =
-            Output::new::<_>(&mut rng, &coin, 0, &pk, None).unwrap();
-        let trans = Transient::new_from_contract_owned_output(&mut rng, &coin.qualify(0), 0, out);
+            Output::new::<_>(&mut rng, &coin, None, &pk, None).unwrap();
+        let trans =
+            Transient::new_from_contract_owned_output(&mut rng, &coin.qualify(0), None, out);
         assert!(trans.is_err());
     }
 }
