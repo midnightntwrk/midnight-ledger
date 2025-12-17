@@ -128,7 +128,7 @@ impl<S: SignatureKind<D>, D: DB>
         };
         let prototypes = calls
             .iter()
-            .zip(partitioned.into_iter())
+            .zip(partitioned)
             .map(|(call, (guaranteed, fallible))| ContractCallPrototype {
                 address: call.address,
                 entry_point: call.entry_point.clone(),
