@@ -1361,7 +1361,7 @@ impl<T> WithDustStateChanges<T> {
 
 impl<T> WithDustStateChanges<T> {
     pub fn add_change(mut self, change: DustStateChanges) -> Self {
-        if let Some(last_change) = self.changes.first_mut() {
+        if let Some(last_change) = self.changes.last_mut() {
             if last_change.can_merge(&change) {
                 last_change.merge(change);
             } else {
@@ -1669,6 +1669,7 @@ impl<D: DB> DustLocalState<D> {
                                 source: event.source.transaction_hash,
                             })
                         } else {
+                            error!("Unable to find backing NIGHT");
                             gen_collapses.push(*generation_index);
                             acc.result.commitment_tree = acc
                                 .result
