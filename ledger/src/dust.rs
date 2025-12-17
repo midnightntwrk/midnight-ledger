@@ -1671,7 +1671,7 @@ impl<D: DB> DustLocalState<D> {
                                 acc.result.dust_utxos = acc.result.dust_utxos.insert(
                                     qdo_new.nullifier(sk),
                                     DustWalletUtxoState {
-                                        utxo: qdo_new.clone(),
+                                        utxo: qdo_new,
                                         pending_until: None,
                                     },
                                 );
