@@ -23,7 +23,7 @@ use ledger::dust::{
     DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
-    DustUtxoState as LedgerDustUtxoState,
+    DustUtxoState as LedgerDustUtxoState, WithDustStateChanges as LedgerWithDustStateChanges,
 };
 use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
@@ -1254,16 +1254,14 @@ impl DustSecretKey {
 
 #[wasm_bindgen]
 pub struct DustLocalStateWithChanges {
-    inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+    inner: LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
     changes: Vec<DustStateChanges>,
 }
 
-impl From<ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>>
+impl From<LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>>
     for DustLocalStateWithChanges
 {
-    fn from(
-        inner: ledger::semantics::WithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
-    ) -> Self {
+    fn from(inner: LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>) -> Self {
         let changes = inner
             .changes
             .iter()

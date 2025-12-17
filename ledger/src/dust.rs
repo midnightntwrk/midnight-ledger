@@ -15,10 +15,11 @@ use crate::error::{
     EventReplayError, GenerationInfoAlreadyPresentError, MalformedTransaction, TransactionInvalid,
 };
 use crate::events::{Event, EventDetails};
-use crate::semantics::{DustStateChanges, TransactionContext, WithDustStateChanges};
+use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
+    UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
@@ -1321,6 +1322,71 @@ pub struct DustLocalState<D: DB> {
     pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
+
+#[derive(Clone)]
+pub struct DustStateChanges {
+    pub received_utxos: Vec<QualifiedDustOutput>,
+    pub spent_utxos: Vec<QualifiedDustOutput>,
+    pub source: TransactionHash,
+}
+
+impl DustStateChanges {
+    pub fn can_merge(&self, other: &DustStateChanges) -> bool {
+        self.source == other.source
+    }
+
+    pub fn merge(&mut self, other: DustStateChanges) {
+        self.received_utxos.extend(other.received_utxos);
+        self.spent_utxos.extend(other.spent_utxos);
+    }
+}
+
+pub struct WithDustStateChanges<T> {
+    pub changes: Vec<DustStateChanges>,
+    pub result: T,
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn new(result: T) -> WithDustStateChanges<T> {
+        WithDustStateChanges {
+            changes: Vec::new(),
+            result,
+        }
+    }
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn add_change(mut self, change: DustStateChanges) -> Self {
+        if let Some(last_change) = self.changes.first_mut() {
+            if last_change.can_merge(&change) {
+                last_change.merge(change);
+            } else {
+                self.changes.push(change);
+            }
+        } else {
+            self.changes.push(change);
+        }
+
+        WithDustStateChanges {
+            changes: self.changes,
+            result: self.result,
+        }
+    }
+
+    pub fn maybe_add_change(self, maybe_change: Option<DustStateChanges>) -> Self {
+        match maybe_change {
+            Some(change) => self.add_change(change),
+            None => self,
+        }
+    }
+
+    pub fn with_result(self, result: T) -> Self {
+        WithDustStateChanges {
+            changes: self.changes,
+            result,
+        }
+    }
+}
 
 impl<D: DB> DustLocalState<D> {
     pub fn new(params: DustParameters) -> Self {
