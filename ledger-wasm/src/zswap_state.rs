@@ -25,7 +25,8 @@ use coin_structure::{
     contract::ContractAddress as Address,
 };
 use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
-use ledger::semantics::{WithZswapStateChanges, ZswapLocalStateExt};
+use ledger::semantics::ZswapLocalStateExt;
+use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
