@@ -96,6 +96,7 @@ impl<T> WithZswapStateChanges<T> {
 }
 
 impl<T> WithZswapStateChanges<T> {
+    // look into zswap crate!!
     pub fn add_change(mut self, change: ZswapStateChanges) -> Self {
         if let Some(last_change) = self.changes.first_mut() {
             if last_change.can_merge(&change) {
@@ -131,6 +132,7 @@ impl<T> WithZswapStateChanges<T> {
 
 #[derive(Clone)]
 pub struct DustStateChanges {
+    //maybe miove to DUST,...
     pub received_utxos: Vec<crate::dust::QualifiedDustOutput>,
     pub spent_utxos: Vec<crate::dust::QualifiedDustOutput>,
     pub source: TransactionHash,
@@ -252,7 +254,7 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
     ) -> WithZswapStateChanges<Self>;
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
-    fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>>(
+    fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Serializable + Tagged>(
         &self,
         secret_keys: &SecretKeys,
         tx: &Transaction<S, P, B, D>,
@@ -279,6 +281,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                 token_type,
             } => {
                 let mut res = WithZswapStateChanges::new(self.clone());
+                let transaction_hash = tx.transaction_hash();
                 for OutputInstructionShielded {
                     amount,
                     target_key: target_address,
@@ -289,7 +292,8 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                         type_: *token_type,
                         nonce: Nonce(*nonce),
                     };
-                    res.result = res.result.apply_claim(
+
+                    let (new_state, new_coin_opt) = res.result.apply_claim(
                         secret_keys,
                         &AuthorizedClaim {
                             coin,
@@ -297,6 +301,16 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                             proof: std::sync::Arc::new(()),
                         },
                     );
+                    res.result = new_state;
+
+                    // If a coin was added, add it to state changes
+                    if let Some(new_coin) = new_coin_opt {
+                        res = res.add_change(ZswapStateChanges {
+                            received_coins: vec![new_coin],
+                            spent_coins: vec![],
+                            source: transaction_hash,
+                        });
+                    }
                 }
                 res
             }
@@ -304,48 +318,87 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         }
     }
 
-    fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>>(
+    fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Serializable + Tagged>(
         &self,
         secret_keys: &SecretKeys,
         tx: &Transaction<S, P, B, D>,
         res: ErasedTransactionResult,
     ) -> WithZswapStateChanges<Self> {
+        let source = tx.transaction_hash();
+
         match (tx, res) {
             (_, ErasedTransactionResult::Failure) => WithZswapStateChanges::new(self.clone()),
             (Transaction::Standard(stx), ErasedTransactionResult::PartialSuccess(segments, ..)) => {
-                let post_guaranteed = if let Some(gc) = &stx.guaranteed_coins {
-                    self.apply(secret_keys, gc)
-                } else {
-                    self.clone()
-                };
+                let (post_guaranteed, post_guaranteed_received, post_guaranteed_spent) =
+                    if let Some(gc) = &stx.guaranteed_coins {
+                        self.apply(secret_keys, gc)
+                    } else {
+                        (self.clone(), Vec::new(), Vec::new())
+                    };
 
-                let result = segments
+                let (state, received_coins, spent_coins) = segments
                     .iter()
                     .filter(|(segment, success)| *segment != 0 && *success)
                     .map(|(segment, _)| segment)
-                    .fold(post_guaranteed, |st, segment| {
-                        if let Some(fc) = stx.fallible_coins.get(segment) {
-                            st.apply(secret_keys, &fc)
-                        } else {
-                            st
-                        }
+                    .fold(
+                        (
+                            post_guaranteed,
+                            post_guaranteed_received,
+                            post_guaranteed_spent,
+                        ),
+                        |(st, mut recv_acc, mut spent_acc), segment| {
+                            if let Some(fc) = stx.fallible_coins.get(segment) {
+                                let (st2, mut recv, mut spent) = st.apply(secret_keys, &fc);
+                                recv_acc.append(&mut recv);
+                                spent_acc.append(&mut spent);
+                                (st2, recv_acc, spent_acc)
+                            } else {
+                                (st, recv_acc, spent_acc)
+                            }
+                        },
+                    );
+
+                let mut res = WithZswapStateChanges::new(state);
+                if !received_coins.is_empty() || !spent_coins.is_empty() {
+                    res = res.add_change(ZswapStateChanges {
+                        received_coins,
+                        spent_coins,
+                        source,
                     });
-                WithZswapStateChanges::new(result)
+                }
+                res
             }
             (Transaction::Standard(stx), ErasedTransactionResult::Success) => {
-                let post_guaranteed = if let Some(gc) = &stx.guaranteed_coins {
-                    self.apply(secret_keys, gc)
-                } else {
-                    self.clone()
-                };
+                let (post_guaranteed, post_guaranteed_received, post_guaranteed_spent) =
+                    if let Some(gc) = &stx.guaranteed_coins {
+                        self.apply(secret_keys, gc)
+                    } else {
+                        (self.clone(), Vec::new(), Vec::new())
+                    };
 
-                let result = stx
-                    .fallible_coins
-                    .sorted_iter()
-                    .fold(post_guaranteed, |st, sp| {
-                        st.apply(secret_keys, sp.1.deref())
+                let (state, received_coins, spent_coins) = stx.fallible_coins.sorted_iter().fold(
+                    (
+                        post_guaranteed,
+                        post_guaranteed_received,
+                        post_guaranteed_spent,
+                    ),
+                    |(st, mut recv_acc, mut spent_acc), sp| {
+                        let (st2, mut recv, mut spent) = st.apply(secret_keys, sp.1.deref());
+                        recv_acc.append(&mut recv);
+                        spent_acc.append(&mut spent);
+                        (st2, recv_acc, spent_acc)
+                    },
+                );
+
+                let mut res = WithZswapStateChanges::new(state);
+                if !received_coins.is_empty() || !spent_coins.is_empty() {
+                    res = res.add_change(ZswapStateChanges {
+                        received_coins,
+                        spent_coins,
+                        source,
                     });
-                WithZswapStateChanges::new(result)
+                }
+                res
             }
             (Transaction::ClaimRewards(_), ErasedTransactionResult::Success) => {
                 WithZswapStateChanges::new(self.clone())
@@ -382,7 +435,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                             .get(nullifier)
                             .map(|qci| ZswapStateChanges {
                                 received_coins: vec![],
-                                spent_coins: vec![qci.clone()],
+                                spent_coins: vec![*qci],
                                 source: event.source.transaction_hash,
                             })
                     } else {
@@ -418,7 +471,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                         )));
                         let qci = ci.qualify(*mt_index);
                         acc.result.pending_outputs = acc.result.pending_outputs.remove(commitment);
-                        acc.result.coins = acc.result.coins.insert(nullifier, qci.clone());
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
                         Some(ZswapStateChanges {
                             received_coins: vec![qci],
                             spent_coins: vec![],
@@ -429,7 +482,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                             &secret_keys.coin_secret_key,
                         )));
                         let qci = ci.qualify(*mt_index);
-                        acc.result.coins = acc.result.coins.insert(nullifier, qci.clone());
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
                         Some(ZswapStateChanges {
                             received_coins: vec![qci],
                             spent_coins: vec![],

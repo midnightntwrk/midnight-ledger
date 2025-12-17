@@ -87,7 +87,7 @@ impl<D: DB> State<D> {
         &self,
         secret_keys: &SecretKeys,
         tx: &AuthorizedClaim<P>,
-    ) -> Self {
+    ) -> (Self, Option<QualifiedCoinInfo>) {
         let mut res = self.clone();
         res.merkle_tree = res
             .merkle_tree
@@ -97,18 +97,23 @@ impl<D: DB> State<D> {
                 (),
             )
             .rehash();
-        if secret_keys.coin_public_key() == tx.recipient {
+        let new_coin = if secret_keys.coin_public_key() == tx.recipient {
+            let qualified_coin = tx.coin.qualify(self.first_free);
             res.coins = self.coins.insert(
                 tx.coin.nullifier(&SenderEvidence::User(Cow::Borrowed(
                     &secret_keys.coin_secret_key,
                 ))),
-                tx.coin.qualify(self.first_free),
+                qualified_coin,
             );
+
+            Some(qualified_coin)
         } else {
             res.merkle_tree.collapse(res.first_free, res.first_free);
-        }
+
+            None
+        };
         res.first_free += 1;
-        res
+        (res, new_coin)
     }
 
     #[instrument(skip(self, tx))]
@@ -134,8 +139,14 @@ impl<D: DB> State<D> {
     }
 
     #[instrument(skip(self, tx))]
-    pub fn apply<P: Storable<D>>(&self, secret_keys: &SecretKeys, tx: &Offer<P, D>) -> State<D> {
+    pub fn apply<P: Storable<D>>(
+        &self,
+        secret_keys: &SecretKeys,
+        tx: &Offer<P, D>,
+    ) -> (State<D>, Vec<QualifiedCoinInfo>, Vec<QualifiedCoinInfo>) {
         let mut res = self.clone();
+        let mut received_coins: Vec<QualifiedCoinInfo> = Vec::new();
+        let mut spent_coins: Vec<QualifiedCoinInfo> = Vec::new();
         for (coin_com, ciph) in tx
             .outputs
             .iter_deref()
@@ -159,6 +170,7 @@ impl<D: DB> State<D> {
                         ),
                         qci,
                     );
+                    received_coins.push(qci);
                     res.pending_outputs = res.pending_outputs.remove(coin_com);
                 }
             } else if let Some(coin) = res.pending_outputs.get(coin_com) {
@@ -171,6 +183,7 @@ impl<D: DB> State<D> {
                     ),
                     qci,
                 );
+                received_coins.push(qci);
                 res.pending_outputs = res.pending_outputs.remove(coin_com);
             } else {
                 res.merkle_tree = res.merkle_tree.collapse(res.first_free, res.first_free);
@@ -185,6 +198,7 @@ impl<D: DB> State<D> {
         {
             if let Some(coin) = res.coins.get(nul) {
                 info!(?coin, "spent coin finalized");
+                spent_coins.push(*coin);
                 res.coins = res.coins.remove(nul);
             }
             if let Some(coin) = res.pending_spends.get(nul) {
@@ -193,7 +207,7 @@ impl<D: DB> State<D> {
             }
         }
         res.merkle_tree = res.merkle_tree.rehash();
-        res
+        (res, received_coins, spent_coins)
     }
 
     #[instrument(skip(self, rng))]

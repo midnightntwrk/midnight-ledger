@@ -199,9 +199,18 @@ impl ZswapLocalState {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
         Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
+            ProvenOffer(val) => {
+                let (state, _received, _spent) = self.0.apply(&sk_unwrapped, val);
+                state
+            }
+            UnprovenOffer(val) => {
+                let (state, _received, _spent) = self.0.apply(&sk_unwrapped, val);
+                state
+            }
+            ProofErasedOffer(val) => {
+                let (state, _received, _spent) = self.0.apply(&sk_unwrapped, val);
+                state
+            }
         }))
     }
 
