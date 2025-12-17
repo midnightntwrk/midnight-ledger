@@ -19,6 +19,7 @@ use crate::dust::{
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
 pub use crate::prove::Resolver;
+use crate::prove::UnprovenIntent;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::INITIAL_PARAMETERS;
 use crate::structure::{
@@ -995,18 +996,14 @@ pub fn test_intents<D: DB, R: Rng + CryptoRng + ?Sized>(
 }
 
 pub fn test_intents_adv<S: SignatureKind<D>, D: DB, R: Rng + CryptoRng + ?Sized>(
-    orig_intents: storage::storage::HashMap<
-        u16,
-        Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-        D,
-    >,
+    orig_intents: storage::storage::HashMap<u16, UnprovenIntent<S, D>, D>,
     rng: &mut R,
     segment: u16,
     calls: Vec<ContractCallPrototype<D>>,
     updates: Vec<MaintenanceUpdate<D>>,
     deploys: Vec<ContractDeploy<D>>,
     tblock: Timestamp,
-) -> storage::storage::HashMap<u16, Intent<S, ProofPreimageMarker, PedersenRandomness, D>, D> {
+) -> storage::storage::HashMap<u16, UnprovenIntent<S, D>, D> {
     let mut intents = storage::storage::HashMap::new();
     intents = intents.insert(
         segment,
