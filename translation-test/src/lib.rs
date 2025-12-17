@@ -14,8 +14,6 @@ use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
-// mod ledger_tl;
-
 use mechanism::*;
 
 type TestDb = ParityDb;
@@ -281,7 +279,7 @@ impl<D: DB>
                     .fold(SizeAnn::empty(), |acc, x| acc.append(&x.ann()));
                 merkle_patricia_trie::Node::Branch {
                     ann,
-                    children: new_children,
+                    children: Box::new(new_children),
                 }
             }
             merkle_patricia_trie::Node::Extension {

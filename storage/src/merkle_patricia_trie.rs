@@ -272,7 +272,7 @@ pub enum Node<
     },
     Branch {
         ann: A,
-        children: [Sp<Node<T, D, A>, D>; 16],
+        children: Box<[Sp<Node<T, D, A>, D>; 16]>,
     },
     Extension {
         ann: A,
@@ -1082,7 +1082,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Sp<Node<T, D, A>, D>
 
                     let branch = self.arena.alloc(Node::Branch {
                         ann: initial_ann,
-                        children: children,
+                        children: Box::new(children),
                     });
 
                     let (final_branch, existing) = branch.insert(&path[index..], value);
@@ -1456,7 +1456,7 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
 
                 Ok(Node::Branch {
                     ann,
-                    children: children,
+                    children: Box::new(children),
                 })
             }
             3 => {
