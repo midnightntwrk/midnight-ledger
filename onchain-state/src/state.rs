@@ -143,9 +143,14 @@ impl<D: DB> Drop for StateValue<D> {
 impl<D: DB> Distribution<StateValue<D>> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> StateValue<D> {
         let disc = rng.gen_range(0..40);
+        // Converges because:
+        // - 38/40 cases do not recurse
+        // - 1/40 (Map) samples randomly between 0..8 children (-> expected 3.5 recursive calls)
+        // - 1/40 (Array) samples randomly between 0..=16 children (-> expected 8 recursive calls)
+        // => 11.5 / 40 expected recursive calls < 1
         match disc {
-            20..=36 => StateValue::Cell(Sp::new(rng.r#gen())),
-            37..=38 => {
+            20..=35 => StateValue::Cell(Sp::new(rng.r#gen())),
+            36..=37 => {
                 let mut mt: MerkleTree<(), D> = rng.r#gen();
                 // The `Serializable::unversioned_serialize` impl requires this.
                 while mt.height() == 0 || mt.height() > 32 {
@@ -153,8 +158,12 @@ impl<D: DB> Distribution<StateValue<D>> for Standard {
                 }
                 StateValue::BoundedMerkleTree(mt)
             }
-            39 => StateValue::Map(rng.r#gen()),
-            40 => StateValue::Array(rng.r#gen()),
+            38 => StateValue::Map(rng.r#gen()),
+            39 => {
+                let len = rng.gen_range(0..=16);
+                let arr = (0..len).fold(Array::new(), |arr, _| arr.push(rng.r#gen()));
+                StateValue::Array(arr)
+            }
             _ => StateValue::Null,
         }
     }
@@ -418,7 +427,13 @@ impl<D: DB> StateValue<D> {
                 if bmt.height() > 32 {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "BMT eceeded maximum height of 32",
+                        "BMT exceeded maximum height of 32",
+                    ));
+                }
+                if bmt.height() == 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "BMT has invalid height of 0",
                     ));
                 }
                 if bmt.root().is_none() {
@@ -554,10 +569,10 @@ fn maybe_str(buf: &[u8]) -> MaybeStr<'_> {
     fn permitted(c: u8) -> bool {
         c.is_ascii_alphanumeric() || b"'+-_\":/\\?#$^*&.".contains(&c)
     }
-    if buf.iter().copied().all(permitted) {
-        if let Ok(s) = std::str::from_utf8(buf) {
-            return MaybeStr::Str(s);
-        }
+    if buf.iter().copied().all(permitted)
+        && let Ok(s) = std::str::from_utf8(buf)
+    {
+        return MaybeStr::Str(s);
     }
     MaybeStr::Bytes(buf)
 }
@@ -709,7 +724,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v4]"]
+#[tag = "contract-state[v5]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -773,7 +788,7 @@ impl<D: DB> ChargedState<D> {
     }
 
     pub fn get_ref(&self) -> &StateValue<D> {
-        &*self.state
+        &self.state
     }
 
     pub fn update(
@@ -849,7 +864,7 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v2]"]
+#[tag = "contract-operation[v3]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
@@ -981,6 +996,8 @@ mod tests {
 
     #[test]
     fn test_state_ser() {
+        let cs = ChargedState::<InMemoryDB>::new(StateValue::Null);
+        test_ser::<RcMap<InMemoryDB>>(cs.charged_keys);
         test_ser::<ContractState<InMemoryDB>>(ContractState::default());
         test_ser::<StateValue<InMemoryDB>>(stval!((512u64)));
         test_ser::<StateValue<InMemoryDB>>(stval!({ 512u64 => (12u64) }));

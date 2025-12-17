@@ -1,6 +1,6 @@
 [package]
 name = "midnight-storage"
-version = "1.0.0-alpha.3"
+version = "1.0.0-rc.2"
 edition = "2024"
 license.workspace = true
 
@@ -62,7 +62,7 @@ sysinfo = "0.34.2"
 midnight-storage = { path = ".", features = ["proptest", "bench"] }
 onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 rayon = "^1.10.0"
-paste = "1.0.15"
+pastey = "0.1.1"
 serde_json = "1.0"
 
 [[bench]]

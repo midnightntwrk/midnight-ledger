@@ -20,7 +20,6 @@ use proptest::arbitrary::Arbitrary;
 use rand::Rng;
 use rand::distributions::Standard;
 use rand::prelude::Distribution;
-use rand::seq::SliceRandom;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::{NoStrategy, simple_arbitrary};
@@ -330,10 +329,12 @@ impl AlignmentSegment {
     fn sample_value<R: Rng + ?Sized>(&self, rng: &mut R) -> Value {
         match self {
             Self::Atom(atom) => Value(vec![atom.sample_value_atom(rng)]),
-            Self::Option(options) => options
-                .choose(rng)
-                .expect("AlignmentSegment::Option should not be empty")
-                .sample_value(rng),
+            Self::Option(options) => {
+                let choice = rng.gen_range(0..options.len());
+                let discriminant = ValueAtom(choice.to_le_bytes().to_vec()).normalize();
+                let remaining = options[choice].sample_value(rng);
+                Value(once(discriminant).chain(remaining.0).collect())
+            }
         }
     }
 }

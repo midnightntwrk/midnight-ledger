@@ -79,6 +79,56 @@ pub const fn hexhash(hex: &[u8]) -> [u8; 32] {
 
 const EXPECTED_DATA: &[(&str, [u8; 32], &str)] = &[
     (
+        "bls_filecoin_2p0",
+        hexhash(b"097364e1420faa48a53729a0e06660c07c9688c0d83d06dd5355d2f22beec834"),
+        "public parameters for k=0",
+    ),
+    (
+        "bls_filecoin_2p1",
+        hexhash(b"c7c965b2c94c0758c602bd41b60338635384233438e6664ff01c492928e7f27b"),
+        "public parameters for k=1",
+    ),
+    (
+        "bls_filecoin_2p2",
+        hexhash(b"1caae55491c06f6264269745be5237d7806a9bd7be6a41721482418f1510c6ec"),
+        "public parameters for k=2",
+    ),
+    (
+        "bls_filecoin_2p3",
+        hexhash(b"3c40874b6a7a3899e8364e8592fcfbbbc5a0e0121175b1eb6b7844bc74292408"),
+        "public parameters for k=3",
+    ),
+    (
+        "bls_filecoin_2p4",
+        hexhash(b"715a680d5d780429a07a8ed9467c491aaaaa07884d793ae76977012abf62fe4a"),
+        "public parameters for k=4",
+    ),
+    (
+        "bls_filecoin_2p5",
+        hexhash(b"1b14f7b1949fc0904a8218301be59a17a1a1eff218420a2beb8b9276ed965ee8"),
+        "public parameters for k=5",
+    ),
+    (
+        "bls_filecoin_2p6",
+        hexhash(b"2c602d1716a984e3029dfa877667e0de605801764aad76a1a296b4e2df1f393a"),
+        "public parameters for k=6",
+    ),
+    (
+        "bls_filecoin_2p7",
+        hexhash(b"ea7deea4821b5bf7822df9e5cf0b197095806a07fc53b36e89c9ed21754c4df7"),
+        "public parameters for k=7",
+    ),
+    (
+        "bls_filecoin_2p8",
+        hexhash(b"62c6799b3dd8ca1fd71c2e61d0297a0b6c54d87f00685cf0fed6daa3f873efe0"),
+        "public parameters for k=8",
+    ),
+    (
+        "bls_filecoin_2p9",
+        hexhash(b"5dc3e4733ba507d1a4c353f1b034bfa1c9d003f8e21a933fda5647e9140d8910"),
+        "public parameters for k=9",
+    ),
+    (
         "bls_filecoin_2p10",
         hexhash(b"d1a3403c1f8669e82ed28d9391e13011aea76801b28fe14b42bf76d141b4efa2"),
         "public parameters for k=10",

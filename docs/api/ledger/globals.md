@@ -1,8 +1,8 @@
-[**@midnight/ledger v6.1.0-alpha.3**](README.md)
+[**@midnight/ledger v6.2.0-rc.2**](README.md)
 
----
+***
 
-# @midnight/ledger v6.1.0-alpha.3
+# @midnight/ledger v6.2.0-rc.2
 
 ## Classes
 
@@ -101,12 +101,14 @@
 - [EncodedStateValue](type-aliases/EncodedStateValue.md)
 - [EncPublicKey](type-aliases/EncPublicKey.md)
 - [ErasedTransactionResult](type-aliases/ErasedTransactionResult.md)
+- [FeePrices](type-aliases/FeePrices.md)
 - [FinalizedTransaction](type-aliases/FinalizedTransaction.md)
 - [Fr](type-aliases/Fr.md)
 - [GatherResult](type-aliases/GatherResult.md)
 - [IntentHash](type-aliases/IntentHash.md)
 - [Key](type-aliases/Key.md)
 - [Nonce](type-aliases/Nonce.md)
+- [NormalizedCost](type-aliases/NormalizedCost.md)
 - [Nullifier](type-aliases/Nullifier.md)
 - [Op](type-aliases/Op.md)
 - [PartitionedTranscript](type-aliases/PartitionedTranscript.md)

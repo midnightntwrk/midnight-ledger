@@ -992,13 +992,8 @@ impl<D: DB> StorageBackend<D> {
                 self.write_cache.set(key, value).is_none(),
                 "write cache is unbounded, it can't evict"
             );
-        } else {
-            match self.read_cache.set(key, value) {
-                Some((_, v)) => {
-                    debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
-                }
-                _ => {}
-            }
+        } else if let Some((_, v)) = self.read_cache.set(key, value) {
+            debug_assert!(!v.is_pending(), "read cache shouldn't contain writes");
         }
     }
 
@@ -1040,7 +1035,7 @@ pub struct OnDiskObject<H: WellBehavedHasher> {
     /// `persist`ed. Note that the `persist` counts are stored separately -- see
     /// `StorageBackend::get_root_count` for details -- but not here in the
     /// object!
-    pub(crate) ref_count: u32,
+    pub(crate) ref_count: u64,
     pub(crate) children: std::vec::Vec<ArenaKey<H>>,
 }
 
@@ -1081,9 +1076,10 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     /// This ignores any `delta.root_delta`, since the `OnDiskObject` is not
     /// concerned with root counts.
     fn apply_delta(self, delta: Delta) -> Self {
-        let ref_count = self.ref_count as i32 + delta.ref_delta;
-        assert!(ref_count >= 0, "ref count can't be negative");
-        let ref_count = ref_count as u32;
+        let ref_count = self
+            .ref_count
+            .checked_add_signed(delta.ref_delta as i64)
+            .expect("ref count can't go out of u64 bounds");
         OnDiskObject {
             data: self.data,
             children: self.children,
@@ -1129,7 +1125,8 @@ impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
         }
         OnDiskObject {
             data: rand_vec(rng, |r| r.r#gen()),
-            ref_count: rng.r#gen(),
+            // u64 is too big to fit into i64 (SQLite INTEGER) so we need to slightly adjust it
+            ref_count: rng.gen_range(0..=i64::MAX as u64),
             children: rand_vec(rng, |r| ArenaKey::Ref(r.r#gen())),
         }
     }
@@ -1151,13 +1148,13 @@ pub(crate) mod raw_node {
         #[allow(dead_code)]
         pub(crate) data: std::vec::Vec<u8>,
         pub(crate) children: std::vec::Vec<ArenaKey<H>>,
-        pub(crate) ref_count: u32,
+        pub(crate) ref_count: u64,
     }
 
     impl<H: WellBehavedHasher> RawNode<H> {
         pub(crate) fn new(
             key: &[u8],
-            ref_count: u32,
+            ref_count: u64,
             children: std::vec::Vec<&RawNode<H>>,
         ) -> Self {
             let data = key.to_vec();
@@ -1200,7 +1197,7 @@ pub(crate) mod raw_node {
 
 #[cfg(test)]
 mod tests {
-    use crate as storage;
+    use crate::{self as storage, storable::child_from};
     use crypto::digest::Digest;
     use derive_where::derive_where;
     use raw_node::RawNode;
@@ -1417,13 +1414,26 @@ mod tests {
         };
         let (child_key, child_bytes) = in_database_repr(child.clone());
         let (parent_key, parent_bytes) = in_database_repr(parent.clone());
-        let (_gp_key, gp_bytes) = in_database_repr(gp.clone());
+        let (gp_key, gp_bytes) = in_database_repr(gp.clone());
+
+        let child_child_repr = child_from(&child_bytes, &[]);
+        let parent_child_repr = child_from(&parent_bytes, std::slice::from_ref(&child_child_repr));
+        let gp_child_repr = child_from(
+            &gp_bytes,
+            &[parent_child_repr.clone(), child_child_repr.clone()],
+        );
+
+        let keys_to_childref = HashMap::from([
+            (child_key.clone(), child_child_repr.clone()),
+            (parent_key.clone(), parent_child_repr.clone()),
+            (gp_key.clone(), gp_child_repr.clone()),
+        ]);
 
         // Test that `Storable` is implemented correctly on `TestNode`.
         let child_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut child_bytes.clone().as_slice(),
             &mut vec![].into_iter(),
-            &IrLoader::new(arena, &HashMap::new()),
+            &IrLoader::new(arena, &HashMap::new(), HashMap::new()),
         )
         .unwrap();
         assert_eq!(child_reconstructed, child);
@@ -1434,7 +1444,7 @@ mod tests {
         let parent_reconstructed = <LabeledNode<D> as Storable<D>>::from_binary_repr(
             &mut parent_bytes.clone().as_slice(),
             &mut vec![ArenaKey::Ref(child_key.clone())].into_iter(),
-            &IrLoader::new(arena, &all),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(parent_reconstructed, parent);
@@ -1449,7 +1459,7 @@ mod tests {
                 ArenaKey::Ref(child_key.clone()),
             ]
             .into_iter(),
-            &IrLoader::new(arena, &all),
+            &IrLoader::new(arena, &all, keys_to_childref.clone()),
         )
         .unwrap();
         assert_eq!(gp_reconstructed, gp);

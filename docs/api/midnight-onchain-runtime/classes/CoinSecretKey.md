@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v1.0.0-alpha.1**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v1.0.0-rc.2**](../README.md)
 
 ***
 
@@ -6,10 +6,23 @@
 
 # Class: CoinSecretKey
 
-A user secret key capable of sending Zswap coins, as a hex-encoded 35-byte
-string
+Holds the coin secret key of a user, serialized as a hex-encoded 32-byte string
 
 ## Methods
+
+### clear()
+
+```ts
+clear(): void
+```
+
+Clears the coin secret key, so that it is no longer usable nor held in memory
+
+#### Returns
+
+`void`
+
+***
 
 ### yesIKnowTheSecurityImplicationsOfThis\_serialize()
 
@@ -20,3 +33,21 @@ yesIKnowTheSecurityImplicationsOfThis_serialize(): Uint8Array
 #### Returns
 
 `Uint8Array`
+
+***
+
+### deserialize()
+
+```ts
+static deserialize(raw): CoinSecretKey
+```
+
+#### Parameters
+
+##### raw
+
+`Uint8Array`
+
+#### Returns
+
+[`CoinSecretKey`](CoinSecretKey.md)

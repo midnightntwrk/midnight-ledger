@@ -20,6 +20,7 @@ use serialize::{Deserializable, tagged_deserialize, tagged_serialize};
 use std::fs::File;
 use std::future::Future;
 use std::io::{BufReader, Read};
+use std::sync::Arc;
 use storage::db::DB;
 use transient_crypto::proofs::{
     KeyLocation, ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, Resolver,
@@ -34,13 +35,13 @@ impl Resolver for ZswapResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
             "midnight/zswap/spend" => {
-                concat!("zswap/", include_str!("../../static/version"), "/spend")
+                concat!("zswap/", midnight_ledger_static::version!(), "/spend")
             }
             "midnight/zswap/output" => {
-                concat!("zswap/", include_str!("../../static/version"), "/output")
+                concat!("zswap/", midnight_ledger_static::version!(), "/output")
             }
             "midnight/zswap/sign" => {
-                concat!("zswap/", include_str!("../../static/version"), "/sign")
+                concat!("zswap/", midnight_ledger_static::version!(), "/sign")
             }
             _ => return Ok(None),
         };
@@ -95,7 +96,7 @@ impl AuthorizedClaim<ProofPreimage> {
         Ok(AuthorizedClaim {
             coin: self.coin,
             recipient: self.recipient,
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -135,7 +136,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -150,7 +151,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof: prover.prove(&self.proof, None).await?,
+            proof: Arc::new(prover.prove(&self.proof, None).await?),
         })
     }
 }
@@ -171,8 +172,8 @@ impl<D: DB> Transient<ProofPreimage, D> {
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof_input: proof_input?,
-            proof_output: proof_output?,
+            proof_input: Arc::new(proof_input?),
+            proof_output: Arc::new(proof_output?),
         })
     }
 }
@@ -194,9 +195,7 @@ mod tests {
             use serialize::Deserializable;
             use std::fs::File;
             use std::path::PathBuf;
-            let file = PathBuf::from("../static/zswap")
-                .join(ir)
-                .with_extension("bzkir");
+            let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
             let ir = tagged_deserialize::<IrSource>(&mut File::open(file).unwrap()).unwrap();
             ir.instructions
                 .iter()

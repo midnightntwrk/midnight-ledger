@@ -36,7 +36,7 @@ use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event[v5]"]
+#[tag = "event[v8]"]
 pub struct Event<D: DB> {
     pub source: EventSource,
     pub content: EventDetails<D>,
@@ -55,9 +55,9 @@ tag_enforcement_test!(EventSource);
 
 #[derive(PartialEq, Eq, Clone, Debug, Serializable, Storable)]
 #[storable(base)]
-#[tag = "zswap-preimage-evidence[v1]"]
+#[tag = "zswap-preimage-evidence[v2]"]
 pub enum ZswapPreimageEvidence {
-    Ciphertext(CoinCiphertext),
+    Ciphertext(Box<CoinCiphertext>),
     PublicPreimage {
         coin: CoinInfo,
         recipient: Recipient,
@@ -82,7 +82,7 @@ impl ZswapPreimageEvidence {
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event-details[v5]"]
+#[tag = "event-details[v8]"]
 #[non_exhaustive]
 pub enum EventDetails<D: DB> {
     ZswapInput {
@@ -104,7 +104,7 @@ pub enum EventDetails<D: DB> {
         entry_point: EntryPointBuf,
         logged_item: StateValue<D>,
     },
-    ParamChange(LedgerParameters),
+    ParamChange(Sp<LedgerParameters, D>),
     DustInitialUtxo {
         output: QualifiedDustOutput,
         generation: DustGenerationInfo,

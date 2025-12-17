@@ -1,0 +1,12 @@
+[package]
+name = "midnight-ledger-static"
+version = "1.0.0-rc.2"
+edition = "2024"
+license.workspace = true
+
+[dependencies]
+quote = "1"
+proc-macro2 = "1"
+
+[lib]
+proc-macro = true

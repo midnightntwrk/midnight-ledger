@@ -40,7 +40,7 @@ pub use ledger_tracing::{LogLevel, init_logger};
 pub mod test_utilities;
 
 #[cfg(feature = "unstable")]
-const _: &'static str = env!(
+const _: &str = env!(
     "MIDNIGHT_LEDGER_EXPERIMENTAL",
     "attempted to use experimental feature without setting `MIDNIGHT_LEDGER_EXPERIMENTAL`."
 );

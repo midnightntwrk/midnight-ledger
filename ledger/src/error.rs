@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
 use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
@@ -214,7 +214,7 @@ pub enum TransactionInvalid<D: DB> {
         operation_value: u128,
         operation: BalanceOperation,
     },
-    InputNotInUtxos(Utxo),
+    InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
@@ -444,7 +444,11 @@ pub enum MalformedTransaction<D: DB> {
         key_id: usize,
     },
     InvalidDustRegistrationSignature {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
+    },
+    InvalidDustSpendProof {
+        declared_time: Timestamp,
+        dust_spend: Box<DustSpend<(), D>>,
     },
     OutOfDustValidityWindow {
         dust_ctime: Timestamp,
@@ -455,7 +459,7 @@ pub enum MalformedTransaction<D: DB> {
         key: VerifyingKey,
     },
     InsufficientDustForRegistrationFee {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
         available_dust: u128,
     },
     ThresholdMissed {
@@ -492,8 +496,8 @@ pub enum MalformedTransaction<D: DB> {
         operation_value: u128,
     },
     PedersenCheckFailure {
-        expected: EmbeddedGroupAffine,
-        calculated: EmbeddedGroupAffine,
+        expected: Box<EmbeddedGroupAffine>,
+        calculated: Box<EmbeddedGroupAffine>,
     },
     BalanceCheckOverspend {
         token_type: TokenType,
@@ -780,8 +784,8 @@ impl<D: DB> Display for MalformedTransaction<D> {
         use MalformedTransaction::*;
         match self {
             InvalidNetworkId { expected, found } => {
-                let expected = sanitize_network_id(&expected);
-                let found = sanitize_network_id(&found);
+                let expected = sanitize_network_id(expected);
+                let found = sanitize_network_id(found);
                 write!(
                     formatter,
                     "invalid network ID - expect '{expected}' found '{found}'"
@@ -881,6 +885,13 @@ impl<D: DB> Display for MalformedTransaction<D> {
             InvalidDustRegistrationSignature { registration } => write!(
                 formatter,
                 "failed to verify signature of dust registration: {registration:?}"
+            ),
+            InvalidDustSpendProof {
+                declared_time,
+                dust_spend,
+            } => write!(
+                formatter,
+                "dust spend proof failed to verify; this is just as likely a disagreement on dust state on the declared time ({declared_time:?}) as the proof being invalid: {dust_spend:?}"
             ),
             OutOfDustValidityWindow {
                 dust_ctime,
@@ -1171,7 +1182,7 @@ pub enum TransactionProvingError<D: DB> {
     LeftoverEntries {
         address: ContractAddress,
         entry_point: EntryPointBuf,
-        entries: Transcript<D>,
+        entries: Box<Transcript<D>>,
     },
     RanOutOfEntries {
         address: ContractAddress,

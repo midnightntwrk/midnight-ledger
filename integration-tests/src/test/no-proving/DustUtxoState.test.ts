@@ -26,14 +26,12 @@ describe('Ledger API - DustUtxoState', () => {
   test('should print out information as string', () => {
     const dustUtxoState = new DustUtxoState();
 
-    const expected = `DustUtxoState(
-    DustUtxoState {
-        commitments: MerkleTree(root = Some(-)) {},
-        commitments_first_free: 0,
-        nullifiers: {},
-        root_history: {},
-    },
-)`;
+    const expected = `DustUtxoState {
+    commitments: MerkleTree(root = Some(-)) {},
+    commitments_first_free: 0,
+    nullifiers: {},
+    root_history: {},
+}`;
 
     expect(dustUtxoState.toString()).toEqual(expected);
   });

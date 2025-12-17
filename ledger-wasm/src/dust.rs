@@ -69,9 +69,9 @@ impl Event {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 }
@@ -1032,9 +1032,9 @@ impl DustParameters {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 
@@ -1112,9 +1112,9 @@ impl DustUtxoState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 }
@@ -1146,9 +1146,9 @@ impl DustGenerationState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 }
@@ -1177,16 +1177,18 @@ impl DustState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 
+    #[wasm_bindgen(getter)]
     pub fn utxo(&self) -> Result<DustUtxoState, JsError> {
         Ok(DustUtxoState(self.0.utxo.clone()))
     }
 
+    #[wasm_bindgen(getter)]
     pub fn generation(&self) -> Result<DustGenerationState, JsError> {
         Ok(DustGenerationState(self.0.generation.clone()))
     }
@@ -1289,7 +1291,7 @@ impl DustLocalState {
         let sk = sk.try_unwrap()?;
         let ctime = Timestamp::from_secs(js_date_to_seconds(ctime));
         let v_fee = u128::try_from(v_fee).map_err(|_| JsError::new("v_fee is out of range"))?;
-        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee.into(), ctime)?;
+        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee, ctime)?;
 
         let res = Array::new();
         res.push(&JsValue::from(DustLocalState(local_state)));
@@ -1330,24 +1332,28 @@ impl DustLocalState {
     #[wasm_bindgen(js_name = "toString")]
     pub fn to_string(&self, compact: Option<bool>) -> String {
         if compact.unwrap_or(false) {
-            format!("{:?}", &self)
+            format!("{:?}", &self.0)
         } else {
-            format!("{:#?}", &self)
+            format!("{:#?}", &self.0)
         }
     }
 
     #[wasm_bindgen(getter)]
     pub fn utxos(&self) -> Result<Vec<JsValue>, JsError> {
-        Ok(self
-            .0
+        self.0
             .utxos()
             .map(|qdo| qdo_to_value(&qdo))
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     }
 
     #[wasm_bindgen(getter)]
     pub fn params(&self) -> Result<DustParameters, JsError> {
         Ok(DustParameters(self.0.params))
+    }
+
+    #[wasm_bindgen(getter, js_name = "syncTime")]
+    pub fn sync_time(&self) -> Date {
+        seconds_to_js_date(self.0.sync_time.to_secs())
     }
 }
 

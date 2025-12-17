@@ -13,7 +13,7 @@
 
 import { LedgerParameters, shieldedToken, Transaction } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { HEX_64_REGEX, type ShieldedTokenType, Static } from '@/test-objects';
+import { type ShieldedTokenType, Static } from '@/test-objects';
 import '@/setup-proving';
 import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -31,7 +31,6 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
     const transaction = await prove(unprovenTransaction);
 
     expect(transaction.guaranteedOffer?.inputs).toBeUndefined();
-    expect(transaction.transactionHash()).toMatch(HEX_64_REGEX);
     expect(transaction.fees(LedgerParameters.initialParameters())).toBeGreaterThan(0n);
     expect(transaction.identifiers().length).toEqual(0);
     expect(transaction.rewards).toBeUndefined();

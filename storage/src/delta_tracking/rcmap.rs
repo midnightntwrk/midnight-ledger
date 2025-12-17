@@ -13,10 +13,10 @@
 
 //! Reference count map for tracking charged keys in write and delete costing
 use crate::Storable;
-use crate::arena::{ArenaHash, ArenaKey};
+use crate::arena::{ArenaHash, ArenaKey, Opaque, Sp};
 use crate::db::DB;
 use crate::storable::Loader;
-use crate::storage::{default_storage, Map};
+use crate::storage::{Map, default_storage};
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
@@ -31,7 +31,11 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 ///
 /// When stored in the arena, `ArenaKey` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
-/// `ArenaKey`.
+/// `ChildRef`.
+//
+// NOTE: Long-term, it would be nice if this could be a wrapper around `Sp<dyn Any>` instead of
+// around an arena key. This would be a safer alternative, as we would not need to make an
+// assumption that the child is allocated in the backend on construction.
 #[derive_where(Debug, PartialEq, Eq)]
 pub struct ChildRef<D: DB> {
     /// The referenced child
@@ -51,6 +55,7 @@ pub struct ChildRef<D: DB> {
 impl<D: DB> ChildRef<D> {
     /// Creates a new reference
     pub fn new(child: ArenaKey<D::Hasher>) -> Self {
+        // this *will* panic if `child` is not already allocated.
         default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
         Self { child }
     }
@@ -64,7 +69,8 @@ impl<D: DB> Clone for ChildRef<D> {
 
 impl<D: DB> Drop for ChildRef<D> {
     fn drop(&mut self) {
-        default_storage::<D>().with_backend(|b| self.child.refs().iter().for_each(|r| b.unpersist(r)));
+        default_storage::<D>()
+            .with_backend(|b| self.child.refs().iter().for_each(|r| b.unpersist(r)));
     }
 }
 
@@ -83,7 +89,7 @@ impl<D: DB> Storable<D> for ChildRef<D> {
     fn from_binary_repr<R: std::io::Read>(
         reader: &mut R,
         children: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
-        _loader: &impl Loader<D>,
+        loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized,
@@ -92,9 +98,17 @@ impl<D: DB> Storable<D> for ChildRef<D> {
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
         if children.len() == 1 && data.is_empty() {
-            Ok(Self::new(children.pop().expect("must be present")))
+            let child = children.pop().expect("must be present");
+            let mut sp: Sp<Opaque<D>, D> = loader.get(&child)?;
+            sp.persist();
+            let child_ref = Self::new(child);
+            sp.unpersist();
+            Ok(child_ref)
         } else {
-            Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "Ref should have exactly one child and no data"))
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Ref should have exactly one child and no data",
+            ))
         }
     }
 }

@@ -245,7 +245,7 @@ impl<
                 .iter()
                 .zip(dust_registration_signing_keys.iter())
                 .map(|(reg, sk)| {
-                    let mut reg = (&*reg).clone();
+                    let mut reg = (*reg).clone();
                     if reg.night_key != sk.verifying_key() {
                         return Err(MalformedTransaction::<D>::IntentSignatureKeyMismatch);
                     }
@@ -368,7 +368,7 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
             key_location: call.key_location.clone(),
         };
 
-        ProofPreimageVersioned::V1(proof)
+        ProofPreimageVersioned::V1(std::sync::Arc::new(proof))
     }
 }
 

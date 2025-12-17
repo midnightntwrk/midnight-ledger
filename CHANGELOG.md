@@ -4,6 +4,23 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 6.2.0
+
+- Remove special-casing of validation behaviour depending on the
+  `test-utilities` feature being present.
+- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
+- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to now hold its data value on the heap (to reduce Enum size), i.e. this variant is now defined as: `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
+- fix: correctly rehash generation Merkle tree on cNgD processing.
+- Pulled in updates to `midnight-zk`
+- bugfix: various fixes for `ClaimRewardsTransaction`
+- bugfix: updated pricing structure w/ overall cost and dimension weightings
+- addressed audit issues:
+  - bugfix: zeroizes witness/key material more reliably
+  - bugfix: rejects identity ciphertext challenges
+  - bugfix: Correctly use >= instead of > during modulus reduction. p = 0 mod p!
+  - bugfix: An accross-the-board package update resolves the vulnerable `tracing-subscriber` instance.
+  - breaking: improved domain seperators across the board
+
 ## 6.1.0
 
 - breaking: feat: Add real cost model
@@ -20,6 +37,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: proof server now fetches missing artifacts on demand
 - feat: add endpoints for estimating fees with a margin depending on allowed
   block adjustment
+- fix: fix balancing bug in contracts with multiple intents
+- fix: remove special casing of checks on test-utilities feature
 
 ## 6.0.0
 

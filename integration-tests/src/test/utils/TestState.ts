@@ -36,8 +36,11 @@ import {
   type SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
+  signData,
+  type Signature,
   type Signaturish,
   type SigningKey,
+  type NormalizedCost,
   type TokenType,
   Transaction,
   TransactionContext,
@@ -55,15 +58,14 @@ import {
 } from '@midnight-ntwrk/ledger';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 import {
+  DEFAULT_TOKEN_TYPE,
   DUST_GRACE_PERIOD_IN_SECONDS,
   GENERATION_DECAY_RATE,
   initialParameters,
   LOCAL_TEST_NETWORK_ID,
   NIGHT_DUST_RATIO,
-  NIGHT_TOKEN_TYPE,
   Random,
   type ShieldedTokenType,
-  STARS_PER_NIGHT,
   type UnshieldedTokenType
 } from '@/test-objects';
 
@@ -85,6 +87,9 @@ class NightKey {
   }
   verifyingKey() {
     return signatureVerifyingKey(this.signingKey);
+  }
+  signData(data: Uint8Array): Signature {
+    return signData(this.signingKey, data);
   }
 }
 
@@ -143,6 +148,54 @@ export class TestState {
     );
   }
 
+  spendDust(limit: number) {
+    if (this.dust.utxos.length < limit) {
+      throw new Error('Not enough DUST utxos to spend');
+    }
+    const spendsBlockBefore = [];
+
+    for (let i = 0; i < limit; i++) {
+      const qdo = this.dust.utxos[0];
+      const genInfo = this.dust.generationInfo(qdo)!;
+      const dustOutput: DustOutput = {
+        initialValue: qdo.initialValue,
+        owner: qdo.owner,
+        nonce: qdo.nonce,
+        seq: qdo.seq,
+        ctime: qdo.ctime,
+        backingNight: qdo.backingNight
+      };
+
+      const vFee = updatedValue(dustOutput.ctime, dustOutput.initialValue, genInfo, this.time, initialParameters);
+      const [newDust, spend] = this.dust.spend(this.dustKey.secretKey, qdo, vFee, this.time);
+      this.dust = newDust;
+      spendsBlockBefore.push(spend);
+    }
+
+    const intent = Intent.new(this.time);
+    intent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      this.time,
+      spendsBlockBefore,
+      []
+    );
+    intent.signatureData(0xfeed);
+
+    const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+
+    const balancedTx = this.balanceTx(tx.eraseProofs());
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(balancedTx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
+    this.assertApply(balancedTx, new WellFormedStrictness(), detailedBlockFullness, overallBlockFullness);
+  }
+
   context() {
     const block: BlockContext = {
       secondsSinceEpoch: BigInt(this.time.getTime() / 1000),
@@ -152,26 +205,58 @@ export class TestState {
     return new TransactionContext(this.ledger, block);
   }
 
-  assertApply(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness) {
-    const result = this.apply(tx, strictness);
+  assertApplyTxFullness(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness) {
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(tx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
+    this.assertApply(tx, strictness, detailedBlockFullness, overallBlockFullness);
+  }
+
+  assertApply(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    strictness: WellFormedStrictness,
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number
+  ) {
+    const result = this.apply(tx, strictness, detailedBlockFullness, overallBlockFullness);
     expect(result.type, `result type was: ${result.type}, and error: ${result.error}`).toEqual('success');
   }
 
-  fastForward(dur: bigint) {
+  fastForward(dur: bigint, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
+    let computedBlockFullness = overallBlockFullness;
+    if (detailedBlockFullness !== undefined && overallBlockFullness === undefined) {
+      computedBlockFullness = Math.max(
+        detailedBlockFullness.readTime,
+        detailedBlockFullness.computeTime,
+        detailedBlockFullness.blockUsage,
+        detailedBlockFullness.bytesWritten,
+        detailedBlockFullness.bytesChurned
+      );
+    }
     const currSeconds = BigInt(Math.floor(this.time.getTime() / 1000)) + dur;
     const ttl = new Date(Number(currSeconds) * 1000);
     this.time = ttl;
 
-    this.ledger = this.ledger.postBlockUpdate(ttl);
+    this.ledger = this.ledger.postBlockUpdate(ttl, detailedBlockFullness, computedBlockFullness);
     this.dust = this.dust.processTtls(ttl);
   }
 
-  step() {
+  step(detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
     const tenSeconds = 10n;
-    this.fastForward(tenSeconds);
+    this.fastForward(tenSeconds, detailedBlockFullness, overallBlockFullness);
   }
 
-  apply(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness): TransactionResult {
+  apply(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    strictness: WellFormedStrictness,
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number
+  ): TransactionResult {
     const context = this.context();
     const vtx = tx.wellFormed(this.ledger, strictness, this.time);
     const [newSt, result] = this.ledger.apply(vtx, context);
@@ -184,7 +269,7 @@ export class TestState {
         .map((utxo) => structuredClone(utxo))
         .filter((utxo) => utxo.owner === pk)
     );
-    this.step();
+    this.step(detailedBlockFullness, overallBlockFullness);
     return result;
   }
 
@@ -202,10 +287,10 @@ export class TestState {
     this.step();
   }
 
-  giveFeeToken(utxos: number) {
+  giveFeeToken(utxos: number, amount: bigint) {
     this.dustGenerationRegister();
     for (let i = 0; i < utxos; i++) {
-      this.rewardNight(5n * STARS_PER_NIGHT);
+      this.rewardNight(amount);
     }
     this.fastForward(initialParameters.timeToCapSeconds);
   }
@@ -233,8 +318,12 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
+  distributeNight(address: UserAddress, amount: bigint, time: Date) {
+    this.ledger = this.ledger.testingDistributeNight(address, amount, time);
+  }
+
   rewardNight(amount: bigint) {
-    this.ledger = this.ledger.testingDistributeNight(this.initialNightAddress, amount, this.time);
+    this.distributeNight(this.initialNightAddress, amount, this.time);
     const claimRewardsTransaction = new ClaimRewardsTransaction(
       SignatureMarker.signatureErased,
       LOCAL_TEST_NETWORK_ID,
@@ -258,8 +347,9 @@ export class TestState {
   }
 
   rewardsUnshielded(token: UnshieldedTokenType, amount: bigint) {
-    if (token.raw === NIGHT_TOKEN_TYPE) {
+    if (token.raw === DEFAULT_TOKEN_TYPE) {
       this.rewardNight(amount);
+      return;
     }
     const utxo: UtxoOutput = {
       owner: addressFromKey(this.nightKey.verifyingKey()),
@@ -276,15 +366,16 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
-  static getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
+  getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
     const guaranteesSegment = 0;
-    const fees = mergedTx.fees(LedgerParameters.initialParameters());
+    const fees = mergedTx.fees(this.ledger.parameters);
     const imbalances = mergedTx.imbalances(guaranteesSegment, fees);
     if (!imbalances) return undefined;
     const dustImbalance = Array.from(imbalances.entries()).find(([tt, bal]) => tt.tag === 'dust' && bal < 0n);
 
     return dustImbalance ? -dustImbalance[1] : undefined;
   }
+
   balanceTx(txi: Transaction<Signaturish, Proofish, Bindingish>): Transaction<Signaturish, Proofish, Bindingish> {
     let tx = txi;
     const fees = undefined;
@@ -303,7 +394,7 @@ export class TestState {
       if (imbalance.size === 0) return;
       (imbalance as Map<TokenType, bigint>).forEach((val, tt) => {
         if (tt.tag === 'dust') {
-          throw new Error('should never happen');
+          return;
         }
         const target = -val;
         let totalInp = 0n;
@@ -365,7 +456,7 @@ export class TestState {
     const oldDust = this.dust;
     let lastDust = 0n;
 
-    let dust = TestState.getDustImbalance(mergedTx);
+    let dust = this.getDustImbalance(mergedTx);
     while (dust !== undefined) {
       dust += lastDust;
       lastDust = dust;
@@ -419,7 +510,7 @@ export class TestState {
       mergedTx = tx.merge(tx2Unproven.eraseProofs());
       unprovenBal = tx2Unproven;
 
-      dust = TestState.getDustImbalance(mergedTx);
+      dust = this.getDustImbalance(mergedTx);
     }
     if (unprovenBal) {
       mergedTx = tx.merge(unprovenBal.eraseProofs());

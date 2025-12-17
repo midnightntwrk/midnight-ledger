@@ -198,6 +198,32 @@ export type SyntheticCost = {
 };
 
 /**
+ * A normalized form of {@link SyntheticCost}.
+ */
+export type NormalizedCost = {
+  /**
+   * The amount of (modelled) time spent reading from disk, measured in picoseconds.
+   */
+  readTime: number,
+  /**
+   * The amount of (modelled) time spent in single-threaded compute, measured in picoseconds.
+   */
+  computeTime: number,
+  /**
+   * The number of bytes of blockspace used
+   */
+  blockUsage: number,
+  /**
+   * The net number of (modelled) bytes written, i.e. max(0, absolute written bytes less deleted bytes).
+   */
+  bytesWritten: number,
+  /**
+   * The number of (modelled) bytes written temporarily or overwritten.
+   */
+  bytesChurned: number,
+};
+
+/**
  * An event emitted by the ledger
  */
 export class Event {
@@ -354,6 +380,7 @@ export class DustLocalState {
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
   readonly params: DustParameters;
+  readonly syncTime: Date;
 }
 
 /**
@@ -437,7 +464,7 @@ export class LedgerState {
    * Typically, `postBlockUpdate` should be run after any (sequence of)
    * (system)-transaction application(s).
    */
-  postBlockUpdate(tblock: Date, blockFullness?: SyntheticCost): LedgerState;
+  postBlockUpdate(tblock: Date, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number): LedgerState;
 
   /**
    * Retrieves the balance of the treasury for a specific token type.
@@ -491,6 +518,10 @@ export class LedgerState {
    * The dust subsystem state
    */
   readonly dust: DustState;
+  /**
+   * The parameters of the ledger
+   */
+  parameters: LedgerParameters;
 }
 
 /**
@@ -1268,6 +1299,18 @@ export class LedgerParameters {
   static deserialize(raw: Uint8Array): LedgerParameters;
 
   toString(compact?: boolean): string;
+
+  /**
+   * Normalizes a detailed block fullness cost to the block limits.
+   *
+   * @throws if any of the block limits is exceeded
+   */
+  normalizeFullness(fullness: SyntheticCost): NormalizedCost;
+
+  /**
+   * The fee prices for transaction
+   */
+  readonly feePrices: FeePrices;
 }
 
 export class TransactionCostModel {
@@ -1292,6 +1335,16 @@ export class TransactionCostModel {
   static deserialize(raw: Uint8Array): TransactionCostModel;
 
   toString(compact?: boolean): string;
+
+  /**
+   * A cost model for calculating transaction fees
+   */
+  readonly runtimeCostModel: CostModel;
+
+  /**
+   * A baseline cost to begin with
+   */
+  readonly baselineCost: RunningCost;
 }
 
 
@@ -1640,7 +1693,11 @@ export type ClaimKind = "Reward" | "CardanoBridge";
  * A request to allocate rewards, authorized by the reward's recipient
  */
 export class ClaimRewardsTransaction<S extends Signaturish> {
-  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S);
+  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S, kind?: ClaimKind);
+
+  static new(network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, kind: ClaimKind): ClaimRewardsTransaction<SignatureErased>;
+
+  addSignature(signature: Signature): ClaimRewardsTransaction<SignatureEnabled>;
 
   eraseSignatures(): ClaimRewardsTransaction<SignatureErased>;
 

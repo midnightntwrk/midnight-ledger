@@ -248,7 +248,7 @@ impl Transaction {
             return Err(JsError::new("Intent offer must be unproven."));
         }
 
-        let segment_id = OsRng.gen_range(1..u16::MAX);
+        let segment_id = OsRng.gen_range(2..u16::MAX);
         let mut intents = vec![];
         if intent.is_some() {
             intents.push((segment_id, intent.unwrap().clone().try_into()?));
@@ -286,11 +286,11 @@ impl Transaction {
         use TransactionTypes::*;
         use ledger::structure::Transaction::ClaimRewards;
         match &rewards.0 {
-            SignatureClaimRewards(val) => Transaction(UnprovenWithSignatureBinding(ClaimRewards(
-                ledger::structure::ClaimRewardsTransaction::from(val.clone()).into(),
-            ))),
+            SignatureClaimRewards(val) => {
+                Transaction(UnprovenWithSignatureBinding(ClaimRewards(val.clone())))
+            }
             SignatureErasedClaimRewards(val) => Transaction(UnprovenWithSignatureErasedBinding(
-                ClaimRewards(ledger::structure::ClaimRewardsTransaction::from(val.clone()).into()),
+                ClaimRewards(val.clone()),
             )),
         }
     }
@@ -567,13 +567,13 @@ impl Transaction {
             | UnprovenWithSignatureErasedPreBinding(_)
             | UnprovenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureNoBinding(_)
+            | ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProvenWithSignatureErasedBinding(_)
             | ProofErasedWithSignatureErasedNoBinding(_) => Err(JsError::new(
-                "Transaction hash is available for proven transactions only.",
+                "Transaction hash is available for proven, signed and bound transactions only.",
             )),
-            ProvenWithSignaturePreBinding(val) => to_hex_ser(&val.transaction_hash()),
             ProvenWithSignatureBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedPreBinding(val) => to_hex_ser(&val.transaction_hash()),
-            ProvenWithSignatureErasedBinding(val) => to_hex_ser(&val.transaction_hash()),
         }
     }
 
@@ -585,41 +585,41 @@ impl Transaction {
         use TransactionTypes::*;
         Ok(Transaction(match (&self.0, &other.0) {
             (UnprovenWithSignaturePreBinding(val), UnprovenWithSignaturePreBinding(other_val)) => {
-                UnprovenWithSignaturePreBinding(val.merge(&other_val)?)
+                UnprovenWithSignaturePreBinding(val.merge(other_val)?)
             }
             (UnprovenWithSignatureBinding(val), UnprovenWithSignatureBinding(other_val)) => {
-                UnprovenWithSignatureBinding(val.merge(&other_val)?)
+                UnprovenWithSignatureBinding(val.merge(other_val)?)
             }
             (
                 UnprovenWithSignatureErasedPreBinding(val),
                 UnprovenWithSignatureErasedPreBinding(other_val),
-            ) => UnprovenWithSignatureErasedPreBinding(val.merge(&other_val)?),
+            ) => UnprovenWithSignatureErasedPreBinding(val.merge(other_val)?),
             (
                 UnprovenWithSignatureErasedBinding(val),
                 UnprovenWithSignatureErasedBinding(other_val),
-            ) => UnprovenWithSignatureErasedBinding(val.merge(&other_val)?),
+            ) => UnprovenWithSignatureErasedBinding(val.merge(other_val)?),
             (ProvenWithSignaturePreBinding(val), ProvenWithSignaturePreBinding(other_val)) => {
-                ProvenWithSignaturePreBinding(val.merge(&other_val)?)
+                ProvenWithSignaturePreBinding(val.merge(other_val)?)
             }
             (ProvenWithSignatureBinding(val), ProvenWithSignatureBinding(other_val)) => {
-                ProvenWithSignatureBinding(val.merge(&other_val)?)
+                ProvenWithSignatureBinding(val.merge(other_val)?)
             }
             (
                 ProvenWithSignatureErasedPreBinding(val),
                 ProvenWithSignatureErasedPreBinding(other_val),
-            ) => ProvenWithSignatureErasedPreBinding(val.merge(&other_val)?),
+            ) => ProvenWithSignatureErasedPreBinding(val.merge(other_val)?),
             (
                 ProvenWithSignatureErasedBinding(val),
                 ProvenWithSignatureErasedBinding(other_val),
-            ) => ProvenWithSignatureErasedBinding(val.merge(&other_val)?),
+            ) => ProvenWithSignatureErasedBinding(val.merge(other_val)?),
             (
                 ProofErasedWithSignatureNoBinding(val),
                 ProofErasedWithSignatureNoBinding(other_val),
-            ) => ProofErasedWithSignatureNoBinding(val.merge(&other_val)?),
+            ) => ProofErasedWithSignatureNoBinding(val.merge(other_val)?),
             (
                 ProofErasedWithSignatureErasedNoBinding(val),
                 ProofErasedWithSignatureErasedNoBinding(other_val),
-            ) => ProofErasedWithSignatureErasedNoBinding(val.merge(&other_val)?),
+            ) => ProofErasedWithSignatureErasedNoBinding(val.merge(other_val)?),
             _ => Err(JsError::new(
                 "Both transactions need to be of the same type.",
             ))?,
@@ -823,7 +823,7 @@ impl Transaction {
             }
         }
 
-        Ok(match &mut self.0 {
+        match &mut self.0 {
             UnprovenWithSignatureBinding(_)
             | UnprovenWithSignatureErasedBinding(_)
             | ProvenWithSignatureBinding(_)
@@ -849,7 +849,8 @@ impl Transaction {
                 tx.fallible_coins = zswap_offers_to_fallible_coins::<()>(offers)?;
             }
             _ => Err(JsError::new("Not a standard transaction."))?,
-        })
+        };
+        Ok(())
     }
 
     #[wasm_bindgen(getter, js_name = "intents")]
@@ -1002,7 +1003,7 @@ where
 
         let imbalances = self
             .balance(fees)
-            .map_err(|err| JsError::new(&String::from(err.to_string())))?;
+            .map_err(|err| JsError::new(&err.to_string()))?;
 
         for ((token, imbalanced_segment), imbalance) in imbalances {
             if imbalanced_segment == segment {
@@ -1018,7 +1019,7 @@ where
         params: &LedgerParameters,
         enforce_time_to_dismiss: bool,
     ) -> Result<JsValue, JsError> {
-        Ok(to_value(&self.cost(&params, enforce_time_to_dismiss)?)?)
+        Ok(to_value(&self.cost(params, enforce_time_to_dismiss)?)?)
     }
 
     fn fees(
@@ -1028,14 +1029,14 @@ where
     ) -> Result<BigInt, JsError> {
         Ok(BigInt::from(ledger::structure::Transaction::fees(
             self,
-            &params,
+            params,
             enforce_time_to_dismiss,
         )?))
     }
 
     fn fees_with_margin(&self, params: &LedgerParameters, n: usize) -> Result<BigInt, JsError> {
         Ok(BigInt::from(
-            ledger::structure::Transaction::fees_with_margin(self, &params, n)?,
+            ledger::structure::Transaction::fees_with_margin(self, params, n)?,
         ))
     }
 
@@ -1144,13 +1145,14 @@ fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
 }
 
 #[wasm_bindgen]
+#[derive(Default)]
 pub struct WellFormedStrictness(pub(crate) ledger::verify::WellFormedStrictness);
 
 #[wasm_bindgen]
 impl WellFormedStrictness {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        WellFormedStrictness(Default::default())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = enforceBalancing)]
@@ -1237,17 +1239,23 @@ impl From<ledger::structure::ClaimRewardsTransaction<(), InMemoryDB>> for ClaimR
 #[wasm_bindgen]
 impl ClaimRewardsTransaction {
     #[wasm_bindgen(constructor)]
-    pub fn new(
+    pub fn construct(
         signature_marker: &str,
         network_id: String,
         value: BigInt,
         owner: &str,
         nonce: &str,
         signature: JsValue,
+        kind: JsValue,
     ) -> Result<ClaimRewardsTransaction, JsError> {
         let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
+        let kind = if kind.is_null() || kind.is_undefined() {
+            ledger::structure::ClaimKind::Reward
+        } else {
+            text_to_claim_kind(&String::from(JsString::from(kind)))?
+        };
 
         use ClaimRewardsTransactionTypes::*;
         use Signaturish::*;
@@ -1264,7 +1272,7 @@ impl ClaimRewardsTransaction {
                     owner,
                     nonce,
                     signature: signature.deref().0.clone(),
-                    kind: ledger::structure::ClaimKind::Reward,
+                    kind,
                 })
             }
             SignatureErased => {
@@ -1277,10 +1285,46 @@ impl ClaimRewardsTransaction {
                     owner,
                     nonce,
                     signature: (),
-                    kind: ledger::structure::ClaimKind::Reward,
+                    kind,
                 })
             }
         }))
+    }
+
+    pub fn new(
+        network_id: String,
+        value: BigInt,
+        owner: &str,
+        nonce: &str,
+        kind: &str,
+    ) -> Result<ClaimRewardsTransaction, JsError> {
+        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
+        let nonce = Nonce(from_hex_ser(nonce)?);
+        let kind = text_to_claim_kind(kind)?;
+        use ClaimRewardsTransactionTypes::*;
+        Ok(ClaimRewardsTransaction(SignatureErasedClaimRewards(
+            ledger::structure::ClaimRewardsTransaction {
+                network_id,
+                value,
+                owner,
+                nonce,
+                signature: (),
+                kind,
+            },
+        )))
+    }
+
+    #[wasm_bindgen(js_name = "addSignature")]
+    pub fn add_signature(&self, signature: &str) -> Result<ClaimRewardsTransaction, JsError> {
+        let signature: Signature = from_hex_ser(signature)?;
+        use ClaimRewardsTransactionTypes::*;
+        Ok(ClaimRewardsTransaction(SignatureClaimRewards(
+            match &self.0 {
+                SignatureClaimRewards(val) => val.add_signature(signature),
+                SignatureErasedClaimRewards(val) => val.add_signature(signature),
+            },
+        )))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
@@ -1349,7 +1393,7 @@ impl ClaimRewardsTransaction {
     pub fn data_to_sign(&self) -> Uint8Array {
         use ClaimRewardsTransactionTypes::*;
         match &self.0 {
-            SignatureClaimRewards(val) => val.data_to_sign().as_slice().into(),
+            SignatureClaimRewards(val) => val.erase_signatures().data_to_sign().as_slice().into(),
             SignatureErasedClaimRewards(val) => val.data_to_sign().as_slice().into(),
         }
     }
@@ -1358,8 +1402,8 @@ impl ClaimRewardsTransaction {
     pub fn value(&self) -> BigInt {
         use ClaimRewardsTransactionTypes::*;
         match &self.0 {
-            SignatureClaimRewards(val) => BigInt::from(val.value.clone()),
-            SignatureErasedClaimRewards(val) => BigInt::from(val.value.clone()),
+            SignatureClaimRewards(val) => BigInt::from(val.value),
+            SignatureErasedClaimRewards(val) => BigInt::from(val.value),
         }
     }
 
@@ -1505,10 +1549,7 @@ impl TransactionResult {
             Success(..) => None,
             PartialSuccess(e, ..) => e
                 .values()
-                .find_map(|item| match item {
-                    Ok(_) => None,
-                    Err(e) => Some(e),
-                })
+                .find_map(|item| item.as_ref().err())
                 .map(|e| format!("{e}")),
             Failure(e) => Some(format!("{e}")),
         }
@@ -1540,7 +1581,7 @@ impl TransactionResult {
             PartialSuccess(e, ..) => {
                 let res = Map::new();
                 for (k, v) in e {
-                    res.set(&JsValue::from(k.clone()), &JsValue::from(v.is_err()));
+                    res.set(&JsValue::from(*k), &JsValue::from(v.is_err()));
                 }
                 Some(res)
             }

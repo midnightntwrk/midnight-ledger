@@ -27,6 +27,7 @@ pub struct VmResults(vm::VmResults<ResultModeGather, InMemoryDB>);
 #[wasm_bindgen]
 impl VmResults {
     #[wasm_bindgen(constructor)]
+    #[allow(clippy::new_ret_no_self)]
     pub fn new() -> Result<StateValue, JsError> {
         Err(JsError::new(
             "VmResults cannot be constructed directly through the WASM API.",

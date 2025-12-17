@@ -37,7 +37,7 @@ use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Debug, Eq)]
 #[storable(db = D)]
-#[tag = "zswap-ledger-state[v4]"]
+#[tag = "zswap-ledger-state[v5]"]
 #[must_use]
 pub struct State<D: DB> {
     pub coin_coms: MerkleTree<Option<Sp<ContractAddress, D>>, D>,

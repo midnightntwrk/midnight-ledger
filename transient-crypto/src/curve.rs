@@ -356,7 +356,7 @@ impl Fr {
     /// Initialize an [Fr] from arbitrary 64 bytes (little-endian)
     /// ensuring the result falls into the space by taking modulo.
     pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
-        Fr(outer::Scalar::from_uniform_bytes(&bytes))
+        Fr(outer::Scalar::from_uniform_bytes(bytes))
     }
 
     /// Output an [Fr] as a little-endian bytes-string
@@ -416,7 +416,7 @@ impl Mul<Fr> for EmbeddedGroupAffine {
         let embedded_modulus = Fr::from_le_bytes(&embedded_m1.as_le_bytes())
             .expect("embedded modulus should fit in scalar field")
             + Fr::from(1);
-        while rhs > embedded_modulus {
+        while rhs >= embedded_modulus {
             rhs = rhs - embedded_modulus;
         }
         self * EmbeddedFr::try_from(rhs).expect("after reducing, rhs should fit in embedded scalar")

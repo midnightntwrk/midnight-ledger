@@ -13,8 +13,7 @@
 
 //! A trait defining a `Storable` object, which can be assembled into a tree.
 
-use crate::DefaultHasher;
-use crate::arena::{ArenaHash, ArenaKey, DirectChildNode, Opaque, Sp, hash};
+use crate::arena::{ArenaKey, DirectChildNode, Opaque, Sp, hash};
 use crate::db::DB;
 use base_crypto::signatures::{Signature, VerifyingKey};
 use base_crypto::time::Timestamp;
@@ -24,16 +23,12 @@ use base_crypto::{
     hash::HashOutput,
 };
 use crypto::digest::Digest;
-use derive_where::derive_where;
-use macros::Storable;
 #[cfg(feature = "proptest")]
 use proptest::{
     prelude::*,
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use rand::prelude::Distribution;
-use rand::{Rng, distributions::Standard};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
 use std::any::Any;
@@ -146,7 +141,7 @@ pub(crate) fn child_from<H: WellBehavedHasher>(
     if is_in_small_object_limit(data, children) {
         ArenaKey::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
     } else {
-        ArenaKey::Ref(hash(&data, children.iter().map(ArenaKey::hash)))
+        ArenaKey::Ref(hash(data, children.iter().map(ArenaKey::hash)))
     }
 }
 
@@ -339,12 +334,37 @@ impl<D: DB> Storable<D> for Option<Sp<dyn Any + Send + Sync, D>> {
     ) -> Result<Self, std::io::Error> {
         let dis = <u8 as Deserializable>::deserialize(reader, 0)?;
         match dis {
-            0 => {
-                Ok(Some(Sp::new(Opaque::from_binary_repr(reader, child_hashes, loader)?).upcast()))
-            }
+            0 => Ok(Some(
+                Sp::new(Opaque::from_binary_repr(reader, child_hashes, loader)?).upcast(),
+            )),
             1 => Ok(None),
             _ => bad_discriminant_error(),
         }
+    }
+}
+
+impl<T: Storable<D>, D: DB> Storable<D> for Arc<T> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
+        T::children(self)
+    }
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::to_binary_repr(self, writer)
+    }
+    fn check_invariant(&self) -> Result<(), std::io::Error> {
+        T::check_invariant(self)
+    }
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
+        T::from_binary_repr(reader, child_hashes, loader).map(Arc::new)
     }
 }
 
@@ -541,7 +561,7 @@ tuple_storable!(
 macro_rules! randomised_storable_test {
     ($type:ty) => {
         #[cfg(test)]
-        ::paste::paste! {
+        ::pastey::paste! {
             /// Test that `to_binary_repr` followed by `from_binary_repr` is the identity
             /// for argument value.
             #[allow(non_snake_case)]

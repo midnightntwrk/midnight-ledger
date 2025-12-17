@@ -53,7 +53,7 @@ impl AuthorizedClaim<ProofPreimage> {
         coin: CoinInfo,
         sk: &CoinSecretKey,
     ) -> Result<Self, OfferCreationFailed> {
-        let pk = match Recipient::from(&SenderEvidence::User(*sk)) {
+        let pk = match Recipient::from(SenderEvidence::User(Cow::Borrowed(sk))) {
             Recipient::User(pk) => pk,
             Recipient::Contract(_) => unreachable!(),
         };
@@ -77,7 +77,7 @@ impl AuthorizedClaim<ProofPreimage> {
         Ok(AuthorizedClaim {
             coin,
             recipient: pk,
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         })
     }
 }
@@ -104,7 +104,7 @@ impl<D: DB> Input<ProofPreimage, D> {
         rng: &mut R,
         coin: &QualifiedCoinInfo,
         segment: u16,
-        sk: SenderEvidence,
+        sk: SenderEvidence<'_>,
         tree: &MerkleTree<A, D>,
     ) -> Result<Self, OfferCreationFailed> {
         let rc_e: EmbeddedFr = rng.r#gen();
@@ -136,7 +136,7 @@ impl<D: DB> Input<ProofPreimage, D> {
                 [Key::Value(3u8.into())],
                 false,
                 ContractAddress,
-                addr
+                *addr
             ));
         }
         public_transcript_prog.extend(
@@ -150,7 +150,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             (Fr, Fr),
             value_commitment.0
         ));
-        let Commitment(hash) = CoinInfo::from(coin).commitment(&(&sk).into());
+        let Commitment(hash) = CoinInfo::from(coin).commitment(&sk.clone().into());
         let mut inputs = Vec::new();
         sk.field_repr(&mut inputs);
         tree.path_for_leaf(coin.mt_index, ((), hash))
@@ -179,7 +179,7 @@ impl<D: DB> Input<ProofPreimage, D> {
                 _ => None,
             },
             merkle_tree_root,
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         };
         //debug_assert!(inp.well_formed().is_ok());
         Ok(inp)
@@ -289,7 +289,7 @@ impl<D: DB> Output<ProofPreimage, D> {
                 _ => None,
             },
             ciphertext: ciphertext.map(|x| Sp::new(x)),
-            proof: proof_preimage,
+            proof: Arc::new(proof_preimage),
         };
         // NOTE: rc negated because output commitments are subtracted
         Ok(outp)

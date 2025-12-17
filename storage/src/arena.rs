@@ -28,13 +28,14 @@ use crate::{
 };
 use crate::{Storable, WellBehavedHasher};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
+#[allow(deprecated)]
 use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
 use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
 use rand::Rng;
 use rand::distributions::{Distribution, Standard};
-use serialize::{self, Deserializable, ReadExt, Serializable, Tagged};
+use serialize::{self, Deserializable, Serializable, Tagged};
 use std::any::TypeId;
 use std::cell::RefCell;
 use std::fmt::Display;
@@ -109,12 +110,14 @@ impl<T: Tagged, H: WellBehavedHasher> Tagged for TypedArenaKey<T, H> {
     }
 }
 
+// newtype is a hack to get the allow lint to work.
+#[allow(deprecated)]
+type HashArray<H> = GenericArray<u8, <H as OutputSizeUser>::OutputSize>;
+
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
 #[derive_where(Clone, PartialEq, Eq, Ord, PartialOrd, Default)]
-pub struct ArenaHash<H: Digest = DefaultHasher>(
-    pub GenericArray<u8, <H as OutputSizeUser>::OutputSize>,
-);
+pub struct ArenaHash<H: Digest = DefaultHasher>(pub HashArray<H>);
 
 impl<H: Digest> Tagged for ArenaHash<H> {
     fn tag() -> std::borrow::Cow<'static, str> {
@@ -146,6 +149,7 @@ impl<D: DB> Storable<D> for ArenaHash<D::Hasher> {
     where
         Self: Sized,
     {
+        #[allow(deprecated)]
         let mut array = GenericArray::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
         reader.read_exact(&mut array)?;
         Ok(Self(array))
@@ -169,6 +173,7 @@ impl<D: Digest> Hash for ArenaHash<D> {
     where
         Self: Sized,
     {
+        #[allow(deprecated)]
         GenericArray::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
             data.iter()
                 .map(|k| k.0.clone())
@@ -200,12 +205,14 @@ impl<H: Digest> Deserializable for ArenaHash<H> {
     ) -> std::io::Result<Self> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
+        #[allow(deprecated)]
         Ok(ArenaHash(GenericArray::clone_from_slice(&res)))
     }
 }
 
 impl<H: Digest> Distribution<ArenaHash<H>> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaHash<H> {
+        #[allow(deprecated)]
         let mut bytes = GenericArray::default();
         rng.fill_bytes(&mut bytes);
         ArenaHash(bytes)
@@ -237,6 +244,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaHash<H> {
                 if v.len() != <H as Digest>::output_size() {
                     return Err(E::invalid_length(v.len(), &self));
                 }
+                #[allow(deprecated)]
                 Ok(ArenaHash(GenericArray::clone_from_slice(v)))
             }
 
@@ -257,6 +265,7 @@ impl<H: Digest> ArenaHash<H> {
     /// The bytes don't need to be as long as the key's internal byte array; the
     /// unspecified values will be filled in with zeros.
     pub(crate) fn _from_bytes(bs: &[u8]) -> Self {
+        #[allow(deprecated)]
         let mut bytes = GenericArray::default();
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;
@@ -840,6 +849,30 @@ impl<D: DB> Arena<D> {
             result = Ok(root);
         }
 
+        let mut key_to_child_repr: HashMap<ArenaHash<<D as DB>::Hasher>, ArenaKey<D::Hasher>> =
+            std::collections::HashMap::new();
+        for node in nodes.nodes.iter() {
+            let children = node
+                .child_indices
+                .iter()
+                .map(|i| {
+                    idx_existing_nodes(&existing_nodes, *i)
+                        .map(|n| hash::<D::Hasher>(&n.binary_repr, n.children.iter()))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let root = hash::<D::Hasher>(&node.data, children.iter());
+            let children = children
+                .iter()
+                .map(|h| {
+                    key_to_child_repr
+                        .get(h)
+                        .ok_or(std::io::Error::other("child not in key_to_child_repr"))
+                })
+                .map(|r| r.cloned())
+                .collect::<Result<Vec<_>, _>>()?;
+            key_to_child_repr.insert(root, child_from(&node.data, &children));
+        }
+
         let key = result?;
         let res: Sp<T, D> = IrLoader {
             arena: self,
@@ -854,6 +887,7 @@ impl<D: DB> Arena<D> {
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            key_to_child_repr,
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1003,6 +1037,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
+    key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
 }
 
 #[cfg(test)]
@@ -1010,12 +1045,14 @@ impl<'a, D: DB> IrLoader<'a, D> {
     pub(crate) fn new(
         arena: &'a Arena<D>,
         all: &'a HashMap<ArenaHash<D::Hasher>, IntermediateRepr<D>>,
+        key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
     ) -> IrLoader<'a, D> {
         IrLoader {
             arena,
             all,
             recursion_depth: 0,
             visited: Rc::new(RefCell::new(HashSet::new())),
+            key_to_child_repr,
         }
     }
 }
@@ -1036,10 +1073,10 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             ArenaKey::Direct(child) => {
                 let value = T::from_binary_repr(
                     &mut &child.data[..],
-                    &mut child.children.iter().map(|child| child.clone()),
+                    &mut child.children.iter().cloned(),
                     self,
                 )?;
-                return Ok(Sp::new(value));
+                return Ok(self.arena.alloc(value));
             }
             ArenaKey::Ref(key) => key,
         };
@@ -1070,20 +1107,23 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
             "IR not found in `all` map",
         ))?;
         if self.recursion_depth > serialize::RECURSION_LIMIT {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Reached recursion limit".to_string(),
-            ));
+            return Err(std::io::Error::other("Reached recursion limit".to_string()));
         }
         let loader = IrLoader {
             arena: self.arena,
             all: self.all,
             recursion_depth: self.recursion_depth + 1,
             visited: self.visited.clone(),
+            key_to_child_repr: self.key_to_child_repr.clone(),
         };
         let sp = self.arena.alloc(T::from_binary_repr(
             &mut ir.binary_repr.clone().as_slice(),
-            &mut ir.children.clone().into_iter().map(ArenaKey::Ref),
+            &mut ir.children.clone().into_iter().map(|k| {
+                self.key_to_child_repr
+                    .get(&k)
+                    .expect("should be able to convert child ArenaHash to ArenaKey")
+                    .clone()
+            }),
             &loader,
         )?);
         assert!(!sp.is_lazy(), "BUG: IrLoader MUST return strict sps");
@@ -1141,7 +1181,7 @@ struct Node {
     /// doesn't tell us that the back-end data for `sp.root` can be uncached,
     /// since some other `Sp<U>` with the same hash could still be referencing
     /// that back-end data.
-    ref_count: u32,
+    ref_count: u64,
 }
 
 impl Node {
@@ -1324,7 +1364,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             max_depth,
             recursion_depth: 0,
         };
-        loader.get(&key)
+        loader.get(key)
     }
 }
 
@@ -1417,7 +1457,6 @@ impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
     }
 }
 
-
 impl<T: ?Sized, D: DB> Sp<T, D> {
     /// Return true iff this `Sp` is lazy/unforced, i.e. its data has not yet
     /// been loaded.
@@ -1476,8 +1515,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             );
             *self = new_sp;
         }
-        self.arena
-            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.persist(&ref_)));
+        self.arena.with_backend(|backend| {
+            self.child_repr
+                .refs()
+                .into_iter()
+                .for_each(|ref_| backend.persist(ref_))
+        });
     }
 
     /// Notify the storage back-end to decrement the persist count on this
@@ -1485,8 +1528,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     ///
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
-        self.arena
-            .with_backend(|backend| self.child_repr.refs().into_iter().for_each(|ref_| backend.unpersist(&ref_)));
+        self.arena.with_backend(|backend| {
+            self.child_repr
+                .refs()
+                .into_iter()
+                .for_each(|ref_| backend.unpersist(ref_))
+        });
     }
 
     /// Returns the content of this `Sp`, if this `Sp` is initialized, and is
@@ -1576,10 +1623,14 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     // easiest way to get that is to just create the lazy `Sp`
                     // for that `Arc`, i.e. what `self` will become when
                     // `force_as_arc` is done!
-                    let sp: Sp<T, _> = match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
-                        Ok(v) => v,
-                        Err(e) => panic!("root should be in the arena (T={}): {e:?}", std::any::type_name::<T>()),
-                    };
+                    let sp: Sp<T, _> =
+                        match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
+                            Ok(v) => v,
+                            Err(e) => panic!(
+                                "root should be in the arena (T={}): {e:?}",
+                                std::any::type_name::<T>()
+                            ),
+                        };
                     let arc = sp
                         .data
                         .get()
@@ -1632,7 +1683,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 ArenaKey::Ref(ref key) => arena
                     .lock_backend()
                     .borrow_mut()
-                    .get(&key)
+                    .get(key)
                     .expect("Arena should contain current serialization target")
                     .clone(),
                 ArenaKey::Direct(ref d) => OnDiskObject {
@@ -1661,7 +1712,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             list_indices.insert(node.clone(), list_indices.len() as u64);
             for child in disk.children.iter() {
                 let incoming = incoming_vertices
-                    .get_mut(&child)
+                    .get_mut(child)
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
@@ -1683,7 +1734,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_indices: disk
                     .children
                     .iter()
-                    .map(|child| len as u64 - 1 - list_indices[&child])
+                    .map(|child| len as u64 - 1 - list_indices[child])
                     .collect(),
                 data: disk.data,
             };
@@ -1787,20 +1838,24 @@ impl<D: DB> Storable<D> for Opaque<D> {
         self.children.iter().map(|child| child.as_child()).collect()
     }
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
-        where
-            Self: Sized {
+    where
+        Self: Sized,
+    {
         writer.write_all(&self.data)
     }
     fn from_binary_repr<R: std::io::Read>(
-            reader: &mut R,
-            child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
-            loader: &impl Loader<D>,
-        ) -> Result<Self, std::io::Error>
-        where
-            Self: Sized {
+        reader: &mut R,
+        child_nodes: &mut impl Iterator<Item = ArenaKey<<D as DB>::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error>
+    where
+        Self: Sized,
+    {
         let mut data = Vec::new();
         reader.read_to_end(&mut data)?;
-        let children = child_nodes.map(|hash| loader.get::<Opaque<_>>(&hash).map(|sp| sp.upcast())).collect::<Result<_, _>>()?;
+        let children = child_nodes
+            .map(|hash| loader.get::<Opaque<_>>(&hash).map(|sp| sp.upcast()))
+            .collect::<Result<_, _>>()?;
         Ok(Self { data, children })
     }
 }
@@ -1809,9 +1864,13 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         match &self.child_repr {
             ArenaKey::Direct(key) => key.children.deref().clone(),
-            ArenaKey::Ref(hash) => {
-                self.arena.with_backend(|backend| backend.get(hash).expect("ref Sp must be in backend").children.clone())
-            }
+            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+                backend
+                    .get(hash)
+                    .expect("ref Sp must be in backend")
+                    .children
+                    .clone()
+            }),
         }
     }
     fn from_binary_repr<R: std::io::Read>(
@@ -1820,17 +1879,19 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
         loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         Opaque::from_binary_repr(reader, child_nodes, loader).map(|opaque| Sp::new(opaque).upcast())
     }
     fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         match &self.child_repr {
             ArenaKey::Direct(key) => writer.write_all(&key.data),
-            ArenaKey::Ref(hash) => {
-                self.arena.with_backend(|backend| writer.write_all(&backend.get(hash).expect("ref Sp must be in backend").data))
-            }
+            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+                writer.write_all(&backend.get(hash).expect("ref Sp must be in backend").data)
+            }),
         }
     }
 }
@@ -1853,7 +1914,7 @@ impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
     }
 
     fn check_invariant(&self) -> Result<(), std::io::Error> {
-        T::check_invariant(&self)
+        T::check_invariant(self)
     }
 }
 
@@ -2686,7 +2747,7 @@ mod tests {
     fn dedup() {
         let val = [0; SMALL_OBJECT_LIMIT];
         let map = new_arena();
-        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val.clone());
+        let _malloced_a = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         let _malloced_b = map.alloc::<[u8; SMALL_OBJECT_LIMIT]>(val);
         assert_eq!(map.size(), 1)
     }
@@ -2981,7 +3042,7 @@ mod tests {
 
             let key = bt1.as_typed_key();
             bt1.unload();
-            let bt2 = arena.get_lazy::<BinTree>(&key.into()).unwrap();
+            let bt2 = arena.get_lazy::<BinTree>(&key).unwrap();
 
             // Walk down the left and right fringes in lock step, checking that
             // nothing is forced prematurely, and that Arcs are shared as
@@ -3034,7 +3095,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "thread 'main' has overflowed its stack"]
+    #[should_panic = "has overflowed its stack"]
     fn drop_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.
@@ -3045,7 +3106,7 @@ mod tests {
     #[cfg(feature = "stress-test")]
     #[test]
     // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "thread 'main' has overflowed its stack"]
+    #[should_panic = "has overflowed its stack"]
     fn serialize_deeply_nested_data() {
         crate::stress_test::runner::StressTest::new()
             // Must capture, so we can match the output with `should_panic`.
@@ -3435,7 +3496,7 @@ mod tests {
     #[test]
     fn serialize_small_sp() {
         let arena = new_arena();
-        let mut sp = arena.alloc(42u32);
+        let sp = arena.alloc(42u32);
         let mut bytes: Vec<u8> = vec![];
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();

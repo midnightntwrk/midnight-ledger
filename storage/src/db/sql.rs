@@ -60,6 +60,7 @@ use crate::{
     backend::OnDiskObject,
     db::DummyArbitrary,
 };
+#[allow(deprecated)]
 use crypto::digest::generic_array::GenericArray;
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
@@ -368,13 +369,13 @@ impl<H: WellBehavedHasher> SqlDB<H> {
                     break;
                 }
                 for key in unreachable_keys {
-                    let children: Vec<ArenaHash<H>> = get_children
+                    let children: Vec<ArenaKey<H>> = get_children
                         .query_row(params![key.clone()], |row| {
                             let children: Children<H> = row.get(0)?;
                             Ok(children.0)
                         })
                         .unwrap();
-                    for child in children {
+                    for child in children.iter().flat_map(|k| k.refs()) {
                         dec_ref_count.execute(params![child]).unwrap();
                     }
                     delete_node.execute(params![key]).unwrap();
@@ -404,10 +405,10 @@ impl<H: WellBehavedHasher> SqlDB<H> {
 
 impl<H: WellBehavedHasher> Drop for SqlDB<H> {
     fn drop(&mut self) {
-        if let Some(lock_file) = &self.lock_file {
-            if let Err(e) = fs2::FileExt::unlock(lock_file) {
-                eprintln!("Failed to unlock mutex file: {:?}", e);
-            }
+        if let Some(lock_file) = &self.lock_file
+            && let Err(e) = fs2::FileExt::unlock(lock_file)
+        {
+            eprintln!("Failed to unlock mutex file: {:?}", e);
         }
     }
 }
@@ -422,8 +423,22 @@ impl<H: WellBehavedHasher> ToSql for ArenaHash<H> {
     }
 }
 
+impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
+    fn to_sql(&self) -> Result<rusqlite::types::ToSqlOutput<'_>> {
+        let mut data = Vec::new();
+        self.serialize(&mut data)
+            .expect("serialization to memory should succeed");
+        // We could use `serialize` here, but then we'd get the length in the
+        // front. We probably don't care, but having the pure, unprefixed key
+        // here should be slightly more convenient if we're manually poking
+        // around in the db for some reason.
+        Ok(data.into())
+    }
+}
+
 impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
+        #[allow(deprecated)]
         Ok(ArenaHash(
             GenericArray::from_slice(value.as_bytes()?).clone(),
         ))
@@ -432,7 +447,7 @@ impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
 
 // Newtype wrapper for `OnDiskObject.children`, so we can implement conversion
 // traits.
-struct Children<H: WellBehavedHasher>(Vec<ArenaHash<H>>);
+struct Children<H: WellBehavedHasher>(Vec<ArenaKey<H>>);
 
 impl<H: WellBehavedHasher> ToSql for Children<H> {
     fn to_sql(&self) -> Result<rusqlite::types::ToSqlOutput<'_>> {
@@ -463,8 +478,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     let data = row.get(0)?;
                     let ref_count = row.get(1)?;
                     let children: Children<H> = row.get(2)?;
-                    let children: Vec<ArenaKey<H>> =
-                        children.0.into_iter().map(Into::into).collect();
+                    let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                     Ok(OnDiskObject {
                         data,
                         ref_count,
@@ -513,8 +527,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         let data = row.get(0)?;
                         let ref_count = row.get(1)?;
                         let children: Children<H> = row.get(2)?;
-                        let children: Vec<ArenaKey<H>> =
-                            children.0.into_iter().map(Into::into).collect();
+                        let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                         let obj = OnDiskObject {
                             data,
                             ref_count,
@@ -537,17 +550,11 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
             let mut stmt = tx.prepare(sql).unwrap();
-            let mut children = Vec::new();
-            for node in object.children {
-                if let ArenaKey::Ref(key) = node {
-                    children.push(key)
-                }
-            }
             stmt.execute(params![
                 key,
                 object.data,
                 object.ref_count,
-                Children(children)
+                Children(object.children)
             ])
             .unwrap();
             stmt.finalize().unwrap();
@@ -589,22 +596,14 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             for (key, update) in iter {
                 match update {
                     DeleteNode => delete_node.execute(params![key]).unwrap(),
-                    InsertNode(object) => {
-                        let mut children = Vec::new();
-                        for node in object.children {
-                            if let ArenaKey::Ref(key) = node {
-                                children.push(key)
-                            }
-                        }
-                        insert_node
-                            .execute(params![
-                                key,
-                                object.data,
-                                object.ref_count,
-                                Children(children)
-                            ])
-                            .unwrap()
-                    }
+                    InsertNode(object) => insert_node
+                        .execute(params![
+                            key,
+                            object.data,
+                            object.ref_count,
+                            Children(object.children)
+                        ])
+                        .unwrap(),
                     SetRootCount(count) => {
                         if count > 0 {
                             set_root_count.execute(params![key, count]).unwrap()
@@ -778,7 +777,7 @@ mod tests {
         mut db: SqlDB<H>,
     ) {
         let u = InsertNode(v);
-        let iter = std::iter::repeat((k.clone(), u.clone())).take(ITERS_PER_JOB);
+        let iter = std::iter::repeat_n((k.clone(), u.clone()), ITERS_PER_JOB);
         db.batch_update(iter);
         db.delete_node(&k);
     }

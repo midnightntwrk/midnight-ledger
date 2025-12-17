@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.3**](../README.md)
+[**@midnight/ledger v6.2.0-rc.2**](../README.md)
 
 ***
 
@@ -18,6 +18,16 @@ readonly dust: DustParameters;
 ```
 
 The parameters associated with DUST.
+
+***
+
+### feePrices
+
+```ts
+readonly feePrices: FeePrices;
+```
+
+The fee prices for transaction
 
 ***
 
@@ -46,6 +56,30 @@ assumed.
 #### Returns
 
 `number`
+
+***
+
+### normalizeFullness()
+
+```ts
+normalizeFullness(fullness): NormalizedCost;
+```
+
+Normalizes a detailed block fullness cost to the block limits.
+
+#### Parameters
+
+##### fullness
+
+[`SyntheticCost`](../type-aliases/SyntheticCost.md)
+
+#### Returns
+
+[`NormalizedCost`](../type-aliases/NormalizedCost.md)
+
+#### Throws
+
+if any of the block limits is exceeded
 
 ***
 

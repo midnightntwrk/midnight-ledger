@@ -128,7 +128,7 @@ async fn test_cnight_dust_payment() {
     let empty_tx: Transaction<Signature, _, _, _> =
         Transaction::new("local-test", Default::default(), None, Default::default());
     let tx = state
-        .balance_tx(rng.split(), empty_tx, &*RESOLVER)
+        .balance_tx(rng.split(), empty_tx, &RESOLVER)
         .await
         .unwrap();
     dbg!(&tx);

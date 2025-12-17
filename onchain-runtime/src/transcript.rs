@@ -40,7 +40,7 @@ tag_enforcement_test!(TranscriptVersion);
 #[serde(bound(serialize = "", deserialize = ""))]
 #[derive_where(Clone, PartialEq, Eq, Debug)]
 #[storable(db = D)]
-#[tag = "contract-transcript[v3]"]
+#[tag = "contract-transcript[v4]"]
 pub struct Transcript<D: DB> {
     pub gas: RunningCost,
     pub effects: Effects<D>,

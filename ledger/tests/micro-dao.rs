@@ -71,16 +71,15 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    let res = prog
-        .iter()
+
+    prog.iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
             Op::Idx { path, .. } => !path.is_empty(),
             Op::Ins { n, .. } => *n != 0,
             _ => true,
         })
-        .collect::<Vec<_>>();
-    res
+        .collect::<Vec<_>>()
 }
 
 fn context_with_offer<D: DB>(
@@ -152,7 +151,7 @@ async fn micro_dao_replay() {
 
 #[allow(unused_assignments, clippy::redundant_clone)]
 async fn micro_dao_inner(mode: TestMode) {
-    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x42);
     //rayon::ThreadPoolBuilder::new().use_current_thread().num_threads(1).build_global().unwrap();
     lazy_static::initialize(&PARAMS_VERIFIER);

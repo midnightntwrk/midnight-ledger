@@ -26,9 +26,11 @@ import {
   Transaction,
   UnshieldedOffer,
   WellFormedStrictness,
-  ZswapChainState
+  ZswapChainState,
+  ClaimRewardsTransaction,
+  SignatureErased
 } from '@midnight-ntwrk/ledger';
-import { Random, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
 
@@ -544,20 +546,23 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('fromRewards - should create rewarding transaction from ClaimRewardsTransaction', () => {
-    // Note: ClaimRewardsTransaction needs to be properly constructed with valid signature
-    // For now, testing the transaction structure that would be created
-    const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-    const rewardsTransaction = Transaction.fromParts('local-test', guaranteedOffer);
+    const claimRewardsTransaction = new ClaimRewardsTransaction(
+      SignatureMarker.signatureErased,
+      LOCAL_TEST_NETWORK_ID,
+      100n,
+      signatureVerifyingKey(sampleSigningKey()),
+      Random.nonce(),
+      new SignatureErased()
+    );
+    const rewardsTransaction = Transaction.fromRewards(claimRewardsTransaction);
 
-    // Verify the rewards property exists (even if undefined for non-rewards transactions)
-    expect(rewardsTransaction.rewards).toBeUndefined();
-    expect(rewardsTransaction.guaranteedOffer).toBeDefined();
+    expect(rewardsTransaction.rewards).toBeDefined();
 
     assertSerializationSuccess(
       rewardsTransaction,
-      SignatureMarker.signature,
+      SignatureMarker.signatureErased,
       ProofMarker.preProof,
-      BindingMarker.preBinding
+      BindingMarker.binding
     );
   });
 

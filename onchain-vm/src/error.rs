@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::vm::MAX_LOG_SIZE;
+use crate::vm::{MAX_LOG_SIZE, MAX_STACK_HEIGHT};
 use base_crypto::fab::{AlignedValue, InvalidBuiltinDecode};
 use derive_where::derive_where;
 use runtime_state::state::{CELL_BOUND, StateValue};
@@ -42,6 +42,7 @@ pub enum OnchainProgramError<D: DB> {
         actual: AlignedValue,
     },
     CellBoundExceeded,
+    StackOverflow,
 }
 
 impl<D: DB> From<Infallible> for OnchainProgramError<D> {
@@ -94,6 +95,10 @@ impl<D: DB> Display for OnchainProgramError<D> {
             LogBoundExceeded => write!(
                 f,
                 "exceeded the maximum bound for log instruction: {MAX_LOG_SIZE}"
+            ),
+            StackOverflow => write!(
+                f,
+                "exceeded the maximum bound for Impact stack: {MAX_STACK_HEIGHT}"
             ),
         }
     }

@@ -13,6 +13,7 @@
 
 use core::fmt::Debug;
 use core::fmt::Formatter;
+use std::borrow::Cow;
 
 use base_crypto::hash::{PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::MemWrite;
@@ -43,7 +44,7 @@ use crate::structure::*;
 #[derive(Debug, Storable)]
 #[derive_where(Clone)]
 #[storable(db = D)]
-#[tag = "zswap-local-state[v5]"]
+#[tag = "zswap-local-state[v6]"]
 #[must_use]
 pub struct State<D: DB> {
     pub coins: Map<Nullifier, QualifiedCoinInfo, D>,
@@ -98,8 +99,9 @@ impl<D: DB> State<D> {
             .rehash();
         if secret_keys.coin_public_key() == tx.recipient {
             res.coins = self.coins.insert(
-                tx.coin
-                    .nullifier(&SenderEvidence::User(secret_keys.coin_secret_key)),
+                tx.coin.nullifier(&SenderEvidence::User(Cow::Borrowed(
+                    &secret_keys.coin_secret_key,
+                ))),
                 tx.coin.qualify(self.first_free),
             );
         } else {
@@ -153,7 +155,7 @@ impl<D: DB> State<D> {
                     res.coins = res.coins.insert(
                         CoinInfo::nullifier(
                             &(&qci).into(),
-                            &SenderEvidence::User(secret_keys.coin_secret_key),
+                            &SenderEvidence::User(Cow::Borrowed(&secret_keys.coin_secret_key)),
                         ),
                         qci,
                     );
@@ -165,7 +167,7 @@ impl<D: DB> State<D> {
                 res.coins = res.coins.insert(
                     CoinInfo::nullifier(
                         &(&qci).into(),
-                        &SenderEvidence::User(secret_keys.coin_secret_key),
+                        &SenderEvidence::User(Cow::Borrowed(&secret_keys.coin_secret_key)),
                     ),
                     qci,
                 );
@@ -218,7 +220,7 @@ impl<D: DB> State<D> {
             rng,
             coin,
             segment,
-            SenderEvidence::User(secret_keys.coin_secret_key),
+            SenderEvidence::User(Cow::Borrowed(&secret_keys.coin_secret_key)),
             tree,
         )?;
         let res = State {

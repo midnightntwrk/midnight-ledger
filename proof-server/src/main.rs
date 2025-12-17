@@ -19,7 +19,8 @@ use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use futures::future::join;
 use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
-use midnight_proof_server::{PUBLIC_PARAMS, server, worker_pool::WorkerPool};
+use midnight_proof_server::endpoints::PUBLIC_PARAMS;
+use midnight_proof_server::{server, worker_pool::WorkerPool};
 use tracing::{Level, info};
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::layer::SubscriberExt;
@@ -72,9 +73,7 @@ async fn main() -> std::io::Result<()> {
                 )
                 .expect("data provider initialization failed"),
             ),
-            Box::new(move |loc: KeyLocation| match &*loc.0 {
-                _ => Box::pin(std::future::ready(Ok(None))),
-            }),
+            Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
         );
         let ks = futures::future::join_all((10..=15).map(|k| PUBLIC_PARAMS.0.fetch_k(k)));
         let keys = futures::future::join_all(

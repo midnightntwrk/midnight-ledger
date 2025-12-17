@@ -55,11 +55,11 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 #[cfg(feature = "proof-verifying")]
-const OUTPUT_VK_RAW: &[u8] = include_bytes!("../../static/zswap/output.verifier");
+const OUTPUT_VK_RAW: &[u8] = include_bytes!("../static/output.verifier");
 #[cfg(feature = "proof-verifying")]
-const SPEND_VK_RAW: &[u8] = include_bytes!("../../static/zswap/spend.verifier");
+const SPEND_VK_RAW: &[u8] = include_bytes!("../static/spend.verifier");
 #[cfg(feature = "proof-verifying")]
-const SIGN_VK_RAW: &[u8] = include_bytes!("../../static/zswap/sign.verifier");
+const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
@@ -301,6 +301,7 @@ fn offer_well_formed_common<P: Ord + Storable<D>, D: DB>(
         || !Vec::from(&offer.deltas)
             .windows(2)
             .all(|slice| slice[0].token_type < slice[1].token_type)
+        || !offer.deltas.iter().all(|d| d.value != 0)
     {
         warn!("Zswap offer not in normal form");
         return Err(MalformedOffer::NotNormalized);

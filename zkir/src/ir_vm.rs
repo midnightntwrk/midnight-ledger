@@ -145,8 +145,8 @@ fn fab_decode_to_bytes_atom(
             }
             for i in 0..chunks {
                 bytes_from(res, FR_BYTES_STORED, inputs[chunks - 1 - i].clone())?;
-                *inputs = &inputs[1..];
             }
+            *inputs = &inputs[chunks..];
             res.extend(res_vec);
             Ok(())
         }
@@ -550,6 +550,7 @@ impl Relation for IrSource {
                 .error_if_known_and(|(preproc, v)| {
                     if idx < seq(preproc).len() && seq(preproc)[idx] != **v {
                         error!(prepare = ?seq(preproc), ?idx, ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
+                        eprintln!("Misalignment between `prepare` and `synthesize` runs. This is a bug.");
                         true
                     } else {
                         false
@@ -778,7 +779,6 @@ impl Relation for IrSource {
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
-        use midnight_circuits::compact_std_lib::ShaTableSize;
         let jubjub = self.instructions.iter().any(|op| {
             matches!(
                 op,
@@ -804,14 +804,12 @@ impl Relation for IrSource {
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
-            sha256: if sha256 {
-                Some(ShaTableSize::Table11)
-            } else {
-                None
-            },
+            sha256,
+            nr_pow2range_cols: 4, // TODO: Get this programmatically, not as a magic constant from Miguel :)
             secp256k1: false,
             bls12_381: false,
             base64: false,
+            automaton: false,
         }
     }
 

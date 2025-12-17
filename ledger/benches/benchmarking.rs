@@ -127,10 +127,10 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
         let mut events = Vec::with_capacity(n);
         let mut owners = Vec::with_capacity(n);
         for _ in 0..n {
-            if owners.len() == 0 || rng.gen_bool(0.5) {
+            if owners.is_empty() || rng.gen_bool(0.5) {
                 let key = DustPublicKey(rng.r#gen());
                 let amt = rng.r#gen::<u32>() as u128;
-                owners.push((key.clone(), amt));
+                owners.push((key, amt));
                 events.push(CNightGeneratesDustEvent {
                     value: amt,
                     owner: key,
@@ -144,7 +144,7 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
                 loop {
                     let idx = rng.gen_range(0..owners.len());
                     let (k, max_amt) = owners[idx];
-                    if max_amt <= 0 {
+                    if max_amt == 0 {
                         continue;
                     }
                     key = k;
@@ -154,7 +154,7 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
                 }
                 events.push(CNightGeneratesDustEvent {
                     value: amt,
-                    owner: key.clone(),
+                    owner: key,
                     time: Timestamp::from_secs(0),
                     action: CNightGeneratesDustActionType::Destroy,
                     nonce: InitialNonce(rng.r#gen()),

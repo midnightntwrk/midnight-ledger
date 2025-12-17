@@ -12,7 +12,7 @@
 # limitations under the License.
 
 {
-  description = "Midnight ledger prototype";
+  description = "Midnight ledger";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/dde9ed5570893a1e382bf87859469fb44b99d1d2";
+      url = "github:midnightntwrk/midnight-ledger/5a889f79251d6e8689aca0a72d328a84986a9971";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -59,6 +59,7 @@
           ./proof-server
           ./storage
           ./zkir
+          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -103,12 +104,7 @@
               [
                 self.packages.${system}.local-params
                 zkir.packages.${system}.zkir
-              ] else [])
-              ++ (
-                if isDarwin
-                then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                else []
-              );
+              ] else []);
           };
         mkLedger = {
           isCrossArm ? false,
@@ -134,7 +130,7 @@
               checkPhase = ''
                 cargo fmt -- --check
                 cargo check --all-targets --workspace
-                cargo test ${if heavy-checks then "--release --target" else ""}
+                ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
               cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
 
@@ -150,12 +146,7 @@
                   zkir.packages.${system}.zkir
                   rust-build
                   pkgs.chez
-                ]
-                ++ (
-                  if isDarwin
-                  then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                  else []
-                );
+                ];
 
               doCheck = true;
             }
@@ -266,6 +257,7 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -352,12 +344,13 @@
             '';
           };
 
-          packages.ledger = mkLedger {};
+          packages.ledger = mkLedger { heavy-checks = true; };
 
           packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v1"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v6"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -399,6 +392,16 @@
             version = "0.1.0";
 
             srcs = [
+              (pkgs.fetchurl { url = param-for 0; hash = "sha256-CXNk4UIPqkilNymg4GZgwHyWiMDYPQbdU1XS8ivuyDQ="; })
+              (pkgs.fetchurl { url = param-for 1; hash = "sha256-x8llsslMB1jGAr1BtgM4Y1OEIzQ45mZP8BxJKSjn8ns="; })
+              (pkgs.fetchurl { url = param-for 2; hash = "sha256-HKrlVJHAb2JkJpdFvlI314Bqm9e+akFyFIJBjxUQxuw="; })
+              (pkgs.fetchurl { url = param-for 3; hash = "sha256-PECHS2p6OJnoNk6Fkvz7u8Wg4BIRdbHra3hEvHQpJAg="; })
+              (pkgs.fetchurl { url = param-for 4; hash = "sha256-cVpoDV14BCmgeo7ZRnxJGqqqB4hNeTrnaXcBKr9i/ko="; })
+              (pkgs.fetchurl { url = param-for 5; hash = "sha256-GxT3sZSfwJBKghgwG+WaF6Gh7/IYQgor64uSdu2WXug="; })
+              (pkgs.fetchurl { url = param-for 6; hash = "sha256-LGAtFxaphOMCnfqHdmfg3mBYAXZKrXahopa04t8fOTo="; })
+              (pkgs.fetchurl { url = param-for 7; hash = "sha256-6n3upIIbW/eCLfnlzwsZcJWAagf8U7NuicntIXVMTfc="; })
+              (pkgs.fetchurl { url = param-for 8; hash = "sha256-YsZ5mz3Yyh/XHC5h0Cl6C2xU2H8AaFzw/tbao/hz7+A="; })
+              (pkgs.fetchurl { url = param-for 9; hash = "sha256-XcPkczulB9Gkw1PxsDS/ocnQA/jiGpM/2lZH6RQNiRA="; })
               (pkgs.fetchurl { url = param-for 10; hash = "sha256-0aNAPB+Gaegu0o2TkeEwEa6naAGyj+FLQr920UG076I="; })
               (pkgs.fetchurl { url = param-for 11; hash = "sha256-tQR/BYANvYT9HqQ7lqiFDhKLelle0TLNcliMwssUayk="; })
               (pkgs.fetchurl { url = param-for 12; hash = "sha256-syeRd1r1//GuXq1oLD2IMpF+uwZStDz4EKHjlW6yenE="; })
@@ -451,6 +454,7 @@
               pkgs.yarn
               pkgs.jq
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
               pkgs.git
               pkgs.cargo-spellcheck
@@ -469,6 +473,7 @@
               pkgs.jq
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
             ];
             buildInputs = [packages.public-params];
@@ -489,8 +494,9 @@
               pkgs.clang
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              pkgs.cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_100
+              pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];

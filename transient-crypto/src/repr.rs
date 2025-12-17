@@ -195,7 +195,7 @@ impl<const N: usize> FieldRepr for [u8; N] {
     }
     fn field_size(&self) -> usize {
         self.len() / FR_BYTES_STORED
-            + if self.len() % FR_BYTES_STORED == 0 {
+            + if self.len().is_multiple_of(FR_BYTES_STORED) {
                 0
             } else {
                 1
