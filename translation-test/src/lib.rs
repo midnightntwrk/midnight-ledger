@@ -14,7 +14,7 @@ use storage::storage::{HashMap, Map, default_storage};
 
 pub mod mechanism;
 
-mod ledger_tl;
+// mod ledger_tl;
 
 use mechanism::*;
 
@@ -66,7 +66,11 @@ mod lr {
     #[tag = "nesty-lr"]
     pub enum Nesty<D: DB> {
         Empty,
-        Node(u32, #[storable(child)] Sp<Nesty<D>, D>, #[storable(child)] Sp<Nesty<D>, D>),
+        Node(
+            u32,
+            #[storable(child)] Sp<Nesty<D>, D>,
+            #[storable(child)] Sp<Nesty<D>, D>,
+        ),
     }
 }
 
@@ -92,7 +96,9 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
     fn required_translations() -> Vec<TranslationId> {
         vec![TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag())]
     }
-    fn child_translations(source: &lr::Nesty<D>) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
+    fn child_translations(
+        source: &lr::Nesty<D>,
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         let tlid = || TranslationId(lr::Nesty::<D>::tag(), rl::Nesty::<D>::tag());
         match source {
             lr::Nesty::Empty => vec![],
@@ -173,12 +179,8 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
 
 struct MptFooToBarTranslation;
 
-impl<D: DB>
-    DirectTranslation<
-        MerklePatriciaTrie<FooEntry, D>,
-        MerklePatriciaTrie<BarEntry, D>,
-        D,
-    > for MptFooToBarTranslation
+impl<D: DB> DirectTranslation<MerklePatriciaTrie<FooEntry, D>, MerklePatriciaTrie<BarEntry, D>, D>
+    for MptFooToBarTranslation
 {
     fn required_translations() -> Vec<TranslationId> {
         vec![TranslationId(
@@ -209,9 +211,7 @@ impl<D: DB>
         let Some(tl) = cache.lookup(&tlid, source.0.as_child()) else {
             return Ok(None);
         };
-        Ok(Some(MerklePatriciaTrie(
-            tl.force_downcast(),
-        )))
+        Ok(Some(MerklePatriciaTrie(tl.force_downcast())))
     }
 }
 
@@ -225,10 +225,7 @@ impl<D: DB>
     > for MptNodeFooToBarTranslation
 {
     fn required_translations() -> Vec<TranslationId> {
-        let entry_tl = TranslationId(
-            FooEntry::tag(),
-            BarEntry::tag(),
-        );
+        let entry_tl = TranslationId(FooEntry::tag(), BarEntry::tag());
         let self_tl = TranslationId(
             merkle_patricia_trie::Node::<FooEntry, D>::tag(),
             merkle_patricia_trie::Node::<BarEntry, D>::tag(),
@@ -238,10 +235,7 @@ impl<D: DB>
     fn child_translations(
         source: &merkle_patricia_trie::Node<FooEntry, D>,
     ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
-        let entry_tl = TranslationId(
-            FooEntry::tag(),
-            BarEntry::tag(),
-        );
+        let entry_tl = TranslationId(FooEntry::tag(), BarEntry::tag());
         let self_tl = TranslationId(
             merkle_patricia_trie::Node::<FooEntry, D>::tag(),
             merkle_patricia_trie::Node::<BarEntry, D>::tag(),
@@ -255,10 +249,9 @@ impl<D: DB>
             merkle_patricia_trie::Node::Extension { child, .. } => {
                 vec![(self_tl, child.upcast())]
             }
-            merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => vec![
-                (entry_tl, value.upcast()),
-                (self_tl, child.upcast()),
-            ],
+            merkle_patricia_trie::Node::MidBranchLeaf { value, child, .. } => {
+                vec![(entry_tl, value.upcast()), (self_tl, child.upcast())]
+            }
             merkle_patricia_trie::Node::Leaf { value, .. } => vec![(entry_tl, value.upcast())],
         }
     }
@@ -267,10 +260,7 @@ impl<D: DB>
         _limit: &mut CostDuration,
         cache: &TranslationCache<D>,
     ) -> io::Result<Option<merkle_patricia_trie::Node<BarEntry, D>>> {
-        let entry_tl = TranslationId(
-            FooEntry::tag(),
-            BarEntry::tag(),
-        );
+        let entry_tl = TranslationId(FooEntry::tag(), BarEntry::tag());
         let self_tl = TranslationId(
             merkle_patricia_trie::Node::<FooEntry, D>::tag(),
             merkle_patricia_trie::Node::<BarEntry, D>::tag(),
@@ -302,8 +292,7 @@ impl<D: DB>
                 let Some(entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
-                let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
-                    entry.force_downcast();
+                let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> = entry.force_downcast();
                 let ann = child.ann();
                 merkle_patricia_trie::Node::Extension {
                     ann,
@@ -315,8 +304,7 @@ impl<D: DB>
                 let Some(entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
-                let value: Sp<BarEntry, D> =
-                    entry.force_downcast();
+                let value: Sp<BarEntry, D> = entry.force_downcast();
                 let ann = SizeAnn::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
@@ -327,8 +315,7 @@ impl<D: DB>
                 let Some(child_entry) = cache.lookup(&self_tl, child.as_child()) else {
                     return Ok(None);
                 };
-                let value: Sp<BarEntry, D> =
-                    value_entry.force_downcast();
+                let value: Sp<BarEntry, D> = value_entry.force_downcast();
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
                     child_entry.force_downcast();
                 let ann = SizeAnn::from_value(&value).append(&child.ann());
@@ -340,15 +327,11 @@ impl<D: DB>
 
 struct FooEntryToBarEntryTranslation;
 
-impl<D: DB> DirectTranslation<FooEntry, BarEntry, D>
-    for FooEntryToBarEntryTranslation
-{
+impl<D: DB> DirectTranslation<FooEntry, BarEntry, D> for FooEntryToBarEntryTranslation {
     fn required_translations() -> Vec<TranslationId> {
         vec![]
     }
-    fn child_translations(
-        source: &FooEntry,
-    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
+    fn child_translations(source: &FooEntry) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![]
     }
     fn finalize(
@@ -356,9 +339,7 @@ impl<D: DB> DirectTranslation<FooEntry, BarEntry, D>
         _limit: &mut CostDuration,
         _cache: &TranslationCache<D>,
     ) -> io::Result<Option<BarEntry>> {
-        Ok(Some(
-            BarEntry(source.0.wrapping_mul(42)),
-        ))
+        Ok(Some(BarEntry(source.0.wrapping_mul(42))))
     }
 }
 
@@ -389,10 +370,7 @@ impl<D: DB> TranslationTable<D> for TestTable {
             &DirectSpTranslation::<_, _, MptNodeFooToBarTranslation, _>(PhantomData),
         ),
         (
-            TranslationId(
-                Cow::Borrowed("foo-entry"),
-                Cow::Borrowed("bar-entry"),
-            ),
+            TranslationId(Cow::Borrowed("foo-entry"), Cow::Borrowed("bar-entry")),
             &DirectSpTranslation::<_, _, FooEntryToBarEntryTranslation, _>(PhantomData),
         ),
     ];
@@ -423,7 +401,8 @@ mod tests {
 
     #[test]
     fn test_nesty_tl() {
-        set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref()))).unwrap();
+        set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref())))
+            .unwrap();
         let t0 = std::time::Instant::now();
         let n = 23;
         let mut before = mk_nesty(n, 0);
@@ -452,15 +431,27 @@ mod tests {
         let dt0 = tfin1 - t0;
         let dt1 = tfin0 - t1;
         let m = 1 << n;
-        eprintln!("took {dt0:?} for {m} items ({} items per second) [incl construction]", m as f64 / dt0.as_secs_f64());
-        eprintln!("took {dt1:?} for {m} items ({} items per second) [excl construction]", m as f64 / dt1.as_secs_f64());
+        eprintln!(
+            "took {dt0:?} for {m} items ({} items per second) [incl construction]",
+            m as f64 / dt0.as_secs_f64()
+        );
+        eprintln!(
+            "took {dt1:?} for {m} items ({} items per second) [excl construction]",
+            m as f64 / dt1.as_secs_f64()
+        );
         dbg!(&TUPDATE);
         dbg!(&TPROCESS);
         dbg!(&TDEP);
         dbg!(&TFIN);
         dbg!(&NPROC);
-        dbg!(TUPDATE.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
-        dbg!(TPROCESS.load(std::sync::atomic::Ordering::SeqCst) as f64 / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64);
+        dbg!(
+            TUPDATE.load(std::sync::atomic::Ordering::SeqCst) as f64
+                / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64
+        );
+        dbg!(
+            TPROCESS.load(std::sync::atomic::Ordering::SeqCst) as f64
+                / NPROC.load(std::sync::atomic::Ordering::SeqCst) as f64
+        );
     }
 
     #[test]
@@ -470,13 +461,9 @@ mod tests {
         let before = mk_foo(n);
         dbg!(before.foo.mpt.serialize_to_node_list().nodes.len());
         let t1 = std::time::Instant::now();
-        let tl_state = TypedTranslationState::<
-            Foo<TestDb>,
-            Bar<TestDb>,
-            TestTable,
-            TestDb,
-        >::start(before)
-        .unwrap();
+        let tl_state =
+            TypedTranslationState::<Foo<TestDb>, Bar<TestDb>, TestTable, TestDb>::start(before)
+                .unwrap();
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
         let finished_state = tl_state.run(cost).unwrap();
         let Some(_after) = finished_state.result().unwrap() else {
@@ -492,10 +479,22 @@ mod tests {
         let dt2 = tfin1 - t1;
         let dt3 = tfin0 - t1;
         let m = 1 << n;
-        eprintln!("took {dt0:?} for {m} items ({} items per second) [incl construction, incl drop]", m as f64 / dt0.as_secs_f64());
-        eprintln!("took {dt1:?} for {m} items ({} items per second) [incl construction, excl drop]", m as f64 / dt1.as_secs_f64());
-        eprintln!("took {dt2:?} for {m} items ({} items per second) [excl construction, incl drop]", m as f64 / dt2.as_secs_f64());
-        eprintln!("took {dt3:?} for {m} items ({} items per second) [excl construction, excl drop]", m as f64 / dt3.as_secs_f64());
+        eprintln!(
+            "took {dt0:?} for {m} items ({} items per second) [incl construction, incl drop]",
+            m as f64 / dt0.as_secs_f64()
+        );
+        eprintln!(
+            "took {dt1:?} for {m} items ({} items per second) [incl construction, excl drop]",
+            m as f64 / dt1.as_secs_f64()
+        );
+        eprintln!(
+            "took {dt2:?} for {m} items ({} items per second) [excl construction, incl drop]",
+            m as f64 / dt2.as_secs_f64()
+        );
+        eprintln!(
+            "took {dt3:?} for {m} items ({} items per second) [excl construction, excl drop]",
+            m as f64 / dt3.as_secs_f64()
+        );
     }
 
     #[test]
