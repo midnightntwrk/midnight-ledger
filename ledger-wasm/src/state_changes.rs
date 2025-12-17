@@ -17,14 +17,15 @@
 
 use crate::conversions::*;
 use js_sys::Array;
-use ledger::semantics;
+use ledger::dust::DustStateChanges as LedgerDustStateChanges;
+use ledger::semantics::ZswapStateChanges as LedgerZswapStateChanges;
 use wasm_bindgen::prelude::*;
 
 /// WASM wrapper for ZswapStateChanges (used by Zswap)
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct ZswapStateChanges {
-    pub(crate) inner: semantics::ZswapStateChanges,
+    pub(crate) inner: LedgerZswapStateChanges,
 }
 
 #[wasm_bindgen]
@@ -53,8 +54,8 @@ impl ZswapStateChanges {
     }
 }
 
-impl From<semantics::ZswapStateChanges> for ZswapStateChanges {
-    fn from(inner: semantics::ZswapStateChanges) -> Self {
+impl From<LedgerZswapStateChanges> for ZswapStateChanges {
+    fn from(inner: LedgerZswapStateChanges) -> Self {
         ZswapStateChanges { inner }
     }
 }
@@ -63,7 +64,7 @@ impl From<semantics::ZswapStateChanges> for ZswapStateChanges {
 #[wasm_bindgen]
 #[derive(Clone)]
 pub struct DustStateChanges {
-    pub(crate) inner: semantics::DustStateChanges,
+    pub(crate) inner: LedgerDustStateChanges,
 }
 
 #[wasm_bindgen]
@@ -92,8 +93,8 @@ impl DustStateChanges {
     }
 }
 
-impl From<semantics::DustStateChanges> for DustStateChanges {
-    fn from(inner: semantics::DustStateChanges) -> Self {
+impl From<LedgerDustStateChanges> for DustStateChanges {
+    fn from(inner: LedgerDustStateChanges) -> Self {
         DustStateChanges { inner }
     }
 }
