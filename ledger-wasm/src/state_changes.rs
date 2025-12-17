@@ -18,7 +18,7 @@
 use crate::conversions::*;
 use js_sys::Array;
 use ledger::dust::DustStateChanges as LedgerDustStateChanges;
-use ledger::semantics::ZswapStateChanges as LedgerZswapStateChanges;
+use ledger::zswap::ZswapStateChanges as LedgerZswapStateChanges;
 use wasm_bindgen::prelude::*;
 
 /// WASM wrapper for ZswapStateChanges (used by Zswap)

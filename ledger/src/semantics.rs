@@ -26,14 +26,14 @@ use crate::structure::{
 };
 use crate::structure::{OutputInstructionShielded, TransactionHash};
 use crate::utils::{KeySortedIter, SortedIter, sorted};
+use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
-use coin_structure::coin::Nonce;
-use coin_structure::coin::UserAddress;
-use coin_structure::coin::{Commitment, NIGHT, ShieldedTokenType, TokenType};
-use coin_structure::coin::{Info, QualifiedInfo};
+use coin_structure::coin::{
+    Commitment, Info, NIGHT, Nonce, ShieldedTokenType, TokenType, UserAddress,
+};
 use coin_structure::contract::ContractAddress;
 use itertools::Either;
 use onchain_runtime::context::{BlockContext, QueryContext};
@@ -60,73 +60,6 @@ pub(crate) fn whitelist_matches(
     match whitelist {
         Some(wl) => wl.contains_key(addr),
         None => true,
-    }
-}
-
-#[derive(Clone)]
-pub struct ZswapStateChanges {
-    pub received_coins: Vec<QualifiedInfo>,
-    pub spent_coins: Vec<QualifiedInfo>,
-    pub source: TransactionHash,
-}
-
-impl ZswapStateChanges {
-    pub fn can_merge(&self, other: &ZswapStateChanges) -> bool {
-        self.source == other.source
-    }
-
-    pub fn merge(&mut self, other: ZswapStateChanges) {
-        self.received_coins.extend(other.received_coins);
-        self.spent_coins.extend(other.spent_coins);
-    }
-}
-
-pub struct WithZswapStateChanges<T> {
-    pub changes: Vec<ZswapStateChanges>,
-    pub result: T,
-}
-
-impl<T> WithZswapStateChanges<T> {
-    pub fn new(result: T) -> WithZswapStateChanges<T> {
-        WithZswapStateChanges {
-            changes: Vec::new(),
-            result,
-        }
-    }
-}
-
-impl<T> WithZswapStateChanges<T> {
-    // look into zswap crate!!
-    pub fn add_change(mut self, change: ZswapStateChanges) -> Self {
-        if let Some(last_change) = self.changes.first_mut() {
-            if last_change.can_merge(&change) {
-                last_change.merge(change);
-            } else {
-                self.changes.push(change);
-            }
-        } else {
-            // No existing changes, just push
-            self.changes.push(change);
-        }
-
-        WithZswapStateChanges {
-            changes: self.changes,
-            result: self.result,
-        }
-    }
-
-    pub fn maybe_add_change(self, maybe_change: Option<ZswapStateChanges>) -> Self {
-        match maybe_change {
-            Some(change) => self.add_change(change),
-            None => self,
-        }
-    }
-
-    pub fn with_result(self, result: T) -> Self {
-        WithZswapStateChanges {
-            changes: self.changes,
-            result,
-        }
     }
 }
 

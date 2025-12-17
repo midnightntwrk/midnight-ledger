@@ -33,6 +33,7 @@ pub mod semantics;
 pub mod structure;
 mod utils;
 pub mod verify;
+pub mod zswap;
 
 pub use ledger_tracing::{LogLevel, init_logger};
 
