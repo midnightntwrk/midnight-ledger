@@ -48,7 +48,7 @@ impl<T> WithZswapStateChanges<T> {
 
 impl<T> WithZswapStateChanges<T> {
     pub fn add_change(mut self, change: ZswapStateChanges) -> Self {
-        if let Some(last_change) = self.changes.first_mut() {
+        if let Some(last_change) = self.changes.last_mut() {
             if last_change.can_merge(&change) {
                 last_change.merge(change);
             } else {
