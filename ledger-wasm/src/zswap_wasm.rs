@@ -15,8 +15,7 @@ use crate::conversions::*;
 use crate::dust::DustParameters;
 use crate::zswap_state::ZswapChainState;
 use base_crypto::cost_model::SyntheticCost;
-use base_crypto::hash::HashOutput;
-use coin_structure::coin::ShieldedTokenType;
+use js_sys::BigInt;
 use js_sys::{JsString, Map, Uint8Array};
 use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::from_value_ser;
@@ -574,21 +573,16 @@ impl ZswapOffer {
     }
 
     #[wasm_bindgen(js_name = "fromInput")]
-    pub fn from_input(input: &ZswapInput, type_: &str, value: u128) -> Result<ZswapOffer, JsError> {
+    pub fn from_input(
+        input: &ZswapInput,
+        _type: Option<String>,
+        _value: Option<BigInt>,
+    ) -> Result<ZswapOffer, JsError> {
         match &input.0 {
-            ZswapInputTypes::UnprovenInput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![val.clone()].into(),
-                    outputs: vec![].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: value as i128,
-                    }]
-                    .into(),
-                })))
-            }
+            ZswapInputTypes::UnprovenInput(val) => Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                zswap::Offer::new(vec![val.clone()], vec![], vec![])
+                    .expect("non-empty offer must exist"),
+            ))),
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased input.",
             )),
@@ -598,22 +592,15 @@ impl ZswapOffer {
     #[wasm_bindgen(js_name = "fromOutput")]
     pub fn from_output(
         output: &ZswapOutput,
-        type_: &str,
-        value: u128,
+        _type: Option<String>,
+        _value: Option<BigInt>,
     ) -> Result<ZswapOffer, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![].into(),
-                    outputs: vec![val.clone()].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: -(value as i128),
-                    }]
-                    .into(),
-                })))
+                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                    zswap::Offer::new(vec![], vec![val.clone()], vec![])
+                        .expect("non-empty offer must exist"),
+                )))
             }
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased output.",

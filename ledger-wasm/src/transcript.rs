@@ -20,7 +20,7 @@ use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct PreTranscript(ledger::construct::PreTranscript<InMemoryDB>);
+pub struct PreTranscript(pub(crate) ledger::construct::PreTranscript<InMemoryDB>);
 
 try_ref_for_exported!(PreTranscript);
 

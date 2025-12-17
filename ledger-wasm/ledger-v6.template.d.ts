@@ -247,7 +247,7 @@ export class DustSecretKey {
 
   /**
    * Create an instance of {@link DustSecretKey} from a seed.
-   * @param Uint8Array
+   * @param seed
    */
   static fromSeed(seed: Uint8Array): DustSecretKey;
 
@@ -674,6 +674,15 @@ export class ContractCall<P extends Proofish> {
   readonly proof: P;
 }
 
+/**
+ * A {@link ContractCall} prior to being partitioned into guarnateed and
+ * fallible parts, for use with {@link Transaction.addCalls}.
+ *
+ * Note that this is similar, but not the same as {@link ContractCall}, which
+ * assumes {@link partitionTranscripts} was already used. {@link
+ * Transaction.addCalls} is a replacement for this that also handles
+ * Zswap components, and creates relevant intents when needed.
+ */
 export class PrePartitionContractCall {
   constructor(
     address: ContractAddress,
@@ -1016,6 +1025,15 @@ export type ProvingProvider = {
   ): Promise<Uint8Array>;
 };
 
+/**
+ * Specifies where something should execute in a transaction.
+ *
+ * Options are:
+ * - As the first thing (alias for `{ tag: 'specific', value: 1 }`)
+ * - In any physical segment, but only utilising the guaranteed logical segment
+ * - In a random segment (ideal for merging with other intents)
+ * - In a specific directly provided segment (in the range 1..65535)
+ */
 export type SegmentSpecifier = { tag: 'first' } | { tag: 'guaranteedOnly' } | { tag: 'random' } | { tag: 'specific', value: number };
 
 /**
@@ -1079,6 +1097,11 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
 
   /**
    * Adds a set of new calls to the transaction.
+   *
+   * In contrast to {@link Intent.addCall}, this takes calls *before*
+   * transcript partitioning ({@link partitionTranscripts}), will create the
+   * target intent where needed, and will ensure that relevant Zswap parts are
+   * placed in the same section as contract interactions with them.
    *
    * @throws If called on bound, proven, or proof-erased transactions.
    */
@@ -1579,14 +1602,14 @@ export class ZswapLocalState {
    * {@link ZswapInput}, and the updated state marking this coin as
    * in-flight.
    */
-  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment?: number, ttl?: Date): [ZswapLocalState, UnprovenInput];
+  spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, ttl?: Date): [ZswapLocalState, UnprovenInput];
 
   /**
    * Initiates a new spend of a new-yet-received output, outputting the
    * corresponding {@link ZswapTransient}, and the updated state marking
    * this coin as in-flight.
    */
-  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment?: number, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
+  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
 
   /**
    * Adds a coin to the list of coins that are expected to be received
@@ -1630,7 +1653,7 @@ export class ZswapLocalState {
 export class ZswapInput<P extends Proofish> {
   private constructor();
 
-  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment?: number, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
+  static newContractOwned(coin: QualifiedShieldedCoinInfo, segment: number | undefined, contract: ContractAddress, state: ZswapChainState): UnprovenInput;
 
   serialize(): Uint8Array;
 
@@ -1665,7 +1688,7 @@ export class ZswapOutput<P extends Proofish> {
    * encryption public key, which may be omitted *only* if the {@link ShieldedCoinInfo}
    * is transferred to the recipient another way
    */
-  static new(coin: ShieldedCoinInfo, segment?: number, target_cpk: CoinPublicKey, target_epk: EncPublicKey): UnprovenOutput;
+  static new(coin: ShieldedCoinInfo, segment: number | undefined, target_cpk: CoinPublicKey, target_epk: EncPublicKey): UnprovenOutput;
 
   /**
    * Creates a new output, targeted to a smart contract
@@ -1673,7 +1696,7 @@ export class ZswapOutput<P extends Proofish> {
    * A contract must *also* explicitly receive a coin created in this way for
    * the output to be valid
    */
-  static newContractOwned(coin: ShieldedCoinInfo, segment?: number, contract: ContractAddress): UnprovenOutput;
+  static newContractOwned(coin: ShieldedCoinInfo, segment: number | undefined, contract: ContractAddress): UnprovenOutput;
 
   serialize(): Uint8Array;
 
@@ -1707,7 +1730,7 @@ export class ZswapTransient<P extends Proofish> {
    *
    * The {@link QualifiedShieldedCoinInfo} should have an `mt_index` of `0`
    */
-  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment?: number, output: UnprovenOutput): UnprovenTransient;
+  static newFromContractOwnedOutput(coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput): UnprovenTransient;
 
   serialize(): Uint8Array;
 
@@ -1802,14 +1825,18 @@ export class ZswapOffer<P extends Proofish> {
   /**
    * Creates a singleton offer, from an {@link ZswapInput} and its value
    * vector
+   *
+   * The `type_` and `value` parameters are deprecated and will be ignored.
    */
-  static fromInput<P extends Proofish>(input: ZswapInput<P>, type_: RawTokenType, value: bigint): ZswapOffer<P>;
+  static fromInput<P extends Proofish>(input: ZswapInput<P>, type_?: RawTokenType, value?: bigint): ZswapOffer<P>;
 
   /**
    * Creates a singleton offer, from an {@link ZswapOutput} and its value
    * vector
+   *
+   * The `type_` and `value` parameters are deprecated and will be ignored.
    */
-  static fromOutput<P extends Proofish>(output: ZswapOutput<P>, type_: RawTokenType, value: bigint): ZswapOffer<P>;
+  static fromOutput<P extends Proofish>(output: ZswapOutput<P>, type_?: RawTokenType, value?: bigint): ZswapOffer<P>;
 
   /**
    * Creates a singleton offer, from a {@link ZswapTransient}

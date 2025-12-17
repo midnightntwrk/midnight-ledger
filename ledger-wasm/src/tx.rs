@@ -15,6 +15,7 @@ use crate::conversions::*;
 use crate::dust::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
+use crate::transcript::PreTranscript;
 use crate::zswap_state::whitelist_from_value;
 use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
@@ -31,8 +32,10 @@ use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
     ProofVersioned, SignatureKind,
 };
+use onchain_runtime::state::EntryPointBuf;
 use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::conversions::token_type_to_value;
+use onchain_runtime_wasm::state::{ContractOperation, from_maybe_string};
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -44,7 +47,7 @@ use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{ProofPreimage, ProvingProvider};
+use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use zswap::Offer;
@@ -100,10 +103,33 @@ try_ref_for_exported!(PrePartitionContractCall);
 #[wasm_bindgen]
 impl PrePartitionContractCall {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> PrePartitionContractCall {
-        todo!()
-        //PrePartitionContractCall(ledger::construct::PrePartitionContractCall {
-        //})
+    pub fn new(
+        address: &str,
+        entry_point: JsValue,
+        op: &ContractOperation,
+        pre_transcript: &PreTranscript,
+        private_transcript_outputs: Vec<JsValue>,
+        input: JsValue,
+        output: JsValue,
+        communication_commitment_rand: &str,
+        key_location: &str,
+    ) -> Result<PrePartitionContractCall, JsError> {
+        Ok(PrePartitionContractCall(
+            ledger::construct::PrePartitionContractCall {
+                address: from_hex_ser(address)?,
+                entry_point: EntryPointBuf(from_maybe_string(entry_point)?),
+                op: op.clone().into(),
+                pre_transcript: pre_transcript.0.clone(),
+                private_transcript_outputs: private_transcript_outputs
+                    .into_iter()
+                    .map(from_value)
+                    .collect::<Result<Vec<_>, _>>()?,
+                input: from_value(input)?,
+                output: from_value(output)?,
+                communication_commitment_rand: from_hex_ser(communication_commitment_rand)?,
+                key_location: KeyLocation(std::borrow::Cow::Owned(key_location.to_owned())),
+            },
+        ))
     }
 
     #[wasm_bindgen(js_name = "toString")]
