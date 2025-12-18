@@ -46,6 +46,18 @@ exclude = [
     "scripts/hardfork_version_patch"
 ]
 
+[patch."https://github.com/midnightntwrk/midnight-zk"]
+midnight-curves = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-proofs = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-circuits = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-zk-stdlib = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+
+[patch."https://github.com/midnightntwrk/midnight-zk.git"]
+midnight-curves = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-proofs = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-circuits = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-zk-stdlib = { git = "https://www.github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+
 # Pretty much every dependency is crypto.
 # If there's one thing I know about it, it's that we don't want the molasses
 # of unoptimized crypto.
