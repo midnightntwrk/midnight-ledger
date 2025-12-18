@@ -540,7 +540,6 @@ impl<P: Clone + Ord + Storable<D>, D: DB> Offer<P, D> {
         self.deltas = normalize_deltas(
             self.deltas
                 .iter_deref()
-                .cloned()
                 .map(|delta| (delta.token_type, delta.value)),
         )
         .into_iter()

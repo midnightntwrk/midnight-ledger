@@ -168,8 +168,8 @@ impl Transaction {
         }
 
         let mut intents = vec![];
-        if intent.is_some() {
-            intents.push((1, intent.unwrap().clone().try_into()?));
+        if let Some(intent) = intent {
+            intents.push((1, intent.clone().try_into()?));
         }
 
         let fallible_items = if let Some(fallible) = fallible {
@@ -250,8 +250,8 @@ impl Transaction {
 
         let segment_id = OsRng.gen_range(2..u16::MAX);
         let mut intents = vec![];
-        if intent.is_some() {
-            intents.push((segment_id, intent.unwrap().clone().try_into()?));
+        if let Some(intent) = intent {
+            intents.push((segment_id, intent.clone().try_into()?));
         }
 
         let fallible_items = if let Some(fallible) = fallible {
