@@ -485,7 +485,7 @@ dependencies = [
 [[package]]
 name = "bench_macros"
 version = "0.1.0"
-source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#e666bedffe4ed80de481ef6fcd7e5b5d7ba98f5d"
 dependencies = [
  "quote 1.0.42",
  "syn 2.0.111",
@@ -2813,7 +2813,7 @@ dependencies = [
 [[package]]
 name = "midnight-circuits"
 version = "5.0.2"
-source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#e666bedffe4ed80de481ef6fcd7e5b5d7ba98f5d"
 dependencies = [
  "base64 0.13.1",
  "bench_macros 0.1.0 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
@@ -2875,7 +2875,7 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.1.1"
-source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#e666bedffe4ed80de481ef6fcd7e5b5d7ba98f5d"
 dependencies = [
  "bitvec",
  "blst",
@@ -3131,7 +3131,7 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.5.2"
-source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#d52b9d6a3fb88232a557d0f43a773e0025e5d441"
+source = "git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2#e666bedffe4ed80de481ef6fcd7e5b5d7ba98f5d"
 dependencies = [
  "bench_macros 0.1.0 (git+https://github.com/riusricardo/midnight-zk?branch=gpu-integration-v5.0.2)",
  "blake2b_simd",
