@@ -993,7 +993,19 @@ impl Transaction {
                     Standard(tx),
                 )))
             }
-            _ => todo!(),
+            UnprovenWithSignatureBinding(_)
+            | UnprovenWithSignatureErasedBinding(_)
+            | ProvenWithSignatureBinding(_)
+            | ProvenWithSignatureErasedBinding(_) => {
+                Err(JsError::new("Transaction is already bound."))?
+            }
+            ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProofErasedWithSignatureNoBinding(_)
+            | ProofErasedWithSignatureErasedNoBinding(_) => {
+                Err(JsError::new("Transaction is already proven."))?
+            }
+            _ => Err(JsError::new("Not a standard transaction."))?,
         }
     }
 
