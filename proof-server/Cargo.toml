@@ -6,7 +6,7 @@ version.workspace = true
 
 [features]
 default = []
-gpu = ["transient-crypto/gpu", "midnight-proofs/gpu", "midnight-proofs/cost-estimator"]
+gpu = ["dep:midnight-proofs", "transient-crypto/gpu", "midnight-proofs/gpu", "midnight-proofs/cost-estimator"]
 experimental = ["dep:zkir-v3"]
 
 [dependencies]
@@ -19,6 +19,8 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 
 zkir = { path = "../zkir", package = "zkir" }
 zkir-v3 = { path = "../zkir-v3", optional = true }
+
+midnight-proofs = { git = "https://github.com/riusricardo/midnight-zk", branch = "gpu-integration-v5.0.2", optional = true }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

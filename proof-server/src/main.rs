@@ -62,12 +62,15 @@ async fn main() -> std::io::Result<()> {
     let args = Args::parse();
     init_logging(args.verbose);
     
-    // Warmup GPU backend before starting server (if gpu feature enabled)
-    // This avoids ~500-1000ms latency on the first proof request
+    // Initialize GPU backend eagerly to avoid ~500-1000ms initialization
+    // latency on the first proof request. If the backend is already initialized,
+    // this is a no-op. This uses the global MSM executor that will be reused
+    // for all proof requests.
     #[cfg(feature = "gpu")]
     {
-        info!("Initializing GPU backend...");
-        if let Some(duration) = transient_crypto::gpu::warmup_gpu() {
+        use midnight_proofs::poly::kzg::msm::init_gpu_backend;
+        info!("Initializing global GPU backend...");
+        if let Some(duration) = init_gpu_backend() {
             info!("GPU backend ready in {:?}", duration);
         } else {
             info!("GPU backend not available, using CPU");
