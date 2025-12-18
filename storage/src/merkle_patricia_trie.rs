@@ -39,10 +39,8 @@ pub struct MerklePatriciaTrie<
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<V> = SizeAnn,
 >(
-    #[cfg(feature = "public-internal-structure")]
-    pub Sp<Node<V, D, A>, D>,
-    #[cfg(not(feature = "public-internal-structure"))]
-    pub(crate) Sp<Node<V, D, A>, D>,
+    #[cfg(feature = "public-internal-structure")] pub Sp<Node<V, D, A>, D>,
+    #[cfg(not(feature = "public-internal-structure"))] pub(crate) Sp<Node<V, D, A>, D>,
 );
 
 impl<V: Storable<D> + Tagged, D: DB, A: Storable<D> + Annotation<V> + Tagged> Tagged
@@ -259,11 +257,8 @@ where
 #[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
 #[derive_where(Ord; T: Ord, A: Ord)]
 #[cfg(feature = "public-internal-structure")]
-pub enum Node<
-    T: Storable<D> + 'static,
-    D: DB = DefaultDB,
-    A: Storable<D> + Annotation<T> = SizeAnn,
-> {
+pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Annotation<T> = SizeAnn>
+{
     #[default]
     Empty,
     Leaf {

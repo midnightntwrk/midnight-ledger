@@ -18,7 +18,7 @@
 
 mod rcmap;
 
-pub use rcmap::{RcMap, ChildRef};
+pub use rcmap::{ChildRef, RcMap};
 use serialize::Serializable;
 
 use crate::arena::ArenaKey;

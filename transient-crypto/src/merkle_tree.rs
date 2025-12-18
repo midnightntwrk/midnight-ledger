@@ -351,10 +351,8 @@ impl MerkleTreeCollapsedUpdate {
 #[storable(db = D)]
 #[tag = "merkle-tree[v1]"]
 pub struct MerkleTree<A: Storable<D>, D: DB = DefaultDB>(
-    #[cfg(feature = "public-internal-structure")]
-    pub Sp<MerkleTreeNode<A, D>, D>,
-    #[cfg(not(feature = "public-internal-structure"))]
-    Sp<MerkleTreeNode<A, D>, D>,
+    #[cfg(feature = "public-internal-structure")] pub Sp<MerkleTreeNode<A, D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))] Sp<MerkleTreeNode<A, D>, D>,
 );
 tag_enforcement_test!(MerkleTree<(), InMemoryDB>);
 

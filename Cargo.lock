@@ -3088,6 +3088,7 @@ dependencies = [
  "derive-where",
  "fake",
  "fs2",
+ "hashbrown 0.16.0",
  "hex",
  "itertools 0.14.0",
  "konst",
@@ -3173,23 +3174,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
-]
-
-[[package]]
-name = "midnight-translation-test"
-version = "0.1.0"
-dependencies = [
- "derive-where",
- "hashbrown 0.16.0",
- "midnight-base-crypto",
- "midnight-coin-structure",
- "midnight-ledger",
- "midnight-onchain-state",
- "midnight-serialize",
- "midnight-storage",
- "midnight-transient-crypto",
- "midnight-zswap",
- "rand 0.8.5",
 ]
 
 [[package]]

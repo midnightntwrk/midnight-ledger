@@ -16,12 +16,12 @@ use serialize::{self, Deserializable, Serializable, Tagged};
 use std::fmt::Debug;
 use std::hash::Hash;
 use storage::Storable;
+use storage::arena::ArenaKey;
 use storage::db::DB;
 use storage::merkle_patricia_trie::HasSize;
 use storage::merkle_patricia_trie::Monoid;
 use storage::merkle_patricia_trie::Semigroup;
 use storage::storable::Loader;
-use storage::arena::ArenaKey;
 
 /// An annotation holding the size of a structure and its `Utxo` value
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Serializable, Storable, Hash)]

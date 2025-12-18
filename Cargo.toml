@@ -23,7 +23,6 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
-    "translation-test",
     "static",
 ]
 default-members = [
@@ -41,7 +40,6 @@ default-members = [
     "serialize",
     "serialize-macros",
     "generate-cost-model",
-    "translation-test",
 ]
 resolver = "2"
 exclude = [
@@ -65,8 +63,3 @@ panic = "abort"
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
-
-[patch.'https://github.com/midnightntwrk/midnight-ledger']
-storage = { path = "storage", package = "midnight-storage" }
-serialize = { path = "serialize", package = "midnight-serialize" }
-base-crypto = { path = "base-crypto", package = "midnight-base-crypto" }

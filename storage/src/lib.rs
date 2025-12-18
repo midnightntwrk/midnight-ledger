@@ -52,3 +52,6 @@ pub mod stress_test;
 pub type DefaultHasher = sha2::Sha256;
 /// The default database.
 pub type DefaultDB = db::InMemoryDB<DefaultHasher>;
+
+#[cfg(feature = "state-translation")]
+pub mod state_translation;
