@@ -23,7 +23,7 @@ use midnight_transient_crypto::hash::{hash_to_curve, transient_hash};
 use rand::RngCore;
 use rand::{Rng, rngs::OsRng};
 use serde_json::json;
-use serialize::{Serializable, tagged_serialize};
+use serialize::tagged_serialize;
 
 /// Helper function to run benchmarks with multiple data points for zero-parameter operations.
 fn with_json_iter<F>(group_name: &str, c: &mut Criterion, mut benchmark_fn: F)
