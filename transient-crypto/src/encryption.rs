@@ -123,7 +123,7 @@ impl Deserializable for Ciphertext {
         let c = EmbeddedGroupAffine::deserialize(reader, recursion_depth)?;
         let ciph = <Vec<Fr> as Deserializable>::deserialize(reader, recursion_depth)?;
         // See note in `decrypt` for why the point at infinity is excluded.
-        if c.is_infinity() {
+        if c.is_identity() {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "ciphertext challenge may not be the point at infinity",
@@ -192,11 +192,11 @@ impl SecretKey {
 
     /// Attempts decryption of a given ciphertext.
     pub fn decrypt<T: FromFieldRepr>(&self, ciph: &Ciphertext) -> Option<T> {
-        // NOTE: Allowing c to be the point at infinity would allow any key to potentially decrypt
-        // this, because k_star would always be the point at infinity for every secret key
+        // NOTE: Allowing c to be the identity element would allow any key to potentially decrypt
+        // this, because k_star would always be the identity element for every secret key
         // Effectively, this is because this is the only point that *is not* a group generator.
         // Therefore, we exclude it.
-        if ciph.c.is_infinity() {
+        if ciph.c.is_identity() {
             return None;
         }
         let k_star = ciph.c * self.0;
