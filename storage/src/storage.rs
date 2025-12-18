@@ -1069,6 +1069,9 @@ impl<
 }
 
 #[derive(Debug)]
+#[cfg(feature = "public-internal-structure")]
+pub struct BigEndianU64(u64);
+#[cfg(not(feature = "public-internal-structure"))]
 struct BigEndianU64(u64);
 
 impl Serializable for BigEndianU64 {

@@ -103,8 +103,8 @@ impl<D: DB> TranslationCache<D> {
         let key = TranslationCacheKey::from_key(id, &child);
         self.transient_map
             .get(&key)
-            .map(|v| (&*v).clone())
-            .or_else(|| self.persistent_map.get(&key).map(|v| (&*v).clone()))
+            .map(|v| (*v).clone())
+            .or_else(|| self.persistent_map.get(&key).map(|v| (*v).clone()))
     }
     pub fn resolve<T: Storable<D> + Tagged + Any + Send + Sync>(
         &self,
@@ -148,8 +148,7 @@ impl<T: Loader<D>, D: DB> AsBackendLoader<D> for T {
         if std::any::type_name::<Self>() == std::any::type_name::<BackendLoader<D>>() {
             Ok(unsafe { &*(self as *const Self as *const BackendLoader<D>) })
         } else {
-            Err(io::Error::new(
-                io::ErrorKind::Other,
+            Err(io::Error::other(
                 "requiered backend loader for translation machinery due to dyn trait shenanigans",
             ))
         }
@@ -159,6 +158,7 @@ impl<T: Loader<D>, D: DB> AsBackendLoader<D> for T {
 pub trait TypelessTranslation<D: DB> {
     fn required_translations(&self) -> Vec<TranslationId>;
     fn start(&self, node: Sp<dyn Any + Send + Sync, D>) -> Box<dyn TypelessTranslationState<D>>;
+    #[allow(clippy::wrong_self_convention)]
     fn from_binary_repr(
         &self,
         reader: &mut dyn std::io::Read,
@@ -487,7 +487,7 @@ pub trait TranslationTable<D: DB>: Send + Sync + 'static {
         let mut missing_tls = vec![];
         for (outer, tl) in Self::TABLE.iter() {
             for inner in tl.required_translations() {
-                if let Err(_) = Self::get(&inner) {
+                if Self::get(&inner).is_err() {
                     missing_tls.push((outer.clone(), inner));
                 }
             }
@@ -608,7 +608,7 @@ impl<TABLE: TranslationTable<D>, D: DB> From<TranslationState<TABLE, D>>
         InflightTranslationState {
             work_queue: value.work_queue.into(),
             cache: value.cache.into(),
-            result: value.result.into(),
+            result: value.result,
         }
     }
 }
@@ -620,7 +620,7 @@ impl<TABLE: TranslationTable<D>, D: DB> From<InflightTranslationState<TABLE, D>>
         TranslationState {
             work_queue: value.work_queue.into(),
             cache: value.cache.into(),
-            result: value.result.into(),
+            result: value.result,
         }
     }
 }
