@@ -27,6 +27,7 @@ group = "^0.13.0"
 midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
 midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
 midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
+halo2curves = "0.7.0"
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 

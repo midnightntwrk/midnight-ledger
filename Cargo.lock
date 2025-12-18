@@ -3122,6 +3122,7 @@ dependencies = [
  "flate2",
  "futures",
  "group",
+ "halo2curves",
  "k256",
  "lazy_static",
  "lru",

@@ -117,10 +117,10 @@ impl ParamsVerifier {
     }
 }
 
-const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_filecoin_2p14");
+const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_midnight_2p14");
 
 lazy_static! {
-    /// The filecoin verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
+    /// The midnight verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
     ///
     /// Note that using this *will* embed these into the binary at compile time, if that's not what
     /// you want, please use `ParamsVerifier::read` instead.

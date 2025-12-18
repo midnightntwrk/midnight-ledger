@@ -386,30 +386,30 @@
               doCheck = false;
             };
           packages.public-params = let
-              param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_filecoin_2p${builtins.toString k}";
+              param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {
             pname = "midnight-testing-public-parameters";
             version = "0.1.0";
 
             srcs = [
-              (pkgs.fetchurl { url = param-for 0; hash = "sha256-CXNk4UIPqkilNymg4GZgwHyWiMDYPQbdU1XS8ivuyDQ="; })
-              (pkgs.fetchurl { url = param-for 1; hash = "sha256-x8llsslMB1jGAr1BtgM4Y1OEIzQ45mZP8BxJKSjn8ns="; })
-              (pkgs.fetchurl { url = param-for 2; hash = "sha256-HKrlVJHAb2JkJpdFvlI314Bqm9e+akFyFIJBjxUQxuw="; })
-              (pkgs.fetchurl { url = param-for 3; hash = "sha256-PECHS2p6OJnoNk6Fkvz7u8Wg4BIRdbHra3hEvHQpJAg="; })
-              (pkgs.fetchurl { url = param-for 4; hash = "sha256-cVpoDV14BCmgeo7ZRnxJGqqqB4hNeTrnaXcBKr9i/ko="; })
-              (pkgs.fetchurl { url = param-for 5; hash = "sha256-GxT3sZSfwJBKghgwG+WaF6Gh7/IYQgor64uSdu2WXug="; })
-              (pkgs.fetchurl { url = param-for 6; hash = "sha256-LGAtFxaphOMCnfqHdmfg3mBYAXZKrXahopa04t8fOTo="; })
-              (pkgs.fetchurl { url = param-for 7; hash = "sha256-6n3upIIbW/eCLfnlzwsZcJWAagf8U7NuicntIXVMTfc="; })
-              (pkgs.fetchurl { url = param-for 8; hash = "sha256-YsZ5mz3Yyh/XHC5h0Cl6C2xU2H8AaFzw/tbao/hz7+A="; })
-              (pkgs.fetchurl { url = param-for 9; hash = "sha256-XcPkczulB9Gkw1PxsDS/ocnQA/jiGpM/2lZH6RQNiRA="; })
-              (pkgs.fetchurl { url = param-for 10; hash = "sha256-0aNAPB+Gaegu0o2TkeEwEa6naAGyj+FLQr920UG076I="; })
-              (pkgs.fetchurl { url = param-for 11; hash = "sha256-tQR/BYANvYT9HqQ7lqiFDhKLelle0TLNcliMwssUayk="; })
-              (pkgs.fetchurl { url = param-for 12; hash = "sha256-syeRd1r1//GuXq1oLD2IMpF+uwZStDz4EKHjlW6yenE="; })
-              (pkgs.fetchurl { url = param-for 13; hash = "sha256-ua9DiSw8uQMh+gCjbl5ZBR81bfFF1/WDaFMfKNISk3s="; })
-              (pkgs.fetchurl { url = param-for 14; hash = "sha256-SSPlp/u3Fdgc21wDucDiEXaNNczFLYL0nD2TvPjTalY="; })
-              (pkgs.fetchurl { url = param-for 15; hash = "sha256-Fi+sDPcLmwLgIZXsNwE8BJl7OdwYMal9WoP0epzjnJc="; })
-              (pkgs.fetchurl { url = param-for 16; hash = "sha256-TrwNB3/mZF6bfKZWMhe+IXbwDf45zJez9g7LrTVz+XM="; })
-              (pkgs.fetchurl { url = param-for 17; hash = "sha256-cijEUZ6W7OLFS/L1N9nyaw7QQoGXM3JmI/q14X6sQ2A="; })
+              (pkgs.fetchurl { url = param-for 0; hash = "sha256-WbMLMRSjTMu/tZk3bhePuNmzNmyuIXTC8dog51hH+CM="; })
+              (pkgs.fetchurl { url = param-for 1; hash = "sha256-u+BP48cNDBOER8sIa0ut3DDLi7KgBBFLwC5vc5UWKA4="; })
+              (pkgs.fetchurl { url = param-for 2; hash = "sha256-gOFVaPoaARfbiTI5vn+l40przDqMO/p3CVNLnLiOtsE="; })
+              (pkgs.fetchurl { url = param-for 3; hash = "sha256-S+gnpkchk9+A2PCLSyWoW670Nv3Rll2Jtq+J9OxOmeI="; })
+              (pkgs.fetchurl { url = param-for 4; hash = "sha256-Iy9AH60Qx934go0qpMhcZQbF2gl5WZjOyuufdfyPato="; })
+              (pkgs.fetchurl { url = param-for 5; hash = "sha256-ChySKfMV/Bho/yX2aPuDrsTQn08jpwa1GXxpLGGdcsY="; })
+              (pkgs.fetchurl { url = param-for 6; hash = "sha256-zyrWvn0P7fW+wqqjX2vkrKMwU9dCaP31qlT8sokept8="; })
+              (pkgs.fetchurl { url = param-for 7; hash = "sha256-6CrokMCAGINV83/q/+kTclhM2BBhUILZFD1N7ART/Z0="; })
+              (pkgs.fetchurl { url = param-for 8; hash = "sha256-kJtwdVHqrqeYKOiDzeb8RqsVmGw7HXkb7UYsnigFyTM="; })
+              (pkgs.fetchurl { url = param-for 9; hash = "sha256-uQCfEJi87//sPEYas6XjoX9+VZnw8Ixw/NxVqJInvL0="; })
+              (pkgs.fetchurl { url = param-for 10; hash = "sha256-RrIpCTPL7Uw3iInkupcfGpKIgzH/sJRmrNT/YaHiy0I="; })
+              (pkgs.fetchurl { url = param-for 11; hash = "sha256-mQFYnXlW/1i+DYVWmy9FW3e1jDdYAm/7W75IBwALltE="; })
+              (pkgs.fetchurl { url = param-for 12; hash = "sha256-7wjrP89i349yxRXP+gJ+aBgItTDLAW7qEEEVVF721cg="; })
+              (pkgs.fetchurl { url = param-for 13; hash = "sha256-0zJJEJacTMVBQ7gEW2SeXDpL1ft7j4X+G3cPZAzhyAM="; })
+              (pkgs.fetchurl { url = param-for 14; hash = "sha256-/CUwFoheyDDpeAjJ7JILtcq1whr1kDgKbLXrBTjiskQ="; })
+              (pkgs.fetchurl { url = param-for 15; hash = "sha256-ckx8PXeRSLsRPH7pwDSy8n2xbmvfMV/ekBBam60Asd4="; })
+              (pkgs.fetchurl { url = param-for 16; hash = "sha256-Cch3IW1libNwJj4Yr0CgMKkBtBp6fDfvWMmQHbQfBcY="; })
+              (pkgs.fetchurl { url = param-for 17; hash = "sha256-Sp72x8Bhmqt07t5EsT51PjulRQigLdO3EGqUmqu3O3Q="; })
             ];
 
             dontUnpack = true;
