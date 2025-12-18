@@ -122,11 +122,11 @@ impl Deserializable for Ciphertext {
         Ciphertext::check_rec(&mut recursion_depth)?;
         let c = EmbeddedGroupAffine::deserialize(reader, recursion_depth)?;
         let ciph = <Vec<Fr> as Deserializable>::deserialize(reader, recursion_depth)?;
-        // See note in `decrypt` for why the point at infinity is excluded.
+        // See note in `decrypt` for why the identity element is excluded.
         if c.is_identity() {
             Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
-                "ciphertext challenge may not be the point at infinity",
+                "ciphertext challenge may not be the identity element",
             ))
         } else {
             Ok(Ciphertext { c, ciph })
