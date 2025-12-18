@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/12b540a5a212c78d13a48ce2eeeead37581f5cbb";
+      url = "github:midnightntwrk/midnight-ledger/b9a7fe4ccfceedbca2e67eb28147baafff14d604";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
