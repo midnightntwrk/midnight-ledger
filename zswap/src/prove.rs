@@ -242,12 +242,12 @@ mod tests {
             .rehash();
 
         let inp =
-            Input::new_contract_owned(&mut rng, &qcoin, 0, Default::default(), &tree).unwrap();
+            Input::new_contract_owned(&mut rng, &qcoin, None, Default::default(), &tree).unwrap();
         let inp_proven = inp.prove(provider.split()).await.unwrap();
         assert_eq!(inp_proven.proof.0.len(), INPUT_PROOF_SIZE);
 
         let out =
-            Output::<_, InMemoryDB>::new_contract_owned(&mut rng, &coin, 0, Default::default())
+            Output::<_, InMemoryDB>::new_contract_owned(&mut rng, &coin, None, Default::default())
                 .unwrap();
         let out_proven = out.prove(provider).await.unwrap();
         assert_eq!(out_proven.proof.0.len(), OUTPUT_PROOF_SIZE);

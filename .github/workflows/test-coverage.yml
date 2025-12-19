@@ -20,20 +20,6 @@ jobs:
     runs-on: ubuntu-latest-8-core-x64
     steps:
 
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Configure git rewrite
         run: |
           mkdir -p $HOME/.config/git
@@ -43,29 +29,24 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
-            netrc-file = ~/.netrc
-            access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh

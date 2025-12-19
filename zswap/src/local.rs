@@ -202,7 +202,7 @@ impl<D: DB> State<D> {
         rng: &mut R,
         secret_keys: &SecretKeys,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
     ) -> Result<(State<D>, Input<ProofPreimage, D>), OfferCreationFailed> {
         self.spend_from_tree(rng, secret_keys, coin, segment, &self.merkle_tree.clone())
     }
@@ -213,7 +213,7 @@ impl<D: DB> State<D> {
         rng: &mut R,
         secret_keys: &SecretKeys,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         tree: &MerkleTree<(), D>,
     ) -> Result<(State<D>, Input<ProofPreimage, D>), OfferCreationFailed> {
         let inp = Input::new_from_secret_key(
@@ -236,7 +236,7 @@ impl<D: DB> State<D> {
         rng: &mut R,
         secret_keys: &SecretKeys,
         coin: &QualifiedCoinInfo,
-        segment: u16,
+        segment: Option<u16>,
         output: Output<ProofPreimage, D>,
     ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
         let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)

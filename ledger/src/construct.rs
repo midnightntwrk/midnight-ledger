@@ -35,6 +35,7 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::{ContractOperation, ContractState, EntryPointBuf};
 use onchain_runtime::transcript::Transcript;
 use rand::{CryptoRng, Rng};
+use serde::{Deserialize, Serialize};
 use serialize::Serializable;
 use std::iter::once;
 use std::ops::Deref;
@@ -47,8 +48,9 @@ use transient_crypto::fab::{AlignedValueExt, ValueReprAlignedValue};
 use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 use transient_crypto::repr::FieldRepr;
-use zswap::Offer;
-use zswap::Offer as ZswapOffer;
+use zswap::{
+    Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput, Transient as ZswapTransient,
+};
 
 impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRandomness, D> {
     pub fn from_intents(
@@ -73,44 +75,206 @@ impl<S: SignatureKind<D>, D: DB>
             Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
             D,
         >,
-        guaranteed_coins: Option<Offer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
+        guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
+        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
     ) -> Self {
-        StandardTransaction {
+        let mut res = StandardTransaction {
             network_id: network_id.into(),
-            binding_randomness: Self::binding_randomness(
-                &guaranteed_coins,
-                &fallible_coins,
-                &intents,
-            ),
+            binding_randomness: Default::default(),
             intents,
             guaranteed_coins: guaranteed_coins.map(|x| Sp::new(x)),
             fallible_coins: fallible_coins.into_iter().collect(),
-        }
+        };
+        res.recompute_binding_randomness();
+        res
     }
 
-    fn binding_randomness(
-        guaranteed_coins: &Option<Offer<ProofPreimage, D>>,
-        fallible_coins: &std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
-        intents: &storage::storage::HashMap<
-            u16,
-            Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
-            D,
-        >,
-    ) -> PedersenRandomness {
-        guaranteed_coins
+    pub fn add_calls<P>(
+        &self,
+        rng: &mut (impl Rng + CryptoRng),
+        segment: SegmentSpecifier,
+        calls: &[PrePartitionContractCall<D>],
+        params: &LedgerParameters,
+        ttl: Timestamp,
+        zswap_inputs: &[ZswapInput<ProofPreimage, D>],
+        zswap_outputs: &[ZswapOutput<ProofPreimage, D>],
+        zswap_transients: &[ZswapTransient<ProofPreimage, D>],
+    ) -> Result<Self, PartitionFailure<D>>
+    where
+        P: ContractCallExt<D>,
+    {
+        let pre_transcripts = calls
+            .iter()
+            .map(|call| PreTranscript {
+                comm_comm: Some(communication_commitment(
+                    call.input.clone(),
+                    call.output.clone(),
+                    call.communication_commitment_rand,
+                )),
+                ..call.pre_transcript.clone()
+            })
+            .collect::<Vec<_>>();
+        let partitioned = partition_transcripts(&pre_transcripts, params)?;
+        let segment = match segment {
+            SegmentSpecifier::First => 1,
+            SegmentSpecifier::GuaranteedOnly
+                if partitioned.iter().any(|(_, snd)| snd.is_some()) =>
+            {
+                return Err(PartitionFailure::GuaranteedOnlyUnsatisfied);
+            }
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => rng.r#gen(),
+            SegmentSpecifier::Specific(0) => return Err(PartitionFailure::IllegalSegmentZero),
+            SegmentSpecifier::Specific(seg) => seg,
+        };
+        let prototypes = calls
+            .iter()
+            .zip(partitioned)
+            .map(|(call, (guaranteed, fallible))| ContractCallPrototype {
+                address: call.address,
+                entry_point: call.entry_point.clone(),
+                op: call.op.clone(),
+                guaranteed_public_transcript: guaranteed,
+                fallible_public_transcript: fallible,
+                private_transcript_outputs: call.private_transcript_outputs.clone(),
+                input: call.input.clone(),
+                output: call.output.clone(),
+                communication_commitment_rand: call.communication_commitment_rand,
+                key_location: call.key_location.clone(),
+            })
+            .collect::<Vec<_>>();
+        let zswap_input_is_fallible = zswap_inputs
+            .iter()
+            .map(|inp| {
+                prototypes.iter().any(|pt| {
+                    pt.fallible_public_transcript
+                        .as_ref()
+                        .is_some_and(|pt| pt.effects.claimed_nullifiers.member(&inp.nullifier))
+                })
+            })
+            .collect::<Vec<_>>();
+        let zswap_output_is_fallible = zswap_outputs
+            .iter()
+            .map(|out| {
+                prototypes.iter().any(|pt| {
+                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
+                        pt.effects
+                            .claimed_shielded_spends
+                            .union(&pt.effects.claimed_shielded_receives)
+                            .member(&out.coin_com)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let zswap_transient_is_fallible = zswap_transients
+            .iter()
+            .map(|trans| {
+                prototypes.iter().any(|pt| {
+                    pt.fallible_public_transcript.as_ref().is_some_and(|pt| {
+                        pt.effects
+                            .claimed_shielded_spends
+                            .union(&pt.effects.claimed_shielded_receives)
+                            .member(&trans.coin_com)
+                            || pt.effects.claimed_nullifiers.member(&trans.nullifier)
+                    })
+                })
+            })
+            .collect::<Vec<_>>();
+        let intent_before = self
+            .intents
+            .get(&segment)
+            .map(|i| (*i).clone())
+            .unwrap_or_else(|| Intent::empty(rng, ttl));
+        let intent = prototypes
+            .into_iter()
+            .fold(intent_before, |i, proto| i.add_call::<P>(proto));
+        let mut res = self.set_intent(segment, intent);
+        let guaranteed_coins = ZswapOffer::new(
+            zswap_inputs
+                .iter()
+                .zip(zswap_input_is_fallible.iter())
+                .filter(|(_, f)| !**f)
+                .map(|(i, _)| i.clone())
+                .collect(),
+            zswap_outputs
+                .iter()
+                .zip(zswap_output_is_fallible.iter())
+                .filter(|(_, f)| !**f)
+                .map(|(o, _)| o.clone())
+                .collect(),
+            zswap_transients
+                .iter()
+                .zip(zswap_transient_is_fallible.iter())
+                .filter(|(_, f)| !**f)
+                .map(|(t, _)| t.clone())
+                .collect(),
+        );
+        let fallible_coins = ZswapOffer::new(
+            zswap_inputs
+                .iter()
+                .zip(zswap_input_is_fallible.iter())
+                .filter(|(_, f)| **f)
+                .map(|(i, _)| i.clone())
+                .collect(),
+            zswap_outputs
+                .iter()
+                .zip(zswap_output_is_fallible.iter())
+                .filter(|(_, f)| **f)
+                .map(|(o, _)| o.clone())
+                .collect(),
+            zswap_transients
+                .iter()
+                .zip(zswap_transient_is_fallible.iter())
+                .filter(|(_, f)| **f)
+                .map(|(t, _)| t.clone())
+                .collect(),
+        );
+        if let Some(offer) = guaranteed_coins {
+            res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
+                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
+            } else {
+                offer
+            }));
+        }
+        if let Some(offer) = fallible_coins {
+            let new_offer = if let Some(old_offer) = res.fallible_coins.get(&segment) {
+                old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
+            } else {
+                offer
+            };
+            res.fallible_coins = res.fallible_coins.insert(segment, new_offer);
+        }
+        res.recompute_binding_randomness();
+        Ok(res)
+    }
+
+    pub fn set_intent(
+        &self,
+        segment: u16,
+        intent: Intent<S, ProofPreimageMarker, PedersenRandomness, D>,
+    ) -> Self {
+        let mut res = self.clone();
+        res.intents = self.intents.insert(segment, intent);
+        res.recompute_binding_randomness();
+        res
+    }
+
+    pub fn recompute_binding_randomness(&mut self) {
+        self.binding_randomness = self
+            .guaranteed_coins
             .as_ref()
             .map(|o| o.binding_randomness())
             .unwrap_or_else(|| PedersenRandomness::from(0))
-            + fallible_coins
+            + self
+                .fallible_coins
                 .values()
                 .fold(PedersenRandomness::from(0), |acc, o| {
                     acc + o.binding_randomness()
                 })
-            + intents
+            + self
+                .intents
                 .values()
                 .map(|i| i.binding_randomness())
-                .fold(0.into(), |a, b| a + b)
+                .fold(0.into(), |a, b| a + b);
     }
 }
 
@@ -153,6 +317,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         Intent::new(rng, None, None, vec![], vec![], vec![], None, ttl)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         guaranteed_unshielded_offer: Option<UnshieldedOffer<S, D>>,
@@ -273,18 +438,43 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             D,
         >,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, Offer<ProofPreimage, D>>,
+        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
     ) -> Self {
-        let binding_randomness =
-            StandardTransaction::binding_randomness(&guaranteed_coins, &fallible_coins, &intents);
-        Transaction::Standard(StandardTransaction {
+        let mut stx = StandardTransaction {
             network_id: network_id.into(),
             intents,
-            guaranteed_coins: guaranteed_coins.map(|x| Sp::new(x)),
-            fallible_coins: fallible_coins.into_iter().collect(),
-            binding_randomness,
-        })
+            guaranteed_coins: guaranteed_coins.map(|x| Sp::new(x.retarget_segment(0))),
+            fallible_coins: fallible_coins
+                .into_iter()
+                .map(|(seg, offer)| (seg, offer.retarget_segment(seg)))
+                .collect(),
+            binding_randomness: Default::default(),
+        };
+        stx.recompute_binding_randomness();
+        Transaction::Standard(stx)
     }
+}
+
+#[derive_where::derive_where(Clone, Debug)]
+pub struct PrePartitionContractCall<D: DB> {
+    pub address: ContractAddress,
+    pub entry_point: EntryPointBuf,
+    pub op: ContractOperation,
+    pub pre_transcript: PreTranscript<D>,
+    pub private_transcript_outputs: Vec<AlignedValue>,
+    pub input: AlignedValue,
+    pub output: AlignedValue,
+    pub communication_commitment_rand: Fr,
+    pub key_location: KeyLocation,
+}
+
+#[derive(Debug, Copy, Clone, Serialize, Deserialize)]
+#[serde(tag = "tag", content = "value", rename_all = "camelCase")]
+pub enum SegmentSpecifier {
+    First,
+    GuaranteedOnly,
+    Random,
+    Specific(u16),
 }
 
 #[derive(Clone, Debug)]
@@ -500,13 +690,23 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
 }
 
 #[derive(Debug)]
-pub struct PreTranscript<'a, D: DB> {
-    pub context: &'a QueryContext<D>,
-    pub program: &'a [Op<ResultModeVerify, D>],
+pub struct PreTranscript<D: DB> {
+    pub context: QueryContext<D>,
+    pub program: Vec<Op<ResultModeVerify, D>>,
     pub comm_comm: Option<Fr>,
 }
 
-impl<D: DB> PreTranscript<'_, D> {
+impl<D: DB> Clone for PreTranscript<D> {
+    fn clone(&self) -> Self {
+        PreTranscript {
+            context: self.context.clone(),
+            program: self.program.clone(),
+            comm_comm: self.comm_comm,
+        }
+    }
+}
+
+impl<D: DB> PreTranscript<D> {
     fn no_checkpoints(&self) -> usize {
         self.program
             .iter()
@@ -558,7 +758,7 @@ impl<D: DB> PreTranscript<'_, D> {
     ) -> Result<(Option<Transcript<D>>, Option<Transcript<D>>), TranscriptRejected<D>> {
         let mut prog_guaranteed = Vec::new();
         let mut prog_fallible = Vec::new();
-        for op in self.program {
+        for op in self.program.iter() {
             if n > 0 && matches!(op, Op::Ckpt) {
                 n -= 1;
             }
@@ -617,7 +817,7 @@ pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand:
 pub type TranscriptPair<D> = (Option<Transcript<D>>, Option<Transcript<D>>);
 
 pub fn partition_transcripts<D: DB>(
-    calls: &[PreTranscript<'_, D>],
+    calls: &[PreTranscript<D>],
     params: &LedgerParameters,
 ) -> Result<Vec<TranscriptPair<D>>, PartitionFailure<D>> {
     let n = calls.len();

@@ -239,7 +239,7 @@ impl<D: DB> TestState<D> {
         let output = zswap::Output::<_, D>::new(
             rng,
             &coin,
-            0u16,
+            Some(0u16),
             &self.zswap_keys.coin_public_key(),
             Some(self.zswap_keys.enc_public_key()),
         )
@@ -405,6 +405,7 @@ impl<D: DB> TestState<D> {
                 .ok()
                 .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
         );
+        dbg!(&tx.erase_proofs());
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -453,7 +454,7 @@ impl<D: DB> TestState<D> {
                     .map(|(_, qci)| {
                         let (next_state, inp) = self
                             .zswap
-                            .spend(&mut rng, &self.zswap_keys, &qci, seg)
+                            .spend(&mut rng, &self.zswap_keys, &qci, Some(seg))
                             .unwrap(); // TODO: unwrap
                         self.zswap = next_state;
                         inp
@@ -467,7 +468,7 @@ impl<D: DB> TestState<D> {
                 let output = ZswapOutput::new(
                     &mut rng,
                     &output_coin,
-                    seg,
+                    Some(seg),
                     &self.zswap_keys.coin_public_key(),
                     Some(self.zswap_keys.enc_public_key()),
                 )
@@ -934,7 +935,7 @@ pub fn well_formed_tx_builder<
     const REWARDS_AMOUNT: u128 = 5000000000;
     let token = ShieldedTokenType(Default::default());
     let coin = CoinInfo::new(&mut rng, REWARDS_AMOUNT, token);
-    let out = ZswapOutput::new(&mut rng, &coin, 0, &secret_key.coin_public_key(), None).unwrap();
+    let out = ZswapOutput::new(&mut rng, &coin, None, &secret_key.coin_public_key(), None).unwrap();
     let offer = ZswapOffer {
         inputs: vec![].into(),
         outputs: vec![out].into(),

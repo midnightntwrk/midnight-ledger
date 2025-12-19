@@ -243,6 +243,20 @@ impl<P: Storable<D>, D: DB> Input<P, D> {
 }
 
 impl<D: DB> Input<ProofPreimage, D> {
+    pub fn delta(&self) -> Delta {
+        // NOTE: This is tied to the implementation in construct.rs
+        // Input before last is CoinInfo
+        let inputs = &self.proof.inputs;
+        let coin = CoinInfo::from_field_repr(
+            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
+        )
+        .expect("coin info must be correct encoded in input preimage");
+        Delta {
+            token_type: coin.type_,
+            value: coin.value.try_into().unwrap_or(i128::MAX),
+        }
+    }
+
     pub fn binding_randomness(&self) -> PedersenRandomness {
         // NOTE: This is tied to the implementation in construct.rs
         // rc is the last input, and should be a single Fr element.
@@ -308,6 +322,20 @@ impl<P: Storable<D>, D: DB> Output<P, D> {
 }
 
 impl<D: DB> Output<ProofPreimage, D> {
+    pub fn delta(&self) -> Delta {
+        // NOTE: This is tied to the implementation in construct.rs.
+        // Input before last is CoinInfo
+        let inputs = &self.proof.inputs;
+        let coin = CoinInfo::from_field_repr(
+            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
+        )
+        .expect("coin info must be correct encoded in input preimage");
+        Delta {
+            token_type: coin.type_,
+            value: coin.value.try_into().unwrap_or(i128::MAX).saturating_neg(),
+        }
+    }
+
     pub fn binding_randomness(&self) -> PedersenRandomness {
         // NOTE: This is tied to the implementation in construct.rs.
         // rc is the last input, and should be a single Fr element.
@@ -540,7 +568,6 @@ impl<P: Clone + Ord + Storable<D>, D: DB> Offer<P, D> {
         self.deltas = normalize_deltas(
             self.deltas
                 .iter_deref()
-                .cloned()
                 .map(|delta| (delta.token_type, delta.value)),
         )
         .into_iter()

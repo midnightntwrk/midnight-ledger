@@ -15,20 +15,27 @@ use crate::conversions::*;
 use crate::dust::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
+use crate::transcript::PreTranscript;
 use crate::zswap_state::whitelist_from_value;
-use crate::zswap_wasm::{LedgerParameters, ZswapOffer, ZswapOfferTypes, offer_segment_id};
+use crate::zswap_wasm::{
+    LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
+    ZswapOutputTypes, ZswapTransient, ZswapTransientTypes, offer_segment_id,
+};
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
 use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
+use ledger::construct::SegmentSpecifier;
 use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
     ProofVersioned, SignatureKind,
 };
+use onchain_runtime::state::EntryPointBuf;
 use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::conversions::token_type_to_value;
+use onchain_runtime_wasm::state::{ContractOperation, from_maybe_string};
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -40,7 +47,7 @@ use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{ProofPreimage, ProvingProvider};
+use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 use zswap::Offer;
@@ -86,6 +93,53 @@ pub enum TransactionTypes {
     ProofErasedWithSignatureErasedNoBinding(
         ledger::structure::Transaction<(), (), NoBinding, InMemoryDB>,
     ),
+}
+
+#[wasm_bindgen]
+pub struct PrePartitionContractCall(ledger::construct::PrePartitionContractCall<InMemoryDB>);
+
+try_ref_for_exported!(PrePartitionContractCall);
+
+#[wasm_bindgen]
+impl PrePartitionContractCall {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        address: &str,
+        entry_point: JsValue,
+        op: &ContractOperation,
+        pre_transcript: &PreTranscript,
+        private_transcript_outputs: Vec<JsValue>,
+        input: JsValue,
+        output: JsValue,
+        communication_commitment_rand: &str,
+        key_location: &str,
+    ) -> Result<PrePartitionContractCall, JsError> {
+        Ok(PrePartitionContractCall(
+            ledger::construct::PrePartitionContractCall {
+                address: from_hex_ser(address)?,
+                entry_point: EntryPointBuf(from_maybe_string(entry_point)?),
+                op: op.clone().into(),
+                pre_transcript: pre_transcript.0.clone(),
+                private_transcript_outputs: private_transcript_outputs
+                    .into_iter()
+                    .map(from_value)
+                    .collect::<Result<Vec<_>, _>>()?,
+                input: from_value(input)?,
+                output: from_value(output)?,
+                communication_commitment_rand: from_hex_ser(communication_commitment_rand)?,
+                key_location: KeyLocation(std::borrow::Cow::Owned(key_location.to_owned())),
+            },
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -168,8 +222,8 @@ impl Transaction {
         }
 
         let mut intents = vec![];
-        if intent.is_some() {
-            intents.push((1, intent.unwrap().clone().try_into()?));
+        if let Some(intent) = intent {
+            intents.push((1, intent.clone().try_into()?));
         }
 
         let fallible_items = if let Some(fallible) = fallible {
@@ -250,8 +304,8 @@ impl Transaction {
 
         let segment_id = OsRng.gen_range(2..u16::MAX);
         let mut intents = vec![];
-        if intent.is_some() {
-            intents.push((segment_id, intent.unwrap().clone().try_into()?));
+        if let Some(intent) = intent {
+            intents.push((segment_id, intent.clone().try_into()?));
         }
 
         let fallible_items = if let Some(fallible) = fallible {
@@ -750,6 +804,7 @@ impl Transaction {
                         .map(|o| o.clone().try_into())
                         .transpose()?
                         .map(Sp::new);
+                    tx.recompute_binding_randomness();
                 }
                 _ => Err(JsError::new("Not a standard transaction."))?,
             },
@@ -759,6 +814,7 @@ impl Transaction {
                         .map(|o| o.clone().try_into())
                         .transpose()?
                         .map(Sp::new);
+                    tx.recompute_binding_randomness();
                 }
                 _ => Err(JsError::new("Not a standard transaction."))?,
             },
@@ -832,9 +888,11 @@ impl Transaction {
             }
             UnprovenWithSignaturePreBinding(Standard(tx)) => {
                 tx.fallible_coins = zswap_offers_to_fallible_coins::<ProofPreimageMarker>(offers)?;
+                tx.recompute_binding_randomness();
             }
             UnprovenWithSignatureErasedPreBinding(Standard(tx)) => {
                 tx.fallible_coins = zswap_offers_to_fallible_coins::<ProofPreimageMarker>(offers)?;
+                tx.recompute_binding_randomness();
             }
             ProvenWithSignaturePreBinding(Standard(tx)) => {
                 tx.fallible_coins = zswap_offers_to_fallible_coins::<ProofMarker>(offers)?;
@@ -851,6 +909,104 @@ impl Transaction {
             _ => Err(JsError::new("Not a standard transaction."))?,
         };
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = "addCalls")]
+    pub fn add_calls(
+        &self,
+        segment: JsValue,
+        calls: Array,
+        params: &LedgerParameters,
+        ttl: &Date,
+        zswap_inputs: Option<Array>,
+        zswap_outputs: Option<Array>,
+        zswap_transient: Option<Array>,
+    ) -> Result<Transaction, JsError> {
+        use TransactionTypes::*;
+        use ledger::structure::Transaction::Standard;
+
+        let segment: SegmentSpecifier = from_value(segment)?;
+        let ttl = Timestamp::from_secs(js_date_to_seconds(ttl));
+        fn array_mapper<T: TryRef, U>(
+            inp: Array,
+            conv: fn(T::Anchor) -> Result<U, JsError>,
+        ) -> Result<Vec<U>, JsError> {
+            inp.iter()
+                .map(|x| T::try_ref(&x)?.map(conv).transpose())
+                .collect::<Result<Option<_>, _>>()?
+                .ok_or_else(|| JsError::new(&format!("expected {}", std::any::type_name::<T>())))
+        }
+        let calls = array_mapper::<PrePartitionContractCall, _>(calls, |x| Ok(x.0.clone()))?;
+        let zswap_inputs = zswap_inputs
+            .map(|i| {
+                array_mapper::<ZswapInput, _>(i, |x| match &x.0 {
+                    ZswapInputTypes::UnprovenInput(i) => Ok(i.clone()),
+                    _ => Err(JsError::new("expected unproven Zswap inputs")),
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let zswap_outputs = zswap_outputs
+            .map(|o| {
+                array_mapper::<ZswapOutput, _>(o, |x| match &x.0 {
+                    ZswapOutputTypes::UnprovenOutput(o) => Ok(o.clone()),
+                    _ => Err(JsError::new("expected unproven Zswap outputs")),
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        let zswap_transient = zswap_transient
+            .map(|t| {
+                array_mapper::<ZswapTransient, _>(t, |x| match &x.0 {
+                    ZswapTransientTypes::UnprovenTransient(t) => Ok(t.deref().clone()),
+                    _ => Err(JsError::new("expected unproven Zswap transients")),
+                })
+            })
+            .transpose()?
+            .unwrap_or_default();
+        match &self.0 {
+            UnprovenWithSignaturePreBinding(Standard(tx)) => {
+                let tx = tx.add_calls::<ProofPreimage>(
+                    &mut OsRng,
+                    segment,
+                    &calls,
+                    params,
+                    ttl,
+                    &zswap_inputs,
+                    &zswap_outputs,
+                    &zswap_transient,
+                )?;
+                Ok(Transaction(UnprovenWithSignaturePreBinding(Standard(tx))))
+            }
+            UnprovenWithSignatureErasedPreBinding(Standard(tx)) => {
+                let tx = tx.add_calls::<ProofPreimage>(
+                    &mut OsRng,
+                    segment,
+                    &calls,
+                    params,
+                    ttl,
+                    &zswap_inputs,
+                    &zswap_outputs,
+                    &zswap_transient,
+                )?;
+                Ok(Transaction(UnprovenWithSignatureErasedPreBinding(
+                    Standard(tx),
+                )))
+            }
+            UnprovenWithSignatureBinding(_)
+            | UnprovenWithSignatureErasedBinding(_)
+            | ProvenWithSignatureBinding(_)
+            | ProvenWithSignatureErasedBinding(_) => {
+                Err(JsError::new("Transaction is already bound."))?
+            }
+            ProvenWithSignaturePreBinding(_)
+            | ProvenWithSignatureErasedPreBinding(_)
+            | ProofErasedWithSignatureNoBinding(_)
+            | ProofErasedWithSignatureErasedNoBinding(_) => {
+                Err(JsError::new("Transaction is already proven."))?
+            }
+            _ => Err(JsError::new("Not a standard transaction."))?,
+        }
     }
 
     #[wasm_bindgen(getter, js_name = "intents")]
@@ -881,6 +1037,7 @@ impl Transaction {
                     tx_intents.push((segment_id, intent.try_into()?));
                 }
                 tx.intents = tx_intents.into_iter().collect();
+                tx.recompute_binding_randomness();
             }
             UnprovenWithSignatureErasedPreBinding(Standard(tx)) => {
                 let mut tx_intents = vec![];
@@ -888,6 +1045,7 @@ impl Transaction {
                     tx_intents.push((segment_id, intent.try_into()?));
                 }
                 tx.intents = tx_intents.into_iter().collect();
+                tx.recompute_binding_randomness();
             }
             ProvenWithSignaturePreBinding(Standard(tx)) => {
                 let mut tx_intents = vec![];

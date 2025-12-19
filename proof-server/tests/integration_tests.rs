@@ -135,7 +135,7 @@ fn valid_unbalanced_zswap(
         let out = zswap::Output::new::<_>(
             &mut rng,
             &coin,
-            0,
+            None,
             &sks.coin_public_key(),
             Some(sks.enc_public_key()),
         )

@@ -87,6 +87,7 @@ impl transient_crypto::proofs::Resolver for Resolver {
 }
 
 #[instrument(skip(prover, cost_model))]
+#[allow(clippy::type_complexity)]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
     intents: &storage::storage::HashMap<
         u16,
