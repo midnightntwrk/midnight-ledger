@@ -58,7 +58,7 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let preproc = self.preprocess(preimage)?;
@@ -550,7 +550,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_circuits::compact_std_lib::cost_model(self),
+            model: midnight_zk_stdlib::cost_model(self),
         }
     }
 
@@ -591,7 +591,7 @@ impl IrSource {
         pk: ProverKey<IrSource>,
         preproc: super::ir_vm::Preprocessed,
     ) -> Result<Proof> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let pis = preproc.pis.clone();

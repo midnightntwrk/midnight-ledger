@@ -821,7 +821,7 @@ impl Relation for IrSource {
             sha3_256: false,
             keccak_256: false,
             blake2b: false,
-            nr_pow2range_cols: 4, // TODO: Get this programmatically, not as a magic constant from Miguel :)
+            nr_pow2range_cols: 1, // TODO: Get this programmatically, not as a magic constant from Miguel :)
             secp256k1: false,
             bls12_381: false,
             base64: false,

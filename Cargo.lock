@@ -6132,6 +6132,7 @@ dependencies = [
  "group",
  "hex",
  "midnight-base-crypto",
+ "midnight-circuits",
  "midnight-proofs",
  "midnight-serialize",
  "midnight-transient-crypto",

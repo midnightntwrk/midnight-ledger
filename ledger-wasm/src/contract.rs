@@ -293,12 +293,12 @@ impl ContractOperationVersion {
     pub fn new(version: &str) -> Result<ContractOperationVersion, JsError> {
         use ledger::structure::ContractOperationVersion as V;
         Ok(ContractOperationVersion(match version {
-            "v1" => {
+            "v1" | "v2" => {
                 return Err(JsError::new(&format!(
                     "superseded contract operation version: {version}"
                 )));
             }
-            "v2" => V::V2,
+            "v3" => V::V3,
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -311,7 +311,7 @@ impl ContractOperationVersion {
     pub fn version(&self) -> String {
         use ledger::structure::ContractOperationVersion as V;
         match &self.0 {
-            V::V2 => "v2",
+            V::V3 => "v3",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -343,12 +343,12 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         let raw_vk = raw_vk.to_vec();
         Ok(ContractOperationVersionedVerifierKey(match version {
-            "v1" => {
+            "v1" | "v2" => {
                 return Err(JsError::new(&format!(
                     "superceded contract operation version: {version}"
                 )));
             }
-            "v2" => V::V2(tagged_deserialize(&mut &raw_vk[..])?),
+            "v3" => V::V3(tagged_deserialize(&mut &raw_vk[..])?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -361,7 +361,7 @@ impl ContractOperationVersionedVerifierKey {
     pub fn version(&self) -> String {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         match &self.0 {
-            V::V2(..) => "v2",
+            V::V3(..) => "v2",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -372,7 +372,7 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         let mut buf = Vec::new();
         match &self.0 {
-            V::V2(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V3(vk) => Serializable::serialize(vk, &mut buf)?,
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         Ok(Uint8Array::from(&buf[..]))
