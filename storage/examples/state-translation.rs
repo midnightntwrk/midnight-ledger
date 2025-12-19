@@ -24,13 +24,11 @@ use std::io;
 use std::marker::PhantomData;
 use storage::Storable;
 use storage::arena::{ArenaKey, Sp};
-use storage::db::{DB, ParityDb};
+use storage::db::DB;
 use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie, Monoid, Semigroup};
 use storage::state_translation::*;
 use storage::storable::{Loader, SizeAnn};
 use storage::storage::{HashMap, Map};
-
-type TestDb = ParityDb;
 
 #[derive(Storable)]
 #[derive_where(Clone, Debug)]
@@ -102,6 +100,7 @@ mod rl {
     }
 }
 
+#[allow(dead_code)]
 struct NestyLrToRlTranslation;
 
 impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTranslation {
@@ -136,12 +135,13 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                     *n,
                     btrans.force_downcast(),
                     atrans.force_downcast(),
-                )));
+                )))
             }
         }
     }
 }
 
+#[allow(dead_code)]
 struct FooToBarTranslation;
 
 impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
@@ -188,6 +188,7 @@ impl<D: DB> DirectTranslation<Foo<D>, Bar<D>, D> for FooToBarTranslation {
     }
 }
 
+#[allow(dead_code)]
 struct MptFooToBarTranslation;
 
 impl<D: DB> DirectTranslation<MerklePatriciaTrie<FooEntry, D>, MerklePatriciaTrie<BarEntry, D>, D>
@@ -226,6 +227,7 @@ impl<D: DB> DirectTranslation<MerklePatriciaTrie<FooEntry, D>, MerklePatriciaTri
     }
 }
 
+#[allow(dead_code)]
 struct MptNodeFooToBarTranslation;
 
 impl<D: DB>
@@ -343,6 +345,7 @@ impl<D: DB>
     }
 }
 
+#[allow(dead_code)]
 struct FooEntryToBarEntryTranslation;
 
 impl<D: DB> DirectTranslation<FooEntry, BarEntry, D> for FooEntryToBarEntryTranslation {
@@ -363,6 +366,7 @@ impl<D: DB> DirectTranslation<FooEntry, BarEntry, D> for FooEntryToBarEntryTrans
     }
 }
 
+#[allow(dead_code)]
 struct TestTable;
 
 impl<D: DB> TranslationTable<D> for TestTable {
@@ -401,7 +405,10 @@ fn main() {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use storage::db::ParityDb;
     use storage::{Storage, arena::Sp, storage::set_default_storage};
+
+    type TestDb = ParityDb;
 
     fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<TestDb>, TestDb> {
         if depth == 0 {

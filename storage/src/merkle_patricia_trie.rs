@@ -256,6 +256,7 @@ where
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
 #[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
 #[derive_where(Ord; T: Ord, A: Ord)]
+#[allow(clippy::type_complexity)]
 #[cfg(feature = "public-internal-structure")]
 pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Annotation<T> = SizeAnn>
 {
@@ -286,6 +287,7 @@ pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Anno
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
 #[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
 #[derive_where(Ord; T: Ord, A: Ord)]
+#[allow(clippy::type_complexity)]
 #[cfg(not(feature = "public-internal-structure"))]
 pub(crate) enum Node<
     T: Storable<D> + 'static,

@@ -12,6 +12,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(clippy::derived_hash_with_manual_eq)]
 //! An [`Arena`] for storing Merkle-ized data structures in
 //! memory, persisting them to disk, and reloading them from disk.
 //!

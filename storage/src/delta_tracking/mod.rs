@@ -384,6 +384,7 @@ mod tests {
     // "doesn't have sideways or back edges". The tests are mostly agnostic to
     // the structure here, altho they often assume that (0,1) and (0,2) are
     // valid nodes with large descendant subgraphs.
+    #[allow(clippy::type_complexity)]
     fn test_dag_adjacency() -> Vec<((u8, u8), Vec<(u8, u8)>)> {
         vec![
             // Layer 0: roots
