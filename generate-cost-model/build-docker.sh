@@ -16,6 +16,7 @@
 mkdir -p .cargo
 mv .cargo/config.toml .cargo/config.toml.bak || true
 cargo vendor > .cargo/config.toml
+chmod -R go+r vendor
 cp -r $MIDNIGHT_PP midnight-pp
 docker build -t ghcr.io/midnight-ntwrk/generate-ledger-cost-model:latest . -f generate-cost-model/Dockerfile
 rm .cargo/config.toml
