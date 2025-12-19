@@ -573,7 +573,8 @@ dependencies = [
 [[package]]
 name = "blake2b_halo2"
 version = "0.1.0"
-source = "git+https://github.com/eryxcoop/blake2b_halo2?rev=c3e590f#c3e590f6e685d5b6cd456881136d0e21ee302fc3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ba44fa3e70871c2bc00d44f08c95be68145ae28a60de8182e649eee2f17a872b"
 dependencies = [
  "ff",
  "hex",
@@ -699,9 +700,9 @@ checksum = "37b2a672a2cb129a2e41c10b1224bb368f9f37a2b16b612598138befd7b37eb5"
 
 [[package]]
 name = "cc"
-version = "1.2.49"
+version = "1.2.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90583009037521a116abf44494efecd645ba48b6622457080f080b85544e2215"
+checksum = "9f50d563227a1c37cc0a263f64eca3334388c01c5e4c4861a9def205c614383c"
 dependencies = [
  "find-msvc-tools",
  "jobserver",
@@ -2757,7 +2758,8 @@ dependencies = [
 [[package]]
 name = "midnight-circuits"
 version = "6.0.0"
-source = "git+https://www.github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v1.0.0#2df59557c9ac3b79c355b29614158180064df48f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ff204b6d67ebe408c695751e4d8e078c6f8b3e178f5cb5f55b2615b08070a4dc"
 dependencies = [
  "base64 0.13.1",
  "blake2b_halo2",
@@ -2798,7 +2800,8 @@ dependencies = [
 [[package]]
 name = "midnight-curves"
 version = "0.2.0"
-source = "git+https://www.github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v1.0.0#2df59557c9ac3b79c355b29614158180064df48f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "71df41292a1fd7796bf6c0c6eff7ad717d628406a59a79240e68579716c3566a"
 dependencies = [
  "bitvec",
  "blst",
@@ -3036,7 +3039,8 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.7.0"
-source = "git+https://www.github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v1.0.0#2df59557c9ac3b79c355b29614158180064df48f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c977f57dc14235eb02ea9579f6bee1996b0edd50efaa5ab7ad55cb87966c0d7d"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -3180,7 +3184,8 @@ dependencies = [
 [[package]]
 name = "midnight-zk-stdlib"
 version = "1.0.0"
-source = "git+https://www.github.com/midnightntwrk/midnight-zk?tag=midnight-zk-stdlib-v1.0.0#2df59557c9ac3b79c355b29614158180064df48f"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0252a1e687f530a355d89bd6d4bce99d8361eef8abe6dff5b3b864fe8e426901"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -4631,7 +4636,8 @@ dependencies = [
 [[package]]
 name = "sha3-circuit"
 version = "0.1.0"
-source = "git+https://github.com/alexandroszacharakis8/sha3-circuit?rev=e38afe2#e38afe2839a1156bc1eef0054f25a756b4235d99"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "be83e5373c70fbe71d6aa678da6d139029a497faccd1c693f393526fe0195101"
 dependencies = [
  "blake2b_simd",
  "ff",

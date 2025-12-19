@@ -25,9 +25,9 @@ base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
-midnight-zk-stdlib = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-zk-stdlib-v1.0.0" }
+midnight-proofs = { version = "^0.7.0" }
+midnight-circuits = { version = "^6.0.0" }
+midnight-zk-stdlib = { version = "^1.0.0" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"
