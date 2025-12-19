@@ -131,7 +131,7 @@ lazy_static! {
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "proof[v4]"]
+#[tag = "proof[v5]"]
 pub struct Proof(pub Vec<u8>);
 tag_enforcement_test!(Proof);
 
@@ -239,10 +239,10 @@ pub(crate) enum InnerProverKey<T: Zkir> {
 
 impl<T: Zkir> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
-        Cow::Owned(format!("prover-key[v6]({})", T::tag()))
+        Cow::Owned(format!("prover-key[v7]({})", T::tag()))
     }
     fn tag_unique_factor() -> String {
-        format!("prover-key[v6]({})", T::tag())
+        format!("prover-key[v7]({})", T::tag())
     }
 }
 
@@ -373,10 +373,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v5]")
+        Cow::Borrowed("verifier-key[v6]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v5]".into()
+        "verifier-key[v6]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);

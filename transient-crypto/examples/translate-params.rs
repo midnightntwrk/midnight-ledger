@@ -2,10 +2,8 @@
 //! https://srs.midnight.network/current_srs/powers_of_tau (as at the end of the ceremony)
 
 use group::prime::PrimeCurveAffine;
-use halo2curves::serde::SerdeObject;
-use midnight_curves::{Bls12, G1Affine, G2Affine};
+use midnight_curves::{Bls12, G1Affine, G2Affine, serde::SerdeObject};
 use midnight_proofs::poly::kzg::params::ParamsKZG;
-use rand::rngs::OsRng;
 use rayon::prelude::*;
 
 pub fn main() {
@@ -23,9 +21,7 @@ pub fn main() {
     let mut g2s = [G2Affine::generator(); 2];
     g2s[0] = read_g2_point(&bytes[offset..offset + g2_size]);
     g2s[1] = read_g2_point(&bytes[offset + g2_size..offset + 2 * g2_size]);
-    // Hack to get around API limitations, we need a param to call `from_parts`.
-    let params = ParamsKZG::<Bls12>::unsafe_setup(1, OsRng);
-    let mut params = params.from_parts(25, g1s, None, g2s[0].into(), g2s[1].into());
+    let mut params = ParamsKZG::<Bls12>::from_parts(25, g1s, None, g2s[0].into(), g2s[1].into());
     for k in (0..=25).rev() {
         eprintln!("k={k}");
         let mut f = std::fs::File::create(format!("bls_midnight_2p{k}")).unwrap();
