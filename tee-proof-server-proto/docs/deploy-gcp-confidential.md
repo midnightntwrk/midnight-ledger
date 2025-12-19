@@ -347,7 +347,7 @@ echo "Reserved IP: $EXTERNAL_IP"
 Create a production-optimized Dockerfile:
 
 ```dockerfile
-# File: /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server/Dockerfile
+# File: ./proof-server/Dockerfile
 
 # Build stage
 FROM rust:1.75-slim as builder
@@ -416,7 +416,7 @@ gcloud services enable containerregistry.googleapis.com
 gcloud auth configure-docker
 
 # Build image
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 docker build -t gcr.io/$PROJECT_ID/midnight-proof-server:latest .
 
 # Tag with version
@@ -1570,7 +1570,7 @@ gcloud compute instances describe midnight-proof-server \
 
 ```bash
 # 1. Build new image
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 docker build -t gcr.io/$PROJECT_ID/midnight-proof-server:v1.1.0 .
 docker push gcr.io/$PROJECT_ID/midnight-proof-server:v1.1.0
 

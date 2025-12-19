@@ -14,3 +14,7 @@ coverage
 logs
 **/.yarn/install-state.gz
 **/.yarn/cache
+vendor
+.DS_Store
+Cargo.lock
+*.lock

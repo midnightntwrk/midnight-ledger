@@ -96,7 +96,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     if args.disable_auth {
-        warn!("⚠️  AUTHENTICATION DISABLED - This is DANGEROUS in production!");
+        warn!("WARNING: AUTHENTICATION DISABLED - This is DANGEROUS in production!");
     }
 
     // Parse API keys

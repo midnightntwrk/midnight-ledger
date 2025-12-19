@@ -386,7 +386,7 @@ sudo perf report --sort=dso,symbol | head -50
 cargo install flamegraph
 
 # Build with debug symbols
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 cargo build --release
 
 # Profile during proof generation

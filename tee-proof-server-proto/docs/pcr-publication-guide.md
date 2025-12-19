@@ -488,7 +488,7 @@ EOFREADME
 
 ```bash
 # Navigate to repository root
-cd /Users/robertblessing-hartley/code/tee-prover-prototype
+cd .
 
 # Create git tag
 git tag -a v1.0.0 -m "Midnight Proof Server v1.0.0"
