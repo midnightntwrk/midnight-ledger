@@ -701,6 +701,7 @@ pub enum EffectsCheckError {
         SubsetCheckFailure<((u16, bool), ((TokenType, PublicAddress), u128))>,
     ),
     ClaimedUnshieldedSpendsUniquenessFailure(Vec<((u16, Commitment), usize)>),
+    #[allow(clippy::type_complexity)]
     ClaimedCallsUniquenessFailure(Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)>),
     NullifiersNEClaimedNullifiers {
         nullifiers: Vec<(u16, Nullifier, ContractAddress)>,

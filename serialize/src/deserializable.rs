@@ -52,7 +52,8 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
-    let count = reader.bytes().count();
+    #[allow(clippy::unbuffered_bytes)] // we can permit a potentally inefficient count here, as in
+    let count = reader.bytes().count(); // the happy path it should be 0
 
     if count == 0 {
         return Ok(value);
@@ -165,7 +166,7 @@ impl<const N: usize> Deserializable for [u8; N] {
     }
 }
 
-impl<T> Deserializable for PhantomData<T> {
+impl<T: ?Sized> Deserializable for PhantomData<T> {
     fn deserialize(_reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
         Ok(PhantomData)
     }

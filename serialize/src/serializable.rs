@@ -175,12 +175,21 @@ impl<const N: usize> Serializable for [u8; N] {
     }
 }
 
-impl<T> Serializable for PhantomData<T> {
+impl<T: ?Sized> Serializable for PhantomData<T> {
     fn serialize(&self, _writer: &mut impl Write) -> std::io::Result<()> {
         Ok(())
     }
     fn serialized_size(&self) -> usize {
         0
+    }
+}
+
+impl<T: ?Sized> Tagged for PhantomData<T> {
+    fn tag() -> Cow<'static, str> {
+        Cow::Borrowed("()")
+    }
+    fn tag_unique_factor() -> String {
+        "()".into()
     }
 }
 
