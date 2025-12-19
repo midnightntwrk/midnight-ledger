@@ -21,12 +21,12 @@ use std::borrow::Cow;
 use std::io;
 use std::marker::PhantomData;
 use storage::Storable;
-use storage::arena::{ArenaKey, BackendLoader, Sp};
-use storage::db::{DB, InMemoryDB, ParityDb};
+use storage::arena::{ArenaKey, Sp};
+use storage::db::{DB, ParityDb};
 use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie, Monoid, Semigroup};
 use storage::state_translation::*;
 use storage::storable::{Loader, SizeAnn};
-use storage::storage::{HashMap, Map, default_storage};
+use storage::storage::{HashMap, Map};
 
 type TestDb = ParityDb;
 
@@ -277,7 +277,10 @@ impl<D: DB>
         );
         Ok(Some(match source {
             merkle_patricia_trie::Node::Empty => merkle_patricia_trie::Node::Empty,
-            merkle_patricia_trie::Node::Branch { ann, children } => {
+            merkle_patricia_trie::Node::Branch {
+                ann: _ann,
+                children,
+            } => {
                 let mut new_children =
                     core::array::from_fn(|_| Sp::new(merkle_patricia_trie::Node::Empty));
                 for (child, new_child) in children.iter().zip(new_children.iter_mut()) {
@@ -295,7 +298,7 @@ impl<D: DB>
                 }
             }
             merkle_patricia_trie::Node::Extension {
-                ann,
+                ann: _ann,
                 compressed_path,
                 child,
             } => {
@@ -310,7 +313,7 @@ impl<D: DB>
                     child,
                 }
             }
-            merkle_patricia_trie::Node::Leaf { ann, value } => {
+            merkle_patricia_trie::Node::Leaf { ann: _ann, value } => {
                 let Some(entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
@@ -341,7 +344,9 @@ impl<D: DB> DirectTranslation<FooEntry, BarEntry, D> for FooEntryToBarEntryTrans
     fn required_translations() -> Vec<TranslationId> {
         vec![]
     }
-    fn child_translations(source: &FooEntry) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
+    fn child_translations(
+        _source: &FooEntry,
+    ) -> Vec<(TranslationId, Sp<dyn Any + Send + Sync, D>)> {
         vec![]
     }
     fn finalize(
@@ -386,10 +391,11 @@ impl<D: DB> TranslationTable<D> for TestTable {
     ];
 }
 
+fn main() {}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serialize::Tagged;
     use storage::{Storage, arena::Sp, storage::set_default_storage};
 
     fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<TestDb>, TestDb> {
