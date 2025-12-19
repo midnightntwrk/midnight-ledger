@@ -6,6 +6,7 @@ members = [
     "ledger",
     "ledger-wasm",
     "proof-server",
+    "tee-proof-server-proto/proof-server",
     "onchain-runtime",
     "onchain-runtime-wasm",
     "onchain-state",

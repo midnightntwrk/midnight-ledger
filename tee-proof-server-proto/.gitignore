@@ -1,0 +1,24 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+Cargo.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment
+.env
+.env.local
+
+# Logs
+*.log
+
+# API keys (never commit!)
+*.key
+api_keys.txt
