@@ -551,8 +551,8 @@ async fn balanced_utxos_1_intent() {
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -565,8 +565,8 @@ async fn balanced_utxos_1_intent() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -776,8 +776,8 @@ async fn intents_cannot_balance_across_segments() {
     ////////////////////////////////////////////////////////
     let transcripts_1 = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &Counter_increment!([key!(0u8)], false, 1u64)[..],
                     &kernel_checkpoint!((), ()),
@@ -870,8 +870,8 @@ async fn intents_cannot_balance_across_segments() {
     ////////////////////////////////////////////////////////
     let transcripts_2 = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &Counter_increment!([key!(0u8)], false, 1u64)[..],
                     &kernel_checkpoint!((), ()),
@@ -1052,8 +1052,8 @@ async fn causality_check_sanity_check() {
     ////////////////////////////////////////////////////////
     let guaranteed_public_transcript_1 = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -1066,8 +1066,8 @@ async fn causality_check_sanity_check() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -1161,8 +1161,8 @@ async fn causality_check_sanity_check() {
     ////////////////////////////////////////////////////////
     let guaranteed_public_transcript_2 = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -1175,8 +1175,8 @@ async fn causality_check_sanity_check() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -1353,8 +1353,8 @@ async fn imbalanced_utxos_1_intent() {
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -1367,8 +1367,8 @@ async fn imbalanced_utxos_1_intent() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -1543,8 +1543,8 @@ async fn imbalanced_utxos_1_intent_fallible() {
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -1557,8 +1557,8 @@ async fn imbalanced_utxos_1_intent_fallible() {
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -2184,8 +2184,8 @@ async fn setup() -> (
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&Counter_increment!([key!(0u8)], false, 1u64), &[]),
             comm_comm: None,
         }],
         &INITIAL_PARAMETERS,
@@ -2198,8 +2198,8 @@ async fn setup() -> (
         &[PreTranscript {
             // Playing fast and loose with state here, this should be the state after applying
             // the guaranteed part, not that it matters here.
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),

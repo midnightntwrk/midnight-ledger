@@ -281,7 +281,7 @@ mod tests {
                     value,
                 };
                 let cpk = coin_structure::coin::PublicKey(rng.r#gen());
-                let output = Output::new(rng, &info, 0, &cpk, None).unwrap();
+                let output = Output::new(rng, &info, None, &cpk, None).unwrap();
                 state = state
                     .try_apply(
                         &Offer {
@@ -307,7 +307,7 @@ mod tests {
         };
         let addr = ContractAddress::default();
         state = insert_dummy_outputs(&mut rng, state, 25);
-        let output = Output::new_contract_owned(&mut rng, &coin, 0, addr).unwrap();
+        let output = Output::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
         let (new_state, indices) = state
             .try_apply(
                 &Offer {
@@ -330,6 +330,6 @@ mod tests {
                 .get(&coin.commitment(&Recipient::Contract(addr)))
                 .unwrap(),
         );
-        Input::new_contract_owned(&mut rng, &qcoin, 0, addr, &state.filter(&[addr])).unwrap();
+        Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
     }
 }

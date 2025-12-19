@@ -195,7 +195,7 @@ impl ZswapLocalState {
         &self,
         secret_keys: &ZswapSecretKeys,
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
@@ -215,7 +215,7 @@ impl ZswapLocalState {
         &self,
         secret_keys: &ZswapSecretKeys,
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         output: &ZswapOutput,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {

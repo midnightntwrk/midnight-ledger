@@ -194,22 +194,22 @@ async fn composable() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_inner).unwrap().data,
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"hello".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -289,11 +289,11 @@ async fn composable() {
         );
         let transcripts = partition_transcripts(
             &[PreTranscript {
-                context: &QueryContext::new(
+                context: QueryContext::new(
                     state.ledger.index(addr_outer).unwrap().data,
                     addr_outer,
                 ),
-                program: &program_with_results(
+                program: program_with_results(
                     &[
                         &Cell_read!([key!(1u8)], false, HashOutput)[..],
                         &Cell_read!([key!(2u8)], false, HashOutput),
@@ -361,22 +361,22 @@ async fn composable() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_inner).unwrap().data,
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"hello".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -455,22 +455,22 @@ async fn composable() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ChargedState::new(stval!([(auth_pk), (b"malicious".to_vec())])),
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"malicious".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -551,22 +551,22 @@ async fn composable() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ChargedState::new(stval!([(auth_pk), (b"malicious".to_vec())])),
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"malicious".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -729,22 +729,22 @@ async fn guaranteed_in_fallible() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_inner).unwrap().data,
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"hello".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -826,11 +826,11 @@ async fn guaranteed_in_fallible() {
         );
         let transcripts = partition_transcripts(
             &[PreTranscript {
-                context: &QueryContext::new(
+                context: QueryContext::new(
                     ledger_state.ledger.index(addr_outer).unwrap().data,
                     addr_outer,
                 ),
-                program: &program_with_results(
+                program: program_with_results(
                     &[
                         &Cell_read!([key!(1u8)], false, HashOutput)[..],
                         &Cell_read!([key!(2u8)], false, HashOutput),
@@ -898,22 +898,22 @@ async fn guaranteed_in_fallible() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_inner).unwrap().data,
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"hello".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -992,22 +992,22 @@ async fn guaranteed_in_fallible() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ChargedState::new(stval!([(auth_pk), (b"malicious".to_vec())])),
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"malicious".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -1088,22 +1088,22 @@ async fn guaranteed_in_fallible() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ChargedState::new(stval!([(auth_pk), (b"malicious".to_vec())])),
                         addr_inner,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &Cell_read!([key!(1u8)], false, Vec<u8>),
                         &[b"malicious".to_vec().into()],
                     ),
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         ledger_state.ledger.index(addr_outer).unwrap().data,
                         addr_outer,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, HashOutput)[..],
                             &Cell_read!([key!(2u8)], false, HashOutput),
@@ -1268,11 +1268,11 @@ async fn composable_funded() {
         let transcripts = partition_transcripts(
             &[
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_burn).unwrap().data,
                         addr_burn,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &kernel_self!((), ())[..],
                             &kernel_claim_zswap_coin_receive!(
@@ -1290,11 +1290,11 @@ async fn composable_funded() {
                     comm_comm: Some(cc),
                 },
                 PreTranscript {
-                    context: &QueryContext::new(
+                    context: QueryContext::new(
                         state.ledger.index(addr_relay).unwrap().data,
                         addr_relay,
                     ),
-                    program: &program_with_results(
+                    program: program_with_results(
                         &[
                             &kernel_self!((), ())[..],
                             &kernel_claim_zswap_coin_receive!(
@@ -1377,19 +1377,19 @@ async fn composable_funded() {
             communication_commitment_rand: rng.r#gen(),
             key_location: KeyLocation(Cow::Borrowed("send_to_burn")),
         };
-        let coin_in_out = Output::new_contract_owned(&mut rng, &coin_in, 0, addr_relay).unwrap();
+        let coin_in_out = Output::new_contract_owned(&mut rng, &coin_in, None, addr_relay).unwrap();
         let mut offer = Offer {
             inputs: Array::new(),
             outputs: vec![
-                Output::new_contract_owned(&mut rng, &coin_xfer, 0, addr_burn).unwrap(),
-                Output::new_contract_owned(&mut rng, &coin_change, 0, addr_relay).unwrap(),
+                Output::new_contract_owned(&mut rng, &coin_xfer, None, addr_burn).unwrap(),
+                Output::new_contract_owned(&mut rng, &coin_change, None, addr_relay).unwrap(),
             ]
             .into(),
             transient: vec![
                 Transient::new_from_contract_owned_output(
                     &mut rng,
                     &coin_in.qualify(0),
-                    0,
+                    None,
                     coin_in_out,
                 )
                 .unwrap(),
