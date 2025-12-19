@@ -14,12 +14,12 @@
 //! minutes in normal mode on @ntc2's machine.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use midnight_zk_stdlib::Relation;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
 use midnight_circuits::types::AssignedNative;
 use midnight_transient_crypto::commitment::PureGeneratorPedersen;
 use midnight_transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr, outer};
 use midnight_transient_crypto::hash::{hash_to_curve, transient_hash};
+use midnight_zk_stdlib::Relation;
 use rand::RngCore;
 use rand::{Rng, rngs::OsRng};
 use serde_json::json;
@@ -103,7 +103,9 @@ pub fn proof_verification(c: &mut Criterion) {
     impl Relation for TestIr {
         type Instance = Vec<Fr>;
         type Witness = Self;
-        fn format_instance(instance: &Self::Instance) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        fn format_instance(
+            instance: &Self::Instance,
+        ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
             Ok(instance.iter().map(|x| x.0).collect())
         }
         fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
