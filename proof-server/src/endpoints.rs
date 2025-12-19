@@ -79,7 +79,7 @@ pub(crate) async fn version() -> impl Responder {
 #[get("/fetch-params/{k}")]
 pub(crate) async fn fetch_k(path: web::Path<u8>) -> impl Responder {
     let k = path.into_inner();
-    if !(10..=24).contains(&k) {
+    if !(0..=25).contains(&k) {
         return Err(ErrorBadRequest(format!("k={k} out of range")));
     }
     PUBLIC_PARAMS.0.fetch_k(k).await?;
