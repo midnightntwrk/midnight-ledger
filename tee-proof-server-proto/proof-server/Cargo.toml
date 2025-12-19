@@ -1,0 +1,76 @@
+[package]
+name = "midnight-proof-server-prototype"
+version = "6.2.0-alpha.1"
+edition = "2021"
+authors = ["Midnight Foundation"]
+license = "Apache-2.0"
+description = "Prototype zero-knowledge proof server for Midnight blockchain"
+
+[dependencies]
+# Axum web framework
+axum = { version = "0.7", features = ["macros", "http2"] }
+tower = { version = "0.4", features = ["limit", "buffer", "timeout"] }
+tower-http = { version = "0.5", features = ["trace", "cors", "limit", "timeout"] }
+
+# Async runtime
+tokio = { version = "1.35", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+bincode = "1.3"
+
+# HTTP
+hyper = { version = "1.1", features = ["full"] }
+http = "1.0"
+http-body-util = "0.1"
+
+# Security & hashing
+sha2 = "0.10"
+hex = "0.4"
+base64 = "0.21"
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Tracing & logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# Rate limiting
+governor = "0.6"
+
+# Async channels
+async-channel = "2.1"
+
+# UUID generation
+uuid = { version = "1.6", features = ["v4", "serde"] }
+
+# Midnight ledger dependencies
+ledger = { path = "../../ledger", package = "midnight-ledger", default-features = false, features = ["proving"] }
+zswap = { path = "../../zswap", package = "midnight-zswap" }
+base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { path = "../../transient-crypto", package = "midnight-transient-crypto" }
+storage = { path = "../../storage", package = "midnight-storage" }
+serialize = { path = "../../serialize", package = "midnight-serialize" }
+zkir_v2 = { path = "../../zkir", package = "zkir" }
+introspection = "0.1.0"
+rand = { version = "0.8.4", features = ["getrandom"] }
+lazy_static = "1.5.0"
+
+[dev-dependencies]
+reqwest = { version = "0.11", features = ["json", "blocking"] }
+tokio-test = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
