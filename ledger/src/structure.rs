@@ -267,7 +267,7 @@ impl Tagged for ProofPreimageVersioned {
         "proof-preimage-versioned".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],{}]", ProofPreimage::tag()).into()
+        format!("[[],{}]", ProofPreimage::tag())
     }
 }
 
@@ -330,7 +330,7 @@ impl Tagged for ProofVersioned {
         "proof-versioned".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],{}]", Proof::tag()).into()
+        format!("[[],{}]", Proof::tag())
     }
 }
 
