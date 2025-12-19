@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(clippy::disallowed_names)]
+
 use midnight_storage as storage;
 
 use base_crypto::cost_model::CostDuration;
@@ -130,12 +132,11 @@ impl<D: DB> DirectTranslation<lr::Nesty<D>, rl::Nesty<D>, D> for NestyLrToRlTran
                 let Some(btrans) = cache.lookup(&tlid, b.as_child()) else {
                     return Ok(None);
                 };
-                let res = Ok(Some(rl::Nesty::Node(
+                Ok(Some(rl::Nesty::Node(
                     *n,
                     btrans.force_downcast(),
                     atrans.force_downcast(),
                 )));
-                res
             }
         }
     }
@@ -321,7 +322,11 @@ impl<D: DB>
                 let ann = SizeAnn::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
-            merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child } => {
+            merkle_patricia_trie::Node::MidBranchLeaf {
+                ann: _ann,
+                value,
+                child,
+            } => {
                 let Some(value_entry) = cache.lookup(&entry_tl, value.as_child()) else {
                     return Ok(None);
                 };
