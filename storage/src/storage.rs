@@ -62,7 +62,14 @@ pub struct HashMap<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<(Sp<K, D>, Sp<V, D>)> = SizeAnn,
->(#[allow(clippy::type_complexity)] Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
+>(
+    #[cfg(feature = "public-internal-structure")]
+    #[allow(clippy::type_complexity)]
+    pub Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    #[allow(clippy::type_complexity)]
+    Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+);
 
 impl<
     K: Serializable + Storable<D> + Tagged,
@@ -585,7 +592,12 @@ where
 #[tag = "mpt-array[v1]"]
 pub struct Array<V: Storable<D>, D: DB = DefaultDB>(
     // Array wraps MPT in an Sp to guarantee it only has one child
-    #[storable(child)] Sp<MerklePatriciaTrie<V, D>, D>,
+    #[cfg(feature = "public-internal-structure")]
+    #[storable(child)]
+    pub Sp<MerklePatriciaTrie<V, D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    #[storable(child)]
+    Sp<MerklePatriciaTrie<V, D>, D>,
 );
 tag_enforcement_test!(Array<()>);
 
@@ -879,6 +891,9 @@ impl<V: Storable<D>, D: DB> Iterator for ArrayIter<'_, V, D> {
 #[tag = "multi-set[v1]"]
 /// A set with quantity. Often known as a bag.
 pub struct MultiSet<V: Serializable + Storable<D>, D: DB> {
+    #[cfg(feature = "public-internal-structure")]
+    pub elements: HashMap<V, u32, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     elements: HashMap<V, u32, D>,
 }
 tag_enforcement_test!(MultiSet<(), DefaultDB>);
@@ -1053,6 +1068,10 @@ impl<
     }
 }
 
+#[cfg(feature = "public-internal-structure")]
+#[derive(Debug)]
+pub struct BigEndianU64(u64);
+#[cfg(not(feature = "public-internal-structure"))]
 #[derive(Debug)]
 struct BigEndianU64(u64);
 
@@ -1088,7 +1107,13 @@ where
     C: Container<D> + Serializable + Storable<D>,
     <C as Container<D>>::Item: Serializable + Storable<D>,
 {
+    #[cfg(feature = "public-internal-structure")]
+    pub time_map: Map<BigEndianU64, C, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub set: MultiSet<<C as Container<D>>::Item, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     time_map: Map<BigEndianU64, C, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     set: MultiSet<<C as Container<D>>::Item, D>,
 }
 impl<C: Serializable + Storable<D>, D: DB> Tagged for TimeFilterMap<C, D>
@@ -1234,7 +1259,13 @@ where
 #[derive_where(PartialEq, Eq, PartialOrd, Ord; V, A)]
 #[derive_where(Hash, Clone)]
 pub struct Map<K, V: Storable<D>, D: DB = DefaultDB, A: Storable<D> + Annotation<V> = SizeAnn> {
+    #[cfg(feature = "public-internal-structure")]
+    pub mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub key_type: PhantomData<K>,
+    #[cfg(not(feature = "public-internal-structure"))]
     pub(crate) mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     key_type: PhantomData<K>,
 }
 

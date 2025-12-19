@@ -44,6 +44,7 @@ pub const PERSISTENT_HASH_BYTES: usize = 32;
     Zeroize,
 )]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[allow(clippy::derived_hash_with_manual_eq)]
 pub struct HashOutput(pub [u8; PERSISTENT_HASH_BYTES]);
 tag_enforcement_test!(HashOutput);
 

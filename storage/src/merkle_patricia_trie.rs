@@ -38,7 +38,10 @@ pub struct MerklePatriciaTrie<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<V> = SizeAnn,
->(pub(crate) Sp<Node<V, D, A>, D>);
+>(
+    #[cfg(feature = "public-internal-structure")] pub Sp<Node<V, D, A>, D>,
+    #[cfg(not(feature = "public-internal-structure"))] pub(crate) Sp<Node<V, D, A>, D>,
+);
 
 impl<V: Storable<D> + Tagged, D: DB, A: Storable<D> + Annotation<V> + Tagged> Tagged
     for MerklePatriciaTrie<V, D, A>
@@ -249,11 +252,43 @@ where
     fn set_size(&self, x: u64) -> Self;
 }
 
+#[derive(Debug, Default)]
+#[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
+#[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
+#[derive_where(Ord; T: Ord, A: Ord)]
+#[allow(clippy::type_complexity)]
+#[cfg(feature = "public-internal-structure")]
+pub enum Node<T: Storable<D> + 'static, D: DB = DefaultDB, A: Storable<D> + Annotation<T> = SizeAnn>
+{
+    #[default]
+    Empty,
+    Leaf {
+        ann: A,
+        value: Sp<T, D>,
+    },
+    Branch {
+        ann: A,
+        children: Box<[Sp<Node<T, D, A>, D>; 16]>,
+    },
+    Extension {
+        ann: A,
+        compressed_path: std::vec::Vec<u8>, // with a length no longer than 255
+        child: Sp<Node<T, D, A>, D>,
+    },
+    MidBranchLeaf {
+        ann: A,
+        value: Sp<T, D>,
+        child: Sp<Node<T, D, A>, D>, // should only be an `Extension` or `Branch`
+    },
+}
+
 // The MPT node
 #[derive(Debug, Default)]
 #[derive_where(Clone, Hash, PartialEq, Eq; T, A)]
 #[derive_where(PartialOrd; T: PartialOrd, A: PartialOrd)]
 #[derive_where(Ord; T: Ord, A: Ord)]
+#[allow(clippy::type_complexity)]
+#[cfg(not(feature = "public-internal-structure"))]
 pub(crate) enum Node<
     T: Storable<D> + 'static,
     D: DB = DefaultDB,
