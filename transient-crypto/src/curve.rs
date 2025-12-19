@@ -46,6 +46,7 @@ use std::mem::size_of;
 use std::ops::Mul;
 use storage::{Storable, arena::ArenaKey, db::DB, storable::Loader};
 use zeroize::DefaultIsZeroes;
+
 /// The outer, main curve
 pub mod outer {
     /// The base prime field, used to represent curve points

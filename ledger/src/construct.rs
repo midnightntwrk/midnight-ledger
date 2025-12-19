@@ -153,6 +153,7 @@ impl<S: SignatureKind<D>, D: DB> Intent<S, ProofPreimageMarker, PedersenRandomne
         Intent::new(rng, None, None, vec![], vec![], vec![], None, ttl)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new<R: Rng + CryptoRng + ?Sized>(
         rng: &mut R,
         guaranteed_unshielded_offer: Option<UnshieldedOffer<S, D>>,

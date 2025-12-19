@@ -82,6 +82,7 @@ fn generate_state_pool() -> Vec<HashMap<AlignedValue, StateValue>> {
 }
 
 // Generate state pairs with four relationship types
+#[allow(clippy::type_complexity)]
 fn generate_state_pairs() -> Vec<(
     HashMap<AlignedValue, StateValue>,
     HashMap<AlignedValue, StateValue>,

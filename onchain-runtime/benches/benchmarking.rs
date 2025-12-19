@@ -691,6 +691,7 @@ impl BenchWithArgs {
 }
 
 /// Benchmarks for each VM op.
+#[allow(clippy::type_complexity)]
 pub fn vm_op_benchmarks(c: &mut Criterion) {
     let mut bwa = BenchWithArgs::new();
 

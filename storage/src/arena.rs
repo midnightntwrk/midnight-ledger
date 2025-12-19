@@ -12,6 +12,7 @@
 // limitations under the License.
 
 #![allow(rustdoc::private_intra_doc_links)]
+#![allow(clippy::derived_hash_with_manual_eq)]
 //! An [`Arena`] for storing Merkle-ized data structures in
 //! memory, persisting them to disk, and reloading them from disk.
 //!
@@ -74,7 +75,7 @@ pub(crate) fn hash<'a, H: WellBehavedHasher>(
 #[derive_where(Debug, Clone, PartialEq, Eq, Ord, PartialOrd)]
 #[derive(Serializable)]
 #[phantom(T, H)]
-pub struct TypedArenaKey<T, H: WellBehavedHasher> {
+pub struct TypedArenaKey<T: ?Sized, H: WellBehavedHasher> {
     key: ArenaKey<H>,
     _phantom: PhantomData<T>,
 }
@@ -1391,7 +1392,73 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     }
 }
 
-impl<T, D: DB> Sp<T, D> {
+impl<D: DB> Sp<dyn Any + Send + Sync, D> {
+    /// Downcasts this dynamically typed pointer to a concrete type, if possible.
+    pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<T>> = match self.data.get() {
+            Some(arc) => {
+                let concrete_arc: Arc<T> = arc.clone().downcast().ok()?;
+                concrete_arc.into()
+            }
+            None => OnceLock::new(),
+        };
+        Some(Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        })
+    }
+
+    /// Downcasts this dynamically typed pointer to a concrete type, but pushes through the cast
+    /// regardless of the underlying type.
+    ///
+    /// This will effectively unload the Sp, and construct a new lazy Sp with the same backing
+    /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
+    /// failure to a context where a failure panics.
+    pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
+            Some(Ok(concrete_arc)) => concrete_arc.into(),
+            None | Some(Err(_)) => OnceLock::new(),
+        };
+        Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        }
+    }
+}
+
+impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
+    /// Casts this pointer into a dynamically typed `Any` pointer.
+    pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
+        if let ArenaKey::Ref(_) = self.child_repr {
+            self.arena.increment_ref(&self.root);
+        }
+        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
+            Some(arc) => {
+                let dyn_arc: Arc<dyn Any + Send + Sync> = arc.clone();
+                dyn_arc.into()
+            }
+            None => OnceLock::new(),
+        };
+        Sp {
+            root: self.root.clone(),
+            child_repr: self.child_repr.clone(),
+            arena: self.arena.clone(),
+            data,
+        }
+    }
+}
+
+impl<T: ?Sized, D: DB> Sp<T, D> {
     /// Return true iff this `Sp` is lazy/unforced, i.e. its data has not yet
     /// been loaded.
     ///
@@ -1557,8 +1624,14 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     // easiest way to get that is to just create the lazy `Sp`
                     // for that `Arc`, i.e. what `self` will become when
                     // `force_as_arc` is done!
-                    let sp: Sp<T, _> = Sp::from_arena(&self.arena, &self.as_child(), max_depth)
-                        .expect("root should be in the arena");
+                    let sp: Sp<T, _> =
+                        match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
+                            Ok(v) => v,
+                            Err(e) => panic!(
+                                "root should be in the arena (T={}): {e:?}",
+                                std::any::type_name::<T>()
+                            ),
+                        };
                     let arc = sp
                         .data
                         .get()
@@ -1753,51 +1826,6 @@ pub struct TopoSortedNode {
     pub data: Vec<u8>,
 }
 
-impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
-    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        self.deref().children()
-    }
-
-    fn from_binary_repr<R: std::io::Read>(
-        reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
-        loader: &impl Loader<D>,
-    ) -> Result<Self, std::io::Error> {
-        T::from_binary_repr(reader, child_hashes, loader).map(|sp| loader.alloc(sp))
-    }
-
-    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
-        self.deref().to_binary_repr(writer)
-    }
-
-    fn check_invariant(&self) -> Result<(), std::io::Error> {
-        T::check_invariant(self)
-    }
-}
-
-impl<T: Storable<D>, D: DB> Serializable for Sp<T, D> {
-    #[allow(clippy::type_complexity)]
-    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        self.serialize_to_node_list().serialize(writer)
-    }
-
-    fn serialized_size(&self) -> usize {
-        self.serialize_to_node_list().serialized_size()
-    }
-}
-
-impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
-    fn deserialize(
-        reader: &mut impl std::io::Read,
-        recursive_depth: u32,
-    ) -> Result<Self, std::io::Error> {
-        default_storage()
-            .arena
-            .clone()
-            .deserialize_sp(reader, recursive_depth)
-    }
-}
-
 #[derive_where(Clone)]
 /// An opaque storable data structure. Any storable data can be read as an opaque object, but
 /// cannot be practically mutated from there.
@@ -1806,7 +1834,6 @@ pub struct Opaque<D: DB> {
     children: Vec<Sp<dyn Any + Send + Sync, D>>,
 }
 
-//NOTE: copied from branch `tkerber/translation-test`
 impl<D: DB> Storable<D> for Opaque<D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         self.children.iter().map(|child| child.as_child()).collect()
@@ -1870,25 +1897,48 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     }
 }
 
-impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
-    /// Casts this pointer into a dynamically typed `Any` pointer.
-    pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
-        if let ArenaKey::Ref(_) = self.child_repr {
-            self.arena.increment_ref(&self.root);
-        }
-        let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
-            Some(arc) => {
-                let dyn_arc: Arc<dyn Any + Send + Sync> = arc.clone();
-                dyn_arc.into()
-            }
-            None => OnceLock::new(),
-        };
-        Sp {
-            root: self.root.clone(),
-            child_repr: self.child_repr.clone(),
-            arena: self.arena.clone(),
-            data,
-        }
+impl<D: DB, T: Storable<D>> Storable<D> for Sp<T, D> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
+        self.deref().children()
+    }
+
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        loader: &impl Loader<D>,
+    ) -> Result<Self, std::io::Error> {
+        T::from_binary_repr(reader, child_hashes, loader).map(|sp| loader.alloc(sp))
+    }
+
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        self.deref().to_binary_repr(writer)
+    }
+
+    fn check_invariant(&self) -> Result<(), std::io::Error> {
+        T::check_invariant(self)
+    }
+}
+
+impl<T: Storable<D>, D: DB> Serializable for Sp<T, D> {
+    #[allow(clippy::type_complexity)]
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        self.serialize_to_node_list().serialize(writer)
+    }
+
+    fn serialized_size(&self) -> usize {
+        self.serialize_to_node_list().serialized_size()
+    }
+}
+
+impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
+    fn deserialize(
+        reader: &mut impl std::io::Read,
+        recursive_depth: u32,
+    ) -> Result<Self, std::io::Error> {
+        default_storage()
+            .arena
+            .clone()
+            .deserialize_sp(reader, recursive_depth)
     }
 }
 

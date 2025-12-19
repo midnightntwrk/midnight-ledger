@@ -3062,6 +3062,7 @@ dependencies = [
  "derive-where",
  "fake",
  "fs2",
+ "hashbrown 0.16.1",
  "hex",
  "itertools 0.14.0",
  "konst",
