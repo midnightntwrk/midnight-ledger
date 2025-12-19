@@ -769,7 +769,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
         preimage: &transient_crypto::proofs::ProofPreimage,
     ) -> Result<Vec<Option<usize>>, anyhow::Error> {
         let ser = self
-            .check_request_body(&ProofPreimageVersioned::V1(std::sync::Arc::new(
+            .check_request_body(&ProofPreimageVersioned::V2(std::sync::Arc::new(
                 preimage.clone(),
             )))
             .await?;
@@ -798,7 +798,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
     ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
         let ser = self
             .proving_request_body(
-                &ProofPreimageVersioned::V1(std::sync::Arc::new(preimage.clone())),
+                &ProofPreimageVersioned::V2(std::sync::Arc::new(preimage.clone())),
                 overwrite_binding_input,
             )
             .await?;
@@ -813,7 +813,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             println!("    Proving response: {} bytes", bytes.len());
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
-                ProofVersioned::V1(proof) => Ok(proof),
+                ProofVersioned::V2(proof) => Ok(proof),
             }
         } else {
             anyhow::bail!(
