@@ -88,7 +88,7 @@ brew install aws-nitro-enclaves-cli
 ### 3. Required Files
 
 Ensure you have:
-- ✅ Proof server source code (`/Users/robertblessing-hartley/code/tee-prover-prototype`)
+- ✅ Proof server source code (`.`)
 - ✅ Dockerfile for enclave build
 - ✅ GPG key for signing PCRs (or generate one)
 
@@ -360,7 +360,7 @@ CMD ["--port", "6300", "--disable-auth"]
 #### Step 2.2: Build Docker Image Locally
 
 ```bash
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 
 # Build Docker image
 docker build -f Dockerfile.enclave -t midnight-proof-server:latest .
@@ -461,7 +461,7 @@ exit
 
 ```bash
 # Back on your local machine - create a tarball
-cd /Users/robertblessing-hartley/code/tee-prover-prototype
+cd .
 tar -czf proof-server.tar.gz proof-server/
 
 # Transfer to EC2

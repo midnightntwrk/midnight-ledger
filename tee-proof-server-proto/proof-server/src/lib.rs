@@ -2,6 +2,9 @@
 // Copyright (C) 2025 Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 
+#![deny(unreachable_pub)]
+#![deny(warnings)]
+
 mod attestation;
 
 use attestation::attestation_handler;

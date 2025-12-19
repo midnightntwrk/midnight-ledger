@@ -365,7 +365,7 @@ docker inspect midnight-proof-server:latest \
   --format='{{.Architecture}}'
 
 # Rebuild image
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 docker build --no-cache -t midnight-proof-server:latest .
 ```
 

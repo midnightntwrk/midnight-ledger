@@ -489,7 +489,7 @@ echo "Attestation URI: $ATTESTATION_URI"
 Create production-optimized Dockerfile:
 
 ```dockerfile
-# File: /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server/Dockerfile
+# File: ./proof-server/Dockerfile
 
 # Build stage
 FROM rust:1.75-slim as builder
@@ -556,7 +556,7 @@ CMD ["--port", "6300"]
 az acr login --name $ACR_NAME
 
 # Build image
-cd /Users/robertblessing-hartley/code/tee-prover-prototype/proof-server
+cd ./proof-server
 docker build -t $ACR_LOGIN_SERVER/midnight-proof-server:latest .
 
 # Tag with version
