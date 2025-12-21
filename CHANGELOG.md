@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 7.0.0
+
+- breaking: Update `midnight-zk` to 5.0.2
+
 ## 6.2.0
 
 - Remove special-casing of validation behaviour depending on the
