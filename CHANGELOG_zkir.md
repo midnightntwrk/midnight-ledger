@@ -1,5 +1,9 @@
 # `zkir` Changelog
 
+## Version `3.0.0`
+
+- added ZKIR v3
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking serialization changes.
