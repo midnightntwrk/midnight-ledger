@@ -4,7 +4,7 @@ version = "1.1.0-rc.1"
 edition = "2024"
 license.workspace = true
 
-[features0
+[features]
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
 sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]
 parity-db = ["dep:parity-db"]
