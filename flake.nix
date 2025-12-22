@@ -74,6 +74,21 @@
           ./wasm-proving-demos/zkir-mt
         ];
         rust = fenix.packages.${system};
+        # Temporary until 0.22.0 is in nixpkgs, as this is required to parse
+        # some new vulns.
+        cargo-audit = pkgs.rustPlatform.buildRustPackage rec {
+          pname = "cargo-audit";
+          version = "0.22.0";
+          src = pkgs.fetchCrate {
+            inherit pname version;
+            hash = "sha256-Ha2yVyu9331NaqiW91NEwCTIeW+3XPiqZzmatN5KOws=";
+          };
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.openssl pkgs.zlib ];
+          buildFeatures = "fix";
+          cargoHash = "sha256-f8nrW1l7UA8sixwqXBD1jCJi9qyKC5tNl/dWwCt41Lk=";
+          doCheck = false;
+        };
         bagel-wasm = (import ./bagel.nix) {
           inherit system nixpkgs;
           stdenv = pkgs.clangStdenv;
@@ -454,7 +469,7 @@
               pkgs.yarn
               pkgs.jq
               pkgs.cargo-hack
-              pkgs.cargo-audit
+              cargo-audit
               pkgs.wasm-pack
               pkgs.git
               pkgs.cargo-spellcheck
@@ -473,7 +488,7 @@
               pkgs.jq
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
-              pkgs.cargo-audit
+              cargo-audit
               pkgs.wasm-pack
             ];
             buildInputs = [packages.public-params];
@@ -494,7 +509,7 @@
               pkgs.clang
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
-              pkgs.cargo-audit
+              cargo-audit
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck
