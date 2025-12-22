@@ -1035,7 +1035,7 @@ pub struct OnDiskObject<H: WellBehavedHasher> {
     /// `persist`ed. Note that the `persist` counts are stored separately -- see
     /// `StorageBackend::get_root_count` for details -- but not here in the
     /// object!
-    pub(crate) ref_count: u64,
+    pub ref_count: u64,
     pub(crate) children: std::vec::Vec<ArenaKey<H>>,
 }
 
