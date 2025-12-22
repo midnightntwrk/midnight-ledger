@@ -4,8 +4,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 7.0.0
+
+- breaking: pull in breaking proof-system changes
+
 ## 6.2.0
 
+- Add `Transaction.addCalls` endpoint to include Zswap inputs/outputs in transcript partitioning.
 - Remove special-casing of validation behaviour depending on the
   `test-utilities` feature being present.
 - Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.

@@ -1,5 +1,9 @@
 # `zkir` Changelog
 
+## Version `2.1.0`
+
+- breaking: pull in breaking proof system changes
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking serialization changes.
