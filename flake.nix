@@ -346,9 +346,9 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v1"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v2"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v6"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v7"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 

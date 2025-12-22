@@ -1,5 +1,8 @@
 # `coin-structure` Changelog
 
+## Version `2.0.0`
+
+- breaking: pull in breaking transient-crypto changes
 
 ## Version `1.0.0`
 

@@ -522,9 +522,9 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@midnight-ntwrk/ledger@link:../result/lib/node_modules/@midnight-ntwrk/ledger-v6::locator=%40midnight%2Fledger-api-tests%40workspace%3A.":
+"@midnight-ntwrk/ledger@link:../result/lib/node_modules/@midnight-ntwrk/ledger-v7::locator=%40midnight%2Fledger-api-tests%40workspace%3A.":
   version: 0.0.0-use.local
-  resolution: "@midnight-ntwrk/ledger@link:../result/lib/node_modules/@midnight-ntwrk/ledger-v6::locator=%40midnight%2Fledger-api-tests%40workspace%3A."
+  resolution: "@midnight-ntwrk/ledger@link:../result/lib/node_modules/@midnight-ntwrk/ledger-v7::locator=%40midnight%2Fledger-api-tests%40workspace%3A."
   languageName: node
   linkType: soft
 
@@ -541,7 +541,7 @@ __metadata:
     "@d2t/vitest-ctrf-json-reporter": "npm:^1.2.0"
     "@dao-xyz/borsh": "npm:^5.2.3"
     "@eslint/compat": "npm:^1.3.2"
-    "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnight-ntwrk/ledger-v6"
+    "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnight-ntwrk/ledger-v7"
     "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnight-ntwrk/zkir-v2"
     "@tsconfig/node22": "npm:^22.0.2"
     "@types/eslint": "npm:^9.6.1"
