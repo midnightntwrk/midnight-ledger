@@ -160,7 +160,7 @@ describe('Ledger API - Intent', () => {
   test('should add maintenance update to intent actions', () => {
     const maintenanceUpdate = new MaintenanceUpdate(
       Random.contractAddress(),
-      [new VerifierKeyRemove('operation', new ContractOperationVersion('v2'))],
+      [new VerifierKeyRemove('operation', new ContractOperationVersion('v3'))],
       0n
     );
 
@@ -203,7 +203,7 @@ describe('Ledger API - Intent', () => {
 
     const maintenanceUpdate = new MaintenanceUpdate(
       Random.contractAddress(),
-      [new VerifierKeyRemove('operation', new ContractOperationVersion('v2'))],
+      [new VerifierKeyRemove('operation', new ContractOperationVersion('v3'))],
       0n
     );
 
