@@ -29,7 +29,6 @@ midnight-curves = { version = "^0.2.0" }
 midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
-halo2curves = "0.7.0"
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 
