@@ -24,7 +24,7 @@ describe('Ledger API - VerifierKeyInsert', () => {
    */
   test('should construct with operation and verifier key', () => {
     const operation = 'test_operation';
-    const verifierKey = new ContractOperationVersionedVerifierKey('v2', TestResource.operationVerifierKey());
+    const verifierKey = new ContractOperationVersionedVerifierKey('v3', TestResource.operationVerifierKey());
 
     const verifierKeyInsert = new VerifierKeyInsert(operation, verifierKey);
 

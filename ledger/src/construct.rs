@@ -558,7 +558,7 @@ impl<D: DB> ContractCallExt<D> for ProofPreimage {
             key_location: call.key_location.clone(),
         };
 
-        ProofPreimageVersioned::V1(std::sync::Arc::new(proof))
+        ProofPreimageVersioned::V2(std::sync::Arc::new(proof))
     }
 }
 

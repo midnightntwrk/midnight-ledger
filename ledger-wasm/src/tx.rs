@@ -472,10 +472,10 @@ impl Transaction {
                 Ok(tagged_deserialize(&mut &result[..]).or_else(|_| {
                     let ppiv = tagged_deserialize::<ProofVersioned>(&mut &result[..])?;
                     match ppiv {
-                        ProofVersioned::V1(proof) => Ok::<_, std::io::Error>(proof),
+                        ProofVersioned::V2(proof) => Ok::<_, std::io::Error>(proof),
                         _ => Err(std::io::Error::new(
                             std::io::ErrorKind::InvalidData,
-                            "expected proof[v1], got a different version",
+                            "expected proof[v2], got a different version",
                         )),
                     }
                 })?)

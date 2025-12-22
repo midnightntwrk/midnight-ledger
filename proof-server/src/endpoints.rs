@@ -79,7 +79,7 @@ pub(crate) async fn version() -> impl Responder {
 #[get("/fetch-params/{k}")]
 pub(crate) async fn fetch_k(path: web::Path<u8>) -> impl Responder {
     let k = path.into_inner();
-    if !(10..=24).contains(&k) {
+    if !(0..=25).contains(&k) {
         return Err(ErrorBadRequest(format!("k={k} out of range")));
     }
     PUBLIC_PARAMS.0.fetch_k(k).await?;
@@ -219,7 +219,7 @@ pub(crate) async fn check(
                     }
                 };
                 let result = match ppi {
-                    ProofPreimageVersioned::V1(ppi) => {
+                    ProofPreimageVersioned::V2(ppi) => {
                         versioned_ir::check(ppi, &ir).map_err(WorkError::BadInput)?
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
@@ -282,7 +282,7 @@ pub(crate) async fn prove(
                     }),
                 );
                 let proof = match ppi {
-                    ProofPreimageVersioned::V1(mut ppi) => {
+                    ProofPreimageVersioned::V2(mut ppi) => {
                         if let Some(binding_input) = binding_input {
                             let mut inner = (*ppi).clone();
                             inner.binding_input = binding_input;
@@ -307,7 +307,7 @@ pub(crate) async fn prove(
                             .map_err(WorkError::BadInput)?
                             .0;
 
-                        ProofVersioned::V1(proof)
+                        ProofVersioned::V2(proof)
                     }
                     // Footgun: If we add a new version, this needs to be covered here, but it's marked
                     // #[non_exhaustive], so we always need the base case.

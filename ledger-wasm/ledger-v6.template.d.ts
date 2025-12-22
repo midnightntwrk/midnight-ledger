@@ -899,9 +899,9 @@ export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyIns
  * The version associated with a {@link ContractOperation}
  */
 export class ContractOperationVersion {
-  constructor(version: 'v2');
+  constructor(version: 'v3');
 
-  readonly version: 'v2';
+  readonly version: 'v3';
 
   toString(compact?: boolean): string;
 }
@@ -910,9 +910,9 @@ export class ContractOperationVersion {
  * A versioned verifier key to be associated with a {@link ContractOperation}.
  */
 export class ContractOperationVersionedVerifierKey {
-  constructor(version: 'v2', rawVk: Uint8Array);
+  constructor(version: 'v3', rawVk: Uint8Array);
 
-  readonly version: 'v2';
+  readonly version: 'v3';
   readonly rawVk: Uint8Array;
 
   toString(compact?: boolean): string;
