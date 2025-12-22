@@ -1,8 +1,8 @@
-**@midnight/ledger v2.0.0-rc.2**
+**@midnight/ledger v2.1.0-alpha.1**
 
 ***
 
-# @midnight/ledger v2.0.0-rc.2
+# @midnight/ledger v2.1.0-alpha.1
 
 ## Type Aliases
 
