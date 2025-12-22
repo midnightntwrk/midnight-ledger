@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.2.0-rc.3**](../README.md)
+[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -20,7 +20,7 @@ new ContractOperationVersionedVerifierKey(version, rawVk): ContractOperationVers
 
 ##### version
 
-`"v2"`
+`"v3"`
 
 ##### rawVk
 
@@ -43,7 +43,7 @@ readonly rawVk: Uint8Array;
 ### version
 
 ```ts
-readonly version: "v2";
+readonly version: "v3";
 ```
 
 ## Methods
