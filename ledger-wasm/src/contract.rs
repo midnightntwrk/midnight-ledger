@@ -361,7 +361,7 @@ impl ContractOperationVersionedVerifierKey {
     pub fn version(&self) -> String {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         match &self.0 {
-            V::V3(..) => "v2",
+            V::V3(..) => "v3",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()

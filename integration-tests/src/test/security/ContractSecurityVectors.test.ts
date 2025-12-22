@@ -361,7 +361,7 @@ describe('Contract Security Vector Tests', () => {
       const operation = 'test_operation';
       const maintenanceUpdate = new MaintenanceUpdate(
         contractAddress,
-        [new VerifierKeyRemove(operation, new ContractOperationVersion('v2'))],
+        [new VerifierKeyRemove(operation, new ContractOperationVersion('v3'))],
         0n
       );
 
@@ -376,13 +376,13 @@ describe('Contract Security Vector Tests', () => {
      * @then operations should complete safely without exposing sensitive data
      */
     test('should secure verifier key management operations', () => {
-      const versionedKey = new ContractOperationVersionedVerifierKey('v2', TestResource.operationVerifierKey());
+      const versionedKey = new ContractOperationVersionedVerifierKey('v3', TestResource.operationVerifierKey());
       const keyInsert = new VerifierKeyInsert('op', versionedKey);
 
       expect(keyInsert).toBeDefined();
       expect(() => keyInsert.toString()).not.toThrow();
 
-      const operationVersion = new ContractOperationVersion('v2');
+      const operationVersion = new ContractOperationVersion('v3');
       const keyRemove = new VerifierKeyRemove('op', operationVersion);
 
       expect(keyRemove).toBeDefined();

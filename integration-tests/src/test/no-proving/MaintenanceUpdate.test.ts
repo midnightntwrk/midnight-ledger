@@ -33,7 +33,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
   test('should remove verifier key', () => {
     const maintenanceUpdate = new MaintenanceUpdate(
       Random.contractAddress(),
-      [new VerifierKeyRemove('operation', new ContractOperationVersion('v2'))],
+      [new VerifierKeyRemove('operation', new ContractOperationVersion('v3'))],
       0n
     );
 
@@ -50,7 +50,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
   test('should return a string representation', () => {
     const maintenanceUpdate = new MaintenanceUpdate(
       Random.contractAddress(),
-      [new VerifierKeyRemove('operation', new ContractOperationVersion('v2'))],
+      [new VerifierKeyRemove('operation', new ContractOperationVersion('v3'))],
       0n
     );
 
@@ -71,7 +71,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
     const sk2 = signData(sampleSigningKey(), new Uint8Array(64));
     let maintenanceUpdate = new MaintenanceUpdate(
       contractAddress,
-      [new VerifierKeyRemove(operation, new ContractOperationVersion('v2'))],
+      [new VerifierKeyRemove(operation, new ContractOperationVersion('v3'))],
       0n
     );
     maintenanceUpdate = maintenanceUpdate.addSignature(0n, sk1);
@@ -98,7 +98,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
       () =>
         new MaintenanceUpdate(
           Random.contractAddress(),
-          [new VerifierKeyInsert('operation', new ContractOperationVersionedVerifierKey('v2', new Uint8Array(1024)))],
+          [new VerifierKeyInsert('operation', new ContractOperationVersionedVerifierKey('v3', new Uint8Array(1024)))],
           0n
         )
     ).toThrow(/expected header tag 'midnight:verifier-key/);
@@ -116,7 +116,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
       () =>
         new MaintenanceUpdate(
           Random.contractAddress(),
-          [new VerifierKeyInsert('operation', new ContractOperationVersionedVerifierKey('v2', new Uint8Array(0)))],
+          [new VerifierKeyInsert('operation', new ContractOperationVersionedVerifierKey('v3', new Uint8Array(0)))],
           0n
         )
     ).toThrow(/expected header tag 'midnight:verifier-key/);
@@ -133,9 +133,9 @@ describe('Ledger API - MaintenanceUpdate', () => {
     const maintenanceUpdate = new MaintenanceUpdate(
       Random.contractAddress(),
       [
-        new VerifierKeyRemove('operation1', new ContractOperationVersion('v2')),
-        new VerifierKeyRemove('operation2', new ContractOperationVersion('v2')),
-        new VerifierKeyRemove('operation3', new ContractOperationVersion('v2'))
+        new VerifierKeyRemove('operation1', new ContractOperationVersion('v3')),
+        new VerifierKeyRemove('operation2', new ContractOperationVersion('v3')),
+        new VerifierKeyRemove('operation3', new ContractOperationVersion('v3'))
       ],
       0n
     );

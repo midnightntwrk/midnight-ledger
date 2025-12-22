@@ -22,9 +22,9 @@ describe('Ledger API - ContractOperation', () => {
    * @then Should store version correctly and return uppercase string representation
    */
   test('should construct ContractOperationVersion with valid version', () => {
-    const contractOperationVersion = new ContractOperationVersion('v2');
+    const contractOperationVersion = new ContractOperationVersion('v3');
 
-    expect(contractOperationVersion.version).toEqual('v2');
-    expect(contractOperationVersion.toString()).toEqual('V2');
+    expect(contractOperationVersion.version).toEqual('v3');
+    expect(contractOperationVersion.toString()).toEqual('V3');
   });
 });
