@@ -28,10 +28,10 @@ use crate::proofs::{
 };
 use futures::executor::block_on;
 use midnight_circuits::{
-    compact_std_lib::Relation,
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
 };
+use midnight_zk_stdlib::Relation;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -327,8 +327,10 @@ struct TestIr {
 impl Relation for TestIr {
     type Instance = Vec<Fr>;
     type Witness = Self;
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.iter().map(|x| x.0).collect()
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.iter().map(|x| x.0).collect())
     }
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         self.serialize(writer)
@@ -338,7 +340,7 @@ impl Relation for TestIr {
     }
     fn circuit(
         &self,
-        std_lib: &midnight_circuits::compact_std_lib::ZkStdLib,
+        std_lib: &midnight_zk_stdlib::ZkStdLib,
         layouter: &mut impl midnight_proofs::circuit::Layouter<outer::Scalar>,
         instance: midnight_proofs::circuit::Value<Self::Instance>,
         _witness: midnight_proofs::circuit::Value<Self::Witness>,
@@ -363,7 +365,7 @@ impl Zkir for TestIr {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
         let params_k = params.get_params(pk.init()?.k()).await?;
         let pis = preimage.public_transcript_inputs.clone();
         let pk = pk.init().unwrap();

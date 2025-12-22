@@ -1040,6 +1040,7 @@ fn sequencing_context_check<P: ProofKind<D>, D: DB>(
 }
 
 // TODO: Document this clearly
+#[allow(clippy::type_complexity)]
 fn relate_nodes<P: ProofKind<D>, D: DB>(
     guaranteed_calls: &mut HashSet<CallNode>,
     fallible_calls: &mut HashSet<CallNode>,
@@ -1136,6 +1137,7 @@ impl<
     D: DB,
 > StandardTransaction<S, P, B, D>
 {
+    #[allow(clippy::mutable_key_type)]
     fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = HashSet::new();
         let mut shielded_outputs = HashSet::new();
@@ -1356,6 +1358,7 @@ impl<
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     fn effects_check(&self) -> Result<(), MalformedTransaction<D>> {
         // We have multisets for the following:
         // - Claimed nullifiers (per segment ID)

@@ -27,9 +27,9 @@ use std::collections::HashSet as StdHashSet;
 #[cfg(feature = "proptest")]
 use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomData};
 
-/// A wrapper around `ArenaHash` that ensures the referenced node is persisted.
+/// A wrapper around `ArenaKey` that ensures the referenced node is persisted.
 ///
-/// When stored in the arena, `ChildRef` reports the wrapped key as its child,
+/// When stored in the arena, `ArenaKey` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
 /// `ChildRef`.
 //
@@ -37,8 +37,9 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 // around an arena key. This would be a safer alternative, as we would not need to make an
 // assumption that the child is allocated in the backend on construction.
 #[derive_where(Debug, PartialEq, Eq)]
-struct ChildRef<D: DB> {
-    child: ArenaKey<D::Hasher>,
+pub struct ChildRef<D: DB> {
+    /// The referenced child
+    pub child: ArenaKey<D::Hasher>,
 }
 
 // NOTE: This used to not be necessary, as creating an Sp of the ref would guarnatee allocation in
@@ -52,7 +53,8 @@ struct ChildRef<D: DB> {
 // behaviour. (Technically those are refcount updates instead of persist/unpersist, but the latter
 // are just thin wrappers around refcount updates)
 impl<D: DB> ChildRef<D> {
-    fn new(child: ArenaKey<D::Hasher>) -> Self {
+    /// Creates a new reference
+    pub fn new(child: ArenaKey<D::Hasher>) -> Self {
         // this *will* panic if `child` is not already allocated.
         default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
         Self { child }
@@ -155,12 +157,18 @@ impl<D: DB> Tagged for ChildRef<D> {
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
     /// Reference counts for keys with `rc >= 1`
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_ge_1: Map<ArenaHash<D::Hasher>, u64, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     rc_ge_1: Map<ArenaHash<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
     /// The `ChildRef` here creates storage overhead -- an additional dag node for
     /// each key -- but the `rc_0` map is expected to be small, so this
     /// shouldn't matter.
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_0: Map<ArenaKey<D::Hasher>, ChildRef<D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     rc_0: Map<ArenaKey<D::Hasher>, ChildRef<D>, D>,
 }
 

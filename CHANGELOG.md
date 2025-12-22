@@ -20,6 +20,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   - bugfix: Correctly use >= instead of > during modulus reduction. p = 0 mod p!
   - bugfix: An accross-the-board package update resolves the vulnerable `tracing-subscriber` instance.
   - breaking: improved domain seperators across the board
+- breaking: Update `midnight-zk` to 5.0.2
+- feat: Transcript partitioning with zswap components via addCalls
 
 ## 6.1.0
 

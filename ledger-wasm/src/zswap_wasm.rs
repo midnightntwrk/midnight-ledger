@@ -15,8 +15,7 @@ use crate::conversions::*;
 use crate::dust::DustParameters;
 use crate::zswap_state::ZswapChainState;
 use base_crypto::cost_model::SyntheticCost;
-use base_crypto::hash::HashOutput;
-use coin_structure::coin::ShieldedTokenType;
+use js_sys::BigInt;
 use js_sys::{JsString, Map, Uint8Array};
 use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::from_value_ser;
@@ -38,7 +37,9 @@ pub enum ZswapTransientTypes {
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapTransient(ZswapTransientTypes);
+pub struct ZswapTransient(pub(crate) ZswapTransientTypes);
+
+try_ref_for_exported!(ZswapTransient);
 
 impl From<zswap::Transient<ProofPreimage, InMemoryDB>> for ZswapTransient {
     fn from(inner: zswap::Transient<ProofPreimage, InMemoryDB>) -> ZswapTransient {
@@ -68,7 +69,7 @@ impl ZswapTransient {
     #[wasm_bindgen(js_name = "newFromContractOwnedOutput")]
     pub fn new_from_contract_owned_output(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         output: &ZswapOutput,
     ) -> Result<ZswapTransient, JsError> {
         match &output.0 {
@@ -213,7 +214,9 @@ pub enum ZswapOutputTypes {
 #[wasm_bindgen]
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct ZswapOutput(ZswapOutputTypes);
+pub struct ZswapOutput(pub(crate) ZswapOutputTypes);
+
+try_ref_for_exported!(ZswapOutput);
 
 impl From<zswap::Output<ProofPreimage, InMemoryDB>> for ZswapOutput {
     fn from(inner: zswap::Output<ProofPreimage, InMemoryDB>) -> ZswapOutput {
@@ -254,7 +257,7 @@ impl ZswapOutput {
 
     pub fn new(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         target_cpk: &str,
         target_epk: &str,
     ) -> Result<ZswapOutput, JsError> {
@@ -269,7 +272,7 @@ impl ZswapOutput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
     ) -> Result<ZswapOutput, JsError> {
         let coin = value_to_shielded_coininfo(coin)?;
@@ -372,7 +375,9 @@ pub enum ZswapInputTypes {
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapInput(ZswapInputTypes);
+pub struct ZswapInput(pub(crate) ZswapInputTypes);
+
+try_ref_for_exported!(ZswapInput);
 
 impl From<zswap::Input<ProofPreimage, InMemoryDB>> for ZswapInput {
     fn from(inner: zswap::Input<ProofPreimage, InMemoryDB>) -> ZswapInput {
@@ -402,7 +407,7 @@ impl ZswapInput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
         state: &ZswapChainState,
     ) -> Result<ZswapInput, JsError> {
@@ -568,21 +573,16 @@ impl ZswapOffer {
     }
 
     #[wasm_bindgen(js_name = "fromInput")]
-    pub fn from_input(input: &ZswapInput, type_: &str, value: u128) -> Result<ZswapOffer, JsError> {
+    pub fn from_input(
+        input: &ZswapInput,
+        _type: Option<String>,
+        _value: Option<BigInt>,
+    ) -> Result<ZswapOffer, JsError> {
         match &input.0 {
-            ZswapInputTypes::UnprovenInput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![val.clone()].into(),
-                    outputs: vec![].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: value as i128,
-                    }]
-                    .into(),
-                })))
-            }
+            ZswapInputTypes::UnprovenInput(val) => Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                zswap::Offer::new(vec![val.clone()], vec![], vec![])
+                    .expect("non-empty offer must exist"),
+            ))),
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased input.",
             )),
@@ -592,22 +592,15 @@ impl ZswapOffer {
     #[wasm_bindgen(js_name = "fromOutput")]
     pub fn from_output(
         output: &ZswapOutput,
-        type_: &str,
-        value: u128,
+        _type: Option<String>,
+        _value: Option<BigInt>,
     ) -> Result<ZswapOffer, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![].into(),
-                    outputs: vec![val.clone()].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: -(value as i128),
-                    }]
-                    .into(),
-                })))
+                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                    zswap::Offer::new(vec![], vec![val.clone()], vec![])
+                        .expect("non-empty offer must exist"),
+                )))
             }
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased output.",

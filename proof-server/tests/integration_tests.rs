@@ -135,7 +135,7 @@ fn valid_unbalanced_zswap(
         let out = zswap::Output::new::<_>(
             &mut rng,
             &coin,
-            0,
+            None,
             &sks.coin_public_key(),
             Some(sks.enc_public_key()),
         )
@@ -272,7 +272,7 @@ async fn test_proof_versions_should_return_status() {
 
     log::info!("Response code: {:?}", response.status());
     assert_eq!(response.status(), 200);
-    assert_eq!(response.text().await.unwrap(), "[\"V1\"]");
+    assert_eq!(response.text().await.unwrap(), "[\"V2\"]");
 }
 
 #[named]

@@ -19,12 +19,12 @@ use crate::curve::{Fr, outer};
 use base_crypto::hash::{HashOutput, persistent_hash};
 use lazy_static::lazy_static;
 use lru::LruCache;
-use midnight_circuits::compact_std_lib::{MidnightCircuit, MidnightPK, MidnightVK, Relation};
 use midnight_curves::Bls12;
 use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
+use midnight_zk_stdlib::{MidnightCircuit, MidnightPK, MidnightVK, Relation};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -117,10 +117,10 @@ impl ParamsVerifier {
     }
 }
 
-const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_filecoin_2p14");
+const PARAMS_VERIFIER_RAW: &[u8] = include_bytes!("../static/bls_midnight_2p14");
 
 lazy_static! {
-    /// The filecoin verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
+    /// The midnight verifier parameters, up to [`VERIFIER_MAX_DEGREE`].
     ///
     /// Note that using this *will* embed these into the binary at compile time, if that's not what
     /// you want, please use `ParamsVerifier::read` instead.
@@ -131,7 +131,7 @@ lazy_static! {
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "proof[v4]"]
+#[tag = "proof[v5]"]
 pub struct Proof(pub Vec<u8>);
 tag_enforcement_test!(Proof);
 
@@ -188,7 +188,7 @@ pub trait Zkir: Relation + Tagged + Deserializable + Any + Send + Sync + Debug {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
-        use midnight_circuits::compact_std_lib::setup_vk;
+        use midnight_zk_stdlib::setup_vk;
         let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
 
         Ok(vk)
@@ -200,7 +200,7 @@ pub trait Zkir: Relation + Tagged + Deserializable + Any + Send + Sync + Debug {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-        use midnight_circuits::compact_std_lib::{setup_pk, setup_vk};
+        use midnight_zk_stdlib::{setup_pk, setup_vk};
         let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
 
@@ -239,10 +239,10 @@ pub(crate) enum InnerProverKey<T: Zkir> {
 
 impl<T: Zkir> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
-        Cow::Owned(format!("prover-key[v6]({})", T::tag()))
+        Cow::Owned(format!("prover-key[v7]({})", T::tag()))
     }
     fn tag_unique_factor() -> String {
-        format!("prover-key[v6]({})", T::tag())
+        format!("prover-key[v7]({})", T::tag())
     }
 }
 
@@ -373,10 +373,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v5]")
+        Cow::Borrowed("verifier-key[v6]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v5]".into()
+        "verifier-key[v6]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
@@ -443,12 +443,14 @@ struct DummyRelation;
 impl Relation for DummyRelation {
     type Instance = Vec<outer::Scalar>;
     type Witness = ();
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.clone()
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.clone())
     }
     fn circuit(
         &self,
-        _std_lib: &midnight_circuits::compact_std_lib::ZkStdLib,
+        _std_lib: &midnight_zk_stdlib::ZkStdLib,
         _layouter: &mut impl midnight_proofs::circuit::Layouter<outer::Scalar>,
         _instance: midnight_proofs::circuit::Value<Self::Instance>,
         _witness: midnight_proofs::circuit::Value<Self::Witness>,
@@ -546,12 +548,10 @@ impl VerifierKey {
         proof: &Proof,
         statement: F,
     ) -> Result<(), VerifyingError> {
-        use midnight_circuits::compact_std_lib;
-
         let vk = self.force_init()?;
         let pi = statement.map(|f| f.0).collect::<Vec<_>>();
         trace!(statement = ?pi, "verifying proof against statement");
-        compact_std_lib::verify::<DummyRelation, TranscriptHash>(
+        midnight_zk_stdlib::verify::<DummyRelation, TranscriptHash>(
             &params.0, &vk, &pi, None, &proof.0,
         )
         .map_err(|_| anyhow::anyhow!("Invalid proof"))
@@ -576,7 +576,7 @@ impl VerifierKey {
         params: &ParamsVerifier,
         parts: V,
     ) -> Result<(), VerifyingError> {
-        use midnight_circuits::compact_std_lib::batch_verify;
+        use midnight_zk_stdlib::batch_verify;
 
         let mut vks = vec![];
         let mut pis = vec![];

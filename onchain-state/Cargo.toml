@@ -1,11 +1,12 @@
 [package]
 name = "midnight-onchain-state"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 edition = "2024"
 license.workspace = true
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest"]
+public-internal-structure = []
 
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }

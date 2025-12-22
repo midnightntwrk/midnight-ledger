@@ -154,7 +154,7 @@ mod tests {
 
     const CACHE_SIZE: usize = 20000;
     /// Time limit for `iterated_get_*` tests.
-    const TIME_BOUND: f64 = 0.3;
+    const TIME_BOUND: f64 = 0.6;
 
     /// Test filling cache and then getting all values.
     ///

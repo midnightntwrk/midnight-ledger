@@ -101,8 +101,8 @@ async fn noop_dos() {
     println!(":: Part 2: First count");
     let guaranteed_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results::<InMemoryDB>(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results::<InMemoryDB>(
                 &Counter_increment!([key!(0u8)], false, 1u64),
                 &[],
             ),
@@ -116,8 +116,8 @@ async fn noop_dos() {
         .unwrap();
     let fallible_public_transcript = partition_transcripts(
         &[PreTranscript {
-            context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-            program: &program_with_results(
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(
                 &[
                     &kernel_checkpoint!((), ())[..],
                     &Cell_read!([key!(1u8)], false, bool),
@@ -196,8 +196,8 @@ async fn noop_dos() {
             call_action.guaranteed_transcript = Some(Sp::new(
                 partition_transcripts(
                     &[PreTranscript {
-                        context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                        program: &noop_dos,
+                        context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                        program: noop_dos,
                         comm_comm: None,
                     }],
                     &INITIAL_PARAMETERS,

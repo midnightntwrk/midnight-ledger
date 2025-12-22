@@ -724,7 +724,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v5]"]
+#[tag = "contract-state[v6]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -739,13 +739,20 @@ tag_enforcement_test!(ContractState<InMemoryDB>);
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[tag = "charged-state[v1]"]
 pub struct ChargedState<D: DB> {
+    #[cfg(feature = "public-internal-structure")]
+    pub state: Sp<StateValue<D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     pub(crate) state: Sp<StateValue<D>, D>,
     // TODO: it would be better to generate charged keys from `data`, since it's
     // an invariant that the chargable contract state is always a subset of the
     // `charged_keys`. I assume this implies a manual `Arbitrary`
     // implementation, but maybe this is some `proptest` magic that supports
     // deriving this ...
+    #[cfg(feature = "public-internal-structure")]
     #[cfg_attr(feature = "proptest", proptest(value = "RcMap::default()"))]
+    pub charged_keys: RcMap<D>,
+    #[cfg_attr(feature = "proptest", proptest(value = "RcMap::default()"))]
+    #[cfg(not(feature = "public-internal-structure"))]
     pub(crate) charged_keys: RcMap<D>,
 }
 tag_enforcement_test!(ChargedState<InMemoryDB>);
@@ -857,7 +864,7 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v3]"]
+#[tag = "contract-operation[v4]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,

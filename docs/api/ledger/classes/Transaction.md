@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.2.0-rc.2**](../README.md)
+[**@midnight/ledger v6.2.0-rc.3**](../README.md)
 
 ***
 
@@ -46,6 +46,11 @@ fallibleOffer: undefined | Map<number, ZswapOffer<P>>;
 
 The fallible Zswap offer
 
+Note that writing to this re-computes binding information if and only if
+this transaction is unbound *and* unproven. If this is not the case,
+creating or removing offer components will lead to a binding error down
+the line.
+
 #### Throws
 
 On writing if `B` is [Binding](Binding.md) or this is not a standard
@@ -61,6 +66,11 @@ guaranteedOffer: undefined | ZswapOffer<P>;
 
 The guaranteed Zswap offer
 
+Note that writing to this re-computes binding information if and only if
+this transaction is unbound *and* unproven. If this is not the case,
+creating or removing offer components will lead to a binding error down
+the line.
+
 #### Throws
 
 On writing if `B` is [Binding](Binding.md) or this is not a standard
@@ -75,6 +85,11 @@ intents: undefined | Map<number, Intent<S, P, B>>;
 ```
 
 The intents contained in this transaction
+
+Note that writing to this re-computes binding information if and only if
+this transaction is unbound *and* unproven. If this is not the case,
+creating or removing intents will lead to a binding error down the line,
+but modifying existing intents will succeed.
 
 #### Throws
 
@@ -94,6 +109,66 @@ readonly rewards:
 The rewards this transaction represents, if applicable
 
 ## Methods
+
+### addCalls()
+
+```ts
+addCalls(
+   segment, 
+   calls, 
+   params, 
+   ttl, 
+   zswapInputs?, 
+   zswapOutputs?, 
+zswapTransient?): Transaction<S, P, B>;
+```
+
+Adds a set of new calls to the transaction.
+
+In contrast to [Intent.addCall](Intent.md#addcall), this takes calls *before*
+transcript partitioning ([partitionTranscripts](../functions/partitionTranscripts.md)), will create the
+target intent where needed, and will ensure that relevant Zswap parts are
+placed in the same section as contract interactions with them.
+
+#### Parameters
+
+##### segment
+
+[`SegmentSpecifier`](../type-aliases/SegmentSpecifier.md)
+
+##### calls
+
+[`PrePartitionContractCall`](PrePartitionContractCall.md)[]
+
+##### params
+
+[`LedgerParameters`](LedgerParameters.md)
+
+##### ttl
+
+`Date`
+
+##### zswapInputs?
+
+[`ZswapInput`](ZswapInput.md)\<[`PreProof`](PreProof.md)\>[]
+
+##### zswapOutputs?
+
+[`ZswapOutput`](ZswapOutput.md)\<[`PreProof`](PreProof.md)\>[]
+
+##### zswapTransient?
+
+[`ZswapTransient`](ZswapTransient.md)\<[`PreProof`](PreProof.md)\>[]
+
+#### Returns
+
+`Transaction`\<`S`, `P`, `B`\>
+
+#### Throws
+
+If called on bound, proven, or proof-erased transactions.
+
+***
 
 ### bind()
 

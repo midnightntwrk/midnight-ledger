@@ -1,6 +1,6 @@
 [package]
 name = "midnight-transient-crypto"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 edition = "2024"
 license.workspace = true
 
@@ -15,6 +15,7 @@ proptest = [
   "storage/proptest",
 ]
 mock-verify = []
+public-internal-structure = []
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
@@ -24,9 +25,10 @@ storage = { path = "../storage", package = "midnight-storage" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
-midnight-curves = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
-midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
-midnight-circuits = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
+midnight-curves = { version = "^0.2.0" }
+midnight-proofs = { version = "^0.7.0" }
+midnight-circuits = { version = "^6.0.0" }
+midnight-zk-stdlib = { version = "^1.0.0" }
 anyhow = { version = "^1.0.98" }
 lru = "0.16.0"
 

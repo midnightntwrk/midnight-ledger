@@ -1,8 +1,8 @@
-[**@midnight/ledger v6.2.0-rc.2**](README.md)
+[**@midnight/ledger v6.2.0-rc.3**](README.md)
 
 ***
 
-# @midnight/ledger v6.2.0-rc.2
+# @midnight/ledger v6.2.0-rc.3
 
 ## Classes
 
@@ -38,6 +38,7 @@
 - [NoBinding](classes/NoBinding.md)
 - [NoProof](classes/NoProof.md)
 - [PreBinding](classes/PreBinding.md)
+- [PrePartitionContractCall](classes/PrePartitionContractCall.md)
 - [PreProof](classes/PreProof.md)
 - [PreTranscript](classes/PreTranscript.md)
 - [Proof](classes/Proof.md)
@@ -121,6 +122,7 @@
 - [QualifiedShieldedCoinInfo](type-aliases/QualifiedShieldedCoinInfo.md)
 - [RawTokenType](type-aliases/RawTokenType.md)
 - [RunningCost](type-aliases/RunningCost.md)
+- [SegmentSpecifier](type-aliases/SegmentSpecifier.md)
 - [ShieldedCoinInfo](type-aliases/ShieldedCoinInfo.md)
 - [ShieldedTokenType](type-aliases/ShieldedTokenType.md)
 - [Signature](type-aliases/Signature.md)

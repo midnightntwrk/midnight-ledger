@@ -87,6 +87,7 @@ impl transient_crypto::proofs::Resolver for Resolver {
 }
 
 #[instrument(skip(prover, cost_model))]
+#[allow(clippy::type_complexity)]
 async fn prove_intents<D: DB, S: SignatureKind<D>>(
     intents: &storage::storage::HashMap<
         u16,
@@ -255,7 +256,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
         cost_model: &CostModel,
     ) -> Result<ContractCall<ProofMarker, D>, TransactionProvingError<D>> {
         let active_calls = match &self.proof {
-            ProofPreimageVersioned::V1(proof) => prover.check(proof).await?,
+            ProofPreimageVersioned::V2(proof) => prover.check(proof).await?,
         };
         let mut remaining_active_calls = &active_calls[..];
 
@@ -352,7 +353,7 @@ impl<D: DB> ContractCall<ProofPreimageMarker, D> {
         };
 
         let proof = match &self.proof {
-            ProofPreimageVersioned::V1(preimage) => ProofVersioned::V1(
+            ProofPreimageVersioned::V2(preimage) => ProofVersioned::V2(
                 prover
                     .prove(
                         preimage,

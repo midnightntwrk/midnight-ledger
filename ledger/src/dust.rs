@@ -651,6 +651,7 @@ pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
     pub night_key: VerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
+    #[allow(clippy::type_complexity)]
     pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
@@ -971,6 +972,7 @@ impl<D: DB> DustState<D> {
         Ok(state)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_registration<S: SignatureKind<D>>(
         &self,
         utxo: &UtxoState<D>,
@@ -1051,6 +1053,7 @@ impl<D: DB> DustState<D> {
         Ok((state, fees_remaining))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fresh_dust_output(
         &self,
         initial_nonce: InitialNonce,
@@ -1732,7 +1735,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 3_888;
+pub const DUST_SPEND_PROOF_SIZE: usize = 2_912;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]

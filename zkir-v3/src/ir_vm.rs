@@ -17,7 +17,6 @@ use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
-use midnight_circuits::compact_std_lib::{Relation, ZkStdLib, ZkStdLibArch};
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
@@ -30,6 +29,7 @@ use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
+use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -100,7 +100,9 @@ fn fab_decode_to_bytes_inner(
             }
             AlignmentSegment::Option(_) => {
                 error!("in-circuit decoding of alignment options is not yet implemented!");
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "in-circuit decoding of alignment options is not yet implemented!".into(),
+                ));
             }
         }
     }
@@ -117,7 +119,9 @@ fn fab_decode_to_bytes_atom(
     match align {
         AlignmentAtom::Field => {
             if inputs.is_empty() {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "cannot decode field element from no data".into(),
+                ));
             }
             let value = &inputs[0];
             *inputs = &inputs[1..];
@@ -137,7 +141,9 @@ fn fab_decode_to_bytes_atom(
                     Ok::<_, Error>(())
                 };
             if inputs.len() < expected_size {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "cannot decode bytes from to little data".into(),
+                ));
             }
             let mut res_vec = Vec::with_bounded_capacity(*length as usize - stray);
             if stray > 0 {
@@ -153,7 +159,9 @@ fn fab_decode_to_bytes_atom(
         }
         AlignmentAtom::Compress => {
             error!("Cannot decode compressed value from field elements");
-            Err(Error::Synthesis)
+            Err(Error::Synthesis(
+                "Cannot decode compressed value from field elements".into(),
+            ))
         }
     }
 }
@@ -614,8 +622,10 @@ impl Relation for IrSource {
 
     type Witness = Preprocessed;
 
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.clone()
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.clone())
     }
 
     fn circuit(
@@ -651,7 +661,9 @@ impl Relation for IrSource {
             memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
             id: &Identifier,
         ) -> Result<&'a AssignedNative<outer::Scalar>, Error> {
-            memory.get(id).ok_or(Error::Synthesis)
+            memory
+                .get(id)
+                .ok_or(Error::Synthesis(format!("value {id:?} not in memory")))
         }
 
         fn resolve_operand<'a>(
@@ -719,7 +731,7 @@ impl Relation for IrSource {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc.".into())
                 })
                 .unwrap()
                 .0
@@ -801,7 +813,9 @@ impl Relation for IrSource {
                     outputs,
                 } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of persistent hash instruction".into(),
+                        ));
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
@@ -815,7 +829,7 @@ impl Relation for IrSource {
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = std.sha256(layouter, &bytes)?;
+                    let res_bytes = std.sha2_256(layouter, &bytes)?;
                     mem_insert(
                         outputs[0].clone(),
                         std.convert(layouter, &res_bytes[31])?,
@@ -896,7 +910,9 @@ impl Relation for IrSource {
                 }
                 I::DivModPowerOfTwo { val, bits, outputs } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of DivModPowerOfTwo instruction".into(),
+                        ));
                     }
                     let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
                     let val_bits = std.assigned_to_le_bits(layouter, &val, None, true)?;
@@ -943,7 +959,9 @@ impl Relation for IrSource {
                     outputs,
                 } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of EcAdd instruction".into(),
+                        ));
                     }
                     let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
                     let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
@@ -970,7 +988,9 @@ impl Relation for IrSource {
                     outputs,
                 } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of EcMul instruction".into(),
+                        ));
                     }
                     let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
                     let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
@@ -992,7 +1012,9 @@ impl Relation for IrSource {
                 }
                 I::EcMulGenerator { scalar, outputs } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of EcMulGenerator instruction".into(),
+                        ));
                     }
                     let g: AssignedNativePoint<embedded::AffineExtended> = std
                         .jubjub()
@@ -1014,7 +1036,9 @@ impl Relation for IrSource {
                 }
                 I::HashToCurve { inputs, outputs } => {
                     if outputs.len() != 2 {
-                        return Err(Error::Synthesis);
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of HashToCurve instruction".into(),
+                        ));
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
@@ -1044,7 +1068,7 @@ impl Relation for IrSource {
             let comm_comm_rand_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc.".into())
                 })
                 .unwrap()
                 .1
@@ -1088,15 +1112,19 @@ impl Relation for IrSource {
                 .instructions
                 .iter()
                 .any(|op| matches!(op, I::TransientHash { .. }));
-        let sha256 = self
+        let sha2_256 = self
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
-            sha256,
-            nr_pow2range_cols: 4,
+            sha2_256,
+            sha2_512: false,
+            keccak_256: false,
+            sha3_256: false,
+            blake2b: false,
+            nr_pow2range_cols: 1,
             secp256k1: false,
             bls12_381: false,
             base64: false,

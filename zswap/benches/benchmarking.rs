@@ -60,7 +60,7 @@ pub fn zswap_ledger(c: &mut Criterion) {
         )
         .unwrap(),
     );
-    let output = ZswapOutput::new(&mut rng, &coin, 0, &keys.coin_public_key(), None).unwrap();
+    let output = ZswapOutput::new(&mut rng, &coin, None, &keys.coin_public_key(), None).unwrap();
     let offer = Offer {
         inputs: storage::storage::Array::new(),
         outputs: vec![output].into(),
@@ -74,7 +74,7 @@ pub fn zswap_ledger(c: &mut Criterion) {
     zswap_local_state = zswap_local_state.watch_for(&keys.coin_public_key(), &coin);
     zswap_local_state = zswap_local_state.apply(&keys, &offer);
     let qc = zswap_local_state.coins.iter().next().unwrap().1;
-    let (_, input) = zswap_local_state.spend(&mut rng, &keys, &qc, 0).unwrap();
+    let (_, input) = zswap_local_state.spend(&mut rng, &keys, &qc, None).unwrap();
     let offer = Offer {
         inputs: vec![input].into(),
         outputs: storage::storage::Array::new(),
@@ -116,7 +116,7 @@ pub fn zswap_local(c: &mut Criterion) {
 
     const CLAIM_AMOUNT: u128 = 5000000000;
     let coin = CoinInfo::new(&mut rng, CLAIM_AMOUNT, Default::default());
-    let out = ZswapOutput::new(&mut rng, &coin, 0, &keys.coin_public_key(), None).unwrap();
+    let out = ZswapOutput::new(&mut rng, &coin, None, &keys.coin_public_key(), None).unwrap();
 
     let offer = Offer {
         inputs: storage::storage::Array::new(),
