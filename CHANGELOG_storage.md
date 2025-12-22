@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `1.1.0`
+
+- Added state translation functionality to support hardforking
+
 ## Version `1.0.0`
 
 - Add `storage::delta_tracking::RcMap` for reference-counted key tracking in
