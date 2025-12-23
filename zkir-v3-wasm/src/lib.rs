@@ -220,12 +220,7 @@ impl WrappedProvingProvider {
 
 #[wasm_bindgen(js_name = "jsonIrToBinary")]
 pub fn json_ir_to_binary(json: &str) -> Result<Uint8Array, JsError> {
-    let ir: zkir_v3::IrSource = serde_json::from_str(json)
-        .map_err(|e| JsError::new(&format!("Failed to parse as ZKIR v3: {}", e)))?;
-
-    let mut buf = Vec::new();
-    tagged_serialize(&ir, &mut buf)?;
-    Ok(buf[..].into())
+    Zkir::from_json(json)?.serialize()
 }
 
 #[wasm_bindgen]
