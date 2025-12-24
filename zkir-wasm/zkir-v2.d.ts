@@ -36,3 +36,12 @@ export function check(
 export function provingProvider(kmProvider: KeyMaterialProvider): ProvingProvider;
 
 export function jsonIrToBinary(json: String): Uint8Array;
+
+export class Zkir {
+  static fromJson(json: string): Zkir;
+  static deserialize(bytes: Uint8Array): Zkir;
+
+  private constructor();
+  getK(): number;
+  serialize(): Uint8Array;
+}

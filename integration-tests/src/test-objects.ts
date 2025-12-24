@@ -52,7 +52,10 @@ import {
   ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
 import { generateHex, loadBinaryFile } from './test-utils';
+import type { ProvingKeyMaterial } from '@midnight-ntwrk/zkir-v2';
 
 export const VERSION_HEADER = '0200';
 export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
@@ -300,6 +303,53 @@ export class Static {
     raw: DEFAULT_TOKEN_TYPE
   });
 }
+
+export const keyMaterialProvider = new (class {
+  // eslint-disable-next-line class-methods-use-this
+  async lookupWellKnownKey(type: string, keyLocation: string): Promise<Buffer | undefined> {
+    // Ideally get this from /static/version, but I'm not sure if this gets run
+    // against a consistent dir.
+    const staticVersionFile = path.resolve(new URL(import.meta.url).pathname, '../../../static/version');
+    const ver = await fs.readFile(staticVersionFile, 'utf-8');
+    const pth = {
+      'midnight/zswap/spend': `zswap/${ver}/spend`,
+      'midnight/zswap/output': `zswap/${ver}/output`,
+      'midnight/zswap/sign': `zswap/${ver}/sign`,
+      'midnight/dust/spend': `dust/${ver}/spend`
+    }[keyLocation];
+    if (pth === undefined) {
+      return undefined;
+    }
+
+    return fs.readFile(`${process.env.MIDNIGHT_PP}/${pth}.${type}`);
+  }
+
+  async lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined> {
+    const [proverKey, verifierKey, ir] = await Promise.all([
+      this.lookupWellKnownKey('prover', keyLocation),
+      this.lookupWellKnownKey('verifier', keyLocation),
+      this.lookupWellKnownKey('bzkir', keyLocation)
+    ]);
+    if (proverKey === undefined || verifierKey === undefined || ir === undefined) {
+      return undefined;
+    }
+    return { proverKey, verifierKey, ir };
+  }
+
+  async lookupJsonIr(keyLocation: string): Promise<string | undefined> {
+    return this.lookupWellKnownKey('zkir', keyLocation).then((maybeIr) => {
+      if (maybeIr === undefined) {
+        return undefined;
+      }
+      return maybeIr.toString('utf-8');
+    });
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async getParams(k: number): Promise<Uint8Array> {
+    return fs.readFile(`${process.env.MIDNIGHT_PP}/bls_filecoin_2p${k}`);
+  }
+})();
 
 export const addressToPublic = (address: string, tag: 'user' | 'contract'): PublicAddress => ({
   address,
