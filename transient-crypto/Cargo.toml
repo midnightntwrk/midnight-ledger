@@ -1,6 +1,6 @@
 [package]
 name = "midnight-transient-crypto"
-version = "1.0.0-rc.3"
+version = "2.0.0-alpha.1"
 edition = "2024"
 license.workspace = true
 

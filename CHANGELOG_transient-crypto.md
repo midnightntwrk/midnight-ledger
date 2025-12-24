@@ -1,5 +1,11 @@
 # `transient-crypto` Changelog
 
+## Version `2.0.0`
+
+- breaking: pull in breaking midnight-zk changes
+- breaking: bugfix: correctly exclude identity point in elliptic curve
+  encryption
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
