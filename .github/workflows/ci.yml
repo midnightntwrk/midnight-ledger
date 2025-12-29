@@ -204,7 +204,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@779680da715d629ac1d338a641029a2f4372abb5
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
