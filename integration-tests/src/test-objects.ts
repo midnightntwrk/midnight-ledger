@@ -54,8 +54,8 @@ import {
 import crypto from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
-import { generateHex, loadBinaryFile } from './test-utils';
 import type { ProvingKeyMaterial } from '@midnight-ntwrk/zkir-v2';
+import { generateHex, loadBinaryFile } from './test-utils';
 
 export const VERSION_HEADER = '0200';
 export const HEX_64_REGEX = /^[0-9a-fA-F]{64}$/;
