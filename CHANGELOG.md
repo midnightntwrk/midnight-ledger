@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 7.0.0
+
+- breaking: pull in breaking proof-system changes
+
 ## 6.2.0
 
 - Remove special-casing of validation behaviour depending on the

@@ -1,8 +1,8 @@
 # `zkir` Changelog
 
-## Version `3.0.0`
+## Version `2.1.0`
 
-- added ZKIR v3
+- breaking: pull in breaking proof system changes
 
 ## Version `2.0.0`
 
