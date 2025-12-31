@@ -2502,31 +2502,76 @@ async fn test_unshielded_contract_to_contract() {
 }
 
 // ============================================================================
-// Rejection Tests: Verify Invalid Scenarios Are Properly Rejected
+// REJECTION TESTS: Security Validation of Invalid Transaction Scenarios
 // ============================================================================
 //
-// These tests verify that the ledger correctly rejects invalid transactions.
-// This is critical for security - we need to ensure that:
-// 1. Users can't deposit more tokens than they have
-// 2. Contract-to-contract transfers require both parties
-// 3. Amount mismatches are detected and rejected
+// PURPOSE:
+// These tests validate that the Midnight ledger's security mechanisms correctly
+// reject malformed or malicious transactions. This is critical for:
+// - Preventing token theft or inflation attacks
+// - Ensuring atomic consistency in multi-contract operations
+// - Validating the integrity of the unshielded token transfer protocol
 //
-// Each test follows the pattern:
-// 1. Set up a scenario that SHOULD fail
-// 2. Build an invalid transaction
-// 3. Verify it's rejected with the expected error type
+// BACKGROUND - How Unshielded Token Validation Works:
+// The ledger performs several validation checks during `well_formed()`:
+//
+// 1. BALANCE CHECK (enforce_balancing = true):
+//    - Ensures that token inputs (UTXOs + mints) equal token outputs (spends + burns)
+//    - For each token type, the sum must balance across all intents
+//    - Error: `MalformedTransaction::BalanceCheckOverspend`
+//
+// 2. EFFECTS CHECK:
+//    - Validates that transcript effects are consistent with transaction structure
+//    - Key validations:
+//      a) `claimed_unshielded_spends` must be subset of `real_unshielded_spends`
+//         This ensures that if Contract A claims to send tokens to Contract B,
+//         then Contract B must have a matching `unshielded_inputs` effect
+//      b) Similar checks for nullifiers, commitments, and contract calls
+//    - Error: `MalformedTransaction::EffectsCheckFailure`
+//
+// 3. SIGNATURE/PROOF CHECKS:
+//    - Validates cryptographic proofs and signatures
+//    - Ensures transcript execution matches claimed effects
+//
+// SECURITY INVARIANTS TESTED:
+// 1. Users cannot deposit more tokens than they actually have in UTXOs
+// 2. Contract-to-contract transfers require BOTH parties to participate
+// 3. Sender and receiver must agree on the exact token amount being transferred
+//
+// TEST PATTERN:
+// 1. Set up a scenario that SHOULD fail validation
+// 2. Build an intentionally invalid transaction
+// 3. Call `well_formed()` and verify it returns the expected error type
+// 4. Panic if the transaction is unexpectedly accepted (security bug)
 // ============================================================================
 
 /// Test that deposit amount mismatch is properly rejected.
 ///
-/// Scenario: User has a UTXO with N tokens but the transcript claims to 
-/// receive 2*N tokens (inflated unshielded_inputs in effects).
+/// # Security Scenario
+/// An attacker attempts to deposit more tokens into a contract than they
+/// actually have. They construct a transaction where:
+/// - The UnshieldedOffer.inputs contains a UTXO worth N tokens
+/// - The transcript's effects.unshielded_inputs claims 2*N tokens
 ///
-/// Expected: Transaction should fail during balance check because
-/// the claimed unshielded_inputs (2*N) exceeds the actual UTXO input (N).
+/// # Attack Vector
+/// If this attack succeeded, the attacker could:
+/// - Inflate their balance in the token vault contract
+/// - Effectively create tokens out of thin air
+/// - Drain value from other users when withdrawing
 ///
-/// This validates that the ledger's balance check catches attempts to
-/// inflate the amount of tokens being deposited.
+/// # Validation Mechanism
+/// The ledger's balance check (enabled via `enforce_balancing = true`) validates:
+/// ```text
+/// Sum(UnshieldedOffer.inputs[token_type]) == Sum(transcript.effects.unshielded_inputs[token_type])
+/// ```
+/// When these don't match, the transaction fails with `BalanceCheckOverspend`.
+///
+/// # Expected Result
+/// Transaction MUST be rejected. Any acceptance would be a critical security bug.
+///
+/// # Ledger Check: Balance Check
+/// - Strictness: `enforce_balancing = true`
+/// - Error: `MalformedTransaction::BalanceCheckOverspend`
 #[tokio::test]
 async fn test_rejection_deposit_amount_mismatch() {
     use base_crypto::signatures::SigningKey;
@@ -2716,11 +2761,39 @@ async fn test_rejection_deposit_amount_mismatch() {
 
 /// Test that contract-to-contract transfer fails when receiver is missing.
 ///
-/// Scenario: Contract A sends tokens to Contract B, but Contract B's
-/// receiveUnshielded call is NOT included in the transaction.
+/// # Security Scenario
+/// An attacker attempts to steal tokens from Contract A by constructing a
+/// transaction where Contract A "sends" tokens to Contract B, but Contract B
+/// never actually receives them. The transaction includes:
+/// - Contract A's sendUnshieldedToContract call (with claimed_unshielded_spends to B)
+/// - NO corresponding receiveUnshielded call from Contract B
 ///
-/// Expected: Transaction should fail because claimed_unshielded_spends
-/// specifies Contract B as recipient, but B has no matching unshielded_inputs.
+/// # Attack Vector
+/// If this attack succeeded, the attacker could:
+/// - Cause Contract A to decrease its balance (tokens "sent")
+/// - But no contract receives the tokens (they vanish)
+/// - This would violate conservation of tokens
+/// - Could be used to grief/drain Contract A's balance
+///
+/// # Validation Mechanism  
+/// The ledger's effects check validates:
+/// ```text
+/// claimed_unshielded_spends ⊆ real_unshielded_spends
+/// ```
+/// Where `real_unshielded_spends` is built from:
+/// - transcript.effects.unshielded_inputs (what contracts claim to receive)
+/// - UnshieldedOffer.outputs (what users claim to receive)
+///
+/// When Contract A claims to spend to Contract B, but B has no matching
+/// unshielded_inputs, the subset check fails.
+///
+/// # Expected Result
+/// Transaction MUST be rejected. This ensures contract-to-contract transfers
+/// are atomic: either both sides execute, or neither does.
+///
+/// # Ledger Check: Effects Check
+/// - Validation: `claimed_unshielded_spends` subset of `real_unshielded_spends`
+/// - Error: `MalformedTransaction::EffectsCheckFailure(RealUnshieldedSpendsSubsetCheckFailure)`
 #[tokio::test]
 async fn test_rejection_missing_receiver() {
     use base_crypto::signatures::SigningKey;
@@ -3017,11 +3090,39 @@ async fn test_rejection_missing_receiver() {
 
 /// Test that contract-to-contract transfer fails when amounts don't match.
 ///
-/// Scenario: Contract A sends 1000 tokens to Contract B, but Contract B's
-/// receiveUnshielded claims only 500 tokens.
+/// # Security Scenario
+/// An attacker attempts to exploit amount disagreement between sender and
+/// receiver contracts. They construct a transaction where:
+/// - Contract A's transcript claims to send 1,000,000 tokens to Contract B
+///   (via claimed_unshielded_spends)
+/// - Contract B's transcript claims to receive only 500,000 tokens
+///   (via unshielded_inputs)
 ///
-/// Expected: Transaction should fail because the claimed_unshielded_spends (1000)
-/// doesn't match the receiver's unshielded_inputs (500).
+/// # Attack Vector
+/// If this attack succeeded, the attacker could:
+/// - Scenario 1 (sender claims more): Contract A loses 1M, B gains 500K, 
+///   500K tokens vanish - violates conservation
+/// - Scenario 2 (receiver claims more): Contract A loses 500K, B gains 1M,
+///   500K tokens created from nothing - token inflation attack
+///
+/// # Validation Mechanism
+/// The effects check builds multisets of claimed spends and real spends:
+/// ```text
+/// claimed_unshielded_spends = {(segment, token_type, recipient, amount), ...}
+/// real_unshielded_spends = {(segment, token_type, recipient, amount), ...}
+/// ```
+/// The validation requires: `claimed_unshielded_spends ⊆ real_unshielded_spends`
+///
+/// Since the amounts differ (1M vs 500K), the claimed spend entry doesn't
+/// appear in real_unshielded_spends, causing the subset check to fail.
+///
+/// # Expected Result
+/// Transaction MUST be rejected. This ensures sender and receiver always
+/// agree on the exact amount being transferred.
+///
+/// # Ledger Check: Effects Check
+/// - Validation: Amount in claimed_unshielded_spends must match unshielded_inputs
+/// - Error: `MalformedTransaction::EffectsCheckFailure(RealUnshieldedSpendsSubsetCheckFailure)`
 #[tokio::test]
 async fn test_rejection_amount_mismatch() {
     use base_crypto::signatures::SigningKey;
