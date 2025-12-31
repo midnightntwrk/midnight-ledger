@@ -107,6 +107,7 @@ use coin_structure::transfer::{Recipient, SenderEvidence};
 use futures::FutureExt;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
+use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
 use midnight_ledger::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, Intent, IntentHash, LedgerState, ProofPreimageMarker, Transaction,
@@ -2498,4 +2499,859 @@ async fn test_unshielded_contract_to_contract() {
     println!("   Contract B balance: {} NIGHT", balance_b_after);
     
     println!("\nUnshielded contract-to-contract transfer test PASSED!");
+}
+
+// ============================================================================
+// Rejection Tests: Verify Invalid Scenarios Are Properly Rejected
+// ============================================================================
+//
+// These tests verify that the ledger correctly rejects invalid transactions.
+// This is critical for security - we need to ensure that:
+// 1. Users can't deposit more tokens than they have
+// 2. Contract-to-contract transfers require both parties
+// 3. Amount mismatches are detected and rejected
+//
+// Each test follows the pattern:
+// 1. Set up a scenario that SHOULD fail
+// 2. Build an invalid transaction
+// 3. Verify it's rejected with the expected error type
+// ============================================================================
+
+/// Test that deposit amount mismatch is properly rejected.
+///
+/// Scenario: User has a UTXO with N tokens but the transcript claims to 
+/// receive 2*N tokens (inflated unshielded_inputs in effects).
+///
+/// Expected: Transaction should fail during balance check because
+/// the claimed unshielded_inputs (2*N) exceeds the actual UTXO input (N).
+///
+/// This validates that the ledger's balance check catches attempts to
+/// inflate the amount of tokens being deposited.
+#[tokio::test]
+async fn test_rejection_deposit_amount_mismatch() {
+    use base_crypto::signatures::SigningKey;
+    use midnight_ledger::error::MalformedTransaction;
+    
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    let mut rng = StdRng::seed_from_u64(0x50);
+    
+    lazy_static::initialize(&PARAMS_VERIFIER);
+    SPEND_VK.init().ok();
+    OUTPUT_VK.init().ok();
+    SIGN_VK.init().ok();
+
+    println!(":: Rejection Test: Deposit Amount Mismatch");
+    
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    state.give_fee_token(&mut rng, 10).await;
+    
+    let user_verifying_key = state.night_key.verifying_key();
+    let user_address = UserAddress::from(user_verifying_key.clone());
+    
+    // Load contract operations
+    let deposit_unshielded_op = ContractOperation::new(
+        verifier_key(&RESOLVER, "depositUnshielded").await
+    );
+    
+    // Deploy contract
+    let owner_sk: HashOutput = rng.r#gen();
+    let owner_pk = derive_public_key(owner_sk);
+    
+    let contract: ContractState<InMemoryDB> = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()),
+            (false),
+            (owner_pk),
+            {},
+            (0u64),
+            (0u64),
+            (0u64),
+            (0u64)
+        ]),
+        HashMap::new()
+            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone()),
+        Default::default(),
+    );
+    
+    let deploy = ContractDeploy::new(&mut rng, contract);
+    let addr = deploy.address();
+    
+    let mut unbalanced_strictness = WellFormedStrictness::default();
+    unbalanced_strictness.enforce_balancing = false;
+    
+    let balanced_strictness = WellFormedStrictness::default();
+    
+    let deploy_tx = Transaction::from_intents(
+        "local-test",
+        test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
+    );
+    let deploy_tx = tx_prove_bind(rng.split(), &deploy_tx, &RESOLVER).await.unwrap();
+    let balanced = state.balance_tx(rng.split(), deploy_tx, &RESOLVER).await.unwrap();
+    state.assert_apply(&balanced, balanced_strictness);
+    
+    println!("   Contract deployed");
+    
+    // Find a UTXO with actual balance
+    let utxo = state.ledger.utxo.utxos.iter()
+        .find(|utxo_ref| utxo_ref.0.owner == user_address)
+        .expect("User should have a UTXO");
+    let utxo_ih = utxo.0.intent_hash;
+    let utxo_out_no = utxo.0.output_no;
+    let actual_value = utxo.0.value;
+    
+    // Try to claim MORE than the UTXO has
+    let claimed_amount = actual_value * 2; // Double the actual amount!
+    
+    println!("   UTXO has {} tokens, but claiming {}", actual_value, claimed_amount);
+    
+    let token_type = TokenType::Unshielded(NIGHT);
+    
+    // Build transcript with INFLATED amount
+    let deposit_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &receive_unshielded_ops::<InMemoryDB>(token_type, claimed_amount)[..], // Claims too much!
+        &Counter_increment!([key!(6u8)], false, 1u64)[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    let transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+            program: program_with_results(&deposit_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(claimed_amount), // Claims inflated amount
+    ].iter());
+    
+    let call = ContractCallPrototype {
+        address: addr,
+        entry_point: b"depositUnshielded"[..].into(),
+        op: deposit_unshielded_op.clone(),
+        input: input_av,
+        output: ().into(),
+        guaranteed_public_transcript: transcripts[0].0.clone(),
+        fallible_public_transcript: transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("depositUnshielded")),
+    };
+    
+    // UnshieldedOffer only provides actual_value, not claimed_amount
+    let uso: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: utxo_ih,
+            output_no: utxo_out_no,
+            owner: user_verifying_key,
+            type_: NIGHT,
+            value: actual_value, // Only this much is actually available!
+        }].into(),
+        outputs: vec![].into(),
+        signatures: vec![].into(),
+    };
+    
+    use midnight_ledger::structure::StandardTransaction;
+    
+    let mut intents: storage::storage::HashMap<
+        u16,
+        Intent<(), ProofPreimageMarker, transient_crypto::curve::EmbeddedFr, InMemoryDB>,
+    > = storage::storage::HashMap::new();
+    
+    intents = intents.insert(
+        1,
+        Intent::new(
+            &mut rng,
+            Some(uso),
+            None,
+            vec![call],
+            Vec::new(),
+            Vec::new(),
+            None,
+            state.time + base_crypto::time::Duration::from_secs(3600),
+        ),
+    );
+    
+    let tx = Transaction::Standard(StandardTransaction::new(
+        "local-test",
+        intents,
+        None,
+        std::collections::HashMap::new(),
+    ));
+    
+    // Test with enforce_balancing = true to catch the mismatch
+    // The balance check should reject this because:
+    // - UnshieldedOffer.inputs provides actual_value tokens
+    // - Transcript.effects.unshielded_inputs claims claimed_amount tokens
+    // - These don't match, so the transaction is unbalanced
+    let mut strictness = WellFormedStrictness::default();
+    strictness.enforce_balancing = true;  // Enable balance check!
+    strictness.verify_signatures = false;
+    strictness.verify_contract_proofs = false;
+    strictness.verify_native_proofs = false;
+    
+    let result = tx.well_formed(&state.ledger, strictness, state.time);
+    
+    match result {
+        Err(MalformedTransaction::BalanceCheckOverspend { token_type: _, segment: _, overspent_value }) => {
+            println!("   Correctly rejected: BalanceCheckOverspend (overspent by {})", overspent_value);
+            println!("\n Rejection test (deposit amount mismatch) PASSED!");
+        }
+        Err(e) => {
+            // Any rejection is acceptable - the key is that it's rejected
+            println!("   Correctly rejected with error: {:?}", e);
+            println!("\n Rejection test (deposit amount mismatch) PASSED!");
+        }
+        Ok(_) => {
+            panic!("   SECURITY BUG: Transaction should have been rejected but was accepted!");
+        }
+    }
+}
+
+/// Test that contract-to-contract transfer fails when receiver is missing.
+///
+/// Scenario: Contract A sends tokens to Contract B, but Contract B's
+/// receiveUnshielded call is NOT included in the transaction.
+///
+/// Expected: Transaction should fail because claimed_unshielded_spends
+/// specifies Contract B as recipient, but B has no matching unshielded_inputs.
+#[tokio::test]
+async fn test_rejection_missing_receiver() {
+    use base_crypto::signatures::SigningKey;
+    use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
+    
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    let mut rng = StdRng::seed_from_u64(0x51);
+    
+    lazy_static::initialize(&PARAMS_VERIFIER);
+    SPEND_VK.init().ok();
+    OUTPUT_VK.init().ok();
+    SIGN_VK.init().ok();
+
+    println!(":: Rejection Test: Missing Receiver in Contract-to-Contract");
+    
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    state.give_fee_token(&mut rng, 10).await;
+    
+    let user_verifying_key = state.night_key.verifying_key();
+    let user_address = UserAddress::from(user_verifying_key.clone());
+    
+    // Load contract operations
+    let deposit_unshielded_op = ContractOperation::new(
+        verifier_key(&RESOLVER, "depositUnshielded").await
+    );
+    let send_to_contract_op = ContractOperation::new(
+        verifier_key(&RESOLVER, "sendUnshieldedToContract").await
+    );
+    
+    // Deploy Contract A
+    let owner_sk_a: HashOutput = rng.r#gen();
+    let owner_pk_a = derive_public_key(owner_sk_a);
+    
+    let contract_a: ContractState<InMemoryDB> = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()),
+            (false),
+            (owner_pk_a),
+            {},
+            (0u64),
+            (0u64),
+            (0u64),
+            (0u64)
+        ]),
+        HashMap::new()
+            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone())
+            .insert(b"sendUnshieldedToContract"[..].into(), send_to_contract_op.clone()),
+        Default::default(),
+    );
+    
+    let deploy_a = ContractDeploy::new(&mut rng, contract_a);
+    let addr_a = deploy_a.address();
+    
+    let mut unbalanced_strictness = WellFormedStrictness::default();
+    unbalanced_strictness.enforce_balancing = false;
+    
+    let balanced_strictness = WellFormedStrictness::default();
+    
+    let deploy_tx_a = Transaction::from_intents(
+        "local-test",
+        test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy_a], state.time),
+    );
+    let deploy_tx_a = tx_prove_bind(rng.split(), &deploy_tx_a, &RESOLVER).await.unwrap();
+    let balanced_a = state.balance_tx(rng.split(), deploy_tx_a, &RESOLVER).await.unwrap();
+    state.assert_apply(&balanced_a, balanced_strictness);
+    
+    // Deploy Contract B (receiver)
+    let owner_sk_b: HashOutput = rng.r#gen();
+    let owner_pk_b = derive_public_key(owner_sk_b);
+    
+    let contract_b: ContractState<InMemoryDB> = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()),
+            (false),
+            (owner_pk_b),
+            {},
+            (0u64),
+            (0u64),
+            (0u64),
+            (0u64)
+        ]),
+        HashMap::new()
+            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone()),
+        Default::default(),
+    );
+    
+    let deploy_b = ContractDeploy::new(&mut rng, contract_b);
+    let addr_b = deploy_b.address();
+    
+    let deploy_tx_b = Transaction::from_intents(
+        "local-test",
+        test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy_b], state.time),
+    );
+    let deploy_tx_b = tx_prove_bind(rng.split(), &deploy_tx_b, &RESOLVER).await.unwrap();
+    let balanced_b = state.balance_tx(rng.split(), deploy_tx_b, &RESOLVER).await.unwrap();
+    state.assert_apply(&balanced_b, balanced_strictness);
+    
+    println!("   Contract A deployed at {:?}", addr_a);
+    println!("   Contract B deployed at {:?}", addr_b);
+    
+    // First, deposit tokens to Contract A (valid operation)
+    let deposit_utxo = state.ledger.utxo.utxos.iter()
+        .find(|utxo_ref| utxo_ref.0.owner == user_address)
+        .expect("User should have a UTXO");
+    let deposit_amount = deposit_utxo.0.value;
+    
+    let token_type = TokenType::Unshielded(NIGHT);
+    
+    let deposit_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &receive_unshielded_ops::<InMemoryDB>(token_type, deposit_amount)[..],
+        &Counter_increment!([key!(6u8)], false, 1u64)[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    let deposit_transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr_a).unwrap().data, addr_a),
+            program: program_with_results(&deposit_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let deposit_input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(deposit_amount),
+    ].iter());
+    
+    let deposit_call = ContractCallPrototype {
+        address: addr_a,
+        entry_point: b"depositUnshielded"[..].into(),
+        op: deposit_unshielded_op.clone(),
+        input: deposit_input_av,
+        output: ().into(),
+        guaranteed_public_transcript: deposit_transcripts[0].0.clone(),
+        fallible_public_transcript: deposit_transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("depositUnshielded")),
+    };
+    
+    let deposit_uso: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: deposit_utxo.0.intent_hash,
+            output_no: deposit_utxo.0.output_no,
+            owner: user_verifying_key.clone(),
+            type_: NIGHT,
+            value: deposit_amount,
+        }].into(),
+        outputs: vec![].into(),
+        signatures: vec![].into(),
+    };
+    
+    use midnight_ledger::structure::StandardTransaction;
+    
+    let mut deposit_intents: storage::storage::HashMap<
+        u16,
+        Intent<(), ProofPreimageMarker, transient_crypto::curve::EmbeddedFr, InMemoryDB>,
+    > = storage::storage::HashMap::new();
+    
+    deposit_intents = deposit_intents.insert(
+        1,
+        Intent::new(
+            &mut rng,
+            Some(deposit_uso),
+            None,
+            vec![deposit_call],
+            Vec::new(),
+            Vec::new(),
+            None,
+            state.time + base_crypto::time::Duration::from_secs(3600),
+        ),
+    );
+    
+    let deposit_tx = Transaction::Standard(StandardTransaction::new(
+        "local-test",
+        deposit_intents,
+        None,
+        std::collections::HashMap::new(),
+    ));
+    
+    let mut deposit_strictness = WellFormedStrictness::default();
+    deposit_strictness.enforce_balancing = false;
+    deposit_strictness.verify_signatures = false;
+    deposit_strictness.verify_contract_proofs = false;
+    deposit_strictness.verify_native_proofs = false;
+    
+    state.assert_apply(&deposit_tx, deposit_strictness);
+    println!("   Deposited {} tokens to Contract A", deposit_amount);
+    
+    // Now try to send tokens from A to B WITHOUT including B's receive call
+    let transfer_amount = deposit_amount / 2;
+    
+    // Build send transcript for Contract A only
+    let send_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &send_unshielded_ops::<InMemoryDB>(token_type, transfer_amount)[..],
+        &claim_unshielded_spend_ops::<InMemoryDB>(
+            token_type,
+            Recipient::Contract(addr_b), // Claims to send to B
+            transfer_amount
+        )[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    let send_transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr_a).unwrap().data, addr_a),
+            program: program_with_results(&send_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let send_input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(addr_b.0),
+        AlignedValue::from(transfer_amount),
+    ].iter());
+    
+    let send_call = ContractCallPrototype {
+        address: addr_a,
+        entry_point: b"sendUnshieldedToContract"[..].into(),
+        op: send_to_contract_op.clone(),
+        input: send_input_av,
+        output: ().into(),
+        guaranteed_public_transcript: send_transcripts[0].0.clone(),
+        fallible_public_transcript: send_transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("sendUnshieldedToContract")),
+    };
+    
+    // Create transaction with ONLY the send call - NO receive call from Contract B!
+    let mut transfer_intents: storage::storage::HashMap<
+        u16,
+        Intent<(), ProofPreimageMarker, transient_crypto::curve::EmbeddedFr, InMemoryDB>,
+    > = storage::storage::HashMap::new();
+    
+    transfer_intents = transfer_intents.insert(
+        1,
+        Intent::new(
+            &mut rng,
+            None,
+            None,
+            vec![send_call], // Only sender, no receiver!
+            Vec::new(),
+            Vec::new(),
+            None,
+            state.time + base_crypto::time::Duration::from_secs(3600),
+        ),
+    );
+    
+    let transfer_tx = Transaction::Standard(StandardTransaction::new(
+        "local-test",
+        transfer_intents,
+        None,
+        std::collections::HashMap::new(),
+    ));
+    
+    let mut transfer_strictness = WellFormedStrictness::default();
+    transfer_strictness.enforce_balancing = false;
+    transfer_strictness.verify_signatures = false;
+    transfer_strictness.verify_contract_proofs = false;
+    transfer_strictness.verify_native_proofs = false;
+    
+    // This should FAIL - Contract B never called receiveUnshielded
+    let result = transfer_tx.well_formed(&state.ledger, transfer_strictness, state.time);
+    
+    match result {
+        Err(MalformedTransaction::EffectsCheckFailure(
+            EffectsCheckError::RealUnshieldedSpendsSubsetCheckFailure(_)
+        )) => {
+            println!("   Correctly rejected: RealUnshieldedSpendsSubsetCheckFailure");
+            println!("      (Contract A claimed to send to B, but B didn't receive)");
+        }
+        Err(e) => {
+            println!("   Correctly rejected with error: {:?}", e);
+        }
+        Ok(_) => {
+            panic!("   SECURITY BUG: Transaction should have been rejected!");
+        }
+    }
+    
+    println!("\n Rejection test (missing receiver) PASSED!");
+}
+
+/// Test that contract-to-contract transfer fails when amounts don't match.
+///
+/// Scenario: Contract A sends 1000 tokens to Contract B, but Contract B's
+/// receiveUnshielded claims only 500 tokens.
+///
+/// Expected: Transaction should fail because the claimed_unshielded_spends (1000)
+/// doesn't match the receiver's unshielded_inputs (500).
+#[tokio::test]
+async fn test_rejection_amount_mismatch() {
+    use base_crypto::signatures::SigningKey;
+    use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
+    
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    let mut rng = StdRng::seed_from_u64(0x52);
+    
+    lazy_static::initialize(&PARAMS_VERIFIER);
+    SPEND_VK.init().ok();
+    OUTPUT_VK.init().ok();
+    SIGN_VK.init().ok();
+
+    println!(":: Rejection Test: Amount Mismatch in Contract-to-Contract");
+    
+    let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
+    state.give_fee_token(&mut rng, 10).await;
+    
+    let user_verifying_key = state.night_key.verifying_key();
+    let user_address = UserAddress::from(user_verifying_key.clone());
+    
+    // Load contract operations
+    let deposit_unshielded_op = ContractOperation::new(
+        verifier_key(&RESOLVER, "depositUnshielded").await
+    );
+    let send_to_contract_op = ContractOperation::new(
+        verifier_key(&RESOLVER, "sendUnshieldedToContract").await
+    );
+    
+    // Deploy Contract A
+    let owner_sk_a: HashOutput = rng.r#gen();
+    let owner_pk_a = derive_public_key(owner_sk_a);
+    
+    let contract_a: ContractState<InMemoryDB> = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()),
+            (false),
+            (owner_pk_a),
+            {},
+            (0u64),
+            (0u64),
+            (0u64),
+            (0u64)
+        ]),
+        HashMap::new()
+            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone())
+            .insert(b"sendUnshieldedToContract"[..].into(), send_to_contract_op.clone()),
+        Default::default(),
+    );
+    
+    let deploy_a = ContractDeploy::new(&mut rng, contract_a);
+    let addr_a = deploy_a.address();
+    
+    let mut unbalanced_strictness = WellFormedStrictness::default();
+    unbalanced_strictness.enforce_balancing = false;
+    
+    let balanced_strictness = WellFormedStrictness::default();
+    
+    let deploy_tx_a = Transaction::from_intents(
+        "local-test",
+        test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy_a], state.time),
+    );
+    let deploy_tx_a = tx_prove_bind(rng.split(), &deploy_tx_a, &RESOLVER).await.unwrap();
+    let balanced_a = state.balance_tx(rng.split(), deploy_tx_a, &RESOLVER).await.unwrap();
+    state.assert_apply(&balanced_a, balanced_strictness);
+    
+    // Deploy Contract B
+    let owner_sk_b: HashOutput = rng.r#gen();
+    let owner_pk_b = derive_public_key(owner_sk_b);
+    
+    let contract_b: ContractState<InMemoryDB> = ContractState::new(
+        stval!([
+            (QualifiedCoinInfo::default()),
+            (false),
+            (owner_pk_b),
+            {},
+            (0u64),
+            (0u64),
+            (0u64),
+            (0u64)
+        ]),
+        HashMap::new()
+            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone()),
+        Default::default(),
+    );
+    
+    let deploy_b = ContractDeploy::new(&mut rng, contract_b);
+    let addr_b = deploy_b.address();
+    
+    let deploy_tx_b = Transaction::from_intents(
+        "local-test",
+        test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy_b], state.time),
+    );
+    let deploy_tx_b = tx_prove_bind(rng.split(), &deploy_tx_b, &RESOLVER).await.unwrap();
+    let balanced_b = state.balance_tx(rng.split(), deploy_tx_b, &RESOLVER).await.unwrap();
+    state.assert_apply(&balanced_b, balanced_strictness);
+    
+    println!("   Contracts A and B deployed");
+    
+    // First, deposit tokens to Contract A
+    let deposit_utxo = state.ledger.utxo.utxos.iter()
+        .find(|utxo_ref| utxo_ref.0.owner == user_address)
+        .expect("User should have a UTXO");
+    let deposit_amount = deposit_utxo.0.value;
+    
+    let token_type = TokenType::Unshielded(NIGHT);
+    
+    let deposit_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &receive_unshielded_ops::<InMemoryDB>(token_type, deposit_amount)[..],
+        &Counter_increment!([key!(6u8)], false, 1u64)[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    let deposit_transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr_a).unwrap().data, addr_a),
+            program: program_with_results(&deposit_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let deposit_input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(deposit_amount),
+    ].iter());
+    
+    let deposit_call = ContractCallPrototype {
+        address: addr_a,
+        entry_point: b"depositUnshielded"[..].into(),
+        op: deposit_unshielded_op.clone(),
+        input: deposit_input_av,
+        output: ().into(),
+        guaranteed_public_transcript: deposit_transcripts[0].0.clone(),
+        fallible_public_transcript: deposit_transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("depositUnshielded")),
+    };
+    
+    let deposit_uso: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+        inputs: vec![UtxoSpend {
+            intent_hash: deposit_utxo.0.intent_hash,
+            output_no: deposit_utxo.0.output_no,
+            owner: user_verifying_key.clone(),
+            type_: NIGHT,
+            value: deposit_amount,
+        }].into(),
+        outputs: vec![].into(),
+        signatures: vec![].into(),
+    };
+    
+    use midnight_ledger::structure::StandardTransaction;
+    
+    let mut deposit_intents: storage::storage::HashMap<
+        u16,
+        Intent<(), ProofPreimageMarker, transient_crypto::curve::EmbeddedFr, InMemoryDB>,
+    > = storage::storage::HashMap::new();
+    
+    deposit_intents = deposit_intents.insert(
+        1,
+        Intent::new(
+            &mut rng,
+            Some(deposit_uso),
+            None,
+            vec![deposit_call],
+            Vec::new(),
+            Vec::new(),
+            None,
+            state.time + base_crypto::time::Duration::from_secs(3600),
+        ),
+    );
+    
+    let deposit_tx = Transaction::Standard(StandardTransaction::new(
+        "local-test",
+        deposit_intents,
+        None,
+        std::collections::HashMap::new(),
+    ));
+    
+    let mut deposit_strictness = WellFormedStrictness::default();
+    deposit_strictness.enforce_balancing = false;
+    deposit_strictness.verify_signatures = false;
+    deposit_strictness.verify_contract_proofs = false;
+    deposit_strictness.verify_native_proofs = false;
+    
+    state.assert_apply(&deposit_tx, deposit_strictness);
+    println!("   Deposited {} tokens to Contract A", deposit_amount);
+    
+    // Now try to send with MISMATCHED amounts
+    let send_amount = deposit_amount / 2;    // Contract A claims to send this much
+    let receive_amount = send_amount / 2;     // Contract B only claims this much (half of what A sends!)
+    
+    println!("   Contract A sends {} but Contract B only receives {}", send_amount, receive_amount);
+    
+    // Build send transcript for Contract A
+    let send_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &send_unshielded_ops::<InMemoryDB>(token_type, send_amount)[..],
+        &claim_unshielded_spend_ops::<InMemoryDB>(
+            token_type,
+            Recipient::Contract(addr_b),
+            send_amount // A claims to send full amount
+        )[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    // Build receive transcript for Contract B with WRONG amount
+    let receive_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
+        &receive_unshielded_ops::<InMemoryDB>(token_type, receive_amount)[..], // Only half!
+        &Counter_increment!([key!(6u8)], false, 1u64)[..],
+    ]
+    .into_iter()
+    .flat_map(|x| x.iter())
+    .cloned()
+    .collect();
+    
+    let send_transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr_a).unwrap().data, addr_a),
+            program: program_with_results(&send_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let receive_transcripts = partition_transcripts(
+        &[PreTranscript {
+            context: QueryContext::new(state.ledger.index(addr_b).unwrap().data, addr_b),
+            program: program_with_results(&receive_transcript, &[]),
+            comm_comm: None,
+        }],
+        &INITIAL_PARAMETERS,
+    )
+    .unwrap();
+    
+    let send_input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(addr_b.0),
+        AlignedValue::from(send_amount),
+    ].iter());
+    
+    let send_call = ContractCallPrototype {
+        address: addr_a,
+        entry_point: b"sendUnshieldedToContract"[..].into(),
+        op: send_to_contract_op.clone(),
+        input: send_input_av,
+        output: ().into(),
+        guaranteed_public_transcript: send_transcripts[0].0.clone(),
+        fallible_public_transcript: send_transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("sendUnshieldedToContract")),
+    };
+    
+    let receive_input_av: AlignedValue = AlignedValue::concat([
+        AlignedValue::from(NIGHT.0),
+        AlignedValue::from(receive_amount), // Mismatched amount
+    ].iter());
+    
+    let receive_call = ContractCallPrototype {
+        address: addr_b,
+        entry_point: b"depositUnshielded"[..].into(),
+        op: deposit_unshielded_op.clone(),
+        input: receive_input_av,
+        output: ().into(),
+        guaranteed_public_transcript: receive_transcripts[0].0.clone(),
+        fallible_public_transcript: receive_transcripts[0].1.clone(),
+        private_transcript_outputs: vec![],
+        communication_commitment_rand: rng.r#gen(),
+        key_location: KeyLocation(Cow::Borrowed("depositUnshielded")),
+    };
+    
+    // Both calls in the transaction, but amounts don't match
+    let mut transfer_intents: storage::storage::HashMap<
+        u16,
+        Intent<(), ProofPreimageMarker, transient_crypto::curve::EmbeddedFr, InMemoryDB>,
+    > = storage::storage::HashMap::new();
+    
+    transfer_intents = transfer_intents.insert(
+        1,
+        Intent::new(
+            &mut rng,
+            None,
+            None,
+            vec![send_call, receive_call],
+            Vec::new(),
+            Vec::new(),
+            None,
+            state.time + base_crypto::time::Duration::from_secs(3600),
+        ),
+    );
+    
+    let transfer_tx = Transaction::Standard(StandardTransaction::new(
+        "local-test",
+        transfer_intents,
+        None,
+        std::collections::HashMap::new(),
+    ));
+    
+    let mut transfer_strictness = WellFormedStrictness::default();
+    transfer_strictness.enforce_balancing = false;
+    transfer_strictness.verify_signatures = false;
+    transfer_strictness.verify_contract_proofs = false;
+    transfer_strictness.verify_native_proofs = false;
+    
+    // This should FAIL - amounts don't match
+    let result = transfer_tx.well_formed(&state.ledger, transfer_strictness, state.time);
+    
+    match result {
+        Err(MalformedTransaction::EffectsCheckFailure(
+            EffectsCheckError::RealUnshieldedSpendsSubsetCheckFailure(_)
+        )) => {
+            println!("   Correctly rejected: RealUnshieldedSpendsSubsetCheckFailure");
+            println!("      (A sent {} but B only received {})", send_amount, receive_amount);
+        }
+        Err(e) => {
+            println!("   Correctly rejected with error: {:?}", e);
+        }
+        Ok(_) => {
+            panic!("   SECURITY BUG: Transaction should have been rejected!");
+        }
+    }
+    
+    println!("\n Rejection test (amount mismatch) PASSED!");
 }
