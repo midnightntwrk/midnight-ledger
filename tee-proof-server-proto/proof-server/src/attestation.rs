@@ -20,7 +20,7 @@ use tracing::{debug, error, info, warn};
 
 /// Query parameters for attestation request
 #[derive(Debug, Deserialize)]
-pub struct AttestationQuery {
+pub(crate) struct AttestationQuery {
     /// Nonce for freshness (prevents replay attacks)
     #[serde(default)]
     pub nonce: Option<String>,
@@ -28,7 +28,7 @@ pub struct AttestationQuery {
 
 /// Attestation response
 #[derive(Debug, Serialize)]
-pub struct AttestationResponse {
+pub(crate) struct AttestationResponse {
     /// TEE platform type
     pub platform: String,
     /// Attestation format
@@ -49,54 +49,87 @@ pub struct AttestationResponse {
 
 /// Detect which TEE platform we're running on
 fn detect_platform() -> TeePlatformType {
-    // Check for AWS Nitro Enclaves
-    if std::path::Path::new("/dev/vsock").exists() {
-        // Additional check: try to read enclave-specific file
-        if std::path::Path::new("/proc/cpuinfo").exists() {
-            if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
-                if cpuinfo.contains("Amazon") || std::env::var("AWS_EXECUTION_ENV").is_ok() {
-                    return TeePlatformType::AwsNitro;
+    // Early exit: if running on macOS or Windows, definitely not a cloud TEE
+    #[cfg(target_os = "macos")]
+    {
+        debug!("Detected macOS - skipping cloud TEE detection");
+        return TeePlatformType::Unknown;
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        debug!("Detected Windows - skipping cloud TEE detection");
+        return TeePlatformType::Unknown;
+    }
+
+    // Only proceed with Linux-specific checks
+    #[cfg(target_os = "linux")]
+    {
+        // Check for AWS Nitro Enclaves
+        // AWS Nitro uses /dev/vsock for communication with parent EC2 instance
+        if std::path::Path::new("/dev/vsock").exists() {
+            // Additional check: try to read enclave-specific file
+            if std::path::Path::new("/proc/cpuinfo").exists() {
+                if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
+                    if cpuinfo.contains("Amazon") || std::env::var("AWS_EXECUTION_ENV").is_ok() {
+                        debug!("Detected AWS Nitro Enclave");
+                        return TeePlatformType::AwsNitro;
+                    }
                 }
             }
         }
-    }
 
-    // Check for GCP Confidential VM
-    if std::path::Path::new("/sys/firmware/dmi/tables/smbios_entry_point").exists() {
-        if let Ok(output) = Command::new("dmidecode")
+        // Check for GCP Confidential VM via DMI
+        if std::path::Path::new("/sys/firmware/dmi/tables/smbios_entry_point").exists() {
+            if let Ok(output) = Command::new("dmidecode")
+                .arg("-s")
+                .arg("system-manufacturer")
+                .output()
+            {
+                let manufacturer = String::from_utf8_lossy(&output.stdout);
+                if manufacturer.contains("Google") {
+                    debug!("Detected GCP Confidential VM");
+                    return TeePlatformType::GcpConfidential;
+                }
+            }
+        }
+
+        // Check for Azure Confidential VM
+        // Only check if we can reach the metadata endpoint quickly
+        // Azure VMs have specific metadata endpoint at 169.254.169.254
+        if let Ok(output) = Command::new("curl")
             .arg("-s")
-            .arg("system-manufacturer")
+            .arg("--max-time")
+            .arg("2")  // 2 second timeout
+            .arg("-H")
+            .arg("Metadata:true")
+            .arg("http://169.254.169.254/metadata/instance/compute/azEnvironment?api-version=2021-02-01&format=text")
             .output()
         {
-            let manufacturer = String::from_utf8_lossy(&output.stdout);
-            if manufacturer.contains("Google") {
-                return TeePlatformType::GcpConfidential;
+            if output.status.success() {
+                let response = String::from_utf8_lossy(&output.stdout);
+                if response.contains("Azure") {
+                    debug!("Detected Azure Confidential VM");
+                    return TeePlatformType::AzureConfidential;
+                }
             }
         }
+
+        // Default for Linux: unknown/development
+        debug!("No recognized TEE platform detected - running in development mode");
+        TeePlatformType::Unknown
     }
 
-    // Check for Azure Confidential VM
-    // Azure VMs have specific metadata endpoint
-    if let Ok(output) = Command::new("curl")
-        .arg("-s")
-        .arg("-H")
-        .arg("Metadata:true")
-        .arg("http://169.254.169.254/metadata/instance/compute/azEnvironment?api-version=2021-02-01&format=text")
-        .output()
+    // For non-Linux platforms (other than macOS/Windows handled above)
+    #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
     {
-        if output.status.success() {
-            let response = String::from_utf8_lossy(&output.stdout);
-            if response.contains("Azure") {
-                return TeePlatformType::AzureConfidential;
-            }
-        }
+        debug!("Unsupported OS - skipping cloud TEE detection");
+        TeePlatformType::Unknown
     }
-
-    // Default: unknown/development
-    TeePlatformType::Unknown
 }
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)] // Variants may not be constructed on all platforms
 enum TeePlatformType {
     AwsNitro,
     GcpConfidential,
@@ -268,7 +301,7 @@ async fn get_azure_attestation(nonce: Option<String>) -> Result<AttestationRespo
 /// - AWS Nitro: CBOR attestation document (must be requested from parent)
 /// - GCP: TPM 2.0 quote
 /// - Azure: JWT token from Attestation Service
-pub async fn attestation_handler(
+pub(crate) async fn attestation_handler(
     Query(params): Query<AttestationQuery>,
 ) -> Result<Response, StatusCode> {
     info!("Attestation request received");
