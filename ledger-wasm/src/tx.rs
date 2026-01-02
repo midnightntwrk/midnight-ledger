@@ -19,7 +19,7 @@ use crate::transcript::PreTranscript;
 use crate::zswap_state::whitelist_from_value;
 use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
-    ZswapOutputTypes, ZswapTransient, ZswapTransientTypes, offer_segment_id,
+    ZswapOutputTypes, ZswapTransient, ZswapTransientTypes,
 };
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
@@ -228,16 +228,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            let segment_id = offer_segment_id(&offer)?;
-            match segment_id {
-                Some(segment_id) => {
-                    if segment_id == 0 {
-                        return Err(JsError::new("Segment ID cannot be 0 in a fallible offer"));
-                    }
-                    HashMap::from([(segment_id, offer)])
-                }
-                None => HashMap::new(),
-            }
+            HashMap::from([(1u16, offer)])
         } else {
             HashMap::new()
         };
@@ -310,16 +301,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            let segment_id = offer_segment_id(&offer)?;
-            match segment_id {
-                Some(segment_id) => {
-                    if segment_id == 0 {
-                        return Err(JsError::new("Segment ID cannot be 0 in a fallible offer"));
-                    }
-                    HashMap::from([(segment_id, offer)])
-                }
-                None => HashMap::new(),
-            }
+            HashMap::from([(segment_id, offer)])
         } else {
             HashMap::new()
         };
@@ -997,13 +979,15 @@ impl Transaction {
             | UnprovenWithSignatureErasedBinding(_)
             | ProvenWithSignatureBinding(_)
             | ProvenWithSignatureErasedBinding(_) => {
-                Err(JsError::new("Transaction is already bound."))?
+                Err(JsError::new("Cannot add calls to bound transaction."))?
             }
-            ProvenWithSignaturePreBinding(_)
-            | ProvenWithSignatureErasedPreBinding(_)
-            | ProofErasedWithSignatureNoBinding(_)
-            | ProofErasedWithSignatureErasedNoBinding(_) => {
-                Err(JsError::new("Transaction is already proven."))?
+            ProvenWithSignaturePreBinding(_) | ProvenWithSignatureErasedPreBinding(_) => {
+                Err(JsError::new("Cannot add calls to proven transaction."))?
+            }
+            ProofErasedWithSignatureNoBinding(_) | ProofErasedWithSignatureErasedNoBinding(_) => {
+                Err(JsError::new(
+                    "Cannot add calls to proof-erased transaction.",
+                ))?
             }
             _ => Err(JsError::new("Not a standard transaction."))?,
         }

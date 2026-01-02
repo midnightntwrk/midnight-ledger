@@ -271,14 +271,14 @@ describe('Economic Attack Vector Tests', () => {
 
     test('should validate segment ID uniqueness within transaction', () => {
       const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-      const fallibleOffer1 = Static.unprovenOfferFromOutput(2);
-      const fallibleOffer2 = Static.unprovenOfferFromOutput(2);
+      const fallibleOffer1 = Static.unprovenOfferFromOutput(1);
+      const fallibleOffer2 = Static.unprovenOfferFromOutput(1);
 
       const transaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer1.merge(fallibleOffer2));
 
       expect(transaction.guaranteedOffer?.outputs.length).toEqual(1);
-      expect(transaction.fallibleOffer?.has(2)).toBe(true);
-      expect(transaction.fallibleOffer?.has(3)).toBe(false);
+      expect(transaction.fallibleOffer?.has(1)).toBe(true);
+      expect(transaction.fallibleOffer?.has(2)).toBe(false);
     });
   });
 

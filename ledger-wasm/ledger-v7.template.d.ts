@@ -1086,7 +1086,7 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    * @throws If called on bound, proven, or proof-erased transactions, or if the
    * transaction contains unproven contract calls.
    */
-  mockProve(): Transaction<S, Proof, B>;
+  mockProve(): Transaction<S, Proof, Binding>;
   /**
    * Proves the transaction, with access to a low-level proving provider.
    * This may *only* be called for `P = PreProof`.
