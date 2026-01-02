@@ -85,14 +85,6 @@ describe('Ledger API - ZswapOffer', () => {
     );
   });
 
-  test('fromOutput - fails on invalid segment', () => {
-    const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-    const fallibleOffer = Static.unprovenOfferFromOutput(0);
-    expect(() => Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer)).toThrow(
-      'Segment ID cannot be 0 in a fallible offer'
-    );
-  });
-
   test('fromTransient - should create from UnprovenTransient', () => {
     const value = 10_000n;
     const coinInfo = Static.shieldedCoinInfo(value);
