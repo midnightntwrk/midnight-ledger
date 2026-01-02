@@ -334,21 +334,23 @@ impl BenchWithArgs {
         });
         let mut p1: usize = 19;
         let mut p2: usize = 12;
+        let mut max_lin: usize = 1 << 13;
         if fast {
             println!(
                 "MIDNIGHT_VM_COST_MODEL_FAST detected! Minimizing parameter space to speed up benchmarking, results will not be useful for actual cost model learning ..."
             );
             p1 = 1;
             p2 = 1;
+            max_lin = 1 << 3;
         }
         println!("Generating BenchWithArgs ...");
         let rng = rand::thread_rng();
         let uid: usize = 0;
         let log_sizes: Vec<usize> = (0..p1).collect();
         let num_aligned_values: usize = p2;
-        // Take p1 even steps up to size 2^p1
+        // Take p1 even steps up to size max_lin.
         println!("... generating lin-step maps ...");
-        let lin_step_map_sizes = (0..p1).map(|i| (i * (1 << p1)) / p1).collect::<Vec<_>>();
+        let lin_step_map_sizes = (0..p1).map(|i| (i * max_lin) / p1).collect::<Vec<_>>();
         let lin_step_maps = gen_maps(&lin_step_map_sizes);
         println!("... generating log-step maps ...");
         let log_step_map_sizes: Vec<usize> = log_sizes.iter().map(|&i| 1 << i).collect();

@@ -15,5 +15,5 @@
 
 cd /cost-model
 export MIDNIGHT_PP=/cost-model/midnight-pp
-cargo bench --frozen
-cargo run --frozen --bin generate-cost-model -- target/criterion all /cost-model/output --plot --output-const
+cargo bench
+cargo run --bin generate-cost-model -- target/criterion all /cost-model/output --plot --output-const
