@@ -1,0 +1,43 @@
+version: '3.8'
+
+services:
+  proof-server:
+    image: midnight/proof-server:latest
+    build:
+      context: ..  # Build from midnight-ledger workspace root
+      dockerfile: tee-proof-server-proto/Dockerfile
+      platforms:
+        - linux/amd64
+        - linux/arm64
+    container_name: midnight-proof-server
+    ports:
+      - "6300:6300"
+    environment:
+      - RUST_LOG=info
+      - PROOF_SERVER_PORT=6300
+      - PROOF_SERVER_HOST=0.0.0.0
+      # Add any Midnight-specific environment variables here
+      - MIDNIGHT_NETWORK=preview
+    volumes:
+      # Persist proof server data
+      - proof-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:6300/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    # Resource limits (adjust based on your needs)
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+volumes:
+  proof-data:
+    driver: local

@@ -4,14 +4,19 @@
 
 use clap::Parser;
 use governor::{Quota, RateLimiter};
-use midnight_proof_server_prototype::{create_app, AppState, SecurityConfig};
+use midnight_proof_server_prototype::{create_app, AppState, SecurityConfig, PUBLIC_PARAMS};
 use midnight_proof_server_prototype::worker_pool::WorkerPool;
+use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
+use futures::future::join;
+use ledger::dust::DustResolver;
+use ledger::prove::Resolver;
 use std::net::SocketAddr;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use transient_crypto::proofs::{KeyLocation, Resolver as ResolverT};
 
 #[derive(Parser, Debug)]
 #[command(name = "midnight-proof-server")]
@@ -64,11 +69,41 @@ struct Args {
     /// Enable /fetch-params endpoint (for fetching ZSwap parameters)
     #[arg(long, env = "MIDNIGHT_PROOF_SERVER_ENABLE_FETCH_PARAMS")]
     enable_fetch_params: bool,
+
+    /// Skip pre-fetching ZSwap and Dust parameters at startup
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_NO_FETCH_PARAMS")]
+    no_fetch_params: bool,
+
+    /// Disable HTTPS/TLS (use plain HTTP instead)
+    /// WARNING: This is NOT RECOMMENDED for production!
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_DISABLE_TLS")]
+    disable_tls: bool,
+
+    /// Path to TLS certificate file (PEM format)
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_TLS_CERT", default_value = "certs/cert.pem")]
+    tls_cert: String,
+
+    /// Path to TLS private key file (PEM format)
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_TLS_KEY", default_value = "certs/key.pem")]
+    tls_key: String,
+
+    /// Generate self-signed certificate if cert files don't exist
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_AUTO_GENERATE_CERT")]
+    auto_generate_cert: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
+
+    // Install rustls crypto provider only if TLS is enabled
+    // This must be done before any TLS operations
+    let enable_tls = !args.disable_tls;
+    if enable_tls {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
+    }
 
     // Setup logging
     let log_level = if args.verbose {
@@ -97,6 +132,47 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     if args.disable_auth {
         warn!("WARNING: AUTHENTICATION DISABLED - This is DANGEROUS in production!");
+    }
+
+    // Pre-fetch ZSwap and Dust parameters (unless disabled)
+    if !args.no_fetch_params {
+        info!("Ensuring zswap key material is available...");
+        let resolver = Resolver::new(
+            PUBLIC_PARAMS.clone(),
+            DustResolver(
+                MidnightDataProvider::new(
+                    FetchMode::OnDemand,
+                    OutputMode::Log,
+                    ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+                )
+                .expect("data provider initialization failed"),
+            ),
+            Box::new(move |_: KeyLocation| Box::pin(std::future::ready(Ok(None)))),
+        );
+
+        // Pre-fetch k parameters (10-15) in parallel
+        let ks = futures::future::join_all((10..=15).map(|k| PUBLIC_PARAMS.0.fetch_k(k)));
+
+        // Pre-fetch all built-in keys in parallel
+        let keys = futures::future::join_all(
+            [
+                "midnight/zswap/spend",
+                "midnight/zswap/output",
+                "midnight/zswap/sign",
+                "midnight/dust/spend",
+            ]
+            .into_iter()
+            .map(|k| resolver.resolve_key(KeyLocation(k.into()))),
+        );
+
+        // Wait for all downloads to complete
+        let (ks, keys) = join(ks, keys).await;
+        ks.into_iter().collect::<Result<Vec<_>, _>>()?;
+        keys.into_iter().collect::<Result<Vec<_>, _>>()?;
+
+        info!("✓ ZSwap and Dust key material validated and cached");
+    } else {
+        info!("Skipping pre-fetch of parameters (--no-fetch-params enabled)");
     }
 
     // Parse API keys
@@ -177,10 +253,151 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("  POST /k              - Get security parameter");
     info!("");
 
-    // Start server
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app)
-        .await?;
+    // Start server with TLS or plain HTTP
+    if enable_tls {
+        info!("TLS/HTTPS enabled");
+
+        // Check if certificates exist
+        let certs_exist = midnight_proof_server_prototype::tls::check_cert_files(
+            &args.tls_cert,
+            &args.tls_key,
+        ).is_ok();
+
+        // Generate self-signed cert if needed
+        if !certs_exist {
+            if args.auto_generate_cert {
+                info!("Certificate files not found, generating self-signed certificate...");
+                midnight_proof_server_prototype::tls::generate_self_signed_cert(
+                    &args.tls_cert,
+                    &args.tls_key,
+                )?;
+            } else {
+                error!("TLS certificate files not found!");
+                error!("  Expected certificate: {}", args.tls_cert);
+                error!("  Expected private key: {}", args.tls_key);
+                error!("");
+                error!("Options:");
+                error!("  1. Generate self-signed certificate (testing only):");
+                error!("     cargo run --bin midnight-proof-server-prototype -- --auto-generate-cert");
+                error!("");
+                error!("  2. Use existing certificates:");
+                error!("     cargo run --bin midnight-proof-server-prototype -- --tls-cert /path/to/cert.pem --tls-key /path/to/key.pem");
+                error!("");
+                error!("  3. Disable TLS (NOT RECOMMENDED for production):");
+                error!("     cargo run --bin midnight-proof-server-prototype -- --enable-tls=false");
+                error!("");
+                return Err("TLS enabled but certificate files not found. See error message above for options.".into());
+            }
+        }
+
+        // Load TLS configuration
+        let tls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
+            &args.tls_cert,
+            &args.tls_key,
+        ).await?;
+
+        info!("Starting Midnight Proof Server v{} with HTTPS", env!("CARGO_PKG_VERSION"));
+        info!("Listening on: https://{}", addr);
+        info!("  Certificate: {}", args.tls_cert);
+        info!("  Private Key: {}", args.tls_key);
+
+        // Create shutdown handle for graceful shutdown
+        let handle = axum_server::Handle::new();
+
+        // Spawn graceful shutdown handler
+        tokio::spawn(shutdown_signal(handle.clone()));
+
+        // Start HTTPS server with graceful shutdown support
+        axum_server::bind_rustls(addr, tls_config)
+            .handle(handle)
+            .serve(app.into_make_service())
+            .await?;
+    } else {
+        warn!("⚠️  TLS/HTTPS is DISABLED - this is NOT RECOMMENDED for production!");
+        warn!("⚠️  Witness data and API keys will be transmitted in plaintext.");
+        info!("Starting Midnight Proof Server v{} with HTTP (insecure)", env!("CARGO_PKG_VERSION"));
+        info!("Listening on: http://{}", addr);
+
+        // Start plain HTTP server with graceful shutdown
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+        // Create graceful shutdown future
+        let shutdown_future = async {
+            use tokio::signal;
+
+            let ctrl_c = async {
+                signal::ctrl_c()
+                    .await
+                    .expect("Failed to install Ctrl+C signal handler");
+            };
+
+            #[cfg(unix)]
+            let terminate = async {
+                signal::unix::signal(signal::unix::SignalKind::terminate())
+                    .expect("Failed to install SIGTERM signal handler")
+                    .recv()
+                    .await;
+            };
+
+            #[cfg(not(unix))]
+            let terminate = std::future::pending::<()>();
+
+            tokio::select! {
+                _ = ctrl_c => {
+                    info!("📡 Received Ctrl+C signal (HTTP mode)");
+                },
+                _ = terminate => {
+                    info!("📡 Received SIGTERM signal (HTTP mode)");
+                },
+            }
+
+            info!("🛑 Initiating graceful shutdown (HTTP mode)...");
+        };
+
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_future)
+            .await?;
+    }
 
     Ok(())
+}
+
+/// Graceful shutdown signal handler
+///
+/// Listens for SIGTERM (on Unix) or Ctrl+C and initiates graceful shutdown
+/// with a 30-second timeout for active connections to complete.
+async fn shutdown_signal(handle: axum_server::Handle<SocketAddr>) {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("Failed to install Ctrl+C signal handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("Failed to install SIGTERM signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("📡 Received Ctrl+C signal");
+        },
+        _ = terminate => {
+            info!("📡 Received SIGTERM signal");
+        },
+    }
+
+    info!("🛑 Initiating graceful shutdown...");
+    info!("   Waiting up to 30 seconds for active connections to complete");
+
+    // Graceful shutdown with 30 second timeout
+    handle.graceful_shutdown(Some(std::time::Duration::from_secs(30)));
 }

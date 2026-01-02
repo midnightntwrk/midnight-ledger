@@ -81,8 +81,22 @@ aws configure
 aws sts get-caller-identity
 
 # Install Nitro CLI (on your local machine for testing)
-brew tap aws/tap
-brew install aws-nitro-enclaves-cli
+From Source (macOS or Linux)
+# Clone the repository:
+bash
+git clone https://github.com/aws/aws-nitro-enclaves-cli.git
+cd aws-nitro-enclaves-cli/
+
+Clone the repository:
+cd aws-nitro-enclaves-cli/
+
+Build and Install
+make nitro-cli && make vsock-proxy && make install
+
+Source the environment script (after installation or reboot):
+source ${NITRO_CLI_INSTALL_DIR}/etc/profile.d/nitro-cli-env.sh
+
+For detailed instructions and prerequisites, refer to the official Install the Nitro Enclaves CLI on Linux documentation or the GitHub repository. Note that some features, like running enclaves, still require a compatible EC2 parent instance. 
 ```
 
 ### 3. Required Files

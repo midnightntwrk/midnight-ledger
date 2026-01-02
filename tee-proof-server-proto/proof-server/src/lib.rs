@@ -6,6 +6,7 @@
 #![deny(warnings)]
 
 mod attestation;
+pub mod tls;
 
 use attestation::attestation_handler;
 use axum::{
@@ -23,6 +24,7 @@ use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use sysinfo::System;
 use tokio::sync::Mutex;
 use tower_http::{
     cors::CorsLayer,
@@ -75,6 +77,27 @@ type TransactionProvePayload<S> = (
     Transaction<S, ProofPreimageMarker, PedersenRandomness, InMemoryDB>,
     HashMap<String, ProvingKeyMaterial>,
 );
+
+// ============================================================================
+// Memory Tracking
+// ============================================================================
+
+/// Helper function to get current process memory usage in bytes
+fn get_memory_usage() -> Option<u64> {
+    use sysinfo::ProcessesToUpdate;
+
+    let pid = sysinfo::get_current_pid().ok()?;
+    let mut system = System::new();
+
+    // Refresh the specific process (API changed in sysinfo 0.33+)
+    let updated = system.refresh_processes(ProcessesToUpdate::Some(&[pid]), false);
+    if updated == 0 {
+        tracing::warn!("Failed to refresh process info for PID {:?}", pid);
+        return None;
+    }
+
+    system.process(pid).map(|process| process.memory())
+}
 
 // ============================================================================
 // Configuration
@@ -409,7 +432,7 @@ async fn prove_handler(
     let request_start = Instant::now();
     let payload_size = body.len();
 
-    info!("🔵 Prove request received");
+    info!("Prove request received");
     info!("   Payload size: {} bytes ({:.2} KB)", payload_size, payload_size as f64 / 1024.0);
 
     // Get queue stats before submission (only if debug logging is enabled)
@@ -435,6 +458,11 @@ async fn prove_handler(
                 ) = tagged_deserialize(&body_clone[..])
                     .map_err(|e| WorkError::BadInput(e.to_string()))?;
 
+                // Log proof type if debug logging is enabled
+                if tracing::enabled!(tracing::Level::DEBUG) {
+                    tracing::debug!("   Proof type: {}", ppi.key_location().0);
+                }
+
                 let resolver = Resolver::new(
                     PUBLIC_PARAMS.clone(),
                     DustResolver(
@@ -449,6 +477,9 @@ async fn prove_handler(
                         Box::pin(std::future::ready(Ok(data.clone())))
                     }),
                 );
+
+                // Track memory before proof generation
+                let mem_before = get_memory_usage();
 
                 let proof = match ppi {
                     ProofPreimageVersioned::V1(ppi) => {
@@ -467,12 +498,31 @@ async fn prove_handler(
                     _ => unreachable!(),
                 };
 
+                // Track memory after proof generation
+                let mem_after = get_memory_usage();
+
                 let mut response = Vec::new();
                 tagged_serialize(&proof, &mut response)
                     .map_err(|e| WorkError::InternalError(e.to_string()))?;
 
                 let proof_elapsed = proof_start.elapsed();
-                tracing::info!("   ⏱️  Proof generation completed in {:.3}s", proof_elapsed.as_secs_f64());
+
+                tracing::info!("   Proof generation completed in {:.3}s", proof_elapsed.as_secs_f64());
+
+                // Calculate memory delta and log
+                match (mem_before, mem_after) {
+                    (Some(before), Some(after)) => {
+                        let delta = after as i64 - before as i64;
+                        let delta_mb = delta as f64 / 1_048_576.0;
+                        tracing::info!("   Memory delta: {:+.2} MB (before: {:.2} MB, after: {:.2} MB)",
+                                delta_mb,
+                                before as f64 / 1_048_576.0,
+                                after as f64 / 1_048_576.0);
+                    }
+                    _ => {
+                        tracing::info!("   Memory tracking unavailable");
+                    }
+                };
                 tracing::debug!("   Proof response size: {} bytes ({:.2} KB)", response.len(), response.len() as f64 / 1024.0);
 
                 Ok(response)
@@ -487,7 +537,7 @@ async fn prove_handler(
     let result = JobStatus::wait_for_success(&updates).await?;
 
     let total_elapsed = request_start.elapsed();
-    info!("✅ Prove request completed in {:.3}s", total_elapsed.as_secs_f64());
+    info!("Prove request completed in {:.3}s", total_elapsed.as_secs_f64());
     info!("   Response size: {} bytes ({:.2} KB)", result.len(), result.len() as f64 / 1024.0);
 
     Ok((StatusCode::OK, result).into_response())
@@ -498,12 +548,14 @@ async fn prove_tx_handler(
     State(state): State<AppState>,
     body: Bytes,
 ) -> Result<Response, AppError> {
+    let request_start = Instant::now();
     info!("Prove-tx request received, payload size: {} bytes", body.len());
 
     // Submit work to pool
     let (_id, updates) = state
         .worker_pool
         .submit_and_subscribe(move |handle| {
+            let proof_start = Instant::now();
             handle.block_on(async move {
                 let (tx, keys): TransactionProvePayload<Signature> =
                     tagged_deserialize(&body[..])
@@ -532,16 +584,41 @@ async fn prove_tx_handler(
                     resolver: &resolver,
                 };
 
-                let mut response = Vec::new();
+                // Track memory before proof generation
+                let mem_before = get_memory_usage();
+
                 // NOTE: The initial cost model here is part of why this is deprecated!
                 // Use /prove instead!
-                tagged_serialize(
-                    &tx.prove(provider, &INITIAL_TRANSACTION_COST_MODEL.runtime_cost_model)
-                        .await
-                        .map_err(|e| WorkError::BadInput(e.to_string()))?,
-                    &mut response,
-                )
-                .map_err(|e| WorkError::InternalError(e.to_string()))?;
+                let proven_tx = tx.prove(provider, &INITIAL_TRANSACTION_COST_MODEL.runtime_cost_model)
+                    .await
+                    .map_err(|e| WorkError::BadInput(e.to_string()))?;
+
+                // Track memory after proof generation
+                let mem_after = get_memory_usage();
+
+                let mut response = Vec::new();
+                tagged_serialize(&proven_tx, &mut response)
+                    .map_err(|e| WorkError::InternalError(e.to_string()))?;
+
+                let proof_elapsed = proof_start.elapsed();
+
+                tracing::info!("   Transaction proof generation completed in {:.3}s", proof_elapsed.as_secs_f64());
+
+                // Calculate memory delta and log
+                match (mem_before, mem_after) {
+                    (Some(before), Some(after)) => {
+                        let delta = after as i64 - before as i64;
+                        let delta_mb = delta as f64 / 1_048_576.0;
+                        tracing::info!("   Memory delta: {:+.2} MB (before: {:.2} MB, after: {:.2} MB)",
+                                delta_mb,
+                                before as f64 / 1_048_576.0,
+                                after as f64 / 1_048_576.0);
+                    }
+                    _ => {
+                        tracing::info!("   Memory tracking unavailable");
+                    }
+                };
+
                 Ok(response)
             })
         })
@@ -549,6 +626,9 @@ async fn prove_tx_handler(
 
     // Wait for result
     let result = JobStatus::wait_for_success(&updates).await?;
+
+    let total_elapsed = request_start.elapsed();
+    info!("Prove-tx request completed in {:.3}s", total_elapsed.as_secs_f64());
 
     Ok((StatusCode::OK, result).into_response())
 }
