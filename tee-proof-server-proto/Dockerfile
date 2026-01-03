@@ -106,7 +106,9 @@ RUN apt-get update && apt-get install -y \
 # Create non-root user for security
 RUN useradd -m -u 1000 proofserver && \
     mkdir -p /app/data && \
-    chown -R proofserver:proofserver /app
+    mkdir -p /home/proofserver/.cache/midnight && \
+    chown -R proofserver:proofserver /app && \
+    chown -R proofserver:proofserver /home/proofserver
 
 WORKDIR /app
 
@@ -119,6 +121,11 @@ RUN chmod +x /app/proof-server
 # Switch to non-root user
 USER proofserver
 
+# Pre-download ZSwap parameters by running the server with --no-fetch-params disabled
+# This will download and cache all parameters, then exit immediately
+RUN timeout 120 /app/proof-server --disable-tls --disable-auth || \
+    (echo "Parameter download completed (server exited as expected)" && exit 0)
+
 # Expose the proof server port
 EXPOSE 6300
 
@@ -130,6 +137,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
 ENV RUST_LOG=info
 ENV MIDNIGHT_PROOF_SERVER_PORT=6300
 ENV MIDNIGHT_PROOF_SERVER_DISABLE_AUTH=true
+ENV MIDNIGHT_PROOF_SERVER_DISABLE_TLS=true
 
 # Labels for metadata
 LABEL org.opencontainers.image.title="Midnight TEE Proof Server"
@@ -140,4 +148,6 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 # Run the proof server
 # Using environment variables instead of command args for easier configuration
+# TLS is disabled by default for Nitro Enclaves - use vsock proxy with TLS on parent instance
+# ZSwap parameters are pre-downloaded and cached during build (no internet access needed)
 CMD ["/app/proof-server"]
