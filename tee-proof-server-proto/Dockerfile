@@ -106,9 +106,8 @@ RUN apt-get update && apt-get install -y \
 # Create non-root user for security
 RUN useradd -m -u 1000 proofserver && \
     mkdir -p /app/data && \
-    mkdir -p /home/proofserver/.cache/midnight && \
-    chown -R proofserver:proofserver /app && \
-    chown -R proofserver:proofserver /home/proofserver
+    mkdir -p /app/.cache/midnight && \
+    chown -R proofserver:proofserver /app
 
 WORKDIR /app
 
@@ -121,6 +120,9 @@ RUN chmod +x /app/proof-server
 # Switch to non-root user
 USER proofserver
 
+# Set HOME to /app so cache goes to /app/.cache
+ENV HOME=/app
+
 # Pre-download ZSwap parameters by running the server briefly
 # The server will download all parameters during startup, then we kill it after 30 seconds
 # This is faster than waiting for timeout and ensures parameters are cached
@@ -128,7 +130,8 @@ RUN /app/proof-server --disable-tls --disable-auth & \
     SERVER_PID=$! && \
     sleep 30 && \
     kill $SERVER_PID || true && \
-    echo "✓ ZSwap parameters pre-downloaded and cached"
+    echo "✓ ZSwap parameters pre-downloaded and cached" && \
+    ls -la /app/.cache/midnight/ || echo "Cache directory check failed"
 
 # Expose the proof server port
 EXPOSE 6300
@@ -152,5 +155,5 @@ LABEL org.opencontainers.image.licenses="Apache-2.0"
 # Run the proof server
 # Using environment variables instead of command args for easier configuration
 # TLS is disabled by default for Nitro Enclaves - use vsock proxy with TLS on parent instance
-# ZSwap parameters are pre-downloaded and cached during build (no internet access needed)
-CMD ["/app/proof-server"]
+# Skip parameter fetching at startup (--no-fetch-params) since enclave has no internet
+CMD ["/app/proof-server", "--no-fetch-params"]
