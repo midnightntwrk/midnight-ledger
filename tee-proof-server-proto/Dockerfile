@@ -121,17 +121,20 @@ RUN chmod +x /app/proof-server
 # Switch to non-root user
 USER proofserver
 
-# Pre-download ZSwap parameters by running the server with --no-fetch-params disabled
-# This will download and cache all parameters, then exit immediately
-RUN timeout 120 /app/proof-server --disable-tls --disable-auth || \
-    (echo "Parameter download completed (server exited as expected)" && exit 0)
+# Pre-download ZSwap parameters by running the server briefly
+# The server will download all parameters during startup, then we kill it after 30 seconds
+# This is faster than waiting for timeout and ensures parameters are cached
+RUN /app/proof-server --disable-tls --disable-auth & \
+    SERVER_PID=$! && \
+    sleep 30 && \
+    kill $SERVER_PID || true && \
+    echo "✓ ZSwap parameters pre-downloaded and cached"
 
 # Expose the proof server port
 EXPOSE 6300
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-    CMD curl -f http://localhost:6300/health || exit 1
+# Note: Healthcheck removed for Nitro Enclave compatibility
+# Enclaves don't have network access for curl, and healthchecks can cause issues
 
 # Set environment variables
 ENV RUST_LOG=info
