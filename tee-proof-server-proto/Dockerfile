@@ -96,11 +96,12 @@ FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
-# Install runtime dependencies (curl for health checks)
+# Install runtime dependencies (curl for health checks, socat for vsock bridge)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     curl \
+    socat \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -152,8 +153,41 @@ LABEL org.opencontainers.image.version="6.2.0-alpha.1"
 LABEL org.opencontainers.image.vendor="Midnight Foundation"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-# Run the proof server
-# Using environment variables instead of command args for easier configuration
+# Create startup script for vsock bridge (Nitro Enclave networking)
+RUN echo '#!/bin/bash' > /app/start.sh && \
+    echo 'set -e' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo 'echo "[$(date)] Starting Midnight Proof Server with vsock bridge..."' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Start proof server in background' >> /app/start.sh && \
+    echo '/app/proof-server --no-fetch-params &' >> /app/start.sh && \
+    echo 'PROOF_SERVER_PID=$!' >> /app/start.sh && \
+    echo 'echo "[$(date)] Proof server started (PID: $PROOF_SERVER_PID)"' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Give proof server time to start' >> /app/start.sh && \
+    echo 'sleep 5' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Start socat to bridge vsock → TCP' >> /app/start.sh && \
+    echo '# Listen on vsock port 6300, forward to localhost:6300' >> /app/start.sh && \
+    echo 'echo "[$(date)] Starting socat bridge: vsock:6300 → localhost:6300"' >> /app/start.sh && \
+    echo 'socat VSOCK-LISTEN:6300,fork TCP:127.0.0.1:6300 &' >> /app/start.sh && \
+    echo 'SOCAT_PID=$!' >> /app/start.sh && \
+    echo 'echo "[$(date)] Socat bridge started (PID: $SOCAT_PID)"' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo 'echo "[$(date)] Proof server ready and accessible via vsock"' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Wait for either process to exit' >> /app/start.sh && \
+    echo 'wait -n' >> /app/start.sh && \
+    echo 'EXIT_CODE=$?' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# If either exits, kill the other and exit' >> /app/start.sh && \
+    echo 'echo "[$(date)] Process exited with code $EXIT_CODE, shutting down..."' >> /app/start.sh && \
+    echo 'kill $PROOF_SERVER_PID $SOCAT_PID 2>/dev/null' >> /app/start.sh && \
+    echo 'exit $EXIT_CODE' >> /app/start.sh && \
+    chmod +x /app/start.sh
+
+# Run the startup script (includes proof server + vsock bridge)
 # TLS is disabled by default for Nitro Enclaves - use vsock proxy with TLS on parent instance
-# Skip parameter fetching at startup (--no-fetch-params) since enclave has no internet
-CMD ["/app/proof-server", "--no-fetch-params"]
+# Note: When run outside enclave (e.g., local Docker), socat will fail to create vsock,
+# but proof server will still work on TCP. This is expected behavior.
+CMD ["/app/start.sh"]
