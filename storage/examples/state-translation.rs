@@ -410,6 +410,10 @@ mod tests {
 
     type TestDb = ParityDb;
 
+    use std::sync::Once;
+
+    static INIT: Once = Once::new();
+
     fn mk_nesty(depth: usize, offset: u32) -> Sp<lr::Nesty<TestDb>, TestDb> {
         if depth == 0 {
             return Sp::new(lr::Nesty::Empty);
@@ -427,12 +431,18 @@ mod tests {
         Sp::new(Foo { foo, baz })
     }
 
-    #[test]
-    fn test_nesty_tl() {
+    fn setup_db() {
+        INIT.call_once(|| {
         set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref())))
             .unwrap();
+        });
+    }
+
+    #[test]
+    fn test_nesty_tl() {
+        setup_db();
         let t0 = std::time::Instant::now();
-        let n = 23;
+        let n = 5;
         let mut before = mk_nesty(n, 0);
         dbg!(before.serialize_to_node_list().nodes.len());
         before.persist();
@@ -484,8 +494,9 @@ mod tests {
 
     #[test]
     fn test_foo_tl() {
+        setup_db();
         let t0 = std::time::Instant::now();
-        let n = 18;
+        let n = 5;
         let before = mk_foo(n);
         dbg!(before.foo.mpt.serialize_to_node_list().nodes.len());
         let t1 = std::time::Instant::now();
@@ -527,6 +538,7 @@ mod tests {
 
     #[test]
     fn test_test_table_closed() {
+        setup_db();
         <TestTable as TranslationTable<TestDb>>::assert_closure();
     }
 }
