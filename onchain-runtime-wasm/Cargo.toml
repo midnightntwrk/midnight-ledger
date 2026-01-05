@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-runtime-wasm"
-version = "2.0.0-alpha.1"
+version = "2.0.0-alpha.1-hard-fork-test"
 edition = "2024"
 license.workspace = true
 
