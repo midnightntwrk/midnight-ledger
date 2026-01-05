@@ -433,7 +433,9 @@ mod tests {
 
     fn setup_db() {
         INIT.call_once(|| {
-        set_default_storage::<TestDb>(|| Storage::new(1024, ParityDb::open("test-db".as_ref())))
+            set_default_storage::<TestDb>(|| {
+                Storage::new(1024, ParityDb::open("test-db".as_ref()))
+            })
             .unwrap();
         });
     }
