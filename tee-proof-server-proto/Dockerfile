@@ -96,12 +96,13 @@ FROM debian:bookworm-slim
 
 ARG TARGETARCH
 
-# Install runtime dependencies (curl for health checks, socat for vsock bridge)
+# Install runtime dependencies (curl for health checks, socat for vsock bridge, iproute2 for network setup)
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
     curl \
     socat \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user for security
@@ -118,8 +119,8 @@ COPY --from=builder --chown=proofserver:proofserver /workspace/proof-server-bina
 # Set permissions
 RUN chmod +x /app/proof-server
 
-# Switch to non-root user
-USER proofserver
+# Don't switch to non-root user yet - the startup script needs root for network setup
+# USER proofserver
 
 # Set HOME to /app so cache goes to /app/.cache
 ENV HOME=/app
@@ -158,6 +159,13 @@ RUN echo '#!/bin/bash' > /app/start.sh && \
     echo 'set -e' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo 'echo "[$(date)] Starting Midnight Proof Server with vsock bridge..."' >> /app/start.sh && \
+    echo '' >> /app/start.sh && \
+    echo '# Configure loopback interface (required in Nitro Enclave)' >> /app/start.sh && \
+    echo 'if ! ip addr show lo | grep -q "127.0.0.1"; then' >> /app/start.sh && \
+    echo '    echo "[$(date)] Configuring loopback interface..."' >> /app/start.sh && \
+    echo '    ip addr add 127.0.0.1/8 dev lo 2>/dev/null || true' >> /app/start.sh && \
+    echo '    ip link set lo up 2>/dev/null || true' >> /app/start.sh && \
+    echo 'fi' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo '# Start proof server in background (bind to localhost only for vsock bridge)' >> /app/start.sh && \
     echo '/app/proof-server --bind 127.0.0.1 --no-fetch-params &' >> /app/start.sh && \
