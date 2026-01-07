@@ -12,29 +12,73 @@
 // limitations under the License.
 
 import {
+  type AlignedValue,
+  bigIntToValue,
+  type Bindingish,
+  ChargedState,
+  ClaimRewardsTransaction,
+  communicationCommitmentRandomness,
+  type ContractAddress,
+  ContractCall,
   ContractDeploy,
+  ContractMaintenanceAuthority,
+  ContractOperation,
   ContractState,
+  createShieldedCoinInfo,
+  encodeContractAddress,
+  encodeShieldedCoinInfo,
   Intent,
   type IntentHash,
   LedgerState,
+  PrePartitionContractCall,
+  PreTranscript,
+  type Proofish,
+  QueryContext,
+  runtimeCoinCommitment,
   sampleIntentHash,
   sampleSigningKey,
   sampleUserAddress,
+  type SegmentSpecifier,
+  type ShieldedCoinInfo,
   type SignatureEnabled,
+  SignatureErased,
   signatureVerifyingKey,
+  type Signaturish,
   signData,
+  StateValue,
   Transaction,
   UnshieldedOffer,
   WellFormedStrictness,
   ZswapChainState,
-  ClaimRewardsTransaction,
-  SignatureErased
+  ZswapOffer,
+  ZswapOutput
 } from '@midnight-ntwrk/ledger';
-import { LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
-import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
+import {
+  INITIAL_NIGHT_AMOUNT,
+  LOCAL_TEST_NETWORK_ID,
+  Random,
+  type ShieldedTokenType,
+  Static,
+  TestResource
+} from '@/test-objects';
+import { assertSerializationSuccess, mapFindByKey, plus1Hour, testIntents } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
+import { TestState } from '@/test/utils/TestState';
+import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, EMPTY_VALUE, ONE_VALUE } from '@/test/utils/value-alignment';
+import {
+  cellRead,
+  cellWrite,
+  getKey,
+  kernelClaimZswapCoinReceive,
+  kernelSelf,
+  programWithResults
+} from '@/test/utils/onchain-runtime-program-fragments';
 
 describe('Ledger API - Transaction', () => {
+  const STORE = 'store';
+  const FIRST_SEGMENT_SPECIFIER: SegmentSpecifier = { tag: 'first' };
+  const SPECIFIC_VALUE_SPECIFIER: SegmentSpecifier = { tag: 'specific', value: 2 };
+  const GUARANTEED_ONLY_SPECIFIER: SegmentSpecifier = { tag: 'guaranteedOnly' };
   const TTL = new Date();
   /**
    * Test creating unproven transaction from guaranteed offer.
@@ -44,7 +88,7 @@ describe('Ledger API - Transaction', () => {
    * @then Should create transaction with correct guaranteed offer properties
    */
   test('should create unproven transaction from guaranteed UnprovenOffer', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
     expect(unprovenTransaction.fallibleOffer?.get(1)?.outputs).toBeUndefined();
     expect(unprovenTransaction.guaranteedOffer?.outputs).toHaveLength(1);
@@ -71,7 +115,7 @@ describe('Ledger API - Transaction', () => {
    */
   test('should create unproven transaction from guaranteed and fallible unproven outputs', () => {
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(),
       Static.unprovenOfferFromOutput()
     );
@@ -103,7 +147,7 @@ describe('Ledger API - Transaction', () => {
     const unprovenOfferGuaranteed = Static.unprovenOfferFromOutput();
     const unprovenOfferFallible = Static.unprovenOfferFromOutput(1);
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       unprovenOfferGuaranteed,
       unprovenOfferFallible,
       intent
@@ -123,7 +167,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('should create transaction with undefined fallible and empty contract call', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, Intent.new(TTL));
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, Intent.new(TTL));
 
     expect(unprovenTransaction.guaranteedOffer).toBeUndefined();
     expect(unprovenTransaction.intents?.size).toEqual(1);
@@ -140,7 +184,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('should create transaction with undefined fallible and contract calls', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, undefined);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, undefined);
 
     expect(unprovenTransaction.guaranteedOffer).toBeUndefined();
     expect(unprovenTransaction.intents).toBeUndefined();
@@ -161,7 +205,7 @@ describe('Ledger API - Transaction', () => {
    * @then Should throw error about non-disjoint coin sets
    */
   test('should not merge with itself', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
     expect(() => unprovenTransaction.merge(unprovenTransaction)).toThrow('attempted to merge non-disjoint coin sets');
   });
 
@@ -175,9 +219,12 @@ describe('Ledger API - Transaction', () => {
   test('should merge two transactions', () => {
     const tokenType = Random.shieldedTokenType();
     const tokenType2 = Random.shieldedTokenType();
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 1n));
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      Static.unprovenOfferFromOutput(0, tokenType, 1n)
+    );
     const unprovenTransaction2 = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(0, tokenType2, 10n)
     );
     const merged = unprovenTransaction.merge(unprovenTransaction2);
@@ -194,9 +241,12 @@ describe('Ledger API - Transaction', () => {
 
   test('merge - should merge two transactions, one with fallible', () => {
     const tokenType = Random.shieldedTokenType();
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 1n));
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      Static.unprovenOfferFromOutput(0, tokenType, 1n)
+    );
     const unprovenTransaction2 = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(0, tokenType, 10n),
       Static.unprovenOfferFromOutput(1, tokenType, 100n)
     );
@@ -216,9 +266,12 @@ describe('Ledger API - Transaction', () => {
     const tokenType = Random.shieldedTokenType();
     const tokenType2 = Random.shieldedTokenType();
     const tokenType3 = Random.shieldedTokenType();
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput(0, tokenType, 1n));
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      Static.unprovenOfferFromOutput(0, tokenType, 1n)
+    );
     const unprovenTransaction2 = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       Static.unprovenOfferFromOutput(0, tokenType2, 10n),
       Static.unprovenOfferFromOutput(1, tokenType3, 100n)
     );
@@ -253,7 +306,7 @@ describe('Ledger API - Transaction', () => {
     const unprovenOfferGuaranteed = Static.unprovenOfferFromOutput();
     const unprovenOfferFallible = Static.unprovenOfferFromOutput(1);
     const unprovenTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       unprovenOfferGuaranteed,
       unprovenOfferFallible,
       intent
@@ -314,7 +367,7 @@ describe('Ledger API - Transaction', () => {
     intent.guaranteedUnshieldedOffer = offer1;
     intent.fallibleUnshieldedOffer = offer2;
 
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
     expect(unprovenTransaction.fallibleOffer).toBeUndefined();
     expect(unprovenTransaction.guaranteedOffer).toBeUndefined();
@@ -330,7 +383,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('should create unproven transaction with empty guaranteed and fallible unproven outputs', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined);
 
     expect(unprovenTransaction.fallibleOffer?.get(1)?.outputs).toBeUndefined();
     expect(unprovenTransaction.guaranteedOffer?.outputs).toBeUndefined();
@@ -346,7 +399,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('should create unproven transaction with empty guaranteed, fallible, and contract calls', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, Intent.new(TTL));
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, Intent.new(TTL));
 
     expect(unprovenTransaction.fallibleOffer?.get(1)?.outputs).toBeUndefined();
     expect(unprovenTransaction.guaranteedOffer?.outputs).toBeUndefined();
@@ -362,7 +415,12 @@ describe('Ledger API - Transaction', () => {
   });
 
   it('should fail wellFormed check against different network', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, Intent.new(new Date()));
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      undefined,
+      undefined,
+      Intent.new(new Date())
+    );
     const wellFormedStrictness = new WellFormedStrictness();
     wellFormedStrictness.enforceBalancing = false;
     expect(() =>
@@ -375,18 +433,22 @@ describe('Ledger API - Transaction', () => {
   });
 
   it('should pass wellFormed check if has only intent', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, Intent.new(TTL));
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, Intent.new(TTL));
     const wellFormedStrictness = new WellFormedStrictness();
     wellFormedStrictness.enforceBalancing = false;
     expect(() =>
-      unprovenTransaction.wellFormed(new LedgerState('local-test', new ZswapChainState()), wellFormedStrictness, TTL)
+      unprovenTransaction.wellFormed(
+        new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState()),
+        wellFormedStrictness,
+        TTL
+      )
     ).not.toThrow();
   });
 
   test('should not allow intent with bind called on it', () => {
     expect(() =>
       Transaction.fromParts(
-        'local-test',
+        LOCAL_TEST_NETWORK_ID,
         undefined,
         undefined,
         // @ts-expect-error lets check if it throws
@@ -485,7 +547,7 @@ describe('Ledger API - Transaction', () => {
     const fallibleOffer = Static.unprovenOfferFromOutput(1, shieldedToken3, 75n);
 
     const complexTransaction = Transaction.fromParts(
-      'local-test',
+      LOCAL_TEST_NETWORK_ID,
       guaranteedOffer.merge(guaranteedOffer2),
       fallibleOffer,
       intent
@@ -532,8 +594,8 @@ describe('Ledger API - Transaction', () => {
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(TTL).addDeploy(contractDeploy);
 
-    const transaction1 = Transaction.fromPartsRandomized('local-test', guaranteedOffer, fallibleOffer, intent);
-    const transaction2 = Transaction.fromPartsRandomized('local-test', guaranteedOffer, fallibleOffer, intent);
+    const transaction1 = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer, intent);
+    const transaction2 = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer, intent);
 
     // The segment IDs should be randomized, allowing for merging
     expect(transaction1.toString()).not.toEqual(transaction2.toString());
@@ -567,7 +629,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('bind - should enforce binding for transaction', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
     const boundTransaction = unprovenTransaction.bind();
 
@@ -582,7 +644,7 @@ describe('Ledger API - Transaction', () => {
   });
 
   test('bindingRandomness - should have binding randomness property', () => {
-    const unprovenTransaction = Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, Static.unprovenOfferFromOutput());
 
     expect(typeof unprovenTransaction.bindingRandomness).toBe('bigint');
     expect(unprovenTransaction.bindingRandomness).toBeGreaterThanOrEqual(0n);
@@ -590,7 +652,7 @@ describe('Ledger API - Transaction', () => {
 
   test('guaranteedOffer - should provide access to guaranteed offer', () => {
     const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-    const transaction = Transaction.fromParts('local-test', guaranteedOffer);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer);
 
     expect(transaction.guaranteedOffer).toBeDefined();
     expect(transaction.guaranteedOffer?.outputs).toHaveLength(1);
@@ -604,7 +666,7 @@ describe('Ledger API - Transaction', () => {
 
   test('guaranteedOffer - should throw when modifying bound transaction', () => {
     const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-    const transaction = Transaction.fromParts('local-test', guaranteedOffer);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer);
     const boundTransaction = transaction.bind();
 
     expect(() => {
@@ -615,7 +677,7 @@ describe('Ledger API - Transaction', () => {
   test('fallibleOffer - should provide access to fallible offer', () => {
     const guaranteedOffer = Static.unprovenOfferFromOutput(0);
     const fallibleOffer = Static.unprovenOfferFromOutput(1);
-    const transaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer);
 
     expect(transaction.fallibleOffer).toBeDefined();
     expect(transaction.fallibleOffer?.size).toEqual(1);
@@ -632,7 +694,7 @@ describe('Ledger API - Transaction', () => {
   test('fallibleOffer - should throw when modifying bound transaction', () => {
     const guaranteedOffer = Static.unprovenOfferFromOutput(0);
     const fallibleOffer = Static.unprovenOfferFromOutput(1);
-    const transaction = Transaction.fromParts('local-test', guaranteedOffer, fallibleOffer);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer);
     const boundTransaction = transaction.bind();
 
     expect(() => {
@@ -646,7 +708,7 @@ describe('Ledger API - Transaction', () => {
     const contractState = new ContractState();
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(TTL).addDeploy(contractDeploy);
-    const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
     expect(transaction.intents).toBeDefined();
     expect(transaction.intents?.size).toEqual(1);
@@ -664,7 +726,7 @@ describe('Ledger API - Transaction', () => {
     const contractState = new ContractState();
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(TTL).addDeploy(contractDeploy);
-    const transaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const transaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const boundTransaction = transaction.bind();
 
     expect(() => {
@@ -674,4 +736,636 @@ describe('Ledger API - Transaction', () => {
       boundTransaction.intents = newIntents;
     }).toThrow('Transaction is already bound.');
   });
+
+  test('addCalls - for first segment specifier', () => {
+    testSpecificSegment(FIRST_SEGMENT_SPECIFIER, 1);
+  });
+
+  test('addCalls - for guaranteedOnly segment specifier', () => {
+    testSpecificSegment(GUARANTEED_ONLY_SPECIFIER);
+  });
+
+  test('addCalls - for random segment specifier', () => {
+    const segment: SegmentSpecifier = { tag: 'random' };
+    testSpecificSegment(segment);
+  });
+
+  test('addCalls - for specific segment specifier with min value', () => {
+    const minSpecificValue = 1;
+    const segment: SegmentSpecifier = { tag: 'specific', value: minSpecificValue };
+    testSpecificSegment(segment, minSpecificValue);
+  });
+
+  test('addCalls - for specific segment specifier with max value', () => {
+    const maxSpecificValue = 65535;
+    const segment: SegmentSpecifier = { tag: 'specific', value: maxSpecificValue };
+    testSpecificSegment(segment, maxSpecificValue);
+  });
+
+  test('addCalls - throws for specific segment specifier with 0 value', () => {
+    const invalidSpecificValue = 0;
+    const segment: SegmentSpecifier = { tag: 'specific', value: invalidSpecificValue };
+    expect(() => testSpecificSegment(segment)).toThrow('illegal manual specification of segment 0');
+  });
+
+  test('addCalls - throws for specific segment specifier when value is above u16', () => {
+    const invalidSpecificValue = 65536;
+    const segment: SegmentSpecifier = { tag: 'specific', value: invalidSpecificValue };
+    expect(() => testSpecificSegment(segment)).toThrow(
+      `Error: invalid value: integer \`${invalidSpecificValue}\`, expected u16`
+    );
+  });
+
+  test('addCalls - works correctly on signature-erased transaction', () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    let erased = Transaction.fromParts(LOCAL_TEST_NETWORK_ID).eraseSignatures();
+    erased = erased.addCalls(FIRST_SEGMENT_SPECIFIER, [], state.ledger.parameters, ttl, [], [], []);
+    expect(erased.intents!.size).toBe(1);
+  });
+
+  test('addCalls - works correctly on multiple addCalls', () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID)
+      .addCalls(FIRST_SEGMENT_SPECIFIER, [], state.ledger.parameters, ttl, [], [], [])
+      .addCalls(SPECIFIC_VALUE_SPECIFIER, [], state.ledger.parameters, ttl, [], [], []);
+
+    expect(tx.intents!.size).toBe(2);
+  });
+
+  test('addCalls - throws on proof-erased transaction', () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    const erased = Transaction.fromParts(LOCAL_TEST_NETWORK_ID).eraseProofs();
+
+    expect(() => erased.addCalls(FIRST_SEGMENT_SPECIFIER, [], state.ledger.parameters, ttl, [], [], [])).toThrow(
+      'Cannot add calls to proof-erased transaction.'
+    );
+  });
+
+  test('addCalls - throws on mockProve() transaction', () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    const proved = Transaction.fromParts(LOCAL_TEST_NETWORK_ID).mockProve();
+
+    expect(() => proved.addCalls(FIRST_SEGMENT_SPECIFIER, [], state.ledger.parameters, ttl, [], [], [])).toThrow(
+      'Cannot add calls to bound transaction.'
+    );
+  });
+
+  test('addCalls - throws on bounded transaction', () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    const bounded = Transaction.fromParts(LOCAL_TEST_NETWORK_ID).bind();
+
+    expect(() => bounded.addCalls(FIRST_SEGMENT_SPECIFIER, [], state.ledger.parameters, ttl, [], [], [])).toThrow(
+      'Cannot add calls to bound transaction.'
+    );
+  });
+
+  test('addCalls - throws on wellFormed when contract-owned output exists but call does not claim receive', () => {
+    const { state, addr, encodedAddr, op, token, unbalancedStrictness } = setup();
+
+    const { preCall, zswapOutput } = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: false
+    });
+
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(FIRST_SEGMENT_SPECIFIER, [preCall], state.ledger.parameters, ttl, [], [zswapOutput], []);
+
+    expect(() => tx.wellFormed(state.ledger, unbalancedStrictness, state.time)).toThrow(
+      'all contract-associated commitments must be claimed'
+    );
+  });
+
+  test('addCalls - throws on wellFormed when call claims receive but no contract-owned output exists', () => {
+    const { state, addr, encodedAddr, op, token, unbalancedStrictness } = setup();
+
+    const { preCall } = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: true
+    });
+
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(FIRST_SEGMENT_SPECIFIER, [preCall], state.ledger.parameters, ttl, [], [], []);
+
+    expect(() => tx.wellFormed(state.ledger, unbalancedStrictness, state.time)).toThrow(
+      'all contract-associated commitments must be claimed by exactly one instance of the same contract in the same segment'
+    );
+  });
+
+  test('addCalls - two calls + two contract-owned outputs in one apply and land in the same segment', () => {
+    const { state, addr, encodedAddr, op, token, unbalancedStrictness, balancedStrictness } = setup();
+
+    const callA = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: true
+    });
+
+    const callB = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 3,
+      includeClaimReceive: true
+    });
+
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(
+      FIRST_SEGMENT_SPECIFIER,
+      [callA.preCall, callB.preCall],
+      state.ledger.parameters,
+      ttl,
+      [],
+      [callA.zswapOutput, callB.zswapOutput],
+      []
+    );
+
+    const segA = findSegmentOfCall(tx, addr, STORE);
+    expect(segA).toBe(1);
+
+    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
+    const balanced = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balanced, balancedStrictness);
+
+    const arr = state.ledger.index(addr)!.data.state.asArray()!;
+    expect(arr[2].asCell().value[0]).toEqual(ONE_VALUE);
+    expect(arr[5].asCell().value[0]).toEqual(ONE_VALUE);
+
+    expect(arr[0].asCell().value[0]).toEqual(callA.coinCom.value[0]);
+    expect(arr[3].asCell().value[0]).toEqual(callB.coinCom.value[0]);
+  });
+
+  test('addCalls - sets intent ttl to the provided ttl', () => {
+    const { state, addr, encodedAddr, op, token, unbalancedStrictness, balancedStrictness } = setup();
+
+    const { preCall, zswapOutput } = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: true
+    });
+
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(FIRST_SEGMENT_SPECIFIER, [preCall], state.ledger.parameters, ttl, [], [zswapOutput], []);
+
+    const seg = findSegmentOfCall(tx, addr, STORE);
+    const intent = tx.intents!.get(seg)!;
+
+    expect(intent.ttl.getTime()).toBe(ttl.getTime());
+
+    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
+    const balanced = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balanced, balancedStrictness);
+  });
+
+  test('addCalls - empty calls with a contract-owned zswap output should fail wellFormed', () => {
+    const state = TestState.new();
+    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
+
+    state.rewardsShielded(token, 5_000_000_000n);
+    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+
+    const unbalancedStrictness = new WellFormedStrictness();
+    unbalancedStrictness.enforceBalancing = false;
+
+    const op = new ContractOperation();
+    op.verifierKey = TestResource.operationVerifierKey();
+    const { addr } = deployContract({
+      state,
+      op,
+      unbalancedStrictness,
+      balancedStrictness: new WellFormedStrictness()
+    });
+
+    const coin: ShieldedCoinInfo = createShieldedCoinInfo(token.raw, 100_000n);
+    const zswapOutput = ZswapOutput.newContractOwned(coin, undefined, addr);
+
+    const ttl = plus1Hour(state.time);
+
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID).addCalls(
+      FIRST_SEGMENT_SPECIFIER,
+      [],
+      state.ledger.parameters,
+      ttl,
+      [],
+      [zswapOutput],
+      []
+    );
+
+    expect(() => tx.wellFormed(state.ledger, unbalancedStrictness, state.time)).toThrow(
+      'all contract-associated commitments must be claimed'
+    );
+  });
+
+  test('addCalls - puts provided Zswap outputs and Zswap inputs into guaranteed section', () => {
+    const state = TestState.new();
+    const ttl = state.time;
+
+    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+
+    const op = new ContractOperation();
+    op.verifierKey = TestResource.operationVerifierKey();
+
+    const contract = new ContractState();
+    contract.setOperation(STORE, op);
+    contract.data = new ChargedState(StateValue.newArray());
+    contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
+
+    const deploy = new ContractDeploy(contract);
+    const tx = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      undefined,
+      undefined,
+      testIntents([], [], [deploy], state.time)
+    );
+
+    const unbalanced = new WellFormedStrictness();
+    unbalanced.enforceBalancing = false;
+
+    tx.wellFormed(state.ledger, unbalanced, state.time);
+    state.assertApply(state.balanceTx(tx.eraseProofs()), new WellFormedStrictness());
+
+    const addr = tx.intents!.get(1)!.actions[0].address;
+
+    const ctx = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
+    const preTranscript = new PreTranscript(ctx, []);
+
+    const call = new PrePartitionContractCall(
+      addr,
+      STORE,
+      op,
+      preTranscript,
+      [],
+      { value: [], alignment: [] },
+      { value: [], alignment: [] },
+      communicationCommitmentRandomness(),
+      STORE
+    );
+
+    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
+    state.rewardsShielded(token, 1_000_000n);
+
+    const coinToSpend = Array.from(state.zswap.coins).find((c) => c.type === token.raw);
+    expect(coinToSpend).toBeDefined();
+
+    const [nextZswap, zswapInput] = state.zswap.spend(state.zswapKeys, coinToSpend!, 2);
+    state.zswap = nextZswap;
+    const outCoin = createShieldedCoinInfo(token.raw, 10_000n);
+    const zswapOutput = ZswapOutput.new(outCoin, 0, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey);
+
+    const baseTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    const txWithZswapOutput = baseTx.addCalls(
+      GUARANTEED_ONLY_SPECIFIER,
+      [call],
+      state.ledger.parameters,
+      ttl,
+      [],
+      [zswapOutput],
+      []
+    );
+
+    const txWithZswapInput = baseTx.addCalls(
+      SPECIFIC_VALUE_SPECIFIER,
+      [call],
+      state.ledger.parameters,
+      ttl,
+      [zswapInput],
+      [],
+      []
+    );
+
+    expect(txWithZswapOutput.guaranteedOffer, 'expected guaranteed offer to exist').toBeDefined();
+    expect(txWithZswapOutput.fallibleOffer, 'expected fallible offer to be empty/undefined').toBeFalsy();
+
+    expect(txWithZswapInput.guaranteedOffer, 'expected guaranteed offer to exist').toBeDefined();
+    expect(txWithZswapInput.fallibleOffer, 'expected fallible offer to be empty/undefined').toBeFalsy();
+  });
+
+  test('addCalls - places Zswap outputs in guaranteed and inputs in fallible', () => {
+    const state = TestState.new();
+
+    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
+    state.rewardsShielded(token, 1_000_000n);
+    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+
+    const op = new ContractOperation();
+    op.verifierKey = TestResource.operationVerifierKey();
+
+    const contract = new ContractState();
+    contract.setOperation(STORE, op);
+    contract.data = new ChargedState(StateValue.newArray());
+    contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
+
+    const deploy = new ContractDeploy(contract);
+    const tx = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      undefined,
+      undefined,
+      testIntents([], [], [deploy], state.time)
+    );
+
+    const unbalanced = new WellFormedStrictness();
+    unbalanced.enforceBalancing = false;
+
+    tx.wellFormed(state.ledger, unbalanced, state.time);
+    state.assertApply(state.balanceTx(tx.eraseProofs()), new WellFormedStrictness());
+
+    const addr = tx.intents!.get(1)!.actions[0].address;
+
+    const ctx = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
+    const preTranscript = new PreTranscript(ctx, []);
+    const call = new PrePartitionContractCall(
+      addr,
+      STORE,
+      op,
+      preTranscript,
+      [],
+      { value: [], alignment: [] },
+      { value: [], alignment: [] },
+      communicationCommitmentRandomness(),
+      STORE
+    );
+
+    const coinToSpend = Array.from(state.zswap.coins).find((c) => c.type === token.raw);
+    expect(coinToSpend).toBeTruthy();
+
+    const [nextZswap, zswapInput] = state.zswap.spend(state.zswapKeys, coinToSpend!, 1);
+    state.zswap = nextZswap;
+
+    const outCoin = createShieldedCoinInfo(token.raw, 10_000n);
+    const zswapOutput = ZswapOutput.new(outCoin, 0, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey);
+
+    const guaranteedOffer = ZswapOffer.fromOutput(zswapOutput, token.raw, 0n);
+    const fallibleOffer = ZswapOffer.fromInput(zswapInput, token.raw, 0n);
+
+    const txWithGuaranteed = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer);
+    const txWithFallible = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, fallibleOffer);
+
+    const baseTx = txWithGuaranteed.merge(txWithFallible);
+
+    const tx2 = baseTx
+      .addCalls(GUARANTEED_ONLY_SPECIFIER, [call], state.ledger.parameters, state.time)
+      .addCalls(SPECIFIC_VALUE_SPECIFIER, [call], state.ledger.parameters, state.time);
+
+    expect(tx2.guaranteedOffer).toBeDefined();
+    expect(tx2.fallibleOffer).toBeDefined();
+
+    expect(tx2.guaranteedOffer!.outputs?.length).toBe(1);
+    expect(tx2.fallibleOffer!.size).toBe(1);
+  });
+
+  function testSpecificSegment(segment: SegmentSpecifier, expectedSegment?: number) {
+    const { state, addr, encodedAddr, op, token, unbalancedStrictness, balancedStrictness } = setup();
+
+    const { preCall, zswapOutput, coinCom, coinPayload } = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: true
+    });
+
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(segment, [preCall], state.ledger.parameters, ttl, [], [zswapOutput], []);
+
+    const segmentFound = findSegmentOfCall(tx, addr, STORE);
+    if (expectedSegment !== undefined) {
+      expect(segmentFound).toBe(expectedSegment);
+    } else {
+      expect(segmentFound).toBeGreaterThan(0);
+      expect(segmentFound).toBeLessThanOrEqual(65535);
+    }
+
+    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
+    const balanced = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balanced, balancedStrictness);
+
+    const contract = state.ledger.index(addr)!;
+    const arr = contract.data.state.asArray()!;
+
+    expect(arr[0].asCell().value[0]).toEqual(coinCom.value[0]);
+
+    const storedPayload = arr[1].asCell().value;
+    expect(storedPayload[0]).toEqual(coinPayload.value[0]);
+    expect(storedPayload[1]).toEqual(coinPayload.value[1]);
+    expect(storedPayload[2]).toEqual(coinPayload.value[2]);
+
+    expect(arr[2].asCell().value[0]).toEqual(ONE_VALUE);
+
+    const recomputed = runtimeCoinCommitment(
+      {
+        value: [storedPayload[0], storedPayload[1], storedPayload[2]],
+        alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+      },
+      {
+        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
+      }
+    );
+    expect(recomputed).toEqual(coinCom);
+  }
+
+  function setup() {
+    const state = TestState.new();
+    const token: ShieldedTokenType = Static.defaultShieldedTokenType();
+
+    state.rewardsShielded(token, 5_000_000_000n);
+    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+
+    const unbalancedStrictness = new WellFormedStrictness();
+    unbalancedStrictness.enforceBalancing = false;
+    const balancedStrictness = new WellFormedStrictness();
+
+    const op = new ContractOperation();
+    op.verifierKey = TestResource.operationVerifierKey();
+
+    const { addr, encodedAddr } = deployContract({
+      state,
+      op,
+      unbalancedStrictness,
+      balancedStrictness
+    });
+
+    return { state, token, op, addr, encodedAddr, unbalancedStrictness, balancedStrictness };
+  }
+
+  function buildCallAndOutput(opts: {
+    state: TestState;
+    addr: ContractAddress;
+    encodedAddr: Uint8Array;
+    op: ContractOperation;
+    token: ShieldedTokenType;
+    baseKey: number;
+    includeClaimReceive: boolean;
+  }) {
+    const { state, addr, encodedAddr, op, token, baseKey, includeClaimReceive } = opts;
+
+    const coin: ShieldedCoinInfo = createShieldedCoinInfo(token.raw, 100_000n);
+    const encodedCoin = encodeShieldedCoinInfo(coin);
+    const value16 = bigIntToValue(encodedCoin.value)[0];
+
+    const coinPayload: AlignedValue = {
+      value: [Static.trimTrailingZeros(encodedCoin.nonce), Static.trimTrailingZeros(encodedCoin.color), value16],
+      alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+    };
+
+    const coinCom: AlignedValue = runtimeCoinCommitment(
+      {
+        value: [
+          Static.trimTrailingZeros(coinPayload.value[0]),
+          Static.trimTrailingZeros(coinPayload.value[1]),
+          Static.trimTrailingZeros(coinPayload.value[2])
+        ],
+        alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+      },
+      {
+        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
+      }
+    );
+
+    const transcriptOps = [
+      ...kernelSelf(),
+      ...(includeClaimReceive ? kernelClaimZswapCoinReceive(coinCom) : []),
+      ...cellWrite(getKey(baseKey), true, coinCom),
+      ...cellWrite(getKey(baseKey + 1), true, coinPayload),
+      ...cellWrite(getKey(baseKey + 2), true, { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }),
+      ...cellRead(getKey(baseKey + 2), false)
+    ];
+
+    const program = programWithResults(transcriptOps, [
+      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }
+    ]);
+
+    const context = new QueryContext(new ChargedState(state.ledger.index(addr)!.data.state), addr);
+    const preTranscript = new PreTranscript(context, program);
+
+    const privateTranscriptOutputs: AlignedValue[] = [
+      { value: [Random.generate32Bytes()], alignment: [ATOM_BYTES_32] }
+    ];
+
+    const preCall = new PrePartitionContractCall(
+      addr,
+      STORE,
+      op,
+      preTranscript,
+      privateTranscriptOutputs,
+      coinPayload,
+      { value: [], alignment: [] },
+      communicationCommitmentRandomness(),
+      STORE
+    );
+
+    const zswapOutput = ZswapOutput.newContractOwned(coin, undefined, addr);
+
+    return { preCall, zswapOutput, coinCom, coinPayload };
+  }
+
+  function deployContract({
+    state,
+    op,
+    unbalancedStrictness,
+    balancedStrictness
+  }: {
+    state: TestState;
+    op: ContractOperation;
+    unbalancedStrictness: WellFormedStrictness;
+    balancedStrictness: WellFormedStrictness;
+  }): { addr: ContractAddress; encodedAddr: Uint8Array } {
+    const contract = new ContractState();
+    contract.setOperation(STORE, op);
+
+    contract.data = new ChargedState(
+      StateValue.newArray()
+        .arrayPush(StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_32] }))
+        .arrayPush(
+          StateValue.newCell({
+            value: [EMPTY_VALUE, EMPTY_VALUE, EMPTY_VALUE],
+            alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+          })
+        )
+        .arrayPush(StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] }))
+        .arrayPush(StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_32] }))
+        .arrayPush(
+          StateValue.newCell({
+            value: [EMPTY_VALUE, EMPTY_VALUE, EMPTY_VALUE],
+            alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
+          })
+        )
+        .arrayPush(StateValue.newCell({ value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] }))
+    );
+
+    contract.maintenanceAuthority = new ContractMaintenanceAuthority([], 1, 0n);
+
+    const deploy = new ContractDeploy(contract);
+    const tx = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      undefined,
+      undefined,
+      testIntents([], [], [deploy], state.time)
+    );
+
+    const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
+    const encodedAddr = encodeContractAddress(addr);
+
+    tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
+    const balanced = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balanced, balancedStrictness);
+
+    return { addr, encodedAddr };
+  }
+
+  function findSegmentOfCall(
+    tx: Transaction<Signaturish, Proofish, Bindingish>,
+    addr: ContractAddress,
+    entryPoint: string
+  ): number {
+    const found = Array.from(tx.intents!.entries()).find(([, intent]) =>
+      intent.actions.some((ca) => ca instanceof ContractCall && ca.address === addr && ca.entryPoint === entryPoint)
+    );
+
+    if (!found) throw new Error(`Call not found: ${entryPoint}`);
+    return found[0];
+  }
 });

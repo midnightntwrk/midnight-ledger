@@ -16,7 +16,8 @@ export default defineConfig({
     ...config.test,
     coverage: {
       ...config.test?.coverage,
-      enabled: true
+      enabled: true,
+      reportOnFailure: true
     }
   },
   plugins: [wasm()]
