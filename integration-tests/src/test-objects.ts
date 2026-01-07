@@ -347,7 +347,7 @@ export const keyMaterialProvider = new (class {
 
   // eslint-disable-next-line class-methods-use-this
   async getParams(k: number): Promise<Uint8Array> {
-    return fs.readFile(`${process.env.MIDNIGHT_PP}/bls_filecoin_2p${k}`);
+    return fs.readFile(`${process.env.MIDNIGHT_PP}/bls_midnight_2p${k}`);
   }
 })();
 
