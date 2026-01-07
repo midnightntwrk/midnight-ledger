@@ -1,6 +1,6 @@
 [package]
 name = "midnight-proof-server-prototype"
-version = "6.2.0-alpha.1"
+version = "6.3.0-alpha.1"
 edition = "2021"
 authors = ["Midnight Foundation"]
 license = "Apache-2.0"
@@ -72,6 +72,10 @@ zkir_v2 = { path = "../../zkir", package = "zkir" }
 introspection = "0.1.0"
 rand = { version = "0.8.4", features = ["getrandom"] }
 lazy_static = "1.5.0"
+
+# AWS Nitro Enclaves NSM API for attestation
+aws-nitro-enclaves-nsm-api = "0.4"
+serde_bytes = "0.11"
 
 [dev-dependencies]
 reqwest = { version = "0.11", features = ["json", "blocking"] }

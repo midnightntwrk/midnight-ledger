@@ -18,6 +18,9 @@ use serde::{Deserialize, Serialize};
 use std::process::Command;
 use tracing::{debug, error, info, warn};
 
+// Import NSM attestation module
+use crate::nsm_attestation;
+
 /// Query parameters for attestation request
 #[derive(Debug, Deserialize)]
 pub(crate) struct AttestationQuery {
@@ -66,13 +69,19 @@ fn detect_platform() -> TeePlatformType {
     #[cfg(target_os = "linux")]
     {
         // Check for AWS Nitro Enclaves
-        // AWS Nitro uses /dev/vsock for communication with parent EC2 instance
+        // Primary check: NSM device (most reliable indicator)
+        if std::path::Path::new("/dev/nsm").exists() {
+            debug!("Detected AWS Nitro Enclave (NSM device present)");
+            return TeePlatformType::AwsNitro;
+        }
+
+        // Fallback: Check for vsock (less reliable but still indicates Nitro)
         if std::path::Path::new("/dev/vsock").exists() {
             // Additional check: try to read enclave-specific file
             if std::path::Path::new("/proc/cpuinfo").exists() {
                 if let Ok(cpuinfo) = std::fs::read_to_string("/proc/cpuinfo") {
                     if cpuinfo.contains("Amazon") || std::env::var("AWS_EXECUTION_ENV").is_ok() {
-                        debug!("Detected AWS Nitro Enclave");
+                        debug!("Detected AWS Nitro Enclave (vsock present)");
                         return TeePlatformType::AwsNitro;
                     }
                 }
@@ -148,30 +157,59 @@ impl TeePlatformType {
     }
 }
 
-/// Get attestation for AWS Nitro Enclaves
+/// Get attestation for AWS Nitro Enclaves using NSM API
 ///
-/// NOTE: This must be called from the PARENT EC2 instance, not from inside the enclave!
-/// The enclave cannot attest itself - attestation comes from the Nitro hypervisor.
+/// This function directly calls the NSM (Nitro Security Module) API to generate
+/// a cryptographic attestation document proving enclave integrity.
 async fn get_aws_attestation(nonce: Option<String>) -> Result<AttestationResponse, String> {
-    info!("Generating AWS Nitro attestation");
+    info!("Generating AWS Nitro attestation via NSM API");
 
-    // In production AWS Nitro deployment, this should be called via vsock
-    // from the parent EC2 instance which has access to nitro-cli
+    // Check if NSM device is available (only present inside Nitro Enclave)
+    if !nsm_attestation::is_nsm_available() {
+        warn!("NSM device not available - not running inside Nitro Enclave");
+        return Ok(AttestationResponse {
+            platform: "AWS Nitro Enclaves".to_string(),
+            format: "CBOR".to_string(),
+            nonce: nonce.clone(),
+            attestation: None,
+            error: Some("NSM device not available - not running inside Nitro Enclave".to_string()),
+            metadata: Some(serde_json::json!({
+                "message": "This endpoint only works inside an AWS Nitro Enclave",
+                "instructions": "Deploy using: nitro-cli run-enclave",
+                "pcr_publication": "https://github.com/midnight/proof-server/releases"
+            })),
+        });
+    }
 
-    warn!("AWS Nitro attestation must be requested from parent EC2 instance");
-    warn!("Use: nitro-cli describe-enclaves --enclave-id <id>");
+    // Convert nonce string to bytes
+    let nonce_bytes = nonce.as_ref().map(|n| n.as_bytes().to_vec());
 
-    Ok(AttestationResponse {
-        platform: "AWS Nitro Enclaves".to_string(),
-        format: "CBOR".to_string(),
-        nonce,
-        attestation: None,
-        error: Some("Attestation must be requested from parent EC2 instance using nitro-cli".to_string()),
-        metadata: Some(serde_json::json!({
-            "instructions": "From parent EC2 instance, run: nitro-cli describe-enclaves --enclave-id <id>",
-            "pcr_publication": "https://github.com/midnight/proof-server/releases"
-        })),
-    })
+    // Request attestation document from NSM
+    match nsm_attestation::request_attestation(nonce_bytes.clone(), None, None) {
+        Ok(attestation_doc) => {
+            info!("✅ Successfully generated NSM attestation document ({} bytes)", attestation_doc.len());
+
+            // Encode attestation document as base64
+            let attestation_b64 = general_purpose::STANDARD.encode(&attestation_doc);
+
+            Ok(AttestationResponse {
+                platform: "AWS Nitro Enclaves".to_string(),
+                format: "CBOR/COSE_Sign1".to_string(),
+                nonce: nonce.clone(),
+                attestation: Some(attestation_b64),
+                error: None,
+                metadata: Some(serde_json::json!({
+                    "document_size_bytes": attestation_doc.len(),
+                    "pcr_publication": "https://github.com/midnight/proof-server/releases",
+                    "verification_instructions": "Decode base64, parse CBOR, verify COSE signature against AWS root certificate"
+                })),
+            })
+        }
+        Err(e) => {
+            error!("❌ Failed to generate NSM attestation: {}", e);
+            Err(format!("NSM attestation failed: {}", e))
+        }
+    }
 }
 
 /// Get attestation for GCP Confidential VM using TPM 2.0
