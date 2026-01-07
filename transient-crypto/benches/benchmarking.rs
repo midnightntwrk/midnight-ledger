@@ -186,7 +186,7 @@ pub fn proof_verification(c: &mut Criterion) {
         async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
             const DIR: &str = env!("MIDNIGHT_PP");
             ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_filecoin_2p{k}"
+                "{DIR}/bls_midnight_2p{k}"
             ))?))
         }
     }
