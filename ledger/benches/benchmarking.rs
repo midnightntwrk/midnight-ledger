@@ -39,7 +39,13 @@ pub fn rewards(c: &mut Criterion) {
         SystemTransaction::DistributeNight(ClaimKind::Reward, outputs)
     }
     let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
-    ledger_state.block_reward_pool = u128::MAX;
+    ledger_state = ledger_state
+        .apply_system_tx(
+            &SystemTransaction::DistributeReserve(ledger_state.reserve_pool),
+            Timestamp::from_secs(0),
+        )
+        .unwrap()
+        .0;
 
     let mut group = c.benchmark_group("rewards");
     for size in [100, 200, 300, 400, 500] {
