@@ -6,6 +6,7 @@
 #![deny(warnings)]
 
 mod attestation;
+mod nsm_attestation;
 pub mod tls;
 
 use attestation::attestation_handler;
