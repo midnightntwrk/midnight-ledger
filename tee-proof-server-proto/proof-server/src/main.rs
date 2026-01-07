@@ -26,6 +26,10 @@ struct Args {
     #[arg(long, env = "MIDNIGHT_PROOF_SERVER_PORT", default_value = "6300")]
     port: u16,
 
+    /// Bind address (use "127.0.0.1" for localhost-only in Nitro Enclaves with vsock bridge)
+    #[arg(long, env = "MIDNIGHT_PROOF_SERVER_BIND", default_value = "0.0.0.0")]
+    bind: String,
+
     /// API keys (comma-separated for multiple keys)
     #[arg(long, env = "MIDNIGHT_PROOF_SERVER_API_KEY")]
     api_key: Option<String>,
@@ -231,7 +235,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = create_app(state);
 
     // Setup server address
-    let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
+    let addr: SocketAddr = format!("{}:{}", args.bind, args.port)
+        .parse()
+        .expect("Invalid bind address");
 
     info!("Starting Midnight Proof Server (Axum) v{}", env!("CARGO_PKG_VERSION"));
     info!("Listening on: http://{}", addr);

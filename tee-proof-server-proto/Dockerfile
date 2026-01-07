@@ -159,8 +159,8 @@ RUN echo '#!/bin/bash' > /app/start.sh && \
     echo '' >> /app/start.sh && \
     echo 'echo "[$(date)] Starting Midnight Proof Server with vsock bridge..."' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
-    echo '# Start proof server in background' >> /app/start.sh && \
-    echo '/app/proof-server --no-fetch-params &' >> /app/start.sh && \
+    echo '# Start proof server in background (bind to localhost only for vsock bridge)' >> /app/start.sh && \
+    echo '/app/proof-server --bind 127.0.0.1 --no-fetch-params &' >> /app/start.sh && \
     echo 'PROOF_SERVER_PID=$!' >> /app/start.sh && \
     echo 'echo "[$(date)] Proof server started (PID: $PROOF_SERVER_PID)"' >> /app/start.sh && \
     echo '' >> /app/start.sh && \
