@@ -11,44 +11,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { provingProvider, type ProvingKeyMaterial } from '@midnight-ntwrk/zkir-v2';
-import { readFile } from 'fs/promises';
+import { provingProvider } from '@midnight-ntwrk/zkir-v2';
 import { parentPort, workerData } from 'worker_threads';
-import path from 'path';
+import { keyMaterialProvider } from './test-objects';
 
-let __filename: string;
-
-const keyMaterialProvider = {
-  lookupKey: async (keyLocation: string): Promise<ProvingKeyMaterial | undefined> => {
-    // Ideally get this from /static/version, but I'm not sure if this gets run
-    // against a consistent dir.
-    const staticVersionFile = path.resolve(path.dirname(__filename), '../../static/version');
-    const ver = await readFile(staticVersionFile, 'utf-8');
-    const pth = {
-      'midnight/zswap/spend': `zswap/${ver}/spend`,
-      'midnight/zswap/output': `zswap/${ver}/output`,
-      'midnight/zswap/sign': `zswap/${ver}/sign`
-    }[keyLocation];
-    if (pth === undefined) {
-      return undefined;
-    }
-    const pk = readFile(`${process.env.MIDNIGHT_PP}/${pth}.prover`);
-    const vk = readFile(`${process.env.MIDNIGHT_PP}/${pth}.verifier`);
-    const ir = readFile(`${process.env.MIDNIGHT_PP}/${pth}.bzkir`);
-    return {
-      proverKey: await pk,
-      verifierKey: await vk,
-      ir: await ir
-    };
-  },
-  getParams: async (k: number): Promise<Uint8Array> => {
-    return readFile(`${process.env.MIDNIGHT_PP}/bls_filecoin_2p${k}`);
-  }
-};
-const wasmProver = provingProvider(keyMaterialProvider);
+export const wasmProver = provingProvider(keyMaterialProvider);
 
 const [op, fname, args]: ['check' | 'prove', string, any[]] = workerData;
-__filename = fname;
 // we handle polymorphic data here
 // @ts-nocheck
 if (op === 'check') {
