@@ -665,20 +665,45 @@ async fn fetch_params_handler(Path(k): Path<u8>) -> Result<String, AppError> {
     Ok("success".to_string())
 }
 
-/// PCR measurements endpoint - serves the PCR values for client verification
-/// This endpoint is embedded at compile time from the pcr-measurements.json file
+/// PCR measurements endpoint - directs clients to canonical external PCR publication
+/// PCRs are published externally to avoid circular dependency in reproducible builds
 async fn pcr_measurements_handler() -> Result<Response, AppError> {
     info!("PCR measurements request received");
 
-    // Include the PCR measurements JSON file at compile time
-    // This file should be placed at tee-proof-server-proto/proof-server/pcr-measurements.json
-    const PCR_JSON: &str = include_str!("../../pcr-measurements.json");
+    // PCR measurements are published externally for several reasons:
+    // 1. Avoids circular dependency (embedding PCRs changes the binary, which changes PCR0)
+    // 2. Enables reproducible builds (anyone can rebuild and verify)
+    // 3. Supports multiple publication channels for transparency
+    // 4. Allows graceful updates and version management
 
-    // Parse to validate it's valid JSON
-    let pcr_value: serde_json::Value = serde_json::from_str(PCR_JSON)
-        .map_err(|e| AppError::InternalError(format!("Invalid PCR JSON: {}", e)))?;
+    let version = env!("CARGO_PKG_VERSION");
 
-    Ok((StatusCode::OK, Json(pcr_value)).into_response())
+    let response = serde_json::json!({
+        "message": "PCR measurements are published externally for reproducibility and transparency",
+        "version": version,
+        "canonical_sources": {
+            "github_release": format!("https://github.com/midnight/midnight-ledger/releases/download/v{}/pcr-measurements.json", version),
+            "cdn": format!("https://cdn.midnight.network/proof-server/v{}/pcr-measurements.json", version),
+            "latest": "https://proof-test.devnet.midnight.network/.well-known/pcr-measurements.json"
+        },
+        "verification_process": {
+            "step1": "Fetch PCR measurements from canonical source",
+            "step2": "Request attestation document from /attestation?nonce=<random>",
+            "step3": "Decode attestation document (CBOR format)",
+            "step4": "Verify certificate chain against AWS Nitro root certificate",
+            "step5": "Compare PCRs in attestation document against published values",
+            "step6": "Verify nonce matches and timestamp is recent"
+        },
+        "documentation": "https://docs.midnight.network/proof-server/attestation-verification",
+        "notes": [
+            "PCR0 uniquely identifies the enclave image (changes with code updates)",
+            "PCR1 identifies the kernel and boot configuration (stable)",
+            "PCR2 identifies CPU and memory configuration",
+            "All PCRs are SHA384 hashes and are deterministically reproducible"
+        ]
+    });
+
+    Ok((StatusCode::OK, Json(response)).into_response())
 }
 
 // ============================================================================

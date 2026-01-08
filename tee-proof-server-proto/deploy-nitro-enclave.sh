@@ -219,9 +219,10 @@ fi
 # Step 9: Extract and save PCR measurements
 log_info "Step 9: Extracting PCR measurements for publication..."
 
-PCR0=$(jq -r '.Measurements.PCR0' enclave-info.json)
-PCR1=$(jq -r '.Measurements.PCR1' enclave-info.json)
-PCR2=$(jq -r '.Measurements.PCR2' enclave-info.json)
+# Extract PCRs from build output (they're in the build-output.txt file)
+PCR0=$(grep -A 10 "Measurements" build-output.txt | grep "PCR0" | sed 's/.*"PCR0": "\(.*\)".*/\1/')
+PCR1=$(grep -A 10 "Measurements" build-output.txt | grep "PCR1" | sed 's/.*"PCR1": "\(.*\)".*/\1/')
+PCR2=$(grep -A 10 "Measurements" build-output.txt | grep "PCR2" | sed 's/.*"PCR2": "\(.*\)".*/\1/')
 
 log_info "PCR Measurements:"
 echo "  PCR0: $PCR0"
@@ -265,6 +266,10 @@ PCREOF
 
 log_success "PCR measurements saved to: $PCR_FILE"
 
+# Also save to a 'latest' symlink for convenience
+ln -sf "$PCR_FILE" pcr-measurements-latest.json
+log_info "Symlink created: pcr-measurements-latest.json → $PCR_FILE"
+
 # Step 10: Display summary
 echo ""
 echo "=================================="
@@ -292,11 +297,25 @@ echo "  Test health:      curl http://localhost:6300/health"
 echo "  Test attestation: curl 'http://localhost:6300/attestation?nonce=test123'"
 echo "  Stop enclave:     nitro-cli terminate-enclave --enclave-id $ENCLAVE_ID"
 echo ""
-echo "Next Steps for PCR Verification:"
-echo "  1. Publish PCR file: $PCR_FILE"
-echo "  2. Make it accessible via HTTPS (e.g., /.well-known/pcr-measurements.json)"
-echo "  3. Configure Lace to fetch PCRs from published location"
-echo "  4. Clients will then verify attestation against these PCRs"
+echo "Next Steps - PCR Publication (Required for Client Verification):"
+echo ""
+echo "  📄 PCR File Generated: $PCR_FILE"
+echo ""
+echo "  Option 1: GitHub Release (Recommended)"
+echo "    1. Commit PCR file to repository"
+echo "    2. Create GitHub release with tag v$VERSION"
+echo "    3. Attach PCR file to release"
+echo "    4. Clients fetch from: https://github.com/midnight/midnight-ledger/releases/download/v$VERSION/pcr-measurements.json"
+echo ""
+echo "  Option 2: Static File Hosting"
+echo "    1. Copy PCR file to web server:"
+echo "       scp $PCR_FILE user@server:/var/www/html/.well-known/pcr-measurements.json"
+echo "    2. Clients fetch from: https://proof-test.devnet.midnight.network/.well-known/pcr-measurements.json"
+echo ""
+echo "  Option 3: S3 + CloudFront"
+echo "    aws s3 cp $PCR_FILE s3://midnight-proof-server-pcrs/$VERSION/pcr-measurements.json --acl public-read"
+echo ""
+echo "  ⚠️  Without PCR publication, clients cannot verify attestation!"
 echo ""
 
 # Optional: Show console output if in debug mode
