@@ -533,7 +533,7 @@ impl Transaction {
         }
     }
 
-    #[wasm_bindgen(getter, js_name = "eraseSignatures")]
+    #[wasm_bindgen(js_name = "eraseSignatures")]
     pub fn erase_signatures(&self) -> Result<Transaction, JsError> {
         use TransactionTypes::*;
         Ok(match &self.0 {

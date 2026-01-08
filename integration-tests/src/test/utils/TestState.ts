@@ -25,22 +25,21 @@ import {
   DustRegistration,
   type DustSecretKey,
   Intent,
-  LedgerParameters,
   LedgerState,
+  type NormalizedCost,
   type PreProof,
   type Proofish,
   type QualifiedShieldedCoinInfo,
   sampleDustSecretKey,
   sampleSigningKey,
   type ShieldedCoinInfo,
+  type Signature,
   type SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
-  signData,
-  type Signature,
   type Signaturish,
+  signData,
   type SigningKey,
-  type NormalizedCost,
   type TokenType,
   Transaction,
   TransactionContext,
@@ -271,20 +270,6 @@ export class TestState {
     );
     this.step(detailedBlockFullness, overallBlockFullness);
     return result;
-  }
-
-  applySystemTx(tx: Transaction<Signaturish, Proofish, Bindingish>) {
-    const [res, events] = this.ledger.applySystemTx(tx, this.time);
-    this.ledger = res;
-    this.zswap = this.zswap.replayEvents(this.zswapKeys, events);
-    this.dust = this.dust.replayEvents(this.dustKey.secretKey, events);
-    const pk: UserAddress = addressFromKey(this.nightKey.verifyingKey());
-    this.utxos = new Set(
-      Array.from(this.ledger.utxo.utxos)
-        .map((utxo) => structuredClone(utxo))
-        .filter((utxo) => utxo.owner === pk)
-    );
-    this.step();
   }
 
   giveFeeToken(utxos: number, amount: bigint) {
