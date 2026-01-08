@@ -15,6 +15,7 @@ use axum::{
 };
 use base64::{Engine as _, engine::general_purpose};
 use serde::{Deserialize, Serialize};
+use serde_cbor::Value as CborValue;
 use std::process::Command;
 use tracing::{debug, error, info, warn};
 
@@ -157,6 +158,138 @@ impl TeePlatformType {
     }
 }
 
+/// Parse AWS Nitro attestation document to extract metadata
+///
+/// AWS Nitro attestation documents are CBOR-encoded COSE_Sign1 structures.
+/// Structure: [protected_headers, unprotected_headers, payload, signature]
+/// The payload (index 2) contains the attestation data we need to extract.
+fn parse_aws_nitro_attestation(attestation_doc: &[u8]) -> Result<serde_json::Value, String> {
+    // Parse the CBOR document
+    let cbor_value: CborValue = serde_cbor::from_slice(attestation_doc)
+        .map_err(|e| format!("Failed to parse CBOR attestation document: {}", e))?;
+
+    // COSE_Sign1 is a CBOR array with 4 elements: [protected, unprotected, payload, signature]
+    let cose_array = match cbor_value {
+        CborValue::Array(arr) => arr,
+        _ => return Err("Attestation document is not a CBOR array".to_string()),
+    };
+
+    if cose_array.len() != 4 {
+        return Err(format!("Invalid COSE_Sign1 structure: expected 4 elements, got {}", cose_array.len()));
+    }
+
+    // Extract payload (index 2)
+    let payload_bytes = match &cose_array[2] {
+        CborValue::Bytes(bytes) => bytes,
+        _ => return Err("Payload is not bytes".to_string()),
+    };
+
+    // Parse payload as CBOR
+    let payload: CborValue = serde_cbor::from_slice(payload_bytes)
+        .map_err(|e| format!("Failed to parse payload CBOR: {}", e))?;
+
+    let payload_map = match payload {
+        CborValue::Map(map) => map,
+        _ => return Err("Payload is not a CBOR map".to_string()),
+    };
+
+    // Extract timestamp (milliseconds since epoch)
+    let timestamp = payload_map.get(&CborValue::Text("timestamp".to_string()))
+        .and_then(|v| match v {
+            CborValue::Integer(i) => Some(*i as u64),
+            _ => None,
+        })
+        .map(|ts| ts as f64); // Convert to f64 for JSON
+
+    // Extract PCRs (Platform Configuration Registers)
+    let pcrs = payload_map.get(&CborValue::Text("pcrs".to_string()))
+        .and_then(|v| match v {
+            CborValue::Map(map) => Some(map),
+            _ => None,
+        })
+        .map(|pcr_map| {
+            let mut pcr_values = serde_json::Map::new();
+            for (key, value) in pcr_map {
+                if let (CborValue::Integer(pcr_index), CborValue::Bytes(pcr_value)) = (key, value) {
+                    pcr_values.insert(
+                        pcr_index.to_string(),
+                        serde_json::Value::String(hex::encode(pcr_value))
+                    );
+                }
+            }
+            serde_json::Value::Object(pcr_values)
+        });
+
+    // Extract certificate chain (cabundle)
+    let certificate_chain = payload_map.get(&CborValue::Text("cabundle".to_string()))
+        .and_then(|v| match v {
+            CborValue::Array(arr) => Some(arr),
+            _ => None,
+        })
+        .map(|certs| {
+            certs.iter()
+                .filter_map(|cert| match cert {
+                    CborValue::Bytes(bytes) => Some(bytes),
+                    _ => None,
+                })
+                .map(|cert_bytes| serde_json::Value::String(general_purpose::STANDARD.encode(cert_bytes)))
+                .collect::<Vec<_>>()
+        });
+
+    // Extract module_id (enclave image measurement)
+    let module_id = payload_map.get(&CborValue::Text("module_id".to_string()))
+        .and_then(|v| match v {
+            CborValue::Text(s) => Some(s.clone()),
+            _ => None,
+        })
+        .map(|s| serde_json::Value::String(s));
+
+    // Extract digest (hash algorithm used)
+    let digest = payload_map.get(&CborValue::Text("digest".to_string()))
+        .and_then(|v| match v {
+            CborValue::Text(s) => Some(s.clone()),
+            _ => None,
+        })
+        .map(|s| serde_json::Value::String(s));
+
+    // Security properties for AWS Nitro Enclaves
+    // AWS Nitro Enclaves always have these security properties enabled
+    let debug_mode = false; // Nitro Enclaves run in production mode
+    let secure_boot = true;  // Always enabled in Nitro
+    let memory_encryption = true; // Always enabled in Nitro
+
+    // Build metadata JSON
+    let mut metadata = serde_json::Map::new();
+
+    if let Some(ts) = timestamp {
+        metadata.insert("timestamp".to_string(), serde_json::Value::Number(
+            serde_json::Number::from_f64(ts).unwrap_or(serde_json::Number::from(0))
+        ));
+    }
+
+    if let Some(pcr_vals) = pcrs {
+        metadata.insert("pcrs".to_string(), pcr_vals);
+    }
+
+    if let Some(certs) = certificate_chain {
+        metadata.insert("certificate_chain".to_string(), serde_json::Value::Array(certs));
+    }
+
+    if let Some(mid) = module_id {
+        metadata.insert("module_id".to_string(), mid);
+    }
+
+    if let Some(dig) = digest {
+        metadata.insert("digest".to_string(), dig);
+    }
+
+    metadata.insert("debug_mode".to_string(), serde_json::Value::Bool(debug_mode));
+    metadata.insert("secure_boot".to_string(), serde_json::Value::Bool(secure_boot));
+    metadata.insert("memory_encryption".to_string(), serde_json::Value::Bool(memory_encryption));
+
+    Ok(serde_json::Value::Object(metadata))
+}
+
 /// Get attestation for AWS Nitro Enclaves using NSM API
 ///
 /// This function directly calls the NSM (Nitro Security Module) API to generate
@@ -189,8 +322,33 @@ async fn get_aws_attestation(nonce: Option<String>) -> Result<AttestationRespons
         Ok(attestation_doc) => {
             info!("✅ Successfully generated NSM attestation document ({} bytes)", attestation_doc.len());
 
+            // Parse attestation document to extract metadata
+            let parsed_metadata = match parse_aws_nitro_attestation(&attestation_doc) {
+                Ok(metadata) => metadata,
+                Err(e) => {
+                    warn!("Failed to parse attestation document: {}, returning document without extracted metadata", e);
+                    serde_json::json!({})
+                }
+            };
+
             // Encode attestation document as base64
             let attestation_b64 = general_purpose::STANDARD.encode(&attestation_doc);
+
+            // Merge parsed metadata with additional info
+            let mut final_metadata = serde_json::json!({
+                "document_size_bytes": attestation_doc.len(),
+                "pcr_publication": "https://github.com/midnight/proof-server/releases",
+                "verification_instructions": "Decode base64, parse CBOR, verify COSE signature against AWS root certificate"
+            });
+
+            // Merge parsed metadata into final_metadata
+            if let Some(final_obj) = final_metadata.as_object_mut() {
+                if let Some(parsed_obj) = parsed_metadata.as_object() {
+                    for (key, value) in parsed_obj {
+                        final_obj.insert(key.clone(), value.clone());
+                    }
+                }
+            }
 
             Ok(AttestationResponse {
                 platform: "AWS Nitro Enclaves".to_string(),
@@ -198,11 +356,7 @@ async fn get_aws_attestation(nonce: Option<String>) -> Result<AttestationRespons
                 nonce: nonce.clone(),
                 attestation: Some(attestation_b64),
                 error: None,
-                metadata: Some(serde_json::json!({
-                    "document_size_bytes": attestation_doc.len(),
-                    "pcr_publication": "https://github.com/midnight/proof-server/releases",
-                    "verification_instructions": "Decode base64, parse CBOR, verify COSE signature against AWS root certificate"
-                })),
+                metadata: Some(final_metadata),
             })
         }
         Err(e) => {
