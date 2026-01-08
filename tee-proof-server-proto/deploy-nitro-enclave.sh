@@ -121,26 +121,46 @@ cat enclave-info.json | jq '.'
 log_info "Step 6: Waiting for enclave to boot (10 seconds)..."
 sleep 10
 
-# Step 7: Set up vsock proxy
-log_info "Step 7: Setting up vsock proxy..."
+# Step 7: Set up vsock proxy with systemd
+log_info "Step 7: Setting up persistent vsock proxy (systemd service)..."
 
-# Kill any existing socat processes
-sudo pkill -f "socat.*6300" 2>/dev/null || true
-sleep 1
+# Create systemd service file
+log_info "Creating systemd service: vsock-proxy.service"
+sudo tee /etc/systemd/system/vsock-proxy.service > /dev/null <<EOF
+[Unit]
+Description=Vsock Proxy for Nitro Enclave Proof Server
+After=network.target
+Requires=nitro-enclaves-allocator.service
 
-# Start vsock proxy
-log_info "Starting vsock proxy: localhost:6300 → enclave CID $ENCLAVE_CID:6300"
-sudo socat TCP-LISTEN:6300,reuseaddr,fork VSOCK-CONNECT:$ENCLAVE_CID:6300 &
-SOCAT_PID=$!
+[Service]
+Type=simple
+User=root
+ExecStart=/usr/bin/socat TCP-LISTEN:6300,reuseaddr,fork VSOCK-CONNECT:$ENCLAVE_CID:6300
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
-# Wait a moment for socat to start
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Reload systemd and restart service
+sudo systemctl daemon-reload
+sudo systemctl enable vsock-proxy
+sudo systemctl restart vsock-proxy
+
+# Wait a moment for service to start
 sleep 2
 
-# Verify socat is running
-if ps -p $SOCAT_PID > /dev/null; then
-    log_success "Vsock proxy started (PID: $SOCAT_PID)"
+# Verify service is running
+if sudo systemctl is-active --quiet vsock-proxy; then
+    log_success "Vsock proxy service started and enabled"
+    log_info "  Status: sudo systemctl status vsock-proxy"
+    log_info "  Logs: sudo journalctl -u vsock-proxy -f"
 else
-    log_error "Failed to start vsock proxy"
+    log_error "Failed to start vsock proxy service"
+    sudo systemctl status vsock-proxy
     exit 1
 fi
 
@@ -196,7 +216,56 @@ else
     log_error "✗ Attestation endpoint not responding correctly"
 fi
 
-# Step 9: Display summary
+# Step 9: Extract and save PCR measurements
+log_info "Step 9: Extracting PCR measurements for publication..."
+
+PCR0=$(jq -r '.Measurements.PCR0' enclave-info.json)
+PCR1=$(jq -r '.Measurements.PCR1' enclave-info.json)
+PCR2=$(jq -r '.Measurements.PCR2' enclave-info.json)
+
+log_info "PCR Measurements:"
+echo "  PCR0: $PCR0"
+echo "  PCR1: $PCR1"
+echo "  PCR2: $PCR2"
+
+# Create PCR publication file
+PCR_FILE="pcr-measurements-$VERSION.json"
+cat > "$PCR_FILE" <<PCREOF
+{
+  "version": "$VERSION",
+  "environment": "devnet",
+  "description": "Midnight Proof Server - AWS Nitro Enclave PCR Measurements",
+  "buildDate": "$(date -u +%Y-%m-%d)",
+  "measurements": {
+    "hashAlgorithm": "SHA384",
+    "pcr0": {
+      "value": "$PCR0",
+      "description": "Enclave image file - uniquely identifies the Docker image and application code"
+    },
+    "pcr1": {
+      "value": "$PCR1",
+      "description": "Kernel and boot ramfs - verifies the Linux kernel and initrd"
+    },
+    "pcr2": {
+      "value": "$PCR2",
+      "description": "Application vCPUs and memory - verifies CPU and memory configuration"
+    }
+  },
+  "buildInfo": {
+    "dockerImage": "midnight/proof-server:$VERSION",
+    "eifFile": "$EIF_FILE",
+    "cpuCount": $ENCLAVE_CPUS,
+    "memoryMB": $ENCLAVE_MEMORY,
+    "reproducible": true
+  },
+  "publishedBy": "Midnight Foundation",
+  "publishedAt": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+}
+PCREOF
+
+log_success "PCR measurements saved to: $PCR_FILE"
+
+# Step 10: Display summary
 echo ""
 echo "=================================="
 echo "  Deployment Summary"
@@ -207,19 +276,27 @@ echo "Enclave CID:    $ENCLAVE_CID"
 echo "CPUs:           $ENCLAVE_CPUS"
 echo "Memory:         ${ENCLAVE_MEMORY}MB"
 echo "Debug Mode:     $DEBUG_MODE"
-echo "Vsock Proxy:    localhost:6300 → CID $ENCLAVE_CID:6300"
+echo "Vsock Proxy:    systemd service (persistent)"
+echo "PCR File:       $PCR_FILE"
 echo ""
 log_success "Deployment completed successfully!"
 echo ""
 
-# Step 10: Useful commands
+# Step 11: Useful commands and next steps
 echo "Useful Commands:"
-echo "  Check status:     nitro-cli describe-enclaves"
-echo "  View console:     nitro-cli console --enclave-id $ENCLAVE_ID  (debug mode only)"
-echo "  View logs:        sudo tail -f /var/log/nitro_enclaves/nitro_enclaves.log"
+echo "  Check enclave:    nitro-cli describe-enclaves"
+echo "  Check proxy:      sudo systemctl status vsock-proxy"
+echo "  View proxy logs:  sudo journalctl -u vsock-proxy -f"
+echo "  View enclave logs:sudo tail -f /var/log/nitro_enclaves/nitro_enclaves.log"
 echo "  Test health:      curl http://localhost:6300/health"
 echo "  Test attestation: curl 'http://localhost:6300/attestation?nonce=test123'"
 echo "  Stop enclave:     nitro-cli terminate-enclave --enclave-id $ENCLAVE_ID"
+echo ""
+echo "Next Steps for PCR Verification:"
+echo "  1. Publish PCR file: $PCR_FILE"
+echo "  2. Make it accessible via HTTPS (e.g., /.well-known/pcr-measurements.json)"
+echo "  3. Configure Lace to fetch PCRs from published location"
+echo "  4. Clients will then verify attestation against these PCRs"
 echo ""
 
 # Optional: Show console output if in debug mode

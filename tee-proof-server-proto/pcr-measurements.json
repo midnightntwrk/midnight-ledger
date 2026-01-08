@@ -1,0 +1,40 @@
+{
+  "version": "v6.3.1",
+  "environment": "devnet",
+  "description": "Midnight Proof Server - AWS Nitro Enclave PCR Measurements",
+  "buildDate": "2026-01-07",
+  "measurements": {
+    "hashAlgorithm": "SHA384",
+    "pcr0": {
+      "value": "7a4a106361d6e434a58f63999ba1f59b662d69ee181716061904ff5bd159da139af4a2c430c3f593769c64a42edac34f",
+      "description": "Enclave image file - uniquely identifies the Docker image and application code"
+    },
+    "pcr1": {
+      "value": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+      "description": "Kernel and boot ramfs - verifies the Linux kernel and initrd"
+    },
+    "pcr2": {
+      "value": "f707d62f55eef04ca9447c09f735b137fcb39512e869f401cd925594656a6ff91b0476174d73b4e7f170221bb21caf68",
+      "description": "Application vCPUs and memory - verifies CPU and memory configuration"
+    }
+  },
+  "buildInfo": {
+    "dockerImage": "midnight/proof-server:v6.3.1",
+    "eifFile": "proof-server-v6.3.1.eif",
+    "cpuCount": 2,
+    "memoryMB": 4096,
+    "reproducible": true
+  },
+  "verificationInstructions": {
+    "url": "https://docs.midnight.network/proof-server/attestation-verification",
+    "notes": [
+      "These PCR values are deterministic and reproducible from the source code",
+      "To reproduce: Build the Docker image from the same commit and convert to EIF",
+      "PCR0 changes with any code or dependency updates",
+      "PCR1 is stable unless kernel/initrd changes",
+      "PCR2 changes if CPU/memory configuration changes"
+    ]
+  },
+  "publishedBy": "Midnight Foundation",
+  "publishedAt": "2026-01-07T23:30:00Z"
+}

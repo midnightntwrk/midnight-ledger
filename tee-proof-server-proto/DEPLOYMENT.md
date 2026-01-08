@@ -106,7 +106,12 @@ curl http://localhost:6300/health
 # Test attestation endpoint
 curl "http://localhost:6300/attestation?nonce=test123"
 
-# You should get a JSON response with attestation document!
+# Test PCR measurements endpoint
+curl http://localhost:6300/pcr
+# or
+curl http://localhost:6300/.well-known/pcr-measurements.json
+
+# You should get a JSON response with attestation document and PCR values!
 ```
 
 ## Automated Deployment Script

@@ -665,6 +665,22 @@ async fn fetch_params_handler(Path(k): Path<u8>) -> Result<String, AppError> {
     Ok("success".to_string())
 }
 
+/// PCR measurements endpoint - serves the PCR values for client verification
+/// This endpoint is embedded at compile time from the pcr-measurements.json file
+async fn pcr_measurements_handler() -> Result<Response, AppError> {
+    info!("PCR measurements request received");
+
+    // Include the PCR measurements JSON file at compile time
+    // This file should be placed at tee-proof-server-proto/proof-server/pcr-measurements.json
+    const PCR_JSON: &str = include_str!("../../pcr-measurements.json");
+
+    // Parse to validate it's valid JSON
+    let pcr_value: serde_json::Value = serde_json::from_str(PCR_JSON)
+        .map_err(|e| AppError::InternalError(format!("Invalid PCR JSON: {}", e)))?;
+
+    Ok((StatusCode::OK, Json(pcr_value)).into_response())
+}
+
 // ============================================================================
 // Router Setup
 // ============================================================================
@@ -677,7 +693,9 @@ pub fn create_app(state: AppState) -> Router {
         .route("/ready", get(ready_handler))
         .route("/version", get(version_handler))
         .route("/proof-versions", get(proof_versions_handler))
-        .route("/attestation", get(attestation_handler));
+        .route("/attestation", get(attestation_handler))
+        .route("/.well-known/pcr-measurements.json", get(pcr_measurements_handler))
+        .route("/pcr", get(pcr_measurements_handler));  // Convenience alias
 
     // Conditionally add /fetch-params/{k} endpoint
     if state.enable_fetch_params {
