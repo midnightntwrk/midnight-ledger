@@ -13,6 +13,11 @@
 
 //! Token Vault Unshielded Token Tests
 //!
+//! **REFERENCE IMPLEMENTATION ONLY**
+//! This code is provided for educational and testing purposes to demonstrate
+//! Midnight ledger features. DO NOT use this code as-is in production without
+//! proper security review, auditing, and hardening.
+//!
 //! This module contains integration tests for unshielded token operations in the
 //! token-vault contract. Unshielded tokens use the UTXO (Unspent Transaction Output)
 //! model, similar to Bitcoin, with transparent balances:

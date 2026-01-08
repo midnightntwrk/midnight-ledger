@@ -13,6 +13,11 @@
 
 //! Token Vault Shielded Token Tests
 //!
+//! **REFERENCE IMPLEMENTATION ONLY**
+//! This code is provided for educational and testing purposes to demonstrate
+//! Midnight ledger features. DO NOT use this code as-is in production without
+//! proper security review, auditing, and hardening.
+//!
 //! This module contains integration tests for shielded token operations in the
 //! token-vault contract. Shielded tokens use ZSwap (Zero-knowledge Swap) for
 //! privacy-preserving transfers with:

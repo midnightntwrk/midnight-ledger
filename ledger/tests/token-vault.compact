@@ -14,6 +14,11 @@
 
 //! Token Vault Contract
 //!
+//! **REFERENCE IMPLEMENTATION ONLY**
+//! This code is provided for educational and testing purposes to demonstrate
+//! Midnight ledger features. DO NOT use this code as-is in production without
+//! proper security review, auditing, and hardening.
+//!
 //! A contract that demonstrates both shielded and unshielded token operations.
 //! - Shielded tokens: Privacy-preserving using ZK proofs
 //! - Unshielded tokens: Public UTXO-based transfers

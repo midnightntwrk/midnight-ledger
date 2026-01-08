@@ -13,6 +13,11 @@
 
 //! Token Vault Test Utilities
 //!
+//! **REFERENCE IMPLEMENTATION ONLY**
+//! This code is provided for educational and testing purposes to demonstrate
+//! Midnight ledger features. DO NOT use this code as-is in production without
+//! proper security review, auditing, and hardening.
+//!
 //! This module contains shared helper functions and utilities used by both
 //! the shielded and unshielded token vault tests. It provides:
 //!
