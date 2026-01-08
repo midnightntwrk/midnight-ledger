@@ -233,14 +233,14 @@ pub fn receive_unshielded_ops<D: DB>(
         Op::Swap { n: 0.try_into().unwrap() },
         // Index into effects at position 6 (unshielded_inputs map), push path for later insert
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: true.try_into().unwrap(),
+            cached: true,
+            push_path: true,
             path: vec![Key::Value(6u8.into())].try_into().unwrap(),
         },
         // Push the token type as key
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(token_type_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(token_type_av.clone())),
         },
         // Duplicate for member check
         Op::Dup { n: 1.try_into().unwrap() },
@@ -249,25 +249,25 @@ pub fn receive_unshielded_ops<D: DB>(
         Op::Member,
         // Push the amount
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(amount_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
         // Swap and negate for branching
         Op::Swap { n: 0.try_into().unwrap() },
         Op::Neg,
-        // Branch: skip 4 ops if key doesn't exist
+        // Branch: skip 4.try_into().unwrap() ops if key doesn't exist
         Op::Branch { skip: 4.try_into().unwrap() },
         // If exists: get current value and add amount
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: false.try_into().unwrap(),
+            cached: true,
+            push_path: false,
             path: vec![Key::Stack].try_into().unwrap(),
         },
         Op::Add,
         // Insert the value
-        Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
+        Op::Ins { cached: true, n: 2.try_into().unwrap() },
         // Swap back
         Op::Swap { n: 0.try_into().unwrap() },
     ]
@@ -300,20 +300,20 @@ pub fn send_unshielded_ops<D: DB>(
     vec![
         Op::Swap { n: 0.try_into().unwrap() },
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: true.try_into().unwrap(),
+            cached: true,
+            push_path: true,
             path: vec![Key::Value(7u8.into())].try_into().unwrap(),
         },
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(token_type_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(token_type_av.clone())),
         },
         Op::Dup { n: 1.try_into().unwrap() },
         Op::Dup { n: 1.try_into().unwrap() },
         Op::Member,
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(amount_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
         Op::Swap { n: 0.try_into().unwrap() },
         Op::Neg,
@@ -321,12 +321,12 @@ pub fn send_unshielded_ops<D: DB>(
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: false.try_into().unwrap(),
+            cached: true,
+            push_path: false,
             path: vec![Key::Stack].try_into().unwrap(),
         },
         Op::Add,
-        Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
+        Op::Ins { cached: true, n: 2.try_into().unwrap() },
         Op::Swap { n: 0.try_into().unwrap() },
     ]
 }
@@ -376,20 +376,20 @@ pub fn claim_unshielded_spend_ops<D: DB>(
     vec![
         Op::Swap { n: 0.try_into().unwrap() },
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: true.try_into().unwrap(),
+            cached: true,
+            push_path: true,
             path: vec![Key::Value(8u8.into())].try_into().unwrap(),
         },
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(key_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(key_av.clone())),
         },
         Op::Dup { n: 1.try_into().unwrap() },
         Op::Dup { n: 1.try_into().unwrap() },
         Op::Member,
         Op::Push {
-            storage: false.try_into().unwrap(),
-            value: StateValue::Cell(Sp::new(amount_av.clone().try_into().unwrap())).try_into().unwrap(),
+            storage: false,
+            value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
         Op::Swap { n: 0.try_into().unwrap() },
         Op::Neg,
@@ -397,12 +397,12 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Dup { n: 2.try_into().unwrap() },
         Op::Idx {
-            cached: true.try_into().unwrap(),
-            push_path: false.try_into().unwrap(),
+            cached: true,
+            push_path: false,
             path: vec![Key::Stack].try_into().unwrap(),
         },
         Op::Add,
-        Op::Ins { cached: true.try_into().unwrap(), n: 2.try_into().unwrap() },
+        Op::Ins { cached: true, n: 2.try_into().unwrap() },
         Op::Swap { n: 0.try_into().unwrap() },
     ]
 }

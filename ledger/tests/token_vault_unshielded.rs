@@ -1432,9 +1432,6 @@ async fn test_rejection_deposit_amount_mismatch() {
     let deploy = ContractDeploy::new(&mut rng, contract);
     let addr = deploy.address();
     
-    let mut unbalanced_strictness = WellFormedStrictness::default();
-    unbalanced_strictness.enforce_balancing = false;
-    
     let balanced_strictness = WellFormedStrictness::default();
     
     let deploy_tx = Transaction::from_intents(
@@ -1657,9 +1654,6 @@ async fn test_rejection_missing_receiver() {
     
     let deploy_a = ContractDeploy::new(&mut rng, contract_a);
     let addr_a = deploy_a.address();
-    
-    let mut unbalanced_strictness = WellFormedStrictness::default();
-    unbalanced_strictness.enforce_balancing = false;
     
     let balanced_strictness = WellFormedStrictness::default();
     
@@ -1986,9 +1980,6 @@ async fn test_rejection_amount_mismatch() {
     
     let deploy_a = ContractDeploy::new(&mut rng, contract_a);
     let addr_a = deploy_a.address();
-    
-    let mut unbalanced_strictness = WellFormedStrictness::default();
-    unbalanced_strictness.enforce_balancing = false;
     
     let balanced_strictness = WellFormedStrictness::default();
     
