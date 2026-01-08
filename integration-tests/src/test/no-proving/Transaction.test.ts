@@ -73,12 +73,12 @@ describe('Ledger API - Transaction', () => {
     const unprovenTransaction = Transaction.fromParts(
       'local-test',
       Static.unprovenOfferFromOutput(),
-      Static.unprovenOfferFromOutput(2)
+      Static.unprovenOfferFromOutput()
     );
 
-    expect(unprovenTransaction.fallibleOffer?.get(2)?.outputs).toHaveLength(1);
+    expect(unprovenTransaction.fallibleOffer?.get(1)?.outputs).toHaveLength(1);
     expect(unprovenTransaction.guaranteedOffer?.outputs).toHaveLength(1);
-    expect(unprovenTransaction.fallibleOffer?.get(2)?.inputs).toHaveLength(0);
+    expect(unprovenTransaction.fallibleOffer?.get(1)?.inputs).toHaveLength(0);
     expect(unprovenTransaction.guaranteedOffer?.inputs).toHaveLength(0);
     expect(unprovenTransaction.intents).toBeUndefined();
     assertSerializationSuccess(
