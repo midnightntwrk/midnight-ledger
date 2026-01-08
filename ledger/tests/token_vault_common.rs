@@ -58,8 +58,8 @@ pub use base_crypto::rng::SplittableRng;
 pub use base_crypto::signatures::Signature;
 pub use base_crypto::time::Timestamp;
 pub use coin_structure::coin::{
-    Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo, NIGHT, UserAddress,
-    TokenType, UnshieldedTokenType,
+    Info as CoinInfo, NIGHT, QualifiedInfo as QualifiedCoinInfo, TokenType, UnshieldedTokenType,
+    UserAddress,
 };
 pub use coin_structure::contract::ContractAddress;
 pub use coin_structure::transfer::{Recipient, SenderEvidence};
@@ -69,8 +69,8 @@ pub use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, parti
 pub use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
 pub use midnight_ledger::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
 pub use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, Intent, IntentHash, LedgerState, ProofPreimageMarker, Transaction,
-    UnshieldedOffer, UtxoOutput, UtxoSpend,
+    ContractDeploy, INITIAL_PARAMETERS, Intent, IntentHash, LedgerState, ProofPreimageMarker,
+    Transaction, UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
 pub use midnight_ledger::test_utilities::{Resolver, verifier_key};
 pub use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
@@ -227,10 +227,12 @@ pub fn receive_unshielded_ops<D: DB>(
     // TokenType::Unshielded is encoded as: [1u8 (tag), color (32 bytes), empty (32 bytes)]
     let token_type_av: AlignedValue = token_type.into();
     let amount_av: AlignedValue = amount.into();
-    
+
     vec![
         // Swap to access effects on stack
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         // Index into effects at position 6 (unshielded_inputs map), push path for later insert
         Op::Idx {
             cached: true,
@@ -243,8 +245,12 @@ pub fn receive_unshielded_ops<D: DB>(
             value: StateValue::Cell(Sp::new(token_type_av.clone())),
         },
         // Duplicate for member check
-        Op::Dup { n: 1.try_into().unwrap() },
-        Op::Dup { n: 1.try_into().unwrap() },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
         // Check if key exists in map
         Op::Member,
         // Push the amount
@@ -253,13 +259,21 @@ pub fn receive_unshielded_ops<D: DB>(
             value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
         // Swap and negate for branching
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         Op::Neg,
         // Branch: skip 4.try_into().unwrap() ops if key doesn't exist
-        Op::Branch { skip: 4.try_into().unwrap() },
+        Op::Branch {
+            skip: 4.try_into().unwrap(),
+        },
         // If exists: get current value and add amount
-        Op::Dup { n: 2.try_into().unwrap() },
-        Op::Dup { n: 2.try_into().unwrap() },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
         Op::Idx {
             cached: true,
             push_path: false,
@@ -267,9 +281,14 @@ pub fn receive_unshielded_ops<D: DB>(
         },
         Op::Add,
         // Insert the value
-        Op::Ins { cached: true, n: 2.try_into().unwrap() },
+        Op::Ins {
+            cached: true,
+            n: 2.try_into().unwrap(),
+        },
         // Swap back
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
     ]
 }
 
@@ -296,9 +315,11 @@ pub fn send_unshielded_ops<D: DB>(
     // Convert to AlignedValue for VM operations
     let token_type_av: AlignedValue = token_type.into();
     let amount_av: AlignedValue = amount.into();
-    
+
     vec![
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         Op::Idx {
             cached: true,
             push_path: true,
@@ -308,26 +329,43 @@ pub fn send_unshielded_ops<D: DB>(
             storage: false,
             value: StateValue::Cell(Sp::new(token_type_av.clone())),
         },
-        Op::Dup { n: 1.try_into().unwrap() },
-        Op::Dup { n: 1.try_into().unwrap() },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
         Op::Member,
         Op::Push {
             storage: false,
             value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         Op::Neg,
-        Op::Branch { skip: 4.try_into().unwrap() },
-        Op::Dup { n: 2.try_into().unwrap() },
-        Op::Dup { n: 2.try_into().unwrap() },
+        Op::Branch {
+            skip: 4.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
         Op::Idx {
             cached: true,
             push_path: false,
             path: vec![Key::Stack].try_into().unwrap(),
         },
         Op::Add,
-        Op::Ins { cached: true, n: 2.try_into().unwrap() },
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Ins {
+            cached: true,
+            n: 2.try_into().unwrap(),
+        },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
     ]
 }
 
@@ -359,7 +397,7 @@ pub fn claim_unshielded_spend_ops<D: DB>(
 ) -> Vec<Op<ResultModeGather, D>> {
     use coin_structure::coin::PublicAddress;
     use onchain_runtime::context::ClaimedUnshieldedSpendsKey;
-    
+
     // Convert Recipient to PublicAddress for the effects key
     // This determines where the tokens will be delivered
     let public_addr: PublicAddress = match recipient {
@@ -368,13 +406,15 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         // The inner HashOutput must match the UTXO output owner
         Recipient::User(pk) => PublicAddress::User(UserAddress(pk.0)),
     };
-    
+
     let key = ClaimedUnshieldedSpendsKey(token_type, public_addr);
     let key_av: AlignedValue = key.into();
     let amount_av: AlignedValue = amount.into();
-    
+
     vec![
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         Op::Idx {
             cached: true,
             push_path: true,
@@ -384,25 +424,42 @@ pub fn claim_unshielded_spend_ops<D: DB>(
             storage: false,
             value: StateValue::Cell(Sp::new(key_av.clone())),
         },
-        Op::Dup { n: 1.try_into().unwrap() },
-        Op::Dup { n: 1.try_into().unwrap() },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 1.try_into().unwrap(),
+        },
         Op::Member,
         Op::Push {
             storage: false,
             value: StateValue::Cell(Sp::new(amount_av.clone())),
         },
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
         Op::Neg,
-        Op::Branch { skip: 4.try_into().unwrap() },
-        Op::Dup { n: 2.try_into().unwrap() },
-        Op::Dup { n: 2.try_into().unwrap() },
+        Op::Branch {
+            skip: 4.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
         Op::Idx {
             cached: true,
             push_path: false,
             path: vec![Key::Stack].try_into().unwrap(),
         },
         Op::Add,
-        Op::Ins { cached: true, n: 2.try_into().unwrap() },
-        Op::Swap { n: 0.try_into().unwrap() },
+        Op::Ins {
+            cached: true,
+            n: 2.try_into().unwrap(),
+        },
+        Op::Swap {
+            n: 0.try_into().unwrap(),
+        },
     ]
 }

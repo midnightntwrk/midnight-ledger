@@ -99,24 +99,18 @@ async fn test_shielded_full_lifecycle() {
     let owner_pk = derive_public_key(owner_sk);
 
     // Load contract operations
-    let deposit_shielded_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "depositShielded").await
-    );
-    let withdraw_shielded_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "withdrawShielded").await
-    );
-    let deposit_unshielded_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "depositUnshielded").await
-    );
-    let withdraw_unshielded_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "withdrawUnshielded").await
-    );
-    let get_shielded_balance_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "getShieldedBalance").await
-    );
-    let get_unshielded_balance_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "getUnshieldedBalance").await
-    );
+    let deposit_shielded_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await);
+    let withdraw_shielded_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "withdrawShielded").await);
+    let deposit_unshielded_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await);
+    let withdraw_unshielded_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await);
+    let get_shielded_balance_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await);
+    let get_unshielded_balance_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "getUnshieldedBalance").await);
 
     println!(":: Shielded Token Vault Test Suite");
     println!("   Owner PK: {:?}", hex::encode(&owner_pk.0[..8]));
@@ -139,22 +133,34 @@ async fn test_shielded_full_lifecycle() {
 
     let contract: ContractState<InMemoryDB> = ContractState::new(
         stval!([
-            (QualifiedCoinInfo::default()),   // 0: shieldedVault
-            (false),                          // 1: hasShieldedTokens
-            (owner_pk),                       // 2: owner
-            {},                               // 3: authorized (empty set)
-            (0u64),                           // 4: totalShieldedDeposits
-            (0u64),                           // 5: totalShieldedWithdrawals
-            (0u64),                           // 6: totalUnshieldedDeposits
-            (0u64)                            // 7: totalUnshieldedWithdrawals
+            (QualifiedCoinInfo::default()), // 0: shieldedVault
+            (false),                        // 1: hasShieldedTokens
+            (owner_pk),                     // 2: owner
+            {},                             // 3: authorized (empty set)
+            (0u64),                         // 4: totalShieldedDeposits
+            (0u64),                         // 5: totalShieldedWithdrawals
+            (0u64),                         // 6: totalUnshieldedDeposits
+            (0u64)                          // 7: totalUnshieldedWithdrawals
         ]),
         HashMap::new()
             .insert(b"depositShielded"[..].into(), deposit_shielded_op.clone())
             .insert(b"withdrawShielded"[..].into(), withdraw_shielded_op.clone())
-            .insert(b"depositUnshielded"[..].into(), deposit_unshielded_op.clone())
-            .insert(b"withdrawUnshielded"[..].into(), withdraw_unshielded_op.clone())
-            .insert(b"getShieldedBalance"[..].into(), get_shielded_balance_op.clone())
-            .insert(b"getUnshieldedBalance"[..].into(), get_unshielded_balance_op.clone()),
+            .insert(
+                b"depositUnshielded"[..].into(),
+                deposit_unshielded_op.clone(),
+            )
+            .insert(
+                b"withdrawUnshielded"[..].into(),
+                withdraw_unshielded_op.clone(),
+            )
+            .insert(
+                b"getShieldedBalance"[..].into(),
+                get_shielded_balance_op.clone(),
+            )
+            .insert(
+                b"getUnshieldedBalance"[..].into(),
+                get_unshielded_balance_op.clone(),
+            ),
         Default::default(),
     );
 
@@ -194,7 +200,7 @@ async fn test_shielded_full_lifecycle() {
     // Build transcript for first deposit (hasShieldedTokens = false)
     // The transcript operations must match exactly what the Compact circuit produces
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
-        &Cell_read!([key!(1u8)], false, bool)[..],  // Read hasShieldedTokens
+        &Cell_read!([key!(1u8)], false, bool)[..], // Read hasShieldedTokens
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), coin_com),
         &kernel_self!((), ())[..],
@@ -214,7 +220,7 @@ async fn test_shielded_full_lifecycle() {
     .collect();
 
     let public_transcript_results: Vec<AlignedValue> = vec![
-        false.into(),  // hasShieldedTokens was false
+        false.into(), // hasShieldedTokens was false
         addr.into(),
         addr.into(),
     ];
@@ -226,7 +232,7 @@ async fn test_shielded_full_lifecycle() {
         transient: vec![].into(),
         deltas: vec![Delta {
             token_type: token,
-            value: -(FIRST_DEPOSIT as i128),  // Negative = user spends
+            value: -(FIRST_DEPOSIT as i128), // Negative = user spends
         }]
         .into(),
     };
@@ -318,23 +324,14 @@ async fn test_shielded_full_lifecycle() {
     let coin_nul = new_coin.nullifier(&SenderEvidence::Contract(addr));
 
     // Create ZSwap input for existing pot
-    let pot_in = ZswapInput::new_contract_owned(
-        &mut rng,
-        &pot,
-        None,
-        addr,
-        &state.ledger.zswap.coin_coms,
-    )
-    .unwrap();
+    let pot_in =
+        ZswapInput::new_contract_owned(&mut rng, &pot, None, addr, &state.ledger.zswap.coin_coms)
+            .unwrap();
 
     // Create transient for new deposit (created and nullified in same tx)
-    let transient = ZswapTransient::new_from_contract_owned_output(
-        &mut rng,
-        &new_coin.qualify(0),
-        None,
-        out,
-    )
-    .unwrap();
+    let transient =
+        ZswapTransient::new_from_contract_owned_output(&mut rng, &new_coin.qualify(0), None, out)
+            .unwrap();
 
     // Output for merged coin
     let merged_out = ZswapOutput::new_contract_owned(&mut rng, &merged_coin, None, addr).unwrap();
@@ -377,7 +374,7 @@ async fn test_shielded_full_lifecycle() {
     .collect();
 
     let public_transcript_results: Vec<AlignedValue> = vec![
-        true.into(),  // hasShieldedTokens is now true
+        true.into(), // hasShieldedTokens is now true
         addr.into(),
         pot.into(),
         addr.into(),
@@ -421,7 +418,12 @@ async fn test_shielded_full_lifecycle() {
     let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
     state.assert_apply(&balanced, balanced_strictness);
 
-    println!("   Merge deposit: {} + {} = {} tokens", FIRST_DEPOSIT, SECOND_DEPOSIT, FIRST_DEPOSIT + SECOND_DEPOSIT);
+    println!(
+        "   Merge deposit: {} + {} = {} tokens",
+        FIRST_DEPOSIT,
+        SECOND_DEPOSIT,
+        FIRST_DEPOSIT + SECOND_DEPOSIT
+    );
 
     // ========================================================================
     // Part 4: Partial Shielded Withdrawal
@@ -454,8 +456,11 @@ async fn test_shielded_full_lifecycle() {
     } else {
         unreachable!()
     };
-    
-    println!("   Contract state: hasShieldedTokens={}, pot.value={}", has_shielded_tokens, pot.value);
+
+    println!(
+        "   Contract state: hasShieldedTokens={}, pot.value={}",
+        has_shielded_tokens, pot.value
+    );
 
     // Create withdrawal coin (goes to user) and change coin (stays in contract)
     let withdraw_coin = CoinInfo::from(&pot).evolve_from(
@@ -471,17 +476,13 @@ async fn test_shielded_full_lifecycle() {
     );
 
     let pot_nul = CoinInfo::from(&pot).nullifier(&SenderEvidence::Contract(addr));
-    let withdraw_com = withdraw_coin.commitment(&Recipient::User(state.zswap_keys.coin_public_key()));
+    let withdraw_com =
+        withdraw_coin.commitment(&Recipient::User(state.zswap_keys.coin_public_key()));
     let change_com = change_coin.commitment(&Recipient::Contract(addr));
 
-    let pot_in = ZswapInput::new_contract_owned(
-        &mut rng,
-        &pot,
-        None,
-        addr,
-        &state.ledger.zswap.coin_coms,
-    )
-    .unwrap();
+    let pot_in =
+        ZswapInput::new_contract_owned(&mut rng, &pot, None, addr, &state.ledger.zswap.coin_coms)
+            .unwrap();
 
     // User output (not contract-owned)
     let withdraw_out = ZswapOutput::new(
@@ -499,16 +500,18 @@ async fn test_shielded_full_lifecycle() {
     // Outputs must be sorted for ZSwap offer normalization
     let mut outputs = vec![withdraw_out, change_out];
     outputs.sort();
-    
+
     let offer = ZswapOffer {
         inputs: vec![pot_in].into(),
         outputs: outputs.into(),
         transient: vec![].into(),
-        deltas: vec![].into(),  // No delta - pure internal transfer
+        deltas: vec![].into(), // No delta - pure internal transfer
     };
 
     // Track the withdrawn coin so user can spend it later
-    state.zswap = state.zswap.watch_for(&state.zswap_keys.coin_public_key(), &withdraw_coin);
+    state.zswap = state
+        .zswap
+        .watch_for(&state.zswap_keys.coin_public_key(), &withdraw_coin);
 
     // Build withdrawal transcript
     // Order matches circuit execution:
@@ -516,10 +519,10 @@ async fn test_shielded_full_lifecycle() {
     // 2. hasShieldedTokens assertion
     // 3. shieldedVault.value check
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
-        &Set_member!([key!(3u8)], false, [u8; 32], owner_pk.0)[..],  // Check authorized.member(pk)
-        &Cell_read!([key!(2u8)], false, [u8; 32])[..],  // Read owner for pk == owner
-        &Cell_read!([key!(1u8)], false, bool)[..],  // Check hasShieldedTokens
-        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],  // Read vault
+        &Set_member!([key!(3u8)], false, [u8; 32], owner_pk.0)[..], // Check authorized.member(pk)
+        &Cell_read!([key!(2u8)], false, [u8; 32])[..],              // Read owner for pk == owner
+        &Cell_read!([key!(1u8)], false, bool)[..],                  // Check hasShieldedTokens
+        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_nullifier!((), (), pot_nul)[..],
         &kernel_claim_zswap_coin_spend!((), (), withdraw_com)[..],
@@ -541,9 +544,9 @@ async fn test_shielded_full_lifecycle() {
     .collect();
 
     let public_transcript_results: Vec<AlignedValue> = vec![
-        false.into(),  // authorized.member(pk) result - pk is NOT in authorized set
-        owner_pk.into(),  // owner value - this equals pk, so pk == owner is true
-        true.into(),   // hasShieldedTokens
+        false.into(),    // authorized.member(pk) result - pk is NOT in authorized set
+        owner_pk.into(), // owner value - this equals pk, so pk == owner is true
+        true.into(),     // hasShieldedTokens
         pot.into(),
         addr.into(),
         addr.into(),
@@ -567,7 +570,7 @@ async fn test_shielded_full_lifecycle() {
         output: withdraw_coin.into(),
         guaranteed_public_transcript: transcripts[0].0.clone(),
         fallible_public_transcript: transcripts[0].1.clone(),
-        private_transcript_outputs: vec![owner_sk.into()],  // Private: owner secret key for auth
+        private_transcript_outputs: vec![owner_sk.into()], // Private: owner secret key for auth
         communication_commitment_rand: rng.r#gen(),
         key_location: KeyLocation(Cow::Borrowed("withdrawShielded")),
     };
@@ -587,7 +590,10 @@ async fn test_shielded_full_lifecycle() {
     state.assert_apply(&balanced, balanced_strictness);
 
     let remaining = FIRST_DEPOSIT + SECOND_DEPOSIT - WITHDRAW_AMOUNT;
-    println!("   Partial withdrawal: {} tokens withdrawn, {} remaining in vault", WITHDRAW_AMOUNT, remaining);
+    println!(
+        "   Partial withdrawal: {} tokens withdrawn, {} remaining in vault",
+        WITHDRAW_AMOUNT, remaining
+    );
 
     // ========================================================================
     // Summary
@@ -596,7 +602,10 @@ async fn test_shielded_full_lifecycle() {
     println!("   Initial funds: {} tokens", REWARDS_AMOUNT);
     println!("   First deposit: {} tokens", FIRST_DEPOSIT);
     println!("   Second deposit (merge): {} tokens", SECOND_DEPOSIT);
-    println!("   Total deposited: {} tokens", FIRST_DEPOSIT + SECOND_DEPOSIT);
+    println!(
+        "   Total deposited: {} tokens",
+        FIRST_DEPOSIT + SECOND_DEPOSIT
+    );
     println!("   Withdrawn: {} tokens", WITHDRAW_AMOUNT);
     println!("   Remaining in vault: {} tokens", remaining);
     println!("\n   All shielded operations completed successfully!");
@@ -617,9 +626,8 @@ async fn test_deploy_only() {
     let owner_sk: HashOutput = rng.r#gen();
     let owner_pk = derive_public_key(owner_sk);
 
-    let deposit_shielded_op = ContractOperation::new(
-        verifier_key(&RESOLVER, "depositShielded").await
-    );
+    let deposit_shielded_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await);
 
     let contract: ContractState<InMemoryDB> = ContractState::new(
         stval!([
@@ -632,8 +640,7 @@ async fn test_deploy_only() {
             (0u64),
             (0u64)
         ]),
-        HashMap::new()
-            .insert(b"depositShielded"[..].into(), deposit_shielded_op),
+        HashMap::new().insert(b"depositShielded"[..].into(), deposit_shielded_op),
         Default::default(),
     );
 
@@ -644,7 +651,8 @@ async fn test_deploy_only() {
         "local-test",
         test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
     );
-    tx.well_formed(&state.ledger, strictness, state.time).unwrap();
+    tx.well_formed(&state.ledger, strictness, state.time)
+        .unwrap();
 
     println!("Contract deployment test passed");
     println!("   Address: {:?}", addr);
