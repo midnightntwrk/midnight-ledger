@@ -334,11 +334,13 @@ impl<D: DB> TestState<D> {
         self.zswap = self
             .zswap
             .replay_events(&self.zswap_keys, events.iter())
-            .expect("just applied transaction should replay");
+            .expect("just applied transaction should replay")
+            .result;
         self.dust = self
             .dust
             .replay_events(&self.dust_key, events.iter())
-            .expect("just applied transaction should replay");
+            .expect("just applied transaction should replay")
+            .result;
         let pk = UserAddress::from(self.night_key.verifying_key());
         self.utxos = self
             .ledger
@@ -370,11 +372,13 @@ impl<D: DB> TestState<D> {
         self.zswap = self
             .zswap
             .replay_events(&self.zswap_keys, result.events())
-            .expect("just applied transaction should replay");
+            .expect("just applied transaction should replay")
+            .result;
         self.dust = self
             .dust
             .replay_events(&self.dust_key, result.events())
-            .expect("just applied transaction should replay");
+            .expect("just applied transaction should replay")
+            .result;
         let pk = UserAddress::from(self.night_key.verifying_key());
         self.utxos = self
             .ledger
