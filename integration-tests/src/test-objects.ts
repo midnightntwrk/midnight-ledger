@@ -233,6 +233,28 @@ export class Static {
     );
   };
 
+  static unprovenOfferFromOutputWithoutSegment = (
+    tokenType: ShieldedTokenType = shieldedToken() as ShieldedTokenType,
+    value: bigint = Static.bigInt(),
+    targetCpk: string = Static.coinPublicKey(),
+    targetEpk: string = Static.encryptionPublicKey()
+  ) => {
+    return ZswapOffer.fromOutput(
+      ZswapOutput.new(
+        {
+          type: tokenType.raw,
+          nonce: Static.nonce(),
+          value
+        },
+        undefined,
+        targetCpk,
+        targetEpk
+      ),
+      tokenType.raw,
+      value
+    );
+  };
+
   static unprovenTransactionGuaranteed = () => {
     return Transaction.fromParts('local-test', Static.unprovenOfferFromOutput());
   };
@@ -392,14 +414,6 @@ export const getNewUnshieldedOffer = (
     ],
     [signData(sampleSigningKey(), new Uint8Array(32))]
   );
-
-export class TestTransactionContext {
-  intentHash = sampleIntentHash();
-  token = Random.unshieldedTokenType();
-  svk = Random.signatureVerifyingKeyNew();
-  signature = Random.signature();
-  userAddress = Random.userAddress();
-}
 
 export class TestResource {
   static operationVerifierKey = (): Uint8Array => {

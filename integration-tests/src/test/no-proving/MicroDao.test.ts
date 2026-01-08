@@ -31,16 +31,12 @@ import {
   encodeContractAddress,
   encodeQualifiedShieldedCoinInfo,
   encodeShieldedCoinInfo,
-  Intent,
   LedgerParameters,
   type LedgerState,
-  type MaintenanceUpdate,
   type Nonce,
   type Op,
   partitionTranscripts,
   persistentCommit,
-  type PreBinding,
-  type PreProof,
   PreTranscript,
   type Proofish,
   type QualifiedShieldedCoinInfo,
@@ -49,7 +45,6 @@ import {
   runtimeCoinCommitment,
   runtimeCoinNullifier,
   type ShieldedCoinInfo,
-  type SignatureEnabled,
   StateBoundedMerkleTree,
   StateMap,
   StateValue,
@@ -91,6 +86,7 @@ import {
   merkleTreeCheckRoot,
   merkleTreeInsert,
   merkleTreeResetToDefault,
+  programWithResults,
   setInsert,
   setMember,
   setResetToDefault
@@ -107,6 +103,7 @@ import {
   THREE_VALUE,
   TWO_VALUE
 } from '@/test/utils/value-alignment';
+import { testIntents } from '@/test-utils';
 
 describe('Ledger API - MicroDao', () => {
   const ADVANCE = 'advance';
@@ -437,7 +434,7 @@ describe('Ledger API - MicroDao', () => {
       console.log(`  :: Part ${name}`);
 
       const coin = createShieldedCoinInfo(token.raw, 100_000n);
-      let out = ZswapOutput.newContractOwned(coin, 0, addr);
+      let out = ZswapOutput.newContractOwned(coin, undefined, addr);
 
       const encodedCoin = encodeShieldedCoinInfo(coin);
       const encodedCoinValue = bigIntToValue(encodedCoin.value);
@@ -525,7 +522,7 @@ describe('Ledger API - MicroDao', () => {
             alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
           }
         );
-        const potIn = ZswapInput.newContractOwned(pot, 0, addr, state.ledger.zswap);
+        const potIn = ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap);
         const transient = ZswapTransient.newFromContractOwnedOutput(
           {
             type: coin.type,
@@ -542,7 +539,7 @@ describe('Ledger API - MicroDao', () => {
           pot.type,
           pot.nonce
         );
-        out = ZswapOutput.newContractOwned(newCoin, 0, addr);
+        out = ZswapOutput.newContractOwned(newCoin, undefined, addr);
         const encodedNewCoin = encodeShieldedCoinInfo(newCoin);
         const encodedNewCoinValue = bigIntToValue(encodedNewCoin.value);
 
@@ -1215,13 +1212,13 @@ describe('Ledger API - MicroDao', () => {
     );
 
     let offer = ZswapOffer.fromInput(
-      ZswapInput.newContractOwned(pot, 0, addr, state.ledger.zswap),
+      ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap),
       pot.type,
       pot.value
     );
     offer = offer.merge(
       ZswapOffer.fromOutput(
-        ZswapOutput.new(newCoin, 0, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey),
+        ZswapOutput.new(newCoin, undefined, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey),
         newCoin.type,
         newCoin.value
       )
@@ -1260,60 +1257,6 @@ describe('Ledger API - MicroDao', () => {
       res.block = block;
     }
     return res;
-  }
-
-  function translateOp(op: Op<null>, nextResult: () => AlignedValue): Op<AlignedValue> {
-    if (typeof op === 'string') {
-      return op;
-    }
-    if ('popeq' in op) {
-      return { popeq: { cached: op.popeq.cached, result: nextResult() } };
-    }
-    return op;
-  }
-
-  function programWithResults(prog: Op<null>[], results: AlignedValue[]): Op<AlignedValue>[] {
-    let i = 0;
-    const next = () => {
-      if (i >= results.length) throw new Error('programWithResults: not enough results to fill popeq ops');
-      return results[i++];
-    };
-    return prog
-      .map((op) => translateOp(op as Op<null>, next))
-      .filter((op) => {
-        if (typeof op === 'string') {
-          return op;
-        }
-        if ('idx' in op) {
-          return op.idx.path.length !== 0;
-        }
-        if ('ins' in op) {
-          return op.ins.n !== 0;
-        }
-        return true;
-      });
-  }
-
-  function testIntents(
-    calls: ContractCallPrototype[],
-    updates: MaintenanceUpdate[],
-    deploys: ContractDeploy[],
-    tblock: Date
-  ): Intent<SignatureEnabled, PreProof, PreBinding> {
-    const fastForward = new Date(0);
-    fastForward.setSeconds(3600);
-    const updatedTtl = new Date(tblock.getTime() + fastForward.getTime());
-    let intent = Intent.new(updatedTtl);
-    calls.forEach((call) => {
-      intent = intent.addCall(call);
-    });
-    updates.forEach((update) => {
-      intent = intent.addMaintenanceUpdate(update);
-    });
-    deploys.forEach((deploy) => {
-      intent = intent.addDeploy(deploy);
-    });
-    return intent;
   }
 
   function getChargedState(orgPk: Value): ChargedState {

@@ -14,12 +14,19 @@
 import path, { dirname } from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+
 import {
   type Bindingish,
+  type ContractCallPrototype,
+  type ContractDeploy,
   createShieldedCoinInfo,
+  Intent,
+  type MaintenanceUpdate,
+  type PreBinding,
   type PreProof,
   type Proofish,
   type RawTokenType,
+  type SignatureEnabled,
   type Signaturish,
   type ZswapInput,
   ZswapLocalState,
@@ -147,4 +154,28 @@ export const createValidZSwapInput = (
   const [outputLocalState, zswapInput] = updatedLocalState.spend(secretKeys, coin, segment);
 
   return { outputLocalState, zswapInput };
+};
+
+export const testIntents = (
+  calls: ContractCallPrototype[],
+  updates: MaintenanceUpdate[],
+  deploys: ContractDeploy[],
+  tblock: Date
+): Intent<SignatureEnabled, PreProof, PreBinding> => {
+  const ttl = plus1Hour(tblock);
+  let intent = Intent.new(ttl);
+  calls.forEach((call) => {
+    intent = intent.addCall(call);
+  });
+  updates.forEach((update) => {
+    intent = intent.addMaintenanceUpdate(update);
+  });
+  deploys.forEach((deploy) => {
+    intent = intent.addDeploy(deploy);
+  });
+  return intent;
+};
+
+export const plus1Hour = (d: Date): Date => {
+  return new Date(d.getTime() + 3600 * 1000);
 };
