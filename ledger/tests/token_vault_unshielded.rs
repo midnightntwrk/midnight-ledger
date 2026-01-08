@@ -127,7 +127,7 @@ use token_vault_common::*;
 async fn test_unshielded_contract_deposit() {
     use base_crypto::signatures::SigningKey;
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x43);
     
     // Initialize crypto parameters
@@ -443,7 +443,7 @@ async fn test_unshielded_contract_deposit() {
 async fn test_unshielded_contract_withdraw() {
     use base_crypto::signatures::SigningKey;
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x44);
     
     // Initialize crypto parameters
@@ -859,7 +859,7 @@ async fn test_unshielded_contract_withdraw() {
 async fn test_unshielded_contract_to_contract() {
     use base_crypto::signatures::SigningKey;
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x45);
     
     // Initialize crypto parameters
@@ -1383,7 +1383,7 @@ async fn test_rejection_deposit_amount_mismatch() {
     use base_crypto::signatures::SigningKey;
     use midnight_ledger::error::MalformedTransaction;
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x50);
     
     lazy_static::initialize(&PARAMS_VERIFIER);
@@ -1605,7 +1605,7 @@ async fn test_rejection_missing_receiver() {
     use base_crypto::signatures::SigningKey;
     use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x51);
     
     lazy_static::initialize(&PARAMS_VERIFIER);
@@ -1934,7 +1934,7 @@ async fn test_rejection_amount_mismatch() {
     use base_crypto::signatures::SigningKey;
     use midnight_ledger::error::{EffectsCheckError, MalformedTransaction};
     
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x52);
     
     lazy_static::initialize(&PARAMS_VERIFIER);

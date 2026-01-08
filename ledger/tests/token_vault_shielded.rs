@@ -83,7 +83,7 @@ use token_vault_common::*;
 /// - totalShieldedWithdrawals: Counter incremented on each withdrawal
 #[tokio::test]
 async fn test_shielded_full_lifecycle() {
-    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
+    //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x42);
 
     // Initialize crypto parameters
