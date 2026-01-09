@@ -131,6 +131,7 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
 
 impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
     fn apply_system_tx(&self, _secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self {
+        #[allow(clippy::match_single_binding, reason = "to re-enable later")]
         match tx {
             // NOTE: Treasury payments have been completely disabled until governance for the
             // treasury has been agreed. All code has been commented out to maximize clarity.
