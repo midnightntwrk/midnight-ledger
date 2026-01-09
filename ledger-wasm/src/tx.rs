@@ -406,6 +406,7 @@ impl Transaction {
                 for value in result {
                     if value.is_undefined() || value.is_null() {
                         res.push(None);
+                        continue;
                     }
                     let value_bigint = value
                         .dyn_into::<BigInt>()
