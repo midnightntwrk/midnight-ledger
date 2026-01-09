@@ -7,8 +7,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes
-- disable system transactions accessing the treasury until treasury governance
-  is in place
+- breaking: disable system transactions accessing the treasury until treasury
+  governance is in place
 
 ## 6.2.0
 
