@@ -97,6 +97,7 @@ async fn system_tx_pay_from_unshielded() {
 }
 
 #[tokio::test]
+#[ignore = "disabled due to treasury payments being disabled"]
 async fn system_tx_pay_from_shielded() {
     let mut rng = StdRng::seed_from_u64(0x42);
     // Initial states

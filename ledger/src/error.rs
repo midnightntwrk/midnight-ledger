@@ -89,6 +89,7 @@ pub enum SystemTransactionError {
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
+    TreasuryDisabled,
 }
 
 impl Display for SystemTransactionError {
@@ -169,6 +170,10 @@ impl Display for SystemTransactionError {
                 )
             }
             SystemTransactionError::InvariantViolation(e) => e.fmt(f),
+            SystemTransactionError::TreasuryDisabled => write!(
+                f,
+                "invalid attempt to access treasury; the treasury is disabled until governance for it has been agreed"
+            ),
         }
     }
 }

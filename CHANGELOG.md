@@ -7,6 +7,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes
+- breaking: disable system transactions accessing the treasury until treasury
+  governance is in place
+- fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
+  `check` method.
 
 ## 6.2.0
 

@@ -17,6 +17,7 @@ use crate::error::{
     TransactionApplicationError, TransactionInvalid,
 };
 use crate::events::{Event, EventDetails, EventSource, ZswapPreimageEvidence};
+use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
     ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, Intent, IntentHash,
@@ -24,14 +25,11 @@ use crate::structure::{
     ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
     SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
-use crate::structure::{OutputInstructionShielded, TransactionHash};
 use crate::utils::{KeySortedIter, SortedIter, sorted};
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
-use coin_structure::coin::Info;
-use coin_structure::coin::Nonce;
 use coin_structure::coin::UserAddress;
 use coin_structure::coin::{Commitment, NIGHT, ShieldedTokenType, TokenType};
 use coin_structure::contract::ContractAddress;
@@ -49,9 +47,9 @@ use storage::storage::HashSet;
 use storage::storage::Map;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::commitment::{PedersenRandomness, PureGeneratorPedersen};
+use zswap::Offer as ZswapOffer;
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
-use zswap::{AuthorizedClaim, Offer as ZswapOffer};
 
 pub(crate) fn whitelist_matches(
     whitelist: &Option<Map<ContractAddress, ()>>,
@@ -132,35 +130,39 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
 }
 
 impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
-    fn apply_system_tx(&self, secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self {
+    fn apply_system_tx(&self, _secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self {
+        #[allow(clippy::match_single_binding, reason = "to re-enable later")]
         match tx {
-            SystemTransaction::PayFromTreasuryShielded {
-                outputs,
-                nonce,
-                token_type,
-            } => {
-                let mut res = self.clone();
-                for OutputInstructionShielded {
-                    amount,
-                    target_key: target_address,
-                } in outputs
-                {
-                    let coin = Info {
-                        value: *amount,
-                        type_: *token_type,
-                        nonce: Nonce(*nonce),
-                    };
-                    res = self.apply_claim(
-                        secret_keys,
-                        &AuthorizedClaim {
-                            coin,
-                            recipient: *target_address,
-                            proof: std::sync::Arc::new(()),
-                        },
-                    );
-                }
-                res
-            }
+            // NOTE: Treasury payments have been completely disabled until governance for the
+            // treasury has been agreed. All code has been commented out to maximize clarity.
+            //
+            // SystemTransaction::PayFromTreasuryShielded {
+            //     outputs,
+            //     nonce,
+            //     token_type,
+            // } => {
+            //     let mut res = self.clone();
+            //     for OutputInstructionShielded {
+            //         amount,
+            //         target_key: target_address,
+            //     } in outputs
+            //     {
+            //         let coin = Info {
+            //             value: *amount,
+            //             type_: *token_type,
+            //             nonce: Nonce(*nonce),
+            //         };
+            //         res = self.apply_claim(
+            //             secret_keys,
+            //             &AuthorizedClaim {
+            //                 coin,
+            //                 recipient: *target_address,
+            //                 proof: std::sync::Arc::new(()),
+            //             },
+            //         );
+            //     }
+            //     res
+            // }
             _ => self.clone(),
         }
     }
@@ -344,6 +346,7 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self))]
+    #[allow(dead_code, reason = "used by disabled treasury interactions")]
     fn native_issue_unbalanced(
         &self,
         target: coin_structure::coin::PublicKey,
@@ -587,159 +590,169 @@ impl<D: DB> LedgerState<D> {
                 let res = (state, vec![]);
                 Ok(res)
             }
-            SystemTransaction::PayFromTreasuryShielded {
-                outputs,
-                token_type,
-                nonce,
-            } => {
-                let mut treasury = self.treasury.clone();
-                let tt_amount = treasury
-                    .get(&TokenType::Shielded(*token_type))
-                    .copied()
-                    .unwrap_or(0);
-                let req_total = outputs
-                    .iter()
-                    .map(|o| o.amount)
-                    .try_fold(0u128, |acc, a| acc.checked_add(a));
-                let req_total = match req_total {
-                    Some(v) if v <= tt_amount => v,
-                    _ => {
-                        error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
-                        return Err(SystemTransactionError::InsufficientTreasuryFunds {
-                            requested: req_total,
-                            actual: tt_amount,
-                            token_type: TokenType::Shielded(*token_type),
-                        });
-                    }
-                };
-                info!(
-                    ?req_total,
-                    ?token_type,
-                    ?outputs,
-                    supply_before = tt_amount,
-                    "[privileged] authorized treasury payout"
+            // NOTE: Treasury payments have been completely disabled until governance for the
+            // treasury has been agreed. All code has been commented out to maximize clarity.
+            SystemTransaction::PayFromTreasuryShielded { .. }
+            | SystemTransaction::PayFromTreasuryUnshielded { .. } => {
+                error!(
+                    ?tx,
+                    "[privileged] denied attempt to access treasury. The treasury is disabled until governance for it has been agreed."
                 );
-                treasury = treasury.insert(TokenType::Shielded(*token_type), tt_amount - req_total);
-                let mut state = LedgerState {
-                    treasury,
-                    ..self.clone()
-                };
-                let mut events = vec![];
-                for output in outputs {
-                    let res = state.native_issue_unbalanced(
-                        output.target_key,
-                        *token_type,
-                        *nonce,
-                        output.amount,
-                        tx.event_source(),
-                    )?;
-                    {
-                        state = res.0;
-                        events.extend(res.1);
-                    }
-                }
-
-                state.check_night_balance_invariant()?;
-
-                let res = (state, events);
-                Ok(res)
+                Err(SystemTransactionError::TreasuryDisabled)
             }
-            SystemTransaction::PayFromTreasuryUnshielded {
-                outputs,
-                token_type,
-            } => {
-                let mut treasury = self.treasury.clone();
-                let tt_amount = treasury
-                    .get(&TokenType::Unshielded(*token_type))
-                    .copied()
-                    .unwrap_or(0);
-                let req_total = outputs
-                    .iter()
-                    .map(|o| o.amount)
-                    .try_fold(0u128, |acc, a| acc.checked_add(a));
-                let req_total = match req_total {
-                    Some(v) if v <= tt_amount => v,
-                    _ => {
-                        error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
-                        return Err(SystemTransactionError::InsufficientTreasuryFunds {
-                            requested: req_total,
-                            actual: tt_amount,
-                            token_type: TokenType::Unshielded(*token_type),
-                        });
-                    }
-                };
-                info!(
-                    ?req_total,
-                    ?token_type,
-                    ?outputs,
-                    supply_before = tt_amount,
-                    "[privileged] authorized treasury payout"
-                );
+            // SystemTransaction::PayFromTreasuryShielded {
+            //     outputs,
+            //     token_type,
+            //     nonce,
+            // } => {
+            //     let mut treasury = self.treasury.clone();
+            //     let tt_amount = treasury
+            //         .get(&TokenType::Shielded(*token_type))
+            //         .copied()
+            //         .unwrap_or(0);
+            //     let req_total = outputs
+            //         .iter()
+            //         .map(|o| o.amount)
+            //         .try_fold(0u128, |acc, a| acc.checked_add(a));
+            //     let req_total = match req_total {
+            //         Some(v) if v <= tt_amount => v,
+            //         _ => {
+            //             error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
+            //             return Err(SystemTransactionError::InsufficientTreasuryFunds {
+            //                 requested: req_total,
+            //                 actual: tt_amount,
+            //                 token_type: TokenType::Shielded(*token_type),
+            //             });
+            //         }
+            //     };
+            //     info!(
+            //         ?req_total,
+            //         ?token_type,
+            //         ?outputs,
+            //         supply_before = tt_amount,
+            //         "[privileged] authorized treasury payout"
+            //     );
+            //     treasury = treasury.insert(TokenType::Shielded(*token_type), tt_amount - req_total);
+            //     let mut state = LedgerState {
+            //         treasury,
+            //         ..self.clone()
+            //     };
+            //     let mut events = vec![];
+            //     for output in outputs {
+            //         let res = state.native_issue_unbalanced(
+            //             output.target_key,
+            //             *token_type,
+            //             *nonce,
+            //             output.amount,
+            //             tx.event_source(),
+            //         )?;
+            //         {
+            //             state = res.0;
+            //             events.extend(res.1);
+            //         }
+            //     }
 
-                treasury =
-                    treasury.insert(TokenType::Unshielded(*token_type), tt_amount - req_total);
+            //     state.check_night_balance_invariant()?;
 
-                let mut state = LedgerState {
-                    treasury,
-                    ..self.clone()
-                };
+            //     let res = (state, events);
+            //     Ok(res)
+            // }
+            // SystemTransaction::PayFromTreasuryUnshielded {
+            //     outputs,
+            //     token_type,
+            // } => {
+            //     let mut treasury = self.treasury.clone();
+            //     let tt_amount = treasury
+            //         .get(&TokenType::Unshielded(*token_type))
+            //         .copied()
+            //         .unwrap_or(0);
+            //     let req_total = outputs
+            //         .iter()
+            //         .map(|o| o.amount)
+            //         .try_fold(0u128, |acc, a| acc.checked_add(a));
+            //     let req_total = match req_total {
+            //         Some(v) if v <= tt_amount => v,
+            //         _ => {
+            //             error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
+            //             return Err(SystemTransactionError::InsufficientTreasuryFunds {
+            //                 requested: req_total,
+            //                 actual: tt_amount,
+            //                 token_type: TokenType::Unshielded(*token_type),
+            //             });
+            //         }
+            //     };
+            //     info!(
+            //         ?req_total,
+            //         ?token_type,
+            //         ?outputs,
+            //         supply_before = tt_amount,
+            //         "[privileged] authorized treasury payout"
+            //     );
 
-                let mut events = vec![];
-                for (i, output) in outputs.iter().enumerate() {
-                    let hash = output.clone().mk_intent_hash(*token_type);
-                    let replay_protection = self
-                        .replay_protection
-                        .clone()
-                        .apply_member(
-                            hash,
-                            tblock + self.parameters.global_ttl,
-                            tblock,
-                            self.parameters.global_ttl,
-                        )
-                        .map_err(SystemTransactionError::ReplayProtectionFailure)?;
+            //     treasury =
+            //         treasury.insert(TokenType::Unshielded(*token_type), tt_amount - req_total);
 
-                    let utxo = Utxo {
-                        value: output.amount,
-                        owner: output.target_address,
-                        type_: *token_type,
-                        intent_hash: hash,
-                        output_no: i as u32,
-                    };
-                    let meta = UtxoMeta { ctime: tblock };
+            //     let mut state = LedgerState {
+            //         treasury,
+            //         ..self.clone()
+            //     };
 
-                    state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
-                    state.replay_protection = Sp::new(replay_protection);
+            //     let mut events = vec![];
+            //     for (i, output) in outputs.iter().enumerate() {
+            //         let hash = output.clone().mk_intent_hash(*token_type);
+            //         let replay_protection = self
+            //             .replay_protection
+            //             .clone()
+            //             .apply_member(
+            //                 hash,
+            //                 tblock + self.parameters.global_ttl,
+            //                 tblock,
+            //                 self.parameters.global_ttl,
+            //             )
+            //             .map_err(SystemTransactionError::ReplayProtectionFailure)?;
 
-                    if let Some(dust_addr) = state
-                        .dust
-                        .generation
-                        .address_delegation
-                        .get(&output.target_address)
-                        && *token_type == NIGHT
-                    {
-                        let mut event_push = |content| {
-                            events.push(Event {
-                                source: tx.event_source(),
-                                content,
-                            })
-                        };
-                        state.dust = Sp::new(state.dust.fresh_dust_output(
-                            crate::dust::initial_nonce(i as u32, hash),
-                            0,
-                            utxo.value,
-                            *dust_addr,
-                            tblock,
-                            tblock,
-                            &mut event_push,
-                        )?);
-                    }
-                }
+            //         let utxo = Utxo {
+            //             value: output.amount,
+            //             owner: output.target_address,
+            //             type_: *token_type,
+            //             intent_hash: hash,
+            //             output_no: i as u32,
+            //         };
+            //         let meta = UtxoMeta { ctime: tblock };
 
-                state.check_night_balance_invariant()?;
+            //         state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
+            //         state.replay_protection = Sp::new(replay_protection);
 
-                let res = (state, events);
-                Ok(res)
-            }
+            //         if let Some(dust_addr) = state
+            //             .dust
+            //             .generation
+            //             .address_delegation
+            //             .get(&output.target_address)
+            //             && *token_type == NIGHT
+            //         {
+            //             let mut event_push = |content| {
+            //                 events.push(Event {
+            //                     source: tx.event_source(),
+            //                     content,
+            //                 })
+            //             };
+            //             state.dust = Sp::new(state.dust.fresh_dust_output(
+            //                 crate::dust::initial_nonce(i as u32, hash),
+            //                 0,
+            //                 utxo.value,
+            //                 *dust_addr,
+            //                 tblock,
+            //                 tblock,
+            //                 &mut event_push,
+            //             )?);
+            //         }
+            //     }
+
+            //     state.check_night_balance_invariant()?;
+
+            //     let res = (state, events);
+            //     Ok(res)
+            // }
             SystemTransaction::CNightGeneratesDustUpdate { events: actions } => {
                 let mut state = self.clone();
                 let mut dust_state = (*self.dust).clone();
