@@ -400,6 +400,32 @@
               ];
               doCheck = false;
             };
+          packages.zkir-v3 = ({
+              "x86_64-linux" = pkgsStatic;
+              "x86_64-darwin" = pkgs;
+              "aarch64-linux" = pkgsStatic;
+              "aarch64-darwin" = pkgs;
+          }.${system}.makeRustPlatform {
+            rustc = packages.rust-build-toolchain;
+            cargo = packages.rust-build-toolchain;
+          }).buildRustPackage rec {
+              pname = "zkir-v3";
+              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
+              src = rustWorkspaceSrc;
+              cargoLock.lockFile = ./Cargo.lock;
+              cargoLock.allowBuiltinFetchGit = true;
+
+              MIDNIGHT_PP = "${packages.public-params}";
+
+              buildInputs = [
+                packages.public-params
+              ];
+              cargoBuildFlags = "--package zkir-v3 --features binary";
+              nativeBuildInputs = [
+                packages.rust-build-toolchain
+              ];
+              doCheck = false;
+            };
           packages.public-params = let
               param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {
