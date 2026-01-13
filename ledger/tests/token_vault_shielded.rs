@@ -475,7 +475,7 @@ async fn test_shielded_full_lifecycle() {
     );
 
     let change_coin = CoinInfo::from(&pot).evolve_from(
-        b"midnight:kernel:nonce_evolve/2",  // Different domain separator for change
+        b"midnight:kernel:nonce_evolve/2", // Different domain separator for change
         pot.value - WITHDRAW_AMOUNT,
         pot.type_,
     );
@@ -581,7 +581,10 @@ async fn test_shielded_full_lifecycle() {
         // Private transcript outputs:
         // 1. owner_sk for localSecretKey() in isAuthorized()
         // 2. coin_public_key for ownPublicKey() (provides the ZswapCoinPublicKey directly)
-        private_transcript_outputs: vec![owner_sk.into(), state.zswap_keys.coin_public_key().into()],
+        private_transcript_outputs: vec![
+            owner_sk.into(),
+            state.zswap_keys.coin_public_key().into(),
+        ],
         communication_commitment_rand: rng.r#gen(),
         key_location: KeyLocation(Cow::Borrowed("withdrawShielded")),
     };
