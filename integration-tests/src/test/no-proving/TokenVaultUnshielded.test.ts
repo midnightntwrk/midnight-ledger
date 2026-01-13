@@ -541,11 +541,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       withdrawTranscripts[0][1],
       [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
       {
-        value: [
-          Static.encodeFromHex(tokenColor),
-          bigIntToValue(WITHDRAW_AMOUNT)[0],
-          Static.encodeFromHex(userAddress)
-        ],
+        value: [Static.encodeFromHex(tokenColor), bigIntToValue(WITHDRAW_AMOUNT)[0], Static.encodeFromHex(userAddress)],
         alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }, ATOM_BYTES_32]
       },
       { value: [], alignment: [] },

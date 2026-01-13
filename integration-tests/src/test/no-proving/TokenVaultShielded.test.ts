@@ -226,11 +226,7 @@ describe('Ledger API - TokenVault Shielded', () => {
   /**
    * Deploy the token vault contract.
    */
-  function deployContract(
-    state: TestState,
-    ownerPk: Value,
-    ops: ReturnType<typeof setupOperations>
-  ): ContractAddress {
+  function deployContract(state: TestState, ownerPk: Value, ops: ReturnType<typeof setupOperations>): ContractAddress {
     const contract = new ContractState();
 
     contract.setOperation(DEPOSIT_SHIELDED, ops.depositShieldedOp);
@@ -262,11 +258,7 @@ describe('Ledger API - TokenVault Shielded', () => {
   /**
    * Get query context with ZSwap offer applied.
    */
-  function getContextWithOffer(
-    ledger: LedgerState,
-    addr: ContractAddress,
-    offer?: ZswapOffer<Proofish>
-  ): QueryContext {
+  function getContextWithOffer(ledger: LedgerState, addr: ContractAddress, offer?: ZswapOffer<Proofish>): QueryContext {
     const res = new QueryContext(new ChargedState(ledger.index(addr)!.data.state), addr);
     if (offer) {
       const [, indices] = ledger.zswap.tryApply(offer);
@@ -434,12 +426,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     unbalancedStrictness.enforceBalancing = false;
     const balancedStrictness = new WellFormedStrictness();
 
-    const tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      offer,
-      undefined,
-      testIntents([call], [], [], state.time)
-    );
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], state.time));
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
@@ -495,7 +482,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     const encodedFirstCoin = encodeShieldedCoinInfo(firstCoin);
     const encodedFirstCoinValue = bigIntToValue(encodedFirstCoin.value);
 
-    let coinCom: AlignedValue = runtimeCoinCommitment(
+    const coinCom: AlignedValue = runtimeCoinCommitment(
       {
         value: [
           Static.trimTrailingZeros(encodedFirstCoin.nonce),
@@ -562,12 +549,7 @@ describe('Ledger API - TokenVault Shielded', () => {
       DEPOSIT_SHIELDED
     );
 
-    let tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      offer,
-      undefined,
-      testIntents([call], [], [], state.time)
-    );
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], state.time));
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     let balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
@@ -751,12 +733,7 @@ describe('Ledger API - TokenVault Shielded', () => {
       DEPOSIT_SHIELDED
     );
 
-    tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      offer,
-      undefined,
-      testIntents([call], [], [], state.time)
-    );
+    tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], state.time));
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
@@ -876,12 +853,7 @@ describe('Ledger API - TokenVault Shielded', () => {
       DEPOSIT_SHIELDED
     );
 
-    let tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      offer,
-      undefined,
-      testIntents([call], [], [], state.time)
-    );
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], state.time));
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     let balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
@@ -1067,12 +1039,7 @@ describe('Ledger API - TokenVault Shielded', () => {
       WITHDRAW_SHIELDED
     );
 
-    tx = Transaction.fromParts(
-      LOCAL_TEST_NETWORK_ID,
-      offer,
-      undefined,
-      testIntents([call], [], [], state.time)
-    );
+    tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], state.time));
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
