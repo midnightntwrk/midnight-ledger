@@ -11,46 +11,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Token Vault Test Utilities
+//! # Token Vault Test Utilities
 //!
-//! **REFERENCE IMPLEMENTATION ONLY**
-//! This code is provided for educational and testing purposes to demonstrate
-//! Midnight ledger features. DO NOT use this code as-is in production without
-//! proper security review, auditing, and hardening.
+//! Shared helper functions for shielded and unshielded token vault tests.
 //!
-//! This module contains shared helper functions and utilities used by both
-//! the shielded and unshielded token vault tests. It provides:
+//! ## Contents
 //!
-//! - Common imports and re-exports
-//! - Helper functions for building transcripts
-//! - Op sequence generators for unshielded operations
-//! - Contract state layout constants
+//! - **Imports**: Common re-exports for test modules
+//! - **Test Configuration**: Resolver setup and key derivation
+//! - **Contract Layout**: State indices matching token-vault.compact
+//! - **Context Helpers**: QueryContext builders for transcript simulation
+//! - **Unshielded Ops**: VM operation sequences for receiveUnshielded/sendUnshielded
+//! - **Constants**: Effects and CallContext index definitions
 //!
-//! ## Architecture Overview
+//! ## Key Functions
 //!
-//! The Midnight ledger supports two types of tokens:
-//!
-//! 1. **Shielded tokens**: Privacy-preserving tokens using ZK proofs. These use
-//!    ZSwap for private transfers with committed values and nullifiers.
-//!
-//! 2. **Unshielded tokens**: Transparent tokens stored as UTXOs (Unspent Transaction
-//!    Outputs) similar to Bitcoin. These use the UTXO model for transfers.
-//!
-//! ## Test Configuration
-//!
-//! Tests require the `MIDNIGHT_LEDGER_TEST_STATIC_DIR` environment variable
-//! to be set to the tests directory containing verifier keys:
-//!
-//! ```bash
-//! MIDNIGHT_LEDGER_TEST_STATIC_DIR=/path/to/ledger/tests cargo test --test token-vault-shielded
-//! MIDNIGHT_LEDGER_TEST_STATIC_DIR=/path/to/ledger/tests cargo test --test token-vault-unshielded
-//! ```
+//! - `program_with_results()`: Converts transcript ops with cached results
+//! - `context_with_balance()`: Creates QueryContext with contract balance for balance checks
+//! - `receive_unshielded_ops()`: Generates ops for effects[6] (unshielded_inputs)
+//! - `send_unshielded_ops()`: Generates ops for effects[7] (unshielded_outputs)
+//! - `claim_unshielded_spend_ops()`: Generates ops for effects[8] (claimed spends)
+//! - `unshielded_balance_lt_ops()`: Generates balance check ops (reads context[5])
 
 #![allow(dead_code)]
 
-// ============================================================================
-// Common Imports
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════════════════════
+//  COMMON IMPORTS - Re-exports for Test Modules
+// ═══════════════════════════════════════════════════════════════════════════════
 
 pub use base_crypto::fab::{
     AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value, ValueAtom,
@@ -103,11 +90,14 @@ pub use zswap::{
     Transient as ZswapTransient,
 };
 
-// ============================================================================
-// Test Configuration
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════════════════════
+//  TEST CONFIGURATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Resolver setup and cryptographic key derivation for token vault tests.
 
 lazy_static! {
+    /// Proving key resolver for token-vault contract.
+    /// Looks for keys at: $MIDNIGHT_LEDGER_TEST_STATIC_DIR/token-vault/{keys,zkir}/
     pub static ref RESOLVER: Resolver = test_resolver("token-vault");
 }
 
@@ -119,17 +109,20 @@ pub fn derive_public_key(sk: HashOutput) -> HashOutput {
     persistent_commit(PK_DOMAIN_SEP, sk)
 }
 
-// ============================================================================
-// Contract State Layout (matches token-vault.compact)
-// ============================================================================
-// Index 0: shieldedVault (QualifiedShieldedCoinInfo)
-// Index 1: hasShieldedTokens (Boolean)
-// Index 2: owner (Bytes<32>)
-// Index 3: authorized (Set<Bytes<32>>)
-// Index 4: totalShieldedDeposits (Counter)
-// Index 5: totalShieldedWithdrawals (Counter)
-// Index 6: totalUnshieldedDeposits (Counter)
-// Index 7: totalUnshieldedWithdrawals (Counter)
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CONTRACT STATE LAYOUT - Indices Match token-vault.compact
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+//  Index | Field Name                    | Type
+//  ------|-------------------------------|---------------------------
+//    0   | shieldedVault                 | QualifiedShieldedCoinInfo
+//    1   | hasShieldedTokens             | Boolean
+//    2   | owner                         | Bytes<32>
+//    3   | authorized                    | Set<Bytes<32>>
+//    4   | totalShieldedDeposits         | Counter
+//    5   | totalShieldedWithdrawals      | Counter
+//    6   | totalUnshieldedDeposits       | Counter
+//    7   | totalUnshieldedWithdrawals    | Counter
 
 pub const STATE_IDX_SHIELDED_VAULT: u8 = 0;
 pub const STATE_IDX_HAS_SHIELDED_TOKENS: u8 = 1;
@@ -140,9 +133,9 @@ pub const STATE_IDX_TOTAL_SHIELDED_WITHDRAWALS: u8 = 5;
 pub const STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS: u8 = 6;
 pub const STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS: u8 = 7;
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════════════════════
+//  HELPER FUNCTIONS - QueryContext Builders and Transcript Utilities
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Convert program operations with results for verification
 pub fn program_with_results<D: DB>(
@@ -175,6 +168,25 @@ pub fn context_with_offer<D: DB>(
     res
 }
 
+/// Create query context with contract's unshielded balance from the ledger.
+///
+/// This function creates a QueryContext that includes the contract's current
+/// unshielded token balance. This is necessary for circuits that check the
+/// contract's balance (e.g., unshieldedBalanceGte) during transcript simulation.
+///
+/// The balance is stored in CallContext.balance which is read from QueryContext
+/// at index 5 during VM execution.
+pub fn context_with_balance<D: DB>(
+    ledger: &LedgerState<D>,
+    addr: ContractAddress,
+) -> QueryContext<D> {
+    let mut res = QueryContext::new(ledger.index(addr).unwrap().data, addr);
+    // Copy the contract's balance from the ledger into the call context
+    res.call_context.balance = ledger.contract.get(&addr).unwrap().balance.clone();
+    res.call_context.own_address = addr;
+    res
+}
+
 /// Initialize crypto parameters for tests
 pub fn init_crypto() {
     lazy_static::initialize(&PARAMS_VERIFIER);
@@ -183,21 +195,24 @@ pub fn init_crypto() {
     SIGN_VK.init().ok();
 }
 
-// ============================================================================
-// Helper Functions for Unshielded Operations
-// ============================================================================
+// ═══════════════════════════════════════════════════════════════════════════════
+//  UNSHIELDED TOKEN OPERATIONS - VM Op Sequence Generators
+// ═══════════════════════════════════════════════════════════════════════════════
 //
-// These helper functions generate the exact Op sequences that the Compact compiler
-// produces for unshielded token operations. Understanding these is crucial for
-// building valid transcripts.
+// These functions generate exact VM operation sequences matching Compact compiler
+// output for unshielded token operations. Critical for transcript construction.
 //
-// The Midnight VM uses a stack-based architecture. The "effects" structure is
-// accessed via stack operations, and maps are modified using Idx/Ins operations.
+// Architecture:
+//  - Midnight VM is stack-based
+//  - Effects structure accessed via Swap/Idx/Ins operations
+//  - Maps use key-based indexing with Member checks
 //
-// Key insight: The transcript you build MUST match exactly what the compiled
-// Compact circuit produces. If there's a mismatch, the ledger will reject the
-// transaction during verification.
-// ============================================================================
+// Requirements:
+//  - Transcript ops MUST match compiled circuit exactly
+//  - Any mismatch causes ledger rejection during verification
+//  - Effects indices: 6 (inputs), 7 (outputs), 8 (claimed spends)
+//
+// ═══════════════════════════════════════════════════════════════════════════════
 
 /// Create the Op sequence for receiveUnshielded (effects index 6: unshielded_inputs)
 ///
@@ -239,7 +254,9 @@ pub fn receive_unshielded_ops<D: DB>(
         Op::Idx {
             cached: true,
             push_path: true,
-            path: vec![Key::Value(6u8.into())].try_into().unwrap(),
+            path: vec![Key::Value(EFFECTS_IDX_UNSHIELDED_INPUTS.into())]
+                .try_into()
+                .unwrap(),
         },
         // Push the token type as key
         Op::Push {
@@ -325,7 +342,9 @@ pub fn send_unshielded_ops<D: DB>(
         Op::Idx {
             cached: true,
             push_path: true,
-            path: vec![Key::Value(7u8.into())].try_into().unwrap(),
+            path: vec![Key::Value(EFFECTS_IDX_UNSHIELDED_OUTPUTS.into())]
+                .try_into()
+                .unwrap(),
         },
         Op::Push {
             storage: false,
@@ -392,6 +411,9 @@ pub fn send_unshielded_ops<D: DB>(
 /// The `PublicKey` in `Recipient::User` wraps a `HashOutput`. For UTXO recipients,
 /// this must match the `UserAddress` in the `UnshieldedOffer.outputs`.
 /// Both `PublicKey` and `UserAddress` wrap the same `HashOutput` type.
+/// Claims unshielded spend from contract to recipient.
+/// This generates the ops for recording a transfer of tokens from the contract's
+/// unshielded balance to a recipient (user or another contract).
 pub fn claim_unshielded_spend_ops<D: DB>(
     token_type: TokenType,
     recipient: Recipient,
@@ -420,7 +442,9 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         Op::Idx {
             cached: true,
             push_path: true,
-            path: vec![Key::Value(8u8.into())].try_into().unwrap(),
+            path: vec![Key::Value(EFFECTS_IDX_CLAIMED_UNSHIELDED_SPENDS.into())]
+                .try_into()
+                .unwrap(),
         },
         Op::Push {
             storage: false,
@@ -465,3 +489,125 @@ pub fn claim_unshielded_spend_ops<D: DB>(
         },
     ]
 }
+
+/// Create the Op sequence for unshieldedBalanceLt check (reads from CallContext balance map)
+///
+/// This function generates the VM operations that check if the contract's unshielded
+/// balance for a token type is less than a given amount. The balance is stored in the
+/// CallContext at index 5 (the balance map).
+///
+/// ## How it works:
+/// 1. Duplicates the context from stack position 2
+/// 2. Indexes into the balance map (context index 5)
+/// 3. Checks if the token type exists in the balance map
+/// 4. If exists: reads the value and compares with amount using 'lt'
+/// 5. If not exists: uses 0 as the balance (which is always < amount if amount > 0)
+///
+/// ## Result:
+/// Returns a boolean indicating whether balance < amount (true) or balance >= amount (false)
+///
+/// ## Usage:
+/// For `unshieldedBalanceGte`, use `!unshieldedBalanceLt` (negate the result)
+pub fn unshielded_balance_lt_ops<D: DB>(
+    token_type: TokenType,
+    amount: u128,
+) -> Vec<Op<ResultModeGather, D>> {
+    // Convert token type to the format used for balance map keys
+    // TokenType::Unshielded is encoded as: [1u8 (tag), color (32 bytes)]
+    // But for the balance map, we need to encode it as a "left" variant
+    let token_type_av: AlignedValue = token_type.into();
+    let amount_av: AlignedValue = amount.into();
+    let zero_av: AlignedValue = 0u128.into();
+
+    vec![
+        // Duplicate context from stack position 2
+        Op::Dup {
+            n: 2.try_into().unwrap(),
+        },
+        // Index into balance map (context index 5)
+        Op::Idx {
+            cached: true,
+            push_path: false,
+            path: vec![Key::Value(CONTEXT_IDX_BALANCE.into())]
+                .try_into()
+                .unwrap(),
+        },
+        // Duplicate for member check
+        Op::Dup {
+            n: 0.try_into().unwrap(),
+        },
+        // Push token type as key
+        Op::Push {
+            storage: false,
+            value: StateValue::Cell(Sp::new(token_type_av.clone())),
+        },
+        // Check if key exists in balance map
+        Op::Member,
+        // Branch: skip 3 ops if key doesn't exist (member returns false)
+        Op::Branch {
+            skip: 3.try_into().unwrap(),
+        },
+        // Key doesn't exist path: pop the balance map, push 0
+        Op::Pop,
+        Op::Push {
+            storage: false,
+            value: StateValue::Cell(Sp::new(zero_av)),
+        },
+        // Jump past the "key exists" path
+        Op::Jmp {
+            skip: 1.try_into().unwrap(),
+        },
+        // Key exists path: index into map to get the value
+        Op::Idx {
+            cached: true,
+            push_path: false,
+            path: vec![Key::Value(token_type_av)].try_into().unwrap(),
+        },
+        // Push amount to compare
+        Op::Push {
+            storage: false,
+            value: StateValue::Cell(Sp::new(amount_av)),
+        },
+        // Less than comparison: balance < amount?
+        Op::Lt,
+        // Pop result (leaves boolean on stack which becomes transcript output)
+        Op::Popeq {
+            cached: true,
+            result: (),
+        },
+    ]
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  EFFECTS INDICES - Match onchain-runtime/src/context.rs::Effects
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// Effects track transaction side-effects across the ledger:
+//  - Indices 0-3: Shielded operations (nullifiers, receives, spends, calls)
+//  - Indices 4-5: Token minting (shielded, unshielded)
+//  - Indices 6-8: Unshielded transfers (inputs, outputs, claimed spends)
+pub const EFFECTS_IDX_CLAIMED_NULLIFIERS: u8 = 0;
+pub const EFFECTS_IDX_CLAIMED_SHIELDED_RECEIVES: u8 = 1;
+pub const EFFECTS_IDX_CLAIMED_SHIELDED_SPENDS: u8 = 2;
+pub const EFFECTS_IDX_CLAIMED_CONTRACT_CALLS: u8 = 3;
+pub const EFFECTS_IDX_SHIELDED_MINTS: u8 = 4;
+pub const EFFECTS_IDX_UNSHIELDED_MINTS: u8 = 5;
+pub const EFFECTS_IDX_UNSHIELDED_INPUTS: u8 = 6;
+pub const EFFECTS_IDX_UNSHIELDED_OUTPUTS: u8 = 7;
+pub const EFFECTS_IDX_CLAIMED_UNSHIELDED_SPENDS: u8 = 8;
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  CALLCONTEXT INDICES - Match QueryContext VmValue Conversion
+// ═══════════════════════════════════════════════════════════════════════════════
+//
+// QueryContext is converted to VmValue for circuit execution.
+// Index 5 (balance) is critical for unshieldedBalanceGte/Lt operations.
+//
+// Reference: onchain-runtime/src/context.rs QueryContext impl
+pub const CONTEXT_IDX_OWN_ADDRESS: u8 = 0;
+pub const CONTEXT_IDX_COM_INDICES: u8 = 1;
+pub const CONTEXT_IDX_TBLOCK: u8 = 2;
+pub const CONTEXT_IDX_TBLOCK_ERR: u8 = 3;
+pub const CONTEXT_IDX_PARENT_BLOCK_HASH: u8 = 4;
+pub const CONTEXT_IDX_BALANCE: u8 = 5;
+pub const CONTEXT_IDX_CALLER: u8 = 6;

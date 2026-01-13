@@ -173,17 +173,17 @@ async fn test_shielded_full_lifecycle() {
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), coin_com),
-        &Cell_read!([key!(1u8)], false, bool)[..], // Read hasShieldedTokens
+        &Cell_read!([key!(STATE_IDX_HAS_SHIELDED_TOKENS)], false, bool)[..], // Read hasShieldedTokens
         &kernel_self!((), ())[..],
         &Cell_write_coin!(
-            [key!(0u8)],
+            [key!(STATE_IDX_SHIELDED_VAULT)],
             true,
             QualifiedCoinInfo,
             coin.clone(),
             Recipient::Contract(addr)
         )[..],
-        &Cell_write!([key!(1u8)], true, bool, true)[..],
-        &Counter_increment!([key!(4u8)], false, 1u64)[..],
+        &Cell_write!([key!(STATE_IDX_HAS_SHIELDED_TOKENS)], true, bool, true)[..],
+        &Counter_increment!([key!(STATE_IDX_TOTAL_SHIELDED_DEPOSITS)], false, 1u64)[..],
     ]
     .into_iter()
     .flat_map(|x| x.iter())
@@ -310,8 +310,8 @@ async fn test_shielded_full_lifecycle() {
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), new_coin_com)[..],
-        &Cell_read!([key!(1u8)], false, bool)[..],
-        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],
+        &Cell_read!([key!(STATE_IDX_HAS_SHIELDED_TOKENS)], false, bool)[..],
+        &Cell_read!([key!(STATE_IDX_SHIELDED_VAULT)], false, QualifiedCoinInfo)[..],
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_nullifier!((), (), pot_nul)[..],
         &kernel_claim_zswap_nullifier!((), (), coin_nul)[..],
@@ -319,13 +319,13 @@ async fn test_shielded_full_lifecycle() {
         &kernel_claim_zswap_coin_receive!((), (), merged_coin_com)[..],
         &kernel_self!((), ())[..],
         &Cell_write_coin!(
-            [key!(0u8)],
+            [key!(STATE_IDX_SHIELDED_VAULT)],
             true,
             QualifiedCoinInfo,
             merged_coin.clone(),
             Recipient::Contract(addr)
         )[..],
-        &Counter_increment!([key!(4u8)], false, 1u64)[..],
+        &Counter_increment!([key!(STATE_IDX_TOTAL_SHIELDED_DEPOSITS)], false, 1u64)[..],
     ]
     .into_iter()
     .flat_map(|x| x.iter())
@@ -468,11 +468,11 @@ async fn test_shielded_full_lifecycle() {
     // Withdrawal transcript: isAuthorized checks, then sendShielded
     // Note: shieldedVault is read twice (value check + sendShielded)
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
-        &Set_member!([key!(3u8)], false, [u8; 32], owner_pk.0)[..], // Check authorized.member(pk)
-        &Cell_read!([key!(2u8)], false, [u8; 32])[..],              // Read owner for pk == owner
-        &Cell_read!([key!(1u8)], false, bool)[..],                  // Check hasShieldedTokens
-        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault for value check
-        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault for sendShielded
+        &Set_member!([key!(STATE_IDX_AUTHORIZED)], false, [u8; 32], owner_pk.0)[..], // Check authorized.member(pk)
+        &Cell_read!([key!(STATE_IDX_OWNER)], false, [u8; 32])[..], // Read owner for pk == owner
+        &Cell_read!([key!(STATE_IDX_HAS_SHIELDED_TOKENS)], false, bool)[..], // Check hasShieldedTokens
+        &Cell_read!([key!(STATE_IDX_SHIELDED_VAULT)], false, QualifiedCoinInfo)[..], // Read vault for value check
+        &Cell_read!([key!(STATE_IDX_SHIELDED_VAULT)], false, QualifiedCoinInfo)[..], // Read vault for sendShielded
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_nullifier!((), (), pot_nul)[..],
         &kernel_claim_zswap_coin_spend!((), (), withdraw_com)[..],
@@ -480,13 +480,13 @@ async fn test_shielded_full_lifecycle() {
         &kernel_claim_zswap_coin_receive!((), (), change_com)[..],
         &kernel_self!((), ())[..],
         &Cell_write_coin!(
-            [key!(0u8)],
+            [key!(STATE_IDX_SHIELDED_VAULT)],
             true,
             QualifiedCoinInfo,
             change_coin.clone(),
             Recipient::Contract(addr)
         )[..],
-        &Counter_increment!([key!(5u8)], false, 1u64)[..],
+        &Counter_increment!([key!(STATE_IDX_TOTAL_SHIELDED_WITHDRAWALS)], false, 1u64)[..],
     ]
     .into_iter()
     .flat_map(|x| x.iter())
