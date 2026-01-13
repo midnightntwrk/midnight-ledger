@@ -494,7 +494,7 @@ async fn test_shielded_full_lifecycle() {
         &withdraw_coin,
         None,
         &state.zswap_keys.coin_public_key(),
-        None,
+        Some(state.zswap_keys.encryption_secret_key.public_key()),
     )
     .unwrap();
 
