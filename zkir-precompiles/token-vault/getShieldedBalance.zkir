@@ -1,6 +1,6 @@
 {
   "version": { "major": 2, "minor": 0 },
-  "do_communications_commitment": false,
+  "do_communications_commitment": true,
   "num_inputs": 0,
   "instructions": [
     { "op": "load_imm", "imm": "01" },

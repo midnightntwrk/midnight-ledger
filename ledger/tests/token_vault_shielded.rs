@@ -574,7 +574,7 @@ async fn test_shielded_full_lifecycle() {
         output: withdraw_coin.into(),
         guaranteed_public_transcript: transcripts[0].0.clone(),
         fallible_public_transcript: transcripts[0].1.clone(),
-        private_transcript_outputs: vec![owner_sk.into()], // Private: owner secret key for auth
+        private_transcript_outputs: vec![owner_sk.into(), owner_sk.into()],
         communication_commitment_rand: rng.r#gen(),
         key_location: KeyLocation(Cow::Borrowed("withdrawShielded")),
     };

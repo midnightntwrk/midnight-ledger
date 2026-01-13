@@ -52,7 +52,9 @@
 // Common Imports
 // ============================================================================
 
-pub use base_crypto::fab::{AlignedValue, Value};
+pub use base_crypto::fab::{
+    AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value, ValueAtom,
+};
 pub use base_crypto::hash::{HashOutput, persistent_commit};
 pub use base_crypto::rng::SplittableRng;
 pub use base_crypto::signatures::Signature;
