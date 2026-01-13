@@ -52,7 +52,23 @@ use std::{
     io::Read,
     ops::Deref,
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
 };
+
+static ALLOW_NON_NORMAL_FORM_DESERIALIZATION: AtomicBool = AtomicBool::new(false);
+
+/// Allow deserializing storage graphs that may not be in normal form.
+///
+/// This relaxes a safety check and should only be enabled when ingesting
+/// trusted legacy data that is known to be well-formed apart from the
+/// normalization step.
+pub fn set_allow_non_normal_form_deserialization(enable: bool) {
+    ALLOW_NON_NORMAL_FORM_DESERIALIZATION.store(enable, Ordering::Relaxed);
+}
+
+fn is_non_normal_form_deserialization_allowed() -> bool {
+    ALLOW_NON_NORMAL_FORM_DESERIALIZATION.load(Ordering::Relaxed)
+}
 
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
@@ -891,7 +907,8 @@ impl<D: DB> Arena<D> {
             key_to_child_repr,
         }
         .get(&ArenaKey::Ref(key))?;
-        if nodes == res.serialize_to_node_list() {
+        let serialized = res.serialize_to_node_list();
+        if nodes == serialized || is_non_normal_form_deserialization_allowed() {
             Ok(res)
         } else {
             Err(std::io::Error::new(
