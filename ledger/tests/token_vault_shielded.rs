@@ -13,45 +13,37 @@
 
 //! Token Vault Shielded Token Tests
 //!
-//! **REFERENCE IMPLEMENTATION ONLY**
-//! This code is provided for educational and testing purposes to demonstrate
-//! Midnight ledger features. DO NOT use this code as-is in production without
-//! proper security review, auditing, and hardening.
-//!
-//! This module contains integration tests for shielded token operations in the
-//! token-vault contract. Shielded tokens use ZSwap (Zero-knowledge Swap) for
-//! privacy-preserving transfers with:
-//!
-//! - **Commitments**: Hide the value and owner of coins
-//! - **Nullifiers**: Prevent double-spending without revealing which coin was spent
-//! - **ZK Proofs**: Prove transaction validity without revealing private data
+//! Integration tests for shielded token operations in the token-vault contract.
+//! Shielded tokens use ZSwap for privacy-preserving transfers with commitments,
+//! nullifiers, and zero-knowledge proofs.
 //!
 //! ## Shielded Token Flow
 //!
 //! ### Deposit (User → Contract):
-//! 1. User creates a ZswapOutput with contract ownership
-//! 2. Contract claims the coin commitment via `kernel.claimZswapCoinReceive()`
-//! 3. Contract stores the coin info in its shieldedVault
+//! 1. User creates ZswapOutput with contract ownership
+//! 2. Contract claims coin via `kernel.claimZswapCoinReceive()`
+//! 3. Contract stores coin info in shieldedVault
 //!
 //! ### Merge (Contract Coin + New Deposit):
-//! 1. Contract nullifies the existing vault coin
-//! 2. Contract receives the new coin via transient
-//! 3. Contract nullifies the transient coin
-//! 4. Contract creates a merged coin with combined value
-//! 5. Contract stores the merged coin in shieldedVault
+//! 1. Contract nullifies existing vault coin
+//! 2. Contract receives new coin via transient
+//! 3. Contract creates merged coin with combined value
+//! 4. Contract stores merged coin in shieldedVault
 //!
 //! ### Withdrawal (Contract → User):
-//! 1. Contract nullifies the vault coin
-//! 2. Contract creates user output (for withdrawn amount)
+//! 1. Contract nullifies vault coin
+//! 2. Contract creates user output (withdrawn amount)
 //! 3. Contract creates change output (remaining in vault)
-//! 4. User receives coin via ZSwap
 //!
-//! ## Running Tests
+//! ## Important Implementation Notes
 //!
-//! ```bash
-//! MIDNIGHT_LEDGER_TEST_STATIC_DIR=/path/to/ledger/tests \
-//!   cargo test --test token_vault_shielded -- --test-threads=1
-//! ```
+//! - **Transcript matching**: Ops must match circuit execution order exactly
+//! - **Double reads**: If circuit reads state twice, transcript needs two Cell_read ops
+//! - **Nonce evolution**: Multiple coins from one input need different domain separators:
+//!   - Primary coin: `midnight:kernel:nonce_evolve`
+//!   - Change coin: `midnight:kernel:nonce_evolve/2`
+//! - **Results**: Only Cell_read and kernel_self produce results; kernel_claim_* ops don't
+//! - **Private witnesses**: localSecretKey() gets secret key, ownPublicKey() gets public key
 
 #![deny(warnings)]
 #![allow(unused_imports)]
@@ -65,27 +57,13 @@ use token_vault_common::*;
 // Main Shielded Integration Test
 // ============================================================================
 
-/// Comprehensive shielded token vault test
+/// Full lifecycle test: deploy, deposit, merge, withdraw.
 ///
-/// This test exercises the complete lifecycle of shielded tokens:
-/// 1. Deploy token vault contract
-/// 2. First shielded deposit (empty vault → new coin)
-/// 3. Second shielded deposit with merge (existing coin + new coin → merged coin)
-/// 4. Partial shielded withdrawal (split vault into user coin + change)
-///
-/// ## ZSwap Concepts Demonstrated:
-///
-/// - **ZswapOutput**: Creates a new shielded coin (for deposits)
-/// - **ZswapInput**: Spends an existing shielded coin (for withdrawals)
-/// - **ZswapTransient**: Temporary coin that is created and nullified in same tx
-/// - **Delta**: Balance change proof (ensures value conservation)
-///
-/// ## Contract State Changes:
-///
-/// - shieldedVault: Stores the current contract-owned coin
-/// - hasShieldedTokens: Boolean flag for first deposit logic
-/// - totalShieldedDeposits: Counter incremented on each deposit
-/// - totalShieldedWithdrawals: Counter incremented on each withdrawal
+/// Parts:
+/// 1. Deploy contract
+/// 2. First deposit (empty vault)
+/// 3. Merge deposit (combine with existing)
+/// 4. Partial withdrawal (split into user + change coins)
 #[tokio::test]
 async fn test_shielded_full_lifecycle() {
     //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
@@ -182,13 +160,7 @@ async fn test_shielded_full_lifecycle() {
     println!("   Contract deployed successfully");
 
     // ========================================================================
-    // Part 2: First Shielded Deposit
-    // ========================================================================
-    //
-    // When the vault is empty (hasShieldedTokens = false), the deposit is simple:
-    // 1. Create a new coin with contract ownership
-    // 2. Store the coin in shieldedVault
-    // 3. Set hasShieldedTokens = true
+    // Part 2: First Shielded Deposit (empty vault)
     // ========================================================================
     println!("\n:: Part 2: First Shielded Deposit");
     const FIRST_DEPOSIT: u128 = 1_000_000;
@@ -197,9 +169,7 @@ async fn test_shielded_full_lifecycle() {
     let out = ZswapOutput::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
     let coin_com = coin.commitment(&Recipient::Contract(addr));
 
-    // Build transcript for first deposit (hasShieldedTokens = false)
-    // The transcript operations must match exactly what the Compact circuit produces
-    // Order: receiveShielded(disclose(coin)) then if(!hasShieldedTokens)
+    // Transcript must match circuit execution order exactly
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), coin_com),
@@ -220,7 +190,7 @@ async fn test_shielded_full_lifecycle() {
     .cloned()
     .collect();
 
-    // Results in order: kernel_self, Cell_read(hasShieldedTokens), kernel_self
+    // Only reads and kernel_self produce results
     let public_transcript_results: Vec<AlignedValue> = vec![
         addr.into(),  // First kernel_self returns contract address
         false.into(), // hasShieldedTokens was false
@@ -279,19 +249,7 @@ async fn test_shielded_full_lifecycle() {
     println!("   First deposit: {} tokens locked", FIRST_DEPOSIT);
 
     // ========================================================================
-    // Part 3: Second Shielded Deposit (Merge)
-    // ========================================================================
-    //
-    // When the vault already has tokens (hasShieldedTokens = true), deposits
-    // require a merge operation:
-    // 1. Read existing vault coin (pot)
-    // 2. Receive new deposit as transient coin
-    // 3. Nullify both pot and transient
-    // 4. Create merged coin with pot.value + deposit.value
-    // 5. Store merged coin in shieldedVault
-    //
-    // This uses a transient coin to atomically combine the deposit with the
-    // existing vault in a single transaction.
+    // Part 3: Second Shielded Deposit (merge with existing via transient)
     // ========================================================================
     println!("\n:: Part 3: Second Shielded Deposit (Merge with Existing)");
     const SECOND_DEPOSIT: u128 = 500_000;
@@ -312,8 +270,7 @@ async fn test_shielded_full_lifecycle() {
     let out = ZswapOutput::new_contract_owned(&mut rng, &new_coin, None, addr).unwrap();
     let new_coin_com = new_coin.commitment(&Recipient::Contract(addr));
 
-    // Create merged coin with combined value
-    // Uses nonce evolution to derive a new nonce from the existing pot nonce
+    // Merged coin derives nonce from pot
     let merged_coin = CoinInfo::from(&pot).evolve_from(
         b"midnight:kernel:nonce_evolve",
         pot.value + new_coin.value,
@@ -349,8 +306,7 @@ async fn test_shielded_full_lifecycle() {
         .into(),
     };
 
-    // Build merge transcript
-    // Order: receiveShielded first, then if(hasShieldedTokens), then mergeCoinImmediate
+    // Merge transcript: receive, read existing, nullify both, create merged
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), new_coin_com)[..],
@@ -376,7 +332,6 @@ async fn test_shielded_full_lifecycle() {
     .cloned()
     .collect();
 
-    // Results in order: kernel_self, Cell_read(hasShieldedTokens), Cell_read(pot), kernel_self, kernel_self
     let public_transcript_results: Vec<AlignedValue> = vec![
         addr.into(), // First kernel_self
         true.into(), // hasShieldedTokens is now true
@@ -430,15 +385,7 @@ async fn test_shielded_full_lifecycle() {
     );
 
     // ========================================================================
-    // Part 4: Partial Shielded Withdrawal
-    // ========================================================================
-    //
-    // Withdrawals split the vault coin into two outputs:
-    // 1. User output: The amount being withdrawn (goes to user)
-    // 2. Change output: The remaining amount (stays in contract)
-    //
-    // Authorization check: The caller must either be the owner or in the
-    // authorized set. This is proven via the private transcript.
+    // Part 4: Partial Shielded Withdrawal (split into user + change coins)
     // ========================================================================
     println!("\n:: Part 4: Partial Shielded Withdrawal");
     const WITHDRAW_AMOUNT: u128 = 300_000;
@@ -518,12 +465,8 @@ async fn test_shielded_full_lifecycle() {
         .zswap
         .watch_for(&state.zswap_keys.coin_public_key(), &withdraw_coin);
 
-    // Build withdrawal transcript
-    // Order matches circuit execution:
-    // 1. isAuthorized() -> checks authorized.member(pk) first, then pk == owner
-    // 2. hasShieldedTokens assertion
-    // 3. shieldedVault.value >= amount check (first read of shieldedVault)
-    // 4. sendShielded(shieldedVault, ...) (second read of shieldedVault)
+    // Withdrawal transcript: isAuthorized checks, then sendShielded
+    // Note: shieldedVault is read twice (value check + sendShielded)
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &Set_member!([key!(3u8)], false, [u8; 32], owner_pk.0)[..], // Check authorized.member(pk)
         &Cell_read!([key!(2u8)], false, [u8; 32])[..],              // Read owner for pk == owner
@@ -578,9 +521,7 @@ async fn test_shielded_full_lifecycle() {
         output: withdraw_coin.into(),
         guaranteed_public_transcript: transcripts[0].0.clone(),
         fallible_public_transcript: transcripts[0].1.clone(),
-        // Private transcript outputs:
-        // 1. owner_sk for localSecretKey() in isAuthorized()
-        // 2. coin_public_key for ownPublicKey() (provides the ZswapCoinPublicKey directly)
+        // Private witnesses: localSecretKey() gets owner_sk, ownPublicKey() gets public key
         private_transcript_outputs: vec![
             owner_sk.into(),
             state.zswap_keys.coin_public_key().into(),
