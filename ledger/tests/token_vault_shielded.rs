@@ -199,10 +199,11 @@ async fn test_shielded_full_lifecycle() {
 
     // Build transcript for first deposit (hasShieldedTokens = false)
     // The transcript operations must match exactly what the Compact circuit produces
+    // Order: receiveShielded(disclose(coin)) then if(!hasShieldedTokens)
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
-        &Cell_read!([key!(1u8)], false, bool)[..], // Read hasShieldedTokens
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), coin_com),
+        &Cell_read!([key!(1u8)], false, bool)[..], // Read hasShieldedTokens
         &kernel_self!((), ())[..],
         &Cell_write_coin!(
             [key!(0u8)],
@@ -219,10 +220,11 @@ async fn test_shielded_full_lifecycle() {
     .cloned()
     .collect();
 
+    // Results in order: kernel_self, Cell_read(hasShieldedTokens), kernel_self
     let public_transcript_results: Vec<AlignedValue> = vec![
+        addr.into(),  // First kernel_self returns contract address
         false.into(), // hasShieldedTokens was false
-        addr.into(),
-        addr.into(),
+        addr.into(),  // Second kernel_self returns contract address
     ];
 
     // ZSwap offer: user sends coins (negative delta), contract receives output
@@ -348,10 +350,11 @@ async fn test_shielded_full_lifecycle() {
     };
 
     // Build merge transcript
+    // Order: receiveShielded first, then if(hasShieldedTokens), then mergeCoinImmediate
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
-        &Cell_read!([key!(1u8)], false, bool)[..],
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_coin_receive!((), (), new_coin_com)[..],
+        &Cell_read!([key!(1u8)], false, bool)[..],
         &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_nullifier!((), (), pot_nul)[..],
@@ -373,12 +376,13 @@ async fn test_shielded_full_lifecycle() {
     .cloned()
     .collect();
 
+    // Results in order: kernel_self, Cell_read(hasShieldedTokens), Cell_read(pot), kernel_self, kernel_self
     let public_transcript_results: Vec<AlignedValue> = vec![
-        true.into(), // hasShieldedTokens is now true
-        addr.into(),
-        pot.into(),
-        addr.into(),
-        addr.into(),
+        addr.into(),  // First kernel_self
+        true.into(),  // hasShieldedTokens is now true
+        pot.into(),   // Read pot for merge
+        addr.into(),  // Second kernel_self (for nullifiers/coin ops)
+        addr.into(),  // Third kernel_self (for write)
     ];
 
     let transcripts = partition_transcripts(
