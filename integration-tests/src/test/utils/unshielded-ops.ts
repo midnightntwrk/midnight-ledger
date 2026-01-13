@@ -84,7 +84,7 @@ function hexToBytes(hex: string): Uint8Array {
  */
 export function encodeUnshieldedTokenType(color: string): AlignedValue {
   const colorBytes = hexToBytes(color);
-  const emptyPadding = new Uint8Array(0);
+  const emptyPadding = new Uint8Array(0); // Empty for unused variant
   return {
     value: [ONE_VALUE, colorBytes, emptyPadding],
     alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
@@ -285,6 +285,85 @@ export function sendUnshieldedOps(tokenType: AlignedValue, amount: AlignedValue)
     'add',
     { ins: { cached: true, n: 2 } },
     { swap: { n: 0 } }
+  ];
+}
+
+// Context indices for reading from CallContext
+const CONTEXT_IDX_BALANCE = 5;
+
+/**
+ * Create the Op sequence for checking if balance < amount (unshieldedBalanceLt).
+ *
+ * This function generates the VM operations that check if the contract's unshielded
+ * balance for a token type is less than a given amount. The balance is stored in the
+ * CallContext at index 5 (the balance map).
+ *
+ * ## How it works:
+ * 1. Duplicates the context from stack position 2
+ * 2. Indexes into the balance map (context index 5)
+ * 3. Checks if the token type exists in the balance map
+ * 4. If exists: reads the value and compares with amount using 'lt'
+ * 5. If not exists: uses 0 as the balance (which is always < amount if amount > 0)
+ *
+ * ## Result:
+ * Returns a boolean indicating whether balance < amount (true) or balance >= amount (false)
+ *
+ * ## Usage:
+ * For `unshieldedBalanceGte`, the result should be false (meaning balance >= amount)
+ *
+ * @param tokenType - The token type as an AlignedValue
+ * @param amount - The amount as an AlignedValue
+ * @returns Array of VM operations
+ */
+export function unshieldedBalanceLtOps(tokenType: AlignedValue, amount: AlignedValue): Op<null>[] {
+  const balanceIndexValue: AlignedValue = {
+    value: [new Uint8Array([CONTEXT_IDX_BALANCE])],
+    alignment: [ATOM_BYTES_1]
+  };
+  // Use the same encoding as amount values for consistency
+  const zeroValue: AlignedValue = {
+    value: bigIntToValue(0n),
+    alignment: [ATOM_BYTES_16]
+  };
+
+  return [
+    // Duplicate context from stack position 2
+    { dup: { n: 2 } },
+    // Index into balance map (context index 5)
+    {
+      idx: {
+        cached: true,
+        pushPath: false,
+        path: [{ tag: 'value', value: balanceIndexValue }]
+      }
+    },
+    // Duplicate for member check
+    { dup: { n: 0 } },
+    // Push token type as key
+    { push: { storage: false, value: { tag: 'cell', content: tokenType } } },
+    // Check if key exists in balance map
+    'member',
+    // Branch: skip 3 ops if key doesn't exist (member returns false)
+    { branch: { skip: 3 } },
+    // Key doesn't exist path: pop the balance map, push 0
+    'pop',
+    { push: { storage: false, value: { tag: 'cell', content: zeroValue } } },
+    // Jump past the "key exists" path
+    { jmp: { skip: 1 } },
+    // Key exists path: index into map to get the value
+    {
+      idx: {
+        cached: true,
+        pushPath: false,
+        path: [{ tag: 'value', value: tokenType }]
+      }
+    },
+    // Push amount to compare
+    { push: { storage: false, value: { tag: 'cell', content: amount } } },
+    // Less than comparison: balance < amount?
+    'lt',
+    // Pop result (leaves boolean on stack which becomes transcript output)
+    { popeq: { cached: true, result: null } }
   ];
 }
 

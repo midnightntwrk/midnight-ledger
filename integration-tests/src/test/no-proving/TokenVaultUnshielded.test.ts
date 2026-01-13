@@ -90,7 +90,8 @@ import {
   cellWrite,
   counterIncrement,
   getKey,
-  programWithResults
+  programWithResults,
+  setMember
 } from '@/test/utils/onchain-runtime-program-fragments';
 import { ATOM_BYTES_1, ATOM_BYTES_8, ATOM_BYTES_32, EMPTY_VALUE, ONE_VALUE } from '@/test/utils/value-alignment';
 import {
@@ -99,7 +100,8 @@ import {
   encodeClaimedSpendKeyUser,
   encodeUnshieldedTokenType,
   receiveUnshieldedOps,
-  sendUnshieldedOps
+  sendUnshieldedOps,
+  unshieldedBalanceLtOps
 } from '@/test/utils/unshielded-ops';
 
 describe('Ledger API - TokenVault Unshielded', () => {
@@ -124,6 +126,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
   // Index 6: totalUnshieldedDeposits (Counter)
   // Index 7: totalUnshieldedWithdrawals (Counter)
   const STATE_IDX_OWNER = 2;
+  const STATE_IDX_AUTHORIZED = 3;
   const STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS = 6;
   const STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS = 7;
 
@@ -510,24 +513,57 @@ describe('Ledger API - TokenVault Unshielded', () => {
     console.log(`   Withdrawing: ${WITHDRAW_AMOUNT} tokens to user`);
 
     // Step 2: Withdraw partial amount - contract sends, user receives UTXO
+    //
+    // The sendUnshieldedToUser circuit performs these operations in order:
+    // 1. isAuthorized(): Set_member check on authorized set + Cell_read of owner
+    // 2. unshieldedBalanceGte(): Balance check (via unshieldedBalanceLt negated)
+    // 3. sendUnshielded(): Increments effects[7] and effects[8]
+    // 4. Counter_increment: Tracks total withdrawals in contract state
+    //
+    // We must match this exact order in our transcript.
     const withdrawAmountValue = encodeAmount(WITHDRAW_AMOUNT);
     const claimKey = encodeClaimedSpendKeyUser(tokenColor, userAddress);
 
+    // Create context WITH the contract's unshielded balance
+    // This is necessary because unshieldedBalanceGte reads from CallContext.balance
     const withdrawContext = new QueryContext(
       new ChargedState(state.ledger.index(contractAddr)!.data.state),
       contractAddr
     );
+    // Set the contract's balance in the call context for balance checks
+    const contractBalance = state.ledger.index(contractAddr)!.balance;
+    const { block } = withdrawContext;
+    block.balance = new Map(contractBalance);
+    withdrawContext.block = block;
 
     const withdrawProgram = programWithResults(
       [
-        // sendUnshielded(color, amount) - contract declares outgoing tokens
+        // === isAuthorized() ===
+        // Check if public key is in authorized set (state index 3)
+        ...setMember(getKey(STATE_IDX_AUTHORIZED), false, { value: ownerPk, alignment: [ATOM_BYTES_32] }),
+        // Read owner from state (state index 2)
+        ...cellRead(getKey(STATE_IDX_OWNER), false),
+        // === unshieldedBalanceGte() ===
+        // Check if balance >= amount (implemented as !(balance < amount))
+        ...unshieldedBalanceLtOps(tokenTypeValue, withdrawAmountValue),
+        // === sendUnshielded() ===
+        // sendUnshielded increments unshielded_outputs (effects index 7)
         ...sendUnshieldedOps(tokenTypeValue, withdrawAmountValue),
-        // claimUnshieldedSpend - specify recipient gets the tokens
+        // Also claim the unshielded spend (effects index 8)
+        // This specifies: "User with public key X should receive these tokens"
         ...claimUnshieldedSpendOps(claimKey, withdrawAmountValue),
-        // totalUnshieldedWithdrawals.increment(1)
+        // Counter_increment for totalUnshieldedWithdrawals (state index 7)
         ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS), false, 1)
       ],
-      [{ value: ownerPk, alignment: [ATOM_BYTES_32] }] // Owner PK for authorization
+      [
+        // Results for operations that have Popeq { cached: true }
+        // 1. Set_member returns false (pk is NOT in the authorized set)
+        { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] },
+        // 2. Cell_read returns owner_pk (the owner's public key - pk == owner succeeds)
+        { value: ownerPk, alignment: [ATOM_BYTES_32] },
+        // 3. unshieldedBalanceLtOps returns false (balance >= amount, NOT less than)
+        { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] }
+      ]
     );
 
     const withdrawCalls: PreTranscript[] = [new PreTranscript(withdrawContext, withdrawProgram)];

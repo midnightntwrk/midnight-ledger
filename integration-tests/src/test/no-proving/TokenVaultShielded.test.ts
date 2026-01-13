@@ -951,14 +951,18 @@ describe('Ledger API - TokenVault Shielded', () => {
 
     // Build withdrawal transcript
     // Order: isAuthorized() -> Set_member(authorized), Cell_read(owner),
-    //        Cell_read(hasShieldedTokens), Cell_read(vault),
+    //        Cell_read(hasShieldedTokens), Cell_read(vault) for value check, Cell_read(vault) for sendShielded,
     //        kernel_self, claim_nullifier(pot), claim_spend(withdraw), claim_spend(change), claim_receive(change),
     //        kernel_self, cell_write_coin(change), counter_increment
+    //
+    // Note: shieldedVault is read twice - once for the value check (shieldedVault.value >= amount)
+    // and once for the sendShielded operation. This is how the Compact circuit works.
     publicTranscript = [
       ...setMember(getKey(STATE_IDX_AUTHORIZED), false, { value: ownerPk, alignment: [ATOM_BYTES_32] }),
       ...cellRead(getKey(STATE_IDX_OWNER), false),
       ...cellRead(getKey(STATE_IDX_HAS_SHIELDED_TOKENS), false),
-      ...cellRead(getKey(STATE_IDX_SHIELDED_VAULT), false),
+      ...cellRead(getKey(STATE_IDX_SHIELDED_VAULT), false), // First vault read (for value check)
+      ...cellRead(getKey(STATE_IDX_SHIELDED_VAULT), false), // Second vault read (for sendShielded)
       ...kernelSelf(),
       ...kernelClaimZswapNullfier(potNull),
       ...kernelClaimZswapCoinSpend(withdrawCom),
@@ -976,12 +980,23 @@ describe('Ledger API - TokenVault Shielded', () => {
       ...counterIncrement(getKey(STATE_IDX_TOTAL_SHIELDED_WITHDRAWALS), false, 1)
     ];
 
-    // Results: Set_member(false), owner(ownerPk), hasShielded(true), pot, kernel_self, kernel_self
+    // Results: Set_member(false), owner(ownerPk), hasShielded(true), pot (x2 for double read), kernel_self (x2)
     publicTranscriptResults = [
       { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] }, // authorized.member(pk) = false
       { value: ownerPk, alignment: [ATOM_BYTES_32] }, // owner = ownerPk (so pk == owner is true)
       { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }, // hasShieldedTokens = true
       {
+        // First vault read (for value check)
+        value: [
+          Static.trimTrailingZeros(encodedPot.nonce),
+          Static.trimTrailingZeros(encodedPot.color),
+          bigIntToValue(encodedPot.value)[0],
+          bigIntToValue(encodedPot.mt_index)[0]
+        ],
+        alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16, ATOM_BYTES_8]
+      },
+      {
+        // Second vault read (for sendShielded)
         value: [
           Static.trimTrailingZeros(encodedPot.nonce),
           Static.trimTrailingZeros(encodedPot.color),
