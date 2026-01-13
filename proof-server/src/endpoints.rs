@@ -185,6 +185,7 @@ pub(crate) async fn check(
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {
@@ -341,6 +342,7 @@ pub(crate) async fn prove_transaction(
     let (_id, updates) = pool
         .submit_and_subscribe(move || {
             let rt = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
                 .build()
                 .unwrap();
             rt.block_on(async move {
