@@ -269,13 +269,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
   // Tests
   // ============================================================================
 
-  /**
-   * Test contract deployment.
-   *
-   * @given A TestState with initial tokens
-   * @when Deploying the token vault contract
-   * @then Should successfully deploy with correct initial state
-   */
+  /** Verify contract deployment initializes owner state correctly. */
   test('should deploy token vault contract', () => {
     const state = TestState.new();
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
@@ -298,32 +292,29 @@ describe('Ledger API - TokenVault Unshielded', () => {
   });
 
   /**
-   * Test depositing unshielded tokens into the contract.
-   *
-   * @given A deployed token vault contract
-   * @and A user with unshielded tokens
-   * @when Depositing unshielded tokens into the contract
-   * @then Should transfer tokens from user to contract
-   * @and Should increment totalUnshieldedDeposits counter
+   * Deposit with UTXO change: spend 2000, deposit 1500, receive 500 change.
+   * Balance: Input(+2000) = Contract(-1500) + Change(-500)
    */
   test('should deposit unshielded tokens into vault', () => {
     const state = TestState.new();
     state.giveFeeToken(10, INITIAL_NIGHT_AMOUNT);
 
     // Create a custom unshielded token type for testing
-    const domainSep = Random.generate32Bytes();
     const tokenColor = Random.hex(64);
-    const depositAmount = 1000n;
+    const UTXO_AMOUNT = 2000n; // User has 2000 tokens in UTXO
+    const DEPOSIT_AMOUNT = 1500n; // User deposits 1500 to contract
+    const CHANGE_AMOUNT = UTXO_AMOUNT - DEPOSIT_AMOUNT; // 500 goes back to user
 
-    // Give the user some unshielded tokens
+    // Give the user a UTXO with 2000 tokens
     const userAddress = addressFromKey(state.nightKey.verifyingKey());
     const tokenType = { tag: 'unshielded' as const, raw: tokenColor };
-    state.rewardsUnshielded(tokenType, depositAmount);
+    state.rewardsUnshielded(tokenType, UTXO_AMOUNT);
 
     // Get the user's UTXO that we'll spend
     const userUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
     expect(userUtxos.length).toBeGreaterThan(0);
     const utxoToSpend = userUtxos[0];
+    expect(utxoToSpend.value).toBe(UTXO_AMOUNT);
 
     // Deploy the contract
     const ownerSk = Random.generate32Bytes();
@@ -331,34 +322,30 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
-    // Build the deposit transaction
-    // The transcript needs to:
-    // 1. Call receiveUnshielded to declare incoming tokens
-    // 2. Increment the totalUnshieldedDeposits counter
+    console.log(':: Unshielded Deposit with UTXO Change');
+    console.log(`   UTXO amount: ${UTXO_AMOUNT}`);
+    console.log(`   Deposit amount: ${DEPOSIT_AMOUNT}`);
+    console.log(`   Change amount: ${CHANGE_AMOUNT}`);
 
+    // Build the deposit transaction
+    // The transcript declares how much the contract receives
     const tokenTypeValue = encodeUnshieldedTokenType(tokenColor);
-    const amountValue = encodeAmount(depositAmount);
+    const depositAmountValue = encodeAmount(DEPOSIT_AMOUNT);
 
     const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
 
     const program = programWithResults(
       [
-        // receiveUnshielded(color, amount)
-        ...receiveUnshieldedOps(tokenTypeValue, amountValue),
+        // receiveUnshielded(color, amount) - contract receives DEPOSIT_AMOUNT
+        ...receiveUnshieldedOps(tokenTypeValue, depositAmountValue),
         // totalUnshieldedDeposits.increment(1)
         ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)
       ],
-      [] // No witness results needed for this simple case
+      [] // No witness results needed
     );
 
     const calls: PreTranscript[] = [new PreTranscript(context, program)];
     const transcripts = partitionTranscripts(calls, LedgerParameters.initialParameters());
-
-    const colorInput: AlignedValue = {
-      value: [Static.encodeFromHex(tokenColor)],
-      alignment: [ATOM_BYTES_32]
-    };
-    const amountInputValue = bigIntToValue(depositAmount);
 
     const call = new ContractCallPrototype(
       contractAddr,
@@ -368,29 +355,35 @@ describe('Ledger API - TokenVault Unshielded', () => {
       transcripts[0][1],
       [], // No private inputs
       {
-        value: [colorInput.value[0], amountInputValue[0]],
+        value: [Static.encodeFromHex(tokenColor), bigIntToValue(DEPOSIT_AMOUNT)[0]],
         alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }]
       },
-      { value: [], alignment: [] }, // No outputs
+      { value: [], alignment: [] },
       communicationCommitmentRandomness(),
       DEPOSIT_UNSHIELDED
     );
 
-    // Create the unshielded offer that spends the user's UTXO
-    // The tokens go to the contract (no output UTXO needed since contract receives them)
+    // Spend full UTXO, create change output for remainder
     const utxoSpend: UtxoSpend = {
-      value: utxoToSpend.value,
+      value: utxoToSpend.value, // Spend the full UTXO (2000)
       owner: state.nightKey.verifyingKey(),
       type: utxoToSpend.type,
       intentHash: utxoToSpend.intentHash,
       outputNo: utxoToSpend.outputNo
     };
 
+    // Change output: the remaining tokens go back to the user
+    const changeOutput: UtxoOutput = {
+      value: CHANGE_AMOUNT,
+      owner: userAddress,
+      type: tokenColor
+    };
+
     const intent = testIntents([call], [], [], state.time);
     intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
-      [utxoSpend],
-      [], // No outputs - tokens go to contract
-      [] // Signatures will be added
+      [utxoSpend], // Input: spend the full UTXO
+      [changeOutput], // Output: change back to user
+      [] // Signatures added later
     );
 
     const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
@@ -407,18 +400,23 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const contractAfter = state.ledger.index(contractAddr)!;
     const stateArrayAfter = contractAfter.data.state.asArray()!;
     const depositCounter = stateArrayAfter[STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS].asCell();
-    // Counter should now be 1
     expect(depositCounter).toBeDefined();
+
+    // Verify the user received their change UTXO
+    const finalUserUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
+    const changeUtxo = finalUserUtxos.find((utxo) => utxo.value === CHANGE_AMOUNT);
+    expect(changeUtxo).toBeDefined();
+    console.log(`   User received change UTXO: ${changeUtxo!.value}`);
+
+    // Verify original UTXO was consumed (no longer in state)
+    const originalStillExists = finalUserUtxos.find((utxo) => utxo.value === UTXO_AMOUNT);
+    expect(originalStillExists).toBeUndefined();
+    console.log('   Original UTXO consumed ✓');
   });
 
   /**
-   * Test withdrawing unshielded tokens from the contract to a user.
-   *
-   * @given A deployed token vault contract with unshielded tokens
-   * @and An authorized user
-   * @when Withdrawing unshielded tokens to the user
-   * @then Should create a UTXO for the user with the withdrawn tokens
-   * @and Should increment totalUnshieldedWithdrawals counter
+   * Withdraw from contract: deposit 2000, withdraw 500, contract retains 1500.
+   * Balance: ContractOutput(+500) = UserUTXO(-500)
    */
   test('should withdraw unshielded tokens to user', () => {
     const state = TestState.new();
@@ -426,13 +424,14 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     // Create a custom unshielded token type for testing
     const tokenColor = Random.hex(64);
-    const depositAmount = 2000n;
-    const withdrawAmount = 500n;
+    const DEPOSIT_AMOUNT = 2000n; // Deposit full UTXO to contract
+    const WITHDRAW_AMOUNT = 500n; // Withdraw partial amount
+    const REMAINING_IN_CONTRACT = DEPOSIT_AMOUNT - WITHDRAW_AMOUNT; // 1500 stays in contract
 
     // Give the user some unshielded tokens
     const userAddress = addressFromKey(state.nightKey.verifyingKey());
     const tokenType = { tag: 'unshielded' as const, raw: tokenColor };
-    state.rewardsUnshielded(tokenType, depositAmount);
+    state.rewardsUnshielded(tokenType, DEPOSIT_AMOUNT);
 
     // Get the user's UTXO that we'll spend
     const userUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
@@ -445,9 +444,12 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
-    // First, deposit tokens into the contract
+    console.log(':: Unshielded Withdrawal Test');
+    console.log(`   Depositing: ${DEPOSIT_AMOUNT} tokens to contract`);
+
+    // Step 1: Deposit all tokens to contract (full UTXO, no change)
     const tokenTypeValue = encodeUnshieldedTokenType(tokenColor);
-    const depositAmountValue = encodeAmount(depositAmount);
+    const depositAmountValue = encodeAmount(DEPOSIT_AMOUNT);
 
     const depositContext = new QueryContext(
       new ChargedState(state.ledger.index(contractAddr)!.data.state),
@@ -473,7 +475,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       depositTranscripts[0][1],
       [],
       {
-        value: [Static.encodeFromHex(tokenColor), bigIntToValue(depositAmount)[0]],
+        value: [Static.encodeFromHex(tokenColor), bigIntToValue(DEPOSIT_AMOUNT)[0]],
         alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }]
       },
       { value: [], alignment: [] },
@@ -481,6 +483,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       DEPOSIT_UNSHIELDED
     );
 
+    // Full UTXO spend - no change (entire UTXO goes to contract)
     const depositUtxoSpend: UtxoSpend = {
       value: utxoToSpend.value,
       owner: state.nightKey.verifyingKey(),
@@ -490,6 +493,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     };
 
     const depositIntent = testIntents([depositCall], [], [], state.time);
+    // No outputs - entire UTXO value goes to contract
     depositIntent.guaranteedUnshieldedOffer = UnshieldedOffer.new([depositUtxoSpend], [], []);
 
     const depositTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, depositIntent);
@@ -502,13 +506,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const balancedDeposit = state.balanceTx(depositTx.eraseProofs());
     state.assertApply(balancedDeposit, depositStrictness);
 
-    // Now withdraw tokens from the contract to a user
-    // The contract needs to:
-    // 1. sendUnshielded(color, amount) - declare outgoing tokens
-    // 2. claimUnshieldedSpend(key, amount) - specify recipient
-    // And the transaction needs an output UTXO for the user
+    console.log(`   Contract now has: ${DEPOSIT_AMOUNT} tokens`);
+    console.log(`   Withdrawing: ${WITHDRAW_AMOUNT} tokens to user`);
 
-    const withdrawAmountValue = encodeAmount(withdrawAmount);
+    // Step 2: Withdraw partial amount - contract sends, user receives UTXO
+    const withdrawAmountValue = encodeAmount(WITHDRAW_AMOUNT);
     const claimKey = encodeClaimedSpendKeyUser(tokenColor, userAddress);
 
     const withdrawContext = new QueryContext(
@@ -518,14 +520,14 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     const withdrawProgram = programWithResults(
       [
-        // sendUnshielded(color, amount)
+        // sendUnshielded(color, amount) - contract declares outgoing tokens
         ...sendUnshieldedOps(tokenTypeValue, withdrawAmountValue),
-        // claimUnshieldedSpend for the user
+        // claimUnshieldedSpend - specify recipient gets the tokens
         ...claimUnshieldedSpendOps(claimKey, withdrawAmountValue),
         // totalUnshieldedWithdrawals.increment(1)
         ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS), false, 1)
       ],
-      [{ value: ownerPk, alignment: [ATOM_BYTES_32] }] // Owner PK is read for authorization check
+      [{ value: ownerPk, alignment: [ATOM_BYTES_32] }] // Owner PK for authorization
     );
 
     const withdrawCalls: PreTranscript[] = [new PreTranscript(withdrawContext, withdrawProgram)];
@@ -537,12 +539,12 @@ describe('Ledger API - TokenVault Unshielded', () => {
       ops.sendToUserOp,
       withdrawTranscripts[0][0],
       withdrawTranscripts[0][1],
-      [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private input: owner secret key for auth
+      [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
       {
         value: [
           Static.encodeFromHex(tokenColor),
-          bigIntToValue(withdrawAmount)[0],
-          Static.encodeFromHex(userAddress) // recipient address
+          bigIntToValue(WITHDRAW_AMOUNT)[0],
+          Static.encodeFromHex(userAddress)
         ],
         alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }, ATOM_BYTES_32]
       },
@@ -551,17 +553,17 @@ describe('Ledger API - TokenVault Unshielded', () => {
       SEND_TO_USER
     );
 
-    // Create the output UTXO that the user will receive
+    // User creates output UTXO to receive withdrawn tokens
     const withdrawOutput: UtxoOutput = {
-      value: withdrawAmount,
+      value: WITHDRAW_AMOUNT,
       owner: userAddress,
       type: tokenColor
     };
 
     const withdrawIntent = testIntents([withdrawCall], [], [], state.time);
     withdrawIntent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
-      [], // No inputs
-      [withdrawOutput], // Output for the user
+      [], // No inputs - tokens come from contract
+      [withdrawOutput], // Output: new UTXO for user
       []
     );
 
@@ -581,10 +583,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const withdrawCounter = stateArrayAfterWithdraw[STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS].asCell();
     expect(withdrawCounter).toBeDefined();
 
-    // Verify the user received the UTXO
+    // Verify the user received the withdrawn UTXO
     const finalUserUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
-    // User should have a new UTXO with the withdrawn amount
-    const withdrawnUtxo = finalUserUtxos.find((utxo) => utxo.value === withdrawAmount);
+    const withdrawnUtxo = finalUserUtxos.find((utxo) => utxo.value === WITHDRAW_AMOUNT);
     expect(withdrawnUtxo).toBeDefined();
+    console.log(`   User received UTXO: ${withdrawnUtxo!.value} tokens`);
+    console.log(`   Contract retains: ${REMAINING_IN_CONTRACT} tokens (in balance)`);
   });
 });
