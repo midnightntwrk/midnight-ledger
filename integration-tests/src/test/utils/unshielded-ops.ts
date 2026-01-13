@@ -50,12 +50,7 @@
 
 import type { AlignedValue, Op } from '@midnight-ntwrk/ledger';
 import { bigIntToValue } from '@midnight-ntwrk/ledger';
-import {
-  ATOM_BYTES_1,
-  ATOM_BYTES_16,
-  ATOM_BYTES_32,
-  ONE_VALUE
-} from '@/test/utils/value-alignment';
+import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, ONE_VALUE } from '@/test/utils/value-alignment';
 
 // Effects structure indices for unshielded operations
 const EFFECTS_UNSHIELDED_INPUTS_IDX = 6;
@@ -106,7 +101,7 @@ export function encodeAmount(amount: bigint): AlignedValue {
   // Use ledger's bigIntToValue which properly encodes as a Value
   const value = bigIntToValue(amount);
   return {
-    value: value,
+    value,
     alignment: [ATOM_BYTES_16]
   };
 }
@@ -115,7 +110,7 @@ export function encodeAmount(amount: bigint): AlignedValue {
  * Creates an AlignedValue representing a user recipient for claimed spends.
  *
  * The key for claimed_unshielded_spends is (TokenType, PublicAddress).
- * 
+ *
  * PublicAddress encoding (from coin-structure/src/coin.rs):
  * - Contract: [true (1), contractAddress, empty]
  * - User: [false (0/empty), empty, userAddress]
@@ -147,7 +142,7 @@ export function encodeClaimedSpendKeyUser(color: string, userAddress: string): A
  * Creates an AlignedValue representing a contract recipient for claimed spends.
  *
  * The key for claimed_unshielded_spends is (TokenType, PublicAddress).
- * 
+ *
  * PublicAddress encoding (from coin-structure/src/coin.rs):
  * - Contract: [true (1), contractAddress, empty]
  * - User: [false (0/empty), empty, userAddress]

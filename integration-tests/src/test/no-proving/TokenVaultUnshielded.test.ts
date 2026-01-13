@@ -76,7 +76,14 @@ import {
 } from '@midnight-ntwrk/ledger';
 
 import { TestState } from '@/test/utils/TestState';
-import { DEFAULT_TOKEN_TYPE, INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Random, Static, TestResource } from '@/test-objects';
+import {
+  DEFAULT_TOKEN_TYPE,
+  INITIAL_NIGHT_AMOUNT,
+  LOCAL_TEST_NETWORK_ID,
+  Random,
+  Static,
+  TestResource
+} from '@/test-objects';
 import { testIntents } from '@/test-utils';
 import {
   cellRead,
@@ -85,13 +92,7 @@ import {
   getKey,
   programWithResults
 } from '@/test/utils/onchain-runtime-program-fragments';
-import {
-  ATOM_BYTES_1,
-  ATOM_BYTES_8,
-  ATOM_BYTES_32,
-  EMPTY_VALUE,
-  ONE_VALUE
-} from '@/test/utils/value-alignment';
+import { ATOM_BYTES_1, ATOM_BYTES_8, ATOM_BYTES_32, EMPTY_VALUE, ONE_VALUE } from '@/test/utils/value-alignment';
 import {
   claimUnshieldedSpendOps,
   encodeAmount,
@@ -280,11 +281,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit(
-      [ATOM_BYTES_32],
-      [Static.encodeFromText('token:vault:pk')],
-      [ownerSk]
-    );
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerSk, ownerPk, ops);
@@ -324,19 +321,13 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.rewardsUnshielded(tokenType, depositAmount);
 
     // Get the user's UTXO that we'll spend
-    const userUtxos = [...state.utxos].filter(
-      (utxo) => utxo.type === tokenColor && utxo.owner === userAddress
-    );
+    const userUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
     expect(userUtxos.length).toBeGreaterThan(0);
     const utxoToSpend = userUtxos[0];
 
     // Deploy the contract
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit(
-      [ATOM_BYTES_32],
-      [Static.encodeFromText('token:vault:pk')],
-      [ownerSk]
-    );
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -348,10 +339,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const tokenTypeValue = encodeUnshieldedTokenType(tokenColor);
     const amountValue = encodeAmount(depositAmount);
 
-    const context = new QueryContext(
-      new ChargedState(state.ledger.index(contractAddr)!.data.state),
-      contractAddr
-    );
+    const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
 
     const program = programWithResults(
       [
@@ -447,19 +435,13 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.rewardsUnshielded(tokenType, depositAmount);
 
     // Get the user's UTXO that we'll spend
-    const userUtxos = [...state.utxos].filter(
-      (utxo) => utxo.type === tokenColor && utxo.owner === userAddress
-    );
+    const userUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
     expect(userUtxos.length).toBeGreaterThan(0);
     const utxoToSpend = userUtxos[0];
 
     // Deploy the contract with owner being the test user
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit(
-      [ATOM_BYTES_32],
-      [Static.encodeFromText('token:vault:pk')],
-      [ownerSk]
-    );
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -562,11 +544,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
           bigIntToValue(withdrawAmount)[0],
           Static.encodeFromHex(userAddress) // recipient address
         ],
-        alignment: [
-          ATOM_BYTES_32,
-          { tag: 'atom', value: { tag: 'bytes', length: 16 } },
-          ATOM_BYTES_32
-        ]
+        alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }, ATOM_BYTES_32]
       },
       { value: [], alignment: [] },
       communicationCommitmentRandomness(),
@@ -604,9 +582,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     expect(withdrawCounter).toBeDefined();
 
     // Verify the user received the UTXO
-    const finalUserUtxos = [...state.utxos].filter(
-      (utxo) => utxo.type === tokenColor && utxo.owner === userAddress
-    );
+    const finalUserUtxos = [...state.utxos].filter((utxo) => utxo.type === tokenColor && utxo.owner === userAddress);
     // User should have a new UTXO with the withdrawn amount
     const withdrawnUtxo = finalUserUtxos.find((utxo) => utxo.value === withdrawAmount);
     expect(withdrawnUtxo).toBeDefined();
