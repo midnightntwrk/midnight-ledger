@@ -46,7 +46,6 @@
  */
 
 import {
-  type AlignedValue,
   addressFromKey,
   bigIntToValue,
   ChargedState,
@@ -57,14 +56,11 @@ import {
   ContractMaintenanceAuthority,
   ContractOperation,
   ContractState,
-  Intent,
   LedgerParameters,
   partitionTranscripts,
   persistentCommit,
   PreTranscript,
   QueryContext,
-  rawTokenType as createRawTokenType,
-  signatureVerifyingKey,
   StateMap,
   StateValue,
   Transaction,
@@ -76,24 +72,16 @@ import {
 } from '@midnight-ntwrk/ledger';
 
 import { TestState } from '@/test/utils/TestState';
-import {
-  DEFAULT_TOKEN_TYPE,
-  INITIAL_NIGHT_AMOUNT,
-  LOCAL_TEST_NETWORK_ID,
-  Random,
-  Static,
-  TestResource
-} from '@/test-objects';
+import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Random, Static, TestResource } from '@/test-objects';
 import { testIntents } from '@/test-utils';
 import {
   cellRead,
-  cellWrite,
   counterIncrement,
   getKey,
   programWithResults,
   setMember
 } from '@/test/utils/onchain-runtime-program-fragments';
-import { ATOM_BYTES_1, ATOM_BYTES_8, ATOM_BYTES_32, EMPTY_VALUE, ONE_VALUE } from '@/test/utils/value-alignment';
+import { ATOM_BYTES_1, ATOM_BYTES_8, ATOM_BYTES_32, EMPTY_VALUE } from '@/test/utils/value-alignment';
 import {
   claimUnshieldedSpendOps,
   encodeAmount,
