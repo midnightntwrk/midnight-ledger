@@ -378,11 +378,11 @@ async fn test_shielded_full_lifecycle() {
 
     // Results in order: kernel_self, Cell_read(hasShieldedTokens), Cell_read(pot), kernel_self, kernel_self
     let public_transcript_results: Vec<AlignedValue> = vec![
-        addr.into(),  // First kernel_self
-        true.into(),  // hasShieldedTokens is now true
-        pot.into(),   // Read pot for merge
-        addr.into(),  // Second kernel_self (for nullifiers/coin ops)
-        addr.into(),  // Third kernel_self (for write)
+        addr.into(), // First kernel_self
+        true.into(), // hasShieldedTokens is now true
+        pot.into(),  // Read pot for merge
+        addr.into(), // Second kernel_self (for nullifiers/coin ops)
+        addr.into(), // Third kernel_self (for write)
     ];
 
     let transcripts = partition_transcripts(
