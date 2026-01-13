@@ -467,6 +467,7 @@ async fn test_shielded_full_lifecycle() {
     );
 
     // Create withdrawal coin (goes to user) and change coin (stays in contract)
+    // Note: Different domain separators are required to derive unique nonces
     let withdraw_coin = CoinInfo::from(&pot).evolve_from(
         b"midnight:kernel:nonce_evolve",
         WITHDRAW_AMOUNT,
@@ -474,7 +475,7 @@ async fn test_shielded_full_lifecycle() {
     );
 
     let change_coin = CoinInfo::from(&pot).evolve_from(
-        b"midnight:kernel:nonce_evolve",
+        b"midnight:kernel:nonce_evolve/2",  // Different domain separator for change
         pot.value - WITHDRAW_AMOUNT,
         pot.type_,
     );
@@ -494,7 +495,7 @@ async fn test_shielded_full_lifecycle() {
         &withdraw_coin,
         None,
         &state.zswap_keys.coin_public_key(),
-        Some(state.zswap_keys.encryption_secret_key.public_key()),
+        Some(state.zswap_keys.enc_public_key()),
     )
     .unwrap();
 
@@ -521,12 +522,14 @@ async fn test_shielded_full_lifecycle() {
     // Order matches circuit execution:
     // 1. isAuthorized() -> checks authorized.member(pk) first, then pk == owner
     // 2. hasShieldedTokens assertion
-    // 3. shieldedVault.value check
+    // 3. shieldedVault.value >= amount check (first read of shieldedVault)
+    // 4. sendShielded(shieldedVault, ...) (second read of shieldedVault)
     let public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
         &Set_member!([key!(3u8)], false, [u8; 32], owner_pk.0)[..], // Check authorized.member(pk)
         &Cell_read!([key!(2u8)], false, [u8; 32])[..],              // Read owner for pk == owner
         &Cell_read!([key!(1u8)], false, bool)[..],                  // Check hasShieldedTokens
-        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault
+        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault for value check
+        &Cell_read!([key!(0u8)], false, QualifiedCoinInfo)[..],     // Read vault for sendShielded
         &kernel_self!((), ())[..],
         &kernel_claim_zswap_nullifier!((), (), pot_nul)[..],
         &kernel_claim_zswap_coin_spend!((), (), withdraw_com)[..],
@@ -551,7 +554,8 @@ async fn test_shielded_full_lifecycle() {
         false.into(),    // authorized.member(pk) result - pk is NOT in authorized set
         owner_pk.into(), // owner value - this equals pk, so pk == owner is true
         true.into(),     // hasShieldedTokens
-        pot.into(),
+        pot.into(),      // First vault read (for value check)
+        pot.into(),      // Second vault read (for sendShielded)
         addr.into(),
         addr.into(),
     ];
@@ -574,7 +578,10 @@ async fn test_shielded_full_lifecycle() {
         output: withdraw_coin.into(),
         guaranteed_public_transcript: transcripts[0].0.clone(),
         fallible_public_transcript: transcripts[0].1.clone(),
-        private_transcript_outputs: vec![owner_sk.into(), owner_sk.into()],
+        // Private transcript outputs:
+        // 1. owner_sk for localSecretKey() in isAuthorized()
+        // 2. coin_public_key for ownPublicKey() (provides the ZswapCoinPublicKey directly)
+        private_transcript_outputs: vec![owner_sk.into(), state.zswap_keys.coin_public_key().into()],
         communication_commitment_rand: rng.r#gen(),
         key_location: KeyLocation(Cow::Borrowed("withdrawShielded")),
     };
