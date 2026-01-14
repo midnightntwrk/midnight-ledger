@@ -558,8 +558,8 @@ describe('Ledger API - TokenVault Unshielded', () => {
         value: [
           Static.encodeFromHex(tokenColor),
           bigIntToValue(WITHDRAW_AMOUNT)[0],
-          new Uint8Array([0]),  // false = Right variant (UserAddress)
-          new Uint8Array(),     // () = empty left value
+          new Uint8Array([0]), // false = Right variant (UserAddress)
+          new Uint8Array(), // () = empty left value
           Static.encodeFromHex(userAddress)
         ],
         alignment: [
