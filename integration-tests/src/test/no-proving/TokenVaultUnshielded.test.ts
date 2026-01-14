@@ -554,20 +554,23 @@ describe('Ledger API - TokenVault Unshielded', () => {
       [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
       {
         // Input: (color, amount, recipient: Either<ContractAddress, UserAddress>)
-        // For Either::Right(UserAddress): [false, (), user_addr]
+        // PublicAddress encoding in Rust: vec![is_contract, contract_addr, user_addr]
+        // For PublicAddress::User: vec![false, (), user_address]
+        // - false is encoded as EMPTY_VALUE (empty Uint8Array), not new Uint8Array([0])
+        // - () is unit type with NO bytes and NO alignment entry
         value: [
           Static.encodeFromHex(tokenColor),
           bigIntToValue(WITHDRAW_AMOUNT)[0],
-          new Uint8Array([0]), // false = Right variant (UserAddress)
-          new Uint8Array(), // () = empty left value
+          EMPTY_VALUE, // false = User address (not Contract)
+          // Unit value for empty contract address - NO bytes added
           Static.encodeFromHex(userAddress)
         ],
         alignment: [
-          ATOM_BYTES_32,
-          { tag: 'atom', value: { tag: 'bytes', length: 16 } },
-          ATOM_BYTES_1,
-          ATOM_BYTES_32,
-          ATOM_BYTES_32
+          ATOM_BYTES_32, // tokenColor
+          { tag: 'atom', value: { tag: 'bytes', length: 16 } }, // amount
+          ATOM_BYTES_1, // boolean (is_contract)
+          // Unit has no alignment entry
+          ATOM_BYTES_32 // user address
         ]
       },
       { value: [], alignment: [] },
