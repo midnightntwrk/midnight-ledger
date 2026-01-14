@@ -99,7 +99,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
   const DEPOSIT_UNSHIELDED = 'depositUnshielded';
   const WITHDRAW_UNSHIELDED = 'withdrawUnshielded';
   const SEND_TO_USER = 'sendUnshieldedToUser';
-  const SEND_TO_CONTRACT = 'sendUnshieldedToContract';
   const GET_UNSHIELDED_BALANCE = 'getUnshieldedBalance';
 
   // ============================================================================
@@ -136,9 +135,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const sendToUserOp = new ContractOperation();
     sendToUserOp.verifierKey = TestResource.operationVerifierKey();
 
-    const sendToContractOp = new ContractOperation();
-    sendToContractOp.verifierKey = TestResource.operationVerifierKey();
-
     const getBalanceOp = new ContractOperation();
     getBalanceOp.verifierKey = TestResource.operationVerifierKey();
 
@@ -146,7 +142,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
       depositUnshieldedOp,
       withdrawUnshieldedOp,
       sendToUserOp,
-      sendToContractOp,
       getBalanceOp
     };
   }
@@ -228,7 +223,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
     contract.setOperation(DEPOSIT_UNSHIELDED, ops.depositUnshieldedOp);
     contract.setOperation(WITHDRAW_UNSHIELDED, ops.withdrawUnshieldedOp);
     contract.setOperation(SEND_TO_USER, ops.sendToUserOp);
-    contract.setOperation(SEND_TO_CONTRACT, ops.sendToContractOp);
     contract.setOperation(GET_UNSHIELDED_BALANCE, ops.getBalanceOp);
 
     // Set initial state

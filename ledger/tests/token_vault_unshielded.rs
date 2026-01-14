@@ -116,8 +116,6 @@ async fn test_unshielded_contract_deposit() {
         ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await);
     let withdraw_unshielded_op =
         ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await);
-    let send_to_contract_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToContract").await);
     let send_to_user_op =
         ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToUser").await);
     let get_shielded_balance_op =
@@ -150,10 +148,6 @@ async fn test_unshielded_contract_deposit() {
             .insert(
                 b"withdrawUnshielded"[..].into(),
                 withdraw_unshielded_op.clone(),
-            )
-            .insert(
-                b"sendUnshieldedToContract"[..].into(),
-                send_to_contract_op.clone(),
             )
             .insert(b"sendUnshieldedToUser"[..].into(), send_to_user_op.clone())
             .insert(
@@ -419,8 +413,6 @@ async fn test_unshielded_contract_withdraw() {
         ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await);
     let withdraw_unshielded_op =
         ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await);
-    let send_to_contract_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToContract").await);
     let send_to_user_op =
         ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToUser").await);
     let get_shielded_balance_op =
@@ -453,10 +445,6 @@ async fn test_unshielded_contract_withdraw() {
             .insert(
                 b"withdrawUnshielded"[..].into(),
                 withdraw_unshielded_op.clone(),
-            )
-            .insert(
-                b"sendUnshieldedToContract"[..].into(),
-                send_to_contract_op.clone(),
             )
             .insert(b"sendUnshieldedToUser"[..].into(), send_to_user_op.clone())
             .insert(
