@@ -162,8 +162,7 @@ circuit depositUnshielded(color: Bytes<32>, amount: Uint<128>): [] {
     totalUnshieldedDeposits.increment(1);
 }
 
-/// Withdraw unshielded tokens from the vault (backward compatible)
-/// Uses Either type for recipient flexibility
+/// Withdraw unshielded tokens from the vault
 circuit withdrawUnshielded(color: Bytes<32>, amount: Uint<128>, recipient: Either<ContractAddress, UserAddress>): [] {
     assert(isAuthorized(), "Not authorized to withdraw");
     assert(unshieldedBalanceGte(disclose(color), disclose(amount)), "Insufficient unshielded balance");
