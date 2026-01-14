@@ -28,7 +28,6 @@ export {
     withdrawShielded,
     depositUnshielded,
     withdrawUnshielded,
-    sendUnshieldedToUser,
     getShieldedBalance,
     getUnshieldedBalance
 }
@@ -161,23 +160,6 @@ circuit depositUnshielded(color: Bytes<32>, amount: Uint<128>): [] {
     receiveUnshielded(disclose(color), disclose(amount));
     
     totalUnshieldedDeposits.increment(1);
-}
-
-/// Withdraw unshielded tokens from the vault to a user
-circuit sendUnshieldedToUser(color: Bytes<32>, amount: Uint<128>, recipient: UserAddress): [] {
-    assert(isAuthorized(), "Not authorized to withdraw");
-    
-    // Check that contract has sufficient balance
-    assert(unshieldedBalanceGte(disclose(color), disclose(amount)), "Insufficient unshielded balance");
-    
-    // Send tokens to the recipient user
-    sendUnshielded(
-        disclose(color),
-        disclose(amount),
-        right<ContractAddress, UserAddress>(disclose(recipient))
-    );
-    
-    totalUnshieldedWithdrawals.increment(1);
 }
 
 /// Withdraw unshielded tokens from the vault (backward compatible)

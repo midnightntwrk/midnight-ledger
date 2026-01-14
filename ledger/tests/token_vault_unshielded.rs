@@ -116,8 +116,6 @@ async fn test_unshielded_contract_deposit() {
         ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await);
     let withdraw_unshielded_op =
         ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await);
-    let send_to_user_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToUser").await);
     let get_shielded_balance_op =
         ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await);
     let get_unshielded_balance_op =
@@ -149,7 +147,6 @@ async fn test_unshielded_contract_deposit() {
                 b"withdrawUnshielded"[..].into(),
                 withdraw_unshielded_op.clone(),
             )
-            .insert(b"sendUnshieldedToUser"[..].into(), send_to_user_op.clone())
             .insert(
                 b"getShieldedBalance"[..].into(),
                 get_shielded_balance_op.clone(),
@@ -366,13 +363,13 @@ async fn test_unshielded_contract_deposit() {
 
 /// Test: Contract withdraws unshielded NIGHT tokens to user.
 ///
-/// Flow: Contract.sendUnshieldedToUser() → New UTXO created for user
+/// Flow: Contract.withdrawUnshielded() → New UTXO created for user
 ///
 /// This test does a full deposit+withdraw cycle with real ZKIR proving:
 /// 1. Deposit: User UTXO → Contract (via receiveUnshielded)
-/// 2. Withdraw: Contract → User UTXO (via sendUnshieldedToUser with authorization)
+/// 2. Withdraw: Contract → User UTXO (via withdrawUnshielded with authorization)
 ///
-/// Circuit operations for sendUnshieldedToUser:
+/// Circuit operations for withdrawUnshielded:
 /// - isAuthorized(): Set_member + Cell_read (checks pk == owner)
 /// - unshieldedBalanceGte(): Balance check via unshieldedBalanceLt negation
 /// - sendUnshielded(): Increments effects[7] and effects[8]
@@ -413,8 +410,6 @@ async fn test_unshielded_contract_withdraw() {
         ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await);
     let withdraw_unshielded_op =
         ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await);
-    let send_to_user_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "sendUnshieldedToUser").await);
     let get_shielded_balance_op =
         ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await);
     let get_unshielded_balance_op =
@@ -446,7 +441,6 @@ async fn test_unshielded_contract_withdraw() {
                 b"withdrawUnshielded"[..].into(),
                 withdraw_unshielded_op.clone(),
             )
-            .insert(b"sendUnshieldedToUser"[..].into(), send_to_user_op.clone())
             .insert(
                 b"getShieldedBalance"[..].into(),
                 get_shielded_balance_op.clone(),
@@ -644,7 +638,7 @@ async fn test_unshielded_contract_withdraw() {
 
     // Build the withdrawal transcript
     //
-    // The sendUnshieldedToUser circuit performs these operations in order:
+    // The withdrawUnshielded circuit performs these operations in order:
     // 1. isAuthorized(): Set_member check on authorized set + Cell_read of owner
     // 2. unshieldedBalanceGte(): Balance check (via unshieldedBalanceLt negated)
     // 3. sendUnshielded(): Increments effects[7] and effects[8]
@@ -700,21 +694,24 @@ async fn test_unshielded_contract_withdraw() {
     )
     .unwrap();
 
-    // Build contract call input for sendUnshieldedToUser
-    // Input: (color: Bytes<32>, amount: Uint<128>, recipient: UserAddress)
+    // Build contract call input for withdrawUnshielded
+    // Input: (color: Bytes<32>, amount: Uint<128>, recipient: Either<ContractAddress, UserAddress>)
+    // For Either::Right(UserAddress), encoding is: [false, (), user_addr]
+    use coin_structure::coin::PublicAddress;
+    let recipient_either = PublicAddress::User(user_address);
     let withdraw_input_av: AlignedValue = AlignedValue::concat(
         [
-            AlignedValue::from(NIGHT.0),         // color
-            AlignedValue::from(withdraw_amount), // amount
-            AlignedValue::from(user_address.0),  // recipient (UserAddress is HashOutput)
+            AlignedValue::from(NIGHT.0),          // color
+            AlignedValue::from(withdraw_amount),  // amount
+            AlignedValue::from(recipient_either), // recipient as Either<ContractAddress, UserAddress>
         ]
         .iter(),
     );
 
     let withdraw_call = ContractCallPrototype {
         address: addr,
-        entry_point: b"sendUnshieldedToUser"[..].into(),
-        op: send_to_user_op.clone(),
+        entry_point: b"withdrawUnshielded"[..].into(),
+        op: withdraw_unshielded_op.clone(),
         input: withdraw_input_av,
         output: ().into(),
         guaranteed_public_transcript: withdraw_transcripts[0].0.clone(),
@@ -722,7 +719,7 @@ async fn test_unshielded_contract_withdraw() {
         // Private witness: localSecretKey() needs owner_sk to prove authorization
         private_transcript_outputs: vec![owner_sk.into()],
         communication_commitment_rand: rng.r#gen(),
-        key_location: KeyLocation(Cow::Borrowed("sendUnshieldedToUser")),
+        key_location: KeyLocation(Cow::Borrowed("withdrawUnshielded")),
     };
 
     // ========================================================================

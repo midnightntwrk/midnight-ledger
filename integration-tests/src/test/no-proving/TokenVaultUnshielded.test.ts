@@ -98,7 +98,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
   // ============================================================================
   const DEPOSIT_UNSHIELDED = 'depositUnshielded';
   const WITHDRAW_UNSHIELDED = 'withdrawUnshielded';
-  const SEND_TO_USER = 'sendUnshieldedToUser';
   const GET_UNSHIELDED_BALANCE = 'getUnshieldedBalance';
 
   // ============================================================================
@@ -132,16 +131,12 @@ describe('Ledger API - TokenVault Unshielded', () => {
     const withdrawUnshieldedOp = new ContractOperation();
     withdrawUnshieldedOp.verifierKey = TestResource.operationVerifierKey();
 
-    const sendToUserOp = new ContractOperation();
-    sendToUserOp.verifierKey = TestResource.operationVerifierKey();
-
     const getBalanceOp = new ContractOperation();
     getBalanceOp.verifierKey = TestResource.operationVerifierKey();
 
     return {
       depositUnshieldedOp,
       withdrawUnshieldedOp,
-      sendToUserOp,
       getBalanceOp
     };
   }
@@ -222,7 +217,6 @@ describe('Ledger API - TokenVault Unshielded', () => {
     // Set up operations
     contract.setOperation(DEPOSIT_UNSHIELDED, ops.depositUnshieldedOp);
     contract.setOperation(WITHDRAW_UNSHIELDED, ops.withdrawUnshieldedOp);
-    contract.setOperation(SEND_TO_USER, ops.sendToUserOp);
     contract.setOperation(GET_UNSHIELDED_BALANCE, ops.getBalanceOp);
 
     // Set initial state
@@ -496,7 +490,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     // Step 2: Withdraw partial amount - contract sends, user receives UTXO
     //
-    // The sendUnshieldedToUser circuit performs these operations in order:
+    // The withdrawUnshielded circuit performs these operations in order:
     // 1. isAuthorized(): Set_member check on authorized set + Cell_read of owner
     // 2. unshieldedBalanceGte(): Balance check (via unshieldedBalanceLt negated)
     // 3. sendUnshielded(): Increments effects[7] and effects[8]
@@ -553,18 +547,32 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     const withdrawCall = new ContractCallPrototype(
       contractAddr,
-      SEND_TO_USER,
-      ops.sendToUserOp,
+      WITHDRAW_UNSHIELDED,
+      ops.withdrawUnshieldedOp,
       withdrawTranscripts[0][0],
       withdrawTranscripts[0][1],
       [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
       {
-        value: [Static.encodeFromHex(tokenColor), bigIntToValue(WITHDRAW_AMOUNT)[0], Static.encodeFromHex(userAddress)],
-        alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }, ATOM_BYTES_32]
+        // Input: (color, amount, recipient: Either<ContractAddress, UserAddress>)
+        // For Either::Right(UserAddress): [false, (), user_addr]
+        value: [
+          Static.encodeFromHex(tokenColor),
+          bigIntToValue(WITHDRAW_AMOUNT)[0],
+          new Uint8Array([0]),  // false = Right variant (UserAddress)
+          new Uint8Array(),     // () = empty left value
+          Static.encodeFromHex(userAddress)
+        ],
+        alignment: [
+          ATOM_BYTES_32,
+          { tag: 'atom', value: { tag: 'bytes', length: 16 } },
+          ATOM_BYTES_1,
+          ATOM_BYTES_32,
+          ATOM_BYTES_32
+        ]
       },
       { value: [], alignment: [] },
       communicationCommitmentRandomness(),
-      SEND_TO_USER
+      WITHDRAW_UNSHIELDED
     );
 
     // User creates output UTXO to receive withdrawn tokens
