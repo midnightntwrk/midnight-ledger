@@ -25,7 +25,6 @@ import {
   ContractOperation,
   ContractState,
   createShieldedCoinInfo,
-  decodeContractAddress,
   encodeContractAddress,
   encodeShieldedCoinInfo,
   Intent,
@@ -1199,12 +1198,7 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        // Recipient::Contract encoding in Either<User, Contract>:
-        // Contract is RIGHT variant: vec![false, (), contract_addr]
-        // - false = EMPTY_VALUE (empty Uint8Array)
-        // - () = empty User PublicKey represented as EMPTY_VALUE
-        // - contract_addr = 32 bytes
-        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
+        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1265,12 +1259,7 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        // Recipient::Contract encoding in Either<User, Contract>:
-        // Contract is RIGHT variant: vec![false, (), contract_addr]
-        // - false = EMPTY_VALUE (empty Uint8Array)
-        // - () = empty User PublicKey represented as EMPTY_VALUE
-        // - contract_addr = 32 bytes
-        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
+        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1285,7 +1274,7 @@ describe('Ledger API - Transaction', () => {
     ];
 
     const program = programWithResults(transcriptOps, [
-      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
+      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
       { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }
     ]);
 
@@ -1357,19 +1346,14 @@ describe('Ledger API - Transaction', () => {
       testIntents([], [], [deploy], state.time)
     );
 
-    const rawAddr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
-    const encodedAddr = encodeContractAddress(rawAddr);
-    // Normalize the address by trimming trailing zeros and decoding back.
-    // This ensures the address can be used in aligned value contexts without
-    // failing alignment checks in the WASM layer.
-    const trimmedEncodedAddr = Static.trimTrailingZeros(encodedAddr);
-    const addr = decodeContractAddress(trimmedEncodedAddr);
+    const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
+    const encodedAddr = encodeContractAddress(addr);
 
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
 
-    return { addr, encodedAddr: trimmedEncodedAddr };
+    return { addr, encodedAddr };
   }
 
   function findSegmentOfCall(
