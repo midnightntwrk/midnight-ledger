@@ -25,6 +25,7 @@ import {
   ContractOperation,
   ContractState,
   createShieldedCoinInfo,
+  decodeContractAddress,
   encodeContractAddress,
   encodeShieldedCoinInfo,
   Intent,
@@ -1356,14 +1357,19 @@ describe('Ledger API - Transaction', () => {
       testIntents([], [], [deploy], state.time)
     );
 
-    const addr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
-    const encodedAddr = encodeContractAddress(addr);
+    const rawAddr: ContractAddress = tx.intents!.get(1)!.actions[0].address;
+    const encodedAddr = encodeContractAddress(rawAddr);
+    // Normalize the address by trimming trailing zeros and decoding back.
+    // This ensures the address can be used in aligned value contexts without
+    // failing alignment checks in the WASM layer.
+    const trimmedEncodedAddr = Static.trimTrailingZeros(encodedAddr);
+    const addr = decodeContractAddress(trimmedEncodedAddr);
 
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());
     state.assertApply(balanced, balancedStrictness);
 
-    return { addr, encodedAddr };
+    return { addr, encodedAddr: trimmedEncodedAddr };
   }
 
   function findSegmentOfCall(
