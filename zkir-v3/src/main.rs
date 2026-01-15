@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ZKIR v2 compiler.
+//! ZKIR v3 compiler.
 #![deny(unreachable_pub)]
 //#![deny(warnings)]
 use base_crypto::data_provider::{self, MidnightDataProvider};
@@ -29,7 +29,7 @@ use tracing_subscriber::Registry;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 use transient_crypto::proofs::Zkir;
-use zkir::IrSource;
+use zkir_v3::IrSource;
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
