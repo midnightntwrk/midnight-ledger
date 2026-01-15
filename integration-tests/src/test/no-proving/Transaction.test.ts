@@ -1198,7 +1198,12 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        // Recipient::Contract encoding in Either<User, Contract>:
+        // Contract is RIGHT variant: vec![false, (), contract_addr]
+        // - false = EMPTY_VALUE (empty Uint8Array)
+        // - () = empty User PublicKey represented as EMPTY_VALUE
+        // - contract_addr = 32 bytes
+        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1259,7 +1264,12 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        // Recipient::Contract encoding in Either<User, Contract>:
+        // Contract is RIGHT variant: vec![false, (), contract_addr]
+        // - false = EMPTY_VALUE (empty Uint8Array)
+        // - () = empty User PublicKey represented as EMPTY_VALUE
+        // - contract_addr = 32 bytes
+        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1274,7 +1284,7 @@ describe('Ledger API - Transaction', () => {
     ];
 
     const program = programWithResults(transcriptOps, [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }
     ]);
 
