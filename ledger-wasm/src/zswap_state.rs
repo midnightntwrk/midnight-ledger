@@ -13,6 +13,7 @@
 
 use crate::conversions::*;
 use crate::dust::Event;
+use crate::state_changes::ZswapStateChanges;
 use crate::zswap_keys::ZswapSecretKeys;
 use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
 use base_crypto::time::Timestamp;
@@ -25,6 +26,7 @@ use coin_structure::{
 };
 use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
 use ledger::semantics::ZswapLocalStateExt;
+use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -84,6 +86,37 @@ impl MerkleTreeCollapsedUpdate {
         } else {
             format!("{:#?}", &self.0)
         }
+    }
+}
+
+#[wasm_bindgen]
+pub struct ZswapLocalStateWithChanges {
+    inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>,
+    changes: Vec<ZswapStateChanges>,
+}
+
+impl From<WithZswapStateChanges<zswap::local::State<InMemoryDB>>> for ZswapLocalStateWithChanges {
+    fn from(inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>) -> Self {
+        let changes = inner
+            .changes
+            .iter()
+            .cloned()
+            .map(ZswapStateChanges::from)
+            .collect();
+        ZswapLocalStateWithChanges { inner, changes }
+    }
+}
+
+#[wasm_bindgen]
+impl ZswapLocalStateWithChanges {
+    #[wasm_bindgen(getter)]
+    pub fn state(&self) -> ZswapLocalState {
+        ZswapLocalState(self.inner.result.clone())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn changes(&self) -> Vec<ZswapStateChanges> {
+        self.changes.clone()
     }
 }
 
@@ -158,6 +191,19 @@ impl ZswapLocalState {
         Ok(ZswapLocalState(
             self.0.replay_events(&secret_keys.try_into()?, events)?,
         ))
+    }
+
+    #[wasm_bindgen(js_name = "replayEventsWithChanges")]
+    pub fn replay_events_with_changes(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        events: Vec<Event>,
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        let events = events.iter().map(|event| &event.0);
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events)?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
     pub fn apply(

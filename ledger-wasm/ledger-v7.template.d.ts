@@ -368,6 +368,34 @@ export class DustState {
   readonly generation: DustGenerationState;
 }
 
+export class DustStateChanges {
+  private constructor();
+  /**
+   * The source of the state change, as a hex-encoded string
+   */
+  readonly source: string;
+  /**
+   * The UTXOs that were received in this state change
+   */
+  readonly receivedUtxos: QualifiedDustOutput[];
+  /**
+   * The UTXOs that were spent in this state change
+   */
+  readonly spentUtxos: QualifiedDustOutput[];
+}
+
+export class DustLocalStateWithChanges {
+  private constructor();
+  /**
+   * The updated local state after replaying events
+   */
+  readonly state: DustLocalState;
+  /**
+   * The state changes that occurred during the replay
+   */
+  readonly changes: DustStateChanges[];
+}
+
 export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
@@ -375,6 +403,7 @@ export class DustLocalState {
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
+  replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
@@ -1543,6 +1572,34 @@ export class ZswapChainState {
   filter(contractAddress: ContractAddress): ZswapChainState;
 }
 
+export class ZswapStateChanges {
+  private constructor();
+  /**
+   * The source of the state change, as a hex-encoded string
+   */
+  readonly source: string;
+  /**
+   * The coins that were received in this state change
+   */
+  readonly receivedCoins: QualifiedShieldedCoinInfo[];
+  /**
+   * The coins that were spent in this state change
+   */
+  readonly spentCoins: QualifiedShieldedCoinInfo[];
+}
+
+export class ZswapLocalStateWithChanges {
+  private constructor();
+  /**
+   * The updated local state after replaying events
+   */
+  readonly state: ZswapLocalState;
+  /**
+   * The state changes that occurred during the replay
+   */
+  readonly changes: ZswapStateChanges[];
+}
+
 /**
  * The local state of a user/wallet, consisting of a set
  * of unspent coins
@@ -1582,6 +1639,11 @@ export class ZswapLocalState {
    * in the same order as emitted by the chain being followed.
    */
   replayEvents(secretKeys: ZswapSecretKeys, events: Event[]): ZswapLocalState;
+  /**
+   * Replays observed events against the current local state, returning both the updated state
+   * and the state changes. These *must* be replayed in the same order as emitted by the chain being followed.
+   */
+  replayEventsWithChanges(secretKeys: ZswapSecretKeys, events: Event[]): ZswapLocalStateWithChanges;
   /**
    * Locally applies an offer to the current state, returning the updated state
    */
