@@ -476,14 +476,16 @@ mod prove_tx_endpoint {
         let body = serialize_zswap_body().await;
 
         let base_url = server.base_url();
-        let _tasks: Vec<_> = (0..50)
-            .map(|_| {
-                let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
-                let url = format!("{}/prove-tx", base_url);
-                let body = body.clone();
-                tokio::spawn(async move { client.post(url).body(body).send().await })
-            })
-            .collect();
+
+        for _ in 0..50 {
+            let client = build_client(LONG_REQUEST_TIMEOUT_SECS);
+            let url = format!("{}/prove-tx", base_url);
+            let body = body.clone();
+
+            tokio::spawn(async move {
+                let _ = client.post(url).body(body).send().await;
+            });
+        }
 
         tokio::time::sleep(std::time::Duration::from_millis(300)).await;
 
