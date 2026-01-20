@@ -37,6 +37,12 @@ pub struct IrSource {
     pub inputs: Vec<Identifier>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
+    /// The alignment of the circuit's input arguments.
+    /// Used by callers to construct AlignedValue for communication commitment.
+    pub arg_alignment: Alignment,
+    /// The alignment of the circuit's return value.
+    /// Used by callers to construct AlignedValue for communication commitment.
+    pub return_val_alignment: Alignment,
     /// The sequence of instructions to run in-circuit
     pub instructions: Arc<Vec<Instruction>>,
 }
@@ -260,6 +266,68 @@ impl Tagged for Operand {
 }
 tag_enforcement_test!(Operand);
 
+/// A symbolic Op that may contain unresolved variable references.
+///
+/// Stored as JSON, resolved to concrete `Op<ResultModeVerify>` during IR VM execution.
+/// The JSON structure matches `Op<ResultModeVerify>` but any string starting with '%'
+/// represents a variable reference that will be resolved using the circuit memory map.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct SymbolicOp(pub serde_json::Value);
+
+impl Serializable for SymbolicOp {
+    fn serialize(&self, sink: &mut impl std::io::Write) -> Result<(), std::io::Error> {
+        // Serialize the JSON as a string
+        let json_str = serde_json::to_string(&self.0)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Serializable::serialize(&json_str, sink)
+    }
+
+    fn serialized_size(&self) -> usize {
+        let json_str = serde_json::to_string(&self.0).unwrap_or_default();
+        json_str.serialized_size()
+    }
+}
+
+impl Deserializable for SymbolicOp {
+    fn deserialize(source: &mut impl Read, max_depth: u32) -> Result<Self, io::Error> {
+        let json_str: String = Deserializable::deserialize(source, max_depth)?;
+        let value: serde_json::Value = serde_json::from_str(&json_str)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
+        Ok(SymbolicOp(value))
+    }
+}
+
+impl Tagged for SymbolicOp {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("symbolic-op[v1]")
+    }
+
+    fn tag_unique_factor() -> String {
+        "[json]".to_string()
+    }
+}
+tag_enforcement_test!(SymbolicOp);
+
+#[cfg(feature = "proptest")]
+impl proptest::arbitrary::Arbitrary for SymbolicOp {
+    type Parameters = ();
+    type Strategy = proptest::strategy::BoxedStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        use proptest::prelude::*;
+        // Generate simple JSON values for testing
+        prop_oneof![
+            Just(SymbolicOp(serde_json::json!("lt"))),
+            Just(SymbolicOp(serde_json::json!("eq"))),
+            Just(SymbolicOp(serde_json::json!("add"))),
+            Just(SymbolicOp(serde_json::json!({"dup": {"n": 0}}))),
+            Just(SymbolicOp(serde_json::json!({"push": {"storage": false, "value": {"tag": "null"}}}))),
+        ]
+        .boxed()
+    }
+}
+
 /// An individual ZK IR instruction
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
@@ -321,15 +389,33 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Conditional impact instruction - declares multiple public inputs under a guard condition.
+    /// Conditional impact instruction - declares operations that produce public inputs.
     ///
-    /// No outputs, but adds the inputs as public inputs and activity information to
-    /// [`IrSource::prove`] and [`IrSource::check`].
+    /// The ops are symbolic and may contain variable references. They are resolved
+    /// to concrete `Op<ResultModeVerify>` values during preprocessing/circuit synthesis
+    /// using the memory map built from earlier instructions.
+    ///
+    /// No outputs, but adds the resolved field elements as public inputs and activity
+    /// information to [`IrSource::prove`] and [`IrSource::check`].
     Impact {
-        /// The boolean condition under which the public inputs are active
+        /// The boolean condition under which the operations are active
         guard: Operand,
-        /// The sequence of values to declare as public inputs
-        inputs: Vec<Operand>,
+        /// The symbolic operations (resolved to concrete Ops during execution)
+        ops: Vec<SymbolicOp>,
+        /// The total number of field elements produced when these ops are encoded via `FieldRepr`.
+        ///
+        /// This count is pre-computed by the compiler and stored here because circuit synthesis
+        /// in Halo2 requires knowing all loop bounds at circuit construction time, before any
+        /// witness values are available. The circuit structure must be fully deterministic.
+        ///
+        /// During preprocessing (proof generation), the symbolic ops are resolved to concrete
+        /// `Op` values using the memory map, then encoded to field elements. The `field_count`
+        /// tells the circuit exactly how many public input cells to allocate for this Impact
+        /// instruction without needing to resolve and encode the ops first.
+        ///
+        /// The value must match `ops.iter().map(|op| op.field_repr_count()).sum()` after
+        /// resolution - a mismatch would cause circuit synthesis to fail.
+        field_count: u64,
     },
     /// Adds two elliptic curve points. UB if either is not a valid curve point.
     ///

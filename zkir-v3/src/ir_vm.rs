@@ -12,7 +12,10 @@
 // limitations under the License.
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
+use super::resolve::resolve_operands_in_json;
 use anyhow::{anyhow, bail};
+use onchain_vm::ops::Op;
+use onchain_vm::result_mode::ResultModeVerify;
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
@@ -486,12 +489,37 @@ impl IrSource {
                         bail!("PersistentHash did not produce expected output");
                     }
                 }
-                I::Impact { guard, inputs } => {
-                    let count = inputs.len();
-                    for input in inputs {
-                        pis.push(resolve_operand(&memory, input)?);
+                I::Impact { guard, ops, field_count } => {
+                    // Resolve symbolic ops to concrete ops using memory context
+                    let resolved_ops: Vec<Op<ResultModeVerify, storage::DefaultDB>> = ops
+                        .iter()
+                        .map(|symbolic_op| {
+                            let mut json = symbolic_op.0.clone();
+                            resolve_operands_in_json(&mut json, &memory)?;
+                            serde_json::from_value(json)
+                                .map_err(|e| anyhow!("Failed to deserialize op: {}", e))
+                        })
+                        .collect::<Result<_, _>>()?;
+
+                    // Encode to field elements using FieldRepr
+                    let mut field_elements: Vec<Fr> = Vec::new();
+                    for op in &resolved_ops {
+                        op.field_repr(&mut field_elements);
+                    }
+
+                    let count = field_elements.len();
+                    if count != *field_count as usize {
+                        bail!(
+                            "Impact field_count mismatch: instruction says {}, but ops produced {}",
+                            field_count, count
+                        );
+                    }
+
+                    for fe in field_elements {
+                        pis.push(fe);
                         public_transcript_inputs_idx += 1;
                     }
+
                     if !resolve_operand_bool(&memory, guard)? {
                         pi_skips.push(Some(count));
                         public_transcript_inputs_idx -= count;
@@ -739,6 +767,7 @@ impl Relation for IrSource {
             let comm_comm = std.assign(layouter, comm_comm_value)?;
             pi_push(comm_comm, &mut public_inputs)?;
         }
+
         for ins in self.instructions.iter() {
             match ins {
                 I::Assert { cond } => {
@@ -782,11 +811,18 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard: _, inputs } => {
-                    for input in inputs {
-                        let val_assigned =
-                            resolve_operand(std, layouter, &memory, &mut constant_pool, input)?;
-                        pi_push(val_assigned, &mut public_inputs)?;
+                I::Impact { guard: _, ops: _, field_count } => {
+                    // For circuit synthesis, use the field_count from the instruction
+                    // and assign the corresponding values from pis.
+                    let start_idx = public_inputs.len();
+
+                    // Assign the field elements from the preprocessed pis
+                    for i in 0..(*field_count as usize) {
+                        let value = witness
+                            .as_ref()
+                            .map(|preproc| preproc.pis.get(start_idx + i).copied().unwrap_or(0.into()));
+                        let assigned = std.assign(layouter, value)?;
+                        pi_push(assigned, &mut public_inputs)?;
                     }
                 }
                 I::Output { val } => {

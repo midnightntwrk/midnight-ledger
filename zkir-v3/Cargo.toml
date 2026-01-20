@@ -24,6 +24,8 @@ proptest = [
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
+storage = { path = "../storage", package = "midnight-storage" }
 
 midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }

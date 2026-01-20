@@ -179,7 +179,7 @@ impl ValueSlice {
 
 /// Encodes an alignment in the field-aligned binary encoding, as a sequence of
 /// [`AlignmentSegment`]s.
-#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Dummy)]
+#[derive(Clone, Default, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, Dummy)]
 #[serde(transparent)]
 pub struct Alignment(pub Vec<AlignmentSegment>);
 

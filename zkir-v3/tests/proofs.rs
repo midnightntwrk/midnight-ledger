@@ -23,7 +23,6 @@ mod proof_tests {
     use std::fs::File;
     use std::io::BufReader;
     use transient_crypto::curve::EmbeddedGroupAffine;
-    use transient_crypto::hash::transient_hash;
     use transient_crypto::proofs::Proof;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::{
@@ -76,6 +75,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
            ]
@@ -110,6 +111,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
            ]
@@ -164,6 +167,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1", "%v_2"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "outputs": ["%v_3", "%v_4"] }
            ]
@@ -204,23 +209,22 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: The impact instruction here doesn't correspond to real Impact VM bytecode.
-    // Real impact instructions contain encoded opcodes (0x10 for push, 0x30 for dup, etc.).
-    // We're keeping this simplified form for historical reasons - it still exercises the
-    // prover's public input handling even if it's not a semantically valid Impact program.
+    // Test impact instruction with symbolic ops.
+    // Uses simple ops (dup, lt) that exercise the symbolic op encoding without StateValue.
     #[actix_rt::test]
     async fn test_hash_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1", "%v_2"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
-               { "op": "impact", "guard": "0x01", "inputs": ["%v_3"] }
+               { "op": "impact", "guard": "0x01", "ops": [{"dup": {"n": 0}}, "lt"], "field_count": 2 }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
-        let x = transient_hash(&[1.into(), 2.into(), 3.into()]);
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let mut pk_data = Vec::new();
@@ -231,12 +235,15 @@ mod proof_tests {
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
+        // The ops [dup(0), lt] encode to field elements:
+        // - dup(0) -> 0x30 (opcode 0x30 | n where n=0)
+        // - lt -> 0x01
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![x],
+            public_transcript_inputs: vec![0x30.into(), 0x01.into()],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -252,8 +259,13 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), x].into_iter())
-            .unwrap();
+        // Verifier receives: binding_input (42) + public_transcript_inputs (0x30, 0x01)
+        vk.verify(
+            &PARAMS_VERIFIER,
+            &proof,
+            [42.into(), 0x30.into(), 0x01.into()].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
@@ -262,6 +274,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] }
            ]
@@ -308,6 +322,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1", "%v_2", "%v_3"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "ec_mul", "a_x": "%v_0", "a_y": "%v_1", "scalar": "%v_2", "outputs": ["%v_4", "%v_5"] },
                { "op": "ec_mul_generator", "scalar": "%v_3", "outputs": ["%v_6", "%v_7"] },
@@ -365,6 +381,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
                { "op": "private_input", "guard": null, "output": "%v_3" },
@@ -421,6 +439,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
            ]
@@ -447,6 +467,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
                { "op": "constrain_eq", "a": "%v_1", "b": "%v_2" }
@@ -489,6 +511,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
                { "op": "test_eq", "a": "%v_1", "b": "%v_2", "output": "%v_3" },
@@ -533,6 +557,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
                { "op": "constrain_eq", "a": "%v_0", "b": "%v_1" }
@@ -568,32 +594,37 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: Same as test_hash_proof - the impact instruction here is not real Impact VM
-    // bytecode, just a simplified test case kept for historical reasons.
+    // Test impact instruction with symbolic ops and public inputs.
+    // Uses dup and addi ops to exercise symbolic op encoding with an immediate value.
     #[actix_rt::test]
     async fn test_immediate_with_public_inputs() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0", "%v_1"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
                { "op": "constrain_bits", "val": "%v_1", "bits": 248 },
                { "op": "cond_select", "bit": "%v_0", "a": "0x00", "b": "0x01", "output": "%v_2" },
                { "op": "assert", "cond": "%v_2" },
-               { "op": "impact", "guard": "0x01", "inputs": ["0x30"] }
+               { "op": "impact", "guard": "0x01", "ops": [{"dup": {"n": 0}}, {"addi": {"immediate": 5}}], "field_count": 3 }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
 
+        // The ops [dup(0), addi(5)] encode to field elements:
+        // - dup(0) -> 0x30 (opcode 0x30 | n where n=0)
+        // - addi(5) -> [0x0e, 5] (opcode 0x0e + immediate value)
         let preimage = ProofPreimage {
             binding_input: 48.into(),
             communications_commitment: None,
             inputs: vec![0.into(), 42.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![48.into()],
+            public_transcript_inputs: vec![0x30.into(), 0x0e.into(), 5.into()],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -609,8 +640,13 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [48.into(), 48.into()].into_iter())
-            .unwrap();
+        // Verifier receives: binding_input (48) + public_transcript_inputs (0x30, 0x0e, 5)
+        vk.verify(
+            &PARAMS_VERIFIER,
+            &proof,
+            [48.into(), 0x30.into(), 0x0e.into(), 5.into()].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
@@ -619,6 +655,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
            ]
@@ -657,6 +695,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
            ]
@@ -697,6 +737,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "assert", "cond": "v_0" }
            ]
@@ -726,6 +768,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["%v_0"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
            ]
@@ -747,6 +791,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": ["foo"],
            "do_communications_commitment": false,
+           "arg_alignment": [],
+           "return_val_alignment": [],
            "instructions": [
                { "op": "assert", "cond": "foo" }
            ]

@@ -16,6 +16,8 @@ extern crate tracing;
 
 pub mod ir;
 pub mod ir_vm;
+pub mod resolve;
 
-pub use ir::{Identifier, Instruction, IrSource};
+pub use ir::{Identifier, Instruction, IrSource, SymbolicOp};
 pub use ir_vm::Preprocessed;
+pub use resolve::resolve_operands_in_json;
