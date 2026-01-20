@@ -1800,7 +1800,7 @@ dependencies = [
 
 [[package]]
 name = "generate-cost-model"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "charming",
  "clap",
@@ -2688,7 +2688,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2703,9 +2703,9 @@ dependencies = [
  "indicatif",
  "k256",
  "lazy_static",
- "midnight-base-crypto",
- "midnight-base-crypto-derive",
- "midnight-serialize",
+ "midnight-base-crypto 1.0.0-rc.3",
+ "midnight-base-crypto-derive 1.0.0-rc.3",
+ "midnight-serialize 1.0.0-rc.3",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -2723,8 +2723,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-base-crypto"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
+dependencies = [
+ "anyhow",
+ "atomic-write-file",
+ "const-hex",
+ "ethnum",
+ "fake",
+ "ff",
+ "flate2",
+ "futures",
+ "group",
+ "k256",
+ "lazy_static",
+ "midnight-base-crypto-derive 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-serialize 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "pastey",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "reqwest",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "sha2",
+ "signature",
+ "subtle",
+ "tracing",
+ "zeroize",
+]
+
+[[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.42",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "midnight-base-crypto-derive"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2757,14 +2800,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "fake",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -2795,7 +2838,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "6.2.0-rc.2"
+version = "6.2.0-rc.3"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2808,13 +2851,13 @@ dependencies = [
  "is_sorted",
  "itertools 0.14.0",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-ledger-static",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "midnight-zswap",
  "pastey",
@@ -2843,19 +2886,19 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "6.2.0-rc.2"
+version = "6.2.0-rc.3"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
  "hex",
  "js-sys",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-onchain-runtime",
  "midnight-onchain-runtime-wasm",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1",
  "midnight-transient-crypto",
  "midnight-zswap",
  "pastey",
@@ -2871,7 +2914,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2882,13 +2925,13 @@ dependencies = [
  "itertools 0.10.5",
  "konst",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -2902,16 +2945,16 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
  "js-sys",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "serde",
@@ -2922,16 +2965,16 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "derive-where",
  "fake",
  "hex",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-onchain-state",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -2943,18 +2986,18 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "derive-where",
  "fake",
  "hex",
  "konst",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -2967,7 +3010,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "6.2.0-rc.2"
+version = "6.2.0-rc.3"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -2981,12 +3024,12 @@ dependencies = [
  "introspection",
  "lazy_static",
  "log",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-ledger",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1",
  "midnight-transient-crypto",
  "midnight-zswap",
  "rand 0.8.5",
@@ -3028,13 +3071,13 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "crypto",
  "konst",
  "lazy_static",
- "midnight-serialize",
- "midnight-serialize-macros",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-serialize-macros 1.0.0-rc.3",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3044,8 +3087,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-serialize"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
+dependencies = [
+ "crypto",
+ "konst",
+ "lazy_static",
+ "midnight-serialize-macros 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "serde",
+ "serde_bytes",
+]
+
+[[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.42",
+ "syn 2.0.111",
+]
+
+[[package]]
+name = "midnight-serialize-macros"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3054,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.0.0-rc.2"
+version = "1.1.0-rc.1"
 dependencies = [
  "archery",
  "criterion",
@@ -3067,11 +3136,11 @@ dependencies = [
  "itertools 0.14.0",
  "konst",
  "lru",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-onchain-state",
- "midnight-serialize",
- "midnight-storage",
- "midnight-storage-macros",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1",
+ "midnight-storage-macros 1.0.0-rc.3",
  "os_pipe",
  "parity-db",
  "parking_lot",
@@ -3092,13 +3161,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-storage"
+version = "1.1.0-rc.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
+dependencies = [
+ "archery",
+ "crypto",
+ "derive-where",
+ "fake",
+ "hex",
+ "itertools 0.14.0",
+ "konst",
+ "lru",
+ "midnight-base-crypto 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-serialize 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-storage-macros 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "parking_lot",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "serde",
+ "sha2",
+ "sysinfo",
+ "tempfile",
+]
+
+[[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "derive-where",
- "midnight-serialize",
- "midnight-serialize-macros",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-serialize-macros 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "pastey",
  "proc-macro2",
  "proptest",
@@ -3109,8 +3204,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-storage-macros"
+version = "1.0.0-rc.3"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
+dependencies = [
+ "midnight-serialize-macros 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "proc-macro2",
+ "quote 1.0.42",
+ "syn 2.0.111",
+]
+
+[[package]]
 name = "midnight-transient-crypto"
-version = "1.0.0-rc.2"
+version = "1.0.0-rc.3"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3126,13 +3232,13 @@ dependencies = [
  "k256",
  "lazy_static",
  "lru",
- "midnight-base-crypto",
- "midnight-base-crypto-derive",
+ "midnight-base-crypto 1.0.0-rc.3",
+ "midnight-base-crypto-derive 1.0.0-rc.3",
  "midnight-circuits",
  "midnight-curves",
  "midnight-proofs",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -3157,7 +3263,7 @@ dependencies = [
  "getrandom 0.2.16",
  "hex",
  "js-sys",
- "midnight-serialize",
+ "midnight-serialize 1.0.0-rc.3",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "serde_json",
@@ -3168,12 +3274,12 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-wasm"
-version = "2.0.0-rc.2"
+version = "2.0.0-rc.3"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
  "js-sys",
- "midnight-serialize",
+ "midnight-serialize 1.0.0-rc.3",
  "midnight-transient-crypto",
  "rand 0.8.5",
  "wasm-bindgen",
@@ -3192,7 +3298,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "6.2.0-rc.2"
+version = "6.2.0-rc.3"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3202,12 +3308,12 @@ dependencies = [
  "is_sorted",
  "itertools 0.14.0",
  "lazy_static",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-coin-structure",
  "midnight-ledger-static",
  "midnight-onchain-runtime",
- "midnight-serialize",
- "midnight-storage",
+ "midnight-serialize 1.0.0-rc.3",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-transient-crypto",
  "pastey",
  "rand 0.8.5",
@@ -6019,7 +6125,7 @@ dependencies = [
 
 [[package]]
 name = "zkir"
-version = "2.0.0-rc.2"
+version = "2.0.0-rc.3"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -6032,10 +6138,10 @@ dependencies = [
  "hex",
  "indicatif",
  "log",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-circuits",
  "midnight-proofs",
- "midnight-serialize",
+ "midnight-serialize 1.0.0-rc.3",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
@@ -6060,10 +6166,10 @@ dependencies = [
  "const-hex",
  "group",
  "hex",
- "midnight-base-crypto",
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-circuits",
  "midnight-proofs",
- "midnight-serialize",
+ "midnight-serialize 1.0.0-rc.3",
  "midnight-transient-crypto",
  "paste",
  "pastey",

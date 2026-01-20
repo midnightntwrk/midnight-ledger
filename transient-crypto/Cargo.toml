@@ -21,7 +21,7 @@ public-internal-structure = []
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage" }
+storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage" }
 
 ff = "^0.13.1"
 group = "^0.13.0"

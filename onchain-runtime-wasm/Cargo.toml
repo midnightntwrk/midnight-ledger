@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage" }
+storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
