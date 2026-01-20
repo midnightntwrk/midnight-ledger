@@ -5748,9 +5748,11 @@ dependencies = [
 name = "v6-to-v7-state-translation"
 version = "7.0.0-alpha.1"
 dependencies = [
+ "midnight-base-crypto 1.0.0-rc.3",
  "midnight-ledger 6.2.0-rc.3",
  "midnight-ledger 7.0.0-alpha.1",
  "midnight-storage 1.1.0-rc.1",
+ "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-6.2.0-rc.3)",
 ]
 
 [[package]]

@@ -1,0 +1,12 @@
+[package]
+name = "v6-to-v7-state-translation"
+edition = "2024"
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+ledger-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-rc.3", package = "midnight-ledger" }
+ledger-v7 = { path = "../ledger", package = "midnight-ledger" }
+storage-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-rc.3", package = "midnight-storage" }
+storage-v7 = { path = "../storage", package = "midnight-storage", features = ["state-translation"] }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
