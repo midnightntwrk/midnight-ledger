@@ -23,7 +23,7 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
-    "static",
+    "static", "v6-to-v7-state-translation",
 ]
 default-members = [
     "zswap",
