@@ -423,7 +423,7 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    #[instrument(skip(self, tx))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.transaction_hash().0))]
     pub fn apply_system_tx(
         &self,
         tx: &SystemTransaction,
@@ -1140,7 +1140,7 @@ impl<D: DB> LedgerState<D> {
         Ok((state, res))
     }
 
-    #[instrument(skip(self, tx, context))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.transaction_hash().0))]
     pub fn apply(
         &self,
         tx: &VerifiedTransaction<D>,
