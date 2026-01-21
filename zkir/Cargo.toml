@@ -21,7 +21,7 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-base-crypto" }
 serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
