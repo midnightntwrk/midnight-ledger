@@ -35,7 +35,6 @@
 
 import {
   type AlignedValue,
-  type Alignment,
   bigIntToValue,
   ChargedState,
   communicationCommitmentRandomness,
@@ -47,30 +46,22 @@ import {
   ContractState,
   createShieldedCoinInfo,
   decodeQualifiedShieldedCoinInfo,
-  degradeToTransient,
   encodeCoinPublicKey,
   encodeContractAddress,
   encodeQualifiedShieldedCoinInfo,
   encodeShieldedCoinInfo,
   LedgerParameters,
-  type LedgerState,
-  type Nonce,
   type Op,
   partitionTranscripts,
   persistentCommit,
   PreTranscript,
-  type Proofish,
   type QualifiedShieldedCoinInfo,
-  QueryContext,
-  type RawTokenType,
   runtimeCoinCommitment,
   runtimeCoinNullifier,
   type ShieldedCoinInfo,
   StateMap,
   StateValue,
   Transaction,
-  transientHash,
-  upgradeFromTransient,
   type Value,
   valueToBigInt,
   WellFormedStrictness,
@@ -108,10 +99,10 @@ import {
   ATOM_BYTES_16,
   ATOM_BYTES_32,
   ATOM_BYTES_8,
-  ATOM_FIELD,
   EMPTY_VALUE,
   ONE_VALUE
 } from '@/test/utils/value-alignment';
+import { evolveFrom, getContextWithOffer } from '@/test/utils/query-context-utils';
 
 describe('Ledger API - TokenVault Shielded', () => {
   // ============================================================================
@@ -253,39 +244,6 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.assertApply(balanced, strictness);
 
     return deploy.address;
-  }
-
-  /**
-   * Get query context with ZSwap offer applied.
-   */
-  function getContextWithOffer(ledger: LedgerState, addr: ContractAddress, offer?: ZswapOffer<Proofish>): QueryContext {
-    const res = new QueryContext(new ChargedState(ledger.index(addr)!.data.state), addr);
-    if (offer) {
-      const [, indices] = ledger.zswap.tryApply(offer);
-      const { block } = res;
-      block.comIndices = new Map(Array.from(indices, ([k, v]) => [k, Number(v)]));
-      res.block = block;
-    }
-    return res;
-  }
-
-  /**
-   * Evolve a coin's nonce using domain separation.
-   */
-  function evolveFrom(domainSep: Uint8Array, value: bigint, type: RawTokenType, nonce: Nonce): ShieldedCoinInfo {
-    const degrade = degradeToTransient([Static.encodeFromHex(nonce)])[0];
-    const thAlignment: Alignment = [ATOM_FIELD, ATOM_FIELD];
-    const thValue: Value = transientHash(thAlignment, [domainSep, degrade]);
-    const evolvedNonce = upgradeFromTransient(thValue)[0];
-    const updatedEvolvedNonce = new Uint8Array(evolvedNonce.length + 1);
-    updatedEvolvedNonce.set(evolvedNonce, 0);
-    updatedEvolvedNonce[updatedEvolvedNonce.length] = 0;
-    const evolvedNonceAsNonce: Nonce = Buffer.from(updatedEvolvedNonce).toString('hex');
-    return {
-      nonce: evolvedNonceAsNonce,
-      type,
-      value
-    };
   }
 
   // ============================================================================
@@ -660,10 +618,6 @@ describe('Ledger API - TokenVault Shielded', () => {
       out
     );
 
-    // Build merge transcript
-    // Order: kernel_self, claim_receive(newCoin), cell_read(hasShielded), cell_read(pot),
-    //        kernel_self, claim_nullifier(pot), claim_nullifier(coin), claim_spend(merged), claim_receive(merged),
-    //        kernel_self, cell_write_coin(merged), counter_increment
     publicTranscript = [
       ...kernelSelf(),
       ...kernelClaimZswapCoinReceive(newCoinCom),
@@ -950,11 +904,6 @@ describe('Ledger API - TokenVault Shielded', () => {
     );
 
     // Build withdrawal transcript
-    // Order: isAuthorized() -> Set_member(authorized), Cell_read(owner),
-    //        Cell_read(hasShieldedTokens), Cell_read(vault) for value check, Cell_read(vault) for sendShielded,
-    //        kernel_self, claim_nullifier(pot), claim_spend(withdraw), claim_spend(change), claim_receive(change),
-    //        kernel_self, cell_write_coin(change), counter_increment
-    //
     // Note: shieldedVault is read twice - once for the value check (shieldedVault.value >= amount)
     // and once for the sendShielded operation. This is how the Compact circuit works.
     publicTranscript = [
