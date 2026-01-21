@@ -102,7 +102,7 @@ import {
   EMPTY_VALUE,
   ONE_VALUE
 } from '@/test/utils/value-alignment';
-import { evolveFrom, getContextWithOffer } from '@/test/utils/query-context-utils';
+import { evolveFrom, getContextWithOffer } from '@/test/utils/zswap';
 
 describe('Ledger API - TokenVault Shielded', () => {
   // ============================================================================

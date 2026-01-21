@@ -95,7 +95,7 @@ import {
   THREE_VALUE,
   TWO_VALUE
 } from '@/test/utils/value-alignment';
-import { evolveFrom, getContextWithOffer } from '@/test/utils/query-context-utils';
+import { evolveFrom, getContextWithOffer } from '@/test/utils/zswap';
 import { testIntents } from '@/test-utils';
 
 describe('Ledger API - MicroDao', () => {
