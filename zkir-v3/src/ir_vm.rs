@@ -647,7 +647,7 @@ impl Relation for IrSource {
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
         let mut memory: HashMap<Identifier, AssignedNative<outer::Scalar>> = HashMap::new();
-        let mut constant_pool: HashMap<Fr, AssignedNative<outer::Scalar>> = HashMap::new();
+
         for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
             let assigned = std.assign(layouter, value)?;
             memory.insert(id.clone(), assigned);
@@ -670,21 +670,11 @@ impl Relation for IrSource {
             std: &ZkStdLib,
             layouter: &mut impl Layouter<outer::Scalar>,
             memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
-            constant_pool: &mut HashMap<Fr, AssignedNative<outer::Scalar>>,
             operand: &'a Operand,
         ) -> Result<AssignedNative<outer::Scalar>, Error> {
             match operand {
                 Operand::Variable(id) => idx(memory, id).cloned(),
-                Operand::Immediate(imm) => {
-                    if let Some(assigned) = constant_pool.get(imm) {
-                        Ok(assigned.clone())
-                    } else {
-                        let assigned: AssignedNative<outer::Scalar> =
-                            std.assign_fixed(layouter, imm.0)?;
-                        constant_pool.insert(*imm, assigned.clone());
-                        Ok(assigned)
-                    }
-                }
+                Operand::Immediate(imm) => std.assign_fixed(layouter, imm.0),
             }
         }
 
@@ -742,24 +732,22 @@ impl Relation for IrSource {
         for ins in self.instructions.iter() {
             match ins {
                 I::Assert { cond } => {
-                    let cond_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, cond)?;
+                    let cond_val = resolve_operand(std, layouter, &memory, cond)?;
                     std.assert_non_zero(layouter, &cond_val)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
-                    let bit_val = resolve_operand(std, layouter, &memory, &mut constant_pool, bit)?;
+                    let bit_val = resolve_operand(std, layouter, &memory, bit)?;
                     let bit = std.is_zero(layouter, &bit_val)?;
                     // Note that b comes first here, because the is_zero negates the bit.
                     // The negation is to ensure the bit bound. This may be
                     // excessive, but user input could violate it otherwise.
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let result = std.select(layouter, &bit, &b_val, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { val, bits } => {
-                    let val_assigned =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val_assigned = resolve_operand(std, layouter, &memory, val)?;
                     drop(std.assigned_to_le_bits(
                         layouter,
                         &val_assigned,
@@ -768,41 +756,33 @@ impl Relation for IrSource {
                     )?);
                 }
                 I::ConstrainEq { a, b } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     std.assert_equal(layouter, &a_val, &b_val)?;
                 }
                 I::ConstrainToBoolean { val } => {
                     // Yes, this does insert a constraint.
-                    let val_assigned =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val_assigned = resolve_operand(std, layouter, &memory, val)?;
                     let _: AssignedBit<_> = std.convert(layouter, &val_assigned)?;
                 }
                 I::Copy { val, output } => {
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
                 I::Impact { guard: _, inputs } => {
                     for input in inputs {
-                        let val_assigned =
-                            resolve_operand(std, layouter, &memory, &mut constant_pool, input)?;
+                        let val_assigned = resolve_operand(std, layouter, &memory, input)?;
                         pi_push(val_assigned, &mut public_inputs)?;
                     }
                 }
                 I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
                     outputs.push(val);
                 }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
                     }
                     let result = std.poseidon(layouter, &resolved_inputs)?;
                     mem_insert(output.clone(), result, &mut memory)?;
@@ -819,13 +799,7 @@ impl Relation for IrSource {
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
@@ -842,39 +816,39 @@ impl Relation for IrSource {
                     )?;
                 }
                 I::TestEq { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let bit = std.is_equal(layouter, &a_val, &b_val)?;
                     let result = std.convert(layouter, &bit)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Add { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let result = std.add(layouter, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Mul { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let result = std.mul(layouter, &a_val, &b_val, None)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let result = std.neg(layouter, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let result = lnot(std, layouter, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::LessThan { a, b, bits, output } => {
                     // Adding mod 2 to meet library constraint that this is even
                     // Hidden req that this is >= 4
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let bit =
                         std.lower_than(layouter, &a_val, &b_val, u32::max(*bits + *bits % 2, 4))?;
                     let result = std.convert(layouter, &bit)?;
@@ -882,13 +856,7 @@ impl Relation for IrSource {
                 }
                 I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
                     let guard = match guard {
-                        Some(g) => Some(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            g,
-                        )?),
+                        Some(g) => Some(resolve_operand(std, layouter, &memory, g)?),
                         None => None,
                     };
                     let value = witness
@@ -914,7 +882,7 @@ impl Relation for IrSource {
                             "Unexpected output length of DivModPowerOfTwo instruction".into(),
                         ));
                     }
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
                     let val_bits = std.assigned_to_le_bits(layouter, &val, None, true)?;
                     let modulus =
                         std.assigned_from_le_bits(layouter, &val_bits[..*bits as usize])?;
@@ -931,10 +899,8 @@ impl Relation for IrSource {
                     bits,
                     output,
                 } => {
-                    let divisor_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, divisor)?;
-                    let modulus_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, modulus)?;
+                    let divisor_val = resolve_operand(std, layouter, &memory, divisor)?;
+                    let modulus_val = resolve_operand(std, layouter, &memory, modulus)?;
                     let divisor_bits = std.assigned_to_le_bits(
                         layouter,
                         &divisor_val,
@@ -963,10 +929,10 @@ impl Relation for IrSource {
                             "Unexpected output length of EcAdd instruction".into(),
                         ));
                     }
-                    let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
-                    let b_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b_x)?;
-                    let b_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b_y)?;
+                    let a_x_val = resolve_operand(std, layouter, &memory, a_x)?;
+                    let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
+                    let b_x_val = resolve_operand(std, layouter, &memory, b_x)?;
+                    let b_y_val = resolve_operand(std, layouter, &memory, b_y)?;
                     let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
                     let b = ecc_from_parts(std, layouter, &b_x_val, &b_y_val)?;
                     let c = std.jubjub().add(layouter, &a, &b)?;
@@ -992,10 +958,9 @@ impl Relation for IrSource {
                             "Unexpected output length of EcMul instruction".into(),
                         ));
                     }
-                    let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
-                    let scalar_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, scalar)?;
+                    let a_x_val = resolve_operand(std, layouter, &memory, a_x)?;
+                    let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
+                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
                     let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
                     let scalar = std.jubjub().convert(layouter, &scalar_val)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
@@ -1019,8 +984,7 @@ impl Relation for IrSource {
                     let g: AssignedNativePoint<embedded::AffineExtended> = std
                         .jubjub()
                         .assign_fixed(layouter, embedded::Affine::generator())?;
-                    let scalar_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, scalar)?;
+                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
                     let scalar = std.jubjub().convert(layouter, &scalar_val)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
                     mem_insert(
@@ -1042,13 +1006,7 @@ impl Relation for IrSource {
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
                     }
                     let point = std.hash_to_curve(layouter, &resolved_inputs)?;
                     mem_insert(
