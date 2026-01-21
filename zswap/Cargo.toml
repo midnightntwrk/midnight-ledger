@@ -13,7 +13,7 @@ base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 midnight-onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
 midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 

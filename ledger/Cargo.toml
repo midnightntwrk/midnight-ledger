@@ -23,7 +23,7 @@ zswap = { path = "../zswap", package = "midnight-zswap" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto"}
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { path = "../zkir", package = "zkir", optional = true }

@@ -12,7 +12,7 @@ fixed-point-custom-serde = []
 
 [dependencies]
 derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 
 ff = "^0.13.1"
 group = "^0.13.0"

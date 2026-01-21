@@ -22,7 +22,7 @@ proptest = [
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
 midnight-proofs = { git = "https://github.com/midnightntwrk/midnight-zk", tag = "midnight-circuits-v5.0.2" }
