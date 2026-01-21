@@ -822,6 +822,7 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
 
 #[tokio::test]
 async fn micro_dao_test() {
+    todo!("serialize the state in the v6 ledger tests and just deserialize it, rather than reading it in");
     for i in 0..9 {
         dbg!(i);
         injected_translation_micro_dao::<InMemoryDB>(i).await;
