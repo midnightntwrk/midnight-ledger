@@ -1,0 +1,59 @@
+{
+  "name": "react-native-ledger-ffi",
+  "version": "1.0.0",
+  "description": "React Native module for Midnight Ledger UniFFI bindings - Native mobile access to Midnight Ledger functionality",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "prepare": "npm run build",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "ledger",
+    "uniffi",
+    "rust",
+    "midnight",
+    "cryptocurrency",
+    "blockchain",
+    "mobile",
+    "ios",
+    "android"
+  ],
+  "author": {
+    "name": "Midnight Protocol",
+    "email": "dev@midnight.network",
+    "url": "https://midnight.network"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/midnight-protocol/react-native-ledger-ffi",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/midnight-protocol/react-native-ledger-ffi.git"
+  },
+  "bugs": {
+    "url": "https://github.com/midnight-protocol/react-native-ledger-ffi/issues"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.76"
+  },
+  "devDependencies": {
+    "@types/react": "*",
+    "@types/react-native": "*",
+    "typescript": "^5.0.0"
+  },
+  "files": [
+    "android",
+    "ios",
+    "dist",
+    "package.json",
+    "README.md",
+    "react-native-ledger-ffi.podspec"
+  ]
+}
