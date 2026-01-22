@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
 use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
 use crate::ir_types::{CircuitValue, IrValue};
 
@@ -315,6 +316,18 @@ impl IrSource {
                     for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
                         memory.insert(out_id.clone(), enc_val);
                     }
+                }
+                I::Decode {
+                    inputs,
+                    val_t,
+                    output,
+                } => {
+                    let raw_inputs = inputs
+                        .iter()
+                        .map(|inp_id| resolve_operand(&memory, inp_id)?.try_into())
+                        .collect::<Result<Vec<Fr>, _>>()?;
+                    let decoded = decode_offcircuit(&raw_inputs, val_t)?;
+                    memory.insert(output.clone(), decoded);
                 }
                 I::Add { a, b, output } => {
                     let a = resolve_operand(&memory, a)?;
@@ -783,6 +796,18 @@ impl Relation for IrSource {
                     for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
                         mem_insert(out_id.clone(), enc_val, &mut memory)?;
                     }
+                }
+                I::Decode {
+                    inputs,
+                    val_t,
+                    output,
+                } => {
+                    let raw_inputs = inputs
+                        .iter()
+                        .map(|inp_id| resolve_operand(std, layouter, &memory, inp_id)?.try_into())
+                        .collect::<Result<Vec<AssignedNative<_>>, Error>>()?;
+                    let decoded = decode_incircuit(std, layouter, &raw_inputs, val_t)?;
+                    mem_insert(output.clone(), decoded, &mut memory)?;
                 }
                 I::Assert { cond } => {
                     let cond_val = resolve_operand(std, layouter, &memory, cond)?;
