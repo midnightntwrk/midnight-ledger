@@ -382,20 +382,16 @@ pub enum Instruction {
         /// The sequence of values to declare as public inputs
         inputs: Vec<Operand>,
     },
-    /// Adds two elliptic curve points. UB if either is not a valid curve point.
+    /// Adds two elliptic curve points.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the sum.
     EcAdd {
-        /// The affine x coordinate of `a`
-        a_x: Operand,
-        /// The affine y coordinate of `a`
-        a_y: Operand,
-        /// The affine x coordinate of `b`
-        b_x: Operand,
-        /// The affine y coordinate of `b`
-        b_y: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The first point to be added
+        a: Operand,
+        /// The second point to be added
+        b: Operand,
+        /// The result of addition
+        output: Identifier,
     },
     /// Multiplies an elliptic curve point by a scalar. UB if it is not a valid
     /// curve point.

@@ -30,6 +30,7 @@ use midnight_circuits::instructions::{
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
 };
+use midnight_curves::{JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -559,21 +560,11 @@ impl IrSource {
                     }
                 }
                 I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
-                I::EcAdd {
-                    a_x,
-                    a_y,
-                    b_x,
-                    b_y,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        bail!("EcAdd requires exactly 2 outputs");
-                    }
-                    let point = resolve_operand_point(&memory, a_x, a_y)?
-                        + resolve_operand_point(&memory, b_x, b_y)?;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), IrValue::Native(x));
-                    memory.insert(outputs[1].clone(), IrValue::Native(y));
+                I::EcAdd { a, b, output } => {
+                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
+                    let b: JubjubSubgroup = resolve_operand(&memory, b)?.try_into()?;
+                    let c = IrValue::JubjubPoint(a + b);
+                    memory.insert(output.clone(), c);
                 }
                 I::HashToCurve { inputs, outputs } => {
                     if outputs.len() != 2 {
@@ -1032,39 +1023,13 @@ impl Relation for IrSource {
                     )?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::EcAdd {
-                    a_x,
-                    a_y,
-                    b_x,
-                    b_y,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcAdd instruction".into(),
-                        ));
-                    }
-                    let a_x_val = resolve_operand(std, layouter, &memory, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
-                    let b_x_val = resolve_operand(std, layouter, &memory, b_x)?;
-                    let b_y_val = resolve_operand(std, layouter, &memory, b_y)?;
-                    let a_x: AssignedNative<_> = a_x_val.try_into()?;
-                    let a_y: AssignedNative<_> = a_y_val.try_into()?;
-                    let b_x: AssignedNative<_> = b_x_val.try_into()?;
-                    let b_y: AssignedNative<_> = b_y_val.try_into()?;
-                    let a = ecc_from_parts(std, layouter, &a_x, &a_y)?;
-                    let b = ecc_from_parts(std, layouter, &b_x, &b_y)?;
+                I::EcAdd { a, b, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
+                    let b: AssignedNativePoint<JubjubExtended> = b_val.try_into()?;
                     let c = std.jubjub().add(layouter, &a, &b)?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.jubjub().x_coordinate(&c)),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(std.jubjub().y_coordinate(&c)),
-                        &mut memory,
-                    )?;
+                    mem_insert(output.clone(), CircuitValue::JubjubPoint(c), &mut memory)?;
                 }
                 I::EcMul {
                     a_x,
