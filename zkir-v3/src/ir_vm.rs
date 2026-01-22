@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
 use crate::ir_types::{CircuitValue, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -303,6 +304,18 @@ impl IrSource {
         for ins in self.instructions.iter() {
             trace!(?ins, "preprocess gate");
             match ins {
+                I::Encode { input, outputs } => {
+                    let val = resolve_operand(&memory, input)?;
+                    let encoded = encode_offcircuit(&val);
+                    if encoded.len() != outputs.len() {
+                        return Err(anyhow::Error::msg(
+                            "Unexpected output length of encode instruction",
+                        ));
+                    }
+                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                        memory.insert(out_id.clone(), enc_val);
+                    }
+                }
                 I::Add { a, b, output } => {
                     let a = resolve_operand(&memory, a)?;
                     let b = resolve_operand(&memory, b)?;
@@ -759,6 +772,18 @@ impl Relation for IrSource {
         }
         for ins in self.instructions.iter() {
             match ins {
+                I::Encode { input, outputs } => {
+                    let val = resolve_operand(std, layouter, &memory, input)?;
+                    let encoded = encode_incircuit(std, layouter, &val)?;
+                    if encoded.len() != outputs.len() {
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of encode instruction".into(),
+                        ));
+                    }
+                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                        mem_insert(out_id.clone(), enc_val, &mut memory)?;
+                    }
+                }
                 I::Assert { cond } => {
                     let cond_val = resolve_operand(std, layouter, &memory, cond)?;
                     let cond: AssignedNative<_> = cond_val.try_into()?;
