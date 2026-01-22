@@ -22,7 +22,7 @@ parity-db = { version = "0.5.2", optional = true }
 archery = "^0.5.0"
 crypto = { version = "0.5.1", features = ["digest"] }
 sha2 = "0.10.9"
-derive-where = "^1.5.0"
+derive-where = "^1.6.0"
 
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }

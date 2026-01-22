@@ -29,7 +29,7 @@ zeroize = "^1.8.0"
 fake = { version = "^2.10.0", features = ["derive"] }
 futures = { version = "^0.3.31" }
 serde = { version = "^1.0.219", features = ["derive"] }
-derive-where = "^1.5.0"
+derive-where = "^1.6.0"
 
 [dev-dependencies]
 zkir_v2 = { path = "../zkir", package = "zkir" }
