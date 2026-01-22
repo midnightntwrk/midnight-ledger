@@ -224,7 +224,7 @@ impl IrSource {
         }
         let mut memory: HashMap<Identifier, Fr> = HashMap::new();
         for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
-            memory.insert(id.clone(), *input);
+            memory.insert(id.name.clone(), *input);
         }
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
@@ -639,7 +639,7 @@ impl Relation for IrSource {
         for id in &self.inputs {
             let value = witness
                 .as_ref()
-                .map(|preproc| preproc.memory.get(id).copied().unwrap_or(0.into()));
+                .map(|preproc| preproc.memory.get(&id.name).copied().unwrap_or(0.into()));
             input_values.push(value);
         }
 
@@ -650,7 +650,7 @@ impl Relation for IrSource {
 
         for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
             let assigned = std.assign(layouter, value)?;
-            memory.insert(id.clone(), assigned);
+            memory.insert(id.name.clone(), assigned);
         }
 
         let binding_input = std.assign(layouter, binding_input_value)?;
@@ -1035,7 +1035,7 @@ impl Relation for IrSource {
 
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
-                if let Some(val) = memory.get(id) {
+                if let Some(val) = memory.get(&id.name) {
                     preimage.push(val.clone());
                 }
             }

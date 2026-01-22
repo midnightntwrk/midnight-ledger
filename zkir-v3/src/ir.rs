@@ -28,13 +28,15 @@ use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash, Zkir,
 };
 
+use crate::ir_types::IrType;
+
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[tag = "ir-source[v3]"]
 pub struct IrSource {
     /// The list of input identifiers for this circuit
-    pub inputs: Vec<Identifier>,
+    pub inputs: Vec<TypedIdentifier>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -82,6 +84,18 @@ impl Zkir for IrSource {
 pub struct Identifier(pub String);
 
 tag_enforcement_test!(Identifier);
+
+/// A typed identifier for a variable in the circuit memory
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[tag = "zkir-typed-identifier[v1]"]
+pub struct TypedIdentifier {
+    pub(crate) name: Identifier,
+    #[serde(rename = "type")]
+    pub(crate) val_t: IrType,
+}
+
+tag_enforcement_test!(TypedIdentifier);
 
 /// An operand that can be either a variable reference or an immediate value
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]

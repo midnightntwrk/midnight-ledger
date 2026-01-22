@@ -74,7 +74,9 @@ mod proof_tests {
     async fn test_extension_attack() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -108,7 +110,9 @@ mod proof_tests {
     async fn test_minimal_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -162,7 +166,11 @@ mod proof_tests {
     async fn test_htc_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1", "%v_2"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_2", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "outputs": ["%v_3", "%v_4"] }
@@ -212,7 +220,11 @@ mod proof_tests {
     async fn test_hash_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1", "%v_2"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_2", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
@@ -260,7 +272,9 @@ mod proof_tests {
     async fn test_persistent_hash_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] }
@@ -306,7 +320,12 @@ mod proof_tests {
     async fn test_ec_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1", "%v_2", "%v_3"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_2", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_3", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "ec_mul", "a_x": "%v_0", "a_y": "%v_1", "scalar": "%v_2", "outputs": ["%v_4", "%v_5"] },
@@ -363,7 +382,9 @@ mod proof_tests {
     async fn test_divmod_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
@@ -419,7 +440,9 @@ mod proof_tests {
     async fn test_keygen_and_serialize_eq() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -445,7 +468,10 @@ mod proof_tests {
         // v_2 = v_0 + 5, constrain_eq(v_1, v_2)
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
@@ -487,7 +513,10 @@ mod proof_tests {
         // v_2 = v_0 + 1, v_3 = test_eq(v_1, v_2), assert(v_3), v_4 = v_3 ? 2 : 3
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
@@ -531,7 +560,9 @@ mod proof_tests {
         // v_1 = copy(0x42), constrain_eq(v_0, v_1)
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
@@ -574,7 +605,10 @@ mod proof_tests {
     async fn test_immediate_with_public_inputs() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0", "%v_1"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%v_1", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
@@ -617,7 +651,9 @@ mod proof_tests {
     async fn test_immediate_little_endian_encoding() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
@@ -655,7 +691,9 @@ mod proof_tests {
         // Test 0x0100 is interpreted as 1 (bytes [01, 00] = 1 + 256*0)
         let ir_raw2 = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
@@ -695,7 +733,9 @@ mod proof_tests {
         // Variables without '%' prefix should fail to deserialize
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "v_0" }
@@ -724,7 +764,9 @@ mod proof_tests {
         // Hex immediates with odd length should fail to deserialize
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["%v_0"],
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
@@ -745,7 +787,9 @@ mod proof_tests {
         // Random strings that don't follow conventions should be rejected
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
-           "inputs": ["foo"],
+           "inputs": [
+              { "name": "foo", "type": "Scalar<BLS12-381>" }
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "foo" }
