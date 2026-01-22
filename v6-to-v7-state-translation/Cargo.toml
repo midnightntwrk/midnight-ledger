@@ -5,7 +5,7 @@ license.workspace = true
 version.workspace = true
 
 [dependencies]
-ledger-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-ledger" }
-ledger-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-ledger" }
+ledger-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-ledger", features = ["proving"] }
+ledger-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-ledger", features = ["proving"] }
 storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage", features = ["state-translation"] }
 base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-base-crypto" }
