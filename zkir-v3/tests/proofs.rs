@@ -333,7 +333,9 @@ mod proof_tests {
            "instructions": [
                { "op": "ec_mul", "a_x": "%v_0", "a_y": "%v_1", "scalar": "%v_2", "outputs": ["%v_4", "%v_5"] },
                { "op": "ec_mul_generator", "scalar": "%v_3", "outputs": ["%v_6", "%v_7"] },
-               { "op": "ec_add", "a_x": "%v_4", "a_y": "%v_5", "b_x": "%v_6", "b_y": "%v_7", "outputs": ["%v_8", "%v_9"] }
+               { "op": "decode", "inputs": ["%v_4", "%v_5"], "type": "Point<Jubjub>", "output": "%v_8" },
+               { "op": "decode", "inputs": ["%v_6", "%v_7"], "type": "Point<Jubjub>", "output": "%v_9" },
+               { "op": "ec_add", "a": "%v_8", "b": "%v_9", "output": "%v_10" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
