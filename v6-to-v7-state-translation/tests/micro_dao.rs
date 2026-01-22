@@ -1,4 +1,52 @@
-async fn injected_translation_micro_dao<D: DB>(step: u32) {
+use base_crypto::fab::{AlignedValue, Value};
+use base_crypto::hash::{HashOutput, persistent_commit};
+use base_crypto::rng::SplittableRng;
+use base_crypto::signatures::Signature;
+use base_crypto::time::Timestamp;
+use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
+use coin_structure::contract::ContractAddress;
+use coin_structure::transfer::{Recipient, SenderEvidence};
+use futures::FutureExt;
+use lazy_static::lazy_static;
+use ledger_v7::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
+use ledger_v7::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
+use ledger_v7::structure::{
+    ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofPreimageMarker, Transaction,
+};
+use ledger_v7::test_utilities::{Resolver, verifier_key};
+use ledger_v7::test_utilities::{TestState, tx_prove_bind};
+use ledger_v7::test_utilities::{Tx, TxBound};
+use ledger_v7::test_utilities::{test_intents, test_resolver};
+use ledger_v7::verify::WellFormedStrictness;
+use onchain_runtime::context::QueryContext;
+use onchain_runtime::ops::{Key, Op, key};
+use onchain_runtime::program_fragments::*;
+use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
+use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
+use rand::rngs::StdRng;
+use rand::{CryptoRng, Rng, SeedableRng};
+use serialize::Serializable;
+use std::borrow::Cow;
+use std::fs::File;
+use std::future::Future;
+use std::path::Path;
+use storage::arena::Sp;
+use storage::db::{DB, InMemoryDB};
+use storage::storage::{Array, HashMap};
+use transient_crypto::commitment::PedersenRandomness;
+use transient_crypto::curve::Fr;
+use transient_crypto::fab::ValueReprAlignedValue;
+use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
+use transient_crypto::proofs::PARAMS_VERIFIER;
+use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+use zswap::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
+use zswap::{
+    Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
+    Transient as ZswapTransient,
+};
+
+#[tokio::test]
+async fn micro_dao() {
     let mode = TestMode::Full;
     //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x42);
@@ -35,6 +83,8 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
         .filter(|c| c.type_ == token)
         .map(|c| c.value)
         .sum();
+
+    // TODO: read in state 0, migrate and continue
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
@@ -84,6 +134,8 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
         .unwrap();
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
+
+    // TODO: read in state 1, migrate and continue
 
     println!(":: Part 2: Setting topic");
     let tx = mode
@@ -146,6 +198,8 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
     //dbg!(&tx);
     //gen_static_serialize_file(&tx).unwrap();
     state.assert_apply(&tx, balanced_strictness);
+
+    // TODO: read in state 2, migrate and continue
 
     // Part 3: Buy-in
     println!(":: Part 3: Buy-in");
@@ -324,6 +378,7 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
         state.assert_apply(&tx, balanced_strictness);
     }
 
+    // TODO: read in state 3, migrate and continue
     // Part 4: Vote commitment
     println!(":: Part 4: Vote commitment");
     let part_votes: [bool; 2] = [true, false];
@@ -431,6 +486,7 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
                 state.assert_apply(&tx, balanced_strictness);
             }
 
+    // TODO: read in state 4, migrate and continue
     // Part 5: advance to reveal phase
     println!(":: Part 5: Advance to reveal phase");
     let tx = mode
@@ -483,6 +539,7 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
     .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
+    // TODO: read in state 5, migrate and continue
 
     // Part 6: Vote revealing
     println!(":: Part 6: Vote revealing");
@@ -599,6 +656,7 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
                     .unwrap();
                 state.assert_apply(&tx, balanced_strictness);
             }
+    // TODO: read in state 6, migrate and continue
 
     // Part 7: advance to final phase
     println!(":: Part 7: Advance to final phase");
@@ -661,6 +719,8 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
     .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
+
+    // TODO: read in state 7, migrate and continue
 
     // Part 8: cash out
     println!(":: Part 8: Cash Out");
@@ -818,14 +878,6 @@ async fn injected_translation_micro_dao<D: DB>(step: u32) {
         funds_after,
         funds_before - funds_after
     );
-}
 
-#[tokio::test]
-async fn micro_dao_test() {
-    todo!("serialize the state in the v6 ledger tests and just deserialize it, rather than reading it in");
-    for i in 0..9 {
-        dbg!(i);
-        injected_translation_micro_dao::<InMemoryDB>(i).await;
-        injected_translation_micro_dao::<ParityDB>(i).await;
-    }
+    // TODO: read in state 8, migrate and continue
 }
