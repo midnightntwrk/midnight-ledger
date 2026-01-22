@@ -280,6 +280,20 @@ tag_enforcement_test!(Operand);
 #[serde(rename_all = "snake_case", tag = "op")]
 #[tag = "ir-instruction[v3]"]
 pub enum Instruction {
+    /// Encodes the given value as a vector of raw Fr elements.
+    ///
+    /// This operation will result in an error if the number of outputs
+    /// is not the exact number of raw Fr elements required to represent a
+    /// value of the input type:
+    ///
+    ///  - Native:      1 output
+    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    Encode {
+        /// The value to encode
+        input: Operand,
+        /// The output variable names
+        outputs: Vec<Identifier>,
+    },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
     /// No outputs
