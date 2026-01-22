@@ -11,6 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ir_types::{CircuitValue, IrType};
+
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
@@ -52,15 +54,6 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
-}
-
-fn lnot(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    a: &AssignedNative<outer::Scalar>,
-) -> Result<AssignedNative<outer::Scalar>, Error> {
-    let bit = std.is_zero(layouter, a)?;
-    std.convert(layouter, &bit)
 }
 
 fn fab_decode_to_bytes(
@@ -646,10 +639,12 @@ impl Relation for IrSource {
         let binding_input_value = witness.as_ref().map(|preproc| preproc.binding_input);
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
-        let mut memory: HashMap<Identifier, AssignedNative<outer::Scalar>> = HashMap::new();
+        let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
 
         for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
-            let assigned = std.assign(layouter, value)?;
+            let assigned = match id.val_t {
+                IrType::Native => CircuitValue::Native(std.assign(layouter, value)?),
+            };
             memory.insert(id.name.clone(), assigned);
         }
 
@@ -658,9 +653,9 @@ impl Relation for IrSource {
         let mut outputs = Vec::new();
 
         fn idx<'a>(
-            memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
+            memory: &'a HashMap<Identifier, CircuitValue>,
             id: &Identifier,
-        ) -> Result<&'a AssignedNative<outer::Scalar>, Error> {
+        ) -> Result<&'a CircuitValue, Error> {
             memory
                 .get(id)
                 .ok_or(Error::Synthesis(format!("value {id:?} not in memory")))
@@ -669,23 +664,29 @@ impl Relation for IrSource {
         fn resolve_operand<'a>(
             std: &ZkStdLib,
             layouter: &mut impl Layouter<outer::Scalar>,
-            memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
+            memory: &'a HashMap<Identifier, CircuitValue>,
             operand: &'a Operand,
-        ) -> Result<AssignedNative<outer::Scalar>, Error> {
+        ) -> Result<CircuitValue, Error> {
             match operand {
                 Operand::Variable(id) => idx(memory, id).cloned(),
-                Operand::Immediate(imm) => std.assign_fixed(layouter, imm.0),
+                Operand::Immediate(imm) => {
+                    std.assign_fixed(layouter, imm.0).map(CircuitValue::Native)
+                }
             }
         }
 
         let mem_insert = |id: Identifier,
-                          cell: AssignedNative<outer::Scalar>,
-                          mem: &mut HashMap<Identifier, AssignedNative<outer::Scalar>>|
+                          cell: CircuitValue,
+                          mem: &mut HashMap<Identifier, CircuitValue>|
          -> Result<(), Error> {
+            // If id exists in the witness memory, make sure the value that
+            // we are inserting is the same.
+            // Miguel: This seems unnecessary to me. I would fail when calling
+            // `mem_insert` with an id that exists in the witness memory.
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) && *expected != **v  {
+                    if let Some(expected) = preproc.memory.get(&id) && *expected != *v  {
                         error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
                         return true;
                     }
@@ -733,24 +734,26 @@ impl Relation for IrSource {
             match ins {
                 I::Assert { cond } => {
                     let cond_val = resolve_operand(std, layouter, &memory, cond)?;
-                    std.assert_non_zero(layouter, &cond_val)?;
+                    let cond: AssignedNative<_> = cond_val.try_into()?;
+                    std.assert_non_zero(layouter, &cond)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
                     let bit_val = resolve_operand(std, layouter, &memory, bit)?;
-                    let bit = std.is_zero(layouter, &bit_val)?;
-                    // Note that b comes first here, because the is_zero negates the bit.
-                    // The negation is to ensure the bit bound. This may be
-                    // excessive, but user input could violate it otherwise.
+                    let bit: AssignedNative<_> = bit_val.try_into()?;
+                    let bit: AssignedBit<outer::Scalar> = std.convert(layouter, &bit)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let result = std.select(layouter, &bit, &b_val, &a_val)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let result = CircuitValue::Native(std.select(layouter, &bit, &a, &b)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { val, bits } => {
                     let val_assigned = resolve_operand(std, layouter, &memory, val)?;
+                    let x: AssignedNative<_> = val_assigned.try_into()?;
                     drop(std.assigned_to_le_bits(
                         layouter,
-                        &val_assigned,
+                        &x,
                         Some(*bits as usize),
                         *bits as usize >= FR_BITS,
                     )?);
@@ -758,12 +761,15 @@ impl Relation for IrSource {
                 I::ConstrainEq { a, b } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    std.assert_equal(layouter, &a_val, &b_val)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    std.assert_equal(layouter, &a, &b)?;
                 }
                 I::ConstrainToBoolean { val } => {
                     // Yes, this does insert a constraint.
                     let val_assigned = resolve_operand(std, layouter, &memory, val)?;
-                    let _: AssignedBit<_> = std.convert(layouter, &val_assigned)?;
+                    let x: AssignedNative<_> = val_assigned.try_into()?;
+                    let _: AssignedBit<_> = std.convert(layouter, &x)?;
                 }
                 I::Copy { val, output } => {
                     let val = resolve_operand(std, layouter, &memory, val)?;
@@ -772,7 +778,8 @@ impl Relation for IrSource {
                 I::Impact { guard: _, inputs } => {
                     for input in inputs {
                         let val_assigned = resolve_operand(std, layouter, &memory, input)?;
-                        pi_push(val_assigned, &mut public_inputs)?;
+                        let x: AssignedNative<_> = val_assigned.try_into()?;
+                        pi_push(x, &mut public_inputs)?;
                     }
                 }
                 I::Output { val } => {
@@ -782,9 +789,11 @@ impl Relation for IrSource {
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
-                    let result = std.poseidon(layouter, &resolved_inputs)?;
+                    let result = CircuitValue::Native(std.poseidon(layouter, &resolved_inputs)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::PersistentHash {
@@ -799,49 +808,61 @@ impl Relation for IrSource {
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
                     let res_bytes = std.sha2_256(layouter, &bytes)?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.convert(layouter, &res_bytes[31])?,
+                        CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        assemble_bytes(std, layouter, &res_bytes[..31])?,
+                        CircuitValue::Native(assemble_bytes(std, layouter, &res_bytes[..31])?),
                         &mut memory,
                     )?;
                 }
                 I::TestEq { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let bit = std.is_equal(layouter, &a_val, &b_val)?;
-                    let result = std.convert(layouter, &bit)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let bit = std.is_equal(layouter, &a, &b)?;
+                    let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Add { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let result = std.add(layouter, &a_val, &b_val)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let result = CircuitValue::Native(std.add(layouter, &a, &b)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Mul { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let result = std.mul(layouter, &a_val, &b_val, None)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let result = CircuitValue::Native(std.mul(layouter, &a, &b, None)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let result = std.neg(layouter, &a_val)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let result = CircuitValue::Native(std.neg(layouter, &a)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let result = lnot(std, layouter, &a_val)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let bit: AssignedBit<_> = std.convert(layouter, &a)?;
+                    let neg_bit = std.not(layouter, &bit)?;
+                    let result = CircuitValue::Native(std.convert(layouter, &neg_bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::LessThan { a, b, bits, output } => {
@@ -849,9 +870,10 @@ impl Relation for IrSource {
                     // Hidden req that this is >= 4
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let bit =
-                        std.lower_than(layouter, &a_val, &b_val, u32::max(*bits + *bits % 2, 4))?;
-                    let result = std.convert(layouter, &bit)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let bit = std.lower_than(layouter, &a, &b, u32::max(*bits + *bits % 2, 4))?;
+                    let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
@@ -869,12 +891,17 @@ impl Relation for IrSource {
                     // => value == 0 || guard
                     if let Some(guard) = guard {
                         let value_is_zero = std.is_zero(layouter, &value_cell)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
                         let guard_bit = std.convert(layouter, &guard)?;
                         let is_ok = std.or(layouter, &[value_is_zero, guard_bit])?;
                         let is_ok_field = std.convert(layouter, &is_ok)?;
                         std.assert_non_zero(layouter, &is_ok_field)?;
                     }
-                    mem_insert(output.clone(), value_cell, &mut memory)?;
+                    mem_insert(
+                        output.clone(),
+                        CircuitValue::Native(value_cell),
+                        &mut memory,
+                    )?;
                 }
                 I::DivModPowerOfTwo { val, bits, outputs } => {
                     if outputs.len() != 2 {
@@ -883,12 +910,15 @@ impl Relation for IrSource {
                         ));
                     }
                     let val = resolve_operand(std, layouter, &memory, val)?;
+                    let val: AssignedNative<_> = val.try_into()?;
                     let val_bits = std.assigned_to_le_bits(layouter, &val, None, true)?;
-                    let modulus =
-                        std.assigned_from_le_bits(layouter, &val_bits[..*bits as usize])?;
+                    let modulus = CircuitValue::Native(
+                        std.assigned_from_le_bits(layouter, &val_bits[..*bits as usize])?,
+                    );
 
-                    let divisor =
-                        std.assigned_from_le_bits(layouter, &val_bits[*bits as usize..])?;
+                    let divisor = CircuitValue::Native(
+                        std.assigned_from_le_bits(layouter, &val_bits[*bits as usize..])?,
+                    );
 
                     mem_insert(outputs[0].clone(), divisor, &mut memory)?;
                     mem_insert(outputs[1].clone(), modulus, &mut memory)?;
@@ -901,21 +931,18 @@ impl Relation for IrSource {
                 } => {
                     let divisor_val = resolve_operand(std, layouter, &memory, divisor)?;
                     let modulus_val = resolve_operand(std, layouter, &memory, modulus)?;
-                    let divisor_bits = std.assigned_to_le_bits(
+                    let divisor: AssignedNative<_> = divisor_val.try_into()?;
+                    let modulus: AssignedNative<_> = modulus_val.try_into()?;
+                    use group::ff::Field;
+                    let result = CircuitValue::Native(std.linear_combination(
                         layouter,
-                        &divisor_val,
-                        Some(FR_BITS - *bits as usize),
-                        true,
-                    )?;
-                    let modulus_bits = std.assigned_to_le_bits(
-                        layouter,
-                        &modulus_val,
-                        Some(*bits as usize),
-                        true,
-                    )?;
-                    let reconstituted = std
-                        .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
-                    mem_insert(output.clone(), reconstituted, &mut memory)?;
+                        &[
+                            (outer::Scalar::from(1), modulus),
+                            (outer::Scalar::from(2).pow([*bits as u64]), divisor),
+                        ],
+                        outer::Scalar::from(0),
+                    )?);
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::EcAdd {
                     a_x,
@@ -933,17 +960,21 @@ impl Relation for IrSource {
                     let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
                     let b_x_val = resolve_operand(std, layouter, &memory, b_x)?;
                     let b_y_val = resolve_operand(std, layouter, &memory, b_y)?;
-                    let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
-                    let b = ecc_from_parts(std, layouter, &b_x_val, &b_y_val)?;
+                    let a_x: AssignedNative<_> = a_x_val.try_into()?;
+                    let a_y: AssignedNative<_> = a_y_val.try_into()?;
+                    let b_x: AssignedNative<_> = b_x_val.try_into()?;
+                    let b_y: AssignedNative<_> = b_y_val.try_into()?;
+                    let a = ecc_from_parts(std, layouter, &a_x, &a_y)?;
+                    let b = ecc_from_parts(std, layouter, &b_x, &b_y)?;
                     let c = std.jubjub().add(layouter, &a, &b)?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.jubjub().x_coordinate(&c),
+                        CircuitValue::Native(std.jubjub().x_coordinate(&c)),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        std.jubjub().y_coordinate(&c),
+                        CircuitValue::Native(std.jubjub().y_coordinate(&c)),
                         &mut memory,
                     )?;
                 }
@@ -961,17 +992,20 @@ impl Relation for IrSource {
                     let a_x_val = resolve_operand(std, layouter, &memory, a_x)?;
                     let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
-                    let scalar = std.jubjub().convert(layouter, &scalar_val)?;
+                    let a_x: AssignedNative<_> = a_x_val.try_into()?;
+                    let a_y: AssignedNative<_> = a_y_val.try_into()?;
+                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
+                    let a = ecc_from_parts(std, layouter, &a_x, &a_y)?;
+                    let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.jubjub().x_coordinate(&b),
+                        CircuitValue::Native(std.jubjub().x_coordinate(&b)),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        std.jubjub().y_coordinate(&b),
+                        CircuitValue::Native(std.jubjub().y_coordinate(&b)),
                         &mut memory,
                     )?;
                 }
@@ -985,16 +1019,17 @@ impl Relation for IrSource {
                         .jubjub()
                         .assign_fixed(layouter, embedded::Affine::generator())?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let scalar = std.jubjub().convert(layouter, &scalar_val)?;
+                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
+                    let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.jubjub().x_coordinate(&b),
+                        CircuitValue::Native(std.jubjub().x_coordinate(&b)),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        std.jubjub().y_coordinate(&b),
+                        CircuitValue::Native(std.jubjub().y_coordinate(&b)),
                         &mut memory,
                     )?;
                 }
@@ -1006,17 +1041,19 @@ impl Relation for IrSource {
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(std, layouter, &memory, inp)?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
                     let point = std.hash_to_curve(layouter, &resolved_inputs)?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.jubjub().x_coordinate(&point),
+                        CircuitValue::Native(std.jubjub().x_coordinate(&point)),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        std.jubjub().y_coordinate(&point),
+                        CircuitValue::Native(std.jubjub().y_coordinate(&point)),
                         &mut memory,
                     )?;
                 }
@@ -1036,10 +1073,16 @@ impl Relation for IrSource {
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
                 if let Some(val) = memory.get(&id.name) {
-                    preimage.push(val.clone());
+                    let x: AssignedNative<_> = val.clone().try_into()?;
+                    preimage.push(x);
                 }
             }
-            preimage.extend(outputs.iter().cloned());
+
+            for output in &outputs {
+                let x: AssignedNative<_> = output.clone().try_into()?;
+                preimage.push(x);
+            }
+
             let comm_comm = std.poseidon(layouter, &preimage)?;
             // Nb. The communications commitment is the second public input
             // by convention
