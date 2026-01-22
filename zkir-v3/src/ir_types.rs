@@ -17,7 +17,7 @@ use midnight_proofs::{circuit::Value, plonk::Error};
 use proptest_derive::Arbitrary;
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged};
-use transient_crypto::curve::outer;
+use transient_crypto::curve::{Fr, outer};
 
 type F = outer::Scalar;
 
@@ -30,6 +30,20 @@ pub enum IrType {
     Native,
 }
 
+/// Off-circuit IR value carrying actual data.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum IrValue {
+    Native(Fr),
+}
+
+impl IrValue {
+    pub(crate) fn get_type(&self) -> IrType {
+        match self {
+            IrValue::Native(_) => IrType::Native,
+        }
+    }
+}
+
 /// In-circuit IR value, this is a placeholder for an [IrValue], a circuit
 /// variable that does not necessarily carry actual data (it will carry data
 /// during the proving process, but not during the circuit compilation)
@@ -39,9 +53,9 @@ pub enum CircuitValue {
 }
 
 impl CircuitValue {
-    pub fn value(&self) -> Value<F> {
+    pub fn value(&self) -> Value<IrValue> {
         match self {
-            CircuitValue::Native(x) => x.value().cloned(),
+            CircuitValue::Native(x) => x.value().cloned().map(|x| IrValue::Native(Fr(x))),
         }
     }
 
@@ -55,7 +69,7 @@ impl CircuitValue {
 /// Implements both `From<T> for Enum` (wrap) and `TryFrom<Enum> for T` (unwrap)
 /// for the specified enum variants.
 macro_rules! impl_enum_from_try_from {
-    ($enum:ident { $($variant:ident => $t:ty),* $(,)? }) => {
+    ($enum:ident, $error:ty { $($variant:ident => $t:ty),* $(,)? }) => {
         $(
             // Wrap: From<T> -> Enum
             impl From<$t> for $enum {
@@ -66,7 +80,7 @@ macro_rules! impl_enum_from_try_from {
 
             // Unwrap: TryFrom<Enum> -> T
             impl std::convert::TryFrom<$enum> for $t {
-                type Error = Error;
+                type Error = $error;
 
                 fn try_from(value: $enum) -> Result<Self, Self::Error> {
                     match &value {
@@ -79,8 +93,15 @@ macro_rules! impl_enum_from_try_from {
 }
 
 // Derives implementations, for every basic type T:
+//  - From<T> for IrValue
+//  - TryFrom<IrValue> for T
+impl_enum_from_try_from!(IrValue, anyhow::Error {
+    Native => Fr,
+});
+
+// Derives implementations, for every basic type T:
 //  - From<T> for CircuitValue
 //  - TryFrom<CircuitValue> for T
-impl_enum_from_try_from!(CircuitValue {
+impl_enum_from_try_from!(CircuitValue, Error {
     Native => AssignedNative<F>,
 });
