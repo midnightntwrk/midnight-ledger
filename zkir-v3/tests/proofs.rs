@@ -30,7 +30,7 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use zkir_v3::{Identifier, IrSource, Preprocessed};
+    use zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
 
@@ -92,7 +92,10 @@ mod proof_tests {
                 &TestParams,
                 pk,
                 Preprocessed {
-                    memory: HashMap::from([(Identifier("v0".to_string()), 1.into())]),
+                    memory: HashMap::from([(
+                        Identifier("v0".to_string()),
+                        IrValue::Native(1.into()),
+                    )]),
                     pis: (0..N).map(Into::into).collect(),
                     pi_skips: vec![],
                     binding_input: 0.into(),
