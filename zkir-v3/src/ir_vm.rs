@@ -11,7 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ir_types::{CircuitValue, IrType, IrValue};
+use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_types::{CircuitValue, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -670,20 +671,7 @@ impl Relation for IrSource {
         let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
 
         for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
-            value.error_if_known_and(|v| v.get_type() != id.val_t)?;
-            let assigned = match id.val_t {
-                IrType::Native => {
-                    let value: Value<outer::Scalar> = value.map_with_result(|x| {
-                        let x: Fr = x.try_into().map_err(|_| {
-                            Error::Synthesis(
-                                format!("expected native value for {:?}", id.name).into(),
-                            )
-                        })?;
-                        Ok::<_, midnight_proofs::plonk::Error>(x.0)
-                    })?;
-                    CircuitValue::Native(std.assign(layouter, value)?)
-                }
-            };
+            let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
             memory.insert(id.name.clone(), assigned);
         }
 
