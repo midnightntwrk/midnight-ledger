@@ -11,12 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate tracing;
+#[cfg(feature = "proptest")]
+use proptest_derive::Arbitrary;
+use serde::{Deserialize, Serialize};
+use serialize::{Deserializable, Serializable, Tagged};
 
-pub mod ir;
-pub mod ir_types;
-pub mod ir_vm;
-
-pub use ir::{Identifier, Instruction, IrSource};
-pub use ir_vm::Preprocessed;
+/// Type of IR values
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[tag = "ir-type[v1]"]
+pub enum IrType {
+    #[serde(rename = "Scalar<BLS12-381>")]
+    Native,
+}
