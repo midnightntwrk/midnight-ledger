@@ -407,12 +407,12 @@ pub enum Instruction {
     },
     /// Multiplies the group generator by a scalar.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the product
     EcMulGenerator {
         /// The scalar to multiply by
         scalar: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The result of multiplication
+        output: Identifier,
     },
     /// Hashes a sequence of field elements to an embedded curve point.
     ///

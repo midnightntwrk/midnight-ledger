@@ -40,8 +40,8 @@ use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use transient_crypto::curve::EmbeddedGroupAffine;
+use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
-use transient_crypto::curve::{embedded, outer};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
 use transient_crypto::proofs::{ProofPreimage, ProvingError};
@@ -565,15 +565,10 @@ impl IrSource {
                     let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
                     memory.insert(output.clone(), c);
                 }
-                I::EcMulGenerator { scalar, outputs } => {
-                    if outputs.len() != 2 {
-                        bail!("EcMulGenerator requires exactly 2 outputs");
-                    }
+                I::EcMulGenerator { scalar, output } => {
                     let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let point = EmbeddedGroupAffine::generator() * s;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), IrValue::Native(x));
-                    memory.insert(outputs[1].clone(), IrValue::Native(y));
+                    let p = JubjubSubgroup::generator() * jubjub_scalar_from_native(s.0)?;
+                    memory.insert(output.clone(), IrValue::JubjubPoint(p));
                 }
             }
         }
@@ -1010,29 +1005,15 @@ impl Relation for IrSource {
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
-                I::EcMulGenerator { scalar, outputs } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcMulGenerator instruction".into(),
-                        ));
-                    }
-                    let g: AssignedNativePoint<embedded::AffineExtended> = std
+                I::EcMulGenerator { scalar, output } => {
+                    let g: AssignedNativePoint<JubjubExtended> = std
                         .jubjub()
-                        .assign_fixed(layouter, embedded::Affine::generator())?;
+                        .assign_fixed(layouter, JubjubSubgroup::generator())?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
                     let scalar: AssignedNative<_> = scalar_val.try_into()?;
                     let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.jubjub().x_coordinate(&b)),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(std.jubjub().y_coordinate(&b)),
-                        &mut memory,
-                    )?;
+                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
                 I::HashToCurve { inputs, outputs } => {
                     if outputs.len() != 2 {
