@@ -334,7 +334,7 @@ mod proof_tests {
                { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
-               { "op": "ec_add", "a": "%p1", "b": "%p2", "output": "%p3" }
+               { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();

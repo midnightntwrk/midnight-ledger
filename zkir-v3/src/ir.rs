@@ -382,17 +382,6 @@ pub enum Instruction {
         /// The sequence of values to declare as public inputs
         inputs: Vec<Operand>,
     },
-    /// Adds two elliptic curve points.
-    ///
-    /// Outputs 1 element, the sum.
-    EcAdd {
-        /// The first point to be added
-        a: Operand,
-        /// The second point to be added
-        b: Operand,
-        /// The result of addition
-        output: Identifier,
-    },
     /// Multiplies an elliptic curve point by a scalar.
     /// curve point.
     ///
@@ -489,7 +478,8 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Adds `a` and `b` in the prime field.
+    /// Adds `a` and `b`.
+    /// Supported on types: `Native, `JubjubPoint`.
     ///
     /// One output `a + b`
     Add {
