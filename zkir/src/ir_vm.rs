@@ -16,11 +16,11 @@ use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
-use group::Group;
+use group::{Group, ff::Field};
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, ZeroInstructions,
+    EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
@@ -30,6 +30,7 @@ use midnight_proofs::{
     plonk::Error,
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
+use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use transient_crypto::curve::EmbeddedGroupAffine;
@@ -601,20 +602,17 @@ impl Relation for IrSource {
             match ins {
                 I::Assert { cond } => std.assert_non_zero(layouter, idx(&memory, *cond)?)?,
                 I::CondSelect { bit, a, b } => {
-                    let bit = std.is_zero(layouter, idx(&memory, *bit)?)?;
-                    // Note that b comes first here, because the is_zero negates the bit.
-                    // The negation is to ensure the bit bound. This may be
-                    // excessive, but user input could violate it otherwise.
+                    let bit: AssignedBit<_> = std.convert(layouter, idx(&memory, *bit)?)?;
                     let result =
-                        std.select(layouter, &bit, idx(&memory, *b)?, idx(&memory, *a)?)?;
+                        std.select(layouter, &bit, idx(&memory, *a)?, idx(&memory, *b)?)?;
                     mem_push(result, &mut memory)?;
                 }
-                I::ConstrainBits { var, bits } => drop(std.assigned_to_le_bits(
-                    layouter,
-                    idx(&memory, *var)?,
-                    Some(*bits as usize),
-                    *bits as usize >= FR_BITS,
-                )?),
+                I::ConstrainBits { var, bits } => {
+                    if *bits < FR_BITS as u32 {
+                        let bound = BigUint::from(1u32) << *bits;
+                        std.assert_lower_than_fixed(layouter, idx(&memory, *var)?, &bound)?;
+                    }
+                }
                 I::ConstrainEq { a, b } => {
                     std.assert_equal(layouter, idx(&memory, *a)?, idx(&memory, *b)?)?
                 }
@@ -712,20 +710,28 @@ impl Relation for IrSource {
                     modulus,
                     bits,
                 } => {
-                    let divisor_bits = std.assigned_to_le_bits(
+                    let modulus = idx(&memory, *modulus)?.clone();
+                    let divisor = idx(&memory, *divisor)?.clone();
+
+                    std.assert_lower_than_fixed(
                         layouter,
-                        idx(&memory, *divisor)?,
-                        Some(FR_BITS - *bits as usize),
-                        true,
+                        &divisor,
+                        &(BigUint::from(1u32) << (FR_BITS as u32 - *bits)),
                     )?;
-                    let modulus_bits = std.assigned_to_le_bits(
+                    std.assert_lower_than_fixed(
                         layouter,
-                        idx(&memory, *modulus)?,
-                        Some(*bits as usize),
-                        true,
+                        &modulus,
+                        &(BigUint::from(1u32) << *bits),
                     )?;
-                    let reconstituted = std
-                        .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
+
+                    let reconstituted = std.linear_combination(
+                        layouter,
+                        &[
+                            (outer::Scalar::from(1), modulus),
+                            (outer::Scalar::from(2).pow([*bits as u64]), divisor),
+                        ],
+                        outer::Scalar::from(0),
+                    )?;
                     mem_push(reconstituted, &mut memory)?;
                 }
                 I::EcAdd { a_x, a_y, b_x, b_y } => {
@@ -821,7 +827,7 @@ impl Relation for IrSource {
             sha3_256: false,
             keccak_256: false,
             blake2b: false,
-            nr_pow2range_cols: 1, // TODO: Get this programmatically, not as a magic constant from Miguel :)
+            nr_pow2range_cols: 4,
             secp256k1: false,
             bls12_381: false,
             base64: false,
