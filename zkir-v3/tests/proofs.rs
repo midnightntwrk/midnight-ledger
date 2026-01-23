@@ -176,7 +176,7 @@ mod proof_tests {
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "outputs": ["%v_3", "%v_4"] }
+               { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%p_0" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();

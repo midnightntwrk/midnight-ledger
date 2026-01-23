@@ -415,13 +415,14 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Hashes a sequence of field elements to an embedded curve point.
+    /// All inputs are required to be of type `Native`. Failure otherwise.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the point
     HashToCurve {
         /// The values to hash to a curve point
         inputs: Vec<Operand>,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The resulting point
+        output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).
     ///
