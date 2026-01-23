@@ -393,19 +393,17 @@ pub enum Instruction {
         /// The result of addition
         output: Identifier,
     },
-    /// Multiplies an elliptic curve point by a scalar. UB if it is not a valid
+    /// Multiplies an elliptic curve point by a scalar.
     /// curve point.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the product
     EcMul {
-        /// The affine x coordinate of `a`
-        a_x: Operand,
-        /// The affine y coordinate of `a`
-        a_y: Operand,
+        /// The point to be multiplied
+        a: Operand,
         /// The scalar to multiply by
         scalar: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The result of multiplication
+        output: Identifier,
     },
     /// Multiplies the group generator by a scalar.
     ///

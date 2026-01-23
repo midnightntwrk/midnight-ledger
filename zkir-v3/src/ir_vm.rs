@@ -30,7 +30,7 @@ use midnight_circuits::instructions::{
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
 };
-use midnight_curves::{JubjubExtended, JubjubSubgroup};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -185,24 +185,11 @@ fn assemble_bytes(
     Ok(acc)
 }
 
-fn ecc_from_parts(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    x: &AssignedNative<outer::Scalar>,
-    y: &AssignedNative<outer::Scalar>,
-) -> Result<AssignedNativePoint<embedded::AffineExtended>, Error> {
-    let point = x
-        .value()
-        .zip(y.value())
-        .map(|(x, y)| EmbeddedGroupAffine::new(Fr(*x), Fr(*y)));
-    point.as_ref().error_if_known_and(|p| p.is_none())?;
-    let point = point.map(|p| p.expect("After is_none check, point should exist").0);
-    let point_var: AssignedNativePoint<embedded::AffineExtended> =
-        std.jubjub().assign(layouter, point)?;
-
-    std.assert_equal(layouter, x, &std.jubjub().x_coordinate(&point_var))?;
-    std.assert_equal(layouter, y, &std.jubjub().y_coordinate(&point_var))?;
-    Ok(point_var)
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
+/// TODO: Remove this function when IrType supports JubjubScalar.
+fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<JubjubFr, anyhow::Error> {
+    let s: Option<JubjubFr> = JubjubFr::from_bytes(&native.to_bytes_le()).into();
+    s.ok_or(anyhow::Error::msg("Error converting Fr to JubjubScalar"))
 }
 
 impl IrSource {
@@ -262,15 +249,7 @@ impl IrSource {
                 }
             })
         };
-        let resolve_operand_point =
-            |memory: &HashMap<Identifier, IrValue>, x: &Operand, y: &Operand| {
-                let x = resolve_operand(memory, x)?;
-                let y = resolve_operand(memory, y)?;
-                let x: Fr = x.try_into()?;
-                let y: Fr = y.try_into()?;
-                EmbeddedGroupAffine::new(x, y)
-                    .ok_or(anyhow!("Elliptic curve point not on curve: ({x:?}, {y:?})"))
-            };
+
         let resolve_operand_bits =
             |memory: &HashMap<Identifier, IrValue>, operand: &Operand, constrain: Option<u32>| {
                 resolve_operand(memory, operand).and_then(|val| {
@@ -580,20 +559,11 @@ impl IrSource {
                     memory.insert(outputs[0].clone(), IrValue::Native(x));
                     memory.insert(outputs[1].clone(), IrValue::Native(y));
                 }
-                I::EcMul {
-                    a_x,
-                    a_y,
-                    scalar,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        bail!("EcMul requires exactly 2 outputs");
-                    }
+                I::EcMul { a, scalar, output } => {
+                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
                     let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let point = resolve_operand_point(&memory, a_x, a_y)? * s;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), IrValue::Native(x));
-                    memory.insert(outputs[1].clone(), IrValue::Native(y));
+                    let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
+                    memory.insert(output.clone(), c);
                 }
                 I::EcMulGenerator { scalar, outputs } => {
                     if outputs.len() != 2 {
@@ -1031,36 +1001,14 @@ impl Relation for IrSource {
                     let c = std.jubjub().add(layouter, &a, &b)?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(c), &mut memory)?;
                 }
-                I::EcMul {
-                    a_x,
-                    a_y,
-                    scalar,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcMul instruction".into(),
-                        ));
-                    }
-                    let a_x_val = resolve_operand(std, layouter, &memory, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, a_y)?;
+                I::EcMul { a, scalar, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let a_x: AssignedNative<_> = a_x_val.try_into()?;
-                    let a_y: AssignedNative<_> = a_y_val.try_into()?;
+                    let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
                     let scalar: AssignedNative<_> = scalar_val.try_into()?;
-                    let a = ecc_from_parts(std, layouter, &a_x, &a_y)?;
                     let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.jubjub().x_coordinate(&b)),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(std.jubjub().y_coordinate(&b)),
-                        &mut memory,
-                    )?;
+                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
                 I::EcMulGenerator { scalar, outputs } => {
                     if outputs.len() != 2 {

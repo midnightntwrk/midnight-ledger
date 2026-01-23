@@ -324,18 +324,18 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%v_0", "type": "Scalar<BLS12-381>" },
-              { "name": "%v_1", "type": "Scalar<BLS12-381>" },
-              { "name": "%v_2", "type": "Scalar<BLS12-381>" },
-              { "name": "%v_3", "type": "Scalar<BLS12-381>" }
+              { "name": "%p0_x", "type": "Scalar<BLS12-381>" },
+              { "name": "%p0_y", "type": "Scalar<BLS12-381>" },
+              { "name": "%s0", "type": "Scalar<BLS12-381>" },
+              { "name": "%s1", "type": "Scalar<BLS12-381>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "ec_mul", "a_x": "%v_0", "a_y": "%v_1", "scalar": "%v_2", "outputs": ["%v_4", "%v_5"] },
-               { "op": "ec_mul_generator", "scalar": "%v_3", "outputs": ["%v_6", "%v_7"] },
-               { "op": "decode", "inputs": ["%v_4", "%v_5"], "type": "Point<Jubjub>", "output": "%v_8" },
-               { "op": "decode", "inputs": ["%v_6", "%v_7"], "type": "Point<Jubjub>", "output": "%v_9" },
-               { "op": "ec_add", "a": "%v_8", "b": "%v_9", "output": "%v_10" }
+               { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
+               { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
+               { "op": "ec_mul_generator", "scalar": "%s1", "outputs": ["%p2_x", "%p2_y"] },
+               { "op": "decode", "inputs": ["%p2_x", "%p2_y"], "type": "Point<Jubjub>", "output": "%p2" },
+               { "op": "ec_add", "a": "%p1", "b": "%p2", "output": "%p3" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
