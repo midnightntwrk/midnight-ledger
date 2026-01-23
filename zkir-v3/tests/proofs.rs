@@ -333,8 +333,7 @@ mod proof_tests {
            "instructions": [
                { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
-               { "op": "ec_mul_generator", "scalar": "%s1", "outputs": ["%p2_x", "%p2_y"] },
-               { "op": "decode", "inputs": ["%p2_x", "%p2_y"], "type": "Point<Jubjub>", "output": "%p2" },
+               { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
                { "op": "ec_add", "a": "%p1", "b": "%p2", "output": "%p3" }
            ]
         }"#;
