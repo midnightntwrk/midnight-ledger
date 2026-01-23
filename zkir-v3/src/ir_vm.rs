@@ -39,7 +39,6 @@ use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use transient_crypto::curve::EmbeddedGroupAffine;
 use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
@@ -276,8 +275,7 @@ impl IrSource {
                     Ok(bits)
                 })
             };
-        let from_point =
-            |p: EmbeddedGroupAffine| [p.x().unwrap_or(0.into()), p.y().unwrap_or(0.into())];
+
         fn from_bits<I: DoubleEndedIterator<Item = bool>>(bits: I) -> Fr {
             bits.rev()
                 .fold(0.into(), |acc, bit| acc * 2.into() + bit.into())
@@ -545,19 +543,14 @@ impl IrSource {
                     let c = IrValue::JubjubPoint(a + b);
                     memory.insert(output.clone(), c);
                 }
-                I::HashToCurve { inputs, outputs } => {
-                    if outputs.len() != 2 {
-                        bail!("HashToCurve requires exactly 2 outputs");
-                    }
+                I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
                         .map(|var| resolve_operand(&memory, var))
                         .map(|r| r.and_then(|v| v.try_into()))
                         .collect::<Result<Vec<Fr>, _>>()?;
                     let point = hash_to_curve(&inputs);
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), IrValue::Native(x));
-                    memory.insert(outputs[1].clone(), IrValue::Native(y));
+                    memory.insert(output.clone(), IrValue::JubjubPoint(point.0));
                 }
                 I::EcMul { a, scalar, output } => {
                     let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
@@ -1015,12 +1008,7 @@ impl Relation for IrSource {
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
-                I::HashToCurve { inputs, outputs } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of HashToCurve instruction".into(),
-                        ));
-                    }
+                I::HashToCurve { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
                         let x = resolve_operand(std, layouter, &memory, inp)?;
@@ -1029,13 +1017,8 @@ impl Relation for IrSource {
                     }
                     let point = std.hash_to_curve(layouter, &resolved_inputs)?;
                     mem_insert(
-                        outputs[0].clone(),
-                        CircuitValue::Native(std.jubjub().x_coordinate(&point)),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        CircuitValue::Native(std.jubjub().y_coordinate(&point)),
+                        output.clone(),
+                        CircuitValue::JubjubPoint(point),
                         &mut memory,
                     )?;
                 }
