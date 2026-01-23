@@ -11,10 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
 use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
-use crate::ir_types::{CircuitValue, IrValue};
+use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -310,9 +311,7 @@ impl IrSource {
                 I::Add { a, b, output } => {
                     let a = resolve_operand(&memory, a)?;
                     let b = resolve_operand(&memory, b)?;
-                    let a: Fr = a.try_into().unwrap();
-                    let b: Fr = b.try_into().unwrap();
-                    let result = IrValue::Native(a + b);
+                    let result = add_offcircuit(&a, &b)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Mul { a, b, output } => {
@@ -537,12 +536,6 @@ impl IrSource {
                     }
                 }
                 I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
-                I::EcAdd { a, b, output } => {
-                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
-                    let b: JubjubSubgroup = resolve_operand(&memory, b)?.try_into()?;
-                    let c = IrValue::JubjubPoint(a + b);
-                    memory.insert(output.clone(), c);
-                }
                 I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
@@ -864,9 +857,7 @@ impl Relation for IrSource {
                 I::Add { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let result = CircuitValue::Native(std.add(layouter, &a, &b)?);
+                    let result = add_incircuit(std, layouter, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Mul { a, b, output } => {
@@ -981,14 +972,6 @@ impl Relation for IrSource {
                     )?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::EcAdd { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
-                    let b: AssignedNativePoint<JubjubExtended> = b_val.try_into()?;
-                    let c = std.jubjub().add(layouter, &a, &b)?;
-                    mem_insert(output.clone(), CircuitValue::JubjubPoint(c), &mut memory)?;
-                }
                 I::EcMul { a, scalar, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
@@ -1060,14 +1043,27 @@ impl Relation for IrSource {
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
+        let involves_types = |target_types: &[IrType]| -> bool {
+            let types_in_inputs = self
+                .inputs
+                .iter()
+                .any(|id| target_types.contains(&id.val_t));
+
+            let types_in_instructions = self.instructions.iter().any(|op| match op {
+                I::Decode { val_t, .. } => target_types.contains(val_t),
+                _ => false,
+            });
+
+            types_in_inputs || types_in_instructions
+        };
+
         let jubjub = self.instructions.iter().any(|op| {
-            matches!(
-                op,
-                I::EcAdd { .. }
-                    | I::EcMul { .. }
-                    | I::EcMulGenerator { .. }
-                    | I::HashToCurve { .. }
-            )
+            involves_types(&[IrType::JubjubPoint]) || {
+                matches!(
+                    op,
+                    I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
+                )
+            }
         });
         let hash_to_curve = self
             .instructions
