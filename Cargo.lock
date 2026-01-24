@@ -1807,7 +1807,7 @@ dependencies = [
 
 [[package]]
 name = "generate-cost-model"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "charming",
  "clap",
@@ -2668,7 +2668,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2704,7 +2704,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto-derive"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -2736,7 +2736,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "2.0.0-alpha.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2782,7 +2782,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "7.0.0-alpha.1"
+version = "7.0.0-rc.1"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2830,7 +2830,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "7.0.0-alpha.1"
+version = "7.0.0-rc.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.16",
@@ -2858,7 +2858,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "2.0.0-alpha.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2889,7 +2889,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "2.0.0-alpha.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -2909,7 +2909,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "2.0.0-alpha.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -2930,7 +2930,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.1-alpha.1"
+version = "1.0.1-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -2954,7 +2954,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "7.0.0-alpha.1"
+version = "7.0.0-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3014,7 +3014,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "crypto",
  "konst",
@@ -3031,7 +3031,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize-macros"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
@@ -3040,7 +3040,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.1.0-rc.1"
+version = "1.1.0-rc.2"
 dependencies = [
  "archery",
  "criterion",
@@ -3079,7 +3079,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-macros"
-version = "1.0.0-rc.3"
+version = "1.0.0-rc.4"
 dependencies = [
  "derive-where",
  "midnight-serialize",
@@ -3096,7 +3096,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.0.0-alpha.1"
+version = "2.0.0-rc.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3161,7 +3161,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3-wasm"
-version = "3.0.0-alpha.1"
+version = "3.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -3177,7 +3177,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-wasm"
-version = "2.1.0-alpha.1"
+version = "2.1.0-rc.1"
 dependencies = [
  "getrandom 0.2.16",
  "hex",
@@ -3201,7 +3201,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "7.0.0-alpha.1"
+version = "7.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -6020,7 +6020,7 @@ dependencies = [
 
 [[package]]
 name = "zkir"
-version = "2.1.0-alpha.1"
+version = "2.1.0-rc.2"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -6055,7 +6055,7 @@ dependencies = [
 
 [[package]]
 name = "zkir-v3"
-version = "3.0.0-alpha.1"
+version = "3.0.0-rc.1"
 dependencies = [
  "actix-rt",
  "anyhow",
