@@ -6,6 +6,19 @@ version.workspace = true
 
 [dependencies]
 ledger-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-ledger", features = ["proving"] }
-ledger-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-ledger", features = ["proving"] }
+ledger-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-ledger", features = ["proving", "test-utilities"] }
 storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage", features = ["state-translation"] }
 base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-base-crypto" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
+coin-structure_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-patched-storage", package = "midnight-coin-structure" }
+coin-structure_v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-coin-structure" }
+zswap_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-patched-storage", package = "midnight-zswap" }
+zswap_v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-zswap" }
+
+[dev-dependencies]
+onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-onchain-runtime" }
+transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-transient-crypto" }
+futures = { version = "^0.3.31" }
+rand = { version = "^0.8.4", features = ["getrandom"] }
+tokio = { version = "^1.46.1", features = ["rt", "macros"] }
+lazy_static = "^1.5.0"

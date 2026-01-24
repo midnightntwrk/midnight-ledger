@@ -2769,6 +2769,7 @@ dependencies = [
  "flate2",
  "futures",
  "group",
+ "indicatif",
  "k256",
  "lazy_static",
  "midnight-base-crypto-derive 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
@@ -3018,7 +3019,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
- "zkir",
+ "zkir 2.1.0-alpha.1",
 ]
 
 [[package]]
@@ -3045,12 +3046,14 @@ dependencies = [
  "midnight-zswap 7.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "rand 0.8.5",
  "rayon",
+ "reqwest",
  "serde",
  "sha2",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "zeroize",
+ "zkir 2.1.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
 ]
 
 [[package]]
@@ -3367,7 +3370,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "zkir",
+ "zkir 2.1.0-alpha.1",
  "zkir-v3",
 ]
 
@@ -3717,7 +3720,7 @@ dependencies = [
  "rand 0.8.5",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "zkir",
+ "zkir 2.1.0-alpha.1",
 ]
 
 [[package]]
@@ -3781,7 +3784,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
- "zkir",
+ "zkir 2.1.0-alpha.1",
 ]
 
 [[package]]
@@ -5931,10 +5934,19 @@ dependencies = [
 name = "v6-to-v7-state-translation"
 version = "7.0.0-alpha.1"
 dependencies = [
+ "futures",
+ "lazy_static",
  "midnight-base-crypto 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-coin-structure 2.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-ledger 6.2.0-rc.3",
  "midnight-ledger 7.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-onchain-runtime 2.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-serialize 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "midnight-storage 1.1.0-rc.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-transient-crypto 2.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-zswap 7.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "rand 0.8.5",
+ "tokio",
 ]
 
 [[package]]
@@ -6670,7 +6682,30 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-subscriber",
- "zkir",
+ "zkir 2.1.0-alpha.1",
+]
+
+[[package]]
+name = "zkir"
+version = "2.1.0-alpha.1"
+source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1#f286bab87276136b2142932a4759ede03b800b03"
+dependencies = [
+ "anyhow",
+ "const-hex",
+ "group",
+ "hex",
+ "midnight-base-crypto 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-circuits 6.0.0",
+ "midnight-proofs 0.7.0",
+ "midnight-serialize 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-transient-crypto 2.0.0-alpha.1 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
+ "midnight-zk-stdlib",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tracing",
 ]
 
 [[package]]

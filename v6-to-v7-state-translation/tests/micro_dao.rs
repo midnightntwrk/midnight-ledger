@@ -1,17 +1,15 @@
-use base_crypto::fab::{AlignedValue, Value};
+use base_crypto::fab::{AlignedValue};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
+use std::ops::Deref;
 use base_crypto::signatures::Signature;
-use base_crypto::time::Timestamp;
 use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure::contract::ContractAddress;
 use coin_structure::transfer::{Recipient, SenderEvidence};
-use futures::FutureExt;
 use lazy_static::lazy_static;
 use ledger_v7::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
-use ledger_v7::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
 use ledger_v7::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofPreimageMarker, Transaction,
+    ContractDeploy, INITIAL_PARAMETERS, LedgerState, Transaction,
 };
 use ledger_v7::test_utilities::{Resolver, verifier_key};
 use ledger_v7::test_utilities::{TestState, tx_prove_bind};
@@ -24,16 +22,16 @@ use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::rngs::StdRng;
-use rand::{CryptoRng, Rng, SeedableRng};
-use serialize::Serializable;
+use std::io::{BufReader};
+use rand::{Rng, SeedableRng};
+use serialize::{tagged_deserialize, Serializable};
 use std::borrow::Cow;
 use std::fs::File;
 use std::future::Future;
 use std::path::Path;
 use storage::arena::Sp;
 use storage::db::{DB, InMemoryDB};
-use storage::storage::{Array, HashMap};
-use transient_crypto::commitment::PedersenRandomness;
+use storage::storage::{HashMap};
 use transient_crypto::curve::Fr;
 use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
@@ -44,6 +42,80 @@ use zswap::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
 };
+use storage::state_translation::TypedTranslationState;
+use base_crypto::cost_model::CostDuration;
+use v6_to_v7_state_translation::StateTranslationTable;
+
+lazy_static! {
+    static ref RESOLVER: Resolver = test_resolver("micro-dao");
+}
+
+#[derive(PartialEq, Eq, Copy, Clone)]
+enum TestMode {
+    Full,
+    Capture,
+    Replay,
+}
+
+impl TestMode {
+    async fn replay_or<T: Future<Output = TxBound<Signature, D>>, F: FnOnce() -> T, D: DB>(
+        self,
+        file: impl AsRef<Path>,
+        f: F,
+    ) -> TxBound<Signature, D> {
+        if TestMode::Full == self {
+            return f().await;
+        }
+        if TestMode::Capture == self {
+            // Do the capture, and then immediately test it
+            f().await;
+        }
+        let f = File::open(file.as_ref()).unwrap();
+        serialize::tagged_deserialize(f).unwrap()
+    }
+
+    fn capture<D: DB>(
+        self,
+        file: impl AsRef<Path>,
+        tx: TxBound<Signature, D>,
+    ) -> TxBound<Signature, D> {
+        if TestMode::Capture == self {
+            let f = File::create(file.as_ref()).unwrap();
+            serialize::tagged_serialize(&tx, f).unwrap();
+        }
+        tx
+    }
+}
+
+fn program_with_results<D: DB>(
+    prog: &[Op<ResultModeGather, D>],
+    results: &[AlignedValue],
+) -> Vec<Op<ResultModeVerify, D>> {
+    let mut res_iter = results.iter();
+
+    prog.iter()
+        .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
+        .filter(|op| match op {
+            Op::Idx { path, .. } => !path.is_empty(),
+            Op::Ins { n, .. } => *n != 0,
+            _ => true,
+        })
+        .collect::<Vec<_>>()
+}
+
+fn context_with_offer<D: DB>(
+    ledger: &LedgerState<D>,
+    addr: ContractAddress,
+    offer: Option<&ZswapOffer<ProofPreimage, D>>,
+) -> QueryContext<D> {
+    let mut res = QueryContext::new(ledger.index(addr).unwrap().data, addr);
+    if let Some(offer) = offer {
+        let (_, indices) = ledger.zswap.try_apply(offer, None).unwrap();
+        res.call_context.com_indices = indices;
+    }
+    res
+}
+
 
 #[tokio::test]
 async fn micro_dao() {
@@ -84,7 +156,20 @@ async fn micro_dao() {
         .map(|c| c.value)
         .sum();
 
-    // TODO: read in state 0, migrate and continue
+    {
+        let f = File::open("tests/micro_dao_state_0.bin").unwrap();
+        let mut reader = BufReader::new(f);
+        let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+        let tl_state =
+            TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+                .unwrap();
+        let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+        let finished_state = tl_state.run(cost).unwrap();
+        let Some(updated_state) = finished_state.result().unwrap() else {
+            panic!("didn't finish");
+        };
+        state.ledger = updated_state.deref().clone();
+    }
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
