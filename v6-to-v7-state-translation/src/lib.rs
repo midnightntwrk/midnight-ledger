@@ -28,7 +28,7 @@ impl<D: DB>
     }
 }
 
-struct StateTranslationTable;
+pub struct StateTranslationTable;
 
 impl<D: DB> TranslationTable<D> for StateTranslationTable {
     const TABLE: &[(TranslationId, &dyn TypelessTranslation<D>)] = &[];
