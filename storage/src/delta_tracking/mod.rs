@@ -159,6 +159,7 @@ pub fn get_writes<D: DB>(
 ) -> StdHashSet<ArenaKey<D::Hasher>> {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut queue: Vec<ArenaKey<D::Hasher>> = roots.iter().cloned().collect();
+    queue.sort();
     let mut keys_added = StdHashSet::new();
 
     while let Some(key) = queue.pop() {
@@ -228,7 +229,9 @@ pub fn update_rcmap<D: DB>(
             }
         }
     }
-    for (k, by) in inc_map.into_iter() {
+    let mut inc_vec = inc_map.into_iter().collect::<Vec<_>>();
+    inc_vec.sort();
+    for (k, by) in inc_vec.into_iter() {
         match &k {
             ArenaKey::Ref(r) => {
                 let old_rc = rcmap.get_rc(&k).unwrap_or(0);
@@ -299,8 +302,10 @@ pub fn gc_rcmap<D: DB>(
         keys_removed.insert(key);
     }
 
+    let mut update_vec = update_queue.into_iter().collect::<Vec<_>>();
+    update_vec.sort();
     // Execute on the update information
-    for (key, update) in update_queue.into_iter() {
+    for (key, update) in update_vec.into_iter() {
         match &key {
             ArenaKey::Ref(r) => {
                 let original = rc_cache
@@ -313,7 +318,9 @@ pub fn gc_rcmap<D: DB>(
         }
     }
 
-    for key in keys_removed.iter() {
+    let mut removed_vec = keys_removed.iter().collect::<Vec<_>>();
+    removed_vec.sort();
+    for key in removed_vec.into_iter() {
         // Remove key.
         //
         // WARNING: the order here is important, i.e. first decrementing
@@ -330,7 +337,7 @@ pub fn gc_rcmap<D: DB>(
         // corresponding to nodes that are currently in the arena in existing
         // sps.
         rcmap = rcmap
-            .remove_unreachable_key(key)
+            .remove_unreachable_key(&key)
             .expect("keys in queue have rc == 0");
     }
 
