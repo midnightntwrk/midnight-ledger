@@ -24,8 +24,9 @@ use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::rngs::StdRng;
+use std::io::{Read, BufReader};
 use rand::{CryptoRng, Rng, SeedableRng};
-use serialize::Serializable;
+use serialize::{tagged_deserialize, Serializable};
 use std::borrow::Cow;
 use std::fs::File;
 use std::future::Future;
@@ -44,6 +45,77 @@ use zswap::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
 };
+
+lazy_static! {
+    static ref RESOLVER: Resolver = test_resolver("micro-dao");
+}
+
+#[derive(PartialEq, Eq, Copy, Clone)]
+enum TestMode {
+    Full,
+    Capture,
+    Replay,
+}
+
+impl TestMode {
+    async fn replay_or<T: Future<Output = TxBound<Signature, D>>, F: FnOnce() -> T, D: DB>(
+        self,
+        file: impl AsRef<Path>,
+        f: F,
+    ) -> TxBound<Signature, D> {
+        if TestMode::Full == self {
+            return f().await;
+        }
+        if TestMode::Capture == self {
+            // Do the capture, and then immediately test it
+            f().await;
+        }
+        let f = File::open(file.as_ref()).unwrap();
+        serialize::tagged_deserialize(f).unwrap()
+    }
+
+    fn capture<D: DB>(
+        self,
+        file: impl AsRef<Path>,
+        tx: TxBound<Signature, D>,
+    ) -> TxBound<Signature, D> {
+        if TestMode::Capture == self {
+            let f = File::create(file.as_ref()).unwrap();
+            serialize::tagged_serialize(&tx, f).unwrap();
+        }
+        tx
+    }
+}
+
+fn program_with_results<D: DB>(
+    prog: &[Op<ResultModeGather, D>],
+    results: &[AlignedValue],
+) -> Vec<Op<ResultModeVerify, D>> {
+    let mut res_iter = results.iter();
+
+    prog.iter()
+        .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
+        .filter(|op| match op {
+            Op::Idx { path, .. } => !path.is_empty(),
+            Op::Ins { n, .. } => *n != 0,
+            _ => true,
+        })
+        .collect::<Vec<_>>()
+}
+
+fn context_with_offer<D: DB>(
+    ledger: &LedgerState<D>,
+    addr: ContractAddress,
+    offer: Option<&ZswapOffer<ProofPreimage, D>>,
+) -> QueryContext<D> {
+    let mut res = QueryContext::new(ledger.index(addr).unwrap().data, addr);
+    if let Some(offer) = offer {
+        let (_, indices) = ledger.zswap.try_apply(offer, None).unwrap();
+        res.call_context.com_indices = indices;
+    }
+    res
+}
+
 
 #[tokio::test]
 async fn micro_dao() {
@@ -84,7 +156,9 @@ async fn micro_dao() {
         .map(|c| c.value)
         .sum();
 
-    // TODO: read in state 0, migrate and continue
+    let f = File::open("tests/micro_dao_state_0.bin").unwrap();
+    let mut reader = BufReader::new(f);
+    let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
