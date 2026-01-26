@@ -337,7 +337,7 @@ pub fn gc_rcmap<D: DB>(
         // corresponding to nodes that are currently in the arena in existing
         // sps.
         rcmap = rcmap
-            .remove_unreachable_key(&key)
+            .remove_unreachable_key(key)
             .expect("keys in queue have rc == 0");
     }
 
