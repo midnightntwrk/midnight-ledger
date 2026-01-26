@@ -58,6 +58,7 @@ proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
 midnight-ledger = { path = ".", features = ["test-utilities", "proptest"] }
+onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
 criterion = { version = "^0.5.1" }
 pastey = "0.1.1"
 serde_json = "^1.0.140"
