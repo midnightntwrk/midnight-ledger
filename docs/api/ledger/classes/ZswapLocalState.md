@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-rc.1**](../README.md)
+[**@midnight/ledger v7.0.0-rc.2**](../README.md)
 
 ***
 
@@ -184,6 +184,31 @@ in the same order as emitted by the chain being followed.
 #### Returns
 
 `ZswapLocalState`
+
+***
+
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(secretKeys, events): ZswapLocalStateWithChanges;
+```
+
+Replays observed events against the current local state, returning both the updated state
+and the state changes. These *must* be replayed in the same order as emitted by the chain being followed.
+
+#### Parameters
+
+##### secretKeys
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`ZswapLocalStateWithChanges`](ZswapLocalStateWithChanges.md)
 
 ***
 
