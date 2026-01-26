@@ -3,6 +3,7 @@
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes
+- feat: add ability to compute k value of a circuit in WASM
 
 ## Version `2.0.0`
 
