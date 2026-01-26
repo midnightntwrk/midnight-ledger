@@ -16,7 +16,7 @@
 //! and as a paper-trail for why an update was performed.
 
 use onchain_vm::cost_model::{CostModel, INITIAL_COST_MODEL};
-use base_crypto::cost_model::{SyntheticCost, CostDuration};
+use base_crypto::{cost_model::{CostDuration, SyntheticCost}, time::Duration};
 use midnight_ledger::structure::{INITIAL_PARAMETERS, INITIAL_LIMITS, INITIAL_TRANSACTION_COST_MODEL, TransactionCostModel, TransactionLimits, LedgerParameters};
 use serialize::tagged_serialize;
 
@@ -176,12 +176,15 @@ const UPDATED_PARAMS: LedgerParameters = LedgerParameters {
         },
         .. INITIAL_LIMITS
     },
+    global_ttl: Duration::from_hours(168),
     .. INITIAL_PARAMETERS
 };
 
 fn main() {
-    let mut stdout = std::io::stdout();
+    let mut f_binary = std::fs::File::create("params.bin").unwrap();
+    let mut f_json = std::fs::File::create("params.json").unwrap();
     dbg!(&INITIAL_PARAMETERS);
     dbg!(&UPDATED_PARAMS);
-    tagged_serialize(&UPDATED_PARAMS, &mut stdout).unwrap();
+    tagged_serialize(&UPDATED_PARAMS, f_binary).unwrap();
+    serde_json::to_writer_pretty(&mut f_json, &UPDATED_PARAMS).unwrap();
 }
