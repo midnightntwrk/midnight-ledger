@@ -11,6 +11,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   governance is in place
 - fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
   `check` method.
+- fix: fix non-determinism in processing smart-contract GC.
 
 ## 6.2.0
 
