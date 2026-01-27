@@ -578,7 +578,9 @@ pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<Ver
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
-    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR").unwrap();
+    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
+        .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
+
     Resolver::new(
         PUBLIC_PARAMS.clone(),
         DustResolver(

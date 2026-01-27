@@ -13,10 +13,11 @@
 
 import { LedgerParameters, shieldedToken, Transaction } from '@midnight-ntwrk/ledger';
 import { prove } from '@/proof-provider';
-import { type ShieldedTokenType, Static } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import '@/setup-proving';
-import { assertSerializationSuccess, mapFindByKey } from '@/test-utils';
+import { assertSerializationSuccess, mapFindByKey, plus1Hour } from '@/test-utils';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
+import { TestState } from '@/test/utils/TestState';
 
 describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
   /**
@@ -233,5 +234,16 @@ describe.concurrent('Ledger API - Transaction [@slow][@proving]', () => {
     expect(transaction.fallibleOffer).toBeUndefined();
     expect(transaction.intents).toBeUndefined();
     assertSerializationSuccess(transaction, SignatureMarker.signature, ProofMarker.proof, BindingMarker.preBinding);
+  });
+
+  test('addCalls - throws on proved transaction', async () => {
+    const state = TestState.new();
+    const ttl = plus1Hour(state.time);
+
+    const proved = await prove(Transaction.fromParts(LOCAL_TEST_NETWORK_ID));
+
+    expect(() => proved.addCalls({ tag: 'first' }, [], state.ledger.parameters, ttl, [], [], [])).toThrow(
+      'Cannot add calls to proven transaction.'
+    );
   });
 });

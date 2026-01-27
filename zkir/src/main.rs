@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! ZKIR compiler.
+//! ZKIR v2 compiler.
 #![deny(unreachable_pub)]
 //#![deny(warnings)]
 use base_crypto::data_provider::{self, MidnightDataProvider};

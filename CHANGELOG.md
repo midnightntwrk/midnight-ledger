@@ -7,6 +7,14 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes
+- breaking: disable system transactions accessing the treasury until treasury
+  governance is in place
+- fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
+  `check` method.
+- feat: add `replayEventsWithChanges` on `ZswapLocalState` and `DustLocalState`,
+  returning `ZswapLocalStateWithChanges` and `DustLocalStateWithChanges` with
+  `ZswapStateChanges` and `DustStateChanges` (received and spent coins or UTXOs
+  per event). Exposed via wasm.
 
 ## 6.2.0
 
