@@ -14,6 +14,7 @@
   - bugfix: Switches to 64-bit unsigned integers for reference counts
   - bugfix: enforce invarient that MPT Node::Extension has a path length of <= 255
     nibbles
+- bugfix: fix non-determinism in `RcMap` processing
 
 ## Version `0.5.0`
 

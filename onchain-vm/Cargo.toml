@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-vm"
-version = "1.0.1-alpha.1"
+version = "1.0.1"
 edition = "2024"
 license.workspace = true
 

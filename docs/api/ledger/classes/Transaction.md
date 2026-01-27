@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -363,7 +363,7 @@ same coins
 ### mockProve()
 
 ```ts
-mockProve(): Transaction<S, Proof, B>;
+mockProve(): Transaction<S, Proof, Binding>;
 ```
 
 Mocks proving, producing a 'proven' transaction that, while it will
@@ -374,7 +374,7 @@ that do not contain unproven contract calls.
 
 #### Returns
 
-`Transaction`\<`S`, [`Proof`](Proof.md), `B`\>
+`Transaction`\<`S`, [`Proof`](Proof.md), [`Binding`](Binding.md)\>
 
 #### Throws
 

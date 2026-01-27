@@ -15,6 +15,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   returning `ZswapLocalStateWithChanges` and `DustLocalStateWithChanges` with
   `ZswapStateChanges` and `DustStateChanges` (received and spent coins or UTXOs
   per event). Exposed via wasm.
+- fix: fix non-determinism in processing smart-contract GC.
 
 ## 6.2.0
 
