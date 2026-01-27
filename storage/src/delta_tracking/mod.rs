@@ -348,10 +348,10 @@ pub fn gc_rcmap<D: DB>(
 mod tests {
     use super::*;
     use crate as storage;
-    use crate::arena::Sp;
-    use crate::db::DB;
+    use crate::arena::{DirectChildNode, Sp};
+    use crate::db::{DB, InMemoryDB};
     use crate::storable::{Loader, SMALL_OBJECT_LIMIT};
-    use crate::storage::set_default_storage;
+    use crate::storage::{WrappedDB, set_default_storage};
     use crate::{DefaultDB, Storable};
     use derive_where::derive_where;
     use serialize::Tagged;
@@ -693,8 +693,6 @@ mod tests {
     // Test that GC operations don't crash when RcMap holds only references to data
     #[test]
     fn rcmap_survives_gc_with_only_references() {
-        use crate::db::InMemoryDB;
-        use crate::storage::WrappedDB;
         use std::collections::HashSet as StdHashSet;
 
         struct Tag;
@@ -851,5 +849,93 @@ mod tests {
             // Update for next iteration
             current_charged_keys = results.updated_charged_keys;
         }
+    }
+
+    // Test non-determinism using a deeply nested DirectChildNode structure.
+    // Reference: PM-21558
+    //
+    // This test creates a complex nested structure similar to the problematic
+    // contract (c470634cb847dc206dc8aa493704a0c65028d8f91132023150ad1c5580853319)
+    // that had an 859-byte serialized key with many nested children.
+    //
+    // The test should FAIL if there's non-determinism in HashMap iteration order
+    // within `update_rcmap` and `gc_rcmap`.
+    #[test]
+    fn synthetic_deep_nested_key_determinism() {
+        struct Tag;
+        type W = WrappedDB<InMemoryDB, Tag>;
+
+        let mut result_hashes: Vec<String> = Vec::new();
+        let iterations = 20;
+
+        for iteration in 0..iterations {
+            let _ = set_default_storage(crate::Storage::<W>::default);
+
+            let obj1: Sp<Node<W>, W> = Node::new((0, 1), &[]);
+            let obj2: Sp<Node<W>, W> = Node::new((0, 2), &[]);
+            let obj3: Sp<Node<W>, W> = Node::new((0, 3), &[]);
+            let obj4: Sp<Node<W>, W> = Node::new((0, 4), &[]);
+            let obj5: Sp<Node<W>, W> = Node::new((0, 5), &[]);
+            let obj6: Sp<Node<W>, W> = Node::new((0, 6), &[]);
+
+            let ref1 = obj1.child_repr.clone();
+            let ref2 = obj2.child_repr.clone();
+            let ref3 = obj3.child_repr.clone();
+            let ref4 = obj4.child_repr.clone();
+            let ref5 = obj5.child_repr.clone();
+            let ref6 = obj6.child_repr.clone();
+
+            // Build a deeply nested DirectChildNode structure (like 859-byte key, as this was failing)
+            let level6 = DirectChildNode::new(vec![0x06], vec![ref6.clone()]);
+            let level5 =
+                DirectChildNode::new(vec![0x05], vec![ArenaKey::Direct(level6), ref5.clone()]);
+            let level4 =
+                DirectChildNode::new(vec![0x04], vec![ArenaKey::Direct(level5), ref4.clone()]);
+            let level3 =
+                DirectChildNode::new(vec![0x03], vec![ArenaKey::Direct(level4), ref3.clone()]);
+            let level2 =
+                DirectChildNode::new(vec![0x02], vec![ArenaKey::Direct(level3), ref2.clone()]);
+            let complex_key = ArenaKey::Direct(DirectChildNode::new(
+                vec![0x01],
+                vec![ArenaKey::Direct(level2), ref1.clone()],
+            ));
+
+            let simple_key = ArenaKey::Direct(DirectChildNode::new(vec![0x03], vec![ref1.clone()]));
+
+            let mut pre_rcmap: RcMap<W> = RcMap::default();
+            pre_rcmap = pre_rcmap.ins_root(simple_key);
+
+            let new_roots: std::collections::HashSet<_> = [complex_key].into_iter().collect();
+            let result = incremental_write_delete_costs::<W>(
+                &pre_rcmap,
+                &new_roots,
+                |_, _| Default::default(),
+                |_| 1000,
+            );
+
+            let hash = format!("{:?}", Sp::new(result.updated_charged_keys).hash());
+            if iteration == 0 {
+                println!("First result hash: {}", hash);
+            }
+            result_hashes.push(hash);
+        }
+
+        let first = &result_hashes[0];
+        let all_same = result_hashes.iter().all(|h| h == first);
+
+        if !all_same {
+            println!("\nNON-DETERMINISM DETECTED in incremental_write_delete_costs!");
+            let unique: std::collections::HashSet<_> = result_hashes.iter().collect();
+            println!("Found {} unique hashes out of {iterations}:", unique.len());
+            for h in unique {
+                let count = result_hashes.iter().filter(|x| *x == h).count();
+                println!("  {} (appeared {} times)", h, count);
+            }
+        }
+
+        assert!(
+            all_same,
+            "incremental_write_delete_costs should be deterministic for deeply nested keys"
+        );
     }
 }
