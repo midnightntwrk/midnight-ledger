@@ -1,6 +1,6 @@
 {
   "name": "@midnight/zkir-v2",
-  "version": "2.1.0-rc.1",
+  "version": "2.1.0",
   "license": "Apache-2.0",
   "devDependencies": {
     "rimraf": "^6.0.0",
