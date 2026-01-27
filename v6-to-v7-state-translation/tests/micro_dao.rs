@@ -168,6 +168,7 @@ async fn micro_dao() {
         let Some(updated_state) = finished_state.result().unwrap() else {
             panic!("didn't finish");
         };
+        let contract_operations = state.ledger.contract.iter()
         state.ledger = updated_state.deref().clone();
     }
 
