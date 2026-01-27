@@ -10,10 +10,12 @@ ledger-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag 
 storage = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-storage", features = ["state-translation"] }
 base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-base-crypto" }
 serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
-coin-structure_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-patched-storage", package = "midnight-coin-structure" }
-coin-structure_v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-coin-structure" }
-zswap_v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-6.2.0-patched-storage", package = "midnight-zswap" }
-zswap_v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-zswap" }
+coin-structure-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-coin-structure" }
+coin-structure-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-coin-structure" }
+zswap-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-zswap" }
+zswap-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-zswap" }
+onchain-state-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-onchain-state" }
+onchain-state-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-onchain-state" }
 
 [dev-dependencies]
 onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-onchain-runtime" }
