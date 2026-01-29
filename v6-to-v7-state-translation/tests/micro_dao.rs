@@ -3,9 +3,9 @@ use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
 use std::ops::Deref;
 use base_crypto::signatures::Signature;
-use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
-use coin_structure::contract::ContractAddress;
-use coin_structure::transfer::{Recipient, SenderEvidence};
+use coin_structure_v7::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
+use coin_structure_v7::contract::ContractAddress;
+use coin_structure_v7::transfer::{Recipient, SenderEvidence};
 use lazy_static::lazy_static;
 use ledger_v7::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use ledger_v7::structure::{
@@ -37,8 +37,8 @@ use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
 use transient_crypto::proofs::PARAMS_VERIFIER;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
-use zswap::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
-use zswap::{
+use zswap_v7::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
+use zswap_v7::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
 };
@@ -168,8 +168,9 @@ async fn micro_dao() {
         let Some(updated_state) = finished_state.result().unwrap() else {
             panic!("didn't finish");
         };
-        let contract_operations = state.ledger.contract.iter()
-        state.ledger = updated_state.deref().clone();
+        let mut updated_state = updated_state.deref().clone();
+        updated_state.contract = state.ledger.contract;
+        state.ledger = updated_state;
     }
 
     // Part 1: Deploy
@@ -221,7 +222,22 @@ async fn micro_dao() {
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
 
-    // TODO: read in state 1, migrate and continue
+    {
+        let f = File::open("tests/micro_dao_state_1.bin").unwrap();
+        let mut reader = BufReader::new(f);
+        let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+        let tl_state =
+            TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+                .unwrap();
+        let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+        let finished_state = tl_state.run(cost).unwrap();
+        let Some(updated_state) = finished_state.result().unwrap() else {
+            panic!("didn't finish");
+        };
+        let mut updated_state = updated_state.deref().clone();
+        updated_state.contract = state.ledger.contract;
+        state.ledger = updated_state;
+    }
 
     println!(":: Part 2: Setting topic");
     let tx = mode
@@ -285,7 +301,22 @@ async fn micro_dao() {
     //gen_static_serialize_file(&tx).unwrap();
     state.assert_apply(&tx, balanced_strictness);
 
-    // TODO: read in state 2, migrate and continue
+    // {
+    //     let f = File::open("tests/micro_dao_state_2.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
 
     // Part 3: Buy-in
     println!(":: Part 3: Buy-in");
@@ -464,7 +495,23 @@ async fn micro_dao() {
         state.assert_apply(&tx, balanced_strictness);
     }
 
-    // TODO: read in state 3, migrate and continue
+    // {
+    //     let f = File::open("tests/micro_dao_state_3.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
+
     // Part 4: Vote commitment
     println!(":: Part 4: Vote commitment");
     let part_votes: [bool; 2] = [true, false];
@@ -572,7 +619,23 @@ async fn micro_dao() {
                 state.assert_apply(&tx, balanced_strictness);
             }
 
-    // TODO: read in state 4, migrate and continue
+    // {
+    //     let f = File::open("tests/micro_dao_state_4.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
+
     // Part 5: advance to reveal phase
     println!(":: Part 5: Advance to reveal phase");
     let tx = mode
@@ -625,7 +688,23 @@ async fn micro_dao() {
     .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
-    // TODO: read in state 5, migrate and continue
+
+    // {
+    //     let f = File::open("tests/micro_dao_state_5.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
 
     // Part 6: Vote revealing
     println!(":: Part 6: Vote revealing");
@@ -742,7 +821,23 @@ async fn micro_dao() {
                     .unwrap();
                 state.assert_apply(&tx, balanced_strictness);
             }
-    // TODO: read in state 6, migrate and continue
+
+    // {
+    //     let f = File::open("tests/micro_dao_state_6.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
 
     // Part 7: advance to final phase
     println!(":: Part 7: Advance to final phase");
@@ -806,7 +901,22 @@ async fn micro_dao() {
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
 
-    // TODO: read in state 7, migrate and continue
+    // {
+    //     let f = File::open("tests/micro_dao_state_7.bin").unwrap();
+    //     let mut reader = BufReader::new(f);
+    //     let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
+    //     let tl_state =
+    //         TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
+    //             .unwrap();
+    //     let cost = CostDuration::from_picoseconds(1_000_000_000_000);
+    //     let finished_state = tl_state.run(cost).unwrap();
+    //     let Some(updated_state) = finished_state.result().unwrap() else {
+    //         panic!("didn't finish");
+    //     };
+    //     let mut updated_state = updated_state.deref().clone();
+    //     updated_state.contract = state.ledger.contract;
+    //     state.ledger = updated_state;
+    // }
 
     // Part 8: cash out
     println!(":: Part 8: Cash Out");
