@@ -1672,4 +1672,18 @@ mod tests {
         // Finally, make sure we can print the tree, which will force a traversal of the whole tree
         println!("{:?}", mpt);
     }
+
+    #[test]
+    fn test_canonicity() {
+        let segment1 = [0u8; 200];
+        let segment2 = [1u8; 200];
+        let path1 = segment1.iter().chain(segment1.iter()).chain(segment1.iter()).copied().collect::<Vec<_>>();
+        let path2 = segment1.iter().chain(segment2.iter()).chain(segment2.iter()).copied().collect::<Vec<_>>();
+
+        let mpt1 = MerklePatriciaTrie::<()>::new().insert(&path1, ());
+        let mpt2 = MerklePatriciaTrie::<()>::new().insert(&path2, ()).insert(&path1, ()).remove(&path2);
+        dbg!(&mpt1);
+        dbg!(&mpt2);
+        assert_eq!(mpt1.0.hash(), mpt2.0.hash());
+    }
 }
