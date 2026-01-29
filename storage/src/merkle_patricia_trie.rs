@@ -505,10 +505,14 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
 }
 
 fn extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
-    path: Vec<u8>,
+    mut path: Vec<u8>,
     child: Sp<Node<T, D, A>, D>,
 ) -> Sp<Node<T, D, A>, D> {
     let mut cur = child;
+    while let Node::Extension { compressed_path, child, .. } = &*cur && !path.len().is_multiple_of(255) {
+        path.extend(compressed_path);
+        cur = child.clone();
+    }
     for working_path in path.chunks(255).rev() {
         cur = Sp::new(Node::Extension {
             ann: cur.ann(),
