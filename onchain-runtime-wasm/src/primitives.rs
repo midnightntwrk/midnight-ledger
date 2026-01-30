@@ -426,7 +426,7 @@ fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<embedded::Scalar, 
 /// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
 fn native_from_jubjub_scalar_from_native(jubjub_s: embedded::Scalar) -> Result<outer::Scalar, JsError> {
     let s: Option<_> = outer::Scalar::from_bytes_le(&jubjub_s.to_bytes()).into();
-    s.ok_or(JsError::new("Error converting Fr to JubjubScalar"))
+    s.ok_or(JsError::new("Error converting JubjubScalar to Fr"))
 }
 
 #[wasm_bindgen(js_name = "jubjubSampleSigningKey")]
