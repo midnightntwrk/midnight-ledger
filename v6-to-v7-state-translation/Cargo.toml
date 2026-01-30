@@ -24,3 +24,7 @@ futures = { version = "^0.3.31" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
+
+[[example]]
+name = "ledger-state"
+
