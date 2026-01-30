@@ -30,7 +30,7 @@ midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
 anyhow = { version = "^1.0.98" }
-lru = "0.16.0"
+lru = "0.16.3"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
