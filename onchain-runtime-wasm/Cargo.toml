@@ -14,6 +14,9 @@ storage = { path = "../storage", package = "midnight-storage" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+ff = "^0.13.1"
+group = "^0.13.0"
+midnight-circuits = "6.0.0"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.

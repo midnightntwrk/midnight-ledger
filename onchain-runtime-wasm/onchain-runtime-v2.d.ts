@@ -519,6 +519,11 @@ export function rawTokenType(domain_sep: DomainSeparator, contract: ContractAddr
 export function sampleContractAddress(): ContractAddress;
 
 /**
+* Testing cross-lib interface
+*/
+export function dummyFunction(): ContractAddress;
+
+/**
  * Samples a uniform user address, for use in testing
  */
 export function sampleUserAddress(): UserAddress;

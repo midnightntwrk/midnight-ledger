@@ -15,7 +15,7 @@ use std::borrow::Cow;
 
 use crate::state::from_maybe_string;
 use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
-use base_crypto::fab::{AlignedValue, Alignment, Value};
+use base_crypto::fab::{AlignedValue, Alignment, Value, ValueSlice};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
 use base_crypto::{hash, signatures};
@@ -28,10 +28,11 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::EntryPointBuf;
 use rand::Rng;
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
 use transient_crypto;
-use transient_crypto::curve;
+use transient_crypto::curve::{self};
 use transient_crypto::curve::Fr;
 use transient_crypto::fab::{AlignedValueExt, AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::repr::FieldRepr;
@@ -109,6 +110,11 @@ pub fn raw_token_type(domain_sep: Uint8Array, contract: &str) -> Result<String, 
 #[wasm_bindgen(js_name = "sampleContractAddress")]
 pub fn sample_contract_address() -> Result<String, JsError> {
     to_value_hex_ser(&ContractAddress(OsRng.r#gen::<HashOutput>()))
+}
+
+#[wasm_bindgen(js_name = "dummyFunction")]
+pub fn dummy_function_test() -> Result<String, JsError> {
+    sample_contract_address()
 }
 
 #[wasm_bindgen(js_name = "sampleUserAddress")]
@@ -398,4 +404,152 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     let val: Value = from_value(val)?;
     let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&*val)?;
     Ok(to_value(&Value::from(res))?)
+}
+
+use transient_crypto::curve::{
+    embedded, outer,
+};
+
+use ff::Field;
+use group::Group;
+
+use midnight_circuits::hash::poseidon::PoseidonChip;
+use midnight_circuits::ecc::curves::CircuitCurve;
+use midnight_circuits::instructions::hash::HashCPU;
+
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
+fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<embedded::Scalar, JsError> {
+    let s: Option<_> = embedded::Scalar::from_bytes(&native.to_bytes_le()).into();
+    s.ok_or(JsError::new("Error converting Fr to JubjubScalar"))
+}
+
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
+fn native_from_jubjub_scalar_from_native(jubjub_s: embedded::Scalar) -> Result<outer::Scalar, JsError> {
+    let s: Option<_> = outer::Scalar::from_bytes_le(&jubjub_s.to_bytes()).into();
+    s.ok_or(JsError::new("Error converting Fr to JubjubScalar"))
+}
+
+#[wasm_bindgen(js_name = "jubjubSampleSigningKey")]
+pub fn jubjub_sample_signing_key() -> Result<JsValue, JsError> {
+    let scalar = embedded::Scalar::random(OsRng);
+    let scalar = native_from_jubjub_scalar_from_native(scalar)?;
+    Ok(to_value(&Value::from(Fr(scalar)))?)
+}
+
+#[derive(Serialize, Deserialize)]
+struct SchnorrSignature{
+    announcement_x: Fr,
+    announcement_y: Fr,
+    response: Fr,
+}
+
+impl From<SchnorrSignature> for Value {
+    fn from(sig: SchnorrSignature) -> Value {
+        Value::concat([
+            &Value::from(sig.announcement_x),
+            &Value::from(sig.announcement_y),
+            &Value::from(sig.response),
+        ])
+    }
+}
+
+impl TryFrom<&Value> for SchnorrSignature {
+    type Error = JsError;
+
+    fn try_from(value: &Value) -> Result<Self, Self::Error> {
+        let fields: (Fr, Fr, Fr) = <(Fr, Fr, Fr)>::try_from(&**value)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(SchnorrSignature {
+            announcement_x: fields.0,
+            announcement_y: fields.1,
+            response: fields.2,
+        })
+    }
+}
+
+fn coordinates(point: curve::embedded::Affine) -> Option<(outer::Scalar, outer::Scalar)> {
+    embedded::AffineExtended::from(point).coordinates()
+}
+
+fn from_jsvalue<T, E>(val: JsValue) -> Result<T, JsError>
+where
+    T: for<'a> TryFrom<&'a ValueSlice, Error = E>,
+    E: std::fmt::Display,
+{
+    let val: Value = from_value(val)?;
+    T::try_from(&*val).map_err(|e| JsError::new(&e.to_string()))
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrSign")]
+pub fn jubjub_schnorr_sign(align: JsValue, msg: JsValue, key: JsValue) -> Result<JsValue, JsError> {
+    let sk = jubjub_scalar_from_native(from_jsvalue::<Fr, _>(key)?.0)?;
+
+    let pk = embedded::Affine::generator() * sk;
+    let (pk_x, pk_y) = coordinates(pk)
+        .ok_or_else(|| JsError::new("Invalid PK"))?;
+
+    let nonce = embedded::Scalar::random(OsRng);
+    let announcement = embedded::Affine::generator() * nonce;
+    let (ann_x, ann_y) = coordinates(announcement)
+        .ok_or_else(|| JsError::new("Invalid announcement"))?;
+
+    let msg_value = AlignedValue::new(from_value(msg)?, from_value(align)?)
+        .ok_or(JsError::new("invalid alignment supplied"))?;
+
+    let mut hash_input = vec![pk_x, pk_y, ann_x, ann_y];
+    hash_input.extend(ValueReprAlignedValue(msg_value).field_vec().iter().map(|a| a.0));
+
+    let challenge = PoseidonChip::<outer::Scalar>::hash(&hash_input);
+    let challenge = jubjub_scalar_from_native(challenge)?;
+
+    let response = native_from_jubjub_scalar_from_native(nonce + challenge * sk)?;
+    let signature = SchnorrSignature {
+        announcement_x: Fr(ann_x),
+        announcement_y: Fr(ann_y),
+        response: Fr(response),
+    };
+    Ok(to_value(&Value::from(signature))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrVerifyingKey")]
+pub fn jubjub_schnorr_verifying_key(key: JsValue) -> Result<JsValue, JsError> {
+    ec_mul_generator(key)
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrVerify")]
+pub fn jubjub_schnorr_verify(
+    align: JsValue,
+    msg: JsValue,
+    pk: JsValue,
+    signature: JsValue,
+) -> Result<bool, JsError> {
+    // Parse public key
+    let pk_point: curve::EmbeddedGroupAffine = from_jsvalue(pk)?;
+    let pk_x = pk_point.x().ok_or_else(|| JsError::new("Public key should not be the identity"))?;
+    let pk_y = pk_point.y().ok_or_else(|| JsError::new("Public key should not be the identity"))?;
+
+    // Parse signature
+    let sig_value: Value = from_value(signature)?;
+    let sig = SchnorrSignature::try_from(&sig_value)?;
+
+    // Reconstruct announcement point
+    let announcement = curve::EmbeddedGroupAffine::new(sig.announcement_x, sig.announcement_y)
+        .ok_or_else(|| JsError::new("Invalid announcement point in signature"))?;
+
+    // Parse message
+    let msg_value = AlignedValue::new(from_value(msg)?, from_value(align)?)
+        .ok_or(JsError::new("invalid alignment supplied"))?;
+
+    // Reconstruct challenge: Hash(pk_x || pk_y || ann_x || ann_y || msg)
+    let mut hash_input = vec![pk_x.0, pk_y.0, sig.announcement_x.0, sig.announcement_y.0];
+    hash_input.extend(ValueReprAlignedValue(msg_value).field_vec().iter().map(|a| a.0));
+
+    let challenge = PoseidonChip::<outer::Scalar>::hash(&hash_input);
+    let challenge_fr = Fr(challenge);
+
+    // Verify: response * G == announcement + challenge * pk
+    let lhs = curve::EmbeddedGroupAffine::generator() * sig.response;
+    let rhs = announcement + pk_point * challenge_fr;
+
+    Ok(lhs == rhs)
 }
