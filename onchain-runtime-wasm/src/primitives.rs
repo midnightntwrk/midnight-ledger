@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
 use transient_crypto;
-use transient_crypto::curve::{self};
 use transient_crypto::curve::Fr;
+use transient_crypto::curve::{self};
 use transient_crypto::fab::{AlignedValueExt, AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::repr::FieldRepr;
 use wasm_bindgen::prelude::*;
@@ -406,15 +406,13 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     Ok(to_value(&Value::from(res))?)
 }
 
-use transient_crypto::curve::{
-    embedded, outer,
-};
+use transient_crypto::curve::{embedded, outer};
 
 use ff::Field;
 use group::Group;
 
-use midnight_circuits::hash::poseidon::PoseidonChip;
 use midnight_circuits::ecc::curves::CircuitCurve;
+use midnight_circuits::hash::poseidon::PoseidonChip;
 use midnight_circuits::instructions::hash::HashCPU;
 
 /// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
@@ -424,7 +422,19 @@ fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<embedded::Scalar, 
 }
 
 /// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
-fn native_from_jubjub_scalar_from_native(jubjub_s: embedded::Scalar) -> Result<outer::Scalar, JsError> {
+/// If the former overflows the Jubjub scalar field size, a modular reduction will
+/// be performed.
+fn jubjub_scalar_from_native_with_mod_reduction(
+    native: outer::Scalar,
+) -> Result<embedded::Scalar, JsError> {
+    let mut bytes = [0; 64];
+    bytes[..32].copy_from_slice(&native.to_bytes_le());
+    let s: Option<_> = embedded::Scalar::from_bytes_wide(&bytes).into();
+    s.ok_or(JsError::new("Error converting Fr to JubjubScalar"))
+}
+
+/// Converts a Jubjub scalar field element into a BLS12-381 scalar field element.
+fn native_from_jubjub_scalar(jubjub_s: embedded::Scalar) -> Result<outer::Scalar, JsError> {
     let s: Option<_> = outer::Scalar::from_bytes_le(&jubjub_s.to_bytes()).into();
     s.ok_or(JsError::new("Error converting JubjubScalar to Fr"))
 }
@@ -432,12 +442,12 @@ fn native_from_jubjub_scalar_from_native(jubjub_s: embedded::Scalar) -> Result<o
 #[wasm_bindgen(js_name = "jubjubSampleSigningKey")]
 pub fn jubjub_sample_signing_key() -> Result<JsValue, JsError> {
     let scalar = embedded::Scalar::random(OsRng);
-    let scalar = native_from_jubjub_scalar_from_native(scalar)?;
+    let scalar = native_from_jubjub_scalar(scalar)?;
     Ok(to_value(&Value::from(Fr(scalar)))?)
 }
 
 #[derive(Serialize, Deserialize)]
-struct SchnorrSignature{
+struct SchnorrSignature {
     announcement_x: Fr,
     announcement_y: Fr,
     response: Fr,
@@ -457,8 +467,8 @@ impl TryFrom<&Value> for SchnorrSignature {
     type Error = JsError;
 
     fn try_from(value: &Value) -> Result<Self, Self::Error> {
-        let fields: (Fr, Fr, Fr) = <(Fr, Fr, Fr)>::try_from(&**value)
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let fields: (Fr, Fr, Fr) =
+            <(Fr, Fr, Fr)>::try_from(&**value).map_err(|e| JsError::new(&e.to_string()))?;
         Ok(SchnorrSignature {
             announcement_x: fields.0,
             announcement_y: fields.1,
@@ -485,24 +495,28 @@ pub fn jubjub_schnorr_sign(align: JsValue, msg: JsValue, key: JsValue) -> Result
     let sk = jubjub_scalar_from_native(from_jsvalue::<Fr, _>(key)?.0)?;
 
     let pk = embedded::Affine::generator() * sk;
-    let (pk_x, pk_y) = coordinates(pk)
-        .ok_or_else(|| JsError::new("Invalid PK"))?;
+    let (pk_x, pk_y) = coordinates(pk).ok_or_else(|| JsError::new("Invalid PK"))?;
 
     let nonce = embedded::Scalar::random(OsRng);
     let announcement = embedded::Affine::generator() * nonce;
-    let (ann_x, ann_y) = coordinates(announcement)
-        .ok_or_else(|| JsError::new("Invalid announcement"))?;
+    let (ann_x, ann_y) =
+        coordinates(announcement).ok_or_else(|| JsError::new("Invalid announcement"))?;
 
     let msg_value = AlignedValue::new(from_value(msg)?, from_value(align)?)
         .ok_or(JsError::new("invalid alignment supplied"))?;
 
     let mut hash_input = vec![pk_x, pk_y, ann_x, ann_y];
-    hash_input.extend(ValueReprAlignedValue(msg_value).field_vec().iter().map(|a| a.0));
+    hash_input.extend(
+        ValueReprAlignedValue(msg_value)
+            .field_vec()
+            .iter()
+            .map(|a| a.0),
+    );
 
     let challenge = PoseidonChip::<outer::Scalar>::hash(&hash_input);
-    let challenge = jubjub_scalar_from_native(challenge)?;
+    let challenge = jubjub_scalar_from_native_with_mod_reduction(challenge)?;
 
-    let response = native_from_jubjub_scalar_from_native(nonce + challenge * sk)?;
+    let response = native_from_jubjub_scalar(nonce + challenge * sk)?;
     let signature = SchnorrSignature {
         announcement_x: Fr(ann_x),
         announcement_y: Fr(ann_y),
@@ -525,8 +539,12 @@ pub fn jubjub_schnorr_verify(
 ) -> Result<bool, JsError> {
     // Parse public key
     let pk_point: curve::EmbeddedGroupAffine = from_jsvalue(pk)?;
-    let pk_x = pk_point.x().ok_or_else(|| JsError::new("Public key should not be the identity"))?;
-    let pk_y = pk_point.y().ok_or_else(|| JsError::new("Public key should not be the identity"))?;
+    let pk_x = pk_point
+        .x()
+        .ok_or_else(|| JsError::new("Public key should not be the identity"))?;
+    let pk_y = pk_point
+        .y()
+        .ok_or_else(|| JsError::new("Public key should not be the identity"))?;
 
     // Parse signature
     let sig_value: Value = from_value(signature)?;
@@ -542,7 +560,12 @@ pub fn jubjub_schnorr_verify(
 
     // Reconstruct challenge: Hash(pk_x || pk_y || ann_x || ann_y || msg)
     let mut hash_input = vec![pk_x.0, pk_y.0, sig.announcement_x.0, sig.announcement_y.0];
-    hash_input.extend(ValueReprAlignedValue(msg_value).field_vec().iter().map(|a| a.0));
+    hash_input.extend(
+        ValueReprAlignedValue(msg_value)
+            .field_vec()
+            .iter()
+            .map(|a| a.0),
+    );
 
     let challenge = PoseidonChip::<outer::Scalar>::hash(&hash_input);
     let challenge_fr = Fr(challenge);
