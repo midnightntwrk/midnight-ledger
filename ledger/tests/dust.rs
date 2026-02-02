@@ -43,7 +43,7 @@ async fn test_registration_dust_payment() {
     let strictness = WellFormedStrictness::default();
     let verifying_key = state.night_key.verifying_key();
     let addr = UserAddress::from(verifying_key.clone());
-    
+
     const NIGHT_VAL: u128 = 1_000_000;
     const DUST_VAL: u128 = NIGHT_VAL * INITIAL_DUST_PARAMETERS.night_dust_ratio as u128;
 
@@ -96,13 +96,19 @@ async fn test_registration_dust_payment() {
     let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
     // Erase for fees due to technicality of the runtime fees calculation being slightly inaccurate
     // due to only having the proof-erased tx to hand.
-    let dust_fee = dbg!(tx.erase_proofs().erase_signatures().fees(&state.ledger.parameters, true).unwrap());
+    let dust_fee = dbg!(
+        tx.erase_proofs()
+            .erase_signatures()
+            .fees(&state.ledger.parameters, true)
+            .unwrap()
+    );
     let result = state.apply(&tx, strictness).unwrap();
     assert!(matches!(result, TransactionResult::Success(_)));
     let dust_bal = state.dust.wallet_balance(state.time);
     let dt = state.time - t0;
     // Add dust generation from time passing
-    let dust_generated = dt.as_seconds() as u128 * NIGHT_VAL * INITIAL_DUST_PARAMETERS.generation_decay_rate as u128;
+    let dust_generated =
+        dt.as_seconds() as u128 * NIGHT_VAL * INITIAL_DUST_PARAMETERS.generation_decay_rate as u128;
     assert!(dust_bal > dust_generated);
     assert!(dbg!(dust_bal) <= dbg!(DUST_VAL - dust_fee + dust_generated));
 }
