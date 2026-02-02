@@ -509,7 +509,13 @@ fn extension<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>>(
     child: Sp<Node<T, D, A>, D>,
 ) -> Sp<Node<T, D, A>, D> {
     let mut cur = child;
-    while let Node::Extension { compressed_path, child, .. } = &*cur && !path.len().is_multiple_of(255) {
+    while let Node::Extension {
+        compressed_path,
+        child,
+        ..
+    } = &*cur
+        && !path.len().is_multiple_of(255)
+    {
         path.extend(compressed_path);
         cur = child.clone();
     }
@@ -1681,11 +1687,24 @@ mod tests {
     fn test_canonicity() {
         let segment1 = [0u8; 200];
         let segment2 = [1u8; 200];
-        let path1 = segment1.iter().chain(segment1.iter()).chain(segment1.iter()).copied().collect::<Vec<_>>();
-        let path2 = segment1.iter().chain(segment2.iter()).chain(segment2.iter()).copied().collect::<Vec<_>>();
+        let path1 = segment1
+            .iter()
+            .chain(segment1.iter())
+            .chain(segment1.iter())
+            .copied()
+            .collect::<Vec<_>>();
+        let path2 = segment1
+            .iter()
+            .chain(segment2.iter())
+            .chain(segment2.iter())
+            .copied()
+            .collect::<Vec<_>>();
 
         let mpt1 = MerklePatriciaTrie::<()>::new().insert(&path1, ());
-        let mpt2 = MerklePatriciaTrie::<()>::new().insert(&path2, ()).insert(&path1, ()).remove(&path2);
+        let mpt2 = MerklePatriciaTrie::<()>::new()
+            .insert(&path2, ())
+            .insert(&path1, ())
+            .remove(&path2);
         dbg!(&mpt1);
         dbg!(&mpt2);
         assert_eq!(mpt1.0.hash(), mpt2.0.hash());
