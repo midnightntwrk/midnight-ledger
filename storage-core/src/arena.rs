@@ -1211,7 +1211,7 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     /// This Sp represented as a child node (for easy access)
     pub(crate) child_repr: ArenaKey<D::Hasher>,
     /// The arena this Sp points into
-    pub(crate) arena: Arena<D>,
+    pub arena: Arena<D>,
     /// The persistent hash of data.
     pub(crate) root: ArenaHash<D::Hasher>,
 }
@@ -2725,8 +2725,8 @@ pub mod stress_tests {
 mod tests {
     use super::*;
     use crate as storage;
+    use crate::DefaultHasher;
     use crate::storable::SMALL_OBJECT_LIMIT;
-    use crate::{DefaultHasher, storage::Array};
     use macros::Storable;
 
     fn new_arena() -> Arena<DefaultDB> {
@@ -2778,13 +2778,6 @@ mod tests {
             .ref_count;
         assert_eq!(malloc_a, malloc_b);
         assert_eq!(ref_count, 2);
-    }
-
-    #[test]
-    fn init_many() {
-        for _ in 0..10_000 {
-            Array::<()>::new();
-        }
     }
 
     // Test that `into_inner` returns the inner value when it should (last ref),

@@ -355,7 +355,7 @@ impl<D: DB> StorageBackend<D> {
     /// but is still in memory because it's still referenced, will not cause
     /// that temp object to continue to exist if its ref count goes to zero. If
     /// you want that, then call `cache` instead!
-    pub(crate) fn get(&mut self, key: &ArenaHash<D::Hasher>) -> Option<&OnDiskObject<D::Hasher>> {
+    pub fn get(&mut self, key: &ArenaHash<D::Hasher>) -> Option<&OnDiskObject<D::Hasher>> {
         // If already in memory, move to the front of cache.
         if self.peek_from_memory(key).is_some() {
             self.stats.borrow_mut().get_cache_hits += 1;
@@ -1088,7 +1088,7 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     }
 
     /// Return the size in bytes of this object.
-    pub(crate) fn size(&self) -> usize {
+    pub fn size(&self) -> usize {
         let data_size = self.data.len();
         let ref_count_size = 4;
         let bytes_per_arena_key = <H as crypto::digest::OutputSizeUser>::output_size();
