@@ -27,13 +27,12 @@
     "zk-proofs"
   ],
   "scripts": {
-    "build": "expo-module build",
+    "build": "tsc",
     "clean": "expo-module clean",
     "lint": "eslint .",
     "test": "jest",
     "prepare": "echo 'skipping build'",
-    "prepublishOnly": "expo-module build",
-    "copy-framework": "cp -r ../ledger-ios/out/MidnightLedger.xcframework ios/Frameworks/ && cp ../ledger-ios/out/swift/*.swift ios/"
+    "prepublishOnly": "expo-module build"
   },
   "peerDependencies": {
     "expo": "*",

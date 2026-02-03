@@ -28,12 +28,12 @@
     "expo-router": "~6.0.23",
     "expo-status-bar": "~3.0.9",
     "expo-system-ui": "~6.0.9",
-    "lucide-react-native": "^0.563.0",
+    "lucide-react-native": "^0.460.0",
     "memoize-one": "^6.0.0",
     "moti": "^0.30.0",
     "nativewind": "^4.2.1",
     "path-browserify": "^1.0.1",
-    "react": "^19.1.0",
+    "react": "19.1.0",
     "react-native": "^0.81.5",
     "react-native-gesture-handler": "~2.28.0",
     "react-native-nitro-modules": "^0.33.3",
@@ -54,6 +54,9 @@
     "@types/react": "^19.2.0",
     "babel-plugin-module-resolver": "^5.0.2",
     "typescript": "~5.9.2"
+  },
+  "overrides": {
+    "react": "19.1.0"
   },
   "private": true
 }

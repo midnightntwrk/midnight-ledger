@@ -1,2 +1,8 @@
-ios
+# Build output
 build
+
+# Generated files from build-ios.sh
+ios/ledger_ios.swift
+ios/ledger_iosFFI.h
+ios/ledger_iosFFI.modulemap
+ios/Frameworks/

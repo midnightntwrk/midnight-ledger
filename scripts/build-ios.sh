@@ -37,11 +37,6 @@ echo_error() {
 check_requirements() {
     echo_info "Checking requirements..."
 
-    if ! command -v rustup &> /dev/null; then
-        echo_error "rustup is not installed. Please install Rust first."
-        exit 1
-    fi
-
     if ! command -v cargo &> /dev/null; then
         echo_error "cargo is not installed. Please install Rust first."
         exit 1
@@ -57,19 +52,14 @@ check_requirements() {
         exit 1
     fi
 
-    # uniffi-bindgen is built from the ledger-ios crate (see generate_bindings)
+    # Verify iOS targets are available (provided by Nix or rustup)
+    if ! rustc --print target-list | grep -q "aarch64-apple-ios"; then
+        echo_error "iOS targets not available. If using Nix, ensure iOS targets are in your flake."
+        echo_error "If using rustup, run: rustup target add aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios"
+        exit 1
+    fi
+
     echo_info "All requirements satisfied."
-}
-
-# Install Rust iOS targets
-install_targets() {
-    echo_info "Installing Rust iOS targets..."
-
-    rustup target add aarch64-apple-ios || true
-    rustup target add aarch64-apple-ios-sim || true
-    rustup target add x86_64-apple-ios || true
-
-    echo_info "Rust iOS targets installed."
 }
 
 # Build for a specific target
@@ -80,22 +70,55 @@ build_target() {
 
     echo_info "Building for $TARGET ($SDK)..."
 
-    export SDKROOT=$(xcrun --sdk $SDK --show-sdk-path)
-    export CC=$(xcrun --sdk $SDK --find clang)
-    export AR=$(xcrun --sdk $SDK --find ar)
+    # Convert target triple to env var format (hyphens -> underscores)
+    local TARGET_ENV="${TARGET//-/_}"
 
-    # Set CFLAGS for the blst crate (BLS12-381 crypto)
-    export CFLAGS="-isysroot $SDKROOT"
+    # Use system xcrun directly to bypass any Nix wrappers
+    # and unset SDKROOT so it can find iOS SDKs
+    local XCRUN="/usr/bin/xcrun"
 
-    # For simulator targets, we need to specify the target triple
+    # Debug: show environment
+    echo_info "  SDKROOT before: ${SDKROOT:-<unset>}"
+    echo_info "  DEVELOPER_DIR: ${DEVELOPER_DIR:-<unset>}"
+
+    local SDK_PATH=$(SDKROOT= DEVELOPER_DIR= $XCRUN --sdk $SDK --show-sdk-path 2>&1)
+    if [[ "$SDK_PATH" == error:* ]]; then
+        echo_error "Failed to find SDK path: $SDK_PATH"
+        echo_error "Try running: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer"
+        exit 1
+    fi
+    echo_info "  SDK_PATH: $SDK_PATH"
+
+    local CC_PATH=$(SDKROOT= DEVELOPER_DIR= $XCRUN --sdk $SDK --find clang 2>&1)
+    local AR_PATH=$(SDKROOT= DEVELOPER_DIR= $XCRUN --sdk $SDK --find ar 2>&1)
+
+    # Set target-specific CFLAGS for the blst crate (BLS12-381 crypto)
+    local TARGET_CFLAGS="-isysroot $SDK_PATH"
     if [[ "$SDK" == "iphonesimulator" ]]; then
-        export CFLAGS="$CFLAGS -target $ARCH-apple-ios-simulator"
+        TARGET_CFLAGS="$TARGET_CFLAGS -target $ARCH-apple-ios-simulator"
     else
-        export CFLAGS="$CFLAGS -target $ARCH-apple-ios"
+        TARGET_CFLAGS="$TARGET_CFLAGS -target $ARCH-apple-ios"
     fi
 
+    # Use target-specific env vars for the iOS cross-compilation
+    # The cc-rs crate respects CC_<target>, AR_<target>, CFLAGS_<target>, and SDKROOT_<target>
+    export "CC_${TARGET_ENV}=$CC_PATH"
+    export "AR_${TARGET_ENV}=$AR_PATH"
+    export "CFLAGS_${TARGET_ENV}=$TARGET_CFLAGS"
+    # Set target-specific SDKROOT so cc-rs uses iOS SDK for target builds
+    # but leaves SDKROOT/DEVELOPER_DIR alone for host builds (proc-macros, build scripts)
+    export "SDKROOT_${TARGET_ENV}=$SDK_PATH"
+
+    echo_info "  CC_${TARGET_ENV}: $CC_PATH"
+    echo_info "  SDKROOT_${TARGET_ENV}: $SDK_PATH"
+
     cd "$PROJECT_ROOT"
-    cargo build \
+    # Override Nix SDK environment for iOS cross-compilation:
+    # - Unset SDKROOT so cc-rs detects iOS SDK via xcrun (not Nix's MacOSX SDK)
+    # - Set DEVELOPER_DIR to Xcode so xcrun can find iOS SDKs
+    # The target-specific env vars (CC_<target>, CFLAGS_<target>) handle the actual compilation
+    local XCODE_DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer"
+    env -u SDKROOT DEVELOPER_DIR="$XCODE_DEVELOPER_DIR" cargo build \
         --package "$PACKAGE_NAME" \
         --target "$TARGET" \
         --profile ios \
@@ -171,9 +194,11 @@ create_xcframework() {
     # Remove existing XCFramework if it exists
     rm -rf "$IOS_OUT/MidnightLedger.xcframework"
 
-    # Create XCFramework
+    # Create XCFramework (override Nix environment so xcrun can find xcodebuild)
     echo_info "Creating XCFramework..."
-    xcodebuild -create-xcframework \
+    DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+    SDKROOT= \
+    /usr/bin/xcrun xcodebuild -create-xcframework \
         -library "$DEVICE_LIB" \
         -headers "$IOS_OUT/headers" \
         -library "$SIM_FAT_LIB" \
@@ -239,7 +264,6 @@ main() {
             ;;
         build)
             check_requirements
-            install_targets
 
             mkdir -p "$IOS_OUT"
 

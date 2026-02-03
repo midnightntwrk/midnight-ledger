@@ -233,7 +233,7 @@
       in
         rec {
           lib.bagel-wasm = bagel-wasm;
-          packages.rust-build-toolchain = rust.combine [
+          packages.rust-build-toolchain = rust.combine ([
             rust.stable.rustc
             rust.targets.wasm32-unknown-unknown.stable.rust-std
             rust.targets.aarch64-unknown-linux-musl.stable.rust-std
@@ -243,8 +243,12 @@
             rust.complete.cargo
             rust.complete.rustfmt
             rust.stable.clippy
-          ];
-          packages.rust-dev-toolchain = rust.combine [
+          ] ++ (if isDarwin then [
+            rust.targets.aarch64-apple-ios.stable.rust-std
+            rust.targets.aarch64-apple-ios-sim.stable.rust-std
+            rust.targets.x86_64-apple-ios.stable.rust-std
+          ] else []));
+          packages.rust-dev-toolchain = rust.combine ([
             rust.stable.rustc
             rust.targets.wasm32-unknown-unknown.stable.rust-std
             rust.targets.aarch64-unknown-linux-musl.stable.rust-std
@@ -257,7 +261,11 @@
             rust.stable.rust-docs
             rust.stable.rust-src
             rust.stable.rust-analyzer
-          ];
+          ] ++ (if isDarwin then [
+            rust.targets.aarch64-apple-ios.stable.rust-std
+            rust.targets.aarch64-apple-ios-sim.stable.rust-std
+            rust.targets.x86_64-apple-ios.stable.rust-std
+          ] else []));
           packages.rust-doc-toolchain = rust.combine [
             rust.complete.rustc
             rust.complete.cargo
