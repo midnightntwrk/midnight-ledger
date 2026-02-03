@@ -222,23 +222,6 @@ async fn micro_dao() {
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
 
-    {
-        let f = File::open("tests/micro_dao_state_1.bin").unwrap();
-        let mut reader = BufReader::new(f);
-        let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
-        let tl_state =
-            TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
-                .unwrap();
-        let cost = CostDuration::from_picoseconds(1_000_000_000_000);
-        let finished_state = tl_state.run(cost).unwrap();
-        let Some(updated_state) = finished_state.result().unwrap() else {
-            panic!("didn't finish");
-        };
-        let mut updated_state = updated_state.deref().clone();
-        updated_state.contract = state.ledger.contract;
-        state.ledger = updated_state;
-    }
-
     println!(":: Part 2: Setting topic");
     let tx = mode
         .replay_or("tx2", async || {
