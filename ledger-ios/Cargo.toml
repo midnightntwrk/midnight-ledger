@@ -1,0 +1,44 @@
+[package]
+name = "midnight-ledger-ios"
+version = "7.0.0"
+license.workspace = true
+edition = "2024"
+
+[lib]
+crate-type = ["staticlib", "cdylib"]
+name = "midnight_ledger_ios"
+
+[dependencies]
+# Workspace crates
+zswap = { path = "../zswap", package = "midnight-zswap" }
+ledger = { path = "../ledger", package = "midnight-ledger", default-features = false }
+storage = { path = "../storage", package = "midnight-storage" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+
+# UniFFI for Swift bindings
+uniffi = { version = "0.31", features = ["cli"] }
+
+# Random number generation
+rand = { version = "^0.8.4", features = ["getrandom"] }
+rand_chacha = "^0.3.1"
+
+# Serialization
+serde = "^1.0.219"
+hex = "^0.4.3"
+
+# Error handling
+thiserror = "^1.0"
+
+# Memory safety for secret keys
+zeroize = "^1.8.0"
+
+[build-dependencies]
+uniffi = { version = "0.31", features = ["build"] }
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "src/uniffi_bindgen.rs"

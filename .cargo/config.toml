@@ -1,0 +1,14 @@
+# iOS cross-compilation configuration
+
+[target.aarch64-apple-ios]
+linker = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
+
+[target.aarch64-apple-ios-sim]
+linker = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
+
+[target.x86_64-apple-ios]
+linker = "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
+
+[env]
+# These will be set for iOS builds
+# SDKROOT is handled per-target below

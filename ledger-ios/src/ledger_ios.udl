@@ -1,0 +1,736 @@
+// This file is part of midnight-ledger.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+//
+// UniFFI interface definition for midnight-ledger iOS wallet bindings
+
+namespace ledger_ios {
+    // Token types (Phase 2)
+    string shielded_token();
+    string unshielded_token();
+    string native_token();
+    string fee_token();
+
+    // Key derivation
+    [Throws=LedgerError]
+    SignatureVerifyingKey signature_verifying_key(string signing_key);
+
+    string address_from_key(SignatureVerifyingKey verifying_key);
+
+    // Coin operations (Phase 3)
+    [Throws=LedgerError]
+    bytes create_shielded_coin_info(string token_type, u64 value);
+
+    [Throws=LedgerError]
+    string coin_commitment(bytes coin_info, string coin_public_key);
+
+    [Throws=LedgerError]
+    string coin_commitment_from_fields(string token_type, string nonce, u64 value, string coin_public_key);
+
+    [Throws=LedgerError]
+    string coin_nullifier(bytes coin_info, CoinSecretKey coin_secret_key);
+
+    [Throws=LedgerError]
+    string coin_nullifier_from_fields(string token_type, string nonce, u64 value, CoinSecretKey coin_secret_key);
+
+    // Signing (Phase 9)
+    [Throws=LedgerError]
+    string sign_data(string signing_key, bytes payload);
+
+    // Sample/test functions
+    string sample_coin_public_key();
+    string sample_encryption_public_key();
+
+    // Deserialize functions (Phase 4)
+    [Throws=LedgerError]
+    Event deserialize_event(bytes raw);
+
+    [Throws=LedgerError]
+    MerkleTreeCollapsedUpdate deserialize_merkle_tree_collapsed_update(bytes raw);
+
+    [Throws=LedgerError]
+    DustParameters deserialize_dust_parameters(bytes raw);
+
+    [Throws=LedgerError]
+    ZswapLocalState deserialize_zswap_local_state(bytes raw);
+
+    [Throws=LedgerError]
+    DustLocalState deserialize_dust_local_state(bytes raw);
+
+    [Throws=LedgerError]
+    LedgerState deserialize_ledger_state(bytes raw);
+
+    // Phase 5-6: Transaction and Offers
+    [Throws=LedgerError]
+    UtxoSpend deserialize_utxo_spend(bytes raw);
+
+    [Throws=LedgerError]
+    UtxoOutput deserialize_utxo_output(bytes raw);
+
+    [Throws=LedgerError]
+    UnshieldedOffer deserialize_unshielded_offer(bytes raw);
+
+    [Throws=LedgerError]
+    Intent deserialize_intent(bytes raw);
+
+    [Throws=LedgerError]
+    Transaction deserialize_transaction(bytes raw);
+
+    [Throws=LedgerError]
+    Transaction deserialize_transaction_typed(
+        string signature_marker,
+        string proof_marker,
+        string binding_marker,
+        bytes raw
+    );
+
+    [Throws=LedgerError]
+    Transaction create_transaction(string network_id, Intent? intent);
+
+    [Throws=LedgerError]
+    Transaction create_transaction_randomized(string network_id, Intent? intent);
+
+    Intent create_intent(u64 ttl_seconds);
+
+    [Throws=LedgerError]
+    UtxoSpend create_utxo_spend(
+        string value,
+        string owner,
+        string token_type,
+        string intent_hash,
+        u32 output_no
+    );
+
+    [Throws=LedgerError]
+    UtxoOutput create_utxo_output(
+        string value,
+        string owner,
+        string token_type
+    );
+
+    [Throws=LedgerError]
+    UnshieldedOffer create_unshielded_offer(
+        sequence<UtxoSpend> inputs,
+        sequence<UtxoOutput> outputs,
+        sequence<string> signatures
+    );
+
+    [Throws=LedgerError]
+    UnshieldedOffer create_unshielded_offer_unsigned(
+        sequence<UtxoSpend> inputs,
+        sequence<UtxoOutput> outputs
+    );
+
+    // Phase 7: Dust Operations
+    [Throws=LedgerError]
+    DustPublicKey deserialize_dust_public_key(bytes raw);
+
+    [Throws=LedgerError]
+    InitialNonce deserialize_initial_nonce(bytes raw);
+
+    [Throws=LedgerError]
+    DustGenerationInfo deserialize_dust_generation_info(bytes raw);
+
+    [Throws=LedgerError]
+    DustOutput deserialize_dust_output(bytes raw);
+
+    [Throws=LedgerError]
+    QualifiedDustOutput deserialize_qualified_dust_output(bytes raw);
+
+    [Throws=LedgerError]
+    DustPublicKey create_dust_public_key(string hex);
+
+    [Throws=LedgerError]
+    InitialNonce create_initial_nonce(string hex);
+
+    [Throws=LedgerError]
+    string dust_updated_value(
+        string initial_value,
+        u64 ctime_seconds,
+        DustGenerationInfo gen_info,
+        u64 now_seconds,
+        DustParameters params
+    );
+
+    // Phase 8: Parameters and Extended Events
+    LedgerParameters initial_ledger_parameters();
+
+    [Throws=LedgerError]
+    LedgerParameters deserialize_ledger_parameters(bytes raw);
+
+    BlockContext create_block_context(u64 tblock_seconds);
+
+    [Throws=LedgerError]
+    BlockContext create_block_context_full(
+        u64 tblock_seconds,
+        u32 tblock_err,
+        string parent_block_hash
+    );
+
+    [Throws=LedgerError]
+    BlockContext deserialize_block_context(bytes raw);
+
+    // Phase 9: Addresses and Signature Verification
+    [Throws=LedgerError]
+    ContractAddress create_contract_address(string hex);
+
+    [Throws=LedgerError]
+    ContractAddress deserialize_contract_address(bytes raw);
+
+    PublicAddress create_public_address_contract(ContractAddress contract);
+
+    [Throws=LedgerError]
+    PublicAddress create_public_address_user(string user_address);
+
+    [Throws=LedgerError]
+    PublicAddress deserialize_public_address(bytes raw);
+
+    [Throws=LedgerError]
+    SignatureVerifyingKey create_verifying_key(string hex);
+
+    [Throws=LedgerError]
+    boolean verify_signature(
+        SignatureVerifyingKey verifying_key,
+        bytes message,
+        string signature
+    );
+};
+
+[Error]
+enum LedgerError {
+    "InvalidData",
+    "InvalidSeed",
+    "KeysCleared",
+    "SerializationError",
+    "DeserializationError",
+    "CryptoError",
+    "TransactionError",
+    "InvalidState",
+    "NotImplemented",
+};
+
+// Phase 1: Core Key Management
+
+interface ZswapSecretKeys {
+    [Throws=LedgerError, Name=from_seed]
+    constructor(bytes seed);
+
+    [Throws=LedgerError]
+    string coin_public_key();
+
+    [Throws=LedgerError]
+    string encryption_public_key();
+
+    [Throws=LedgerError]
+    CoinSecretKey coin_secret_key();
+
+    [Throws=LedgerError]
+    EncryptionSecretKey encryption_secret_key();
+
+    void clear();
+};
+
+interface DustSecretKey {
+    [Throws=LedgerError, Name=from_seed]
+    constructor(bytes seed);
+
+    [Throws=LedgerError]
+    string public_key();
+
+    void clear();
+};
+
+interface SignatureVerifyingKey {
+    [Throws=LedgerError, Name=from_signing_key]
+    constructor(string signing_key);
+
+    [Throws=LedgerError, Name=from_hex]
+    constructor(string hex);
+
+    string address();
+
+    string to_hex();
+
+    [Throws=LedgerError]
+    boolean verify(bytes message, string signature);
+};
+
+interface CoinSecretKey {
+    [Throws=LedgerError]
+    string public_key();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    void clear();
+};
+
+interface EncryptionSecretKey {
+    [Throws=LedgerError, Name=deserialize]
+    constructor(bytes raw);
+
+    [Throws=LedgerError]
+    string public_key();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    void clear();
+};
+
+// Phase 4: Local State Management
+
+interface Event {
+    [Throws=LedgerError, Name=deserialize]
+    constructor(bytes raw);
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string event_type();
+    EventSource source();
+
+    boolean is_zswap_event();
+    boolean is_dust_event();
+    boolean is_contract_event();
+    boolean is_param_change_event();
+
+    string? zswap_input_nullifier();
+    string? zswap_output_commitment();
+    u64? zswap_output_mt_index();
+
+    string to_debug_string();
+};
+
+interface EventSource {
+    string transaction_hash();
+    u16 logical_segment();
+    u16 physical_segment();
+};
+
+interface MerkleTreeCollapsedUpdate {
+    [Throws=LedgerError, Name=deserialize]
+    constructor(bytes raw);
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface DustParameters {
+    [Name=new]
+    constructor(u64 night_dust_ratio, u32 generation_decay_rate, i64 dust_grace_period_seconds);
+
+    u64 night_dust_ratio();
+    u32 generation_decay_rate();
+    i64 dust_grace_period_seconds();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface ZswapLocalState {
+    [Name=new]
+    constructor();
+
+    u64 first_free();
+    u64 coins_count();
+
+    [Throws=LedgerError]
+    sequence<string> coins();
+
+    sequence<QualifiedShieldedCoinInfo> coins_data();
+    sequence<PendingSpendEntry> pending_spends_data();
+    sequence<PendingOutputEntry> pending_outputs_data();
+
+    [Throws=LedgerError]
+    ZswapLocalState replay_events(ZswapSecretKeys secret_keys, sequence<Event> events);
+
+    [Throws=LedgerError]
+    ZswapLocalState apply_collapsed_update(MerkleTreeCollapsedUpdate update);
+
+    [Throws=LedgerError]
+    ZswapLocalState watch_for(string coin_public_key, bytes coin_info);
+
+    [Throws=LedgerError]
+    ZswapSpendResult spend(ZswapSecretKeys secret_keys, bytes coin, u16? segment);
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface ZswapInput {
+    string nullifier();
+    string? contract_address();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface ZswapSpendResult {
+    ZswapLocalState state();
+    ZswapInput input();
+};
+
+interface DustLocalState {
+    [Name=new]
+    constructor(DustParameters params);
+
+    string wallet_balance(u64 time_seconds);
+    u64 sync_time_seconds();
+    u64 utxos_count();
+    DustParameters params();
+
+    sequence<QualifiedDustOutput> utxos();
+    DustGenerationInfo? generation_info(QualifiedDustOutput utxo);
+
+    DustLocalState process_ttls(u64 time_seconds);
+
+    [Throws=LedgerError]
+    DustLocalState replay_events(DustSecretKey secret_key, sequence<Event> events);
+
+    [Throws=LedgerError]
+    DustSpendResult spend(DustSecretKey secret_key, QualifiedDustOutput utxo, string v_fee, u64 ctime_seconds);
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface DustSpend {
+    string v_fee();
+    string old_nullifier();
+    string new_commitment();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface DustSpendResult {
+    DustLocalState state();
+    DustSpend spend();
+};
+
+interface LedgerState {
+    [Name=blank]
+    constructor(string network_id);
+
+    string network_id();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+// Phase 5-6: Transaction and Offers
+
+interface UtxoSpend {
+    [Throws=LedgerError, Name=new]
+    constructor(
+        string value,
+        string owner,
+        string token_type,
+        string intent_hash,
+        u32 output_no
+    );
+
+    string value();
+    string owner();
+    string token_type();
+    string intent_hash();
+    u32 output_no();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface UtxoOutput {
+    [Throws=LedgerError, Name=new]
+    constructor(string value, string owner, string token_type);
+
+    string value();
+    string owner();
+    string token_type();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface UnshieldedOffer {
+    [Throws=LedgerError, Name=new]
+    constructor(
+        sequence<UtxoSpend> inputs,
+        sequence<UtxoOutput> outputs,
+        sequence<string> signatures
+    );
+
+    sequence<UtxoSpend> inputs();
+    sequence<UtxoOutput> outputs();
+    sequence<string> signatures();
+
+    [Throws=LedgerError]
+    UnshieldedOffer add_signatures(sequence<string> signatures);
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface Intent {
+    [Name=new]
+    constructor(u64 ttl_seconds);
+
+    u64 ttl_seconds();
+    Intent set_ttl(u64 ttl_seconds);
+
+    bytes signature_data(u16 segment_id);
+    string intent_hash(u16 segment_id);
+
+    UnshieldedOffer? guaranteed_unshielded_offer();
+
+    [Throws=LedgerError]
+    Intent set_guaranteed_unshielded_offer(UnshieldedOffer? offer);
+
+    UnshieldedOffer? fallible_unshielded_offer();
+
+    [Throws=LedgerError]
+    Intent set_fallible_unshielded_offer(UnshieldedOffer? offer);
+
+    [Throws=LedgerError]
+    Intent bind(u16 segment_id);
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface Transaction {
+    [Throws=LedgerError, Name=from_parts]
+    constructor(string network_id, Intent? intent);
+
+    string network_id();
+
+    [Throws=LedgerError]
+    Transaction bind();
+
+    [Throws=LedgerError]
+    Transaction mock_prove();
+
+    [Throws=LedgerError]
+    Transaction merge(Transaction other);
+
+    [Throws=LedgerError]
+    sequence<string> identifiers();
+
+    Transaction erase_proofs();
+    Transaction erase_signatures();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+// Phase 7: Dust Operations
+
+interface DustPublicKey {
+    [Throws=LedgerError, Name=from_hex]
+    constructor(string hex);
+
+    string to_hex();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface InitialNonce {
+    [Throws=LedgerError, Name=from_hex]
+    constructor(string hex);
+
+    string to_hex();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface DustGenerationInfo {
+    [Throws=LedgerError, Name=new]
+    constructor(
+        string value,
+        DustPublicKey owner,
+        InitialNonce nonce,
+        u64 dtime_seconds
+    );
+
+    string value();
+    DustPublicKey owner();
+    InitialNonce nonce();
+    u64 dtime_seconds();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface DustOutput {
+    [Throws=LedgerError, Name=new]
+    constructor(
+        string initial_value,
+        DustPublicKey owner,
+        string nonce,
+        u32 seq,
+        u64 ctime_seconds
+    );
+
+    string initial_value();
+    DustPublicKey owner();
+    string nonce();
+    u32 seq();
+    u64 ctime_seconds();
+
+    string updated_value(
+        DustGenerationInfo gen_info,
+        u64 now_seconds,
+        DustParameters params
+    );
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface ShieldedCoinInfo {
+    string token_type();
+    string nonce();
+    string value();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface QualifiedShieldedCoinInfo {
+    string token_type();
+    string nonce();
+    string value();
+    u64 mt_index();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface PendingSpendEntry {
+    string nullifier();
+    QualifiedShieldedCoinInfo coin();
+};
+
+interface PendingOutputEntry {
+    string commitment();
+    ShieldedCoinInfo coin();
+};
+
+interface QualifiedDustOutput {
+    [Throws=LedgerError, Name=new]
+    constructor(
+        string initial_value,
+        DustPublicKey owner,
+        string nonce,
+        u32 seq,
+        u64 ctime_seconds,
+        InitialNonce backing_night,
+        u64 mt_index
+    );
+
+    string initial_value();
+    DustPublicKey owner();
+    string nonce();
+    u32 seq();
+    u64 ctime_seconds();
+    InitialNonce backing_night();
+    u64 mt_index();
+
+    DustOutput to_dust_output();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+// Phase 8: Parameters and Extended Events
+
+interface LedgerParameters {
+    [Name=initial]
+    constructor();
+
+    DustParameters dust_params();
+    i64 global_ttl_seconds();
+    u64 transaction_byte_limit();
+    u32 cardano_bridge_fee_basis_points();
+    string cardano_bridge_min_amount();
+
+    f64 fee_overall_price();
+    f64 fee_read_factor();
+    f64 fee_compute_factor();
+    f64 fee_block_usage_factor();
+    f64 fee_write_factor();
+
+    string min_claimable_rewards();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+interface BlockContext {
+    [Name=default_context]
+    constructor();
+
+    u64 tblock_seconds();
+    u32 tblock_err();
+    string parent_block_hash();
+
+    [Throws=LedgerError]
+    bytes serialize();
+
+    string to_debug_string();
+};
+
+// Phase 9: Addresses and Signature Verification
+
+interface ContractAddress {
+    [Throws=LedgerError, Name=from_hex]
+    constructor(string hex);
+
+    string to_hex();
+
+    [Throws=LedgerError]
+    string custom_shielded_token(string domain_sep);
+
+    [Throws=LedgerError]
+    string custom_unshielded_token(string domain_sep);
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
+
+interface PublicAddress {
+    [Throws=LedgerError, Name=from_user]
+    constructor(string user_address);
+
+    boolean is_contract();
+    boolean is_user();
+
+    ContractAddress? contract_address();
+    string? user_address();
+
+    string to_hex();
+
+    [Throws=LedgerError]
+    bytes serialize();
+};
