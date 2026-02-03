@@ -915,7 +915,6 @@ pub struct BackendLoader<'a, D: DB> {
     recursion_depth: u32,
 }
 
-#[cfg(feature = "proptest")]
 impl<'a, D: DB> BackendLoader<'a, D> {
     /// Construct a new `BackendLoader`
     pub fn new(arena: &'a Arena<D>, max_depth: Option<usize>) -> Self {
@@ -1209,11 +1208,11 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     /// y.data.get().unwrap())` is true.
     data: OnceLock<Arc<T>>,
     /// This Sp represented as a child node (for easy access)
-    pub(crate) child_repr: ArenaKey<D::Hasher>,
+    pub child_repr: ArenaKey<D::Hasher>,
     /// The arena this Sp points into
     pub arena: Arena<D>,
     /// The persistent hash of data.
-    pub(crate) root: ArenaHash<D::Hasher>,
+    pub root: ArenaHash<D::Hasher>,
 }
 
 impl<T: Display, D: DB> Display for Sp<T, D> {

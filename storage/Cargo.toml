@@ -25,6 +25,11 @@ sha2 = "0.10.9"
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 serde_json = { version = "1.0", features = ["std"], optional = true }
 
+[dev-dependencies]
+pastey = "0.1.1"
+rayon = "^1.10.0"
+storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test"] }
+
 [[bench]]
 name = "benchmarking"
 harness = false

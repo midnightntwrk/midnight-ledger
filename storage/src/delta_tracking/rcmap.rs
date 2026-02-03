@@ -358,7 +358,7 @@ pub(crate) mod tests {
         let mut reader = &bytes[..];
         let mut child_iter = keyrefs.children().into_iter();
         let arena = &crate::storage::default_storage().arena;
-        let loader = crate::arena::BackendLoader::new(arena, None);
+        let loader = storage_core::arena::BackendLoader::new(arena, None);
         let deserialized: Vec<Sp<ChildRef<InMemoryDB>, InMemoryDB>> =
             Storable::from_binary_repr(&mut reader, &mut child_iter, &loader).unwrap();
 
