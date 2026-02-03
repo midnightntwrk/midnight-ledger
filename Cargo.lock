@@ -3049,6 +3049,8 @@ dependencies = [
  "midnight-storage-core",
  "parking_lot",
  "pastey",
+ "proptest",
+ "proptest-derive",
  "rand 0.8.5",
  "rayon",
  "serde",
