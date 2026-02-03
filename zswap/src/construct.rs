@@ -404,8 +404,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
             coin_com: output.coin_com,
             value_commitment_input: input.value_commitment,
             value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
+            contract_address: addr,
             proof_input: input.proof,
             proof_output: output.proof,
         };
@@ -420,8 +419,9 @@ impl<D: DB> Transient<ProofPreimage, D> {
             coin_com: output.coin_com,
             value_commitment_input: input.value_commitment,
             value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
+            contract_address: output
+                .contract_address
+                .expect("contract address must be present"),
             proof_input: input.proof,
             proof_output: output.proof,
         }

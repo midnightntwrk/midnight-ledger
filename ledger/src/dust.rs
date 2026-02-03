@@ -449,7 +449,7 @@ impl From<DustGenerationInfo> for DustGenerationUniquenessInfo {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; P)]
 #[storable(db = D)]
-#[tag = "dust-spend[v1]"]
+#[tag = "dust-spend[v2]"]
 pub struct DustSpend<P: ProofKind<D>, D: DB> {
     pub v_fee: u128,
     pub old_nullifier: DustNullifier,
@@ -696,7 +696,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
 #[derive_where(Debug)]
 #[derive_where(Clone, PartialEq, Eq; S, P)]
 #[storable(db = D)]
-#[tag = "dust-actions[v1]"]
+#[tag = "dust-actions[v2]"]
 pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub spends: storage::storage::Array<DustSpend<P, D>, D>,
     pub registrations: storage::storage::Array<DustRegistration<S, D>, D>,

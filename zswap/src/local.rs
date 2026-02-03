@@ -140,11 +140,7 @@ impl<D: DB> State<D> {
             .outputs
             .iter_deref()
             .map(|o| (&o.coin_com, &o.ciphertext))
-            .chain(
-                tx.transient
-                    .iter_deref()
-                    .map(|io| (&io.coin_com, &io.ciphertext)),
-            )
+            .chain(tx.transient.iter_deref().map(|io| (&io.coin_com, &None)))
         {
             res.merkle_tree = res.merkle_tree.update_hash(res.first_free, coin_com.0, ());
             if let Some(ci) = ciph.as_ref().and_then(|ciph| secret_keys.try_decrypt(ciph)) {
@@ -239,6 +235,9 @@ impl<D: DB> State<D> {
         segment: Option<u16>,
         output: Output<ProofPreimage, D>,
     ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
+        let Some(addr) = output.contract_address else {
+            return Err(OfferCreationFailed::NotContractOwned);
+        };
         let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)
             .update_hash(0, output.coin_com.0, ())
             .rehash();
@@ -248,8 +247,7 @@ impl<D: DB> State<D> {
             coin_com: output.coin_com,
             value_commitment_input: input.value_commitment,
             value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
+            contract_address: addr,
             proof_input: input.proof,
             proof_output: output.proof,
         };

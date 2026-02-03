@@ -26,7 +26,7 @@ struct CoinPreimage {
 
 ledger merkleTree: HistoricMerkleTree<32, Bytes<32>>;
 ledger nullifiers: Set<Bytes<32>>;
-ledger valueCom: CurvePoint;
+ledger valueCom: NativePoint;
 ledger contractAddr: ContractAddress;
 ledger publicKey: ZswapCoinPublicKey;
 ledger segment: Uint<16>;

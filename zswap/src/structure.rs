@@ -25,6 +25,7 @@ use serde::Serialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
+use std::marker::PhantomData;
 use std::ops::{Add, Sub};
 use std::sync::Arc;
 use storage::Storable;
@@ -209,7 +210,7 @@ impl<P> AuthorizedClaim<P> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-input[v2]"]
+#[tag = "zswap-input[v3]"]
 #[storable(db = D)]
 pub struct Input<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
@@ -298,7 +299,7 @@ impl<D: DB> Input<ProofPreimage, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-output[v2]"]
+#[tag = "zswap-output[v3]"]
 #[storable(db = D)]
 pub struct Output<P: Storable<D>, D: DB> {
     pub coin_com: Commitment,
@@ -376,15 +377,14 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
-#[tag = "zswap-transient[v2]"]
+#[tag = "zswap-transient[v3]"]
 #[storable(db = D)]
 pub struct Transient<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
     pub coin_com: Commitment,
     pub value_commitment_input: Pedersen,
     pub value_commitment_output: Pedersen,
-    pub contract_address: Option<Sp<ContractAddress, D>>,
-    pub ciphertext: Option<Sp<CoinCiphertext, D>>,
+    pub contract_address: Sp<ContractAddress, D>,
     pub proof_input: Arc<P>,
     pub proof_output: Arc<P>,
 }
@@ -398,7 +398,6 @@ impl<P: Storable<D>, D: DB> Transient<P, D> {
             value_commitment_input: self.value_commitment_input,
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
-            ciphertext: self.ciphertext.clone(),
             proof_input: Arc::new(()),
             proof_output: Arc::new(()),
         }
@@ -419,7 +418,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
         Input {
             nullifier: self.nullifier,
             value_commitment: self.value_commitment_input,
-            contract_address: self.contract_address.clone(),
+            contract_address: Some(self.contract_address.clone()),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
                 .update_hash(0, self.coin_com.0, ())
                 .rehash()
@@ -433,8 +432,8 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
         Output {
             coin_com: self.coin_com,
             value_commitment: self.value_commitment_output,
-            contract_address: self.contract_address.clone(),
-            ciphertext: self.ciphertext.clone(),
+            contract_address: Some(self.contract_address.clone()),
+            ciphertext: None,
             proof: self.proof_output.clone(),
         }
     }
@@ -442,20 +441,11 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
 
 impl<P: Storable<D>, D: DB> Debug for Transient<P, D> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        match self.contract_address.clone() {
-            Some(addr) => {
-                write!(
-                    formatter,
-                    "<shielded transient coin {:?} {:?} for: {:?}>",
-                    self.coin_com, self.nullifier, addr
-                )
-            }
-            None => write!(
-                formatter,
-                "<shielded transient coin {:?} {:?}>",
-                self.coin_com, self.nullifier
-            ),
-        }
+        write!(
+            formatter,
+            "<shielded transient coin {:?} {:?} for: {:?}>",
+            self.coin_com, self.nullifier, self.contract_address,
+        )
     }
 }
 
@@ -470,7 +460,7 @@ tag_enforcement_test!(Delta);
 
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
-#[tag = "zswap-offer[v5]"]
+#[tag = "zswap-offer[v6]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
 /// inputs/outputs.

@@ -1417,34 +1417,38 @@ impl<
                     .map(|seg_x_offer| (*seg_x_offer.0.deref(), seg_x_offer.1.deref().clone())),
             )
             .collect();
-        let commitments: MultiSet<(u16, Commitment, ContractAddress)> =
-            offers
-                .iter()
-                .flat_map(|(segment, offer)| {
-                    offer
-                        .outputs
-                        .iter()
-                        .filter_map(|o| o.contract_address.clone().map(|addr| (o.coin_com, addr)))
-                        .chain(offer.transient.iter().filter_map(|t| {
-                            t.contract_address.clone().map(|addr| (t.coin_com, addr))
-                        }))
-                        .map(|(com, addr)| (*segment, com, *addr.deref()))
-                })
-                .collect();
-        let nullifiers: MultiSet<(u16, Nullifier, ContractAddress)> =
-            offers
-                .iter()
-                .flat_map(|(segment, offer)| {
-                    offer
-                        .inputs
-                        .iter()
-                        .flat_map(|i| i.contract_address.clone().map(|addr| (i.nullifier, addr)))
-                        .chain(offer.transient.iter().flat_map(|t| {
-                            t.contract_address.clone().map(|addr| (t.nullifier, addr))
-                        }))
-                        .map(|(nullifier, addr)| (*segment, nullifier, *addr.deref()))
-                })
-                .collect();
+        let commitments: MultiSet<(u16, Commitment, ContractAddress)> = offers
+            .iter()
+            .flat_map(|(segment, offer)| {
+                offer
+                    .outputs
+                    .iter()
+                    .filter_map(|o| o.contract_address.clone().map(|addr| (o.coin_com, addr)))
+                    .chain(
+                        offer
+                            .transient
+                            .iter()
+                            .map(|t| (t.coin_com, t.contract_address.clone())),
+                    )
+                    .map(|(com, addr)| (*segment, com, *addr.deref()))
+            })
+            .collect();
+        let nullifiers: MultiSet<(u16, Nullifier, ContractAddress)> = offers
+            .iter()
+            .flat_map(|(segment, offer)| {
+                offer
+                    .inputs
+                    .iter()
+                    .flat_map(|i| i.contract_address.clone().map(|addr| (i.nullifier, addr)))
+                    .chain(
+                        offer
+                            .transient
+                            .iter()
+                            .map(|t| (t.nullifier, t.contract_address.clone())),
+                    )
+                    .map(|(nullifier, addr)| (*segment, nullifier, *addr.deref()))
+            })
+            .collect();
         let claimed_nullifiers: MultiSet<(u16, Nullifier, ContractAddress)> = transcripts
             .iter()
             .flat_map(|(_, segment, t, addr)| {

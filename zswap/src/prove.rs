@@ -171,7 +171,6 @@ impl<D: DB> Transient<ProofPreimage, D> {
             value_commitment_input: self.value_commitment_input,
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
-            ciphertext: self.ciphertext.clone(),
             proof_input: Arc::new(proof_input?),
             proof_output: Arc::new(proof_output?),
         })
