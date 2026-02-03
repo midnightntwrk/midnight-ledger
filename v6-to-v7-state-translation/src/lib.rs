@@ -1,5 +1,6 @@
 use base_crypto::cost_model::CostDuration;
 use serialize::Tagged;
+use std::ops::Deref;
 use std::{any::Any, borrow::Cow, io, marker::PhantomData};
 use storage::{
     Storable,
@@ -7,7 +8,7 @@ use storage::{
     db::DB,
     merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie},
     state_translation::*,
-    storage::{Map, default_storage},
+    storage::{HashMap, Map, default_storage},
 };
 
 struct LedgerV6ToV7Translation;
@@ -240,11 +241,47 @@ impl<D: DB>
         Vec::new()
     }
     fn finalize(
-        _source: &onchain_state_v6::state::ContractState<D>,
+        source: &onchain_state_v6::state::ContractState<D>,
         _limit: &mut CostDuration,
         _cache: &TranslationCache<D>,
     ) -> io::Result<Option<onchain_state_v7::state::ContractState<D>>> {
-        Ok(Some(onchain_state_v7::state::ContractState::<D>::default()))
+        Ok(Some(onchain_state_v7::state::ContractState::<D> {
+            data: recast::<
+                onchain_state_v6::state::ChargedState<D>,
+                onchain_state_v7::state::ChargedState<D>,
+                D,
+            >(&Sp::new(source.data.clone()))?
+            .deref()
+            .clone(),
+            operations: source
+                .operations
+                .iter()
+                .map(|sp| {
+                    (
+                        recast::<
+                            onchain_state_v6::state::EntryPointBuf,
+                            onchain_state_v7::state::EntryPointBuf,
+                            D,
+                        >(&sp.0)
+                        .unwrap()
+                        .deref()
+                        .clone(),
+                        onchain_state_v7::state::ContractOperation::new(None),
+                    )
+                })
+                .collect(),
+            maintenance_authority: recast::<
+                onchain_state_v6::state::ContractMaintenanceAuthority,
+                onchain_state_v7::state::ContractMaintenanceAuthority,
+                D,
+            >(&Sp::new(source.maintenance_authority.clone()))?
+            .deref()
+            .clone(),
+            balance: HashMap(Map {
+                mpt: recast(&source.balance.0.mpt)?,
+                key_type: PhantomData,
+            }),
+        }))
     }
 }
 

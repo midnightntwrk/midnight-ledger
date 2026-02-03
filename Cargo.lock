@@ -479,7 +479,7 @@ version = "0.1.0"
 source = "git+https://github.com/midnightntwrk/midnight-zk?tag=midnight-circuits-v5.0.2#64ba405fedab8c96e09abde3dc134c902c6f2c6f"
 dependencies = [
  "quote 1.0.42",
- "syn 2.0.111",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -3461,7 +3461,7 @@ source = "git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.
 dependencies = [
  "proc-macro2",
  "quote 1.0.42",
- "syn 2.0.111",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -3553,7 +3553,7 @@ dependencies = [
  "midnight-serialize-macros 1.0.0-rc.3 (git+https://github.com/midnightntwrk/midnight-ledger.git?tag=ledger-7.0.0-alpha.1)",
  "proc-macro2",
  "quote 1.0.42",
- "syn 2.0.111",
+ "syn 2.0.113",
 ]
 
 [[package]]
@@ -6725,6 +6725,8 @@ dependencies = [
  "futures-executor",
  "group",
  "hex",
+ "indicatif",
+ "log",
  "midnight-base-crypto 1.0.0-rc.3",
  "midnight-circuits 6.0.0",
  "midnight-proofs 0.7.0",
