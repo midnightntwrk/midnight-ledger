@@ -13,7 +13,6 @@
 
 import {
   type AlignedValue,
-  type Alignment,
   bigIntToValue,
   ChargedState,
   type CoinPublicKey,
@@ -26,22 +25,17 @@ import {
   ContractState,
   createShieldedCoinInfo,
   decodeQualifiedShieldedCoinInfo,
-  degradeToTransient,
   encodeCoinPublicKey,
   encodeContractAddress,
   encodeQualifiedShieldedCoinInfo,
   encodeShieldedCoinInfo,
   LedgerParameters,
-  type LedgerState,
-  type Nonce,
   type Op,
   partitionTranscripts,
   persistentCommit,
   PreTranscript,
-  type Proofish,
   type QualifiedShieldedCoinInfo,
   QueryContext,
-  type RawTokenType,
   runtimeCoinCommitment,
   runtimeCoinNullifier,
   type ShieldedCoinInfo,
@@ -49,8 +43,6 @@ import {
   StateMap,
   StateValue,
   Transaction,
-  transientHash,
-  upgradeFromTransient,
   type Value,
   valueToBigInt,
   WellFormedStrictness,
@@ -103,6 +95,7 @@ import {
   THREE_VALUE,
   TWO_VALUE
 } from '@/test/utils/value-alignment';
+import { evolveFrom, getContextWithOffer } from '@/test/utils/zswap';
 import { testIntents } from '@/test-utils';
 
 describe('Ledger API - MicroDao', () => {
@@ -1230,33 +1223,6 @@ describe('Ledger API - MicroDao', () => {
     tx.wellFormed(s.ledger, unbalancedStrictness, s.time);
     const balanced = s.balanceTx(tx.eraseProofs());
     s.assertApply(balanced, balancedStrictness);
-  }
-
-  function evolveFrom(domainSep: Uint8Array, value: bigint, type: RawTokenType, nonce: Nonce): ShieldedCoinInfo {
-    const degrade = degradeToTransient([Static.encodeFromHex(nonce)])[0];
-    const thAlignment: Alignment = [ATOM_FIELD, ATOM_FIELD];
-    const thValue: Value = transientHash(thAlignment, [domainSep, degrade]);
-    const evolvedNonce = upgradeFromTransient(thValue)[0];
-    const updatedEvolvedNonce = new Uint8Array(evolvedNonce.length + 1);
-    updatedEvolvedNonce.set(evolvedNonce, 0);
-    updatedEvolvedNonce[updatedEvolvedNonce.length] = 0;
-    const evolvedNonceAsNonce: Nonce = Buffer.from(updatedEvolvedNonce).toString('hex');
-    return {
-      nonce: evolvedNonceAsNonce,
-      type,
-      value
-    };
-  }
-
-  function getContextWithOffer(ledger: LedgerState, addr: ContractAddress, offer?: ZswapOffer<Proofish>) {
-    const res = new QueryContext(new ChargedState(ledger.index(addr)!.data.state), addr);
-    if (offer) {
-      const [, indices] = ledger.zswap.tryApply(offer);
-      const { block } = res;
-      block.comIndices = new Map(Array.from(indices, ([k, v]) => [k, Number(v)]));
-      res.block = block;
-    }
-    return res;
   }
 
   function getChargedState(orgPk: Value): ChargedState {

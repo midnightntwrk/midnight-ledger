@@ -11,6 +11,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   governance is in place
 - fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
   `check` method.
+- feat: add `replayEventsWithChanges` on `ZswapLocalState` and `DustLocalState`,
+  returning `ZswapLocalStateWithChanges` and `DustLocalStateWithChanges` with
+  `ZswapStateChanges` and `DustStateChanges` (received and spent coins or UTXOs
+  per event). Exposed via wasm.
+- fix: fix non-determinism in processing smart-contract GC.
 
 ## 6.2.0
 

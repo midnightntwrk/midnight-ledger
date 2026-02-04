@@ -1259,7 +1259,7 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );
@@ -1274,7 +1274,7 @@ describe('Ledger API - Transaction', () => {
     ];
 
     const program = programWithResults(transcriptOps, [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] }
     ]);
 
@@ -1282,7 +1282,7 @@ describe('Ledger API - Transaction', () => {
     const preTranscript = new PreTranscript(context, program);
 
     const privateTranscriptOutputs: AlignedValue[] = [
-      { value: [Random.generate32Bytes()], alignment: [ATOM_BYTES_32] }
+      { value: [Static.trimTrailingZeros(Random.generate32Bytes())], alignment: [ATOM_BYTES_32] }
     ];
 
     const preCall = new PrePartitionContractCall(
