@@ -1,8 +1,12 @@
-**@midnight/ledger v2.1.0-alpha.1**
+**@midnight/ledger v2.1.0**
 
 ***
 
-# @midnight/ledger v2.1.0-alpha.1
+# @midnight/ledger v2.1.0
+
+## Classes
+
+- [Zkir](classes/Zkir.md)
 
 ## Type Aliases
 
