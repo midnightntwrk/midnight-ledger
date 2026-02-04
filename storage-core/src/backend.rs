@@ -1036,7 +1036,7 @@ pub struct OnDiskObject<H: WellBehavedHasher> {
     /// `StorageBackend::get_root_count` for details -- but not here in the
     /// object!
     pub ref_count: u64,
-    /// Used in `storage` crate
+    /// `ArenaKey`s for the `OnDiskObject`'s children
     pub children: std::vec::Vec<ArenaKey<H>>,
 }
 

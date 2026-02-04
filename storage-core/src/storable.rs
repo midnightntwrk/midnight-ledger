@@ -281,7 +281,7 @@ impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
     }
 }
 
-#[cfg(feature = "test")]
+#[cfg(feature = "test-utilities")]
 // Storable for Vec is inherently unsafe as a Vec can be arbitrarily long whereas `Storable`
 // requires that a node has no more than 16 children. However, it is useful for testing.
 impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {

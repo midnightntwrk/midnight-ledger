@@ -12,7 +12,7 @@ stress-test = ["dep:serde_json", "dep:os_pipe"]
 bench = ["dep:criterion", "dep:pprof"]
 public-internal-structure = []
 state-translation = ["public-internal-structure", "dep:hashbrown"]
-test = []
+test-utilities = []
 
 [dependencies]
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
