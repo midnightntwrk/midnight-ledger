@@ -81,7 +81,7 @@ import {
   programWithResults,
   setMember
 } from '@/test/utils/onchain-runtime-program-fragments';
-import { ATOM_BYTES_1, ATOM_BYTES_8, ATOM_BYTES_32, EMPTY_VALUE } from '@/test/utils/value-alignment';
+import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, ATOM_BYTES_8, EMPTY_VALUE } from '@/test/utils/value-alignment';
 import {
   claimUnshieldedSpendOps,
   encodeAmount,
@@ -455,7 +455,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       [],
       {
         value: [Static.encodeFromHex(tokenColor), bigIntToValue(DEPOSIT_AMOUNT)[0]],
-        alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }]
+        alignment: [ATOM_BYTES_32, ATOM_BYTES_16]
       },
       { value: [], alignment: [] },
       communicationCommitmentRandomness(),
@@ -567,7 +567,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
         ],
         alignment: [
           ATOM_BYTES_32, // tokenColor
-          { tag: 'atom', value: { tag: 'bytes', length: 16 } }, // amount
+          ATOM_BYTES_16, // amount
           ATOM_BYTES_1, // boolean (is_contract)
           // Unit has no alignment entry
           ATOM_BYTES_32 // user address
@@ -614,5 +614,150 @@ describe('Ledger API - TokenVault Unshielded', () => {
     expect(withdrawnUtxo).toBeDefined();
     console.log(`   User received UTXO: ${withdrawnUtxo!.value} tokens`);
     console.log(`   Contract retains: ${REMAINING_IN_CONTRACT} tokens (in balance)`);
+  });
+
+  /** Verify that receiveUnshielded increases gas compared to a baseline without unshielded ops. */
+  test('partitionTranscripts returns higher gas for receiveUnshielded than baseline', () => {
+    const state = TestState.new();
+    state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
+
+    const ownerSk = Random.generate32Bytes();
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ops = setupOperations();
+    const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
+
+    const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
+
+    // Program A: just increment a counter (no unshielded ops)
+    const programA = programWithResults(
+      [...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)],
+      []
+    );
+    const transcriptsA = partitionTranscripts(
+      [new PreTranscript(context, programA)],
+      LedgerParameters.initialParameters()
+    );
+
+    // Program B: receiveUnshieldedOps + counterIncrement (populates effects.unshielded_inputs)
+    const tokenColor = Random.hex(64);
+    const tokenTypeValue = encodeUnshieldedTokenType(tokenColor);
+    const amountValue = encodeAmount(1000n);
+
+    const programB = programWithResults(
+      [
+        ...receiveUnshieldedOps(tokenTypeValue, amountValue),
+        ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)
+      ],
+      []
+    );
+    const transcriptsB = partitionTranscripts(
+      [new PreTranscript(context, programB)],
+      LedgerParameters.initialParameters()
+    );
+
+    const gasA = transcriptsA[0][0]!.gas;
+    const gasB = transcriptsB[0][0]!.gas;
+
+    const totalGasA = gasA.computeTime + gasA.readTime + gasA.bytesWritten + gasA.bytesDeleted;
+    const totalGasB = gasB.computeTime + gasB.readTime + gasB.bytesWritten + gasB.bytesDeleted;
+    expect(totalGasB).toBeGreaterThan(totalGasA);
+  });
+
+  /** Verify that sendUnshielded increases gas compared to a baseline without unshielded ops. */
+  test('partitionTranscripts returns higher gas for sendUnshielded than baseline', () => {
+    const state = TestState.new();
+    state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
+
+    const ownerSk = Random.generate32Bytes();
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ops = setupOperations();
+    const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
+
+    const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
+
+    // Program A: just increment a counter (no unshielded ops)
+    const programA = programWithResults(
+      [...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS), false, 1)],
+      []
+    );
+    const transcriptsA = partitionTranscripts(
+      [new PreTranscript(context, programA)],
+      LedgerParameters.initialParameters()
+    );
+
+    // Program B: sendUnshieldedOps + counterIncrement (populates effects.unshielded_outputs)
+    const tokenColor = Random.hex(64);
+    const tokenTypeValue = encodeUnshieldedTokenType(tokenColor);
+    const amountValue = encodeAmount(500n);
+
+    const programB = programWithResults(
+      [
+        ...sendUnshieldedOps(tokenTypeValue, amountValue),
+        ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_WITHDRAWALS), false, 1)
+      ],
+      []
+    );
+    const transcriptsB = partitionTranscripts(
+      [new PreTranscript(context, programB)],
+      LedgerParameters.initialParameters()
+    );
+
+    const gasA = transcriptsA[0][0]!.gas;
+    const gasB = transcriptsB[0][0]!.gas;
+
+    const totalGasA = gasA.computeTime + gasA.readTime + gasA.bytesWritten + gasA.bytesDeleted;
+    const totalGasB = gasB.computeTime + gasB.readTime + gasB.bytesWritten + gasB.bytesDeleted;
+    expect(totalGasB).toBeGreaterThan(totalGasA);
+  });
+
+  /** Verify that more unshielded token types produce proportionally more gas overhead. */
+  test('partitionTranscripts returns higher gas for two unshielded token types than one', () => {
+    const state = TestState.new();
+    state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
+
+    const ownerSk = Random.generate32Bytes();
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ops = setupOperations();
+    const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
+
+    const context = new QueryContext(new ChargedState(state.ledger.index(contractAddr)!.data.state), contractAddr);
+
+    const tokenColor1 = Random.hex(64);
+    const tokenColor2 = Random.hex(64);
+    const amountValue = encodeAmount(1000n);
+
+    // Program A: receiveUnshieldedOps(tokenColor1) + counterIncrement (1 key in unshielded_inputs)
+    const programA = programWithResults(
+      [
+        ...receiveUnshieldedOps(encodeUnshieldedTokenType(tokenColor1), amountValue),
+        ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)
+      ],
+      []
+    );
+    const transcriptsA = partitionTranscripts(
+      [new PreTranscript(context, programA)],
+      LedgerParameters.initialParameters()
+    );
+
+    // Program B: receiveUnshieldedOps(color1) + receiveUnshieldedOps(color2) + counterIncrement (2 keys)
+    const programB = programWithResults(
+      [
+        ...receiveUnshieldedOps(encodeUnshieldedTokenType(tokenColor1), amountValue),
+        ...receiveUnshieldedOps(encodeUnshieldedTokenType(tokenColor2), amountValue),
+        ...counterIncrement(getKey(STATE_IDX_TOTAL_UNSHIELDED_DEPOSITS), false, 1)
+      ],
+      []
+    );
+    const transcriptsB = partitionTranscripts(
+      [new PreTranscript(context, programB)],
+      LedgerParameters.initialParameters()
+    );
+
+    const gasA = transcriptsA[0][0]!.gas;
+    const gasB = transcriptsB[0][0]!.gas;
+
+    const totalGasA = gasA.computeTime + gasA.readTime + gasA.bytesWritten + gasA.bytesDeleted;
+    const totalGasB = gasB.computeTime + gasB.readTime + gasB.bytesWritten + gasB.bytesDeleted;
+    expect(totalGasB).toBeGreaterThan(totalGasA);
   });
 });
