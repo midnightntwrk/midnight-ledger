@@ -507,6 +507,242 @@ impl IrSource {
                 .map(|(comm, rand)| (comm.0, rand.0)),
         })
     }
+
+    /// Performs a dry run of the circuit to compute public inputs without validation.
+    ///
+    /// This method executes the circuit with the given inputs and returns the computed
+    /// public inputs vector. Unlike `preprocess`, it does not validate the public inputs
+    /// against expected values, making it useful for discovering what public inputs a
+    /// circuit will produce.
+    ///
+    /// # Arguments
+    /// * `inputs` - The witness/input values for the circuit
+    /// * `binding_input` - The binding input value
+    /// * `public_transcript_outputs` - Values consumed by `PublicInput` instructions
+    ///
+    /// # Returns
+    /// A vector of field elements representing the computed public inputs (excluding the
+    /// binding input which is always the first element in the full public input vector).
+    pub fn dry_run(
+        &self,
+        inputs: &[Fr],
+        public_transcript_outputs: &[Fr],
+    ) -> Result<Vec<Fr>, ProvingError> {
+        if inputs.len() != self.num_inputs as usize {
+            bail!(
+                "Expected {} inputs, received {}",
+                self.num_inputs,
+                inputs.len()
+            );
+        }
+        let mut memory: Vec<Fr> = inputs.to_vec();
+        let mut pis: Vec<Fr> = Vec::new(); // Don't include binding_input here
+        let mut public_transcript_outputs_idx: usize = 0;
+
+        let idx = |memory: &[Fr], i: u32| {
+            memory
+                .get(i as usize)
+                .copied()
+                .ok_or_else(|| anyhow!("index out of bounds: {i}"))
+        };
+        let idx_bool = |memory: &[Fr], i: u32| {
+            idx(memory, i).and_then(|val| {
+                if val == 0.into() {
+                    Ok(false)
+                } else if val == 1.into() {
+                    Ok(true)
+                } else {
+                    bail!("Expected boolean, found: {val:?}");
+                }
+            })
+        };
+        let idx_point = |memory: &[Fr], x: u32, y: u32| {
+            let x = idx(memory, x)?;
+            let y = idx(memory, y)?;
+            EmbeddedGroupAffine::new(x, y)
+                .ok_or_else(|| anyhow!("Elliptic curve point not on curve: ({x:?}, {y:?})"))
+        };
+        let idx_bits = |memory: &[Fr], i: u32, constrain: Option<u32>| {
+            idx(memory, i).and_then(|val| {
+                let mut bits = val
+                    .0
+                    .to_bytes_le()
+                    .into_iter()
+                    .flat_map(|byte| {
+                        [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]
+                            .into_iter()
+                            .map(move |mask| byte & mask != 0)
+                    })
+                    .collect::<Vec<_>>();
+                if let Some(n) = constrain {
+                    if n as usize >= FR_BITS {
+                        bail!("Excessive bit bound");
+                    }
+                    if bits[n as usize..].iter().any(|b| *b) {
+                        bail!("Bit bound failed: {val:?} is not {n}-bit");
+                    }
+                    bits.truncate(n as usize);
+                }
+                Ok(bits)
+            })
+        };
+        let from_point =
+            |p: EmbeddedGroupAffine| [p.x().unwrap_or(0.into()), p.y().unwrap_or(0.into())];
+        fn from_bits<I: DoubleEndedIterator<Item = bool>>(bits: I) -> Fr {
+            bits.rev()
+                .fold(0.into(), |acc, bit| acc * 2.into() + bit.into())
+        }
+
+        for ins in self.instructions.iter() {
+            match ins {
+                I::Add { a, b } => memory.push(idx(&memory, *a)? + idx(&memory, *b)?),
+                I::Mul { a, b } => memory.push(idx(&memory, *a)? * idx(&memory, *b)?),
+                I::Neg { a } => memory.push(-idx(&memory, *a)?),
+                I::Not { a } => memory.push((!idx_bool(&memory, *a)?).into()),
+                I::ConstrainEq { a, b } => {
+                    if idx(&memory, *a)? != idx(&memory, *b)? {
+                        bail!(
+                            "Failed equality constraint: {:?} != {:?}",
+                            idx(&memory, *a)?,
+                            idx(&memory, *b)?
+                        );
+                    }
+                }
+                I::CondSelect { bit, a, b } => {
+                    let (bit, a, b) = (
+                        idx_bool(&memory, *bit)?,
+                        idx(&memory, *a)?,
+                        idx(&memory, *b)?,
+                    );
+                    memory.push(if bit { a } else { b })
+                }
+                I::Assert { cond } => {
+                    if !idx_bool(&memory, *cond)? {
+                        bail!("Failed direct assertion");
+                    }
+                }
+                I::TestEq { a, b } => memory.push((idx(&memory, *a)? == idx(&memory, *b)?).into()),
+                I::PublicInput { guard } => {
+                    let val = match guard {
+                        Some(guard) if !idx_bool(&memory, *guard)? => 0.into(),
+                        _ => {
+                            let v = public_transcript_outputs
+                                .get(public_transcript_outputs_idx)
+                                .copied()
+                                .ok_or_else(|| anyhow!("Ran out of public transcript outputs"))?;
+                            public_transcript_outputs_idx += 1;
+                            v
+                        }
+                    };
+                    memory.push(val);
+                }
+                I::DeclarePubInput { var } => {
+                    pis.push(idx(&memory, *var)?);
+                }
+                I::PrivateInput { guard: _ } => {
+                    // In dry run, we don't have private transcript, push zero
+                    memory.push(0.into());
+                }
+                I::Copy { var } => memory.push(idx(&memory, *var)?),
+                I::ConstrainToBoolean { var } => drop(idx_bool(&memory, *var)?),
+                I::ConstrainBits { var, bits } => drop(idx_bits(&memory, *var, Some(*bits))?),
+                I::DivModPowerOfTwo { var, bits } => {
+                    if *bits as usize > FR_BYTES_STORED * 8 {
+                        bail!("Excessive bit count");
+                    }
+                    let var_bits = idx_bits(&memory, *var, None)?;
+                    memory.push(from_bits(var_bits[*bits as usize..].iter().copied()));
+                    memory.push(from_bits(var_bits[..*bits as usize].iter().copied()));
+                }
+                I::ReconstituteField {
+                    divisor,
+                    modulus,
+                    bits,
+                } => {
+                    if *bits as usize > FR_BYTES_STORED * 8 {
+                        bail!("Excessive bit count");
+                    }
+                    let fr_max = Fr::from(-1);
+                    let max_bits = idx_bits(&[fr_max], 0, None)?;
+                    let modulus_bits = idx_bits(&memory, *modulus, Some(*bits))?;
+                    let divisor_bits = idx_bits(&memory, *divisor, Some(FR_BITS as u32 - *bits))?;
+                    let cmp = modulus_bits
+                        .iter()
+                        .chain(divisor_bits.iter())
+                        .rev()
+                        .zip(max_bits[..FR_BITS].iter().rev())
+                        .map(|(ab, max)| ab.cmp(max))
+                        .fold(
+                            Ordering::Equal,
+                            |prefix, local| if prefix.is_eq() { local } else { prefix },
+                        );
+                    if cmp.is_gt() {
+                        bail!("Reconstituted element overflows field");
+                    }
+                    let power = (0..*bits).fold(Fr::from(1), |acc, _| Fr::from(2) * acc);
+                    memory.push(power * idx(&memory, *divisor)? + idx(&memory, *modulus)?);
+                }
+                I::LessThan { a, b, bits } => memory.push(
+                    (from_bits(idx_bits(&memory, *a, Some(*bits))?.into_iter())
+                        < from_bits(idx_bits(&memory, *b, Some(*bits))?.into_iter()))
+                    .into(),
+                ),
+                I::TransientHash { inputs } => memory.push(transient_hash(
+                    &inputs
+                        .iter()
+                        .map(|i| idx(&memory, *i))
+                        .collect::<Result<Vec<_>, _>>()?,
+                )),
+                I::PersistentHash { alignment, inputs } => {
+                    let inputs = inputs
+                        .iter()
+                        .map(|i| idx(&memory, *i))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    let value = alignment.parse_field_repr(&inputs).ok_or_else(|| {
+                        anyhow!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})")
+                    })?;
+                    let mut repr = Vec::new();
+                    ValueReprAlignedValue(value).binary_repr(&mut repr);
+                    let hash = persistent_hash(&repr);
+                    memory.extend(hash.field_vec());
+                }
+                I::PiSkip { guard, count } => {
+                    // In dry run, we skip validation but still track skipped inputs
+                    if let Some(guard) = guard {
+                        if !idx_bool(&memory, *guard)? {
+                            // Guard is false, these inputs are skipped - remove them from pis
+                            for _ in 0..(*count as usize) {
+                                pis.pop();
+                            }
+                        }
+                    }
+                    // When guard is true or no guard, keep the pis as-is (no validation)
+                }
+                I::LoadImm { imm } => memory.push(*imm),
+                I::Output { var: _ } => {
+                    // Outputs don't affect public inputs
+                }
+                I::EcAdd { a_x, a_y, b_x, b_y } => memory.extend(from_point(
+                    idx_point(&memory, *a_x, *a_y)? + idx_point(&memory, *b_x, *b_y)?,
+                )),
+                I::HashToCurve { inputs } => {
+                    let inputs = inputs
+                        .iter()
+                        .map(|var| idx(&memory, *var))
+                        .collect::<Result<Vec<_>, _>>()?;
+                    memory.extend(from_point(hash_to_curve(&inputs)))
+                }
+                I::EcMul { a_x, a_y, scalar } => memory.extend(from_point(
+                    idx_point(&memory, *a_x, *a_y)? * idx(&memory, *scalar)?,
+                )),
+                I::EcMulGenerator { scalar } => memory.extend(from_point(
+                    EmbeddedGroupAffine::generator() * idx(&memory, *scalar)?,
+                )),
+            }
+        }
+
+        Ok(pis)
+    }
 }
 
 impl Relation for IrSource {
