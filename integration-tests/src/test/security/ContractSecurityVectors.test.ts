@@ -426,10 +426,12 @@ describe('Contract Security Vector Tests', () => {
     test('should limit transaction context complexity', () => {
       const zswapChainState = new ZswapChainState();
       const ledgerState = new LedgerState('local-test', zswapChainState);
+      const secondsSinceEpoch = Static.blockTime(new Date());
       const blockContext = {
-        secondsSinceEpoch: Static.blockTime(new Date()),
+        secondsSinceEpoch,
         secondsSinceEpochErr: 0,
-        parentBlockHash: Static.parentBlockHash()
+        parentBlockHash: Static.parentBlockHash(),
+        lastBlockTime: secondsSinceEpoch - 6n
       };
 
       const transactionContext = new TransactionContext(ledgerState, blockContext);

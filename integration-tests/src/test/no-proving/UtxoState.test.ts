@@ -65,7 +65,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -114,7 +115,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -166,7 +168,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -1031,7 +1034,8 @@ describe('Ledger API - UtxoState', () => {
       const blockContext = {
         secondsSinceEpoch: Static.blockTime(new Date(0)),
         secondsSinceEpochErr: 0,
-        parentBlockHash: Static.parentBlockHash()
+        parentBlockHash: Static.parentBlockHash(),
+        lastBlockTime: Static.blockTime(new Date(0))
       };
 
       const strictness = new WellFormedStrictness();

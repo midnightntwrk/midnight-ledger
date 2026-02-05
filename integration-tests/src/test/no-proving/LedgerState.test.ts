@@ -307,11 +307,7 @@ describe('Ledger API - LedgerState', () => {
     const unprovenTransaction = Transaction.fromParts('local-test', unprovenOfferGuaranteed, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const ledgerState = new LedgerState('local-test', new ZswapChainState());
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date(0)),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date(0));
 
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -393,11 +389,7 @@ describe('Ledger API - LedgerState', () => {
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const ledgerState = new LedgerState('local-test', new ZswapChainState());
 
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date(Date.now() - 5_000)),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date(Date.now() - 5_000));
 
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -436,11 +428,7 @@ describe('Ledger API - LedgerState', () => {
     const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const ledgerState = new LedgerState('local-test', new ZswapChainState());
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(now),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(now);
 
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
@@ -476,11 +464,7 @@ describe('Ledger API - LedgerState', () => {
     const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const ledgerState = new LedgerState('local-test', new ZswapChainState());
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date(0)),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date(0));
 
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
