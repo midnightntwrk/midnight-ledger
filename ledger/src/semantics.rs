@@ -918,12 +918,12 @@ impl<D: DB> LedgerState<D> {
     >(
         &self,
         tx: &StandardTransaction<S, P, B, D>,
+        transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
         let mut events: Vec<Event<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
-        let transaction_hash = Transaction::Standard(tx.clone()).transaction_hash();
         if segment == 0 {
             // Apply replay protection
             state.replay_protection = Sp::new(
@@ -1187,13 +1187,13 @@ impl<D: DB> LedgerState<D> {
         Ok((state, res))
     }
 
-    #[instrument(skip(self, tx), fields(tx = ?tx.transaction_hash().0))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.hash))]
     pub fn apply(
         &self,
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        let res = match &tx.0 {
+        let res = match &tx.inner {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
@@ -1202,7 +1202,7 @@ impl<D: DB> LedgerState<D> {
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
@@ -1233,7 +1233,7 @@ impl<D: DB> LedgerState<D> {
                 rewards,
                 &context.block_context,
                 EventSource {
-                    transaction_hash: tx.transaction_hash(),
+                    transaction_hash: tx.hash,
                     logical_segment: 0,
                     physical_segment: 0,
                 },
@@ -1243,7 +1243,7 @@ impl<D: DB> LedgerState<D> {
             "state transition: {:?} => {:?} [transaction {:?}]",
             self.state_hash(),
             res.0.state_hash(),
-            tx.transaction_hash().0
+            tx.hash,
         );
         debug!(
             "transaction result: {:?}",
