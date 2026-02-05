@@ -320,6 +320,10 @@ export type BlockContext = {
    * The hash of the block prior to this transaction, as a hex-encoded string
    */
   parentBlockHash: string,
+  /**
+   * The {@link secondsSinceEpoch} of the previous block
+   */
+  lastBlockTime: bigint,
 };
 /**
  * The contract-external effects of a transcript.
