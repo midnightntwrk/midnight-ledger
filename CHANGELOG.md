@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 7.0.1
+
+- pulled in non-breaking changes to `storage` crate
+
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes
