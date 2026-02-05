@@ -9,7 +9,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "bas
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
 stress-test = ["storage-core/stress-test"]
-bench = ["storage-core/bench"]
+bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation"]
 
@@ -28,6 +28,8 @@ proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 tempfile = "3.20"
 hashbrown = { version = "^0.16.0", optional = true }
+pprof = { version = "0.14", optional = true, features = ["criterion", "flamegraph"] }
+criterion = { version = "^0.5.1", optional = true }
 
 [dev-dependencies]
 pastey = "0.1.1"

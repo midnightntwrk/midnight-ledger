@@ -25,6 +25,7 @@ use std::marker::PhantomData;
 use storage::Storable;
 use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
+use storage::merkle_patricia_trie::Node;
 use storage::merkle_patricia_trie::{self, Annotation, MerklePatriciaTrie, Monoid, Semigroup};
 use storage::state_translation::*;
 use storage::storable::{Loader, SizeAnn};
