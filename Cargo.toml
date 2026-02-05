@@ -24,6 +24,7 @@ members = [
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
     "static",
+	"storage-core"
 ]
 default-members = [
     "zswap",
