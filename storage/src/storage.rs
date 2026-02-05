@@ -26,8 +26,6 @@ use crypto::digest::Digest;
 use derive_where::derive_where;
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
-#[cfg(feature = "proptest")]
-use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;

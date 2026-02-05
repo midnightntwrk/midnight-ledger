@@ -39,7 +39,7 @@ mod cache;
         any(feature = "parity-db", feature = "sqlite")
     )
 ))]
-mod test;
+pub mod test;
 
 // Stress testing utilities. Needs to be pub since we call it from a bin
 // target. But not meant to be consumed by library users.

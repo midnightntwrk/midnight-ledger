@@ -553,7 +553,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                         return None;
                     }
                 }
-                Self::lookup_with(&child, &path[compressed_path.len()..], f)
+                Self::lookup_with(child, &path[compressed_path.len()..], f)
             }
             Node::MidBranchLeaf { value, child, .. } => {
                 if path.is_empty() {
@@ -602,7 +602,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
         sp: &Sp<Node<T, D, A>, D>,
         target_path: &[u8],
         // Returns "is this node empty?" so we can collapse parts of the tree as we go
-    ) -> (Sp<Node<T, D, A>, D>, Vec<Sp<T, D>>) {
+    ) -> (Sp<Self, D>, Vec<Sp<T, D>>) {
         if target_path.is_empty() {
             return (sp.clone(), vec![]);
         }
@@ -934,7 +934,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
 
     // Inserts a value at a given path.
     // Returns the updated tree, and the existing value at that path, if applicable.
-    fn insert(sp: &Sp<Node<T, D, A>, D>, path: &[u8], value: T) -> (Sp<Node<T, D, A>, D>, Option<Sp<T, D>>) {
+    fn insert(sp: &Sp<Self, D>, path: &[u8], value: T) -> (Sp<Self, D>, Option<Sp<T, D>>) {
         if path.is_empty() {
             let value_sp = sp.arena.alloc(value.clone());
             let (node, existing_val) = match sp.deref() {
@@ -1160,7 +1160,7 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
 
     /// Removes a value from a path, doing nothing if no value was present.
     /// Returns the updated node, and the value removed if applicable.
-    pub fn remove(sp: &Sp<Node<T, D, A>, D>, path: &[u8]) -> (Sp<Node<T, D, A>, D>, Option<Sp<T, D>>) {
+    pub fn remove(sp: &Sp<Self, D>, path: &[u8]) -> (Sp<Self, D>, Option<Sp<T, D>>) {
         match sp.deref() {
             Node::Empty => (sp.arena.alloc(Node::Empty), None),
             Node::Leaf { value, ann } => {

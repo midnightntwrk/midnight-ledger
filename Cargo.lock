@@ -3044,7 +3044,9 @@ version = "1.1.0"
 dependencies = [
  "crypto",
  "derive-where",
+ "hashbrown 0.16.1",
  "midnight-base-crypto",
+ "midnight-onchain-state",
  "midnight-serialize",
  "midnight-storage-core",
  "parking_lot",
@@ -3056,6 +3058,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
 ]
 
 [[package]]

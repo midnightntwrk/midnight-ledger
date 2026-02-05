@@ -292,9 +292,9 @@ impl<D: DB>
                     };
                     *new_child = entry.force_downcast();
                 }
-                let ann = new_children
-                    .iter()
-                    .fold(SizeAnn::empty(), |acc, x| acc.append(&x.ann()));
+                let ann = new_children.iter().fold(SizeAnn::empty(), |acc, x| {
+                    acc.append(&Node::<_, D, _>::ann(x))
+                });
                 merkle_patricia_trie::Node::Branch {
                     ann,
                     children: Box::new(new_children),
@@ -309,7 +309,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> = entry.force_downcast();
-                let ann = child.ann();
+                let ann = Node::<BarEntry, D>::ann(child);
                 merkle_patricia_trie::Node::Extension {
                     ann,
                     compressed_path: compressed_path.clone(),
@@ -338,7 +338,7 @@ impl<D: DB>
                 let value: Sp<BarEntry, D> = value_entry.force_downcast();
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
                     child_entry.force_downcast();
-                let ann = SizeAnn::from_value(&value).append(&child.ann());
+                let ann = SizeAnn::from_value(&value).append(&Node::<BarEntry, D>::ann(child));
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
         }))
