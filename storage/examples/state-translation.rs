@@ -310,7 +310,7 @@ impl<D: DB>
                     return Ok(None);
                 };
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> = entry.force_downcast();
-                let ann = Node::<BarEntry, D>::ann(child);
+                let ann = Node::<BarEntry, D>::ann(&child);
                 merkle_patricia_trie::Node::Extension {
                     ann,
                     compressed_path: compressed_path.clone(),
@@ -339,7 +339,7 @@ impl<D: DB>
                 let value: Sp<BarEntry, D> = value_entry.force_downcast();
                 let child: Sp<merkle_patricia_trie::Node<BarEntry, D>, D> =
                     child_entry.force_downcast();
-                let ann = SizeAnn::from_value(&value).append(&Node::<BarEntry, D>::ann(child));
+                let ann = SizeAnn::from_value(&value).append(&Node::<BarEntry, D>::ann(&child));
                 merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child }
             }
         }))
