@@ -66,6 +66,7 @@ struct SerdeBlockContext {
     seconds_since_epoch: u64,
     seconds_since_epoch_err: u32,
     parent_block_hash: String,
+    last_block_time: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -78,6 +79,7 @@ struct SerdeCallContext {
     caller: Option<SerdePublicAddress>,
     balance: HashMap<SerdeTokenType, u128>,
     com_indices: HashMap<String, u64>,
+    last_block_time: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,6 +218,7 @@ impl From<BlockContext> for SerdeBlockContext {
             seconds_since_epoch: ctxt.tblock.to_secs(),
             seconds_since_epoch_err: ctxt.tblock_err,
             parent_block_hash: ctxt.parent_block_hash.0.encode_hex(),
+            last_block_time: ctxt.last_block_time.to_secs(),
         }
     }
 }
@@ -231,6 +234,7 @@ impl TryFrom<SerdeBlockContext> for BlockContext {
             tblock: Timestamp::from_secs(ctxt.seconds_since_epoch),
             tblock_err: ctxt.seconds_since_epoch_err,
             parent_block_hash: HashOutput(hash),
+            last_block_time: Timestamp::from_secs(ctxt.last_block_time),
         })
     }
 }
@@ -256,6 +260,7 @@ impl<D: DB> From<CallContext<D>> for SerdeCallContext {
                 .iter()
                 .map(|(com, val)| (com.0.0.encode_hex(), *val))
                 .collect(),
+            last_block_time: ctxt.last_block_time.to_secs(),
         }
     }
 }
@@ -295,6 +300,7 @@ impl<D: DB> TryFrom<SerdeCallContext> for CallContext<D> {
                     ))
                 })
                 .collect::<Result<Map<CoinCommitment, u64>, _>>()?,
+            last_block_time: Timestamp::from_secs(ctxt.last_block_time),
         })
     }
 }
@@ -308,6 +314,7 @@ pub struct CallContext<D: DB> {
     pub caller: Option<PublicAddress>,
     pub balance: storage::storage::HashMap<TokenType, u128, D>,
     pub com_indices: Map<CoinCommitment, u64>,
+    pub last_block_time: Timestamp,
 }
 
 impl<D: DB> Serialize for CallContext<D> {
@@ -331,12 +338,13 @@ impl<'de, DD: DB> Deserialize<'de> for CallContext<DD> {
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, Serializable)]
-#[tag = "block-context[v1]"]
+#[tag = "block-context[v2]"]
 #[serde(try_from = "SerdeBlockContext", into = "SerdeBlockContext")]
 pub struct BlockContext {
     pub tblock: Timestamp,
     pub tblock_err: u32,
     pub parent_block_hash: HashOutput,
+    pub last_block_time: Timestamp,
 }
 tag_enforcement_test!(BlockContext);
 
@@ -879,6 +887,7 @@ impl<D: DB> From<&QueryContext<D>> for VmValue<D> {
                         Some(x) => StateValue::Cell(Sp::new(x.into())),
                         None => StateValue::Null,
                     },
+                    StateValue::Cell(Sp::new(context.call_context.last_block_time.into())),
                 ]
                 .into(),
             ),

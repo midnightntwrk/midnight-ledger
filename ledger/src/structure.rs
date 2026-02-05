@@ -2441,6 +2441,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
             caller,
             balance: state.balance,
             com_indices: com_indices.clone(),
+            last_block_time: block.last_block_time,
         }
     }
 
