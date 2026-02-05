@@ -1954,6 +1954,7 @@ pub mod bin_tree {
     #[derive_where(Clone, PartialEq, Eq)]
     #[tag = "test-bin-tree"]
     #[storable(db = D)]
+    /// A binary tree used for stress-testing
     pub struct BinTree<D: DB> {
         value: u64,
         pub(crate) left: Option<Sp<BinTree<D>, D>>,
@@ -1972,6 +1973,7 @@ pub mod bin_tree {
     }
 
     impl<D: DB> BinTree<D> {
+        /// Create a new `BinTree`
         pub fn new(
             value: u64,
             left: Option<Sp<BinTree<D>, D>>,
