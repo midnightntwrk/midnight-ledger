@@ -1034,7 +1034,7 @@ impl<D: DB> LedgerState<D> {
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
-                                &state.utxo,
+                                &context.ref_state.utxo,
                                 fees_remaining,
                                 &erased,
                                 reg,
