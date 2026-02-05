@@ -12,7 +12,6 @@ base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", ta
 serialize = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-serialize" }
 coin-structure-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-coin-structure" }
 coin-structure-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-coin-structure" }
-zswap-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-zswap" }
 zswap-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-zswap" }
 onchain-state-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-onchain-state" }
 onchain-state-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-onchain-state" }
@@ -20,7 +19,7 @@ onchain-state-v7 = { git = "https://github.com/midnightntwrk/midnight-ledger.git
 [dev-dependencies]
 onchain-runtime = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-onchain-runtime" }
 transient-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger.git", tag = "ledger-7.0.0-alpha.1", package = "midnight-transient-crypto" }
-futures = { version = "^0.3.31" }
+transient-crypto-v6 = { git = "https://github.com/midnightntwrk/midnight-ledger.git", branch = "ledger-6.2.0-patched-storage", package = "midnight-transient-crypto" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"

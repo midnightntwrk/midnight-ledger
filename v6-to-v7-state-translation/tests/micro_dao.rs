@@ -1,19 +1,30 @@
-use base_crypto::fab::{AlignedValue};
+// This file is part of midnight-ledger.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use base_crypto::cost_model::CostDuration;
+use base_crypto::fab::AlignedValue;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use std::ops::Deref;
 use base_crypto::signatures::Signature;
 use coin_structure_v7::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure_v7::contract::ContractAddress;
 use coin_structure_v7::transfer::{Recipient, SenderEvidence};
 use lazy_static::lazy_static;
 use ledger_v7::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
-use ledger_v7::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, LedgerState, Transaction,
-};
+use ledger_v7::structure::{ContractDeploy, INITIAL_PARAMETERS, LedgerState, Transaction};
+use ledger_v7::test_utilities::TxBound;
 use ledger_v7::test_utilities::{Resolver, verifier_key};
 use ledger_v7::test_utilities::{TestState, tx_prove_bind};
-use ledger_v7::test_utilities::{Tx, TxBound};
 use ledger_v7::test_utilities::{test_intents, test_resolver};
 use ledger_v7::verify::WellFormedStrictness;
 use onchain_runtime::context::QueryContext;
@@ -22,29 +33,29 @@ use onchain_runtime::program_fragments::*;
 use onchain_runtime::result_mode::{ResultModeGather, ResultModeVerify};
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::rngs::StdRng;
-use std::io::{BufReader};
 use rand::{Rng, SeedableRng};
-use serialize::{tagged_deserialize, Serializable};
+use serialize::{Serializable, tagged_deserialize};
 use std::borrow::Cow;
 use std::fs::File;
 use std::future::Future;
+use std::io::BufReader;
+use std::ops::Deref;
 use std::path::Path;
 use storage::arena::Sp;
 use storage::db::{DB, InMemoryDB};
-use storage::storage::{HashMap};
+use storage::state_translation::TypedTranslationState;
+use storage::storage::HashMap;
 use transient_crypto::curve::Fr;
 use transient_crypto::fab::ValueReprAlignedValue;
 use transient_crypto::merkle_tree::{MerkleTree, leaf_hash};
 use transient_crypto::proofs::PARAMS_VERIFIER;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
+use v6_to_v7_state_translation::StateTranslationTable;
 use zswap_v7::verify::{OUTPUT_VK, SIGN_VK, SPEND_VK};
 use zswap_v7::{
     Delta, Input as ZswapInput, Offer as ZswapOffer, Output as ZswapOutput,
     Transient as ZswapTransient,
 };
-use storage::state_translation::TypedTranslationState;
-use base_crypto::cost_model::CostDuration;
-use v6_to_v7_state_translation::StateTranslationTable;
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("micro-dao");
@@ -116,7 +127,6 @@ fn context_with_offer<D: DB>(
     res
 }
 
-
 #[tokio::test]
 async fn micro_dao() {
     let mode = TestMode::Full;
@@ -159,10 +169,15 @@ async fn micro_dao() {
     {
         let f = File::open("tests/micro_dao_state_0.bin").unwrap();
         let mut reader = BufReader::new(f);
-        let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> = tagged_deserialize(&mut reader).unwrap();
-        let tl_state =
-            TypedTranslationState::<ledger_v6::structure::LedgerState<InMemoryDB>, ledger_v7::structure::LedgerState<InMemoryDB>, StateTranslationTable, InMemoryDB>::start(Sp::new(v6_state))
-                .unwrap();
+        let v6_state: ledger_v6::structure::LedgerState<InMemoryDB> =
+            tagged_deserialize(&mut reader).unwrap();
+        let tl_state = TypedTranslationState::<
+            ledger_v6::structure::LedgerState<InMemoryDB>,
+            ledger_v7::structure::LedgerState<InMemoryDB>,
+            StateTranslationTable,
+            InMemoryDB,
+        >::start(Sp::new(v6_state))
+        .unwrap();
         let cost = CostDuration::from_picoseconds(1_000_000_000_000);
         let finished_state = tl_state.run(cost).unwrap();
         let Some(updated_state) = finished_state.result().unwrap() else {
@@ -192,14 +207,14 @@ async fn micro_dao() {
             (false)
         ]),
         HashMap::new()
-        .insert(b"advance"[..].into(), advance_op.clone())
-        .insert(b"buyIn"[..].into(), buy_in_op.clone())
-        .insert(b"cashOut"[..].into(), cash_out_op.clone())
-        .insert(b"setTopic"[..].into(), set_topic_op.clone())
-        .insert(b"voteCommit"[..].into(), vote_commit_op.clone())
-        .insert(b"voteReveal"[..].into(), vote_reveal_op.clone()),
+            .insert(b"advance"[..].into(), advance_op.clone())
+            .insert(b"buyIn"[..].into(), buy_in_op.clone())
+            .insert(b"cashOut"[..].into(), cash_out_op.clone())
+            .insert(b"setTopic"[..].into(), set_topic_op.clone())
+            .insert(b"voteCommit"[..].into(), vote_commit_op.clone())
+            .insert(b"voteReveal"[..].into(), vote_reveal_op.clone()),
         Default::default(),
-        );
+    );
     let tx = mode
         .replay_or("tx1", async || {
             let deploy = ContractDeploy::new(&mut rng, contract.clone());
@@ -215,7 +230,7 @@ async fn micro_dao() {
             let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
             mode.capture("tx1", balanced)
         })
-    .await;
+        .await;
     let addr = tx.deploys().map(|(_, d)| d).next().unwrap().address();
     tx.well_formed(&state.ledger, balanced_strictness, state.time)
         .unwrap();
@@ -230,33 +245,33 @@ async fn micro_dao() {
                     context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
                     program: program_with_results(
                         &[
-                        &Cell_read!([key!(0u8)], false, [u8; 32])[..],
-                        &Cell_read!([key!(1u8)], false, u8),
-                        &Cell_write!(
-                            [key!(2u8)],
-                            false,
-                            Option<Vec<u8>>,
-                            Some(b"test topic".to_vec())
-                        ),
-                        &Cell_write!(
-                            [key!(3u8)],
-                            false,
-                            Option<[u8; 32]>,
-                            Some(state.zswap_keys.coin_public_key().0.0)
-                        ),
-                        &Cell_write!([key!(1u8)], true, u8, 1u8),
+                            &Cell_read!([key!(0u8)], false, [u8; 32])[..],
+                            &Cell_read!([key!(1u8)], false, u8),
+                            &Cell_write!(
+                                [key!(2u8)],
+                                false,
+                                Option<Vec<u8>>,
+                                Some(b"test topic".to_vec())
+                            ),
+                            &Cell_write!(
+                                [key!(3u8)],
+                                false,
+                                Option<[u8; 32]>,
+                                Some(state.zswap_keys.coin_public_key().0.0)
+                            ),
+                            &Cell_write!([key!(1u8)], true, u8, 1u8),
                         ]
                         .into_iter()
                         .flat_map(|x| x.iter())
                         .cloned()
                         .collect::<Vec<_>>(),
                         &[org_pk.into(), 0u8.into()],
-                        ),
-                        comm_comm: None,
+                    ),
+                    comm_comm: None,
                 }],
                 &INITIAL_PARAMETERS,
-                )
-                    .unwrap();
+            )
+            .unwrap();
             let call = ContractCallPrototype {
                 address: addr,
                 entry_point: b"setTopic"[..].into(),
@@ -279,7 +294,7 @@ async fn micro_dao() {
             let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
             mode.capture("tx2", balanced)
         })
-    .await;
+        .await;
     //dbg!(&tx);
     //gen_static_serialize_file(&tx).unwrap();
     state.assert_apply(&tx, balanced_strictness);
@@ -305,10 +320,10 @@ async fn micro_dao() {
                     &kernel_claim_zswap_coin_receive!((), (), coin_com),
                     &Cell_read!([key!(12u8)], false, bool),
                 ]
-                    .into_iter()
-                    .flat_map(|x| x.iter())
-                    .cloned()
-                    .collect();
+                .into_iter()
+                .flat_map(|x| x.iter())
+                .cloned()
+                .collect();
                 let mut public_transcript_results: Vec<AlignedValue> =
                     vec![addr.into(), pot_has_coin.into()];
 
@@ -324,8 +339,7 @@ async fn micro_dao() {
                     } else {
                         unreachable!()
                     };
-                    let pot_nul =
-                        CoinInfo::from(&pot).nullifier(&SenderEvidence::Contract(addr));
+                    let pot_nul = CoinInfo::from(&pot).nullifier(&SenderEvidence::Contract(addr));
                     let coin_nul = coin.nullifier(&SenderEvidence::Contract(addr));
                     let pot_in = ZswapInput::new_contract_owned(
                         &mut rng,
@@ -334,40 +348,40 @@ async fn micro_dao() {
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
-                        .unwrap();
+                    .unwrap();
                     let transient = ZswapTransient::new_from_contract_owned_output(
                         &mut rng,
                         &coin.qualify(0),
                         None,
                         out,
                     )
-                        .unwrap();
+                    .unwrap();
                     let new_coin = CoinInfo::from(&pot).evolve_from(
                         b"midnight:kernel:nonce_evolve",
                         pot.value + coin.value,
                         pot.type_,
                     );
-                    let out = ZswapOutput::new_contract_owned(&mut rng, &new_coin, None, addr)
-                        .unwrap();
+                    let out =
+                        ZswapOutput::new_contract_owned(&mut rng, &new_coin, None, addr).unwrap();
                     let coin_com = new_coin.commitment(&Recipient::Contract(addr));
 
                     public_transcript_results.extend([pot.into(), addr.into(), addr.into()]);
                     public_transcript.extend(
                         [
-                        &Cell_read!([key!(11u8)], false, QualifiedCoinInfo)[..],
-                        &kernel_self!((), ()),
-                        &kernel_claim_zswap_nullifier!((), (), pot_nul),
-                        &kernel_claim_zswap_nullifier!((), (), coin_nul),
-                        &kernel_claim_zswap_coin_spend!((), (), coin_com),
-                        &kernel_claim_zswap_coin_receive!((), (), coin_com),
-                        &kernel_self!((), ()),
-                        &Cell_write_coin!(
-                            [key!(11u8)],
-                            true,
-                            QualifiedCoinInfo,
-                            new_coin,
-                            Recipient::Contract(addr)
-                        ),
+                            &Cell_read!([key!(11u8)], false, QualifiedCoinInfo)[..],
+                            &kernel_self!((), ()),
+                            &kernel_claim_zswap_nullifier!((), (), pot_nul),
+                            &kernel_claim_zswap_nullifier!((), (), coin_nul),
+                            &kernel_claim_zswap_coin_spend!((), (), coin_com),
+                            &kernel_claim_zswap_coin_receive!((), (), coin_com),
+                            &kernel_self!((), ()),
+                            &Cell_write_coin!(
+                                [key!(11u8)],
+                                true,
+                                QualifiedCoinInfo,
+                                new_coin,
+                                Recipient::Contract(addr)
+                            ),
                         ]
                         .into_iter()
                         .flatten()
@@ -387,15 +401,15 @@ async fn micro_dao() {
                     public_transcript_results.extend([addr.into()]);
                     public_transcript.extend(
                         [
-                        &kernel_self!((), ()),
-                        &Cell_write_coin!(
-                            [key!(11u8)],
-                            true,
-                            QualifiedCoinInfo,
-                            coin.clone(),
-                            Recipient::Contract(addr)
-                        )[..],
-                        &Cell_write!([key!(12u8)], true, bool, true),
+                            &kernel_self!((), ()),
+                            &Cell_write_coin!(
+                                [key!(11u8)],
+                                true,
+                                QualifiedCoinInfo,
+                                coin.clone(),
+                                Recipient::Contract(addr)
+                            )[..],
+                            &Cell_write!([key!(12u8)], true, bool, true),
                         ]
                         .into_iter()
                         .flatten()
@@ -414,8 +428,8 @@ async fn micro_dao() {
                 };
                 public_transcript.extend(
                     HistoricMerkleTree_insert!([key!(8u8)], false, 10, [u8; 32], pk)
-                    .iter()
-                    .cloned(),
+                        .iter()
+                        .cloned(),
                 );
                 let transcripts = partition_transcripts(
                     &[PreTranscript {
@@ -428,7 +442,7 @@ async fn micro_dao() {
                     }],
                     &INITIAL_PARAMETERS,
                 )
-                    .unwrap();
+                .unwrap();
                 let call = ContractCallPrototype {
                     address: addr,
                     entry_point: b"buyIn"[..].into(),
@@ -453,7 +467,7 @@ async fn micro_dao() {
                 let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
                 mode.capture(format!("tx3-{name}"), balanced)
             })
-        .await;
+            .await;
         use serialize::Serializable;
         dbg!(tx.serialized_size());
         dbg!(tx.erase_proofs().erase_signatures().serialized_size());
@@ -466,107 +480,107 @@ async fn micro_dao() {
     let part_votes: [bool; 2] = [true, false];
     for (((sk, pk), vote), name) in part_sks
         .iter()
-            .zip(part_pks.iter())
-            .zip(part_votes.iter())
-            .zip(part_names.iter())
-            {
-                println!("  :: {}", name);
-                let tx = mode
-                    .replay_or(format!("tx4-{name}"), async || {
-                        let contract = state.ledger.index(addr).unwrap();
-                        let eligible_voters = if let StateValue::Array(arr) = contract.data.get_ref() {
-                            &arr.get(8).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let mtree_val = if let StateValue::Array(arr) = eligible_voters {
-                            &arr.get(0).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let path = if let StateValue::BoundedMerkleTree(tree) = mtree_val {
-                            tree.find_path_for_leaf(*pk).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let nul = persistent_commit(b"\0\0\0\0\0\0\0\0udao:cn\0", *sk);
-                        let cm = persistent_commit(
-                            if *vote {
-                                b"\0\0\0\0\0\0\0\0yes\0\0\0\0\0"
-                            } else {
-                                b"\0\0\0\0\0\0\0\0no\0\0\0\0\0\0"
-                            },
-                            *sk,
-                        );
-                        let private_transcript_outputs = vec![
-                            AlignedValue::from(Fr::from(0u64)),
-                            AlignedValue::from(*sk),
-                            AlignedValue::from(true),
-                            AlignedValue::from(path.clone()),
-                        ];
-                        let transcripts = partition_transcripts(
-                            &[PreTranscript {
-                                context: context_with_offer(&state.ledger, addr, None),
-                                program: program_with_results(
-                                    &[
-                                    &Cell_read!(&[key!(1u8)], false, u8)[..],
-                                    &Counter_read!(&[key!(6u8)], false),
-                                    &Set_member!(&[key!(9u8)], false, [u8; 32], nul.0),
-                                    &HistoricMerkleTree_check_root!(
-                                        &[key!(8u8)],
-                                        false,
-                                        10,
-                                        [u8; 32],
-                                        path.root()
-                                    ),
-                                    &Counter_read!(&[key!(6u8)], false),
-                                    &MerkleTree_insert!(&[key!(7u8)], false, 10, [u8; 32], cm.0),
-                                    &Set_insert!(&[key!(9u8)], false, [u8; 32], nul.0),
-                                    ]
-                                    .into_iter()
-                                    .flat_map(|x| x.iter())
-                                    .cloned()
-                                    .collect::<Vec<_>>(),
-                                    &[
-                                        1u8.into(),
-                                        0u64.into(),
-                                        false.into(),
-                                        true.into(),
-                                        0u64.into(),
-                                    ],
-                                    ),
-                                    comm_comm: None,
-                            }],
-                            &INITIAL_PARAMETERS,
-                            )
-                                .unwrap();
-                        let call = ContractCallPrototype {
-                            address: addr,
-                            entry_point: b"voteCommit"[..].into(),
-                            op: vote_commit_op.clone(),
-                            input: (*vote).into(),
-                            output: ().into(),
-                            guaranteed_public_transcript: transcripts[0].0.clone(),
-                            fallible_public_transcript: transcripts[0].1.clone(),
-                            private_transcript_outputs,
-                            communication_commitment_rand: rng.r#gen(),
-                            key_location: KeyLocation(Cow::Borrowed("voteCommit")),
-                        };
-                        let tx = Transaction::from_intents(
-                            "local-test",
-                            test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                        );
-                        let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
-                        tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
-                            .unwrap();
+        .zip(part_pks.iter())
+        .zip(part_votes.iter())
+        .zip(part_names.iter())
+    {
+        println!("  :: {}", name);
+        let tx = mode
+            .replay_or(format!("tx4-{name}"), async || {
+                let contract = state.ledger.index(addr).unwrap();
+                let eligible_voters = if let StateValue::Array(arr) = contract.data.get_ref() {
+                    &arr.get(8).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let mtree_val = if let StateValue::Array(arr) = eligible_voters {
+                    &arr.get(0).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let path = if let StateValue::BoundedMerkleTree(tree) = mtree_val {
+                    tree.find_path_for_leaf(*pk).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let nul = persistent_commit(b"\0\0\0\0\0\0\0\0udao:cn\0", *sk);
+                let cm = persistent_commit(
+                    if *vote {
+                        b"\0\0\0\0\0\0\0\0yes\0\0\0\0\0"
+                    } else {
+                        b"\0\0\0\0\0\0\0\0no\0\0\0\0\0\0"
+                    },
+                    *sk,
+                );
+                let private_transcript_outputs = vec![
+                    AlignedValue::from(Fr::from(0u64)),
+                    AlignedValue::from(*sk),
+                    AlignedValue::from(true),
+                    AlignedValue::from(path.clone()),
+                ];
+                let transcripts = partition_transcripts(
+                    &[PreTranscript {
+                        context: context_with_offer(&state.ledger, addr, None),
+                        program: program_with_results(
+                            &[
+                                &Cell_read!(&[key!(1u8)], false, u8)[..],
+                                &Counter_read!(&[key!(6u8)], false),
+                                &Set_member!(&[key!(9u8)], false, [u8; 32], nul.0),
+                                &HistoricMerkleTree_check_root!(
+                                    &[key!(8u8)],
+                                    false,
+                                    10,
+                                    [u8; 32],
+                                    path.root()
+                                ),
+                                &Counter_read!(&[key!(6u8)], false),
+                                &MerkleTree_insert!(&[key!(7u8)], false, 10, [u8; 32], cm.0),
+                                &Set_insert!(&[key!(9u8)], false, [u8; 32], nul.0),
+                            ]
+                            .into_iter()
+                            .flat_map(|x| x.iter())
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                            &[
+                                1u8.into(),
+                                0u64.into(),
+                                false.into(),
+                                true.into(),
+                                0u64.into(),
+                            ],
+                        ),
+                        comm_comm: None,
+                    }],
+                    &INITIAL_PARAMETERS,
+                )
+                .unwrap();
+                let call = ContractCallPrototype {
+                    address: addr,
+                    entry_point: b"voteCommit"[..].into(),
+                    op: vote_commit_op.clone(),
+                    input: (*vote).into(),
+                    output: ().into(),
+                    guaranteed_public_transcript: transcripts[0].0.clone(),
+                    fallible_public_transcript: transcripts[0].1.clone(),
+                    private_transcript_outputs,
+                    communication_commitment_rand: rng.r#gen(),
+                    key_location: KeyLocation(Cow::Borrowed("voteCommit")),
+                };
+                let tx = Transaction::from_intents(
+                    "local-test",
+                    test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
+                );
+                let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
+                tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
+                    .unwrap();
 
-                        let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
-                        mode.capture(format!("tx4-{name}"), balanced)
-                    })
-                .await;
-                //dbg!(&tx);
-                state.assert_apply(&tx, balanced_strictness);
-            }
+                let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
+                mode.capture(format!("tx4-{name}"), balanced)
+            })
+            .await;
+        //dbg!(&tx);
+        state.assert_apply(&tx, balanced_strictness);
+    }
 
     // Part 5: advance to reveal phase
     println!(":: Part 5: Advance to reveal phase");
@@ -577,11 +591,11 @@ async fn micro_dao() {
                     context: context_with_offer(&state.ledger, addr, None),
                     program: program_with_results(
                         &[
-                        &Cell_read!([key!(1u8)], false, u8)[..],
-                        &Cell_read!([key!(0u8)], false, [u8; 32]),
-                        &Cell_read!([key!(1u8)], false, u8),
-                        &Cell_write!([key!(1u8)], false, u8, 2u8),
-                        &Cell_read!([key!(1u8)], false, u8),
+                            &Cell_read!([key!(1u8)], false, u8)[..],
+                            &Cell_read!([key!(0u8)], false, [u8; 32]),
+                            &Cell_read!([key!(1u8)], false, u8),
+                            &Cell_write!([key!(1u8)], false, u8, 2u8),
+                            &Cell_read!([key!(1u8)], false, u8),
                         ]
                         .into_iter()
                         .flat_map(|x| x.iter())
@@ -593,7 +607,7 @@ async fn micro_dao() {
                 }],
                 &INITIAL_PARAMETERS,
             )
-                .unwrap();
+            .unwrap();
             let call = ContractCallPrototype {
                 address: addr,
                 entry_point: b"advance"[..].into(),
@@ -617,7 +631,7 @@ async fn micro_dao() {
             let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
             mode.capture("tx5", balanced)
         })
-    .await;
+        .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
 
@@ -625,117 +639,114 @@ async fn micro_dao() {
     println!(":: Part 6: Vote revealing");
     for ((sk, vote), name) in part_sks
         .iter()
-            .zip(part_votes.iter())
-            .zip(part_names.iter())
-            {
-                println!("  :: {}", name);
-                let tx = mode
-                    .replay_or(format!("tx6-{name}"), async || {
-                        let cm = persistent_commit(
-                            if *vote {
-                                b"\0\0\0\0\0\0\0\0yes\0\0\0\0\0"
-                            } else {
-                                b"\0\0\0\0\0\0\0\0no\0\0\0\0\0\0"
-                            },
-                            *sk,
-                        );
-                        let contract = state.ledger.index(addr).unwrap();
-                        let committed_votes = if let StateValue::Array(arr) = contract.data.get_ref() {
-                            &arr.get(7).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let mtree_value = if let StateValue::Array(arr) = committed_votes {
-                            &arr.get(0).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let path = if let StateValue::BoundedMerkleTree(tree) = mtree_value {
-                            tree.find_path_for_leaf(cm).unwrap()
-                        } else {
-                            unreachable!()
-                        };
-                        let nul = persistent_commit(b"\0\0\0\0\0\0\0\0udao:rn\0", *sk);
-                        let private_transcript_outputs = vec![
-                            AlignedValue::from(Fr::from(1u64)),
-                            AlignedValue::from(*sk),
-                            AlignedValue::from(true),
-                            AlignedValue::from(*vote),
-                            AlignedValue::from(true),
-                            AlignedValue::from(path.clone()),
-                        ];
-                        let transcripts = partition_transcripts(
-                            &[PreTranscript {
-                                context: QueryContext::new(
-                                             state.ledger.index(addr).unwrap().data,
-                                             addr,
-                                         ),
-                                         program: program_with_results(
-                                             &[
-                                             &Cell_read!([key!(1u8)], false, u8)[..],
-                                             &Counter_read!([key!(6u8)], false),
-                                             &Set_member!([key!(10u8)], false, [u8; 32], nul.0),
-                                             &Counter_read!([key!(6u8)], false),
-                                             &MerkleTree_check_root!(
-                                                 [key!(7u8)],
-                                                 false,
-                                                 10,
-                                                 [u8; 32],
-                                                 path.root()
-                                             ),
-                                             &Counter_increment!(
-                                                 [key!(if *vote { 4u8 } else { 5u8 })],
-                                                 false,
-                                                 1u64
-                                             ),
-                                             &Set_insert!([key!(10u8)], false, [u8; 32], nul.0),
-                                             ]
-                                             .into_iter()
-                                             .flat_map(|x| x.iter())
-                                             .cloned()
-                                             .collect::<Vec<_>>(),
-                                             &[
-                                                 2u8.into(),
-                                                 0u64.into(),
-                                                 false.into(),
-                                                 0u64.into(),
-                                                 true.into(),
-                                             ],
-                                             ),
-                                             comm_comm: None,
-                            }],
-                            &INITIAL_PARAMETERS,
-                            )
-                                .unwrap();
-                        let call = ContractCallPrototype {
-                            address: addr,
-                            entry_point: b"voteReveal"[..].into(),
-                            op: vote_reveal_op.clone(),
-                            input: ().into(),
-                            output: ().into(),
-                            guaranteed_public_transcript: transcripts[0].0.clone(),
-                            fallible_public_transcript: transcripts[0].1.clone(),
-                            private_transcript_outputs,
-                            communication_commitment_rand: rng.r#gen(),
-                            key_location: KeyLocation(Cow::Borrowed("voteReveal")),
-                        };
-                        let tx = Transaction::from_intents(
-                            "local-test",
-                            test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                        );
-                        let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
-                        tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
-                            .unwrap();
-
-                        let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
-                        mode.capture(format!("tx6-{name}"), balanced)
-                    })
-                .await;
-                //dbg!(&tx);
-                tx.well_formed(&state.ledger, balanced_strictness, state.time)
+        .zip(part_votes.iter())
+        .zip(part_names.iter())
+    {
+        println!("  :: {}", name);
+        let tx = mode
+            .replay_or(format!("tx6-{name}"), async || {
+                let cm = persistent_commit(
+                    if *vote {
+                        b"\0\0\0\0\0\0\0\0yes\0\0\0\0\0"
+                    } else {
+                        b"\0\0\0\0\0\0\0\0no\0\0\0\0\0\0"
+                    },
+                    *sk,
+                );
+                let contract = state.ledger.index(addr).unwrap();
+                let committed_votes = if let StateValue::Array(arr) = contract.data.get_ref() {
+                    &arr.get(7).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let mtree_value = if let StateValue::Array(arr) = committed_votes {
+                    &arr.get(0).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let path = if let StateValue::BoundedMerkleTree(tree) = mtree_value {
+                    tree.find_path_for_leaf(cm).unwrap()
+                } else {
+                    unreachable!()
+                };
+                let nul = persistent_commit(b"\0\0\0\0\0\0\0\0udao:rn\0", *sk);
+                let private_transcript_outputs = vec![
+                    AlignedValue::from(Fr::from(1u64)),
+                    AlignedValue::from(*sk),
+                    AlignedValue::from(true),
+                    AlignedValue::from(*vote),
+                    AlignedValue::from(true),
+                    AlignedValue::from(path.clone()),
+                ];
+                let transcripts = partition_transcripts(
+                    &[PreTranscript {
+                        context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                        program: program_with_results(
+                            &[
+                                &Cell_read!([key!(1u8)], false, u8)[..],
+                                &Counter_read!([key!(6u8)], false),
+                                &Set_member!([key!(10u8)], false, [u8; 32], nul.0),
+                                &Counter_read!([key!(6u8)], false),
+                                &MerkleTree_check_root!(
+                                    [key!(7u8)],
+                                    false,
+                                    10,
+                                    [u8; 32],
+                                    path.root()
+                                ),
+                                &Counter_increment!(
+                                    [key!(if *vote { 4u8 } else { 5u8 })],
+                                    false,
+                                    1u64
+                                ),
+                                &Set_insert!([key!(10u8)], false, [u8; 32], nul.0),
+                            ]
+                            .into_iter()
+                            .flat_map(|x| x.iter())
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                            &[
+                                2u8.into(),
+                                0u64.into(),
+                                false.into(),
+                                0u64.into(),
+                                true.into(),
+                            ],
+                        ),
+                        comm_comm: None,
+                    }],
+                    &INITIAL_PARAMETERS,
+                )
+                .unwrap();
+                let call = ContractCallPrototype {
+                    address: addr,
+                    entry_point: b"voteReveal"[..].into(),
+                    op: vote_reveal_op.clone(),
+                    input: ().into(),
+                    output: ().into(),
+                    guaranteed_public_transcript: transcripts[0].0.clone(),
+                    fallible_public_transcript: transcripts[0].1.clone(),
+                    private_transcript_outputs,
+                    communication_commitment_rand: rng.r#gen(),
+                    key_location: KeyLocation(Cow::Borrowed("voteReveal")),
+                };
+                let tx = Transaction::from_intents(
+                    "local-test",
+                    test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
+                );
+                let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
+                tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
                     .unwrap();
-                state.assert_apply(&tx, balanced_strictness);
-            }
+
+                let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
+                mode.capture(format!("tx6-{name}"), balanced)
+            })
+            .await;
+        //dbg!(&tx);
+        tx.well_formed(&state.ledger, balanced_strictness, state.time)
+            .unwrap();
+        state.assert_apply(&tx, balanced_strictness);
+    }
 
     // Part 7: advance to final phase
     println!(":: Part 7: Advance to final phase");
@@ -746,32 +757,32 @@ async fn micro_dao() {
                     context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
                     program: program_with_results(
                         &[
-                        &Cell_read!([key!(1u8)], false, u8)[..],
-                        &Cell_read!([key!(0u8)], false, [u8; 32]),
-                        &Cell_read!([key!(1u8)], false, u8),
-                        &Cell_write!([key!(1u8)], false, u8, 3u8),
-                        &Cell_read!([key!(1u8)], false, u8),
-                        &Counter_read!([key!(5u8)], false),
-                        &Counter_less_than!([key!(4u8)], false, 1u64),
+                            &Cell_read!([key!(1u8)], false, u8)[..],
+                            &Cell_read!([key!(0u8)], false, [u8; 32]),
+                            &Cell_read!([key!(1u8)], false, u8),
+                            &Cell_write!([key!(1u8)], false, u8, 3u8),
+                            &Cell_read!([key!(1u8)], false, u8),
+                            &Counter_read!([key!(5u8)], false),
+                            &Counter_less_than!([key!(4u8)], false, 1u64),
                         ]
                         .into_iter()
                         .flat_map(|x| x.iter())
                         .cloned()
                         .collect::<Vec<_>>(),
                         &[
-                        2u8.into(),
-                        org_pk.into(),
-                        2u8.into(),
-                        3u8.into(),
-                        1u64.into(),
-                        false.into(),
+                            2u8.into(),
+                            org_pk.into(),
+                            2u8.into(),
+                            3u8.into(),
+                            1u64.into(),
+                            false.into(),
                         ],
-                        ),
-                        comm_comm: None,
+                    ),
+                    comm_comm: None,
                 }],
                 &INITIAL_PARAMETERS,
-                )
-                    .unwrap();
+            )
+            .unwrap();
             let call = ContractCallPrototype {
                 address: addr,
                 entry_point: b"advance"[..].into(),
@@ -795,7 +806,7 @@ async fn micro_dao() {
             let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
             mode.capture("tx7", balanced)
         })
-    .await;
+        .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
 
@@ -828,63 +839,63 @@ async fn micro_dao() {
                     context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
                     program: program_with_results(
                         &[
-                        &Cell_read!([key!(1u8)], false, u8)[..],
-                        &Cell_read!([key!(3u8)], false, Option<[u8; 32]>),
-                        &Cell_read!([key!(3u8)], false, Option<[u8; 32]>),
-                        &Counter_read!([key!(4u8)], false),
-                        &Counter_less_than!([key!(5u8)], false, 2u64),
-                        &Cell_read!([key!(11u8)], false, QualifiedCoinInfo),
-                        &Cell_read!([key!(11u8)], false, QualifiedCoinInfo),
-                        &kernel_self!((), ()),
-                        &kernel_claim_zswap_nullifier!((), (), nul),
-                        &kernel_claim_zswap_coin_spend!((), (), coin_com),
-                        &Cell_write!([key!(1u8)], false, u8, 0u8),
-                        &Cell_write!(
-                            [key!(2u8)],
-                            false,
-                            Option<Vec<u8>>,
-                            Option::<Vec<u8>>::None
-                        ),
-                        &Counter_reset_to_default!([key!(4u8)], false),
-                        &Counter_reset_to_default!([key!(5u8)], false),
-                        &Cell_write!(
-                            [key!(3u8)],
-                            false,
-                            Option<[u8; 32]>,
-                            Option::<[u8; 32]>::None
-                        ),
-                        &MerkleTree_reset_to_default!([key!(7u8)], false, 10, [u8; 32]),
-                        &Set_reset_to_default!([key!(9u8)], false, [u8; 32]),
-                        &Set_reset_to_default!([key!(10u8)], false, [u8; 32]),
-                        &Cell_write!(
-                            [key!(11u8)],
-                            false,
-                            QualifiedCoinInfo,
-                            QualifiedCoinInfo::default()
-                        ),
-                        &Cell_write!([key!(12u8)], false, bool, false),
-                        &Counter_increment!([key!(6u8)], false, 1u64),
-                        ]
-                            .into_iter()
-                            .flat_map(|x| x.iter())
-                            .cloned()
-                            .collect::<Vec<_>>(),
-                            &[
-                                3u8.into(),
-                                beneficiary.into(),
-                                beneficiary.into(),
-                                1u64.into(),
-                                true.into(),
-                                pot.into(),
-                                pot.into(),
-                                addr.into(),
-                            ],
+                            &Cell_read!([key!(1u8)], false, u8)[..],
+                            &Cell_read!([key!(3u8)], false, Option<[u8; 32]>),
+                            &Cell_read!([key!(3u8)], false, Option<[u8; 32]>),
+                            &Counter_read!([key!(4u8)], false),
+                            &Counter_less_than!([key!(5u8)], false, 2u64),
+                            &Cell_read!([key!(11u8)], false, QualifiedCoinInfo),
+                            &Cell_read!([key!(11u8)], false, QualifiedCoinInfo),
+                            &kernel_self!((), ()),
+                            &kernel_claim_zswap_nullifier!((), (), nul),
+                            &kernel_claim_zswap_coin_spend!((), (), coin_com),
+                            &Cell_write!([key!(1u8)], false, u8, 0u8),
+                            &Cell_write!(
+                                [key!(2u8)],
+                                false,
+                                Option<Vec<u8>>,
+                                Option::<Vec<u8>>::None
                             ),
-                            comm_comm: None,
+                            &Counter_reset_to_default!([key!(4u8)], false),
+                            &Counter_reset_to_default!([key!(5u8)], false),
+                            &Cell_write!(
+                                [key!(3u8)],
+                                false,
+                                Option<[u8; 32]>,
+                                Option::<[u8; 32]>::None
+                            ),
+                            &MerkleTree_reset_to_default!([key!(7u8)], false, 10, [u8; 32]),
+                            &Set_reset_to_default!([key!(9u8)], false, [u8; 32]),
+                            &Set_reset_to_default!([key!(10u8)], false, [u8; 32]),
+                            &Cell_write!(
+                                [key!(11u8)],
+                                false,
+                                QualifiedCoinInfo,
+                                QualifiedCoinInfo::default()
+                            ),
+                            &Cell_write!([key!(12u8)], false, bool, false),
+                            &Counter_increment!([key!(6u8)], false, 1u64),
+                        ]
+                        .into_iter()
+                        .flat_map(|x| x.iter())
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                        &[
+                            3u8.into(),
+                            beneficiary.into(),
+                            beneficiary.into(),
+                            1u64.into(),
+                            true.into(),
+                            pot.into(),
+                            pot.into(),
+                            addr.into(),
+                        ],
+                    ),
+                    comm_comm: None,
                 }],
                 &INITIAL_PARAMETERS,
-                )
-                    .unwrap();
+            )
+            .unwrap();
             let call = ContractCallPrototype {
                 address: addr,
                 entry_point: b"cashOut"[..].into(),
@@ -906,22 +917,22 @@ async fn micro_dao() {
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
-                        .unwrap(),
+                    .unwrap(),
                 ]
-                    .into(),
-                    outputs: vec![
-                        ZswapOutput::new(
-                            &mut rng,
-                            &new_coin,
-                            None,
-                            &state.zswap_keys.coin_public_key(),
-                            None,
-                        )
-                            .unwrap(),
-                    ]
-                        .into(),
-                        transient: vec![].into(),
-                        deltas: vec![].into(),
+                .into(),
+                outputs: vec![
+                    ZswapOutput::new(
+                        &mut rng,
+                        &new_coin,
+                        None,
+                        &state.zswap_keys.coin_public_key(),
+                        None,
+                    )
+                    .unwrap(),
+                ]
+                .into(),
+                transient: vec![].into(),
+                deltas: vec![].into(),
             };
             state.zswap = state
                 .zswap
@@ -938,7 +949,7 @@ async fn micro_dao() {
             let balanced = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
             mode.capture("tx8", balanced)
         })
-    .await;
+        .await;
     //dbg!(&tx);
     state.assert_apply(&tx, balanced_strictness);
     let funds_after: u128 = state

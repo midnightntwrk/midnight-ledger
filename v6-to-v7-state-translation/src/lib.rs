@@ -1,3 +1,16 @@
+// This file is part of midnight-ledger.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+// http://www.apache.org/licenses/LICENSE-2.0
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use base_crypto::cost_model::CostDuration;
 use serialize::Tagged;
 use std::ops::Deref;
@@ -157,7 +170,11 @@ impl<
                 let ann = AnnB::from_value(&value);
                 merkle_patricia_trie::Node::Leaf { ann, value }
             }
-            merkle_patricia_trie::Node::MidBranchLeaf { ann, value, child } => {
+            merkle_patricia_trie::Node::MidBranchLeaf {
+                ann: _,
+                value: _,
+                child: _,
+            } => {
                 let value = try_resopt!(cache.resolve(&tls[0].0, tls[0].1.as_child()));
                 let child: Sp<merkle_patricia_trie::Node<B, D, AnnB>, D> =
                     try_resopt!(cache.resolve(&tls[1].0, tls[1].1.as_child()));
