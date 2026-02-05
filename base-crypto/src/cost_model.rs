@@ -484,6 +484,28 @@ impl From<RunningCost> for SyntheticCost {
     }
 }
 
+// Lossy conversion back to running cost, used in cost estimation heuristics
+impl From<SyntheticCost> for RunningCost {
+    fn from(value: SyntheticCost) -> Self {
+        RunningCost {
+            read_time: value.read_time,
+            compute_time: value.compute_time,
+            bytes_written: value.bytes_written,
+            bytes_deleted: 0,
+        }
+    }
+}
+
+impl std::iter::Sum for RunningCost {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut res = RunningCost::ZERO;
+        for i in iter {
+            res += i;
+        }
+        res
+    }
+}
+
 impl Mul<f64> for RunningCost {
     type Output = RunningCost;
     fn mul(self, rhs: f64) -> Self::Output {
