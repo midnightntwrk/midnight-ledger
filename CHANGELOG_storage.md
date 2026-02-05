@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `1.1.1`
+
+- Split out `DB`s and `Sp`s into `storage-core` crate
+
 ## Version `1.1.0`
 
 - Added state translation functionality to support hardforking

@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `2.0.1`
+
+- Pulled in non-breaking `storage` changes
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking transient-crypto changes
