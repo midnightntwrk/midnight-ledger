@@ -1,4 +1,4 @@
-<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v2.d.ts', 'utf8')); %>
+<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v3.d.ts', 'utf8')); %>
 
 /**
  * A zero-knowledge proof.
