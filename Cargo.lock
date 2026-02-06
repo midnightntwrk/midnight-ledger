@@ -6096,6 +6096,7 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-circuits",
+ "midnight-curves",
  "midnight-proofs",
  "midnight-serialize",
  "midnight-transient-crypto",

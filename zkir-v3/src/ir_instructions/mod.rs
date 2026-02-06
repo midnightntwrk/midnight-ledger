@@ -11,13 +11,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[macro_use]
-extern crate tracing;
+use transient_crypto::curve::outer;
 
-pub mod ir;
-pub mod ir_instructions;
-pub mod ir_types;
-pub mod ir_vm;
+type F = outer::Scalar;
 
-pub use ir::{Identifier, Instruction, IrSource};
-pub use ir_vm::Preprocessed;
+pub mod add;
+pub mod assign;
+pub mod decode;
+pub mod encode;
