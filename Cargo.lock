@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "7.0.0"
+version = "8.0.0-rc.1"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2873,7 +2873,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "7.0.0"
+version = "8.0.0-rc.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -2901,7 +2901,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2932,7 +2932,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -2952,7 +2952,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "derive-where",
  "fake",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "7.0.0"
+version = "8.0.0-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3109,7 +3109,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.1.0"
+version = "2.0.0"
 dependencies = [
  "criterion",
  "crypto",
@@ -3214,7 +3214,7 @@ dependencies = [
  "derive-where",
  "midnight-serialize 1.0.0",
  "midnight-serialize-macros 1.0.0",
- "midnight-storage",
+ "midnight-storage-core 1.0.0",
  "pastey",
  "proc-macro2",
  "proptest",
@@ -3342,7 +3342,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "7.0.0"
+version = "8.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
