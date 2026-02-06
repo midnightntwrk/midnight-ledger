@@ -15,6 +15,8 @@
 
 mkdir -p ./.cargo
 ls -lh ./.cargo
+# We should be the only writer to config.toml
+rm -f ./.cargo/config.toml
 echo "[net]" >> ./.cargo/config.toml
 echo "git-fetch-with-cli = true" >> ./.cargo/config.toml
 cat ./.cargo/config.toml
