@@ -1287,12 +1287,15 @@ pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB
 tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 
 #[derive_where(Debug, Clone)]
-pub struct VerifiedTransaction<D: DB>(pub(crate) Transaction<(), (), Pedersen, D>);
+pub struct VerifiedTransaction<D: DB> {
+    pub(crate) inner: Transaction<(), (), Pedersen, D>,
+    pub(crate) hash: TransactionHash,
+}
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
     type Target = Transaction<(), (), Pedersen, D>;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
@@ -2441,6 +2444,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
             caller,
             balance: state.balance,
             com_indices: com_indices.clone(),
+            last_block_time: block.last_block_time,
         }
     }
 

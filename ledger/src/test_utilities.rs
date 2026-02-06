@@ -355,7 +355,7 @@ impl<D: DB> TestState<D> {
     pub fn apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
@@ -391,7 +391,7 @@ impl<D: DB> TestState<D> {
     pub fn assert_apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,

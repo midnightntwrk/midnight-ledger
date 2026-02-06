@@ -39,7 +39,7 @@ use onchain_runtime::state::{
     EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
-use serialize::Serializable;
+use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::{HashSet, VecDeque};
@@ -543,14 +543,14 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D> + Storable<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D> + Tagged,
     D: DB,
 > Transaction<S, P, B, D>
 where
     Transaction<S, P, B, D>: Serializable,
 {
     // All checks that can be done without a state.
-    #[instrument(skip(self, ref_state), fields(self = ?self.erase_proofs().erase_signatures().transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
+    #[instrument(skip(self, ref_state), fields(self = ?self.transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
     /// Checks if a transaction is well-formed, performing all checks possible
     /// with a moderately stale reference state.
     ///
@@ -632,7 +632,10 @@ where
                 }
 
                 debug!("transaction well-formed");
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
             Transaction::ClaimRewards(mtx) => {
                 ref_state.network_check(&mtx.network_id)?;
@@ -642,7 +645,10 @@ where
                         move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
         }
     }
