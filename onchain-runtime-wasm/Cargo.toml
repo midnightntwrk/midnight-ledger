@@ -9,10 +9,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
 storage = { path = "../storage", package = "midnight-storage" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
