@@ -18,9 +18,9 @@ mock-verify = []
 public-internal-structure = []
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
 derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
 storage = { path = "../storage", package = "midnight-storage" }
 
 ff = "^0.13.1"

@@ -20,10 +20,10 @@ fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { path = "../zswap", package = "midnight-zswap" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto"}
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
 midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { path = "../zkir", package = "zkir", optional = true }

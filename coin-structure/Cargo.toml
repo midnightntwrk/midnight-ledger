@@ -8,9 +8,9 @@ license.workspace = true
 proptest = ["dep:proptest", "dep:proptest-derive", "storage/proptest", "transient-crypto/proptest", "serialize/proptest"]
 
 [dependencies]
-serialize = { path = "../serialize", package = "midnight-serialize" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
 storage = { path = "../storage", package = "midnight-storage" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 lazy_static = "^1.5.0"

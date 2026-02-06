@@ -14,9 +14,9 @@ public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation"]
 
 [dependencies]
-storage-core = { path = "../storage-core", package = "midnight-storage-core" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-storage-core" }
+base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
+serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 derive-where = "^1.5.0"
 crypto = { version = "0.5.1", features = ["digest"] }
@@ -34,7 +34,7 @@ criterion = { version = "^0.5.1", optional = true }
 [dev-dependencies]
 pastey = "0.1.1"
 rayon = "^1.10.0"
-storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }
+storage-core = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-storage-core", features = ["test-utilities"] }
 onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 
 [[bench]]
