@@ -14,6 +14,7 @@
 # limitations under the License.
 
 mkdir -p ./.cargo
+ls -lh ./.cargo
 echo "[net]" >> ./.cargo/config.toml
 echo "git-fetch-with-cli = true" >> ./.cargo/config.toml
 cat ./.cargo/config.toml
