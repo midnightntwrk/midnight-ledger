@@ -37,7 +37,7 @@ uuid = { version = "1.17.0", features = ["v4"] }
 thiserror = "2.0.12"
 tokio = "1.46.1"
 async-channel = "2.5.0"
-time = { version = "0.3.41", features = ["serde-human-readable"] }
+time = { version = "0.3.47", features = ["serde-human-readable"] }
 serde = "1.0.219"
 
 [dev-dependencies]
