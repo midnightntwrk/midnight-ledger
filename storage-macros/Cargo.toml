@@ -13,7 +13,7 @@ quote = "^1.0"
 proc-macro2 = "1"
 
 [dev-dependencies]
-storage = { path = "../storage", package = "midnight-storage", features = ["proptest"] }
+storage = { path = "../storage-core", package = "midnight-storage-core", features = ["proptest"] }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
