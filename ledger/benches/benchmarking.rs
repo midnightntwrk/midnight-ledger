@@ -1,15 +1,15 @@
 #![deny(warnings)]
 use base_crypto::rng::SplittableRng;
+use base_crypto::signatures::{Signature, SigningKey};
 use base_crypto::time::Timestamp;
-use coin_structure::coin::UserAddress;
+use coin_structure::coin::{NIGHT, UserAddress};
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use lazy_static::lazy_static;
 use midnight_ledger::dust::{DustPublicKey, InitialNonce};
 use midnight_ledger::prove::Resolver;
 use midnight_ledger::semantics::TransactionContext;
 use midnight_ledger::structure::{
-    CNightGeneratesDustActionType, CNightGeneratesDustEvent, LedgerState,
-    OutputInstructionUnshielded, ProofMarker, SystemTransaction,
+    CNightGeneratesDustActionType, CNightGeneratesDustEvent, Intent, LedgerState, OutputInstructionUnshielded, ProofMarker, SystemTransaction, UnshieldedOffer, Utxo, UtxoMeta, UtxoOutput, UtxoSpend, UtxoState
 };
 use midnight_ledger::structure::{ClaimKind, Transaction};
 use midnight_ledger::test_utilities::{test_resolver, well_formed_tx_builder};
@@ -17,9 +17,12 @@ use midnight_ledger::verify::WellFormedStrictness;
 use onchain_runtime::context::BlockContext;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use storage::storage::default_storage;
+use storage::arena::Sp;
 use storage::db::InMemoryDB;
 use transient_crypto::commitment::PedersenRandomness;
 use zswap::keys::SecretKeys;
+use std::ops::Deref;
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("");
@@ -127,6 +130,68 @@ pub fn create_dust(c: &mut Criterion) {
     group.finish();
 }
 
+pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
+    let sk = SigningKey::sample(&mut rng);
+    let vk = sk.verifying_key();
+    let addr = UserAddress::from(vk.clone());
+    for log_size in 0..=20 {
+        let size = 2u64.pow(log_size);
+        let mut state = LedgerState::<InMemoryDB>::new("local-test");
+        let utxos = (0..size).fold(state.utxo.utxos.clone(), |state, _| state.insert(Utxo { value: rng.r#gen(), owner: rng.r#gen(), type_: rng.r#gen(), intent_hash: rng.r#gen(), output_no: 0 }, UtxoMeta { ctime: rng.r#gen() }));
+        let real_utxo = Utxo {
+            value: 1_000_000,
+            owner: addr,
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        state.utxo = Sp::new(UtxoState { utxos: utxos.insert(real_utxo.clone(), UtxoMeta { ctime: rng.r#gen() }) });
+        let mut state = Sp::new(state);
+        let offer: UnshieldedOffer<Signature, InMemoryDB> = UnshieldedOffer {
+            inputs: vec![UtxoSpend {
+                value: real_utxo.value,
+                owner: vk.clone(),
+                type_: NIGHT,
+                intent_hash: real_utxo.intent_hash,
+                output_no: 0,
+            }].into(),
+            outputs: vec![UtxoOutput {
+                value: 100,
+                owner: addr,
+                type_: NIGHT,
+            }, UtxoOutput {
+                value: real_utxo.value - 100,
+                owner: addr,
+                type_: NIGHT,
+            }].into(),
+            signatures: vec![].into(),
+        };
+        let intent = Intent::new(&mut rng, Some(offer), None, vec![], vec![], vec![], None, Timestamp::from_secs(10));
+        let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+        let mut strictness = WellFormedStrictness::default();
+        strictness.enforce_balancing = false;
+        let vtx = tx.well_formed(&*state, strictness, Timestamp::from_secs(0)).unwrap();
+        let context = TransactionContext {
+            ref_state: state.deref().clone(),
+            block_context: BlockContext::default(),
+            whitelist: None,
+        };
+        let key = state.as_typed_key();
+        state.persist();
+        drop(state);
+        group.bench_with_input(BenchmarkId::from_parameter(log_size), &log_size, |b, _| {
+            b.iter(|| {
+                default_storage().get_lazy(&key).unwrap().apply(&vtx, &context)
+            });
+        });
+        let state = default_storage().get_lazy(&key).unwrap();
+        state.unpersist();
+    }
+    group.finish();
+}
+
 pub fn create_and_destroy_dust(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     fn mk_tx<R: Rng>(rng: &mut R, n: usize) -> SystemTransaction {
@@ -191,5 +256,5 @@ criterion_group!(
     config = Criterion::default().sample_size(10);
     targets = transaction_validation
 );
-criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust);
+criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust, night_transfer_by_utxo_set_size);
 criterion_main!(benchmarking, system_tx);
