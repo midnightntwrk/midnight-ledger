@@ -18,6 +18,7 @@ pub mod crypto;
 pub mod dust;
 pub mod intent;
 pub mod state;
+pub mod state_changes;
 pub mod transcript;
 pub mod tx;
 pub mod unshielded;
@@ -65,26 +66,26 @@ pub(crate) use onchain_runtime::{from_value_hex_ser, to_value_hex_ser, token_typ
 
 #[wasm_bindgen(getter, js_name = "nativeToken")]
 pub fn native_token() -> Result<JsValue, JsError> {
-    Ok(token_type_to_value(&TokenType::Unshielded(NIGHT))?)
+    token_type_to_value(&TokenType::Unshielded(NIGHT))
 }
 
 #[wasm_bindgen(getter, js_name = "feeToken")]
 pub fn fee_token() -> Result<JsValue, JsError> {
-    Ok(token_type_to_value(&FEE_TOKEN)?)
+    token_type_to_value(&FEE_TOKEN)
 }
 
 #[wasm_bindgen(getter, js_name = "shieldedToken")]
 pub fn shielded_token() -> Result<JsValue, JsError> {
-    Ok(token_type_to_value(&TokenType::Shielded(
-        ShieldedTokenType(HashOutput([0u8; 32])),
-    ))?)
+    token_type_to_value(&TokenType::Shielded(ShieldedTokenType(HashOutput(
+        [0u8; 32],
+    ))))
 }
 
 #[wasm_bindgen(getter, js_name = "unshieldedToken")]
 pub fn unshielded_token() -> Result<JsValue, JsError> {
-    Ok(token_type_to_value(&TokenType::Unshielded(
-        UnshieldedTokenType(HashOutput([0u8; 32])),
-    ))?)
+    token_type_to_value(&TokenType::Unshielded(UnshieldedTokenType(HashOutput(
+        [0u8; 32],
+    ))))
 }
 
 #[wasm_bindgen(js_name = "createShieldedCoinInfo")]
@@ -119,8 +120,9 @@ pub fn coin_nullifier(
     coin_secret_key: &CoinSecretKey,
 ) -> Result<String, JsError> {
     let coin_info_parsed = value_to_shielded_coininfo(coin_info)?;
-    let nullifier =
-        coin_info_parsed.nullifier(&SenderEvidence::User(coin_secret_key.try_unwrap()?.clone()));
+    let nullifier = coin_info_parsed.nullifier(&SenderEvidence::User(std::borrow::Cow::Borrowed(
+        &coin_secret_key.try_unwrap()?,
+    )));
     to_value_hex_ser(&nullifier)
 }
 
@@ -156,7 +158,7 @@ pub fn create_proving_transaction_payload(
         match (k, pk, vk, ir) {
             (Some(k), Ok(pk), Ok(vk), Ok(ir)) => {
                 proof_data.insert(
-                    k.into(),
+                    k,
                     ProvingKeyMaterial {
                         prover_key: pk.to_vec(),
                         verifier_key: vk.to_vec(),
@@ -178,7 +180,7 @@ pub fn create_proving_transaction_payload(
 fn try_proof_preimage(serialized_preimage: &[u8]) -> Result<ProofPreimageVersioned, JsError> {
     Ok(
         tagged_deserialize(&mut &serialized_preimage[..]).or_else(|_| {
-            tagged_deserialize(&mut &serialized_preimage[..]).map(ProofPreimageVersioned::V1)
+            tagged_deserialize(&mut &serialized_preimage[..]).map(ProofPreimageVersioned::V2)
         })?,
     )
 }

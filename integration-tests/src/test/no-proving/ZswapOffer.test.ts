@@ -85,14 +85,6 @@ describe('Ledger API - ZswapOffer', () => {
     );
   });
 
-  test('fromOutput - fails on invalid segment', () => {
-    const guaranteedOffer = Static.unprovenOfferFromOutput(0);
-    const fallibleOffer = Static.unprovenOfferFromOutput(0);
-    expect(() => Transaction.fromParts(LOCAL_TEST_NETWORK_ID, guaranteedOffer, fallibleOffer)).toThrow(
-      'Segment ID cannot be 0 in a fallible offer'
-    );
-  });
-
   test('fromTransient - should create from UnprovenTransient', () => {
     const value = 10_000n;
     const coinInfo = Static.shieldedCoinInfo(value);
@@ -252,7 +244,7 @@ describe('Ledger API - ZswapOffer', () => {
     expect(mergedOffer.inputs).toHaveLength(0);
     expect(mergedOffer.outputs).toHaveLength(2);
     expect(mergedOffer.deltas.size).toEqual(1);
-    expect(mergedOffer.deltas.get(tokenType.raw)).toEqual(-3n);
+    expect(mergedOffer.deltas.get(tokenType.raw)).toEqual(-20_000n);
     assertSerializationSuccess(mergedOffer, undefined, ProofMarker.preProof);
   });
 
@@ -284,8 +276,8 @@ describe('Ledger API - ZswapOffer', () => {
     expect(mergedOffer.inputs).toHaveLength(0);
     expect(mergedOffer.outputs).toHaveLength(2);
     expect(mergedOffer.deltas.size).toEqual(2);
-    expect(mergedOffer.deltas.get(tokenType.raw)).toEqual(-1n);
-    expect(mergedOffer.deltas.get(tokenType2.raw)).toEqual(-2n);
+    expect(mergedOffer.deltas.get(tokenType.raw)).toEqual(-10_000n);
+    expect(mergedOffer.deltas.get(tokenType2.raw)).toEqual(-10_000n);
     assertSerializationSuccess(mergedOffer, undefined, ProofMarker.preProof);
   });
 
@@ -338,7 +330,7 @@ describe('Ledger API - ZswapOffer', () => {
     expect(mergedOffer.inputs).toHaveLength(0);
     expect(mergedOffer.outputs).toHaveLength(2);
     expect(mergedOffer.deltas.size).toEqual(1);
-    expect(mergedOffer.deltas.get(coinInfo.type)).toEqual(-3n);
+    expect(mergedOffer.deltas.get(coinInfo.type)).toEqual(-20_000n);
     expect(mergedOffer.outputs[0]?.contractAddress).toEqual(contractAddress);
     expect(mergedOffer.outputs[1]?.contractAddress).toEqual(contractAddress);
     assertSerializationSuccess(mergedOffer, undefined, ProofMarker.preProof);
@@ -365,8 +357,8 @@ describe('Ledger API - ZswapOffer', () => {
     expect(mergedOffer.inputs).toHaveLength(0);
     expect(mergedOffer.outputs).toHaveLength(2);
     expect(mergedOffer.deltas.size).toEqual(2);
-    expect(mergedOffer.deltas.get(coinInfo.type)).toEqual(-1n);
-    expect(mergedOffer.deltas.get(coinInfo2.type)).toEqual(-2n);
+    expect(mergedOffer.deltas.get(coinInfo.type)).toEqual(-10_000n);
+    expect(mergedOffer.deltas.get(coinInfo2.type)).toEqual(-10_000n);
     expect(mergedOffer.outputs[0]?.contractAddress).toEqual(contractAddress);
     expect(mergedOffer.outputs[1]?.contractAddress).toEqual(contractAddress);
     assertSerializationSuccess(mergedOffer, undefined, ProofMarker.preProof);

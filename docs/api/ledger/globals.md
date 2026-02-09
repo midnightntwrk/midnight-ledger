@@ -1,8 +1,8 @@
-[**@midnight/ledger v6.1.0-alpha.4**](README.md)
+[**@midnight/ledger v7.0.0**](README.md)
 
 ***
 
-# @midnight/ledger v6.1.0-alpha.4
+# @midnight/ledger v7.0.0
 
 ## Classes
 
@@ -22,11 +22,13 @@
 - [DustActions](classes/DustActions.md)
 - [DustGenerationState](classes/DustGenerationState.md)
 - [DustLocalState](classes/DustLocalState.md)
+- [DustLocalStateWithChanges](classes/DustLocalStateWithChanges.md)
 - [DustParameters](classes/DustParameters.md)
 - [DustRegistration](classes/DustRegistration.md)
 - [DustSecretKey](classes/DustSecretKey.md)
 - [DustSpend](classes/DustSpend.md)
 - [DustState](classes/DustState.md)
+- [DustStateChanges](classes/DustStateChanges.md)
 - [DustUtxoState](classes/DustUtxoState.md)
 - [EncryptionSecretKey](classes/EncryptionSecretKey.md)
 - [Event](classes/Event.md)
@@ -38,6 +40,7 @@
 - [NoBinding](classes/NoBinding.md)
 - [NoProof](classes/NoProof.md)
 - [PreBinding](classes/PreBinding.md)
+- [PrePartitionContractCall](classes/PrePartitionContractCall.md)
 - [PreProof](classes/PreProof.md)
 - [PreTranscript](classes/PreTranscript.md)
 - [Proof](classes/Proof.md)
@@ -66,9 +69,11 @@
 - [ZswapChainState](classes/ZswapChainState.md)
 - [ZswapInput](classes/ZswapInput.md)
 - [ZswapLocalState](classes/ZswapLocalState.md)
+- [ZswapLocalStateWithChanges](classes/ZswapLocalStateWithChanges.md)
 - [ZswapOffer](classes/ZswapOffer.md)
 - [ZswapOutput](classes/ZswapOutput.md)
 - [ZswapSecretKeys](classes/ZswapSecretKeys.md)
+- [ZswapStateChanges](classes/ZswapStateChanges.md)
 - [ZswapTransient](classes/ZswapTransient.md)
 
 ## Type Aliases
@@ -108,6 +113,7 @@
 - [IntentHash](type-aliases/IntentHash.md)
 - [Key](type-aliases/Key.md)
 - [Nonce](type-aliases/Nonce.md)
+- [NormalizedCost](type-aliases/NormalizedCost.md)
 - [Nullifier](type-aliases/Nullifier.md)
 - [Op](type-aliases/Op.md)
 - [PartitionedTranscript](type-aliases/PartitionedTranscript.md)
@@ -120,6 +126,7 @@
 - [QualifiedShieldedCoinInfo](type-aliases/QualifiedShieldedCoinInfo.md)
 - [RawTokenType](type-aliases/RawTokenType.md)
 - [RunningCost](type-aliases/RunningCost.md)
+- [SegmentSpecifier](type-aliases/SegmentSpecifier.md)
 - [ShieldedCoinInfo](type-aliases/ShieldedCoinInfo.md)
 - [ShieldedTokenType](type-aliases/ShieldedTokenType.md)
 - [Signature](type-aliases/Signature.md)

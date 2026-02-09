@@ -46,6 +46,7 @@ use std::mem::size_of;
 use std::ops::Mul;
 use storage::{Storable, arena::ArenaKey, db::DB, storable::Loader};
 use zeroize::DefaultIsZeroes;
+
 /// The outer, main curve
 pub mod outer {
     /// The base prime field, used to represent curve points
@@ -355,7 +356,7 @@ impl Fr {
     /// Initialize an [Fr] from arbitrary 64 bytes (little-endian)
     /// ensuring the result falls into the space by taking modulo.
     pub fn from_uniform_bytes(bytes: &[u8; 64]) -> Self {
-        Fr(outer::Scalar::from_uniform_bytes(&bytes))
+        Fr(outer::Scalar::from_uniform_bytes(bytes))
     }
 
     /// Output an [Fr] as a little-endian bytes-string
@@ -415,7 +416,7 @@ impl Mul<Fr> for EmbeddedGroupAffine {
         let embedded_modulus = Fr::from_le_bytes(&embedded_m1.as_le_bytes())
             .expect("embedded modulus should fit in scalar field")
             + Fr::from(1);
-        while rhs > embedded_modulus {
+        while rhs >= embedded_modulus {
             rhs = rhs - embedded_modulus;
         }
         self * EmbeddedFr::try_from(rhs).expect("after reducing, rhs should fit in embedded scalar")
@@ -511,13 +512,18 @@ impl EmbeddedGroupAffine {
         EmbeddedGroupAffine(embedded::Affine::identity())
     }
 
+    /// Returns if the curve point is the additive identity.
+    pub fn is_identity(&self) -> bool {
+        self.0.is_identity().into()
+    }
+
     /// Returns if the curve point is the point at infinity.
     pub fn is_infinity(&self) -> bool {
         false
     }
 
     /// Whether or not this embedded curve has an infinity point in affine representation.
-    pub const HAS_INFINITY: bool = true;
+    pub const HAS_INFINITY: bool = false;
 }
 
 impl PartialOrd for EmbeddedGroupAffine {

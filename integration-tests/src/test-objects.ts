@@ -52,6 +52,9 @@ import {
   ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import crypto from 'node:crypto';
+import * as fs from 'node:fs/promises';
+import * as path from 'node:path';
+import type { ProvingKeyMaterial } from '@midnight-ntwrk/zkir-v2';
 import { generateHex, loadBinaryFile } from './test-utils';
 
 export const VERSION_HEADER = '0200';
@@ -166,11 +169,15 @@ export class Static {
 
   static userAddress = () => dummyUserAddress();
 
-  static blockContext = (blockTime: Date): BlockContext => ({
-    secondsSinceEpoch: Static.blockTime(blockTime),
-    secondsSinceEpochErr: 0,
-    parentBlockHash: Static.parentBlockHash()
-  });
+  static blockContext = (blockTime: Date): BlockContext => {
+    const secondsSinceEpoch = Static.blockTime(blockTime);
+    return {
+      secondsSinceEpoch,
+      secondsSinceEpochErr: 0,
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: secondsSinceEpoch > 6n ? secondsSinceEpoch - 6n : 0n
+    };
+  };
 
   static shieldedCoinInfo = (value: bigint = Static.bigInt()): ShieldedCoinInfo => {
     const token = shieldedToken() as ShieldedTokenType;
@@ -222,6 +229,28 @@ export class Static {
           value
         },
         segment,
+        targetCpk,
+        targetEpk
+      ),
+      tokenType.raw,
+      value
+    );
+  };
+
+  static unprovenOfferFromOutputWithoutSegment = (
+    tokenType: ShieldedTokenType = shieldedToken() as ShieldedTokenType,
+    value: bigint = Static.bigInt(),
+    targetCpk: string = Static.coinPublicKey(),
+    targetEpk: string = Static.encryptionPublicKey()
+  ) => {
+    return ZswapOffer.fromOutput(
+      ZswapOutput.new(
+        {
+          type: tokenType.raw,
+          nonce: Static.nonce(),
+          value
+        },
+        undefined,
         targetCpk,
         targetEpk
       ),
@@ -301,6 +330,53 @@ export class Static {
   });
 }
 
+export const keyMaterialProvider = new (class {
+  // eslint-disable-next-line class-methods-use-this
+  async lookupWellKnownKey(type: string, keyLocation: string): Promise<Buffer | undefined> {
+    // Ideally get this from /static/version, but I'm not sure if this gets run
+    // against a consistent dir.
+    const staticVersionFile = path.resolve(new URL(import.meta.url).pathname, '../../../static/version');
+    const ver = await fs.readFile(staticVersionFile, 'utf-8');
+    const pth = {
+      'midnight/zswap/spend': `zswap/${ver}/spend`,
+      'midnight/zswap/output': `zswap/${ver}/output`,
+      'midnight/zswap/sign': `zswap/${ver}/sign`,
+      'midnight/dust/spend': `dust/${ver}/spend`
+    }[keyLocation];
+    if (pth === undefined) {
+      return undefined;
+    }
+
+    return fs.readFile(`${process.env.MIDNIGHT_PP}/${pth}.${type}`);
+  }
+
+  async lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined> {
+    const [proverKey, verifierKey, ir] = await Promise.all([
+      this.lookupWellKnownKey('prover', keyLocation),
+      this.lookupWellKnownKey('verifier', keyLocation),
+      this.lookupWellKnownKey('bzkir', keyLocation)
+    ]);
+    if (proverKey === undefined || verifierKey === undefined || ir === undefined) {
+      return undefined;
+    }
+    return { proverKey, verifierKey, ir };
+  }
+
+  async lookupJsonIr(keyLocation: string): Promise<string | undefined> {
+    return this.lookupWellKnownKey('zkir', keyLocation).then((maybeIr) => {
+      if (maybeIr === undefined) {
+        return undefined;
+      }
+      return maybeIr.toString('utf-8');
+    });
+  }
+
+  // eslint-disable-next-line class-methods-use-this
+  async getParams(k: number): Promise<Uint8Array> {
+    return fs.readFile(`${process.env.MIDNIGHT_PP}/bls_midnight_2p${k}`);
+  }
+})();
+
 export const addressToPublic = (address: string, tag: 'user' | 'contract'): PublicAddress => ({
   address,
   tag
@@ -342,14 +418,6 @@ export const getNewUnshieldedOffer = (
     ],
     [signData(sampleSigningKey(), new Uint8Array(32))]
   );
-
-export class TestTransactionContext {
-  intentHash = sampleIntentHash();
-  token = Random.unshieldedTokenType();
-  svk = Random.signatureVerifyingKeyNew();
-  signature = Random.signature();
-  userAddress = Random.userAddress();
-}
 
 export class TestResource {
   static operationVerifierKey = (): Uint8Array => {

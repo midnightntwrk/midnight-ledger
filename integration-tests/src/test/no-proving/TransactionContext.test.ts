@@ -26,11 +26,7 @@ describe('Ledger API - TransactionContext', () => {
   test('should create context', () => {
     const zswapChainState = new ZswapChainState();
     const ledgerState = new LedgerState('local-test', zswapChainState);
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date()),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date());
 
     expect(() => new TransactionContext(ledgerState, blockContext).toString()).not.toThrow();
   });
@@ -45,11 +41,7 @@ describe('Ledger API - TransactionContext', () => {
   test('should create context with whitelist', () => {
     const zswapChainState = new ZswapChainState();
     const ledgerState = new LedgerState('local-test', zswapChainState);
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date()),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date());
 
     expect(() =>
       new TransactionContext(ledgerState, blockContext, new Set([Random.contractAddress()])).toString()
@@ -69,7 +61,8 @@ describe('Ledger API - TransactionContext', () => {
     const invalidBlockContext = {
       secondsSinceEpoch: -1n,
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: -1n
     };
 
     expect(() => new TransactionContext(ledgerState, invalidBlockContext).toString(true)).toThrow(
@@ -87,11 +80,7 @@ describe('Ledger API - TransactionContext', () => {
   test('should return string representation', () => {
     const zswapChainState = new ZswapChainState();
     const ledgerState = new LedgerState('local-test', zswapChainState);
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date()),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date());
     const transactionContext = new TransactionContext(ledgerState, blockContext);
 
     expect(transactionContext.toString(true)).toMatch(/TransactionContext.*/);
@@ -107,11 +96,7 @@ describe('Ledger API - TransactionContext', () => {
   test('should create context with multiple whitelist addresses', () => {
     const zswapChainState = new ZswapChainState();
     const ledgerState = new LedgerState('local-test', zswapChainState);
-    const blockContext = {
-      secondsSinceEpoch: Static.blockTime(new Date()),
-      secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
-    };
+    const blockContext = Static.blockContext(new Date());
 
     expect(() =>
       new TransactionContext(

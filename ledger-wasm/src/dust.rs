@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
+use crate::state_changes::DustStateChanges;
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
@@ -22,7 +23,7 @@ use ledger::dust::{
     DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
-    DustUtxoState as LedgerDustUtxoState,
+    DustUtxoState as LedgerDustUtxoState, WithDustStateChanges as LedgerWithDustStateChanges,
 };
 use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
@@ -1252,6 +1253,39 @@ impl DustSecretKey {
 }
 
 #[wasm_bindgen]
+pub struct DustLocalStateWithChanges {
+    inner: LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>,
+    changes: Vec<DustStateChanges>,
+}
+
+impl From<LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>>
+    for DustLocalStateWithChanges
+{
+    fn from(inner: LedgerWithDustStateChanges<LedgerDustLocalState<InMemoryDB>>) -> Self {
+        let changes = inner
+            .changes
+            .iter()
+            .cloned()
+            .map(DustStateChanges::from)
+            .collect();
+        DustLocalStateWithChanges { inner, changes }
+    }
+}
+
+#[wasm_bindgen]
+impl DustLocalStateWithChanges {
+    #[wasm_bindgen(getter)]
+    pub fn state(&self) -> DustLocalState {
+        DustLocalState(self.inner.result.clone())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn changes(&self) -> Vec<DustStateChanges> {
+        self.changes.clone()
+    }
+}
+
+#[wasm_bindgen]
 #[derive(Debug)]
 pub struct DustLocalState(pub(crate) LedgerDustLocalState<InMemoryDB>);
 
@@ -1291,7 +1325,7 @@ impl DustLocalState {
         let sk = sk.try_unwrap()?;
         let ctime = Timestamp::from_secs(js_date_to_seconds(ctime));
         let v_fee = u128::try_from(v_fee).map_err(|_| JsError::new("v_fee is out of range"))?;
-        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee.into(), ctime)?;
+        let (local_state, dust_spend) = self.0.spend(&sk, &qdo, v_fee, ctime)?;
 
         let res = Array::new();
         res.push(&JsValue::from(DustLocalState(local_state)));
@@ -1319,6 +1353,18 @@ impl DustLocalState {
         Ok(DustLocalState(self.0.replay_events(&sk, events)?))
     }
 
+    #[wasm_bindgen(js_name = "replayEventsWithChanges")]
+    pub fn replay_events_with_changes(
+        &self,
+        sk: &DustSecretKey,
+        events: Vec<Event>,
+    ) -> Result<DustLocalStateWithChanges, JsError> {
+        let sk = sk.try_unwrap()?;
+        let events = events.iter().map(|event| &event.0);
+        let with_changes = self.0.replay_events_with_changes(&sk, events)?;
+        Ok(DustLocalStateWithChanges::from(with_changes))
+    }
+
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
         tagged_serialize(&self.0, &mut res)?;
@@ -1340,16 +1386,20 @@ impl DustLocalState {
 
     #[wasm_bindgen(getter)]
     pub fn utxos(&self) -> Result<Vec<JsValue>, JsError> {
-        Ok(self
-            .0
+        self.0
             .utxos()
             .map(|qdo| qdo_to_value(&qdo))
-            .collect::<Result<_, _>>()?)
+            .collect::<Result<_, _>>()
     }
 
     #[wasm_bindgen(getter)]
     pub fn params(&self) -> Result<DustParameters, JsError> {
         Ok(DustParameters(self.0.params))
+    }
+
+    #[wasm_bindgen(getter, js_name = "syncTime")]
+    pub fn sync_time(&self) -> Date {
+        seconds_to_js_date(self.0.sync_time.to_secs())
     }
 }
 

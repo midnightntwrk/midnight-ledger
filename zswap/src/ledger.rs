@@ -27,13 +27,17 @@ use storage::db::DB;
 use storage::storage::default_storage;
 use storage::storage::{HashMap, Map};
 use storage::storage::{Identity, TimeFilterMap};
-use storage::{Storable, arena::ArenaKey, storable::Loader};
+use storage::{
+    Storable,
+    arena::{ArenaHash, ArenaKey},
+    storable::Loader,
+};
 use transient_crypto::merkle_tree::{MerkleTree, MerkleTreeDigest};
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Debug, Eq)]
 #[storable(db = D)]
-#[tag = "zswap-ledger-state[v4]"]
+#[tag = "zswap-ledger-state[v5]"]
 #[must_use]
 pub struct State<D: DB> {
     pub coin_coms: MerkleTree<Option<Sp<ContractAddress, D>>, D>,
@@ -277,7 +281,7 @@ mod tests {
                     value,
                 };
                 let cpk = coin_structure::coin::PublicKey(rng.r#gen());
-                let output = Output::new(rng, &info, 0, &cpk, None).unwrap();
+                let output = Output::new(rng, &info, None, &cpk, None).unwrap();
                 state = state
                     .try_apply(
                         &Offer {
@@ -303,7 +307,7 @@ mod tests {
         };
         let addr = ContractAddress::default();
         state = insert_dummy_outputs(&mut rng, state, 25);
-        let output = Output::new_contract_owned(&mut rng, &coin, 0, addr).unwrap();
+        let output = Output::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
         let (new_state, indices) = state
             .try_apply(
                 &Offer {
@@ -326,6 +330,6 @@ mod tests {
                 .get(&coin.commitment(&Recipient::Contract(addr)))
                 .unwrap(),
         );
-        Input::new_contract_owned(&mut rng, &qcoin, 0, addr, &state.filter(&[addr])).unwrap();
+        Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
     }
 }

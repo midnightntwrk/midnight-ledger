@@ -15,7 +15,7 @@
 
 use anyhow::Result;
 use base_crypto::fab::Alignment;
-use midnight_proofs::dev::cost_model::{CircuitModel, from_circuit_to_circuit_model};
+use midnight_proofs::dev::cost_model::CircuitModel;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -25,10 +25,7 @@ use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::io::{self, Read};
 use std::sync::Arc;
-use transient_crypto::curve::{
-    FR_BYTES, Fr,
-    outer::{self, POINT_BYTES},
-};
+use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash, Zkir,
 };
@@ -63,7 +60,7 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let preproc = self.preprocess(preimage)?;
@@ -383,23 +380,10 @@ impl Model {
 
 impl IrSource {
     /// Retrieves a model representation of this circuit.
-    pub fn model(&self, k: Option<u8>) -> Model {
-        use midnight_circuits::compact_std_lib::MidnightCircuit;
-        let model = from_circuit_to_circuit_model::<
-            outer::Scalar,
-            MidnightCircuit<Self>,
-            POINT_BYTES,
-            FR_BYTES,
-        >(
-            k.map(|k| k as u32),
-            &MidnightCircuit::from_relation(self),
-            self.instructions
-                .iter()
-                .filter(|op| matches!(op, Instruction::DeclarePubInput { .. }))
-                .count(),
-        );
-
-        Model { model }
+    pub fn model(&self) -> Model {
+        Model {
+            model: midnight_zk_stdlib::cost_model(self),
+        }
     }
 
     /// Attempts to parse an arbitrary input as IR.
@@ -439,7 +423,7 @@ impl IrSource {
         pk: ProverKey<IrSource>,
         preproc: super::ir_vm::Preprocessed,
     ) -> Result<Proof> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
 
         let params_k = params.get_params(pk.init()?.k()).await?;
         let pis = preproc.pis.clone();

@@ -14,4 +14,3 @@ coverage
 logs
 **/.yarn/install-state.gz
 **/.yarn/cache
-vendor

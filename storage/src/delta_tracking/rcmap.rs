@@ -13,10 +13,10 @@
 
 //! Reference count map for tracking charged keys in write and delete costing
 use crate::Storable;
-use crate::arena::ArenaKey;
+use crate::arena::{ArenaHash, ArenaKey, Opaque, Sp};
 use crate::db::DB;
 use crate::storable::Loader;
-use crate::storage::Map;
+use crate::storage::{Map, default_storage};
 use crate::{self as storage, DefaultDB};
 use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
@@ -29,99 +29,147 @@ use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomDa
 
 /// A wrapper around `ArenaKey` that ensures the referenced node is persisted.
 ///
-/// When stored in the arena, `KeyRef` reports the wrapped key as its child,
+/// When stored in the arena, `ArenaKey` reports the wrapped key as its child,
 /// which causes the back-end to keep the referenced node alive as long as the
-/// `KeyRef`.
-#[derive_where(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
-struct KeyRef<D: DB> {
-    key: ArenaKey<D::Hasher>,
+/// `ChildRef`.
+//
+// NOTE: Long-term, it would be nice if this could be a wrapper around `Sp<dyn Any>` instead of
+// around an arena key. This would be a safer alternative, as we would not need to make an
+// assumption that the child is allocated in the backend on construction.
+#[derive_where(Debug, PartialEq, Eq)]
+pub struct ChildRef<D: DB> {
+    /// The referenced child
+    pub child: ArenaKey<D::Hasher>,
 }
 
-impl<D: DB> KeyRef<D> {
-    fn new(key: ArenaKey<D::Hasher>) -> Self {
-        Self { key }
+// NOTE: This used to not be necessary, as creating an Sp of the ref would guarnatee allocation in
+// the backend. With the small nodes optimisation, this is no longer guaranteed, as the backend is
+// only invoked when a parent that isn't a small node is instantiated.
+//
+// However, if the referenced node(s) aren't in the backend, the ref doesn't do its job of keeping
+// these allocated. Therefore, we manually increment its ref count on allocation, and decrement it
+// on deallocation, using the backend `persist`/`unpersist` methods. Note that these are part of
+// what happens during (non-small node) Sp allocation, so this is only replicating a subset of this
+// behaviour. (Technically those are refcount updates instead of persist/unpersist, but the latter
+// are just thin wrappers around refcount updates)
+impl<D: DB> ChildRef<D> {
+    /// Creates a new reference
+    pub fn new(child: ArenaKey<D::Hasher>) -> Self {
+        // this *will* panic if `child` is not already allocated.
+        default_storage::<D>().with_backend(|b| child.refs().iter().for_each(|r| b.persist(r)));
+        Self { child }
     }
 }
 
-impl<D: DB> Storable<D> for KeyRef<D> {
+impl<D: DB> Clone for ChildRef<D> {
+    fn clone(&self) -> Self {
+        ChildRef::new(self.child.clone())
+    }
+}
+
+impl<D: DB> Drop for ChildRef<D> {
+    fn drop(&mut self) {
+        default_storage::<D>()
+            .with_backend(|b| self.child.refs().iter().for_each(|r| b.unpersist(r)));
+    }
+}
+
+impl<D: DB> Storable<D> for ChildRef<D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        vec![self.key.clone()]
+        vec![self.child.clone()]
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
     where
         Self: Sized,
     {
-        // All information is in the child
         Ok(())
     }
 
     fn from_binary_repr<R: std::io::Read>(
-        _reader: &mut R,
-        child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
-        _loader: &impl Loader<D>,
+        reader: &mut R,
+        children: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        loader: &impl Loader<D>,
     ) -> Result<Self, std::io::Error>
     where
         Self: Sized,
     {
-        child_hashes.next().map(KeyRef::new).ok_or_else(|| {
-            std::io::Error::new(std::io::ErrorKind::InvalidData, "KeyRef missing child key")
-        })
+        let mut children = children.collect::<Vec<_>>();
+        let mut data = Vec::new();
+        reader.read_to_end(&mut data)?;
+        if children.len() == 1 && data.is_empty() {
+            let child = children.pop().expect("must be present");
+            let mut sp: Sp<Opaque<D>, D> = loader.get(&child)?;
+            sp.persist();
+            let child_ref = Self::new(child);
+            sp.unpersist();
+            Ok(child_ref)
+        } else {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Ref should have exactly one child and no data",
+            ))
+        }
     }
 }
 
-impl<D: DB> Serializable for KeyRef<D> {
+impl<D: DB> Serializable for ChildRef<D> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
-        self.key.serialize(writer)
+        self.child.serialize(writer)
     }
 
     fn serialized_size(&self) -> usize {
-        self.key.serialized_size()
+        self.child.serialized_size()
     }
 }
 
-impl<D: DB> Deserializable for KeyRef<D> {
+impl<D: DB> Deserializable for ChildRef<D> {
     fn deserialize(reader: &mut impl std::io::Read, recursive_depth: u32) -> std::io::Result<Self> {
-        ArenaKey::deserialize(reader, recursive_depth).map(KeyRef::new)
+        ArenaKey::<D::Hasher>::deserialize(reader, recursive_depth).map(ChildRef::new)
     }
 }
 
-impl<D: DB> Distribution<KeyRef<D>> for Standard {
-    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> KeyRef<D> {
-        KeyRef::new(rng.r#gen())
+impl<D: DB> Distribution<ChildRef<D>> for Standard {
+    fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChildRef<D> {
+        ChildRef::new(ArenaKey::Ref(rng.r#gen()))
     }
 }
 
 // Manual impl because we don't derive Storable
-impl<D: DB> Tagged for KeyRef<D> {
+impl<D: DB> Tagged for ChildRef<D> {
     fn tag() -> std::borrow::Cow<'static, str> {
-        "keyref[v1]".into()
+        "childref[v1]".into()
     }
     fn tag_unique_factor() -> String {
-        "keyref[v1]".into()
+        "children[v1]".into()
     }
 }
 
 /// Reference count map for tracking charged keys in write and delete costing.
 ///
-/// Internally we use `KeyRef` to ensure that nodes for all keys in the `RcMap`
+/// Internally we use `ChildRef` to ensure that nodes for all keys in the `RcMap`
 /// will be persisted as long a the `RcMap` itself is.
-#[derive_where(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[derive(serde::Serialize, serde::Deserialize, Storable)]
-#[serde(bound(serialize = "", deserialize = ""))]
+#[derive_where(Debug, Clone, PartialEq, Eq)]
+#[derive(Storable)]
+//#[derive(serde::Serialize, serde::Deserialize, Storable)]
+//#[serde(bound(serialize = "", deserialize = ""))]
 #[storable(db = D)]
 #[tag = "rcmap[v1]"]
 pub struct RcMap<D: DB = DefaultDB> {
     /// Reference counts for keys with `rc >= 1`
-    rc_ge_1: Map<ArenaKey<D::Hasher>, u64, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_ge_1: Map<ArenaHash<D::Hasher>, u64, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    rc_ge_1: Map<ArenaHash<D::Hasher>, u64, D>,
     /// Keys with reference count zero, for efficient garbage collection.
     ///
-    /// The `KeyRef` here creates storage overhead -- an additional dag node for
+    /// The `ChildRef` here creates storage overhead -- an additional dag node for
     /// each key -- but the `rc_0` map is expected to be small, so this
     /// shouldn't matter.
-    rc_0: Map<ArenaKey<D::Hasher>, KeyRef<D>, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub rc_0: Map<ArenaKey<D::Hasher>, ChildRef<D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    rc_0: Map<ArenaKey<D::Hasher>, ChildRef<D>, D>,
 }
 
 impl<D: DB> RcMap<D> {
@@ -133,7 +181,9 @@ impl<D: DB> RcMap<D> {
     /// Get the current reference count for a key.
     /// Returns Some(n) if key is charged (n >= 0), None if key is not in `RcMap`.
     pub(crate) fn get_rc(&self, key: &ArenaKey<D::Hasher>) -> Option<u64> {
-        if let Some(count) = self.rc_ge_1.get(key) {
+        if let ArenaKey::Ref(key) = key
+            && let Some(count) = self.rc_ge_1.get(key)
+        {
             Some(*count)
         } else if self.rc_0.contains_key(key) {
             Some(0)
@@ -142,10 +192,26 @@ impl<D: DB> RcMap<D> {
         }
     }
 
+    #[must_use]
+    pub(crate) fn ins_root(&self, key: ArenaKey<D::Hasher>) -> Self {
+        RcMap {
+            rc_ge_1: self.rc_ge_1.clone(),
+            rc_0: self.rc_0.insert(key.clone(), ChildRef::new(key.clone())),
+        }
+    }
+
+    #[must_use]
+    pub(crate) fn rm_root(&self, key: &ArenaKey<D::Hasher>) -> Self {
+        RcMap {
+            rc_ge_1: self.rc_ge_1.clone(),
+            rc_0: self.rc_0.remove(key),
+        }
+    }
+
     /// Increment the reference count for a key.
     /// Returns `(new_rcmap, new_rc)`.
     #[must_use]
-    pub(crate) fn modify_rc(&self, key: &ArenaKey<D::Hasher>, updated: u64) -> Self {
+    pub(crate) fn modify_rc(&self, key: &ArenaHash<D::Hasher>, updated: u64) -> Self {
         let curr = self.rc_ge_1.get(key).copied().unwrap_or(0);
         match (curr, updated) {
             (0, 0) =>
@@ -153,7 +219,10 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.clone(),
-                    rc_0: self.rc_0.insert(key.clone(), KeyRef::new(key.clone())),
+                    rc_0: self.rc_0.insert(
+                        ArenaKey::Ref(key.clone()),
+                        ChildRef::new(ArenaKey::Ref(key.clone())),
+                    ),
                 }
             }
             (0, 1..) =>
@@ -161,7 +230,7 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.insert(key.clone(), updated),
-                    rc_0: self.rc_0.remove(key),
+                    rc_0: self.rc_0.remove(&ArenaKey::Ref(key.clone())),
                 }
             }
             (1.., 1..) =>
@@ -177,7 +246,10 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.remove(key),
-                    rc_0: self.rc_0.insert(key.clone(), KeyRef::new(key.clone())),
+                    rc_0: self.rc_0.insert(
+                        ArenaKey::Ref(key.clone()),
+                        ChildRef::new(ArenaKey::Ref(key.clone())),
+                    ),
                 }
             }
         }
@@ -219,7 +291,7 @@ impl<D: DB> RcMap<D> {
 
         // Add all keys with rc >= 1
         for (key, count) in self.rc_ge_1.iter() {
-            result.insert(key.clone(), *count);
+            result.insert(ArenaKey::Ref(key.clone()), *count);
         }
 
         result
@@ -261,17 +333,19 @@ pub(crate) mod tests {
     use super::*;
     use crate::arena::Sp;
     use crate::db::InMemoryDB;
+    use crate::storable::SMALL_OBJECT_LIMIT;
 
-    // Test Storable serialization of vector of KeyRefs, to be sure the manual
+    // Test Storable serialization of vector of ChildRef, to be sure the manual
     // Storable impl makes sense.
     #[test]
     fn keyref_round_trip_storable() {
         // Create a dummy value to get an arena key
-        let val = Sp::<_, InMemoryDB>::new(42u64);
-        let key = val.root.clone();
-        let keyref = KeyRef::<InMemoryDB>::new(key);
+        let val = Sp::<_, InMemoryDB>::new([0u8; 1024]);
+        let key = val.as_child();
+        let keyref = ChildRef::<InMemoryDB>::new(key);
 
-        // Create a vector with 3 of the same KeyRef
+        let _ = Sp::new(keyref.clone());
+        // Create a vector with 3 of the same ChildRef
         let keyrefs = vec![
             Sp::new(keyref.clone()),
             Sp::new(keyref.clone()),
@@ -284,8 +358,8 @@ pub(crate) mod tests {
         let mut reader = &bytes[..];
         let mut child_iter = keyrefs.children().into_iter();
         let arena = &crate::storage::default_storage().arena;
-        let loader = crate::arena::BackendLoader::new(arena, None);
-        let deserialized: Vec<Sp<KeyRef<InMemoryDB>, InMemoryDB>> =
+        let loader = storage_core::arena::BackendLoader::new(arena, None);
+        let deserialized: Vec<Sp<ChildRef<InMemoryDB>, InMemoryDB>> =
             Storable::from_binary_repr(&mut reader, &mut child_iter, &loader).unwrap();
 
         assert_eq!(keyrefs, deserialized);
@@ -303,27 +377,32 @@ pub(crate) mod tests {
             if !visited.insert(current.clone()) {
                 continue;
             }
-            arena.with_backend(|backend| {
-                let disk_obj = backend.get(&current).expect("Key should exist in backend");
-                to_visit.extend(disk_obj.children.clone());
-            });
+            match current {
+                ArenaKey::Direct(d) => to_visit.extend(d.children.iter().cloned()),
+                ArenaKey::Ref(ref r) => {
+                    arena.with_backend(|backend| {
+                        let disk_obj = backend.get(r).expect("Key should exist in backend");
+                        to_visit.extend(disk_obj.children.clone());
+                    });
+                }
+            }
         }
         visited
     }
 
-    // Test that keys in rc_0 are descendants of RcMap via KeyRef storage.
+    // Test that keys in rc_0 are descendants of RcMap via ChildRef storage.
     #[test]
     fn rc_0_keys_are_descendants() {
-        let val = Sp::<_, InMemoryDB>::new(42u64);
+        let val = Sp::<_, InMemoryDB>::new([42u8; SMALL_OBJECT_LIMIT]);
         let key = val.root.clone();
 
         // Create RcMap with key in rc_0
         let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key, 0);
-        assert!(rcmap.rc_0.contains_key(&key));
+        assert!(rcmap.rc_0.contains_key(&ArenaKey::Ref(key.clone())));
 
         let descendants = get_rcmap_descendants(&rcmap);
         assert!(
-            descendants.contains(&key),
+            descendants.contains(&val.as_child()),
             "Key in rc_0 must be a descendant of RcMap"
         );
     }
@@ -332,61 +411,70 @@ pub(crate) mod tests {
     #[test]
     fn rcmap_operations() {
         // Create test keys using simple u8 values
-        let val1 = Sp::<_, InMemoryDB>::new(1u8);
-        let key1 = val1.root.clone();
-        let val2 = Sp::<_, InMemoryDB>::new(2u8);
-        let key2 = val2.root.clone();
-        let val3 = Sp::<_, InMemoryDB>::new(3u8);
-        let key3 = val3.root.clone();
+        let val1 = Sp::<_, InMemoryDB>::new([1u8; 1024]);
+        let key1 = val1.as_child();
+        let ArenaKey::Ref(hash1) = key1.clone() else {
+            panic!("testing refs");
+        };
+        let val2 = Sp::<_, InMemoryDB>::new([2u8; 1024]);
+        let key2 = val2.as_child();
+        let ArenaKey::Ref(hash2) = key2.clone() else {
+            panic!("testing refs");
+        };
+        let val3 = Sp::<_, InMemoryDB>::new([3u8; 1024]);
+        let key3 = val3.as_child();
+        let ArenaKey::Ref(hash3) = key3.clone() else {
+            panic!("testing refs");
+        };
 
-        let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key1, 0);
+        let rcmap = RcMap::<InMemoryDB>::default().ins_root(key1.clone());
 
         // Test initialize_key sets rc=0
         assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
         assert!(rcmap.rc_0.contains_key(&key1), "key1 should be in rc_0 map");
         assert!(
-            !rcmap.rc_ge_1.contains_key(&key1),
+            !rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should not be in rc_ge_1 map"
         );
 
         // Test increment_rc from 0 to 1 moves to rc_ge_1
-        let rcmap = rcmap.modify_rc(&key1, 1);
+        let rcmap = rcmap.modify_rc(&hash1, 1);
         assert_eq!(rcmap.get_rc(&key1), Some(1), "get_rc should return 1");
         assert!(
             !rcmap.rc_0.contains_key(&key1),
             "key1 should not be in rc_0 map"
         );
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should be in rc_ge_1 map"
         );
 
         // Test increment_rc multiple times
-        let rcmap = rcmap.modify_rc(&key1, 2);
-        let rcmap = rcmap.modify_rc(&key1, 3);
+        let rcmap = rcmap.modify_rc(&hash1, 2);
+        let rcmap = rcmap.modify_rc(&hash1, 3);
         assert_eq!(rcmap.get_rc(&key1), Some(3), "get_rc should return 3");
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should remain in rc_ge_1 map"
         );
 
         // Test decrement_rc multiple times
-        let rcmap = rcmap.modify_rc(&key1, 2);
-        let rcmap = rcmap.modify_rc(&key1, 1);
+        let rcmap = rcmap.modify_rc(&hash1, 2);
+        let rcmap = rcmap.modify_rc(&hash1, 1);
         assert!(
-            rcmap.rc_ge_1.contains_key(&key1),
+            rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should still be in rc_ge_1 map"
         );
 
         // Test decrement_rc from 1 to 0 moves back to rc_0
-        let rcmap = rcmap.modify_rc(&key1, 0);
+        let rcmap = rcmap.modify_rc(&hash1, 0);
         assert_eq!(rcmap.get_rc(&key1), Some(0), "get_rc should return 0");
         assert!(
             rcmap.rc_0.contains_key(&key1),
             "key1 should be back in rc_0 map"
         );
         assert!(
-            !rcmap.rc_ge_1.contains_key(&key1),
+            !rcmap.rc_ge_1.contains_key(&hash1),
             "key1 should not be in rc_ge_1 map"
         );
 
@@ -398,8 +486,8 @@ pub(crate) mod tests {
         );
 
         // Test multiple keys
-        let rcmap = rcmap.modify_rc(&key2, 1);
-        let rcmap = rcmap.modify_rc(&key3, 2);
+        let rcmap = rcmap.modify_rc(&hash2, 1);
+        let rcmap = rcmap.modify_rc(&hash3, 2);
 
         // Verify all keys have correct reference counts
         assert_eq!(rcmap.get_rc(&key1), Some(0));
@@ -408,8 +496,8 @@ pub(crate) mod tests {
 
         // Verify correct map placement
         assert!(rcmap.rc_0.contains_key(&key1));
-        assert!(rcmap.rc_ge_1.contains_key(&key2));
-        assert!(rcmap.rc_ge_1.contains_key(&key3));
+        assert!(rcmap.rc_ge_1.contains_key(&hash2));
+        assert!(rcmap.rc_ge_1.contains_key(&hash3));
 
         // Test remove_unreachable_key functionality
         // Remove key1 (rc=0) should succeed

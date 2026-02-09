@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![cfg(feature = "mock-verify")]
 //! ONLY FOR USE DURING BENCHMARKING OR TESTING
 //!
 //! Allows for realistic-ish system benchmarks without having to generate proofs
@@ -29,10 +28,10 @@ use crate::proofs::{
 };
 use futures::executor::block_on;
 use midnight_circuits::{
-    compact_std_lib::Relation,
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
 };
+use midnight_zk_stdlib::Relation;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
@@ -137,12 +136,12 @@ fn load_default_calib() -> Calibration {
 }
 
 fn calibration() -> &'static Calibration {
-    CALIBRATION.get_or_init(|| load_default_calib())
+    CALIBRATION.get_or_init(load_default_calib)
 }
 
 fn burn_step(i: u64) {
     let mut sha = Sha256::new();
-    sha.update(&i.to_be_bytes());
+    sha.update(i.to_be_bytes());
     black_box(sha.finalize());
 }
 
@@ -290,7 +289,7 @@ pub fn calibrate_for(path: PathBuf) -> Calibration {
         let median_iters = iter_curve[iter_curve.len() / 2];
 
         calibration_results.push(CalibrationRecord {
-            circuit_inputs: size as usize,
+            circuit_inputs: size,
             median_iters,
         });
     }
@@ -328,8 +327,10 @@ struct TestIr {
 impl Relation for TestIr {
     type Instance = Vec<Fr>;
     type Witness = Self;
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.iter().map(|x| x.0).collect()
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.iter().map(|x| x.0).collect())
     }
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
         self.serialize(writer)
@@ -339,7 +340,7 @@ impl Relation for TestIr {
     }
     fn circuit(
         &self,
-        std_lib: &midnight_circuits::compact_std_lib::ZkStdLib,
+        std_lib: &midnight_zk_stdlib::ZkStdLib,
         layouter: &mut impl midnight_proofs::circuit::Layouter<outer::Scalar>,
         instance: midnight_proofs::circuit::Value<Self::Instance>,
         _witness: midnight_proofs::circuit::Value<Self::Witness>,
@@ -364,7 +365,7 @@ impl Zkir for TestIr {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        use midnight_circuits::compact_std_lib::prove;
+        use midnight_zk_stdlib::prove;
         let params_k = params.get_params(pk.init()?.k()).await?;
         let pis = preimage.public_transcript_inputs.clone();
         let pk = pk.init().unwrap();

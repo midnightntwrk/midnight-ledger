@@ -23,7 +23,7 @@ describe('Ledger API - VerifierKeyRemove', () => {
    */
   test('should construct with operation and version', () => {
     const operation = 'test_operation';
-    const version = new ContractOperationVersion('v2');
+    const version = new ContractOperationVersion('v3');
 
     const verifierKeyRemove = new VerifierKeyRemove(operation, version);
 

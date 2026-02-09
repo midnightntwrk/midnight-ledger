@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -128,7 +128,7 @@ is transferred to the recipient another way
 
 ##### segment
 
-`number`
+`undefined` | `number`
 
 ##### target\_cpk
 
@@ -166,7 +166,7 @@ the output to be valid
 
 ##### segment
 
-`number`
+`undefined` | `number`
 
 ##### contract
 

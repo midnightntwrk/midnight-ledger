@@ -14,15 +14,17 @@ proof-verifying = ["zswap/proof-verifying"]
 test-utilities = ["dep:reqwest", "dep:zkir_v2"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
 mock-verify = ["transient-crypto/mock-verify"]
+fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { path = "../zswap", package = "midnight-zswap" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto"}
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
+midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
 zkir_v2 = { path = "../zkir", package = "zkir", optional = true }
 
@@ -58,11 +60,11 @@ indexmap = "2.10.0"
 [dev-dependencies]
 midnight-ledger = { path = ".", features = ["test-utilities", "proptest"] }
 criterion = { version = "^0.5.1" }
-paste = "1.0.15"
+pastey = "0.1.1"
 serde_json = "^1.0.140"
 hex = "^0.4.3"
 
 [[bench]]
 name = "benchmarking"
 harness = false
-required-features = ["proving", "dust"]
+required-features = ["proving"]

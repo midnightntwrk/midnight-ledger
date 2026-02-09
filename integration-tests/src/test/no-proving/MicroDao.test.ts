@@ -13,7 +13,6 @@
 
 import {
   type AlignedValue,
-  type Alignment,
   bigIntToValue,
   ChargedState,
   type CoinPublicKey,
@@ -26,36 +25,24 @@ import {
   ContractState,
   createShieldedCoinInfo,
   decodeQualifiedShieldedCoinInfo,
-  degradeToTransient,
   encodeCoinPublicKey,
   encodeContractAddress,
   encodeQualifiedShieldedCoinInfo,
   encodeShieldedCoinInfo,
-  Intent,
   LedgerParameters,
-  type LedgerState,
-  type MaintenanceUpdate,
-  type Nonce,
   type Op,
   partitionTranscripts,
   persistentCommit,
-  type PreBinding,
-  type PreProof,
   PreTranscript,
-  type Proofish,
   type QualifiedShieldedCoinInfo,
   QueryContext,
-  type RawTokenType,
   runtimeCoinCommitment,
   runtimeCoinNullifier,
   type ShieldedCoinInfo,
-  type SignatureEnabled,
   StateBoundedMerkleTree,
   StateMap,
   StateValue,
   Transaction,
-  transientHash,
-  upgradeFromTransient,
   type Value,
   valueToBigInt,
   WellFormedStrictness,
@@ -91,6 +78,7 @@ import {
   merkleTreeCheckRoot,
   merkleTreeInsert,
   merkleTreeResetToDefault,
+  programWithResults,
   setInsert,
   setMember,
   setResetToDefault
@@ -107,6 +95,8 @@ import {
   THREE_VALUE,
   TWO_VALUE
 } from '@/test/utils/value-alignment';
+import { evolveFrom, getContextWithOffer } from '@/test/utils/zswap';
+import { testIntents } from '@/test-utils';
 
 describe('Ledger API - MicroDao', () => {
   const ADVANCE = 'advance';
@@ -437,7 +427,7 @@ describe('Ledger API - MicroDao', () => {
       console.log(`  :: Part ${name}`);
 
       const coin = createShieldedCoinInfo(token.raw, 100_000n);
-      let out = ZswapOutput.newContractOwned(coin, 0, addr);
+      let out = ZswapOutput.newContractOwned(coin, undefined, addr);
 
       const encodedCoin = encodeShieldedCoinInfo(coin);
       const encodedCoinValue = bigIntToValue(encodedCoin.value);
@@ -525,7 +515,7 @@ describe('Ledger API - MicroDao', () => {
             alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
           }
         );
-        const potIn = ZswapInput.newContractOwned(pot, 0, addr, state.ledger.zswap);
+        const potIn = ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap);
         const transient = ZswapTransient.newFromContractOwnedOutput(
           {
             type: coin.type,
@@ -542,7 +532,7 @@ describe('Ledger API - MicroDao', () => {
           pot.type,
           pot.nonce
         );
-        out = ZswapOutput.newContractOwned(newCoin, 0, addr);
+        out = ZswapOutput.newContractOwned(newCoin, undefined, addr);
         const encodedNewCoin = encodeShieldedCoinInfo(newCoin);
         const encodedNewCoinValue = bigIntToValue(encodedNewCoin.value);
 
@@ -1215,13 +1205,13 @@ describe('Ledger API - MicroDao', () => {
     );
 
     let offer = ZswapOffer.fromInput(
-      ZswapInput.newContractOwned(pot, 0, addr, state.ledger.zswap),
+      ZswapInput.newContractOwned(pot, undefined, addr, state.ledger.zswap),
       pot.type,
       pot.value
     );
     offer = offer.merge(
       ZswapOffer.fromOutput(
-        ZswapOutput.new(newCoin, 0, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey),
+        ZswapOutput.new(newCoin, undefined, state.zswapKeys.coinPublicKey, state.zswapKeys.encryptionPublicKey),
         newCoin.type,
         newCoin.value
       )
@@ -1233,87 +1223,6 @@ describe('Ledger API - MicroDao', () => {
     tx.wellFormed(s.ledger, unbalancedStrictness, s.time);
     const balanced = s.balanceTx(tx.eraseProofs());
     s.assertApply(balanced, balancedStrictness);
-  }
-
-  function evolveFrom(domainSep: Uint8Array, value: bigint, type: RawTokenType, nonce: Nonce): ShieldedCoinInfo {
-    const degrade = degradeToTransient([Static.encodeFromHex(nonce)])[0];
-    const thAlignment: Alignment = [ATOM_FIELD, ATOM_FIELD];
-    const thValue: Value = transientHash(thAlignment, [domainSep, degrade]);
-    const evolvedNonce = upgradeFromTransient(thValue)[0];
-    const updatedEvolvedNonce = new Uint8Array(evolvedNonce.length + 1);
-    updatedEvolvedNonce.set(evolvedNonce, 0);
-    updatedEvolvedNonce[updatedEvolvedNonce.length] = 0;
-    const evolvedNonceAsNonce: Nonce = Buffer.from(updatedEvolvedNonce).toString('hex');
-    return {
-      nonce: evolvedNonceAsNonce,
-      type,
-      value
-    };
-  }
-
-  function getContextWithOffer(ledger: LedgerState, addr: ContractAddress, offer?: ZswapOffer<Proofish>) {
-    const res = new QueryContext(new ChargedState(ledger.index(addr)!.data.state), addr);
-    if (offer) {
-      const [, indices] = ledger.zswap.tryApply(offer);
-      const { block } = res;
-      block.comIndices = new Map(Array.from(indices, ([k, v]) => [k, Number(v)]));
-      res.block = block;
-    }
-    return res;
-  }
-
-  function translateOp(op: Op<null>, nextResult: () => AlignedValue): Op<AlignedValue> {
-    if (typeof op === 'string') {
-      return op;
-    }
-    if ('popeq' in op) {
-      return { popeq: { cached: op.popeq.cached, result: nextResult() } };
-    }
-    return op;
-  }
-
-  function programWithResults(prog: Op<null>[], results: AlignedValue[]): Op<AlignedValue>[] {
-    let i = 0;
-    const next = () => {
-      if (i >= results.length) throw new Error('programWithResults: not enough results to fill popeq ops');
-      return results[i++];
-    };
-    return prog
-      .map((op) => translateOp(op as Op<null>, next))
-      .filter((op) => {
-        if (typeof op === 'string') {
-          return op;
-        }
-        if ('idx' in op) {
-          return op.idx.path.length !== 0;
-        }
-        if ('ins' in op) {
-          return op.ins.n !== 0;
-        }
-        return true;
-      });
-  }
-
-  function testIntents(
-    calls: ContractCallPrototype[],
-    updates: MaintenanceUpdate[],
-    deploys: ContractDeploy[],
-    tblock: Date
-  ): Intent<SignatureEnabled, PreProof, PreBinding> {
-    const fastForward = new Date(0);
-    fastForward.setSeconds(3600);
-    const updatedTtl = new Date(tblock.getTime() + fastForward.getTime());
-    let intent = Intent.new(updatedTtl);
-    calls.forEach((call) => {
-      intent = intent.addCall(call);
-    });
-    updates.forEach((update) => {
-      intent = intent.addMaintenanceUpdate(update);
-    });
-    deploys.forEach((deploy) => {
-      intent = intent.addDeploy(deploy);
-    });
-    return intent;
   }
 
   function getChargedState(orgPk: Value): ChargedState {

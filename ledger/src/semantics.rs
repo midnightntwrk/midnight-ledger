@@ -17,6 +17,7 @@ use crate::error::{
     TransactionApplicationError, TransactionInvalid,
 };
 use crate::events::{Event, EventDetails, EventSource, ZswapPreimageEvidence};
+use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
     ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, Intent, IntentHash,
@@ -24,14 +25,12 @@ use crate::structure::{
     ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
     SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
-use crate::structure::{OutputInstructionShielded, TransactionHash};
 use crate::utils::{KeySortedIter, SortedIter, sorted};
-use base_crypto::cost_model::SyntheticCost;
+use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
-use coin_structure::coin::Info;
-use coin_structure::coin::Nonce;
 use coin_structure::coin::UserAddress;
 use coin_structure::coin::{Commitment, NIGHT, ShieldedTokenType, TokenType};
 use coin_structure::contract::ContractAddress;
@@ -39,7 +38,8 @@ use itertools::Either;
 use onchain_runtime::context::{BlockContext, QueryContext};
 use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng};
-use serialize::{Deserializable, Serializable};
+use serialize::{Deserializable, Serializable, Tagged};
+use std::borrow::Cow;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
@@ -48,9 +48,9 @@ use storage::storage::HashSet;
 use storage::storage::Map;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::commitment::{PedersenRandomness, PureGeneratorPedersen};
+use zswap::Offer as ZswapOffer;
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
-use zswap::{AuthorizedClaim, Offer as ZswapOffer};
 
 pub(crate) fn whitelist_matches(
     whitelist: &Option<Map<ContractAddress, ()>>,
@@ -122,44 +122,54 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
         tx: &Transaction<S, P, B, D>,
         res: ErasedTransactionResult,
     ) -> Self;
-    #[must_use]
+    #[must_use = "return value must be used"]
     fn replay_events<'a>(
         &self,
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError>;
+    #[must_use = "return value must be used"]
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError>;
 }
 
 impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
-    fn apply_system_tx(&self, secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self {
+    fn apply_system_tx(&self, _secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self {
+        #[allow(clippy::match_single_binding, reason = "to re-enable later")]
         match tx {
-            SystemTransaction::PayFromTreasuryShielded {
-                outputs,
-                nonce,
-                token_type,
-            } => {
-                let mut res = self.clone();
-                for OutputInstructionShielded {
-                    amount,
-                    target_key: target_address,
-                } in outputs
-                {
-                    let coin = Info {
-                        value: *amount,
-                        type_: *token_type,
-                        nonce: Nonce(*nonce),
-                    };
-                    res = self.apply_claim(
-                        secret_keys,
-                        &AuthorizedClaim {
-                            coin,
-                            recipient: *target_address,
-                            proof: (),
-                        },
-                    );
-                }
-                res
-            }
+            // NOTE: Treasury payments have been completely disabled until governance for the
+            // treasury has been agreed. All code has been commented out to maximize clarity.
+            //
+            // SystemTransaction::PayFromTreasuryShielded {
+            //     outputs,
+            //     nonce,
+            //     token_type,
+            // } => {
+            //     let mut res = self.clone();
+            //     for OutputInstructionShielded {
+            //         amount,
+            //         target_key: target_address,
+            //     } in outputs
+            //     {
+            //         let coin = Info {
+            //             value: *amount,
+            //             type_: *token_type,
+            //             nonce: Nonce(*nonce),
+            //         };
+            //         res = self.apply_claim(
+            //             secret_keys,
+            //             &AuthorizedClaim {
+            //                 coin,
+            //                 recipient: *target_address,
+            //                 proof: std::sync::Arc::new(()),
+            //             },
+            //         );
+            //     }
+            //     res
+            // }
             _ => self.clone(),
         }
     }
@@ -222,18 +232,40 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError> {
+        self.replay_events_with_changes(secret_keys, events)
+            .map(|w| w.result)
+    }
+
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError> {
         use coin_structure::transfer::SenderEvidence;
 
-        let mut res = events
-            .into_iter()
-            .try_fold(self.clone(), |mut state, event| match &event.content {
+        let mut res = events.into_iter().try_fold(
+            WithZswapStateChanges::new(self.clone()),
+            |mut acc, event| match &event.content {
                 EventDetails::ZswapInput {
                     nullifier,
                     contract: None,
                 } => {
-                    state.coins = state.coins.remove(&nullifier);
-                    state.pending_spends = state.pending_spends.remove(&nullifier);
-                    Ok(state)
+                    let maybe_change = if acc.result.coins.contains_key(nullifier) {
+                        acc.result
+                            .coins
+                            .get(nullifier)
+                            .map(|qci| ZswapStateChanges {
+                                received_coins: vec![],
+                                spent_coins: vec![*qci],
+                                source: event.source.transaction_hash,
+                            })
+                    } else {
+                        None
+                    };
+                    acc.result.coins = acc.result.coins.remove(nullifier);
+                    acc.result.pending_spends = acc.result.pending_spends.remove(nullifier);
+
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 EventDetails::ZswapOutput {
                     commitment,
@@ -241,35 +273,55 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     mt_index,
                     ..
                 } => {
-                    if *mt_index != state.first_free {
+                    if *mt_index != acc.result.first_free {
                         return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.first_free,
+                            expected_next: acc.result.first_free,
                             received: *mt_index,
                             tree_name: "zswap commitment",
                         });
                     }
-                    state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
-                    state.first_free += 1;
-                    if let Some(ci) = state.pending_outputs.get(&commitment) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                    acc.result.merkle_tree =
+                        acc.result
+                            .merkle_tree
+                            .update_hash(*mt_index, commitment.0, ());
+                    acc.result.first_free += 1;
+                    let maybe_change = if let Some(ci) = acc.result.pending_outputs.get(commitment)
+                    {
+                        let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
+                            &secret_keys.coin_secret_key,
+                        )));
                         let qci = ci.qualify(*mt_index);
-                        state.pending_outputs = state.pending_outputs.remove(&commitment);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.pending_outputs = acc.result.pending_outputs.remove(commitment);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
-                        let nullifier =
-                            ci.nullifier(&SenderEvidence::User(secret_keys.coin_secret_key));
+                        let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
+                            &secret_keys.coin_secret_key,
+                        )));
                         let qci = ci.qualify(*mt_index);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else {
-                        state.merkle_tree = state.merkle_tree.collapse(*mt_index, *mt_index);
-                    }
-                    Ok(state)
+                        acc.result.merkle_tree =
+                            acc.result.merkle_tree.collapse(*mt_index, *mt_index);
+                        None
+                    };
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 #[allow(unreachable_patterns)]
-                _ => Ok(state),
-            })?;
-        res.merkle_tree = res.merkle_tree.rehash();
+                _ => Ok(acc),
+            },
+        )?;
+        res.result.merkle_tree = res.result.merkle_tree.rehash();
+
         Ok(res)
     }
 }
@@ -290,7 +342,7 @@ impl<D: DB> LedgerState<D> {
         mut event_push: impl FnMut(Event<D>),
     ) -> Result<Self, TransactionInvalid<D>> {
         let mut state = self.clone();
-        let (new_zswap, new_com_indices) = state.zswap.try_apply(&offer, whitelist)?;
+        let (new_zswap, new_com_indices) = state.zswap.try_apply(offer, whitelist)?;
 
         state.zswap = Sp::new(new_zswap);
         *com_indices = new_com_indices;
@@ -327,7 +379,7 @@ impl<D: DB> LedgerState<D> {
                 content: EventDetails::ZswapOutput {
                     commitment: output.coin_com,
                     preimage_evidence: match &output.ciphertext {
-                        Some(ciph) => ZswapPreimageEvidence::Ciphertext((**ciph).clone()),
+                        Some(ciph) => ZswapPreimageEvidence::Ciphertext(Box::new((**ciph).clone())),
                         None => ZswapPreimageEvidence::None,
                     },
                     contract: output.contract_address.clone(),
@@ -341,6 +393,7 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self))]
+    #[allow(dead_code, reason = "used by disabled treasury interactions")]
     fn native_issue_unbalanced(
         &self,
         target: coin_structure::coin::PublicKey,
@@ -417,13 +470,13 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    #[instrument(skip(self, tx))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.transaction_hash().0))]
     pub fn apply_system_tx(
         &self,
         tx: &SystemTransaction,
         tblock: Timestamp,
     ) -> Result<MaybeEvents<D>, SystemTransactionError> {
-        match tx {
+        let res = match tx {
             SystemTransaction::OverwriteParameters(new_params) => {
                 if new_params.cardano_to_midnight_bridge_fee_basis_points > 10_000 {
                     return Err(SystemTransactionError::InvalidBasisPoints(
@@ -438,7 +491,7 @@ impl<D: DB> LedgerState<D> {
                     state,
                     vec![Event {
                         source: tx.event_source(),
-                        content: EventDetails::ParamChange(new_params.clone()).clone(),
+                        content: EventDetails::ParamChange(Sp::new(new_params.clone())),
                     }],
                 );
                 Ok(res)
@@ -540,7 +593,7 @@ impl<D: DB> LedgerState<D> {
                                 .copied()
                                 .unwrap_or(0);
                             let bridge_receiving = state.bridge_receiving.insert(
-                                target_address.clone(),
+                                *target_address,
                                 curr_value.saturating_add(post_fee_amount),
                             );
 
@@ -556,7 +609,7 @@ impl<D: DB> LedgerState<D> {
 
                 state.check_night_balance_invariant()?;
 
-                return Ok((state, vec![]));
+                Ok((state, vec![]))
             }
             SystemTransaction::PayBlockRewardsToTreasury { amount } => {
                 if *amount > self.block_reward_pool {
@@ -584,159 +637,169 @@ impl<D: DB> LedgerState<D> {
                 let res = (state, vec![]);
                 Ok(res)
             }
-            SystemTransaction::PayFromTreasuryShielded {
-                outputs,
-                token_type,
-                nonce,
-            } => {
-                let mut treasury = self.treasury.clone();
-                let tt_amount = treasury
-                    .get(&TokenType::Shielded(*token_type))
-                    .copied()
-                    .unwrap_or(0);
-                let req_total = outputs
-                    .iter()
-                    .map(|o| o.amount)
-                    .try_fold(0u128, |acc, a| acc.checked_add(a));
-                let req_total = match req_total {
-                    Some(v) if v <= tt_amount => v,
-                    _ => {
-                        error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
-                        return Err(SystemTransactionError::InsufficientTreasuryFunds {
-                            requested: req_total,
-                            actual: tt_amount,
-                            token_type: TokenType::Shielded(*token_type),
-                        });
-                    }
-                };
-                info!(
-                    ?req_total,
-                    ?token_type,
-                    ?outputs,
-                    supply_before = tt_amount,
-                    "[privileged] authorized treasury payout"
+            // NOTE: Treasury payments have been completely disabled until governance for the
+            // treasury has been agreed. All code has been commented out to maximize clarity.
+            SystemTransaction::PayFromTreasuryShielded { .. }
+            | SystemTransaction::PayFromTreasuryUnshielded { .. } => {
+                error!(
+                    ?tx,
+                    "[privileged] denied attempt to access treasury. The treasury is disabled until governance for it has been agreed."
                 );
-                treasury = treasury.insert(TokenType::Shielded(*token_type), tt_amount - req_total);
-                let mut state = LedgerState {
-                    treasury,
-                    ..self.clone()
-                };
-                let mut events = vec![];
-                for output in outputs {
-                    let res = state.native_issue_unbalanced(
-                        output.target_key,
-                        *token_type,
-                        *nonce,
-                        output.amount,
-                        tx.event_source(),
-                    )?;
-                    {
-                        state = res.0;
-                        events.extend(res.1);
-                    }
-                }
-
-                state.check_night_balance_invariant()?;
-
-                let res = (state, events);
-                Ok(res)
+                Err(SystemTransactionError::TreasuryDisabled)
             }
-            SystemTransaction::PayFromTreasuryUnshielded {
-                outputs,
-                token_type,
-            } => {
-                let mut treasury = self.treasury.clone();
-                let tt_amount = treasury
-                    .get(&TokenType::Unshielded(*token_type))
-                    .copied()
-                    .unwrap_or(0);
-                let req_total = outputs
-                    .iter()
-                    .map(|o| o.amount)
-                    .try_fold(0u128, |acc, a| acc.checked_add(a));
-                let req_total = match req_total {
-                    Some(v) if v <= tt_amount => v,
-                    _ => {
-                        error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
-                        return Err(SystemTransactionError::InsufficientTreasuryFunds {
-                            requested: req_total,
-                            actual: tt_amount,
-                            token_type: TokenType::Unshielded(*token_type),
-                        });
-                    }
-                };
-                info!(
-                    ?req_total,
-                    ?token_type,
-                    ?outputs,
-                    supply_before = tt_amount,
-                    "[privileged] authorized treasury payout"
-                );
+            // SystemTransaction::PayFromTreasuryShielded {
+            //     outputs,
+            //     token_type,
+            //     nonce,
+            // } => {
+            //     let mut treasury = self.treasury.clone();
+            //     let tt_amount = treasury
+            //         .get(&TokenType::Shielded(*token_type))
+            //         .copied()
+            //         .unwrap_or(0);
+            //     let req_total = outputs
+            //         .iter()
+            //         .map(|o| o.amount)
+            //         .try_fold(0u128, |acc, a| acc.checked_add(a));
+            //     let req_total = match req_total {
+            //         Some(v) if v <= tt_amount => v,
+            //         _ => {
+            //             error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
+            //             return Err(SystemTransactionError::InsufficientTreasuryFunds {
+            //                 requested: req_total,
+            //                 actual: tt_amount,
+            //                 token_type: TokenType::Shielded(*token_type),
+            //             });
+            //         }
+            //     };
+            //     info!(
+            //         ?req_total,
+            //         ?token_type,
+            //         ?outputs,
+            //         supply_before = tt_amount,
+            //         "[privileged] authorized treasury payout"
+            //     );
+            //     treasury = treasury.insert(TokenType::Shielded(*token_type), tt_amount - req_total);
+            //     let mut state = LedgerState {
+            //         treasury,
+            //         ..self.clone()
+            //     };
+            //     let mut events = vec![];
+            //     for output in outputs {
+            //         let res = state.native_issue_unbalanced(
+            //             output.target_key,
+            //             *token_type,
+            //             *nonce,
+            //             output.amount,
+            //             tx.event_source(),
+            //         )?;
+            //         {
+            //             state = res.0;
+            //             events.extend(res.1);
+            //         }
+            //     }
 
-                treasury =
-                    treasury.insert(TokenType::Unshielded(*token_type), tt_amount - req_total);
+            //     state.check_night_balance_invariant()?;
 
-                let mut state = LedgerState {
-                    treasury,
-                    ..self.clone()
-                };
+            //     let res = (state, events);
+            //     Ok(res)
+            // }
+            // SystemTransaction::PayFromTreasuryUnshielded {
+            //     outputs,
+            //     token_type,
+            // } => {
+            //     let mut treasury = self.treasury.clone();
+            //     let tt_amount = treasury
+            //         .get(&TokenType::Unshielded(*token_type))
+            //         .copied()
+            //         .unwrap_or(0);
+            //     let req_total = outputs
+            //         .iter()
+            //         .map(|o| o.amount)
+            //         .try_fold(0u128, |acc, a| acc.checked_add(a));
+            //     let req_total = match req_total {
+            //         Some(v) if v <= tt_amount => v,
+            //         _ => {
+            //             error!(?req_total, ?token_type, ?outputs, supply = ?tt_amount, "[privileged] treasury payout rejected due to insufficient funds");
+            //             return Err(SystemTransactionError::InsufficientTreasuryFunds {
+            //                 requested: req_total,
+            //                 actual: tt_amount,
+            //                 token_type: TokenType::Unshielded(*token_type),
+            //             });
+            //         }
+            //     };
+            //     info!(
+            //         ?req_total,
+            //         ?token_type,
+            //         ?outputs,
+            //         supply_before = tt_amount,
+            //         "[privileged] authorized treasury payout"
+            //     );
 
-                let mut events = vec![];
-                for (i, output) in outputs.iter().enumerate() {
-                    let hash = output.clone().mk_intent_hash(*token_type);
-                    let replay_protection = self
-                        .replay_protection
-                        .clone()
-                        .apply_member(
-                            hash,
-                            tblock + self.parameters.global_ttl,
-                            tblock,
-                            self.parameters.global_ttl,
-                        )
-                        .map_err(SystemTransactionError::ReplayProtectionFailure)?;
+            //     treasury =
+            //         treasury.insert(TokenType::Unshielded(*token_type), tt_amount - req_total);
 
-                    let utxo = Utxo {
-                        value: output.amount,
-                        owner: output.target_address,
-                        type_: *token_type,
-                        intent_hash: hash,
-                        output_no: i as u32,
-                    };
-                    let meta = UtxoMeta { ctime: tblock };
+            //     let mut state = LedgerState {
+            //         treasury,
+            //         ..self.clone()
+            //     };
 
-                    state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
-                    state.replay_protection = Sp::new(replay_protection);
+            //     let mut events = vec![];
+            //     for (i, output) in outputs.iter().enumerate() {
+            //         let hash = output.clone().mk_intent_hash(*token_type);
+            //         let replay_protection = self
+            //             .replay_protection
+            //             .clone()
+            //             .apply_member(
+            //                 hash,
+            //                 tblock + self.parameters.global_ttl,
+            //                 tblock,
+            //                 self.parameters.global_ttl,
+            //             )
+            //             .map_err(SystemTransactionError::ReplayProtectionFailure)?;
 
-                    if let Some(dust_addr) = state
-                        .dust
-                        .generation
-                        .address_delegation
-                        .get(&output.target_address)
-                        && *token_type == NIGHT
-                    {
-                        let mut event_push = |content| {
-                            events.push(Event {
-                                source: tx.event_source(),
-                                content,
-                            })
-                        };
-                        state.dust = Sp::new(state.dust.fresh_dust_output(
-                            crate::dust::initial_nonce(i as u32, hash),
-                            0,
-                            utxo.value,
-                            *dust_addr,
-                            tblock,
-                            tblock,
-                            &mut event_push,
-                        )?);
-                    }
-                }
+            //         let utxo = Utxo {
+            //             value: output.amount,
+            //             owner: output.target_address,
+            //             type_: *token_type,
+            //             intent_hash: hash,
+            //             output_no: i as u32,
+            //         };
+            //         let meta = UtxoMeta { ctime: tblock };
 
-                state.check_night_balance_invariant()?;
+            //         state.utxo = Sp::new(state.utxo.clone().insert(utxo.clone(), meta));
+            //         state.replay_protection = Sp::new(replay_protection);
 
-                let res = (state, events);
-                Ok(res)
-            }
+            //         if let Some(dust_addr) = state
+            //             .dust
+            //             .generation
+            //             .address_delegation
+            //             .get(&output.target_address)
+            //             && *token_type == NIGHT
+            //         {
+            //             let mut event_push = |content| {
+            //                 events.push(Event {
+            //                     source: tx.event_source(),
+            //                     content,
+            //                 })
+            //             };
+            //             state.dust = Sp::new(state.dust.fresh_dust_output(
+            //                 crate::dust::initial_nonce(i as u32, hash),
+            //                 0,
+            //                 utxo.value,
+            //                 *dust_addr,
+            //                 tblock,
+            //                 tblock,
+            //                 &mut event_push,
+            //             )?);
+            //         }
+            //     }
+
+            //     state.check_night_balance_invariant()?;
+
+            //     let res = (state, events);
+            //     Ok(res)
+            // }
             SystemTransaction::CNightGeneratesDustUpdate { events: actions } => {
                 let mut state = self.clone();
                 let mut dust_state = (*self.dust).clone();
@@ -772,7 +835,7 @@ impl<D: DB> LedgerState<D> {
                                 .generation
                                 .generating_tree
                                 .index(*idx)
-                                .map(|gen_info| gen_info.1.clone())
+                                .map(|gen_info| *gen_info.1)
                             else {
                                 error!(
                                     ?action,
@@ -786,13 +849,14 @@ impl<D: DB> LedgerState<D> {
                             dust_state.generation.generating_tree = dust_state
                                 .generation
                                 .generating_tree
-                                .update_hash(*idx, gen_info.merkle_hash(), gen_info);
+                                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .rehash();
                             event_push(EventDetails::DustGenerationDtimeUpdate {
                                 update: dust_state
                                     .generation
                                     .generating_tree
                                     .insertion_evidence(*idx)
-                                    .expect("must be able to produce evidence for udpated path"),
+                                    .expect("must be able to produce evidence for updated path"),
                                 block_time: tblock,
                             });
                         }
@@ -821,25 +885,45 @@ impl<D: DB> LedgerState<D> {
 
                 new_st.check_night_balance_invariant()?;
 
-                return Ok((new_st, vec![]));
+                Ok((new_st, vec![]))
+            }
+        };
+        match &res {
+            Ok(res) => {
+                debug!(
+                    "state transition: {:?} => {:?} [system transaction {:?}]",
+                    self.state_hash(),
+                    res.0.state_hash(),
+                    tx.transaction_hash().0
+                );
+                trace!(?tx, "system transaction details");
+            }
+            Err(e) => {
+                debug!(
+                    "system transaction rejection from state {:?} (system transaction {:?}): {e}",
+                    self.state_hash(),
+                    tx.transaction_hash().0
+                );
+                trace!(?tx, "system transaction details");
             }
         }
+        res
     }
 
     #[instrument(skip(self, tx, context))]
     fn apply_section<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+        B: Storable<D> + PedersenDowngradeable<D> + Serializable + Tagged,
     >(
         &self,
         tx: &StandardTransaction<S, P, B, D>,
+        transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
         let mut events: Vec<Event<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
-        let transaction_hash = Transaction::Standard(tx.clone()).transaction_hash();
         if segment == 0 {
             // Apply replay protection
             state.replay_protection = Sp::new(
@@ -852,7 +936,7 @@ impl<D: DB> LedgerState<D> {
             let mut com_indices = Map::new();
             if let Some(offer) = &tx.guaranteed_coins {
                 state = state.apply_zswap(
-                    &offer,
+                    offer,
                     context.whitelist.clone(),
                     &mut com_indices,
                     transaction_hash,
@@ -950,7 +1034,7 @@ impl<D: DB> LedgerState<D> {
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
-                                &state.utxo,
+                                &context.ref_state.utxo,
                                 fees_remaining,
                                 &erased,
                                 reg,
@@ -1036,8 +1120,7 @@ impl<D: DB> LedgerState<D> {
         state.check_night_balance_invariant()?;
 
         trace!("transaction phase {segment} successfully applied");
-        let res = Ok((state, events));
-        res
+        Ok((state, events))
     }
 
     pub fn batch_apply_independant(
@@ -1079,7 +1162,7 @@ impl<D: DB> LedgerState<D> {
         context: &TransactionContext<D>,
     ) -> Result<
         (Self, Vec<TransactionResult<D>>),
-        (
+        Box<(
             // The state before the first failure
             Self,
             // The results up to the failure
@@ -1088,14 +1171,14 @@ impl<D: DB> LedgerState<D> {
             TransactionInvalid<D>,
             // The remaining transactions, including the failing one
             &'a [VerifiedTransaction<D>],
-        ),
+        )>,
     > {
         let mut state = self.clone();
         let mut res = Vec::with_capacity(txs.len());
         for (i, tx) in txs.iter().enumerate() {
             let (state2, txres) = state.apply(tx, context);
             if let TransactionResult::Failure(err) = txres {
-                return Err((state, res, err, &txs[i..]));
+                return Err(Box::new((state, res, err, &txs[i..])));
             } else {
                 res.push(txres);
             }
@@ -1104,13 +1187,13 @@ impl<D: DB> LedgerState<D> {
         Ok((state, res))
     }
 
-    #[instrument(skip(self, tx, context))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.hash))]
     pub fn apply(
         &self,
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        match &tx.0 {
+        let res = match &tx.inner {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
@@ -1119,7 +1202,7 @@ impl<D: DB> LedgerState<D> {
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
@@ -1136,27 +1219,38 @@ impl<D: DB> LedgerState<D> {
                     }
                 }
 
-                let res = (
+                (
                     new_st,
                     if total_success {
                         TransactionResult::Success(events)
                     } else {
                         TransactionResult::PartialSuccess(segment_success, events)
                     },
-                );
-                res
+                )
             }
             Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
                 self,
                 rewards,
                 &context.block_context,
                 EventSource {
-                    transaction_hash: tx.transaction_hash(),
+                    transaction_hash: tx.hash,
                     logical_segment: 0,
                     physical_segment: 0,
                 },
             ),
-        }
+        };
+        debug!(
+            "state transition: {:?} => {:?} [transaction {:?}]",
+            self.state_hash(),
+            res.0.state_hash(),
+            tx.hash,
+        );
+        debug!(
+            "transaction result: {:?}",
+            ErasedTransactionResult::from(&res.1)
+        );
+        trace!(?tx, "transaction details");
+        res
     }
 
     fn apply_actions<P: ProofKind<D>>(
@@ -1207,7 +1301,7 @@ impl<D: DB> LedgerState<D> {
                                     token_type,
                                     bal.checked_add(val).ok_or(
                                         TransactionInvalid::BalanceCheckOutOfBounds {
-                                            token_type: token_type,
+                                            token_type,
                                             current_balance: bal,
                                             operation_value: val,
                                             operation: BalanceOperation::Addition,
@@ -1327,18 +1421,36 @@ impl<D: DB> LedgerState<D> {
         Ok(res)
     }
 
-    #[must_use]
+    #[instrument(skip(self))]
     pub fn post_block_update(
         &self,
         tblock: Timestamp,
-        block_fullness: SyntheticCost,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
     ) -> Result<Self, BlockLimitExceeded> {
         let mut new_st = self.clone();
-        let block_fullness = block_fullness
-            .normalize(self.parameters.limits.block_limits)
-            .ok_or(BlockLimitExceeded)?;
+        let values = [
+            &detailed_block_fullness.read_time,
+            &detailed_block_fullness.compute_time,
+            &detailed_block_fullness.block_usage,
+            &detailed_block_fullness.bytes_written,
+            &detailed_block_fullness.bytes_churned,
+            &overall_block_fullness,
+        ];
+        if values
+            .iter()
+            .any(|v| **v < FixedPoint::ZERO || **v > FixedPoint::ONE)
+        {
+            debug!(
+                "post block update rejection at state {:?}: {}",
+                self.state_hash(),
+                BlockLimitExceeded
+            );
+            return Err(BlockLimitExceeded);
+        }
         let fee_prices = self.parameters.fee_prices.update_from_fullness(
-            block_fullness,
+            detailed_block_fullness,
+            overall_block_fullness,
             self.parameters.cost_dimension_min_ratio,
             self.parameters.price_adjustment_a_parameter,
         );
@@ -1352,6 +1464,11 @@ impl<D: DB> LedgerState<D> {
             new_st
                 .dust
                 .post_block_update(tblock, self.parameters.global_ttl),
+        );
+        debug!(
+            "state transition: {:?} => {:?} [post block update]",
+            self.state_hash(),
+            new_st.state_hash()
         );
         Ok(new_st)
     }
@@ -1525,7 +1642,9 @@ impl<D: DB> UtxoState<D> {
             let input_utxo = Utxo::from(input.clone());
             let is_member = res.utxos.contains_key(&input_utxo);
             if !is_member {
-                return Err(TransactionInvalid::InputNotInUtxos(input_utxo.clone()));
+                return Err(TransactionInvalid::InputNotInUtxos(Box::new(
+                    input_utxo.clone(),
+                )));
             }
 
             // self.utxos -= inputs;
@@ -1554,7 +1673,7 @@ impl<D: DB> UtxoState<D> {
             let meta = UtxoMeta {
                 ctime: context.block_context.tblock,
             };
-            res = res.insert((&**output).clone(), meta);
+            res = res.insert((**output).clone(), meta);
         }
         Ok(res)
     }
@@ -1629,7 +1748,6 @@ impl<D: DB> ReplayProtectionState<D> {
             })
     }
 
-    #[must_use]
     pub fn post_block_update(&self, tblock: Timestamp) -> Self {
         ReplayProtectionState {
             time_filter_map: self.time_filter_map.filter(tblock),

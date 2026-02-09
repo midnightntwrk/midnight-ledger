@@ -79,79 +79,134 @@ pub const fn hexhash(hex: &[u8]) -> [u8; 32] {
 
 const EXPECTED_DATA: &[(&str, [u8; 32], &str)] = &[
     (
-        "bls_filecoin_2p10",
-        hexhash(b"d1a3403c1f8669e82ed28d9391e13011aea76801b28fe14b42bf76d141b4efa2"),
+        "bls_midnight_2p0",
+        hexhash(b"59b30b3114a34ccbbfb599376e178fb8d9b3366cae2174c2f1da20e75847f823"),
+        "public parameters for k=0",
+    ),
+    (
+        "bls_midnight_2p1",
+        hexhash(b"bbe04fe3c70d0c138447cb086b4baddc30cb8bb2a004114bc02e6f739516280e"),
+        "public parameters for k=1",
+    ),
+    (
+        "bls_midnight_2p2",
+        hexhash(b"80e15568fa1a0117db893239be7fa5e34a6bcc3a8c3bfa7709534b9cb88eb6c1"),
+        "public parameters for k=2",
+    ),
+    (
+        "bls_midnight_2p3",
+        hexhash(b"4be827a6472193df80d8f08b4b25a85baef436fdd1965d89b6af89f4ec4e99e2"),
+        "public parameters for k=3",
+    ),
+    (
+        "bls_midnight_2p4",
+        hexhash(b"232f401fad10c7ddf8828d2aa4c85c6506c5da09795998cecaeb9f75fc8f6ada"),
+        "public parameters for k=4",
+    ),
+    (
+        "bls_midnight_2p5",
+        hexhash(b"0a1c9229f315fc1868ff25f668fb83aec4d09f4f23a706b5197c692c619d72c6"),
+        "public parameters for k=5",
+    ),
+    (
+        "bls_midnight_2p6",
+        hexhash(b"cf2ad6be7d0fedf5bec2aaa35f6be4aca33053d74268fdf5aa54fcb2891ea6df"),
+        "public parameters for k=6",
+    ),
+    (
+        "bls_midnight_2p7",
+        hexhash(b"e82ae890c080188355f37feaffe91372584cd810615082d9143d4dec0453fd9d"),
+        "public parameters for k=7",
+    ),
+    (
+        "bls_midnight_2p8",
+        hexhash(b"909b707551eaaea79828e883cde6fc46ab15986c3b1d791bed462c9e2805c933"),
+        "public parameters for k=8",
+    ),
+    (
+        "bls_midnight_2p9",
+        hexhash(b"b9009f1098bcefffec3c461ab3a5e3a17f7e5599f0f08c70fcdc55a89227bcbd"),
+        "public parameters for k=9",
+    ),
+    (
+        "bls_midnight_2p10",
+        hexhash(b"46b2290933cbed4c378889e4ba971f1a92888331ffb09466acd4ff61a1e2cb42"),
         "public parameters for k=10",
     ),
     (
-        "bls_filecoin_2p11",
-        hexhash(b"b5047f05800dbd84fd1ea43b96a8850e128b7a595ed132cd72588cc2cb146b29"),
+        "bls_midnight_2p11",
+        hexhash(b"9901589d7956ff58be0d85569b2f455b77b58c3758026ffb5bbe4807000b96d1"),
         "public parameters for k=11",
     ),
     (
-        "bls_filecoin_2p12",
-        hexhash(b"b32791775af5fff1ae5ead682c3d8832917ebb0652b43cf810a1e3956eb27a71"),
+        "bls_midnight_2p12",
+        hexhash(b"ef08eb3fcf62df8f72c515cffa027e681808b530cb016eea104115545ef6d5c8"),
         "public parameters for k=12",
     ),
     (
-        "bls_filecoin_2p13",
-        hexhash(b"b9af43892c3cb90321fa00a36e5e59051f356df145d7f58368531f28d212937b"),
+        "bls_midnight_2p13",
+        hexhash(b"d3324910969c4cc54143b8045b649e5c3a4bd5fb7b8f85fe1b770f640ce1c803"),
         "public parameters for k=13",
     ),
     (
-        "bls_filecoin_2p14",
-        hexhash(b"4923e5a7fbb715d81cdb5c03b9c0e211768d35ccc52d82f49c3d93bcf8d36a56"),
+        "bls_midnight_2p14",
+        hexhash(b"fc253016885ec830e97808c9ec920bb5cab5c21af590380a6cb5eb0538e2b244"),
         "public parameters for k=14",
     ),
     (
-        "bls_filecoin_2p15",
-        hexhash(b"162fac0cf70b9b02e02195ec37013c04997b39dc1831a97d5a83f47a9ce39c97"),
+        "bls_midnight_2p15",
+        hexhash(b"724c7c3d779148bb113c7ee9c034b2f27db16e6bdf315fde90105a9bad00b1de"),
         "public parameters for k=15",
     ),
     (
-        "bls_filecoin_2p16",
-        hexhash(b"4ebc0d077fe6645e9b7ca6563217be2176f00dfe39cc97b3f60ecbad3573f973"),
+        "bls_midnight_2p16",
+        hexhash(b"09c877216d6589b370263e18af40a030a901b41a7a7c37ef58c9901db41f05c6"),
         "public parameters for k=16",
     ),
     (
-        "bls_filecoin_2p17",
-        hexhash(b"7228c4519e96ece2c54bf2f537d9f26b0ed042819733726623fab5e17eac4360"),
+        "bls_midnight_2p17",
+        hexhash(b"4a9ef6c7c0619aab74eede44b13e753e3ba54508a02dd3b7106a949aabb73b74"),
         "public parameters for k=17",
     ),
     (
-        "bls_filecoin_2p18",
-        hexhash(b"4f023825c14cc0a88070c70588a932519186d646094eddbff93c87a46060fd28"),
+        "bls_midnight_2p18",
+        hexhash(b"e8436dc5d8b598f169c127c745135d889744007e6d384ff126df8d1332522f86"),
         "public parameters for k=18",
     ),
     (
-        "bls_filecoin_2p19",
-        hexhash(b"0574a536c128142e89c0f28198d048145e2bb2bf645c8b81c8697cba445a1fb1"),
+        "bls_midnight_2p19",
+        hexhash(b"8e8dc15c4362f05c912f1e770559a3945db3e58a374def416ed5d3e65ad5b10e"),
         "public parameters for k=19",
     ),
     (
-        "bls_filecoin_2p20",
-        hexhash(b"75a1774fdf0848f4ff82790202e5c1401598bafea27321b77180d96c56e62228"),
+        "bls_midnight_2p20",
+        hexhash(b"1cc62978558fdc1e445cd70cfd9a86ec3c2e2151b6d74811232d37faf9133ff1"),
         "public parameters for k=20",
     ),
     (
-        "bls_filecoin_2p21",
-        hexhash(b"e05fcbe4f7692800431cfc32e972be629c641fca891017be09a8384d0b5f8d3c"),
+        "bls_midnight_2p21",
+        hexhash(b"9cf1644a87f0f027ae5fc6278f91d823a6334ff3e338a29e2f2ef57d071ed64d"),
         "public parameters for k=21",
     ),
     (
-        "bls_filecoin_2p22",
-        hexhash(b"277d9c8140c02a1d4472d5da65a823fc883bc4596e69734fb16ca463d193186b"),
+        "bls_midnight_2p22",
+        hexhash(b"e8ad5eed936d657a0fb59d2a55ba19f81a3083bb3554ef88f464f5377e9b2c2f"),
         "public parameters for k=22",
     ),
     (
-        "bls_filecoin_2p23",
-        hexhash(b"7b8dc4b2e809ef24ed459cabaf9286774cf63f2e6e2086f0d9fb014814bdfc97"),
+        "bls_midnight_2p23",
+        hexhash(b"09399d05f9f50875dfdd87dc9903d40c897eaafa9ec8cbb08bace853ecc36c0c"),
         "public parameters for k=23",
     ),
     (
-        "bls_filecoin_2p24",
-        hexhash(b"e6b02dccf381a5fc7a79ba4d87612015eba904241f81521e2dea39a60ab6b812"),
+        "bls_midnight_2p24",
+        hexhash(b"b0e6fa7a4ab4a79a1e6560966f267556409db44bab6d5fab3711ad6c6b623207"),
         "public parameters for k=24",
+    ),
+    (
+        "bls_midnight_2p25",
+        hexhash(b"3289a751c938988cd2f54154d8722d1eda2cd11593064afdde82099b24ff4a58"),
+        "public parameters for k=25",
     ),
 ];
 
@@ -285,7 +340,7 @@ impl MidnightDataProvider {
 
     /// The name of the public parameters for the given `k` value.
     pub fn name_k(k: u8) -> String {
-        format!("bls_filecoin_2p{k}")
+        format!("bls_midnight_2p{k}")
     }
 
     /// Fetches the public parameters for a give `k`.

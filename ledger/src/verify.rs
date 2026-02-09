@@ -39,14 +39,14 @@ use onchain_runtime::state::{
     EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
-use serialize::Serializable;
+use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::{HashSet, VecDeque};
 use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
@@ -98,6 +98,7 @@ pub trait StateReference<D: DB> {
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
 }
 
 fn get_op<D: DB>(
@@ -175,7 +176,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params = self.parameters.dust.clone();
+        let params = self.parameters.dust;
         let commitment_root = self
             .dust
             .utxo
@@ -201,6 +202,9 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
                 found: network.into(),
             })
         }
+    }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.state_hash()
     }
 }
 
@@ -287,7 +291,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             MerkleTreeDigest,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let params_old = self.previously_validated_state.parameters.dust.clone();
+        let params_old = self.previously_validated_state.parameters.dust;
         let commitment_root_old = self
             .previously_validated_state
             .dust
@@ -304,7 +308,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             .get(ctime)
             .map(|x| x.0)
             .unwrap_or_default();
-        let params_new = self.new_state.parameters.dust.clone();
+        let params_new = self.new_state.parameters.dust;
         let commitment_root_new = self
             .new_state
             .dust
@@ -338,6 +342,9 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
                 found: network.into(),
             })
         }
+    }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.new_state.state_hash()
     }
 }
 
@@ -503,7 +510,7 @@ impl<
                 })
                 .transpose()?;
             self.binding_commitment
-                .valid(&Intent::challenge_pre_for(&self, segment_id))
+                .valid(&Intent::challenge_pre_for(self, segment_id))
         })?;
 
         self.actions
@@ -536,14 +543,14 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D> + Storable<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D> + Tagged,
     D: DB,
 > Transaction<S, P, B, D>
 where
     Transaction<S, P, B, D>: Serializable,
 {
     // All checks that can be done without a state.
-    #[instrument(skip(self, ref_state))]
+    #[instrument(skip(self, ref_state), fields(self = ?self.transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
     /// Checks if a transaction is well-formed, performing all checks possible
     /// with a moderately stale reference state.
     ///
@@ -580,14 +587,14 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(&*x, 0).map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, 0).map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {
                         if *seg_x_offer.0 == 0 {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
-                        P::zswap_well_formed(&seg_x_offer.1.deref(), *seg_x_offer.0.deref())
+                        P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
                             .map_err(|e: zswap::error::MalformedOffer| {
                                 MalformedTransaction::<D>::Zswap(e)
                             })?;
@@ -625,17 +632,23 @@ where
                 }
 
                 debug!("transaction well-formed");
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
             Transaction::ClaimRewards(mtx) => {
                 ref_state.network_check(&mtx.network_id)?;
                 ref_state.stateless_check(|| {
                     B::when_sealed(Ok(
                         // There's no point in checking this unless we actually care about signature verification
-                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(&mtx).well_formed(),
+                        move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
         }
     }
@@ -1040,6 +1053,7 @@ fn sequencing_context_check<P: ProofKind<D>, D: DB>(
 }
 
 // TODO: Document this clearly
+#[allow(clippy::type_complexity)]
 fn relate_nodes<P: ProofKind<D>, D: DB>(
     guaranteed_calls: &mut HashSet<CallNode>,
     fallible_calls: &mut HashSet<CallNode>,
@@ -1136,6 +1150,7 @@ impl<
     D: DB,
 > StandardTransaction<S, P, B, D>
 {
+    #[allow(clippy::mutable_key_type)]
     fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
         let mut shielded_inputs = HashSet::new();
         let mut shielded_outputs = HashSet::new();
@@ -1172,7 +1187,6 @@ impl<
                         shielded_outputs: shielded_outputs
                             .into_iter()
                             .map(|x| x.erase_proof())
-                            .into_iter()
                             .collect(),
                         transient_outputs: outputs.into_iter().map(|x| x.erase_proof()).collect(),
                     },
@@ -1349,14 +1363,15 @@ impl<
 
         if comm != expected {
             return Err(MalformedTransaction::PedersenCheckFailure {
-                expected,
-                calculated: comm,
+                expected: Box::new(expected),
+                calculated: Box::new(comm),
             });
         };
 
         Ok(())
     }
 
+    #[allow(clippy::type_complexity)]
     fn effects_check(&self) -> Result<(), MalformedTransaction<D>> {
         // We have multisets for the following:
         // - Claimed nullifiers (per segment ID)
@@ -1395,8 +1410,7 @@ impl<
         let transcripts: Vec<_> = calls
             .iter()
             .flat_map(|(segment, call)| {
-                (*call)
-                    .guaranteed_transcript
+                call.guaranteed_transcript
                     .iter()
                     .map(move |t| (segment, &0, t, call.address))
                     .chain(
@@ -1541,8 +1555,8 @@ impl<
             .iter()
             .flat_map(|(segment, _, t, _)| {
                 t.effects.claimed_contract_calls.iter().map(|call| {
-                    let (_seq, addr, hash, fr) = (&*call).into_inner();
-                    (**segment, (addr, hash, fr))
+                    let (_seq, addr, hash, fr) = &call.into_inner();
+                    (**segment, (*addr, *hash, *fr))
                 })
             })
             .collect();
@@ -1590,7 +1604,7 @@ impl<
                         let (sp, i) = sp.deref();
                         (
                             (**intent_seg, **logical_seg == 0),
-                            ((sp.deref().0.clone(), sp.deref().1.clone()), *(*i).deref()),
+                            ((sp.deref().0, sp.deref().1), *(*i).deref()),
                         )
                     })
                 })
@@ -1603,10 +1617,7 @@ impl<
                         (
                             (**intent_seg, **logical_seg == 0),
                             (
-                                (
-                                    sp.deref().0.deref().clone(),
-                                    PublicAddress::Contract((*addr).clone()),
-                                ),
+                                (*sp.deref().0.deref(), PublicAddress::Contract(*addr)),
                                 *sp.deref().1.deref(),
                             ),
                         )
@@ -1626,7 +1637,7 @@ impl<
                                 (segment, guaranteed),
                                 (
                                     (
-                                        TokenType::Unshielded(output.type_.clone()),
+                                        TokenType::Unshielded(output.type_),
                                         PublicAddress::User(output.owner),
                                     ),
                                     output.value,
@@ -1694,7 +1705,7 @@ impl<D: DB> ContractDeploy<D> {
         if self.initial_state.balance.iter().any(|bal| *bal.1 > 0) {
             let mut err_data = std::collections::HashMap::new();
             for val in self.initial_state.balance.clone().iter() {
-                err_data.insert(*(*val).0, *(*val).1);
+                err_data.insert(*val.0, *val.1);
             }
             return Err(MalformedTransaction::<D>::MalformedContractDeploy(
                 MalformedContractDeploy::NonZeroBalance(err_data),
@@ -1785,10 +1796,11 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         strictness: WellFormedStrictness,
         parent: &ErasedIntent<D>,
     ) -> Result<(), MalformedTransaction<D>> {
-        if let Some(fallible) = &self.fallible_transcript {
-            if fallible.program.get(0) != Some(&Op::Ckpt) && self.guaranteed_transcript.is_some() {
-                return Err(MalformedTransaction::FallibleWithoutCheckpoint);
-            }
+        if let Some(fallible) = &self.fallible_transcript
+            && fallible.program.get(0) != Some(&Op::Ckpt)
+            && self.guaranteed_transcript.is_some()
+        {
+            return Err(MalformedTransaction::FallibleWithoutCheckpoint);
         }
         for transcript in [
             self.guaranteed_transcript.as_ref(),
@@ -1873,6 +1885,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
     pub(crate) fn binding_input(&self, binding_com: Pedersen) -> Fr {
         let mut binding_input = Vec::new();
 
+        binding_input.extend(b"midnight:binding-input[v1]");
         let _ = Serializable::serialize(&self.address, &mut binding_input);
         let _ = Serializable::serialize(&self.entry_point, &mut binding_input);
         let _ = Serializable::serialize(

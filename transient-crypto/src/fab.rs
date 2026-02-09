@@ -16,7 +16,7 @@
 //! alignment which can be used to interpret them either as binary data, or a
 //! sequence of field elements for proving.
 
-use std::iter::{once, repeat};
+use std::iter::once;
 
 use crate::curve::{EmbeddedFr, EmbeddedGroupAffine};
 use crate::curve::{FR_BYTES, FR_BYTES_STORED, Fr};
@@ -25,7 +25,7 @@ use crate::merkle_tree::{MerklePath, MerkleTreeDigest};
 use crate::repr::{FieldRepr, bytes_from_field_repr};
 use base_crypto::fab::{
     Aligned, AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, DynAligned,
-    InvalidBuiltinDecode, Value, ValueAtom, ValueSlice, int_size,
+    FIELD_BYTE_LIMIT, InvalidBuiltinDecode, Value, ValueAtom, ValueSlice, int_size,
 };
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
 use rand::Rng;
@@ -105,7 +105,9 @@ impl<T: DynAligned> DynAligned for MerklePath<T> {
     fn dyn_alignment(&self) -> Alignment {
         let leaf_align = self.leaf.dyn_alignment();
         let entry_align = Alignment::concat([&MerkleTreeDigest::alignment(), &bool::alignment()]);
-        Alignment::concat(once(&leaf_align).chain(repeat(&entry_align).take(self.path.len())))
+        Alignment::concat(
+            once(&leaf_align).chain(std::iter::repeat_n(&entry_align, self.path.len())),
+        )
     }
 }
 
@@ -242,6 +244,8 @@ impl ValueExt for Value {
                     let discriminant = u16::try_from(&atom_slice[0])
                         .expect("unchecked discriminant should decode");
                     let choice = &options[discriminant as usize];
+                    acc = f(acc, &AlignmentAtom::Bytes { length: 2 }, &atom_slice[0]);
+                    *atom_slice = &atom_slice[1..];
                     acc = Value::repr_traverse(atom_slice, choice, f, len, pad, acc);
                     let padding = options.iter().map(len).max().unwrap_or(0) - len(choice);
                     acc = pad(acc, padding);
@@ -252,8 +256,9 @@ impl ValueExt for Value {
     }
 
     fn field_repr_unchecked<W: MemWrite<Fr>>(&self, align: &Alignment, writer: &mut W) {
+        let mut unconsumed_value = &self.0[..];
         Value::repr_traverse(
-            &mut &self.0[..],
+            &mut unconsumed_value,
             align,
             &|mut w: &mut W, a, v| {
                 v.field_repr_unchecked(a, &mut w);
@@ -266,11 +271,13 @@ impl ValueExt for Value {
             },
             writer,
         );
+        debug_assert!(unconsumed_value.is_empty());
     }
 
     fn binary_repr_unchecked<W: MemWrite<u8>>(&self, align: &Alignment, writer: &mut W) {
+        let mut unconsumed_value = &self.0[..];
         Value::repr_traverse(
-            &mut &self.0[..],
+            &mut unconsumed_value,
             align,
             &|mut w: &mut W, a, v| {
                 v.binary_repr_unchecked(a, &mut w);
@@ -283,6 +290,7 @@ impl ValueExt for Value {
             },
             writer,
         );
+        debug_assert!(unconsumed_value.is_empty());
     }
 }
 
@@ -455,6 +463,20 @@ pub(crate) trait ValueAtomExt {
     fn binary_repr_unchecked<W: MemWrite<u8>>(&self, ty: &AlignmentAtom, writer: &mut W);
 }
 
+// Interprets a value atom as a field element, reducing modulo the field prime
+// if required.
+//
+// The input *must* have validated as having AlignementAtom::Field, and
+// therefore is guaranteed to be at most FIELD_BYTE_LIMIT bytes long.
+fn value_atom_as_field(atom: &ValueAtom) -> Fr {
+    let mut bytes = [0u8; FIELD_BYTE_LIMIT];
+    assert!(atom.0.len() <= FIELD_BYTE_LIMIT);
+    bytes[..atom.0.len()].copy_from_slice(&atom.0);
+    // A white lie -- we aren't inputting uniform bytes, but we are of the
+    // correct length, and this function does the right modulus reduction.
+    Fr::from_uniform_bytes(&bytes)
+}
+
 impl ValueAtomExt for ValueAtom {
     fn field_repr<W: MemWrite<Fr>>(&self, ty: &AlignmentAtom, writer: &mut W) -> bool {
         if !ty.fits(self) {
@@ -488,9 +510,7 @@ impl ValueAtomExt for ValueAtom {
                 writer.write(&vec![Fr::from(0); prepend_zeros]);
                 writer.write(&raw.collect::<Vec<_>>());
             }
-            AlignmentAtom::Field => writer
-                .write(&[Fr::from_le_bytes(&self.0)
-                    .expect("Unchecked field repr field should be in range")]),
+            AlignmentAtom::Field => writer.write(&[value_atom_as_field(self)]),
         }
     }
 
@@ -506,9 +526,7 @@ impl ValueAtomExt for ValueAtom {
                 writer.write(&zeroes);
             }
             AlignmentAtom::Field => {
-                Fr::from_le_bytes(&self.0)
-                    .expect("Unchecked field repr field should be in range")
-                    .binary_repr(writer);
+                value_atom_as_field(self).binary_repr(writer);
             }
         }
     }
@@ -650,6 +668,23 @@ impl FieldRepr for AlignmentSegment {
             AlignmentSegment::Option(options) => {
                 2 + options.iter().map(FieldRepr::field_size).sum::<usize>()
             }
+        }
+    }
+}
+
+#[cfg(all(test, feature = "proptest"))]
+mod tests {
+    use super::*;
+    use base_crypto::fab::AlignedValue;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn test_fab_repr_consistency(value in AlignedValue::arbitrary()) {
+            assert!(value.alignment.fits(&value.value));
+            assert_eq!(value.field_vec().len(), value.field_size());
+            let value_repr = ValueReprAlignedValue(value);
+            assert_eq!(value_repr.binary_vec().len(), value_repr.binary_len());
         }
     }
 }

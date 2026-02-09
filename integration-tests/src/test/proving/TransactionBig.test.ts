@@ -93,7 +93,7 @@ describe.concurrent('Ledger API - TransactionBig [@slow][@proving]', () => {
       for (let updateIndex = 0; updateIndex < 10; updateIndex++) {
         const maintenanceUpdate = new MaintenanceUpdate(
           Static.contractAddress(),
-          [new VerifierKeyRemove(`operation_${updateIndex}`, new ContractOperationVersion('v2'))],
+          [new VerifierKeyRemove(`operation_${updateIndex}`, new ContractOperationVersion('v3'))],
           BigInt(updateIndex)
         );
         intent = intent.addMaintenanceUpdate(maintenanceUpdate);

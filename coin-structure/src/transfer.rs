@@ -26,7 +26,7 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Dummy, Serializable)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "recipient[v1]"]
+#[tag = "recipient[v2]"]
 pub enum Recipient {
     User(PublicKey),
     Contract(ContractAddress),
@@ -56,14 +56,13 @@ impl FieldRepr for Recipient {
     }
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serializable, Dummy)]
-#[cfg_attr(feature = "proptest", derive(Arbitrary))]
-pub enum SenderEvidence {
-    User(SecretKey),
+#[derive(Debug, Clone, Hash)]
+pub enum SenderEvidence<'a> {
+    User(std::borrow::Cow<'a, SecretKey>),
     Contract(ContractAddress),
 }
 
-impl FieldRepr for SenderEvidence {
+impl FieldRepr for SenderEvidence<'_> {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
         match self {
             SenderEvidence::User(sk) => {
@@ -83,12 +82,12 @@ impl FieldRepr for SenderEvidence {
     }
 }
 
-impl From<&SenderEvidence> for Recipient {
-    fn from(se: &SenderEvidence) -> Recipient {
+impl From<SenderEvidence<'_>> for Recipient {
+    fn from(se: SenderEvidence<'_>) -> Recipient {
         use SenderEvidence::*;
         match se {
             User(sk) => Recipient::User(sk.public_key()),
-            Contract(addr) => Recipient::Contract(*addr),
+            Contract(addr) => Recipient::Contract(addr),
         }
     }
 }

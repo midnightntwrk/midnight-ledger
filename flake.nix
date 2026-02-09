@@ -12,7 +12,7 @@
 # limitations under the License.
 
 {
-  description = "Midnight ledger prototype";
+  description = "Midnight ledger";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
@@ -25,7 +25,7 @@
     #  inputs.onchain-runtime.follows = "";
     #};
     zkir = {
-      url = "github:midnightntwrk/midnight-ledger/dde9ed5570893a1e382bf87859469fb44b99d1d2";
+      url = "github:midnightntwrk/midnight-ledger/48b80c5d6d21412a0a531cf5336389656b9ad2d1";
       # Have the self-recursion just be a fixpoint.
       inputs.zkir.follows = "zkir";
     };
@@ -59,6 +59,7 @@
           ./proof-server
           ./storage
           ./zkir
+          ./zkir-v3
           ./base-crypto-derive
           ./base-crypto
           ./transient-crypto
@@ -73,6 +74,21 @@
           ./wasm-proving-demos/zkir-mt
         ];
         rust = fenix.packages.${system};
+        # Temporary until 0.22.0 is in nixpkgs, as this is required to parse
+        # some new vulns.
+        cargo-audit = pkgs.rustPlatform.buildRustPackage rec {
+          pname = "cargo-audit";
+          version = "0.22.0";
+          src = pkgs.fetchCrate {
+            inherit pname version;
+            hash = "sha256-Ha2yVyu9331NaqiW91NEwCTIeW+3XPiqZzmatN5KOws=";
+          };
+          nativeBuildInputs = [ pkgs.pkg-config ];
+          buildInputs = [ pkgs.openssl pkgs.zlib ];
+          buildFeatures = "fix";
+          cargoHash = "sha256-f8nrW1l7UA8sixwqXBD1jCJi9qyKC5tNl/dWwCt41Lk=";
+          doCheck = false;
+        };
         bagel-wasm = (import ./bagel.nix) {
           inherit system nixpkgs;
           stdenv = pkgs.clangStdenv;
@@ -103,12 +119,7 @@
               [
                 self.packages.${system}.local-params
                 zkir.packages.${system}.zkir
-              ] else [])
-              ++ (
-                if isDarwin
-                then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                else []
-              );
+              ] else []);
           };
         mkLedger = {
           isCrossArm ? false,
@@ -150,12 +161,7 @@
                   zkir.packages.${system}.zkir
                   rust-build
                   pkgs.chez
-                ]
-                ++ (
-                  if isDarwin
-                  then [pkgs.darwin.apple_sdk.frameworks.SystemConfiguration]
-                  else []
-                );
+                ];
 
               doCheck = true;
             }
@@ -266,6 +272,7 @@
               packages.onchain-runtime-wasm
               packages.ledger-wasm
               packages.zkir-wasm
+              packages.zkir-v3-wasm
             ];
           };
 
@@ -354,10 +361,11 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v1"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v2"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v6"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v7"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
@@ -392,21 +400,57 @@
               ];
               doCheck = false;
             };
+          packages.zkir-v3 = ({
+              "x86_64-linux" = pkgsStatic;
+              "x86_64-darwin" = pkgs;
+              "aarch64-linux" = pkgsStatic;
+              "aarch64-darwin" = pkgs;
+          }.${system}.makeRustPlatform {
+            rustc = packages.rust-build-toolchain;
+            cargo = packages.rust-build-toolchain;
+          }).buildRustPackage rec {
+              pname = "zkir-v3";
+              version = (builtins.fromTOML (builtins.readFile ./zkir-v3/Cargo.toml)).package.version;
+              src = rustWorkspaceSrc;
+              cargoLock.lockFile = ./Cargo.lock;
+              cargoLock.allowBuiltinFetchGit = true;
+
+              MIDNIGHT_PP = "${packages.public-params}";
+
+              buildInputs = [
+                packages.public-params
+              ];
+              cargoBuildFlags = "--package zkir-v3 --features binary";
+              nativeBuildInputs = [
+                packages.rust-build-toolchain
+              ];
+              doCheck = false;
+            };
           packages.public-params = let
-              param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_filecoin_2p${builtins.toString k}";
+              param-for = k: "https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/bls_midnight_2p${builtins.toString k}";
           in pkgs.stdenvNoCC.mkDerivation {
             pname = "midnight-testing-public-parameters";
             version = "0.1.0";
 
             srcs = [
-              (pkgs.fetchurl { url = param-for 10; hash = "sha256-0aNAPB+Gaegu0o2TkeEwEa6naAGyj+FLQr920UG076I="; })
-              (pkgs.fetchurl { url = param-for 11; hash = "sha256-tQR/BYANvYT9HqQ7lqiFDhKLelle0TLNcliMwssUayk="; })
-              (pkgs.fetchurl { url = param-for 12; hash = "sha256-syeRd1r1//GuXq1oLD2IMpF+uwZStDz4EKHjlW6yenE="; })
-              (pkgs.fetchurl { url = param-for 13; hash = "sha256-ua9DiSw8uQMh+gCjbl5ZBR81bfFF1/WDaFMfKNISk3s="; })
-              (pkgs.fetchurl { url = param-for 14; hash = "sha256-SSPlp/u3Fdgc21wDucDiEXaNNczFLYL0nD2TvPjTalY="; })
-              (pkgs.fetchurl { url = param-for 15; hash = "sha256-Fi+sDPcLmwLgIZXsNwE8BJl7OdwYMal9WoP0epzjnJc="; })
-              (pkgs.fetchurl { url = param-for 16; hash = "sha256-TrwNB3/mZF6bfKZWMhe+IXbwDf45zJez9g7LrTVz+XM="; })
-              (pkgs.fetchurl { url = param-for 17; hash = "sha256-cijEUZ6W7OLFS/L1N9nyaw7QQoGXM3JmI/q14X6sQ2A="; })
+              (pkgs.fetchurl { url = param-for 0; hash = "sha256-WbMLMRSjTMu/tZk3bhePuNmzNmyuIXTC8dog51hH+CM="; })
+              (pkgs.fetchurl { url = param-for 1; hash = "sha256-u+BP48cNDBOER8sIa0ut3DDLi7KgBBFLwC5vc5UWKA4="; })
+              (pkgs.fetchurl { url = param-for 2; hash = "sha256-gOFVaPoaARfbiTI5vn+l40przDqMO/p3CVNLnLiOtsE="; })
+              (pkgs.fetchurl { url = param-for 3; hash = "sha256-S+gnpkchk9+A2PCLSyWoW670Nv3Rll2Jtq+J9OxOmeI="; })
+              (pkgs.fetchurl { url = param-for 4; hash = "sha256-Iy9AH60Qx934go0qpMhcZQbF2gl5WZjOyuufdfyPato="; })
+              (pkgs.fetchurl { url = param-for 5; hash = "sha256-ChySKfMV/Bho/yX2aPuDrsTQn08jpwa1GXxpLGGdcsY="; })
+              (pkgs.fetchurl { url = param-for 6; hash = "sha256-zyrWvn0P7fW+wqqjX2vkrKMwU9dCaP31qlT8sokept8="; })
+              (pkgs.fetchurl { url = param-for 7; hash = "sha256-6CrokMCAGINV83/q/+kTclhM2BBhUILZFD1N7ART/Z0="; })
+              (pkgs.fetchurl { url = param-for 8; hash = "sha256-kJtwdVHqrqeYKOiDzeb8RqsVmGw7HXkb7UYsnigFyTM="; })
+              (pkgs.fetchurl { url = param-for 9; hash = "sha256-uQCfEJi87//sPEYas6XjoX9+VZnw8Ixw/NxVqJInvL0="; })
+              (pkgs.fetchurl { url = param-for 10; hash = "sha256-RrIpCTPL7Uw3iInkupcfGpKIgzH/sJRmrNT/YaHiy0I="; })
+              (pkgs.fetchurl { url = param-for 11; hash = "sha256-mQFYnXlW/1i+DYVWmy9FW3e1jDdYAm/7W75IBwALltE="; })
+              (pkgs.fetchurl { url = param-for 12; hash = "sha256-7wjrP89i349yxRXP+gJ+aBgItTDLAW7qEEEVVF721cg="; })
+              (pkgs.fetchurl { url = param-for 13; hash = "sha256-0zJJEJacTMVBQ7gEW2SeXDpL1ft7j4X+G3cPZAzhyAM="; })
+              (pkgs.fetchurl { url = param-for 14; hash = "sha256-/CUwFoheyDDpeAjJ7JILtcq1whr1kDgKbLXrBTjiskQ="; })
+              (pkgs.fetchurl { url = param-for 15; hash = "sha256-ckx8PXeRSLsRPH7pwDSy8n2xbmvfMV/ekBBam60Asd4="; })
+              (pkgs.fetchurl { url = param-for 16; hash = "sha256-Cch3IW1libNwJj4Yr0CgMKkBtBp6fDfvWMmQHbQfBcY="; })
+              (pkgs.fetchurl { url = param-for 17; hash = "sha256-Sp72x8Bhmqt07t5EsT51PjulRQigLdO3EGqUmqu3O3Q="; })
             ];
 
             dontUnpack = true;
@@ -451,6 +495,7 @@
               pkgs.yarn
               pkgs.jq
               pkgs.cargo-hack
+              cargo-audit
               pkgs.wasm-pack
               pkgs.git
               pkgs.cargo-spellcheck
@@ -469,6 +514,7 @@
               pkgs.jq
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              cargo-audit
               pkgs.wasm-pack
             ];
             buildInputs = [packages.public-params];
@@ -489,8 +535,9 @@
               pkgs.clang
               #compactc.packages.${system}.compactc-no-runtime
               pkgs.cargo-hack
+              cargo-audit
               pkgs.wasm-pack
-              pkgs.wasm-bindgen-cli_0_2_100
+              pkgs.wasm-bindgen-cli_0_2_104
               pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];

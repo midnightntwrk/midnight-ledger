@@ -25,20 +25,21 @@ import {
   DustRegistration,
   type DustSecretKey,
   Intent,
-  LedgerParameters,
   LedgerState,
+  type NormalizedCost,
   type PreProof,
   type Proofish,
   type QualifiedShieldedCoinInfo,
   sampleDustSecretKey,
   sampleSigningKey,
   type ShieldedCoinInfo,
+  type Signature,
   type SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
   type Signaturish,
+  signData,
   type SigningKey,
-  type SyntheticCost,
   type TokenType,
   Transaction,
   TransactionContext,
@@ -85,6 +86,9 @@ class NightKey {
   }
   verifyingKey() {
     return signatureVerifyingKey(this.signingKey);
+  }
+  signData(data: Uint8Array): Signature {
+    return signData(this.signingKey, data);
   }
 }
 
@@ -180,45 +184,79 @@ export class TestState {
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
     const balancedTx = this.balanceTx(tx.eraseProofs());
-    this.assertApply(balancedTx, new WellFormedStrictness(), balancedTx.cost(this.ledger.parameters));
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(balancedTx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
+    this.assertApply(balancedTx, new WellFormedStrictness(), detailedBlockFullness, overallBlockFullness);
   }
 
   context() {
+    const secondsSinceEpoch = BigInt(this.time.getTime() / 1000);
     const block: BlockContext = {
-      secondsSinceEpoch: BigInt(this.time.getTime() / 1000),
+      secondsSinceEpoch,
       secondsSinceEpochErr: 0,
-      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex')
+      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex'),
+      lastBlockTime: secondsSinceEpoch > 6n ? secondsSinceEpoch - 6n : 0n
     };
     return new TransactionContext(this.ledger, block);
+  }
+
+  assertApplyTxFullness(tx: Transaction<Signaturish, Proofish, Bindingish>, strictness: WellFormedStrictness) {
+    const detailedBlockFullness = this.ledger.parameters.normalizeFullness(tx.cost(this.ledger.parameters));
+    const overallBlockFullness = Math.max(
+      detailedBlockFullness.readTime,
+      detailedBlockFullness.computeTime,
+      detailedBlockFullness.blockUsage,
+      detailedBlockFullness.bytesWritten,
+      detailedBlockFullness.bytesChurned
+    );
+    this.assertApply(tx, strictness, detailedBlockFullness, overallBlockFullness);
   }
 
   assertApply(
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
-    blockFullness?: SyntheticCost
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number
   ) {
-    const result = this.apply(tx, strictness, blockFullness);
+    const result = this.apply(tx, strictness, detailedBlockFullness, overallBlockFullness);
     expect(result.type, `result type was: ${result.type}, and error: ${result.error}`).toEqual('success');
   }
 
-  fastForward(dur: bigint, blockFullness?: SyntheticCost) {
+  fastForward(dur: bigint, detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
+    let computedBlockFullness = overallBlockFullness;
+    if (detailedBlockFullness !== undefined && overallBlockFullness === undefined) {
+      computedBlockFullness = Math.max(
+        detailedBlockFullness.readTime,
+        detailedBlockFullness.computeTime,
+        detailedBlockFullness.blockUsage,
+        detailedBlockFullness.bytesWritten,
+        detailedBlockFullness.bytesChurned
+      );
+    }
     const currSeconds = BigInt(Math.floor(this.time.getTime() / 1000)) + dur;
     const ttl = new Date(Number(currSeconds) * 1000);
     this.time = ttl;
 
-    this.ledger = this.ledger.postBlockUpdate(ttl, blockFullness);
+    this.ledger = this.ledger.postBlockUpdate(ttl, detailedBlockFullness, computedBlockFullness);
     this.dust = this.dust.processTtls(ttl);
   }
 
-  step(blockFullness?: SyntheticCost) {
+  step(detailedBlockFullness?: NormalizedCost, overallBlockFullness?: number) {
     const tenSeconds = 10n;
-    this.fastForward(tenSeconds, blockFullness);
+    this.fastForward(tenSeconds, detailedBlockFullness, overallBlockFullness);
   }
 
   apply(
     tx: Transaction<Signaturish, Proofish, Bindingish>,
     strictness: WellFormedStrictness,
-    blockFullness?: SyntheticCost
+    detailedBlockFullness?: NormalizedCost,
+    overallBlockFullness?: number
   ): TransactionResult {
     const context = this.context();
     const vtx = tx.wellFormed(this.ledger, strictness, this.time);
@@ -232,22 +270,8 @@ export class TestState {
         .map((utxo) => structuredClone(utxo))
         .filter((utxo) => utxo.owner === pk)
     );
-    this.step(blockFullness);
+    this.step(detailedBlockFullness, overallBlockFullness);
     return result;
-  }
-
-  applySystemTx(tx: Transaction<Signaturish, Proofish, Bindingish>) {
-    const [res, events] = this.ledger.applySystemTx(tx, this.time);
-    this.ledger = res;
-    this.zswap = this.zswap.replayEvents(this.zswapKeys, events);
-    this.dust = this.dust.replayEvents(this.dustKey.secretKey, events);
-    const pk: UserAddress = addressFromKey(this.nightKey.verifyingKey());
-    this.utxos = new Set(
-      Array.from(this.ledger.utxo.utxos)
-        .map((utxo) => structuredClone(utxo))
-        .filter((utxo) => utxo.owner === pk)
-    );
-    this.step();
   }
 
   giveFeeToken(utxos: number, amount: bigint) {
@@ -281,8 +305,12 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
+  distributeNight(address: UserAddress, amount: bigint, time: Date) {
+    this.ledger = this.ledger.testingDistributeNight(address, amount, time);
+  }
+
   rewardNight(amount: bigint) {
-    this.ledger = this.ledger.testingDistributeNight(this.initialNightAddress, amount, this.time);
+    this.distributeNight(this.initialNightAddress, amount, this.time);
     const claimRewardsTransaction = new ClaimRewardsTransaction(
       SignatureMarker.signatureErased,
       LOCAL_TEST_NETWORK_ID,
@@ -325,9 +353,9 @@ export class TestState {
     this.assertApply(tx, strictness);
   }
 
-  static getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
+  getDustImbalance(mergedTx: Transaction<Signaturish, Proofish, Bindingish>): bigint | undefined {
     const guaranteesSegment = 0;
-    const fees = mergedTx.fees(LedgerParameters.initialParameters());
+    const fees = mergedTx.fees(this.ledger.parameters);
     const imbalances = mergedTx.imbalances(guaranteesSegment, fees);
     if (!imbalances) return undefined;
     const dustImbalance = Array.from(imbalances.entries()).find(([tt, bal]) => tt.tag === 'dust' && bal < 0n);
@@ -415,7 +443,7 @@ export class TestState {
     const oldDust = this.dust;
     let lastDust = 0n;
 
-    let dust = TestState.getDustImbalance(mergedTx);
+    let dust = this.getDustImbalance(mergedTx);
     while (dust !== undefined) {
       dust += lastDust;
       lastDust = dust;
@@ -469,7 +497,7 @@ export class TestState {
       mergedTx = tx.merge(tx2Unproven.eraseProofs());
       unprovenBal = tx2Unproven;
 
-      dust = TestState.getDustImbalance(mergedTx);
+      dust = this.getDustImbalance(mergedTx);
     }
     if (unprovenBal) {
       mergedTx = tx.merge(unprovenBal.eraseProofs());

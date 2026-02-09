@@ -1,6 +1,6 @@
 [workspace]
 package.license = "Apache-2.0"
-package.version = "6.1.0-alpha.4"
+package.version = "7.0.0"
 members = [
     "zswap",
     "ledger",
@@ -12,7 +12,9 @@ members = [
     "onchain-vm",
     "storage",
     "zkir",
+    "zkir-v3",
     "zkir-wasm",
+    "zkir-v3-wasm",
     "transient-crypto",
     "base-crypto",
     "base-crypto-derive",
@@ -21,6 +23,8 @@ members = [
     "serialize-macros",
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
+    "static",
+	"storage-core"
 ]
 default-members = [
     "zswap",

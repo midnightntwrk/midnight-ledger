@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `2.0.0`
+
+- breaking: pull in breaking transient-crypto changes
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
@@ -7,6 +11,10 @@
   accounting for state space that has been paid for.
 - breaking: major refactor of runtime cost-model
 - feat: add `key_location` parameter to proof data serializer.
+- addressed audit issues:
+  - bugfix: VM checks the max stack depth after each instruction
+  - breaking: fix: disallow Merkle trees of height 0, as per spec
+  - breaking: fix: fix off-by-one error in Merkle tree `new` operation
 
 ## Version `0.5.0`
 

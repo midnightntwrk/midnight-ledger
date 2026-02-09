@@ -30,25 +30,25 @@ import {
   TWO_VALUE
 } from '@/test/utils/value-alignment';
 
-function assertNonEmptyPath(path: Key[]): void {
+const assertNonEmptyPath = (path: Key[]): void => {
   if (path.length === 0) {
     throw new Error('path must have at least one segment');
   }
-}
+};
 
-function dropLast(keys: Key[]): Key[] {
+const dropLast = (keys: Key[]): Key[] => {
   return keys.slice(0, Math.max(0, keys.length - 1));
-}
+};
 
-function getLeafAlignedValue(keys: Key[]): AlignedValue {
+const getLeafAlignedValue = (keys: Key[]): AlignedValue => {
   const leaf = keys[keys.length - 1];
   if (leaf.tag === 'stack') {
     throw Error('stack key type not supported');
   }
   return leaf.value;
-}
+};
 
-export function kernelClaimZswapCoinSpend(coinCom: AlignedValue): Op<null>[] {
+export const kernelClaimZswapCoinSpend = (coinCom: AlignedValue): Op<null>[] => {
   return [
     { swap: { n: 0 } },
     {
@@ -76,9 +76,9 @@ export function kernelClaimZswapCoinSpend(coinCom: AlignedValue): Op<null>[] {
     { ins: { cached: true, n: 2 } },
     { swap: { n: 0 } }
   ];
-}
+};
 
-export function kernelClaimZswapNullfier(potNull: AlignedValue): Op<null>[] {
+export const kernelClaimZswapNullfier = (potNull: AlignedValue): Op<null>[] => {
   return [
     { swap: { n: 0 } },
     {
@@ -106,9 +106,14 @@ export function kernelClaimZswapNullfier(potNull: AlignedValue): Op<null>[] {
     { ins: { cached: true, n: 2 } },
     { swap: { n: 0 } }
   ];
-}
+};
 
-export function cellWriteCoin(path: Key[], cached: boolean, commitment: AlignedValue, coin: AlignedValue): Op<null>[] {
+export const cellWriteCoin = (
+  path: Key[],
+  cached: boolean,
+  commitment: AlignedValue,
+  coin: AlignedValue
+): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const parentPath = dropLast(path);
@@ -140,9 +145,9 @@ export function cellWriteCoin(path: Key[], cached: boolean, commitment: AlignedV
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length - 1 } }
   ];
-}
+};
 
-export function cellWrite(path: Key[], cached: boolean, value: AlignedValue): Op<null>[] {
+export const cellWrite = (path: Key[], cached: boolean, value: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const parentPath = dropLast(path);
@@ -155,21 +160,21 @@ export function cellWrite(path: Key[], cached: boolean, value: AlignedValue): Op
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length - 1 } }
   ];
-}
+};
 
-export function cellRead(path: Key[], cached: boolean): Op<null>[] {
+export const cellRead = (path: Key[], cached: boolean): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [{ dup: { n: 0 } }, { idx: { cached, pushPath: false, path } }, { popeq: { cached, result: null } }];
-}
+};
 
-export function counterRead(path: Key[], cached: boolean): Op<null>[] {
+export const counterRead = (path: Key[], cached: boolean): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [{ dup: { n: 0 } }, { idx: { cached, pushPath: false, path } }, { popeq: { cached: true, result: null } }];
-}
+};
 
-export function counterLessThan(path: Key[], cached: boolean, decrement: AlignedValue): Op<null>[] {
+export const counterLessThan = (path: Key[], cached: boolean, decrement: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -179,9 +184,9 @@ export function counterLessThan(path: Key[], cached: boolean, decrement: Aligned
     'lt',
     { popeq: { cached: true, result: null } }
   ];
-}
+};
 
-export function setMember(path: Key[], cached: boolean, nul: AlignedValue): Op<null>[] {
+export const setMember = (path: Key[], cached: boolean, nul: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -191,9 +196,9 @@ export function setMember(path: Key[], cached: boolean, nul: AlignedValue): Op<n
     'member',
     { popeq: { cached: true, result: null } }
   ];
-}
+};
 
-export function setInsert(path: Key[], cached: boolean, nul: AlignedValue): Op<null>[] {
+export const setInsert = (path: Key[], cached: boolean, nul: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -203,9 +208,9 @@ export function setInsert(path: Key[], cached: boolean, nul: AlignedValue): Op<n
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length } }
   ];
-}
+};
 
-export function kernelSelf(): Op<null>[] {
+export const kernelSelf = (): Op<null>[] => {
   return [
     { dup: { n: 2 } },
     {
@@ -222,9 +227,9 @@ export function kernelSelf(): Op<null>[] {
     },
     { popeq: { cached: true, result: null } }
   ];
-}
+};
 
-export function kernelClaimZswapCoinReceive(coinCom: AlignedValue): Op<null>[] {
+export const kernelClaimZswapCoinReceive = (coinCom: AlignedValue): Op<null>[] => {
   return [
     { swap: { n: 0 } },
     {
@@ -252,18 +257,18 @@ export function kernelClaimZswapCoinReceive(coinCom: AlignedValue): Op<null>[] {
     { ins: { cached: true, n: 2 } },
     { swap: { n: 0 } }
   ];
-}
+};
 
-export function counterIncrement(path: Key[], cached: boolean, increment: number): Op<null>[] {
+export const counterIncrement = (path: Key[], cached: boolean, increment: number): Op<null>[] => {
   assertNonEmptyPath(path);
   return [
     { idx: { cached, pushPath: true, path } },
     { addi: { immediate: increment } },
     { ins: { cached: true, n: path.length } }
   ];
-}
+};
 
-export function counterResetToDefault(path: Key[], cached: boolean): Op<null>[] {
+export const counterResetToDefault = (path: Key[], cached: boolean): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const parentPath = dropLast(path);
@@ -288,9 +293,9 @@ export function counterResetToDefault(path: Key[], cached: boolean): Op<null>[] 
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length - 1 } }
   ];
-}
+};
 
-export function setResetToDefault(path: Key[], cached: boolean): Op<null>[] {
+export const setResetToDefault = (path: Key[], cached: boolean): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const parentPath = dropLast(path);
@@ -306,9 +311,9 @@ export function setResetToDefault(path: Key[], cached: boolean): Op<null>[] {
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length - 1 } }
   ];
-}
+};
 
-export function merkleTreeResetToDefault(path: Key[], cached: boolean, height: number): Op<null>[] {
+export const merkleTreeResetToDefault = (path: Key[], cached: boolean, height: number): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const tree = new StateBoundedMerkleTree(height);
@@ -341,9 +346,9 @@ export function merkleTreeResetToDefault(path: Key[], cached: boolean, height: n
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length - 1 } }
   ];
-}
+};
 
-export function merkleTreeCheckRoot(path: Key[], cached: boolean, pathRoot: AlignedValue): Op<null>[] {
+export const merkleTreeCheckRoot = (path: Key[], cached: boolean, pathRoot: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -369,9 +374,9 @@ export function merkleTreeCheckRoot(path: Key[], cached: boolean, pathRoot: Alig
     'eq',
     { popeq: { cached: true, result: null } }
   ];
-}
+};
 
-export function historicMerkleTreeInsert(path: Key[], cached: boolean, pk: AlignedValue): Op<null>[] {
+export const historicMerkleTreeInsert = (path: Key[], cached: boolean, pk: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -463,9 +468,9 @@ export function historicMerkleTreeInsert(path: Key[], cached: boolean, pk: Align
     { ins: { cached: false, n: 1 } },
     { ins: { cached: true, n: path.length + 1 } }
   ];
-}
+};
 
-export function historicMerkleTreeCheckRoot(path: Key[], cached: boolean, root: AlignedValue): Op<null>[] {
+export const historicMerkleTreeCheckRoot = (path: Key[], cached: boolean, root: AlignedValue): Op<null>[] => {
   assertNonEmptyPath(path);
 
   return [
@@ -492,9 +497,9 @@ export function historicMerkleTreeCheckRoot(path: Key[], cached: boolean, root: 
     'member',
     { popeq: { cached: true, result: null } }
   ];
-}
+};
 
-export function merkleTreeInsert(path: Key[], cached: boolean, cm: Value): Op<null>[] {
+export const merkleTreeInsert = (path: Key[], cached: boolean, cm: Value): Op<null>[] => {
   assertNonEmptyPath(path);
 
   const cmLeafHash = leafHash({ value: cm, alignment: [ATOM_BYTES_32] });
@@ -560,9 +565,9 @@ export function merkleTreeInsert(path: Key[], cached: boolean, cm: Value): Op<nu
     { addi: { immediate: 1 } },
     { ins: { cached: true, n: path.length + 1 } }
   ];
-}
+};
 
-export function getKey(keyNr: number): Key[] {
+export const getKey = (keyNr: number): Key[] => {
   return [
     {
       tag: 'value',
@@ -572,4 +577,26 @@ export function getKey(keyNr: number): Key[] {
       }
     }
   ];
-}
+};
+
+const translateOp = (op: Op<null>, nextResult: () => AlignedValue): Op<AlignedValue> => {
+  if (typeof op === 'string') return op;
+  if ('popeq' in op) return { popeq: { cached: op.popeq.cached, result: nextResult() } };
+  return op;
+};
+
+export const programWithResults = (prog: Op<null>[], results: AlignedValue[]): Op<AlignedValue>[] => {
+  let i = 0;
+  const next = () => {
+    if (i >= results.length) throw new Error('programWithResults: not enough results to fill popeq ops');
+    return results[i++];
+  };
+  return prog
+    .map((op) => translateOp(op as Op<null>, next))
+    .filter((op) => {
+      if (typeof op === 'string') return op;
+      if ('idx' in op) return op.idx.path.length !== 0;
+      if ('ins' in op) return op.ins.n !== 0;
+      return true;
+    });
+};

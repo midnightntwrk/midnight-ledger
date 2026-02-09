@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -145,12 +145,14 @@ static deserialize<P>(markerP, raw): ZswapOffer<P>;
 ```ts
 static fromInput<P>(
    input, 
-   type_, 
-value): ZswapOffer<P>;
+   type_?, 
+value?): ZswapOffer<P>;
 ```
 
 Creates a singleton offer, from an [ZswapInput](ZswapInput.md) and its value
 vector
+
+The `type_` and `value` parameters are deprecated and will be ignored.
 
 #### Type Parameters
 
@@ -164,11 +166,11 @@ vector
 
 [`ZswapInput`](ZswapInput.md)\<`P`\>
 
-##### type\_
+##### type\_?
 
 `string`
 
-##### value
+##### value?
 
 `bigint`
 
@@ -183,12 +185,14 @@ vector
 ```ts
 static fromOutput<P>(
    output, 
-   type_, 
-value): ZswapOffer<P>;
+   type_?, 
+value?): ZswapOffer<P>;
 ```
 
 Creates a singleton offer, from an [ZswapOutput](ZswapOutput.md) and its value
 vector
+
+The `type_` and `value` parameters are deprecated and will be ignored.
 
 #### Type Parameters
 
@@ -202,11 +206,11 @@ vector
 
 [`ZswapOutput`](ZswapOutput.md)\<`P`\>
 
-##### type\_
+##### type\_?
 
 `string`
 
-##### value
+##### value?
 
 `bigint`
 

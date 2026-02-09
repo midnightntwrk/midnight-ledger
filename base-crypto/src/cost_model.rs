@@ -24,7 +24,7 @@ use serialize::{Deserializable, Serializable, Tagged};
 use std::{
     fmt::Debug,
     iter::Sum,
-    ops::{Add, AddAssign, Div, Mul, Neg, Sub},
+    ops::{Add, AddAssign, Div, Mul, Neg, Sub, SubAssign},
 };
 
 #[derive(
@@ -64,6 +64,12 @@ impl Sum for CostDuration {
     }
 }
 
+impl SubAssign for CostDuration {
+    fn sub_assign(&mut self, rhs: Self) {
+        *self = *self - rhs;
+    }
+}
+
 impl AddAssign for CostDuration {
     fn add_assign(&mut self, rhs: Self) {
         *self = *self + rhs;
@@ -74,6 +80,13 @@ impl Add for CostDuration {
     type Output = CostDuration;
     fn add(self, rhs: Self) -> Self::Output {
         CostDuration(self.0.saturating_add(rhs.0))
+    }
+}
+
+impl Sub for CostDuration {
+    type Output = CostDuration;
+    fn sub(self, rhs: Self) -> Self::Output {
+        CostDuration(self.0.saturating_sub(rhs.0))
     }
 }
 
@@ -195,19 +208,38 @@ impl Add for SyntheticCost {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone)]
+#[derive(
+    PartialEq, Eq, PartialOrd, Ord, Debug, Copy, Clone, Serialize, Deserialize, Serializable,
+)]
+#[tag = "normalized-cost[v1]"]
 /// The costs normalized to a block's limit in each dimension
 pub struct NormalizedCost {
+    #[serde(rename = "readTime")]
     /// The fraction of a block's read time used
     pub read_time: FixedPoint,
+    #[serde(rename = "computeTime")]
     /// The fraction of a block's compute time used
     pub compute_time: FixedPoint,
+    #[serde(rename = "blockUsage")]
     /// The fraction of a block's size used
     pub block_usage: FixedPoint,
+    #[serde(rename = "bytesWritten")]
     /// The fraction of a block's data write allowance used
     pub bytes_written: FixedPoint,
+    #[serde(rename = "bytesChurned")]
     /// The fraction of a block's data churn allowance used
     pub bytes_churned: FixedPoint,
+}
+
+impl NormalizedCost {
+    /// The empty cost
+    pub const ZERO: NormalizedCost = NormalizedCost {
+        read_time: FixedPoint::ZERO,
+        compute_time: FixedPoint::ZERO,
+        block_usage: FixedPoint::ZERO,
+        bytes_written: FixedPoint::ZERO,
+        bytes_churned: FixedPoint::ZERO,
+    };
 }
 
 impl SyntheticCost {
@@ -249,25 +281,55 @@ impl SyntheticCost {
     }
 }
 
-#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Serializable)]
-#[tag = "fee-prices[v1]"]
+#[derive(PartialEq, Eq, PartialOrd, Ord, Debug, Clone, Serializable, Serialize, Deserialize)]
+#[tag = "fee-prices[v2]"]
 /// The pricing of the various block operations
 ///
 /// All values are denominated in DUST (*not* atomic units, or SPECKs)
 pub struct FeePrices {
-    /// The price in DUST of a block's full read capacity
-    pub read_price: FixedPoint,
+    /// The price in DUST of a full block for the average cost dimension
+    #[serde(rename = "overallPrice")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
+    pub overall_price: FixedPoint,
+    /// The price factor applied to the read cost dimension
+    #[serde(rename = "readFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
+    pub read_factor: FixedPoint,
     /// The price in DUST of a block's full compute capacity
-    pub compute_price: FixedPoint,
+    #[serde(rename = "computeFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
+    pub compute_factor: FixedPoint,
     /// The price in DUST of a block's full size capacity
-    pub block_usage_price: FixedPoint,
+    #[serde(rename = "blockUsageFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
+    pub block_usage_factor: FixedPoint,
     /// The price in DUST of a block's full write allowance capacity
-    pub write_price: FixedPoint,
+    #[serde(rename = "writeFactor")]
+    #[cfg_attr(
+        feature = "fixed-point-custom-serde",
+        serde(with = "fixed_point_custom_serde")
+    )]
+    pub write_factor: FixedPoint,
 }
 
 impl FeePrices {
     /// Compute an updated cost from a given block fullness. This should be the
     /// sum of the normalized costs of all transactions in a block.
+    ///
+    /// Overall block fullness is the total fullness of a block, while detailed block fullness
+    /// references the how full individual cost dimensions are.
     ///
     /// `min_ratio` specifies a bound that the smallest price will not fall
     /// below, as a ratio of the highest price. It should be `0 < min_ratio < 1`.
@@ -275,40 +337,50 @@ impl FeePrices {
     /// `a` is the `a` parameter from [`price_adjustment_function`].
     pub fn update_from_fullness(
         &self,
-        block_fullness: NormalizedCost,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
         min_ratio: FixedPoint,
         a: FixedPoint,
     ) -> Self {
         let multiplier = |frac| price_adjustment_function(frac, a) + FixedPoint::ONE;
         let mut updated = FeePrices {
-            read_price: self.read_price * multiplier(block_fullness.read_time),
-            compute_price: self.compute_price * multiplier(block_fullness.compute_time),
-            block_usage_price: self.block_usage_price * multiplier(block_fullness.block_usage),
-            write_price: self.write_price
+            overall_price: self.overall_price * multiplier(overall_block_fullness),
+            read_factor: self.read_factor * multiplier(detailed_block_fullness.read_time),
+            compute_factor: self.compute_factor * multiplier(detailed_block_fullness.compute_time),
+            block_usage_factor: self.block_usage_factor
+                * multiplier(detailed_block_fullness.block_usage),
+            write_factor: self.write_factor
                 * multiplier(FixedPoint::max(
-                    block_fullness.bytes_written,
-                    block_fullness.bytes_churned,
+                    detailed_block_fullness.bytes_written,
+                    detailed_block_fullness.bytes_churned,
                 )),
         };
-        let dimensions = [
-            &mut updated.read_price,
-            &mut updated.compute_price,
-            &mut updated.block_usage_price,
-            &mut updated.write_price,
+        let mut dimensions = [
+            &mut updated.read_factor,
+            &mut updated.compute_factor,
+            &mut updated.block_usage_factor,
+            &mut updated.write_factor,
         ];
         let most_expensive_dimension = **dimensions
             .iter()
             .max()
             .expect("max of 4 elements must exist");
+        for dim in dimensions.iter_mut() {
+            **dim = FixedPoint::max(**dim, most_expensive_dimension * min_ratio);
+        }
         // The smallest fixed point cost is *not* MIN_POSITIVE, to ensure that we don't get 'stuck'
         // there and unable to adjust up. Because adjustments are small, single-digit percentages,
         // rounding would keep us at 1 if this was 1.
         const MIN_COST: FixedPoint = FixedPoint(100);
+        updated.overall_price = FixedPoint::max(updated.overall_price, MIN_COST);
+        // Now we normalize the factors to have an average of 1.
+        let factor_mean = dimensions
+            .iter()
+            .map(|d| **d)
+            .fold(FixedPoint::ZERO, FixedPoint::add)
+            / FixedPoint::from_u64_div(4, 1);
         for dim in dimensions.into_iter() {
-            *dim = FixedPoint::max(
-                FixedPoint::max(*dim, most_expensive_dimension * min_ratio),
-                MIN_COST,
-            );
+            *dim = *dim / factor_mean;
         }
         updated
     }
@@ -318,14 +390,14 @@ impl FeePrices {
     ///
     /// The final cost is denominated in DUST.
     pub fn overall_cost(&self, tx_normalized: &NormalizedCost) -> FixedPoint {
-        let read_cost = self.read_price * tx_normalized.read_time;
-        let compute_cost = self.compute_price * tx_normalized.compute_time;
-        let block_usage_cost = self.block_usage_price * tx_normalized.block_usage;
-        let write_cost = self.write_price * tx_normalized.bytes_written;
-        let churn_cost = self.write_price * tx_normalized.bytes_churned;
+        let read_cost = self.read_factor * tx_normalized.read_time;
+        let compute_cost = self.compute_factor * tx_normalized.compute_time;
+        let block_usage_cost = self.block_usage_factor * tx_normalized.block_usage;
+        let write_cost = self.write_factor * tx_normalized.bytes_written;
+        let churn_cost = self.write_factor * tx_normalized.bytes_churned;
         let utilization_cost =
             FixedPoint::max(read_cost, FixedPoint::max(compute_cost, block_usage_cost));
-        utilization_cost + write_cost + churn_cost
+        self.overall_price * (utilization_cost + write_cost + churn_cost)
     }
 }
 
@@ -412,6 +484,28 @@ impl From<RunningCost> for SyntheticCost {
     }
 }
 
+// Lossy conversion back to running cost, used in cost estimation heuristics
+impl From<SyntheticCost> for RunningCost {
+    fn from(value: SyntheticCost) -> Self {
+        RunningCost {
+            read_time: value.read_time,
+            compute_time: value.compute_time,
+            bytes_written: value.bytes_written,
+            bytes_deleted: 0,
+        }
+    }
+}
+
+impl std::iter::Sum for RunningCost {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut res = RunningCost::ZERO;
+        for i in iter {
+            res += i;
+        }
+        res
+    }
+}
+
 impl Mul<f64> for RunningCost {
     type Output = RunningCost;
     fn mul(self, rhs: f64) -> Self::Output {
@@ -487,6 +581,24 @@ impl CostDuration {
 /// should always be rejected), and division rounds up.
 pub struct FixedPoint(i128);
 
+impl Serialize for FixedPoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_f64((*self).into())
+    }
+}
+
+impl<'de> Deserialize<'de> for FixedPoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        f64::deserialize(deserializer).map(Into::into)
+    }
+}
+
 impl Debug for FixedPoint {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "FixedPoint({})", f64::from(*self))
@@ -508,6 +620,28 @@ impl From<FixedPoint> for i128 {
 impl From<FixedPoint> for f64 {
     fn from(fp: FixedPoint) -> f64 {
         fp.0 as f64 / 2f64.powi(64)
+    }
+}
+
+/// Custom serde for the `FixedPoint` structure, sacrificing readability for precision
+pub mod fixed_point_custom_serde {
+    use super::FixedPoint;
+
+    /// serializing `FixedPoint`` structure
+    pub fn serialize<S>(value: &FixedPoint, s: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        s.serialize_i128(value.0)
+    }
+
+    /// deserializing `FixedPoint` structure
+    pub fn deserialize<'de, D>(d: D) -> Result<FixedPoint, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let inner_value = serde::Deserialize::deserialize(d)?;
+        Ok(FixedPoint(inner_value))
     }
 }
 
@@ -549,7 +683,7 @@ impl FixedPoint {
     /// Raises the number to an integer power.
     pub fn powi(self, mut exp: i32) -> Self {
         match exp {
-            i32::MIN..=-1 => dbg!(FixedPoint::ONE / self).powi(dbg!(-exp)),
+            i32::MIN..=-1 => FixedPoint::ONE / self.powi(-exp),
             0 => FixedPoint::ONE,
             1..=i32::MAX => {
                 let mut acc = FixedPoint::ONE;
@@ -638,7 +772,7 @@ impl Mul for FixedPoint {
         // C = A * B
         // (c / (2 ** 64)) = (a / (2 ** 64)) * (b / (2 ** 64)) = (a * b) / (2 ** 128)
         // c = (a * b) / (2 ** 64)
-        let ab = i256::from(self.0) * i128::from(rhs.0);
+        let ab = i256::from(self.0) * rhs.0;
         let c = i256::min(i256::from(i128::MAX), ab >> 64).as_i128();
         FixedPoint(c)
     }
@@ -842,10 +976,11 @@ mod tests {
     #[test]
     fn test_pricing_cant_get_stuck() {
         let mut cur = FeePrices {
-            block_usage_price: FixedPoint::ONE,
-            read_price: FixedPoint::ONE,
-            write_price: FixedPoint::ONE,
-            compute_price: FixedPoint::ONE,
+            overall_price: FixedPoint::ONE,
+            block_usage_factor: FixedPoint::ONE,
+            read_factor: FixedPoint::ONE,
+            write_factor: FixedPoint::ONE,
+            compute_factor: FixedPoint::ONE,
         };
         for _ in 0..10_000 {
             cur = cur.update_from_fullness(
@@ -856,16 +991,18 @@ mod tests {
                     bytes_written: FixedPoint::ZERO,
                     bytes_churned: FixedPoint::ZERO,
                 },
+                FixedPoint::ZERO,
                 FixedPoint::from_u64_div(1, 4),
                 FixedPoint::from_u64_div(100, 1),
             );
         }
         let dims = |cur: &FeePrices| {
             [
-                cur.block_usage_price,
-                cur.read_price,
-                cur.write_price,
-                cur.compute_price,
+                cur.overall_price,
+                cur.block_usage_factor,
+                cur.read_factor,
+                cur.write_factor,
+                cur.compute_factor,
             ]
         };
         assert!(dims(&cur).into_iter().all(|price| price > FixedPoint::ZERO));
@@ -879,15 +1016,12 @@ mod tests {
         };
         let next = cur.update_from_fullness(
             fullness,
+            fraction,
             FixedPoint::from_u64_div(1, 4),
             FixedPoint::from_u64_div(100, 1),
         );
-        assert!(
-            dims(&cur)
-                .into_iter()
-                .zip(dims(&next).into_iter())
-                .all(|(cur, next)| next > cur)
-        );
+        assert!(next.overall_price > cur.overall_price);
+        assert_eq!(next.compute_factor, cur.compute_factor);
     }
 
     proptest! {
@@ -936,5 +1070,42 @@ mod tests {
         fn u128_div(a: u128, b in 1u128..u128::MAX) {
             within_permissible_error(a as f64 / b as f64, f64::from(FixedPoint::from_u128_div(a, b)), 1e-9f64);
         }
+    }
+
+    #[test]
+    #[cfg(feature = "fixed-point-custom-serde")]
+    fn test_fixed_point_custom_serde() {
+        let expected_fee_prices = FeePrices {
+            overall_price: FixedPoint::ONE,
+            block_usage_factor: FixedPoint::MAX,
+            read_factor: FixedPoint::from_u64_div(3, 4),
+            write_factor: FixedPoint::from_u64_div(100, 1),
+            compute_factor: FixedPoint::ZERO,
+        };
+
+        let actual_fee_prices_str = r#"
+            {
+            "overallPrice": 18446744073709551616,
+            "readFactor": 13835058055282163712,
+            "computeFactor": 0,
+            "blockUsageFactor": 170141183460469231731687303715884105727,
+            "writeFactor": 1844674407370955161600
+            }
+        "#;
+
+        // test deserialize
+        let actual_fee_prices: FeePrices =
+            serde_json::from_str(actual_fee_prices_str).expect("failed to deserialize");
+        assert_eq!(actual_fee_prices, expected_fee_prices);
+
+        // test serialize
+        let clean_actual_fee_prices_str = actual_fee_prices_str
+            .replace(" ", "")
+            .replace("\t", "")
+            .replace("\n", "");
+
+        let expected_fee_prices_str =
+            serde_json::to_string(&expected_fee_prices).expect("failed to serialize");
+        assert_eq!(clean_actual_fee_prices_str, expected_fee_prices_str);
     }
 }

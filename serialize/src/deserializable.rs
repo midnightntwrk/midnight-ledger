@@ -30,7 +30,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     let tag_expected = format!("{GLOBAL_TAG}{}:", T::tag());
     let mut read_tag = vec![0u8; tag_expected.len()];
     let mut remaining_tag_buf = &mut read_tag[..];
-    while remaining_tag_buf.len() > 0 {
+    while !remaining_tag_buf.is_empty() {
         let read = reader.read(remaining_tag_buf)?;
         if read == 0 {
             let rem = remaining_tag_buf.len();
@@ -52,7 +52,8 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
-    let count = reader.bytes().count();
+    #[allow(clippy::unbuffered_bytes)] // we can permit a potentally inefficient count here, as in
+    let count = reader.bytes().count(); // the happy path it should be 0
 
     if count == 0 {
         return Ok(value);
@@ -159,15 +160,13 @@ impl<T: Deserializable> Deserializable for Arc<T> {
 
 impl<const N: usize> Deserializable for [u8; N] {
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
-        unsafe {
-            let mut res = std::mem::MaybeUninit::<[u8; N]>::uninit().assume_init();
-            reader.read_exact(&mut res[..])?;
-            Ok(res)
-        }
+        let mut res = [0u8; N];
+        reader.read_exact(&mut res[..])?;
+        Ok(res)
     }
 }
 
-impl<T> Deserializable for PhantomData<T> {
+impl<T: ?Sized> Deserializable for PhantomData<T> {
     fn deserialize(_reader: &mut impl Read, _recursion_depth: u32) -> std::io::Result<Self> {
         Ok(PhantomData)
     }

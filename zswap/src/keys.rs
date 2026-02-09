@@ -34,6 +34,7 @@ use crate::error::OfferCreationFailed;
 use crate::structure::*;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
+#[derive(Zeroize, ZeroizeOnDrop)]
 pub struct Seed([u8; 32]);
 
 impl Debug for Seed {
@@ -67,10 +68,13 @@ impl Seed {
     pub fn derive_encryption_secret_key(self: &Seed) -> encryption::SecretKey {
         const DOMAIN_SEPARATOR: &[u8; 12] = b"midnight:esk";
         const NUMBER_OF_BYTES: usize = 64;
-        let raw_bytes = self.sample_bytes(NUMBER_OF_BYTES, DOMAIN_SEPARATOR);
-        let raw_bytes_arr: [u8; 64] = raw_bytes.clone().try_into().unwrap();
+        let mut raw_bytes = self.sample_bytes(NUMBER_OF_BYTES, DOMAIN_SEPARATOR);
+        let mut raw_bytes_arr: [u8; 64] = raw_bytes.clone().try_into().unwrap();
 
-        encryption::SecretKey::from_uniform_bytes(&raw_bytes_arr)
+        raw_bytes.zeroize();
+        let res = encryption::SecretKey::from_uniform_bytes(&raw_bytes_arr);
+        raw_bytes_arr.zeroize();
+        res
     }
 
     pub fn sample_bytes(&self, no_of_bytes: usize, domain_separator: &[u8]) -> Vec<u8> {

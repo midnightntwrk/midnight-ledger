@@ -26,9 +26,10 @@ use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::{self, Debug, Formatter};
 use std::ops::{Add, Sub};
+use std::sync::Arc;
 use storage::Storable;
-use storage::arena::ArenaKey;
 use storage::arena::Sp;
+use storage::arena::{ArenaHash, ArenaKey};
 use storage::db::DB;
 #[cfg(test)]
 use storage::db::InMemoryDB;
@@ -44,9 +45,9 @@ use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("zswap/", include_str!("../../static/version"), "/", $name),
+            concat!("zswap/", midnight_ledger_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
-                &include_bytes!(concat!("../../static/zswap/", $name, ".sha256"))
+                &include_bytes!(concat!("../static/", $name, ".sha256"))
                     .split_at(64)
                     .0,
             ),
@@ -129,16 +130,23 @@ impl Deserializable for CoinCiphertext {
         reader: &mut impl std::io::Read,
         recursive_depth: u32,
     ) -> Result<Self, std::io::Error> {
-        Ok(Self {
-            c: EmbeddedGroupAffine::deserialize(reader, recursive_depth)?,
-            ciph: {
-                let mut res = [Fr::default(); COIN_CIPHERTEXT_LEN];
-                for byte in res.iter_mut() {
-                    *byte = Fr::deserialize(reader, recursive_depth)?;
-                }
-                res
-            },
-        })
+        let c = EmbeddedGroupAffine::deserialize(reader, recursive_depth)?;
+        // See note in `transient_crypto::encryption::SecretKey::decrypt` for why the point at
+        // infinity is excluded.
+        if c.is_infinity() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ciphertext challenge may not be the point at infinity",
+            ));
+        };
+        let ciph = {
+            let mut res = [Fr::default(); COIN_CIPHERTEXT_LEN];
+            for byte in res.iter_mut() {
+                *byte = Fr::deserialize(reader, recursive_depth)?;
+            }
+            res
+        };
+        Ok(Self { c, ciph })
     }
 }
 
@@ -180,12 +188,12 @@ impl From<CoinCiphertext> for encryption::Ciphertext {
 }
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Serializable, Serialize)]
-#[tag = "zswap-authorized-claim[v2]"]
+#[tag = "zswap-authorized-claim[v3]"]
 /// A claim to a specific public key, authorized by the user's private key.
 pub struct AuthorizedClaim<P> {
     pub coin: CoinInfo,
     pub recipient: CoinPublicKey,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(AuthorizedClaim<()>);
 
@@ -194,21 +202,21 @@ impl<P> AuthorizedClaim<P> {
         AuthorizedClaim {
             coin: self.coin,
             recipient: self.recipient,
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-input[v1]"]
+#[tag = "zswap-input[v2]"]
 #[storable(db = D)]
 pub struct Input<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
     pub value_commitment: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub merkle_tree_root: MerkleTreeDigest,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(Input<(), InMemoryDB>);
 
@@ -229,12 +237,26 @@ impl<P: Storable<D>, D: DB> Input<P, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: self.merkle_tree_root,
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
 
 impl<D: DB> Input<ProofPreimage, D> {
+    pub fn delta(&self) -> Delta {
+        // NOTE: This is tied to the implementation in construct.rs
+        // Input before last is CoinInfo
+        let inputs = &self.proof.inputs;
+        let coin = CoinInfo::from_field_repr(
+            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
+        )
+        .expect("coin info must be correct encoded in input preimage");
+        Delta {
+            token_type: coin.type_,
+            value: coin.value.try_into().unwrap_or(i128::MAX),
+        }
+    }
+
     pub fn binding_randomness(&self) -> PedersenRandomness {
         // NOTE: This is tied to the implementation in construct.rs
         // rc is the last input, and should be a single Fr element.
@@ -268,7 +290,7 @@ impl<D: DB> Input<ProofPreimage, D> {
             .iter()
             .copied()
             .last()
-            .map(|fr| TryInto::<u16>::try_into(fr))
+            .map(TryInto::<u16>::try_into)
             .transpose()
             .unwrap_or(None)
     }
@@ -276,14 +298,14 @@ impl<D: DB> Input<ProofPreimage, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Hash, Clone; P)]
-#[tag = "zswap-output[v1]"]
+#[tag = "zswap-output[v2]"]
 #[storable(db = D)]
 pub struct Output<P: Storable<D>, D: DB> {
     pub coin_com: Commitment,
     pub value_commitment: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
-    pub proof: P,
+    pub proof: Arc<P>,
 }
 tag_enforcement_test!(Output<(), InMemoryDB>);
 
@@ -294,12 +316,26 @@ impl<P: Storable<D>, D: DB> Output<P, D> {
             value_commitment: self.value_commitment,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof: (),
+            proof: Arc::new(()),
         }
     }
 }
 
 impl<D: DB> Output<ProofPreimage, D> {
+    pub fn delta(&self) -> Delta {
+        // NOTE: This is tied to the implementation in construct.rs.
+        // Input before last is CoinInfo
+        let inputs = &self.proof.inputs;
+        let coin = CoinInfo::from_field_repr(
+            &inputs[inputs.len() - 1 - CoinInfo::FIELD_SIZE..inputs.len() - 1],
+        )
+        .expect("coin info must be correct encoded in input preimage");
+        Delta {
+            token_type: coin.type_,
+            value: coin.value.try_into().unwrap_or(i128::MAX).saturating_neg(),
+        }
+    }
+
     pub fn binding_randomness(&self) -> PedersenRandomness {
         // NOTE: This is tied to the implementation in construct.rs.
         // rc is the last input, and should be a single Fr element.
@@ -319,7 +355,7 @@ impl<D: DB> Output<ProofPreimage, D> {
             .iter()
             .copied()
             .last()
-            .map(|fr| TryInto::<u16>::try_into(fr))
+            .map(TryInto::<u16>::try_into)
             .transpose()
             .unwrap_or(None)
     }
@@ -340,7 +376,7 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
-#[tag = "zswap-transient[v1]"]
+#[tag = "zswap-transient[v2]"]
 #[storable(db = D)]
 pub struct Transient<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
@@ -349,8 +385,8 @@ pub struct Transient<P: Storable<D>, D: DB> {
     pub value_commitment_output: Pedersen,
     pub contract_address: Option<Sp<ContractAddress, D>>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
-    pub proof_input: P,
-    pub proof_output: P,
+    pub proof_input: Arc<P>,
+    pub proof_output: Arc<P>,
 }
 tag_enforcement_test!(Transient<(), InMemoryDB>);
 
@@ -363,8 +399,8 @@ impl<P: Storable<D>, D: DB> Transient<P, D> {
             value_commitment_output: self.value_commitment_output,
             contract_address: self.contract_address.clone(),
             ciphertext: self.ciphertext.clone(),
-            proof_input: (),
-            proof_output: (),
+            proof_input: Arc::new(()),
+            proof_output: Arc::new(()),
         }
     }
 }
@@ -434,7 +470,7 @@ tag_enforcement_test!(Delta);
 
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
-#[tag = "zswap-offer[v4]"]
+#[tag = "zswap-offer[v5]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
 /// inputs/outputs.
@@ -532,7 +568,6 @@ impl<P: Clone + Ord + Storable<D>, D: DB> Offer<P, D> {
         self.deltas = normalize_deltas(
             self.deltas
                 .iter_deref()
-                .cloned()
                 .map(|delta| (delta.token_type, delta.value)),
         )
         .into_iter()
@@ -591,7 +626,7 @@ impl Debug for Symbol {
 }
 
 pub const INPUT_PIS: usize = 68;
-pub const INPUT_PROOF_SIZE: usize = 6_064;
+pub const INPUT_PROOF_SIZE: usize = 4_832;
 pub const OUTPUT_PIS: usize = 77;
-pub const OUTPUT_PROOF_SIZE: usize = 6_064;
+pub const OUTPUT_PROOF_SIZE: usize = 4_832;
 pub const AUTHORIZED_CLAIM_PIS: usize = 13;

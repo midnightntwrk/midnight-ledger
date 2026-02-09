@@ -1,10 +1,18 @@
 # `zkir` Changelog
 
+## Version `2.1.0`
+
+- breaking: pull in breaking proof system changes
+- feat: add ability to compute k value of a circuit in WASM
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking serialization changes.
 - breaking: move the IR itself into the scope of `zkir`
 - feat: add a wasm API to IR proving/checking
+- addressed audit issues:
+  - bugfix: correctly update the sliding window for in-circuit FAB bytes
+    decoding only after the reversed iteration.
 
 ## Version `1.3.0`
 

@@ -277,13 +277,12 @@ fn gen_arrays(sizes: &[usize]) -> Vec<StateValueArray> {
 fn choose_aligned_values(num: usize, map: &StateValueMap) -> Vec<AlignedValue> {
     let avs: Vec<_> = map
         .keys()
-        .sorted_by_key(|av| <AlignedValue as Serializable>::serialized_size(av))
+        .sorted_by_key(<AlignedValue as Serializable>::serialized_size)
         .collect();
     let size = avs.len();
     let half_size = size / 2;
     let mut results = vec![];
-    // Here ((num+1)/2) = ceil(num/2).
-    for i in 0..((num + 1) / 2) {
+    for i in 0..num.div_ceil(2) {
         // Even steps thru the first half of the range
         results.push(avs[(size / num) * i].clone())
     }
@@ -326,7 +325,7 @@ struct BenchWithArgs {
 
 impl BenchWithArgs {
     fn new() -> Self {
-        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").map_or(false, |v| {
+        let fast = std::env::var("MIDNIGHT_VM_COST_MODEL_FAST").is_ok_and(|v| {
             if v == "1" {
                 true
             } else {
@@ -335,21 +334,23 @@ impl BenchWithArgs {
         });
         let mut p1: usize = 19;
         let mut p2: usize = 12;
+        let mut max_lin: usize = 1 << 13;
         if fast {
             println!(
                 "MIDNIGHT_VM_COST_MODEL_FAST detected! Minimizing parameter space to speed up benchmarking, results will not be useful for actual cost model learning ..."
             );
             p1 = 1;
             p2 = 1;
+            max_lin = 1 << 3;
         }
         println!("Generating BenchWithArgs ...");
         let rng = rand::thread_rng();
         let uid: usize = 0;
         let log_sizes: Vec<usize> = (0..p1).collect();
         let num_aligned_values: usize = p2;
-        // Take p1 even steps up to size 2^p1
+        // Take p1 even steps up to size max_lin.
         println!("... generating lin-step maps ...");
-        let lin_step_map_sizes = (0..p1).map(|i| (i * (1 << p1)) / p1).collect::<Vec<_>>();
+        let lin_step_map_sizes = (0..p1).map(|i| (i * max_lin) / p1).collect::<Vec<_>>();
         let lin_step_maps = gen_maps(&lin_step_map_sizes);
         println!("... generating log-step maps ...");
         let log_step_map_sizes: Vec<usize> = log_sizes.iter().map(|&i| 1 << i).collect();
@@ -578,7 +579,7 @@ impl BenchWithArgs {
                 "uid": self.next_uid(),
             });
             if sizes.len() == 1 {
-                json[format!("value_size")] = sizes[0].into();
+                json["value_size".to_string()] = sizes[0].into();
             } else {
                 for (i, size) in sizes.iter().enumerate() {
                     json[format!("value_{i}_size")] = (*size).into();
@@ -692,6 +693,7 @@ impl BenchWithArgs {
 }
 
 /// Benchmarks for each VM op.
+#[allow(clippy::type_complexity)]
 pub fn vm_op_benchmarks(c: &mut Criterion) {
     let mut bwa = BenchWithArgs::new();
 
@@ -834,7 +836,7 @@ pub fn vm_op_benchmarks(c: &mut Criterion) {
         let con = mk_vm_val(value);
         let stack = [con];
         let op = op![log];
-        bench_one_op(&mut group, &stack, op, json);
+        bench_one_op_that_may_crash(&mut group, &stack, op, json);
     };
     bwa.with_null(&mut bench);
     bwa.with_cell(&mut bench);

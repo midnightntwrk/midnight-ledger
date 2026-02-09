@@ -33,7 +33,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::hash::HashOutput;
 use transient_crypto::hash::{degrade_to_transient, transient_hash, upgrade_from_transient};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
-use zeroize::Zeroize;
+use zeroize::{Zeroize, ZeroizeOnDrop};
 
 use std::fmt::{self, Debug, Formatter};
 use std::iter::once;
@@ -56,7 +56,7 @@ use std::iter::once;
     Dummy,
 )]
 #[storable(base)]
-#[tag = "zswap-nullifier[v1]"]
+#[tag = "zswap-nullifier[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Nullifier(pub HashOutput);
 tag_enforcement_test!(Nullifier);
@@ -88,7 +88,7 @@ randomised_serialization_test!(Nullifier);
     Dummy,
 )]
 #[storable(base)]
-#[tag = "zswap-coin-commitment[v1]"]
+#[tag = "zswap-coin-commitment[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct Commitment(pub HashOutput);
 tag_enforcement_test!(Commitment);
@@ -136,19 +136,15 @@ impl rand::distributions::Distribution<Nonce> for rand::distributions::Standard 
 
 #[derive(
     Default,
-    Copy,
     Clone,
     Hash,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
     FieldRepr,
     FromFieldRepr,
     BinaryHashRepr,
     Serializable,
     Dummy,
     Zeroize,
+    ZeroizeOnDrop,
 )]
 #[tag = "zswap-coin-secret-key[v1]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -161,14 +157,11 @@ impl Debug for SecretKey {
     }
 }
 
-#[cfg(feature = "proptest")]
-randomised_serialization_test!(SecretKey);
-
 impl SecretKey {
     pub fn public_key(&self) -> PublicKey {
-        let mut data = Vec::with_capacity(38);
+        let mut data = Vec::with_capacity(21 + 32);
+        data.extend(b"midnight:zswap-pk[v1]");
         self.binary_repr(&mut data);
-        data.extend(b"mdn:pk");
         PublicKey(persistent_hash(&data))
     }
 }
@@ -203,7 +196,7 @@ impl TryFrom<&ValueAtom> for SecretKey {
     Serializable,
     Dummy,
 )]
-#[tag = "zswap-coin-public-key[v1]"]
+#[tag = "zswap-coin-public-key[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct PublicKey(pub HashOutput);
 tag_enforcement_test!(PublicKey);
@@ -355,10 +348,8 @@ impl Serialize for TokenType {
         S: serde::Serializer,
     {
         let bytes = match self {
-            TokenType::Unshielded(data) => {
-                once(UNSHIELDED_TAG).chain(data.0.0.into_iter()).collect()
-            }
-            TokenType::Shielded(data) => once(SHIELDED_TAG).chain(data.0.0.into_iter()).collect(),
+            TokenType::Unshielded(data) => once(UNSHIELDED_TAG).chain(data.0.0).collect(),
+            TokenType::Shielded(data) => once(SHIELDED_TAG).chain(data.0.0).collect(),
             TokenType::Dust => vec![DUST_TAG],
         };
         serializer.serialize_bytes(&bytes)
@@ -392,6 +383,9 @@ impl<'de> Deserialize<'de> for TokenType {
                         return Err(E::invalid_length(v.len(), &self));
                     }
                     return Ok(TokenType::Dust);
+                }
+                if tag != UNSHIELDED_TAG && tag != SHIELDED_TAG {
+                    return Err(E::unknown_variant(&tag.to_string(), &["0", "1", "2"]));
                 }
                 if v.len() != 33 {
                     return Err(E::invalid_length(v.len(), &self));
@@ -552,7 +546,7 @@ impl BinaryHashRepr for TokenType {
     fn binary_len(&self) -> usize {
         match self {
             TokenType::Dust => 1,
-            _ => 32,
+            _ => 33,
         }
     }
 }
@@ -630,25 +624,27 @@ impl Info {
     }
 
     pub fn commitment(&self, recipient: &Recipient) -> Commitment {
-        let mut data = Vec::with_capacity(119);
+        let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
+        data.extend(b"midnight:zswap-cc[v1]");
         self.binary_repr(&mut data);
         match &recipient {
             Recipient::User(d) => (true, d.0).binary_repr(&mut data),
             Recipient::Contract(d) => (false, d.0).binary_repr(&mut data),
         }
-        data.extend(b"mdn:cc");
         Commitment(persistent_hash(&data))
     }
 
-    pub fn nullifier(&self, se: &SenderEvidence) -> Nullifier {
-        let mut data = Vec::with_capacity(119);
+    pub fn nullifier(&self, se: &SenderEvidence<'_>) -> Nullifier {
+        let mut data = Vec::with_capacity(21 + 32 + 32 + 16 + 1 + 32);
+        data.extend(b"midnight:zswap-cn[v1]");
         self.binary_repr(&mut data);
         match &se {
             SenderEvidence::User(d) => (true, d.0).binary_repr(&mut data),
             SenderEvidence::Contract(d) => (false, d.0).binary_repr(&mut data),
         }
-        data.extend(b"mdn:cn");
-        Nullifier(persistent_hash(&data))
+        let res = Nullifier(persistent_hash(&data));
+        data.zeroize();
+        res
     }
 
     pub fn qualify(&self, mt_index: u64) -> QualifiedInfo {
@@ -911,3 +907,20 @@ hash_serde!(
     SecretKey,
     UserAddress
 );
+
+#[cfg(test)]
+mod tests {
+    #[cfg(feature = "proptest")]
+    use proptest::prelude::*;
+
+    use super::*;
+
+    #[cfg(feature = "proptest")]
+    proptest! {
+        #[test]
+        fn test_token_type_binary_hash_repr_len(tt in TokenType::arbitrary()) {
+            let bin_repr = tt.binary_vec();
+            assert_eq!(bin_repr.len(), tt.binary_len());
+        }
+    }
+}

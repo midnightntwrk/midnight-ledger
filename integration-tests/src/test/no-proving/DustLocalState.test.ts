@@ -27,6 +27,7 @@ import {
   type SignatureVerifyingKey,
   signData,
   Transaction,
+  TransactionContext,
   UnshieldedOffer,
   type UserAddress,
   type UtxoOutput,
@@ -43,7 +44,8 @@ import {
   INITIAL_NIGHT_AMOUNT,
   initialParameters,
   LOCAL_TEST_NETWORK_ID,
-  NIGHT_DUST_RATIO
+  NIGHT_DUST_RATIO,
+  Static
 } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
 import { assertSerializationSuccess } from '@/test-utils';
@@ -281,7 +283,15 @@ describe('Ledger API - DustLocalState', () => {
     intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
     const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const balancedTx = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balancedTx, new WellFormedStrictness(), balancedTx.cost(state.ledger.parameters));
+    const normalizedCost = state.ledger.parameters.normalizeFullness(balancedTx.cost(state.ledger.parameters));
+    const overallCost = Math.max(
+      normalizedCost.readTime,
+      normalizedCost.computeTime,
+      normalizedCost.blockUsage,
+      normalizedCost.bytesWritten,
+      normalizedCost.bytesChurned
+    );
+    state.assertApply(balancedTx, new WellFormedStrictness(), normalizedCost, overallCost);
 
     expect(state.dust.utxos.length).toEqual(1);
     expect(state.dust.generationInfo(state.dust.utxos[0])!.dtime).toBeInstanceOf(Date);
@@ -440,5 +450,362 @@ describe('Ledger API - DustLocalState', () => {
     const emptyTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
     const balancedTx = state.balanceTx(emptyTx.eraseProofs());
     state.assertApply(balancedTx, new WellFormedStrictness());
+  });
+
+  /**
+   * Test replayEventsWithChanges - handling Dust registration.
+   *
+   * @given A DustLocalState with a transaction containing Dust registration
+   * @when Replaying events with changes on a transaction that registers Dust
+   * @then Should track and confirm received UTXOs in changes, and update local state correctly
+   */
+  test('replayEventsWithChanges - should handle Dust registration', () => {
+    const state = TestState.new();
+    const localState = new DustLocalState(initialParameters);
+    const { secretKey } = state.dustKey;
+
+    // Create a transaction with Dust registration
+    state.rewardNight(INITIAL_NIGHT_AMOUNT);
+    state.fastForward(initialParameters.timeToCapSeconds);
+
+    const utxoIh: IntentHash = state.ledger.utxo.utxos.values().next().value!.intentHash;
+    const intent = Intent.new(state.time);
+    const inputs: UtxoSpend[] = [
+      {
+        value: INITIAL_NIGHT_AMOUNT,
+        owner: state.nightKey.verifyingKey(),
+        type: DEFAULT_TOKEN_TYPE,
+        intentHash: utxoIh,
+        outputNo: 0
+      }
+    ];
+
+    const outputs: UtxoOutput[] = [
+      {
+        owner: state.initialNightAddress,
+        type: DEFAULT_TOKEN_TYPE,
+        value: INITIAL_NIGHT_AMOUNT
+      }
+    ];
+
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
+
+    const baseRegistrations: DustRegistration<SignatureEnabled>[] = [
+      new DustRegistration(
+        SignatureMarker.signature,
+        state.nightKey.verifyingKey(),
+        state.dustKey.publicKey(),
+        BALANCING_OVERHEAD
+      )
+    ];
+
+    intent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations
+    );
+
+    const intentSignatureData = intent.signatureData(1);
+    const signatureEnabled = new SignatureEnabled(signData(state.nightKey.signingKey, intentSignatureData));
+
+    intent.dustActions = new DustActions(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations.map(
+        (reg) =>
+          new DustRegistration(
+            SignatureMarker.signature,
+            reg.nightKey,
+            reg.dustAddress,
+            reg.allowFeePayment,
+            signatureEnabled
+          )
+      )
+    );
+
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+    const transactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+    const verifiedTransaction = tx.wellFormed(state.ledger, strictness, state.time);
+    const { events } = state.ledger.apply(verifiedTransaction, transactionContext)[1];
+    const withChanges = localState.replayEventsWithChanges(secretKey, events);
+    const appliedTxLocalState = withChanges.state;
+
+    // Verify state changes - should have received UTXO but no spent UTXOs
+    const allReceivedUtxos = withChanges.changes.flatMap((change) => change.receivedUtxos);
+    const allSpentUtxos = withChanges.changes.flatMap((change) => change.spentUtxos);
+
+    expect(allSpentUtxos).toEqual([]);
+    expect(allReceivedUtxos.length).toEqual(1);
+
+    // After registration, a Dust UTXO is created immediately
+    // Verify the received UTXO matches what's in the state
+    const actualUtxo = appliedTxLocalState.utxos[0];
+    expect(allReceivedUtxos).toEqual([actualUtxo]);
+
+    // Verify state was updated
+    expect(appliedTxLocalState.utxos).toEqual([actualUtxo]);
+    assertSerializationSuccess(appliedTxLocalState);
+  });
+
+  /**
+   * Test replayEventsWithChanges - handling non-empty state with empty transaction.
+   *
+   * @given A DustLocalState with generated Dust UTXOs
+   * @when Replaying events with changes on an empty transaction (no Dust actions)
+   * @then Should have no spent or received UTXOs in changes, and state should remain unchanged
+   */
+  test('replayEventsWithChanges - should handle non-empty state', () => {
+    const state = TestState.new();
+    let localState = new DustLocalState(initialParameters);
+    const { secretKey } = state.dustKey;
+
+    // First, register and generate some Dust
+    state.rewardNight(INITIAL_NIGHT_AMOUNT);
+    state.fastForward(initialParameters.timeToCapSeconds);
+
+    const utxoIh: IntentHash = state.ledger.utxo.utxos.values().next().value!.intentHash;
+    const intent = Intent.new(state.time);
+    const inputs: UtxoSpend[] = [
+      {
+        value: INITIAL_NIGHT_AMOUNT,
+        owner: state.nightKey.verifyingKey(),
+        type: DEFAULT_TOKEN_TYPE,
+        intentHash: utxoIh,
+        outputNo: 0
+      }
+    ];
+
+    const outputs: UtxoOutput[] = [
+      {
+        owner: state.initialNightAddress,
+        type: DEFAULT_TOKEN_TYPE,
+        value: INITIAL_NIGHT_AMOUNT
+      }
+    ];
+
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
+
+    const baseRegistrations: DustRegistration<SignatureEnabled>[] = [
+      new DustRegistration(
+        SignatureMarker.signature,
+        state.nightKey.verifyingKey(),
+        state.dustKey.publicKey(),
+        BALANCING_OVERHEAD
+      )
+    ];
+
+    intent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations
+    );
+
+    const intentSignatureData = intent.signatureData(1);
+    const signatureEnabled = new SignatureEnabled(signData(state.nightKey.signingKey, intentSignatureData));
+
+    intent.dustActions = new DustActions(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations.map(
+        (reg) =>
+          new DustRegistration(
+            SignatureMarker.signature,
+            reg.nightKey,
+            reg.dustAddress,
+            reg.allowFeePayment,
+            signatureEnabled
+          )
+      )
+    );
+
+    const registrationTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+    const transactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+    const verifiedRegistrationTx = registrationTx.wellFormed(state.ledger, strictness, state.time);
+    const { events: registrationEvents } = state.ledger.apply(verifiedRegistrationTx, transactionContext)[1];
+    const withRegistrationChanges = localState.replayEventsWithChanges(secretKey, registrationEvents);
+    localState = withRegistrationChanges.state;
+
+    // Fast forward to generate Dust
+    state.fastForward(initialParameters.timeToCapSeconds);
+
+    const initialUtxoCount = localState.utxos.length;
+    expect(initialUtxoCount).toEqual(1);
+
+    // Create a new empty transaction
+    const emptyIntent = Intent.new(state.time);
+    const emptyTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, emptyIntent);
+    const emptyTransactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    strictness.verifySignatures = false;
+    const verifiedEmptyTx = emptyTx.wellFormed(state.ledger, strictness, state.time);
+    const { events: emptyEvents } = state.ledger.apply(verifiedEmptyTx, emptyTransactionContext)[1];
+    const withEmptyChanges = localState.replayEventsWithChanges(secretKey, emptyEvents);
+    const appliedTxLocalState = withEmptyChanges.state;
+
+    // Verify state changes - empty transaction should not change UTXOs
+    const allReceivedUtxos = withEmptyChanges.changes.flatMap((change) => change.receivedUtxos);
+    const allSpentUtxos = withEmptyChanges.changes.flatMap((change) => change.spentUtxos);
+
+    expect(allSpentUtxos).toEqual([]);
+    expect(allReceivedUtxos).toEqual([]);
+
+    // State should remain the same (empty transaction doesn't generate new UTXOs)
+    expect(appliedTxLocalState.utxos.length).toEqual(initialUtxoCount);
+    assertSerializationSuccess(appliedTxLocalState);
+  });
+
+  /**
+   * Test replayEventsWithChanges - tracking spent and received UTXOs in transfer.
+   *
+   * @given A DustLocalState with an initial Dust UTXO and a transfer transaction
+   * @when Replaying events with changes on a transfer that spends and receives UTXOs
+   * @then Should track and confirm both spent UTXOs and received UTXOs in the changes
+   */
+  test('replayEventsWithChanges - should track spent and received UTXOs in transfer transaction', () => {
+    const state = TestState.new();
+    let localState = new DustLocalState(initialParameters);
+    const { secretKey } = state.dustKey;
+
+    // Step 1: Register and generate Dust
+    state.rewardNight(INITIAL_NIGHT_AMOUNT);
+    state.fastForward(initialParameters.timeToCapSeconds);
+
+    const utxoIh: IntentHash = state.ledger.utxo.utxos.values().next().value!.intentHash;
+    const intent = Intent.new(state.time);
+    const inputs: UtxoSpend[] = [
+      {
+        value: INITIAL_NIGHT_AMOUNT,
+        owner: state.nightKey.verifyingKey(),
+        type: DEFAULT_TOKEN_TYPE,
+        intentHash: utxoIh,
+        outputNo: 0
+      }
+    ];
+
+    const outputs: UtxoOutput[] = [
+      {
+        owner: state.initialNightAddress,
+        type: DEFAULT_TOKEN_TYPE,
+        value: INITIAL_NIGHT_AMOUNT
+      }
+    ];
+
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
+
+    const baseRegistrations: DustRegistration<SignatureEnabled>[] = [
+      new DustRegistration(
+        SignatureMarker.signature,
+        state.nightKey.verifyingKey(),
+        state.dustKey.publicKey(),
+        BALANCING_OVERHEAD
+      )
+    ];
+
+    intent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations
+    );
+
+    const intentSignatureData = intent.signatureData(1);
+    const signatureEnabled = new SignatureEnabled(signData(state.nightKey.signingKey, intentSignatureData));
+
+    intent.dustActions = new DustActions(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations.map(
+        (reg) =>
+          new DustRegistration(
+            SignatureMarker.signature,
+            reg.nightKey,
+            reg.dustAddress,
+            reg.allowFeePayment,
+            signatureEnabled
+          )
+      )
+    );
+
+    const registrationTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+    const transactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+    const verifiedRegistrationTx = registrationTx.wellFormed(state.ledger, strictness, state.time);
+    const [afterRegistrationLedgerState, { events: registrationEvents }] = state.ledger.apply(
+      verifiedRegistrationTx,
+      transactionContext
+    );
+    state.ledger = afterRegistrationLedgerState.postBlockUpdate(state.time);
+    const withRegistrationChanges = localState.replayEventsWithChanges(secretKey, registrationEvents);
+    localState = withRegistrationChanges.state;
+
+    // Fast forward to generate Dust
+    state.fastForward(initialParameters.timeToCapSeconds);
+
+    // Apply an empty transaction to sync local state with ledger after fast-forward
+    const syncIntent = Intent.new(state.time);
+    const syncTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, syncIntent);
+    const syncTransactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    strictness.verifySignatures = false;
+    const verifiedSyncTx = syncTx.wellFormed(state.ledger, strictness, state.time);
+    const { events: syncEvents } = state.ledger.apply(verifiedSyncTx, syncTransactionContext)[1];
+    const withSyncChanges = localState.replayEventsWithChanges(secretKey, syncEvents);
+    localState = withSyncChanges.state;
+
+    expect(localState.utxos.length).toEqual(1);
+    const utxoToSpend = localState.utxos[0];
+
+    // Step 2: Spend the Dust UTXO and create a new one (transfer)
+    const vFee = 0n;
+    const [localStateWithSpend, dustSpend] = localState.spend(secretKey, utxoToSpend, vFee, state.time);
+
+    const transferIntent = Intent.new(state.time);
+    transferIntent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [dustSpend],
+      []
+    );
+
+    const transferTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, transferIntent);
+    const transferTransactionContext = new TransactionContext(state.ledger, Static.blockContext(state.time));
+    strictness.verifySignatures = false;
+    const verifiedTransferTx = transferTx.wellFormed(state.ledger, strictness, state.time);
+    const { events: transferEvents } = state.ledger.apply(verifiedTransferTx, transferTransactionContext)[1];
+
+    // Step 3: Replay events with changes and verify both spent and received UTXOs
+    // Use localStateWithSpend because it has the pending spend tracked
+    const withTransferChanges = localStateWithSpend.replayEventsWithChanges(secretKey, transferEvents);
+    const allReceivedUtxos = withTransferChanges.changes.flatMap((change) => change.receivedUtxos);
+    const allSpentUtxos = withTransferChanges.changes.flatMap((change) => change.spentUtxos);
+
+    // Should have spent the original UTXO
+    expect(allSpentUtxos.length).toEqual(1);
+    expect(allSpentUtxos).toEqual([utxoToSpend]);
+
+    // Dust spend creates a new commitment (for change or output)
+    // When spending with 0 fee, we should receive change back
+    expect(allReceivedUtxos.length).toEqual(1);
+    const receivedUtxo = allReceivedUtxos[0];
+
+    // Verify final state - should have the received UTXO (change)
+    expect(withTransferChanges.state.utxos.length).toEqual(1);
+    expect(withTransferChanges.state.utxos[0]).toEqual(receivedUtxo);
+    assertSerializationSuccess(withTransferChanges.state);
   });
 });

@@ -11,10 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#![allow(dead_code)]
 use hex::FromHex;
 use js_sys::{BigInt, Function, JsString, Promise, Uint8Array};
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize, tagged_serialize};
+use transient_crypto::proofs::Zkir as ZkirTrait;
 use transient_crypto::{
     curve::Fr,
     proofs::{
@@ -40,7 +42,7 @@ fn try_to_string(jsv: JsValue) -> String {
 }
 
 fn err(msg: impl Into<String>) -> std::io::Error {
-    std::io::Error::new(std::io::ErrorKind::Other, msg.into())
+    std::io::Error::other(msg.into())
 }
 
 impl ParamsProverProvider for JsKeyProvider {
@@ -214,8 +216,41 @@ impl WrappedProvingProvider {
 
 #[wasm_bindgen(js_name = "jsonIrToBinary")]
 pub fn json_ir_to_binary(json: &str) -> Result<Uint8Array, JsError> {
-    let ir: IrSource = IrSource::load(json.as_bytes())?;
-    let mut buf = Vec::new();
-    tagged_serialize(&ir, &mut buf)?;
-    Ok(buf[..].into())
+    Zkir::from_json(json)?.serialize()
+}
+
+#[wasm_bindgen]
+struct Zkir(IrSource);
+
+#[wasm_bindgen]
+impl Zkir {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<Zkir, JsError> {
+        Err(JsError::new(
+            "Zkir cannot be constructed directly through the WASM API.",
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "getK")]
+    pub fn get_k(&self) -> u8 {
+        self.0.k()
+    }
+
+    #[wasm_bindgen(js_name = "fromJson")]
+    pub fn from_json(json: &str) -> Result<Self, JsError> {
+        let ir: IrSource = IrSource::load(json.as_bytes())?;
+        Ok(Self(ir))
+    }
+
+    #[wasm_bindgen]
+    pub fn deserialize(bytes: Uint8Array) -> Result<Self, JsError> {
+        let ir: IrSource = tagged_deserialize(&mut &bytes.to_vec()[..])?;
+        Ok(Self(ir))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut buf = Vec::new();
+        tagged_serialize(&self.0, &mut buf)?;
+        Ok(buf[..].into())
+    }
 }

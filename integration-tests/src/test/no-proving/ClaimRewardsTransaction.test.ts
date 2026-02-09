@@ -14,22 +14,27 @@
 import {
   ClaimRewardsTransaction,
   sampleSigningKey,
+  signData,
+  SignatureEnabled,
   SignatureErased,
-  signatureVerifyingKey
+  signatureVerifyingKey,
+  Transaction,
+  WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
-import { Static } from '@/test-objects';
+import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
+import { TestState } from '@/test/utils/TestState';
 
 describe('Ledger API - ClaimRewardsTransaction', () => {
   /**
    * Test construction of ClaimRewardsTransaction.
    */
-  test('should construct ClaimRewardsTransaction correctly', async () => {
+  test('should construct ClaimRewardsTransaction correctly', () => {
     const svk = signatureVerifyingKey(sampleSigningKey());
     const signature = new SignatureErased();
     const value = 100n;
     const nonce = Static.nonce();
-    const tx = new ClaimRewardsTransaction(signature.instance, 'local-test', 100n, svk, nonce, signature);
+    const tx = new ClaimRewardsTransaction(signature.instance, LOCAL_TEST_NETWORK_ID, value, svk, nonce, signature);
 
     expect(tx.value).toEqual(value);
     expect(tx.signature.toString()).toEqual(signature.toString());
@@ -37,5 +42,130 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     expect(tx.owner).toEqual(svk);
     expect(tx.kind).toEqual('Reward');
     assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('should construct ClaimRewardsTransaction with the CardanoBridge claim kind', () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const kind = 'CardanoBridge';
+    const tx = new ClaimRewardsTransaction(
+      signature.instance,
+      LOCAL_TEST_NETWORK_ID,
+      value,
+      svk,
+      nonce,
+      signature,
+      kind
+    );
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual(kind);
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('should construct ClaimRewardsTransaction with the Reward claim kind', () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const kind = 'Reward';
+    const tx = new ClaimRewardsTransaction(
+      signature.instance,
+      LOCAL_TEST_NETWORK_ID,
+      value,
+      svk,
+      nonce,
+      signature,
+      kind
+    );
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual(kind);
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('new - should construct a signature-erased ClaimRewardsTransaction', () => {
+    const svk = signatureVerifyingKey(sampleSigningKey());
+    const signature = new SignatureErased();
+    const value = 100n;
+    const nonce = Static.nonce();
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, value, svk, nonce, 'CardanoBridge');
+
+    expect(tx.value).toEqual(value);
+    expect(tx.signature.toString()).toEqual(signature.toString());
+    expect(tx.nonce).toEqual(nonce);
+    expect(tx.owner).toEqual(svk);
+    expect(tx.kind).toEqual('CardanoBridge');
+    assertSerializationSuccess(tx, signature.instance);
+  });
+
+  test('new - should construct a signature-enabled ClaimRewardsTransaction', () => {
+    const signingKey = sampleSigningKey();
+    const svk = signatureVerifyingKey(signingKey);
+    const value = 100n;
+    const nonce = Static.nonce();
+    const kind = 'CardanoBridge';
+
+    // create a signature-erased tx
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, value, svk, nonce, kind);
+
+    // sign and add a signature
+    const signature = signData(signingKey, tx.dataToSign);
+    const signedTx = tx.addSignature(signature);
+
+    // create a signature-enabled tx from the signed tx
+    const signatureEnabledTx = new ClaimRewardsTransaction(
+      signedTx.signature.instance,
+      LOCAL_TEST_NETWORK_ID,
+      value,
+      svk,
+      nonce,
+      signedTx.signature,
+      kind
+    );
+
+    // validate they are equal
+    expect(signatureEnabledTx.toString(true)).toEqual(signedTx.toString(true));
+    assertSerializationSuccess(signatureEnabledTx, signatureEnabledTx.signature.instance);
+  });
+
+  test('addSignature - should sign and insert a signature', () => {
+    const signingKey = sampleSigningKey();
+    const svk = signatureVerifyingKey(signingKey);
+    const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, svk, Static.nonce(), 'CardanoBridge');
+    expect(tx.signature.toString()).toEqual(new SignatureErased().toString());
+
+    const signature = signData(signingKey, tx.dataToSign);
+    const signedTx = tx.addSignature(signature);
+    expect(signedTx.signature.toString()).toEqual(new SignatureEnabled(signature).toString());
+    assertSerializationSuccess(signedTx, signedTx.signature.instance);
+  });
+
+  test('should apply the ClaimRewardsTransaction correctly', () => {
+    const state = TestState.new();
+    state.distributeNight(state.initialNightAddress, INITIAL_NIGHT_AMOUNT, state.time);
+    expect(state.ledger.utxo.utxos.values().next().value).toBeUndefined();
+
+    const rewards = ClaimRewardsTransaction.new(
+      LOCAL_TEST_NETWORK_ID,
+      INITIAL_NIGHT_AMOUNT,
+      state.nightKey.verifyingKey(),
+      Static.nonce(),
+      'Reward'
+    );
+    const signature = state.nightKey.signData(rewards.dataToSign);
+    const signedRewards = rewards.addSignature(signature);
+
+    const tx = Transaction.fromRewards(signedRewards);
+    state.assertApply(tx, new WellFormedStrictness());
+    expect(state.ledger.utxo.utxos.values().next().value?.value).toEqual(INITIAL_NIGHT_AMOUNT);
   });
 });

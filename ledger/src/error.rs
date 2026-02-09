@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
 use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
@@ -34,6 +34,7 @@ use transient_crypto::curve::EmbeddedGroupAffine;
 use transient_crypto::curve::Fr;
 use transient_crypto::merkle_tree::InvalidUpdate;
 use transient_crypto::proofs::{KeyLocation, ProvingError, VerifyingError};
+use zswap::error::MalformedOffer;
 use zswap::{Input, Output};
 
 #[derive(Debug, Clone)]
@@ -88,6 +89,7 @@ pub enum SystemTransactionError {
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
+    TreasuryDisabled,
 }
 
 impl Display for SystemTransactionError {
@@ -168,6 +170,10 @@ impl Display for SystemTransactionError {
                 )
             }
             SystemTransactionError::InvariantViolation(e) => e.fmt(f),
+            SystemTransactionError::TreasuryDisabled => write!(
+                f,
+                "invalid attempt to access treasury; the treasury is disabled until governance for it has been agreed"
+            ),
         }
     }
 }
@@ -214,7 +220,7 @@ pub enum TransactionInvalid<D: DB> {
         operation_value: u128,
         operation: BalanceOperation,
     },
-    InputNotInUtxos(Utxo),
+    InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
     GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
@@ -444,7 +450,11 @@ pub enum MalformedTransaction<D: DB> {
         key_id: usize,
     },
     InvalidDustRegistrationSignature {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
+    },
+    InvalidDustSpendProof {
+        declared_time: Timestamp,
+        dust_spend: Box<DustSpend<(), D>>,
     },
     OutOfDustValidityWindow {
         dust_ctime: Timestamp,
@@ -455,7 +465,7 @@ pub enum MalformedTransaction<D: DB> {
         key: VerifyingKey,
     },
     InsufficientDustForRegistrationFee {
-        registration: DustRegistration<(), D>,
+        registration: Box<DustRegistration<(), D>>,
         available_dust: u128,
     },
     ThresholdMissed {
@@ -492,8 +502,8 @@ pub enum MalformedTransaction<D: DB> {
         operation_value: u128,
     },
     PedersenCheckFailure {
-        expected: EmbeddedGroupAffine,
-        calculated: EmbeddedGroupAffine,
+        expected: Box<EmbeddedGroupAffine>,
+        calculated: Box<EmbeddedGroupAffine>,
     },
     BalanceCheckOverspend {
         token_type: TokenType,
@@ -696,6 +706,7 @@ pub enum EffectsCheckError {
         SubsetCheckFailure<((u16, bool), ((TokenType, PublicAddress), u128))>,
     ),
     ClaimedUnshieldedSpendsUniquenessFailure(Vec<((u16, Commitment), usize)>),
+    #[allow(clippy::type_complexity)]
     ClaimedCallsUniquenessFailure(Vec<((u16, (ContractAddress, HashOutput, Fr)), usize)>),
     NullifiersNEClaimedNullifiers {
         nullifiers: Vec<(u16, Nullifier, ContractAddress)>,
@@ -780,8 +791,8 @@ impl<D: DB> Display for MalformedTransaction<D> {
         use MalformedTransaction::*;
         match self {
             InvalidNetworkId { expected, found } => {
-                let expected = sanitize_network_id(&expected);
-                let found = sanitize_network_id(&found);
+                let expected = sanitize_network_id(expected);
+                let found = sanitize_network_id(found);
                 write!(
                     formatter,
                     "invalid network ID - expect '{expected}' found '{found}'"
@@ -881,6 +892,13 @@ impl<D: DB> Display for MalformedTransaction<D> {
             InvalidDustRegistrationSignature { registration } => write!(
                 formatter,
                 "failed to verify signature of dust registration: {registration:?}"
+            ),
+            InvalidDustSpendProof {
+                declared_time,
+                dust_spend,
+            } => write!(
+                formatter,
+                "dust spend proof failed to verify; this is just as likely a disagreement on dust state on the declared time ({declared_time:?}) as the proof being invalid: {dust_spend:?}"
             ),
             OutOfDustValidityWindow {
                 dust_ctime,
@@ -1171,7 +1189,7 @@ pub enum TransactionProvingError<D: DB> {
     LeftoverEntries {
         address: ContractAddress,
         entry_point: EntryPointBuf,
-        entries: Transcript<D>,
+        entries: Box<Transcript<D>>,
     },
     RanOutOfEntries {
         address: ContractAddress,
@@ -1232,6 +1250,9 @@ impl<D: DB> From<ProvingError> for TransactionProvingError<D> {
 pub enum PartitionFailure<D: DB> {
     Transcript(TranscriptRejected<D>),
     NonForest,
+    GuaranteedOnlyUnsatisfied,
+    IllegalSegmentZero,
+    Merge(MalformedOffer),
 }
 
 impl<D: DB> From<TranscriptRejected<D>> for PartitionFailure<D> {
@@ -1247,6 +1268,14 @@ impl<D: DB> Display for PartitionFailure<D> {
                 write!(f, "call graph was not a forest; cannot partition")
             }
             PartitionFailure::Transcript(e) => e.fmt(f),
+            PartitionFailure::GuaranteedOnlyUnsatisfied => write!(
+                f,
+                "transaction could not be constructed to satisfy 'guaranteed only' segment specifier: the call was too expensive"
+            ),
+            PartitionFailure::IllegalSegmentZero => {
+                write!(f, "illegal manual specification of segment 0")
+            }
+            PartitionFailure::Merge(e) => write!(f, "failed zswap merge: {e}"),
         }
     }
 }
@@ -1255,6 +1284,7 @@ impl<D: DB> Error for PartitionFailure<D> {
     fn cause(&self) -> Option<&dyn Error> {
         match self {
             PartitionFailure::Transcript(err) => Some(err),
+            PartitionFailure::Merge(err) => Some(err),
             _ => None,
         }
     }

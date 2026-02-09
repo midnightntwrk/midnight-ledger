@@ -71,16 +71,15 @@ fn program_with_results<D: DB>(
     results: &[AlignedValue],
 ) -> Vec<Op<ResultModeVerify, D>> {
     let mut res_iter = results.iter();
-    let res = prog
-        .iter()
+
+    prog.iter()
         .map(|op| op.clone().translate(|()| res_iter.next().unwrap().clone()))
         .filter(|op| match op {
             Op::Idx { path, .. } => !path.is_empty(),
             Op::Ins { n, .. } => *n != 0,
             _ => true,
         })
-        .collect::<Vec<_>>();
-    res
+        .collect::<Vec<_>>()
 }
 
 fn context_with_offer<D: DB>(
@@ -242,8 +241,8 @@ async fn micro_dao_inner(mode: TestMode) {
         .replay_or("tx2", async || {
             let transcripts = partition_transcripts(
                 &[PreTranscript {
-                    context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                    program: &program_with_results(
+                    context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(0u8)], false, [u8; 32])[..],
                             &Cell_read!([key!(1u8)], false, u8),
@@ -312,7 +311,7 @@ async fn micro_dao_inner(mode: TestMode) {
         let tx = mode
             .replay_or(format!("tx3-{name}"), async || {
                 let coin = CoinInfo::new(&mut rng, 100000, token);
-                let out = ZswapOutput::new_contract_owned(&mut rng, &coin, 0, addr).unwrap();
+                let out = ZswapOutput::new_contract_owned(&mut rng, &coin, None, addr).unwrap();
                 let coin_com = coin.commitment(&Recipient::Contract(addr));
                 let pot_has_coin = *name != "red";
                 let mut public_transcript: Vec<Op<ResultModeGather, InMemoryDB>> = [
@@ -344,7 +343,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     let pot_in = ZswapInput::new_contract_owned(
                         &mut rng,
                         &pot,
-                        0,
+                        None,
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
@@ -352,7 +351,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     let transient = ZswapTransient::new_from_contract_owned_output(
                         &mut rng,
                         &coin.qualify(0),
-                        0,
+                        None,
                         out,
                     )
                     .unwrap();
@@ -362,7 +361,7 @@ async fn micro_dao_inner(mode: TestMode) {
                         pot.type_,
                     );
                     let out =
-                        ZswapOutput::new_contract_owned(&mut rng, &new_coin, 0, addr).unwrap();
+                        ZswapOutput::new_contract_owned(&mut rng, &new_coin, None, addr).unwrap();
                     let coin_com = new_coin.commitment(&Recipient::Contract(addr));
 
                     public_transcript_results.extend([pot.into(), addr.into(), addr.into()]);
@@ -433,8 +432,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 );
                 let transcripts = partition_transcripts(
                     &[PreTranscript {
-                        context: &context_with_offer(&state.ledger, addr, Some(&offer)),
-                        program: &program_with_results(
+                        context: context_with_offer(&state.ledger, addr, Some(&offer)),
+                        program: program_with_results(
                             &public_transcript,
                             &public_transcript_results,
                         ),
@@ -520,8 +519,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 ];
                 let transcripts = partition_transcripts(
                     &[PreTranscript {
-                        context: &context_with_offer(&state.ledger, addr, None),
-                        program: &program_with_results(
+                        context: context_with_offer(&state.ledger, addr, None),
+                        program: program_with_results(
                             &[
                                 &Cell_read!(&[key!(1u8)], false, u8)[..],
                                 &Counter_read!(&[key!(6u8)], false),
@@ -588,8 +587,8 @@ async fn micro_dao_inner(mode: TestMode) {
         .replay_or("tx5", async || {
             let transcripts = partition_transcripts(
                 &[PreTranscript {
-                    context: &context_with_offer(&state.ledger, addr, None),
-                    program: &program_with_results(
+                    context: context_with_offer(&state.ledger, addr, None),
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, u8)[..],
                             &Cell_read!([key!(0u8)], false, [u8; 32]),
@@ -680,8 +679,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 ];
                 let transcripts = partition_transcripts(
                     &[PreTranscript {
-                        context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                        program: &program_with_results(
+                        context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                        program: program_with_results(
                             &[
                                 &Cell_read!([key!(1u8)], false, u8)[..],
                                 &Counter_read!([key!(6u8)], false),
@@ -754,8 +753,8 @@ async fn micro_dao_inner(mode: TestMode) {
         .replay_or("tx7", async || {
             let transcripts = partition_transcripts(
                 &[PreTranscript {
-                    context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                    program: &program_with_results(
+                    context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, u8)[..],
                             &Cell_read!([key!(0u8)], false, [u8; 32]),
@@ -836,8 +835,8 @@ async fn micro_dao_inner(mode: TestMode) {
             let beneficiary = Some(state.zswap_keys.coin_public_key());
             let transcripts = partition_transcripts(
                 &[PreTranscript {
-                    context: &QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
-                    program: &program_with_results(
+                    context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
+                    program: program_with_results(
                         &[
                             &Cell_read!([key!(1u8)], false, u8)[..],
                             &Cell_read!([key!(3u8)], false, Option<[u8; 32]>),
@@ -913,7 +912,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     ZswapInput::new_contract_owned(
                         &mut rng,
                         &pot,
-                        0,
+                        None,
                         addr,
                         &state.ledger.zswap.coin_coms,
                     )
@@ -924,7 +923,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     ZswapOutput::new(
                         &mut rng,
                         &new_coin,
-                        0,
+                        None,
                         &state.zswap_keys.coin_public_key(),
                         None,
                     )

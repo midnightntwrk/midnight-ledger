@@ -4,10 +4,41 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## 8.0.0
+
+- breaking: fix: correctly compute change for Dust spent during registration
+
+## 7.0.0
+
+- breaking: pull in breaking proof-system changes
+- breaking: disable system transactions accessing the treasury until treasury
+  governance is in place
+- fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
+  `check` method.
+- feat: add `replayEventsWithChanges` on `ZswapLocalState` and `DustLocalState`,
+  returning `ZswapLocalStateWithChanges` and `DustLocalStateWithChanges` with
+  `ZswapStateChanges` and `DustStateChanges` (received and spent coins or UTXOs
+  per event). Exposed via wasm.
+- fix: fix non-determinism in processing smart-contract GC.
+
+## 6.2.0
 
 - Remove special-casing of validation behaviour depending on the
   `test-utilities` feature being present.
+- Change ledger `DustSpendError::BackingNightNotFound`, `ZswapPreimageEvidence::Ciphertext`, `EventDetails::ParamChange`, and `ContractAction::Deploy` enum variants to now hold their data values on the heap (to reduce Enum sizes), i.e. these variants are now defined as `BackingNightNotFound(Box<QualifiedDustOutput>)`, `Ciphertext(Box<CoinCiphertext>)`, `ParamChange(Sp<LedgerParameters, D>)` and `Deploy(Sp<ContractDeploy<D>, D>)` respectively.
+- Change ledger-wasm `ZswapTransientTypes::UnprovenTransient` enum variant to now hold its data value on the heap (to reduce Enum size), i.e. this variant is now defined as: `UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>)`.
+- fix: correctly rehash generation Merkle tree on cNgD processing.
+- Pulled in updates to `midnight-zk`
+- bugfix: various fixes for `ClaimRewardsTransaction`
+- bugfix: updated pricing structure w/ overall cost and dimension weightings
+- addressed audit issues:
+  - bugfix: zeroizes witness/key material more reliably
+  - bugfix: rejects identity ciphertext challenges
+  - bugfix: Correctly use >= instead of > during modulus reduction. p = 0 mod p!
+  - bugfix: An accross-the-board package update resolves the vulnerable `tracing-subscriber` instance.
+  - breaking: improved domain seperators across the board
+- breaking: Update `midnight-zk` to 5.0.2
+- feat: Transcript partitioning with zswap components via addCalls
 
 ## 6.1.0
 
@@ -26,6 +57,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add endpoints for estimating fees with a margin depending on allowed
   block adjustment
 - fix: fix balancing bug in contracts with multiple intents
+- fix: remove special casing of checks on test-utilities feature
 
 ## 6.0.0
 

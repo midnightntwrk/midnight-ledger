@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-vm"
-version = "1.0.0-alpha.4"
+version = "1.0.1"
 edition = "2024"
 license.workspace = true
 
@@ -33,4 +33,4 @@ derive-where = "^1.5.0"
 [dev-dependencies]
 midnight-onchain-vm = { path = ".", features = ["proptest"] }
 rand = { version = "^0.8.5", features = ["getrandom"] }
-paste = "1.0.15"
+pastey = "0.1.1"

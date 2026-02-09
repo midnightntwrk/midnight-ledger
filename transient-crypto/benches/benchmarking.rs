@@ -14,16 +14,16 @@
 //! minutes in normal mode on @ntc2's machine.
 
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use midnight_circuits::compact_std_lib::Relation;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
 use midnight_circuits::types::AssignedNative;
 use midnight_transient_crypto::commitment::PureGeneratorPedersen;
 use midnight_transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr, outer};
 use midnight_transient_crypto::hash::{hash_to_curve, transient_hash};
+use midnight_zk_stdlib::Relation;
 use rand::RngCore;
 use rand::{Rng, rngs::OsRng};
 use serde_json::json;
-use serialize::{Serializable, tagged_serialize};
+use serialize::tagged_serialize;
 
 /// Helper function to run benchmarks with multiple data points for zero-parameter operations.
 fn with_json_iter<F>(group_name: &str, c: &mut Criterion, mut benchmark_fn: F)
@@ -103,8 +103,10 @@ pub fn proof_verification(c: &mut Criterion) {
     impl Relation for TestIr {
         type Instance = Vec<Fr>;
         type Witness = Self;
-        fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-            instance.iter().map(|x| x.0).collect()
+        fn format_instance(
+            instance: &Self::Instance,
+        ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+            Ok(instance.iter().map(|x| x.0).collect())
         }
         fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
             self.serialize(writer)
@@ -114,7 +116,7 @@ pub fn proof_verification(c: &mut Criterion) {
         }
         fn circuit(
             &self,
-            std_lib: &midnight_circuits::compact_std_lib::ZkStdLib,
+            std_lib: &midnight_zk_stdlib::ZkStdLib,
             layouter: &mut impl midnight_proofs::circuit::Layouter<outer::Scalar>,
             instance: midnight_proofs::circuit::Value<Self::Instance>,
             _witness: midnight_proofs::circuit::Value<Self::Witness>,
@@ -139,7 +141,7 @@ pub fn proof_verification(c: &mut Criterion) {
             pk: ProverKey<Self>,
             preimage: &ProofPreimage,
         ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-            use midnight_circuits::compact_std_lib::prove;
+            use midnight_zk_stdlib::prove;
             let params_k = params.get_params(pk.init()?.k()).await?;
             let pis = preimage.public_transcript_inputs.clone();
             let pk = pk.init().unwrap();
@@ -184,7 +186,7 @@ pub fn proof_verification(c: &mut Criterion) {
         async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
             const DIR: &str = env!("MIDNIGHT_PP");
             ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_filecoin_2p{k}"
+                "{DIR}/bls_midnight_2p{k}"
             ))?))
         }
     }

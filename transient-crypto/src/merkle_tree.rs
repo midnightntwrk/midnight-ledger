@@ -350,12 +350,15 @@ impl MerkleTreeCollapsedUpdate {
 #[derive(Storable)]
 #[storable(db = D)]
 #[tag = "merkle-tree[v1]"]
-pub struct MerkleTree<A: Storable<D>, D: DB = DefaultDB>(Sp<MerkleTreeNode<A, D>, D>);
+pub struct MerkleTree<A: Storable<D>, D: DB = DefaultDB>(
+    #[cfg(feature = "public-internal-structure")] pub Sp<MerkleTreeNode<A, D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))] Sp<MerkleTreeNode<A, D>, D>,
+);
 tag_enforcement_test!(MerkleTree<(), InMemoryDB>);
 
 impl<A: Storable<D>, D: DB> Hash for MerkleTree<A, D> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        Hash::hash(&ArenaKey::from(self.0.hash()), state)
+        Hash::hash(&self.0.hash(), state)
     }
 }
 
@@ -748,7 +751,8 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         ))
     }
 
-    fn rehash(&self) -> Self {
+    /// Force rehash this node and its children
+    pub fn rehash(&self) -> Self {
         match self {
             Leaf { .. } | Collapsed { .. } | Stub { .. } | Node { hash: Some(_), .. } => {
                 self.clone()

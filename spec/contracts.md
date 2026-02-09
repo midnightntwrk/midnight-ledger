@@ -9,7 +9,7 @@ interact with other parts of the ledger.
 At it's core, a contract has an *internal state type*, which we refer to as
 `StateValue`. This type is left unspecified in this spec, however in practice
 it is an [onchain runtime state
-value](../apis-and-common-types/onchain-runtime/README.md#values).
+value](onchain-runtime.md#values).
 
 ```rust
 type StateValue;
@@ -139,7 +139,7 @@ struct Transcript {
 ```
 
 Note that the real program is a program as described in the [onchain runtime
-specification](../apis-and-common-types/onchain-runtime/README.md).
+specification](onchain-runtime.md).
 
 ### Effects
 
@@ -196,6 +196,7 @@ struct CallContext {
     parent_block_hash: Hash<Block>,
     caller: Option<PublicAddress>,
     balance: Map<TokenType, u128>,
+    last_block_time: Timestamp,
 }
 ```
 
@@ -218,6 +219,7 @@ struct BlockContext {
     seconds_since_epoch: Timestamp,
     seconds_since_epoch_err: Duration,
     parent_block_hash: Hash<Block>,
+    last_block_time: Timestamp,
 }
 
 impl ContractCall {
@@ -254,6 +256,7 @@ impl ContractCall {
             parent_block_hash: block.parent_block_hash,
             caller,
             balance: state.balance,
+            last_block_time: block.last_block_time,
         }
     }
 

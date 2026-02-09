@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -122,7 +122,7 @@ static newContractOwned(
 
 ##### segment
 
-`number`
+`undefined` | `number`
 
 ##### contract
 

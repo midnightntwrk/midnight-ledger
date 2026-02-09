@@ -18,6 +18,7 @@ use crate::onchain_runtime::{ContractState, value_to_token_type};
 use crate::tx::{SystemTransaction, TransactionContext, TransactionResult, VerifiedTransaction};
 use crate::zswap_state::*;
 use crate::zswap_wasm::*;
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use js_sys::{Array, BigInt, Date, Function, Map, Set, Uint8Array};
@@ -62,16 +63,27 @@ impl LedgerState {
     pub fn post_block_update(
         &self,
         tblock: &Date,
-        fullness: JsValue,
+        detailed_fullness: JsValue,
+        overall_fullness: JsValue,
     ) -> Result<LedgerState, JsError> {
-        let fullness = if fullness.is_null() || fullness.is_undefined() {
-            self.0.parameters.limits.block_limits * 0.5
+        let detailed_fullness = if detailed_fullness.is_null() || detailed_fullness.is_undefined() {
+            NormalizedCost::ZERO
         } else {
-            from_value(fullness)?
+            from_value(detailed_fullness)?
+        };
+        let overall_fullness = if overall_fullness.is_null() || overall_fullness.is_undefined() {
+            FixedPoint::from_u64_div(1, 2)
+        } else if let Some(f) = overall_fullness.as_f64() {
+            FixedPoint::from(f)
+        } else {
+            return Err(JsError::new(
+                "expected number or undefined for overall fullness",
+            ));
         };
         Ok(LedgerState(self.0.post_block_update(
             Timestamp::from_secs(js_date_to_seconds(tblock)),
-            fullness,
+            detailed_fullness,
+            overall_fullness,
         )?))
     }
 
@@ -226,7 +238,7 @@ impl LedgerState {
         let sys_tx_rewards = ledger::structure::SystemTransaction::DistributeNight(
             ClaimKind::Reward,
             vec![OutputInstructionUnshielded {
-                amount: amount,
+                amount,
                 target_address: address,
                 nonce: OsRng.r#gen(),
             }],
@@ -289,7 +301,7 @@ impl UtxoState {
         let res = Set::new(&JsValue::NULL);
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
-            res.add(&utxo_to_value(&utxo)?);
+            res.add(&utxo_to_value(utxo)?);
         }
         Ok(res)
     }
@@ -301,7 +313,7 @@ impl UtxoState {
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
             if utxo.owner == address {
-                res.add(&utxo_to_value(&utxo)?);
+                res.add(&utxo_to_value(utxo)?);
             }
         }
         Ok(res)
@@ -314,9 +326,9 @@ impl UtxoState {
 
         for utxo in self.0.utxos.iter() {
             let utxo = &*utxo.0;
-            let is_member = prior.0.utxos.contains_key(&utxo);
+            let is_member = prior.0.utxos.contains_key(utxo);
             if !is_member {
-                let js_value = utxo_to_value(&utxo)?;
+                let js_value = utxo_to_value(utxo)?;
                 let mut accepted = true;
 
                 if let Some(filter_by) = filter_by.clone() {
@@ -337,9 +349,9 @@ impl UtxoState {
         }
         for utxo in prior.0.utxos.iter() {
             let utxo = &*utxo.0;
-            let is_member = self.0.utxos.contains_key(&utxo);
+            let is_member = self.0.utxos.contains_key(utxo);
             if !is_member {
-                let js_value = utxo_to_value(&utxo)?;
+                let js_value = utxo_to_value(utxo)?;
                 let mut accepted = true;
 
                 if let Some(filter_by) = filter_by.clone() {
@@ -354,7 +366,7 @@ impl UtxoState {
                 }
 
                 if accepted {
-                    prior_minus_this.add(&utxo_to_value(&utxo)?);
+                    prior_minus_this.add(&utxo_to_value(utxo)?);
                 }
             }
         }

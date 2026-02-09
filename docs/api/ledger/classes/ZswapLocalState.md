@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -187,6 +187,31 @@ in the same order as emitted by the chain being followed.
 
 ***
 
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(secretKeys, events): ZswapLocalStateWithChanges;
+```
+
+Replays observed events against the current local state, returning both the updated state
+and the state changes. These *must* be replayed in the same order as emitted by the chain being followed.
+
+#### Parameters
+
+##### secretKeys
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`ZswapLocalStateWithChanges`](ZswapLocalStateWithChanges.md)
+
+***
+
 ### serialize()
 
 ```ts
@@ -225,7 +250,7 @@ in-flight.
 
 ##### segment
 
-`number`
+`undefined` | `number`
 
 ##### ttl?
 
@@ -264,7 +289,7 @@ this coin as in-flight.
 
 ##### segment
 
-`number`
+`undefined` | `number`
 
 ##### output
 

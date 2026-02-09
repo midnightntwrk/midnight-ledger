@@ -11,48 +11,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Traits for defining new storage mechanisms
+//! storage containers
 
 use crate as storage;
-use crate::arena::{Arena, ArenaKey, Sp};
-use crate::backend::StorageBackend;
-use crate::db::{DB, DummyArbitrary, InMemoryDB};
+use crate::arena::{ArenaHash, ArenaKey, Sp};
+use crate::db::{DB, InMemoryDB};
 use crate::merkle_patricia_trie::Annotation;
 use crate::merkle_patricia_trie::MerklePatriciaTrie;
 use crate::merkle_patricia_trie::Semigroup;
-use crate::storable::Loader;
-use crate::storable::SizeAnn;
+use crate::storable::{Loader, SizeAnn};
 use crate::{DefaultDB, Storable};
 use base_crypto::time::Timestamp;
 use crypto::digest::Digest;
 use derive_where::derive_where;
-use parking_lot::{Mutex, MutexGuard};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
-#[cfg(feature = "proptest")]
-use proptest::strategy::{BoxedStrategy, Strategy};
 use rand::distributions::{Distribution, Standard};
 #[cfg(feature = "proptest")]
 use serialize::NoStrategy;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use sha2::Sha256;
-use std::any::{Any, TypeId};
 use std::borrow::Borrow;
 use std::fmt::{Debug, Formatter};
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
+
+pub use storage_core::storage::*;
 
 /// Storage backed by an in-memory hash map, indexed by SHA256 hashes
 pub type InMemoryStorage = Storage<InMemoryDB<Sha256>>;
-/// The default size of the storage cache.
-///
-/// This size is in number of cache objects, not megabytes consumed! This value
-/// is not well motivated, and we may want to change it later, or better yet,
-/// refactor the back-end to track the memory size of the cache, instead of the
-/// number of cached objects.
-pub const DEFAULT_CACHE_SIZE: usize = 1024 * 1024;
 
 /// A map from key hashes to values
 #[derive(Storable)]
@@ -63,7 +52,14 @@ pub struct HashMap<
     V: Storable<D>,
     D: DB = DefaultDB,
     A: Storable<D> + Annotation<(Sp<K, D>, Sp<V, D>)> = SizeAnn,
->(#[allow(clippy::type_complexity)] Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>);
+>(
+    #[cfg(feature = "public-internal-structure")]
+    #[allow(clippy::type_complexity)]
+    pub Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    #[allow(clippy::type_complexity)]
+    Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>,
+);
 
 impl<
     K: Serializable + Storable<D> + Tagged,
@@ -76,7 +72,7 @@ impl<
         format!("hash-map({},{},{})", K::tag(), V::tag(), A::tag()).into()
     }
     fn tag_unique_factor() -> String {
-        <Map<ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
+        <Map<ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>), D, A>>::tag_unique_factor()
     }
 }
 tag_enforcement_test!(HashMap<(), ()>);
@@ -246,12 +242,12 @@ impl<
         Self(Map::new())
     }
 
-    fn gen_key(key: &K) -> ArenaKey<D::Hasher> {
+    fn gen_key(key: &K) -> ArenaHash<D::Hasher> {
         let mut hasher = D::Hasher::default();
         let mut bytes: std::vec::Vec<u8> = std::vec::Vec::new();
         K::serialize(key, &mut bytes).expect("HashMap key should be serializable");
         hasher.update(bytes);
-        ArenaKey(hasher.finalize())
+        ArenaHash(hasher.finalize())
     }
 
     /// Insert object value in map, keyed with the hash of object key. Overwrites
@@ -392,7 +388,7 @@ where
     V: 'static,
 {
     #[allow(clippy::type_complexity)]
-    inner: std::vec::IntoIter<(ArenaKey<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
+    inner: std::vec::IntoIter<(ArenaHash<D::Hasher>, (Sp<K, D>, Sp<V, D>))>,
 }
 
 impl<K, V, D> Iterator for HashMapIntoIter<K, V, D>
@@ -445,7 +441,7 @@ impl<
 > serde::Serialize for HashSet<V, D, A>
 {
     fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
-        ser.collect_seq(self.iter().map(|v| (&**v).clone()))
+        ser.collect_seq(self.iter().map(|v| (**v).clone()))
     }
 }
 
@@ -586,7 +582,12 @@ where
 #[tag = "mpt-array[v1]"]
 pub struct Array<V: Storable<D>, D: DB = DefaultDB>(
     // Array wraps MPT in an Sp to guarantee it only has one child
-    #[storable(child)] Sp<MerklePatriciaTrie<V, D>, D>,
+    #[cfg(feature = "public-internal-structure")]
+    #[storable(child)]
+    pub Sp<MerklePatriciaTrie<V, D>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
+    #[storable(child)]
+    Sp<MerklePatriciaTrie<V, D>, D>,
 );
 tag_enforcement_test!(Array<()>);
 
@@ -870,7 +871,7 @@ impl<V: Storable<D>, D: DB> Iterator for ArrayIter<'_, V, D> {
             .0
             .lookup_sp(&Array::<V, D>::index_to_nibbles(self.next_index));
         self.next_index += 1;
-        return result;
+        result
     }
 }
 
@@ -880,9 +881,18 @@ impl<V: Storable<D>, D: DB> Iterator for ArrayIter<'_, V, D> {
 #[tag = "multi-set[v1]"]
 /// A set with quantity. Often known as a bag.
 pub struct MultiSet<V: Serializable + Storable<D>, D: DB> {
+    #[cfg(feature = "public-internal-structure")]
+    pub elements: HashMap<V, u32, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     elements: HashMap<V, u32, D>,
 }
 tag_enforcement_test!(MultiSet<(), DefaultDB>);
+
+impl<V: Serializable + Storable<D>, D: DB> Default for MultiSet<V, D> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
     /// Create a new, empty `MultiSet`
@@ -911,11 +921,11 @@ impl<V: Serializable + Storable<D>, D: DB> MultiSet<V, D> {
     /// Decrement the count of an element by `n`, removing it if its count becomes 0
     #[must_use]
     pub fn remove_n(&self, element: &V, n: u32) -> Self {
-        let current_count = self.elements.get(&element).map(|x| *x.deref()).unwrap_or(0);
+        let current_count = self.elements.get(element).map(|x| *x.deref()).unwrap_or(0);
         let result = u32::checked_sub(current_count, n).unwrap_or(0);
         if result == 0 {
             MultiSet {
-                elements: self.elements.remove(&element),
+                elements: self.elements.remove(element),
             }
         } else {
             MultiSet {
@@ -1004,7 +1014,7 @@ impl<T: Storable<D> + Serializable, D: DB, A: Storable<D> + Annotation<(Sp<T, D>
     Semigroup for HashSet<T, D, A>
 {
     fn append(&self, other: &Self) -> Self {
-        self.union(&other)
+        self.union(other)
     }
 }
 
@@ -1048,6 +1058,10 @@ impl<
     }
 }
 
+#[cfg(feature = "public-internal-structure")]
+#[derive(Debug)]
+pub struct BigEndianU64(u64);
+#[cfg(not(feature = "public-internal-structure"))]
 #[derive(Debug)]
 struct BigEndianU64(u64);
 
@@ -1083,7 +1097,13 @@ where
     C: Container<D> + Serializable + Storable<D>,
     <C as Container<D>>::Item: Serializable + Storable<D>,
 {
+    #[cfg(feature = "public-internal-structure")]
+    pub time_map: Map<BigEndianU64, C, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub set: MultiSet<<C as Container<D>>::Item, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     time_map: Map<BigEndianU64, C, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     set: MultiSet<<C as Container<D>>::Item, D>,
 }
 impl<C: Serializable + Storable<D>, D: DB> Tagged for TimeFilterMap<C, D>
@@ -1110,6 +1130,15 @@ where
 {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         self.time_map.fmt(f)
+    }
+}
+
+impl<C: Container<D> + Debug + Storable<D> + Serializable, D: DB> Default for TimeFilterMap<C, D>
+where
+    <C as Container<D>>::Item: Serializable,
+{
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -1179,7 +1208,7 @@ where
         }
         res.time_map = res
             .time_map
-            .insert(BigEndianU64(ts.to_secs()), xs.append(&v));
+            .insert(BigEndianU64(ts.to_secs()), xs.append(v));
 
         res
     }
@@ -1220,7 +1249,13 @@ where
 #[derive_where(PartialEq, Eq, PartialOrd, Ord; V, A)]
 #[derive_where(Hash, Clone)]
 pub struct Map<K, V: Storable<D>, D: DB = DefaultDB, A: Storable<D> + Annotation<V> = SizeAnn> {
+    #[cfg(feature = "public-internal-structure")]
+    pub mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
+    #[cfg(feature = "public-internal-structure")]
+    pub key_type: PhantomData<K>,
+    #[cfg(not(feature = "public-internal-structure"))]
     pub(crate) mpt: Sp<MerklePatriciaTrie<V, D, A>, D>,
+    #[cfg(not(feature = "public-internal-structure"))]
     key_type: PhantomData<K>,
 }
 
@@ -1246,7 +1281,7 @@ impl<
     /// Rather than in-lining the wrapped MPT it is a child such that we know the public Map has
     /// only a single child element (rather than up to 16)
     fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
-        vec![Sp::hash(&self.mpt).into()]
+        vec![Sp::as_child(&self.mpt)]
     }
 
     fn to_binary_repr<W: std::io::Write>(&self, _writer: &mut W) -> Result<(), std::io::Error>
@@ -1350,24 +1385,6 @@ where
             map = map.insert(rng.r#gen(), rng.r#gen());
         }
         map
-    }
-}
-
-impl<T: serde::Serialize + Storable<D>, D: DB> serde::Serialize for Sp<T, D> {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        <T as serde::Serialize>::serialize(&self, serializer)
-    }
-}
-
-impl<'a, T: serde::Deserialize<'a> + Storable<D>, D: DB> serde::Deserialize<'a> for Sp<T, D> {
-    fn deserialize<D2>(deserializer: D2) -> Result<Self, D2::Error>
-    where
-        D2: serde::Deserializer<'a>,
-    {
-        T::deserialize(deserializer).map(Sp::new)
     }
 }
 
@@ -1551,8 +1568,8 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
         self.mpt.deref().clone().size()
     }
 
-    fn from_mpt(&self, mpt: MerklePatriciaTrie<V, D, A>) -> Self {
-        Map {
+    fn build_from_mpt(&self, mpt: MerklePatriciaTrie<V, D, A>) -> Self {
+        Self {
             mpt: Sp::new(mpt),
             key_type: self.key_type,
         }
@@ -1583,7 +1600,7 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> Map<BigEndianU64, V,
     /// 15.
     pub fn prune(&self, target_path: &[u8]) -> (Self, std::vec::Vec<Sp<V, D>>) {
         let (mpt, removed) = self.mpt.prune(target_path);
-        (self.from_mpt(mpt), removed)
+        (self.build_from_mpt(mpt), removed)
     }
 }
 
@@ -1644,324 +1661,10 @@ impl<
     }
 }
 
-#[derive(Clone, Debug)]
-/// A factory for various storage objects
-pub struct Storage<D: DB = DefaultDB> {
-    /// The inner storage arena
-    pub arena: Arena<D>,
-}
-
-impl<D: DB> Storage<D> {
-    /// Create a new Storage type with given cache size and db.
-    ///
-    /// If the `cache_size` is zero, then the `StorageBackend` caches will be
-    /// unbounded. Otherwise, the read cache will be strictly bounded by
-    /// `cache_size`, and the write cache will be truncated to at most that size
-    /// on `StorageBackend` flush operations.
-    ///
-    /// Note: the cache size is in *number* of objects, not number of megabytes
-    /// of memory! See [`self::DEFAULT_CACHE_SIZE`] for a default choice.
-    pub fn new(cache_size: usize, db: D) -> Self {
-        let arena = Arena::<D>::new_from_backend(StorageBackend::new(cache_size, db));
-        Self { arena }
-    }
-
-    /// Create a new Storage type from an existing Arena
-    pub fn new_from_arena(arena: Arena<D>) -> Self {
-        Self { arena }
-    }
-}
-
-impl<D: DB> Deref for Storage<D> {
-    type Target = Arena<D>;
-    fn deref(&self) -> &Arena<D> {
-        &self.arena
-    }
-}
-
-impl<D: Default + DB> Default for Storage<D> {
-    /// Create a new storage with the default cache size.
-    fn default() -> Self {
-        Self::new(DEFAULT_CACHE_SIZE, D::default())
-    }
-}
-
-type StorageMap = std::collections::HashMap<TypeId, Arc<dyn Any + Sync + Send>>;
-
-/// Mutable global default `Storage<D>` keyed on DB type `D`.
-static STORAGES: LazyLock<Mutex<StorageMap>> =
-    LazyLock::new(|| Mutex::new(std::collections::HashMap::new()));
-
-/// Return the shared storage object for DB type `D`, panicking if none is
-/// available.
-///
-/// Use `try_get_default_storage` instead, if you want to be able to recover
-/// from a missing default storage. But the intended use of default storage is
-/// that you set it with `set_default_storage` during program initialization,
-/// and then assume it's set from that point on, and so crashing if it's not set
-/// is expected in normal usage, as it indicates an initialization bug.
-///
-/// # Implicit initialization of `InMemoryDB` backed storage
-///
-/// When `D = InMemoryDB`, if the default storage is not initialized, then
-/// instead of crashing we initialize it implicitly using
-/// `InMemoryDB::default`. This is to avoid needing to write boilerplate storage
-/// initialization code in tests, and is not expected to be used in production,
-/// where other, actually persistent `DB`s are used to back the storage.
-///
-/// # Foot-gun
-///
-/// The default storage is defined per process, so in particular all threads in
-/// a process share the same default storage at each storage type.
-///
-/// Because `cargo test` runs tests as different threads in the same process,
-/// any tests relying on the default storage may interfere with each other. For
-/// most tests this probably doesn't matter, but for tests of the storage
-/// itself, we need isolation.
-///
-/// See [`WrappedDB`] for creating disjoint default `Storage`s for the same DB
-/// type, e.g. for test isolation.
-pub fn default_storage<D: DB + Any>() -> Arc<Storage<D>> {
-    match try_get_default_storage() {
-        Some(arc) => arc,
-        _ => {
-            if TypeId::of::<D>() == TypeId::of::<InMemoryDB>() {
-                // Implicit initialization, but only for InMemoryDB backed storage!
-                set_default_storage(Storage::<D>::default).unwrap_or_else(|s| s)
-            } else {
-                panic!(
-                    "default storage is not set! you probably need to call set_default_storage in your initialization code"
-                )
-            }
-        }
-    }
-}
-
-/// Return `Some(default storage)` if initialized, and `None` otherwise.
-///
-/// In normal usage, you should call `default_storage` instead, because an unset
-/// default storage is an initialization bug.
-pub fn try_get_default_storage<D: DB + Any>() -> Option<Arc<Storage<D>>> {
-    let storages = STORAGES.lock();
-    try_get_default_storage_locked(&storages)
-}
-
-// Factored out `try_get_default_storage` logic, for reuse where the lock is
-// already held.
-fn try_get_default_storage_locked<D: DB + Any>(
-    storages: &MutexGuard<StorageMap>,
-) -> Option<Arc<Storage<D>>> {
-    storages.get(&TypeId::of::<Storage<D>>()).map(|arc| {
-        arc.clone()
-            .downcast::<Storage<D>>()
-            .expect("impossible: we only insert Storage<D>")
-    })
-}
-
-/// Attempts to set the shared storage object for a given DB type.
-///
-/// This function is similar to
-/// <https://doc.rust-lang.org/std/sync/struct.OnceLock.html#method.set>, except
-/// that it takes a closure instead of a value. The semantics are:
-///
-/// - if the default storage is already set for `D`, then return `Err(<existing
-///   value>)`
-///
-/// - if the default storage is not already set for `D`, then set it by calling
-///   `mk_value` and return `Ok(<value just set>)`
-///
-/// Note: It is NOT an error when this function returns `Err(...)`, it just
-/// means `mk_value` wasn't actually called. Most callers shouldn't care about
-/// this distinction, but returning the `Result` allows the distinction to be
-/// tracked if it matters. Normal callers are expected to ignore the result if
-/// they're setting the default storage in a context where their init code runs
-/// in multiple threads, e.g.
-///
-/// ```ignore
-/// let _idontcare = set_default_storage(|| ...);
-/// ```
-///
-/// or call `unwrap` on the result if they expect to be the only caller (since
-/// failure will indicate a bug). If the caller wants the resulting storage, and
-/// doesn't care where it came from, then they should call
-/// `Result::unwrap_or_else(|s| s)` on the result.
-pub fn set_default_storage<D: DB + Any>(
-    mk_value: impl FnOnce() -> Storage<D>,
-) -> Result<Arc<Storage<D>>, Arc<Storage<D>>> {
-    let mut storages = STORAGES.lock();
-    match try_get_default_storage_locked(&storages) {
-        Some(arc) => Err(arc),
-        _ => {
-            let storage = mk_value();
-            let arc = Arc::new(storage);
-            storages.insert(TypeId::of::<Storage<D>>(), arc.clone());
-            Ok(arc)
-        }
-    }
-}
-
-/// Clears the shared storage object for a given DB type.
-///
-/// Since default storage is a global resource shared across all threads,
-/// calling this function may cause other threads to crash when they
-/// subsequently try to look up the default storage. We don't expect this
-/// function to be used in production, but we provide it just case. Callers will
-/// need to provide their own synchronization, to for example avoid a race where
-/// other threads try to access the default storage between calls to this
-/// function and `set_default_storage`.
-///
-/// # Note
-///
-/// This function is not "unsafe" in the formal Rust sense of causing undefined
-/// behavior if called incorrectly. The `unsafe_` prefix is just to help avoid
-/// someone calling it without understanding the consequences.
-pub fn unsafe_drop_default_storage<D: DB + Any>() {
-    STORAGES.lock().remove(&TypeId::of::<Storage<D>>());
-}
-
-/// A tagged newtype wrapper for `DB`s, to support creating disjoint [default
-/// storage]([`default_storage`]) `DB`s of the same type, concurrently.
-///
-/// Disjoint default storage for the same DB type are needed, for example, when
-/// writing tests that need to run in isolation.
-///
-/// See `self::tests::persist_to_disk` and
-/// `self::tests::test_default_storage` for example usage.
-#[derive(Clone)]
-#[derive_where(Debug; D)]
-pub struct WrappedDB<D: DB, T> {
-    db: D,
-    tag: PhantomData<T>,
-}
-
-impl<D: DB, T> WrappedDB<D, T> {
-    /// Create a new `WrappedDB` from a `DB`.
-    pub fn wrap(db: D) -> Self {
-        Self {
-            db,
-            tag: PhantomData,
-        }
-    }
-}
-
-impl<D: Default + DB, T> Default for WrappedDB<D, T> {
-    fn default() -> Self {
-        Self {
-            db: Default::default(),
-            tag: Default::default(),
-        }
-    }
-}
-
-/// A pass-thru implementation of `DB`.
-///
-/// # Foot-gun
-///
-/// If the `DB` trait ever grows another method with a default implementation,
-/// we'll need to be sure to add the pass-thru here, to preserve any possibly
-/// overriding implementations provided by the wrapped db.
-impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
-    type Hasher = D::Hasher;
-
-    fn get_node(
-        &self,
-        key: &ArenaKey<Self::Hasher>,
-    ) -> Option<crate::backend::OnDiskObject<Self::Hasher>> {
-        self.db.get_node(key)
-    }
-
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaKey<Self::Hasher>> {
-        self.db.get_unreachable_keys()
-    }
-
-    fn insert_node(
-        &mut self,
-        key: ArenaKey<Self::Hasher>,
-        object: crate::backend::OnDiskObject<Self::Hasher>,
-    ) {
-        self.db.insert_node(key, object)
-    }
-
-    fn delete_node(&mut self, key: &ArenaKey<Self::Hasher>) {
-        self.db.delete_node(key)
-    }
-
-    fn get_root_count(&self, key: &ArenaKey<Self::Hasher>) -> u32 {
-        self.db.get_root_count(key)
-    }
-
-    fn set_root_count(&mut self, key: ArenaKey<Self::Hasher>, count: u32) {
-        self.db.set_root_count(key, count)
-    }
-
-    fn get_roots(&self) -> std::collections::HashMap<ArenaKey<Self::Hasher>, u32> {
-        self.db.get_roots()
-    }
-
-    fn size(&self) -> usize {
-        self.db.size()
-    }
-
-    fn batch_update<I>(&mut self, iter: I)
-    where
-        I: Iterator<Item = (ArenaKey<Self::Hasher>, crate::db::Update<Self::Hasher>)>,
-    {
-        self.db.batch_update(iter)
-    }
-
-    fn batch_get_nodes<I>(
-        &self,
-        keys: I,
-    ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
-        Option<crate::backend::OnDiskObject<Self::Hasher>>,
-    )>
-    where
-        I: Iterator<Item = ArenaKey<Self::Hasher>>,
-    {
-        self.db.batch_get_nodes(keys)
-    }
-
-    fn bfs_get_nodes<C>(
-        &self,
-        key: &ArenaKey<Self::Hasher>,
-        cache_get: C,
-        truncate: bool,
-        max_depth: Option<usize>,
-        max_count: Option<usize>,
-    ) -> std::vec::Vec<(
-        ArenaKey<Self::Hasher>,
-        crate::backend::OnDiskObject<Self::Hasher>,
-    )>
-    where
-        C: Fn(&ArenaKey<Self::Hasher>) -> Option<crate::backend::OnDiskObject<Self::Hasher>>,
-    {
-        self.db
-            .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)
-    }
-}
-
-#[cfg(feature = "proptest")]
-/// A pass-thru implementation for `Arbitrary`.
-impl<D: DB + Arbitrary, T> Arbitrary for WrappedDB<D, T> {
-    type Parameters = D::Parameters;
-    type Strategy = BoxedStrategy<Self>;
-
-    fn arbitrary_with(params: Self::Parameters) -> Self::Strategy {
-        D::arbitrary_with(params)
-            .prop_map(|db| WrappedDB {
-                db,
-                tag: PhantomData,
-            })
-            .boxed()
-    }
-}
-
-impl<D: DB + DummyArbitrary, T> DummyArbitrary for WrappedDB<D, T> {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storable::SMALL_OBJECT_LIMIT;
 
     #[test]
     fn iter_map() {
@@ -2065,7 +1768,7 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(512), 512);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
     }
@@ -2076,106 +1779,106 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(1), 1);
         time_map = time_map.insert(Timestamp::from_secs(2), 2);
 
-        assert_eq!(time_map.get(Timestamp::from_secs(0)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(0)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1)).copied(),
             Some(Identity(1))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), true);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
+        assert!(!time_map.contains(&0));
+        assert!(time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
         // Drop all things before the first item
         time_map = time_map.filter(Timestamp::from_secs(2));
         // First item should be gone now
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
 
         // Fails if to_nibbles bit emission order is reversed (as it was originally)
         time_map = time_map.insert(Timestamp::from_secs(16), 16);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(16)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(16)).copied(),
             Some(Identity(16))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(17)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(17)).copied(),
             Some(Identity(16))
         );
 
         time_map = time_map.filter(Timestamp::from_secs(2));
 
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(17)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(17)).copied(),
             Some(Identity(16))
         );
 
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
-        assert_eq!(time_map.contains(&16), true);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
+        assert!(time_map.contains(&16));
 
         // Fails if little-endian encoded during serialisation
         time_map = time_map.insert(Timestamp::from_secs(256), 256);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(256)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(256)).copied(),
             Some(Identity(256))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
 
         time_map = time_map.filter(Timestamp::from_secs(2));
 
-        assert_eq!(time_map.get(Timestamp::from_secs(1)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(1)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(2)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(2)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(3)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(3)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(257)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(257)).copied(),
             Some(Identity(256))
         );
 
-        assert_eq!(time_map.contains(&0), false);
-        assert_eq!(time_map.contains(&1), false);
-        assert_eq!(time_map.contains(&2), true);
-        assert_eq!(time_map.contains(&3), false);
-        assert_eq!(time_map.contains(&256), true);
+        assert!(!time_map.contains(&0));
+        assert!(!time_map.contains(&1));
+        assert!(time_map.contains(&2));
+        assert!(!time_map.contains(&3));
+        assert!(time_map.contains(&256));
     }
 
     #[test]
@@ -2207,7 +1910,7 @@ mod tests {
         let mut time_map = TimeFilterMap::<Identity<i32>, InMemoryDB>::new();
         time_map = time_map.insert(Timestamp::from_secs(100), 1);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(100)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(100)).copied(),
             Some(Identity(1))
         );
         assert!(time_map.contains(&1));
@@ -2215,11 +1918,11 @@ mod tests {
         assert!(!time_map.contains(&1));
         assert!(time_map.contains(&2));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(100)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(100)).copied(),
             Some(Identity(2))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(101)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(101)).copied(),
             Some(Identity(2))
         );
     }
@@ -2234,11 +1937,11 @@ mod tests {
         assert!(time_map.contains(&10));
         assert!(time_map.contains(&20));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(20)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(20)).copied(),
             Some(Identity(20))
         );
     }
@@ -2270,15 +1973,15 @@ mod tests {
         assert!(time_map.contains(&30));
         assert_eq!(time_map.get(Timestamp::from_secs(10)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(20)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(20)).copied(),
             Some(Identity(20))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(21)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(21)).copied(),
             Some(Identity(20))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(30)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(30)).copied(),
             Some(Identity(30))
         );
     }
@@ -2295,11 +1998,11 @@ mod tests {
         assert!(!time_map.contains(&10));
         assert!(time_map.contains(&20));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(30)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(30)).copied(),
             Some(Identity(30))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(31)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(31)).copied(),
             Some(Identity(30))
         );
 
@@ -2309,11 +2012,11 @@ mod tests {
         assert!(time_map.contains(&40));
         assert_eq!(time_map.get(Timestamp::from_secs(39)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(40)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(40)).copied(),
             Some(Identity(40))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(41)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(41)).copied(),
             Some(Identity(40))
         );
 
@@ -2329,18 +2032,18 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(10), 10);
 
         assert_eq!(
-            time_map.get(Timestamp::from_secs(0)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(0)).copied(),
             Some(Identity(0))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(5)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(5)).copied(),
             Some(Identity(0))
         );
         assert!(time_map.contains(&0));
 
         time_map = time_map.filter(Timestamp::from_secs(0));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(0)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(0)).copied(),
             Some(Identity(0))
         );
         assert!(time_map.contains(&0));
@@ -2350,7 +2053,7 @@ mod tests {
         assert!(!time_map.contains(&0));
         assert_eq!(time_map.get(Timestamp::from_secs(5)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
     }
@@ -2361,25 +2064,25 @@ mod tests {
         time_map = time_map.insert(Timestamp::from_secs(10), 10);
         time_map = time_map.insert(Timestamp::from_secs(1000000), 1000000);
 
-        assert_eq!(time_map.get(Timestamp::from_secs(9)).map(|v| *v), None);
+        assert_eq!(time_map.get(Timestamp::from_secs(9)).copied(), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(11)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(11)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(999999)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(999999)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000001)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000001)).copied(),
             Some(Identity(1000000))
         );
         assert!(time_map.contains(&10));
@@ -2387,11 +2090,11 @@ mod tests {
 
         time_map = time_map.filter(Timestamp::from_secs(10));
         assert_eq!(
-            time_map.get(Timestamp::from_secs(10)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(10)).copied(),
             Some(Identity(10))
         );
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert!(time_map.contains(&10));
@@ -2400,7 +2103,7 @@ mod tests {
         time_map = time_map.filter(Timestamp::from_secs(1000000));
         assert_eq!(time_map.get(Timestamp::from_secs(10)), None);
         assert_eq!(
-            time_map.get(Timestamp::from_secs(1000000)).map(|v| *v),
+            time_map.get(Timestamp::from_secs(1000000)).copied(),
             Some(Identity(1000000))
         );
         assert!(!time_map.contains(&10));
@@ -2449,31 +2152,54 @@ mod tests {
 
         // Create a default storage of type D1.
         let b1 = set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        let s1 = b1.arena.alloc(42u8);
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        let s1 = b1.arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
 
         // Check that D1 and D2 have disjoint default storages, even tho they're
         // the same underlying database type.
         set_default_storage::<D2>(Storage::<D2>::default).unwrap();
-        assert!(default_storage::<D2>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D2>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Drop the D1 default storage and see that we can create a new one.
         unsafe_drop_default_storage::<D1>();
         assert!(try_get_default_storage::<D1>().is_none());
         set_default_storage::<D1>(Storage::<D1>::default).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Check that dropping the default storage for D1 didn't affect existing
         // references.
-        assert!(b1.get::<u8>(&s1.hash()).is_ok());
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_err());
+        assert!(
+            b1.get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_err()
+        );
 
         // Check that we can restore the original D1 default storage (unlikely
         // use case ...)
         let s = Arc::into_inner(b1).expect("we should have the only reference");
         unsafe_drop_default_storage::<D1>();
         set_default_storage::<D1>(|| s).unwrap();
-        assert!(default_storage::<D1>().get::<u8>(&s1.hash()).is_ok());
+        assert!(
+            default_storage::<D1>()
+                .get::<[u8; SMALL_OBJECT_LIMIT]>(&s1.as_typed_key())
+                .is_ok()
+        );
     }
 
     #[cfg(feature = "sqlite")]
@@ -2523,10 +2249,10 @@ mod tests {
             let arena = &storage1.arena;
             let vals1 = vec![1u8, 1, 2, 3, 5];
             let array1: super::Array<_, W<D>> = vals1.into();
-            let sp1 = arena.alloc(array1.clone());
+            let mut sp1 = arena.alloc(array1.clone());
             sp1.persist();
             storage1.with_backend(|backend| backend.flush_all_changes_to_db());
-            sp1.hash()
+            sp1.as_typed_key()
         };
         unsafe_drop_default_storage::<W<D>>();
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -2575,5 +2301,12 @@ mod tests {
         // Deserialize using public API
         let mut cursor = std::io::Cursor::new(&serialized);
         assert!(Map::<u32, u32>::deserialize(&mut cursor, 0).is_err());
+    }
+
+    #[test]
+    fn init_many() {
+        for _ in 0..10_000 {
+            Array::<()>::new();
+        }
     }
 }

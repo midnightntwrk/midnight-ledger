@@ -195,15 +195,17 @@ impl TryFrom<&ValueSlice> for Recipient {
     }
 }
 
-impl TryFrom<&ValueSlice> for SenderEvidence {
+impl TryFrom<&ValueSlice> for SenderEvidence<'static> {
     type Error = InvalidBuiltinDecode;
 
-    fn try_from(value: &ValueSlice) -> Result<SenderEvidence, InvalidBuiltinDecode> {
+    fn try_from(value: &ValueSlice) -> Result<SenderEvidence<'static>, InvalidBuiltinDecode> {
         if value.0.len() == 3 {
             let is_left: bool = (&value.0[0]).try_into()?;
             if is_left {
                 <()>::try_from(&value.0[2])?;
-                Ok(SenderEvidence::User((&value.0[1]).try_into()?))
+                Ok(SenderEvidence::User(std::borrow::Cow::Owned(
+                    (&value.0[1]).try_into()?,
+                )))
             } else {
                 <()>::try_from(&value.0[1])?;
                 Ok(SenderEvidence::Contract((&value.0[2]).try_into()?))

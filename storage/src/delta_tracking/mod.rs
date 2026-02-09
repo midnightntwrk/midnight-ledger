@@ -18,7 +18,8 @@
 
 mod rcmap;
 
-pub use rcmap::RcMap;
+pub use rcmap::{ChildRef, RcMap};
+use serialize::Serializable;
 
 use crate::arena::ArenaKey;
 use crate::db::DB;
@@ -52,7 +53,7 @@ pub fn initial_write_delete_costs<D: DB>(
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
 ) -> WriteDeleteResults<D> {
     let rcmap = RcMap::default();
-    let keys_reachable_from_r0 = get_writes(&rcmap, &r0);
+    let keys_reachable_from_r0 = get_writes(&rcmap, r0);
     let keys_removed = StdHashSet::new();
     let k0 = update_rcmap(&rcmap, &keys_reachable_from_r0);
     WriteDeleteResults::new(keys_reachable_from_r0, keys_removed, k0, cpu_cost)
@@ -92,17 +93,23 @@ fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64
     arena.with_backend(|backend| {
         keys.iter()
             .map(|key| {
-                backend
-                    .get(key)
-                    // WARNING: this requires the keys to be in the backend,
-                    // which in turn requires them to be `persist()`ed or
-                    // currently loaded in sps. We ensure this by storing refs
-                    // to charged keys in the RcMap, which itself gets persisted
-                    // as part of the ContractState's ChargedState.
-                    .expect("key should exist in arena when computing bytes")
-                    .size() as u64
-                    // Overhead of storing the refcount itself
-                    + 32 + 4
+                match key {
+                    ArenaKey::Ref(key) => {
+                        backend
+                        .get(key)
+                        // WARNING: this requires the keys to be in the backend,
+                        // which in turn requires them to be `persist()`ed or
+                        // currently loaded in sps. We ensure this by storing refs
+                        // to charged keys in the RcMap, which itself gets persisted
+                        // as part of the ContractState's ChargedState.
+                        .expect("key should exist in arena when computing bytes")
+                        .size() as u64
+                        // Overhead of storing the refcount itself
+                        + 32 + 4
+                    }
+                    // Direct children *must* be in rc_0, where they are both key and value
+                    ArenaKey::Direct(_) => key.serialized_size() as u64 * 2,
+                }
             })
             .sum()
     })
@@ -152,14 +159,27 @@ pub fn get_writes<D: DB>(
 ) -> StdHashSet<ArenaKey<D::Hasher>> {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut queue: Vec<ArenaKey<D::Hasher>> = roots.iter().cloned().collect();
+    queue.sort();
     let mut keys_added = StdHashSet::new();
 
     while let Some(key) = queue.pop() {
         if !rcmap.contains(&key) && !keys_added.contains(&key) {
-            let children = arena
-                .children(&key)
-                .expect("children for write update should be loadable");
-            queue.extend(children);
+            match &key {
+                ArenaKey::Ref(key) => {
+                    let children = arena
+                        .children(key)
+                        .expect("children for write update should be loadable");
+                    queue.extend(
+                        children
+                            .iter()
+                            .flat_map(ArenaKey::refs)
+                            .map(|r| ArenaKey::Ref(r.clone())),
+                    );
+                }
+                ArenaKey::Direct(_) => {
+                    queue.extend(key.refs().into_iter().map(|r| ArenaKey::Ref(r.clone())))
+                }
+            }
             keys_added.insert(key);
         }
     }
@@ -191,14 +211,34 @@ pub fn update_rcmap<D: DB>(
     // Initialize all new keys with rc = 0
     // Update reference counts for all edges from new keys
     for key in keys_added {
-        let children = arena.children(key).expect("children should be loadable");
-        for child in children {
-            *inc_map.entry(child).or_default() += 1;
+        match key {
+            ArenaKey::Ref(key) => {
+                let children = arena.children(key).expect("children should be loadable");
+                for child in children
+                    .iter()
+                    .flat_map(ArenaKey::refs)
+                    .map(|r| ArenaKey::Ref(r.clone()))
+                {
+                    *inc_map.entry(child).or_default() += 1;
+                }
+            }
+            ArenaKey::Direct(_) => {
+                for child in key.refs().into_iter().map(|r| ArenaKey::Ref(r.clone())) {
+                    *inc_map.entry(child).or_default() += 1;
+                }
+            }
         }
     }
-    for (k, by) in inc_map.into_iter() {
-        let old_rc = rcmap.get_rc(&k).unwrap_or(0);
-        rcmap = rcmap.modify_rc(&k, old_rc + by);
+    let mut inc_vec = inc_map.into_iter().collect::<Vec<_>>();
+    inc_vec.sort();
+    for (k, by) in inc_vec.into_iter() {
+        match &k {
+            ArenaKey::Ref(r) => {
+                let old_rc = rcmap.get_rc(&k).unwrap_or(0);
+                rcmap = rcmap.modify_rc(r, old_rc + by);
+            }
+            ArenaKey::Direct(_) => rcmap = rcmap.ins_root(k),
+        }
     }
 
     rcmap
@@ -232,8 +272,23 @@ pub fn gc_rcmap<D: DB>(
         step += 1;
 
         // Decrement reference counts of key's children
-        let children = arena.children(&key).expect("children should be loadable");
-        for child in children {
+        let children_refs: Box<dyn Iterator<Item = _>> = match &key {
+            ArenaKey::Ref(key) => Box::new(
+                arena
+                    .children(key)
+                    .expect("children should be loadable")
+                    .into_iter()
+                    .flat_map(|c| {
+                        c.refs()
+                            .into_iter()
+                            .cloned()
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                    }),
+            ),
+            ArenaKey::Direct(_) => Box::new(key.refs().into_iter().cloned()),
+        };
+        for child in children_refs.map(|r| ArenaKey::Ref(r.clone())) {
             let existing = rc_cache
                 .entry(child.clone())
                 .or_insert_with(|| rcmap.get_rc(&child).unwrap_or(0));
@@ -241,22 +296,31 @@ pub fn gc_rcmap<D: DB>(
             *sub += 1;
             // If child's rc became 0 and it's not in roots, add it to the gc queue
             if *sub >= *existing && !roots.contains(&child) {
-                queue.push(child);
+                queue.push(child.clone());
             }
         }
         keys_removed.insert(key);
     }
 
+    let mut update_vec = update_queue.into_iter().collect::<Vec<_>>();
+    update_vec.sort();
     // Execute on the update information
-    for (key, update) in update_queue.into_iter() {
-        let original = rc_cache
-            .get(&key)
-            .expect("must have cached decremented key");
-        let updated = original.saturating_sub(update);
-        rcmap = rcmap.modify_rc(&key, updated);
+    for (key, update) in update_vec.into_iter() {
+        match &key {
+            ArenaKey::Ref(r) => {
+                let original = rc_cache
+                    .get(&key)
+                    .expect("must have cached decremented key");
+                let updated = original.saturating_sub(update);
+                rcmap = rcmap.modify_rc(r, updated);
+            }
+            ArenaKey::Direct(_) => rcmap = rcmap.rm_root(&key),
+        }
     }
 
-    for key in keys_removed.iter() {
+    let mut removed_vec = keys_removed.iter().collect::<Vec<_>>();
+    removed_vec.sort();
+    for key in removed_vec.into_iter() {
         // Remove key.
         //
         // WARNING: the order here is important, i.e. first decrementing
@@ -286,7 +350,7 @@ mod tests {
     use crate as storage;
     use crate::arena::Sp;
     use crate::db::DB;
-    use crate::storable::Loader;
+    use crate::storable::{Loader, SMALL_OBJECT_LIMIT};
     use crate::storage::set_default_storage;
     use crate::{DefaultDB, Storable};
     use derive_where::derive_where;
@@ -301,6 +365,7 @@ mod tests {
     struct Node<D: DB = DefaultDB> {
         id: u64, // Encode (layer, node_id) as layer * 256 + node_id
         children: Vec<Sp<Node<D>, D>>,
+        _data: [u8; SMALL_OBJECT_LIMIT], // In-lined data to keep nodes large enough to not be inlined themselves
     }
 
     impl<D: DB> Node<D> {
@@ -309,6 +374,7 @@ mod tests {
             Sp::new(Node {
                 id: encoded_id,
                 children: children.to_vec(),
+                _data: [0; SMALL_OBJECT_LIMIT],
             })
         }
     }
@@ -325,6 +391,7 @@ mod tests {
     // "doesn't have sideways or back edges". The tests are mostly agnostic to
     // the structure here, altho they often assume that (0,1) and (0,2) are
     // valid nodes with large descendant subgraphs.
+    #[allow(clippy::type_complexity)]
     fn test_dag_adjacency() -> Vec<((u8, u8), Vec<(u8, u8)>)> {
         vec![
             // Layer 0: roots
@@ -369,10 +436,10 @@ mod tests {
             nodes.insert(node_id, Node::new(node_id, &children));
         }
 
-        // Convert to ArenaKey map for easier test access
+        // Convert to ArenaHash map for easier test access
         let mut arena_nodes = HashMap::new();
         for ((layer, id), node) in &nodes {
-            arena_nodes.insert((*layer, *id), node.root.clone());
+            arena_nodes.insert((*layer, *id), node.child_repr.clone());
         }
 
         Dag {
@@ -385,7 +452,7 @@ mod tests {
     fn compute_reachable_nodes(roots: &[(u8, u8)]) -> StdHashSet<(u8, u8)> {
         let adjacency = test_dag_adjacency();
         let mut reachable = StdHashSet::new();
-        let mut queue: Vec<(u8, u8)> = roots.iter().copied().collect();
+        let mut queue: Vec<(u8, u8)> = roots.to_vec();
 
         while let Some(node_id) = queue.pop() {
             if !reachable.insert(node_id) {
@@ -428,7 +495,7 @@ mod tests {
         rcs
     }
 
-    // Convert node IDs to ArenaKeys using the DAG
+    // Convert node IDs to ArenaHashs using the DAG
     fn to_keys<'a, I>(node_ids: I) -> StdHashSet<ArenaKey<crate::DefaultHasher>>
     where
         I: IntoIterator<Item = &'a (u8, u8)>,
@@ -452,12 +519,13 @@ mod tests {
         let roots = [(0, 1)];
         let r1 = to_keys(roots.iter());
 
-        let writes = super::get_writes(&k0, &r1);
+        let writes = super::get_writes(&k0, &r1.clone().into_iter().collect());
         let expected_reachable = compute_reachable_nodes(&roots);
         let expected_keys = to_keys(expected_reachable.iter());
 
         assert_eq!(
-            writes, expected_keys,
+            writes,
+            expected_keys.into_iter().collect(),
             "Write set should contain exactly the reachable nodes"
         );
 
@@ -469,10 +537,11 @@ mod tests {
             .filter(|(layer, _)| *layer >= 3 && *layer <= 5)
             .collect();
         let k0_keys = to_keys(k0_node_ids.iter());
-        let k0_writes = super::get_writes::<DefaultDB>(&RcMap::default(), &k0_keys);
+        let k0_writes =
+            super::get_writes::<DefaultDB>(&RcMap::default(), &k0_keys.into_iter().collect());
         let k0: RcMap<DefaultDB> = super::update_rcmap(&RcMap::default(), &k0_writes);
 
-        let writes = super::get_writes(&k0, &r1);
+        let writes = super::get_writes(&k0, &r1.into_iter().collect());
 
         // Compute what should be written: reachable from roots minus what's in K0
         let reachable_from_r1 = compute_reachable_nodes(&roots);
@@ -481,19 +550,22 @@ mod tests {
         let expected_writes_keys = to_keys(expected_writes.iter());
 
         assert_eq!(
-            writes, expected_writes_keys,
+            writes,
+            expected_writes_keys.into_iter().collect(),
             "Write set should exclude K0 nodes"
         );
 
         // Test 3: Multiple roots
         let multi_roots = [(0, 1), (0, 2)];
         let r1_multi = to_keys(multi_roots.iter());
-        let writes_multi = super::get_writes::<DefaultDB>(&RcMap::default(), &r1_multi);
+        let writes_multi =
+            super::get_writes::<DefaultDB>(&RcMap::default(), &r1_multi.into_iter().collect());
         let expected_multi = compute_reachable_nodes(&multi_roots);
         let expected_multi_keys = to_keys(expected_multi.iter());
 
         assert_eq!(
-            writes_multi, expected_multi_keys,
+            writes_multi,
+            expected_multi_keys.into_iter().collect(),
             "Multiple roots should give union of reachable sets"
         );
     }
@@ -509,14 +581,14 @@ mod tests {
         let k0: RcMap<DefaultDB> = RcMap::default();
         let writes = to_keys(reachable.iter());
 
-        let k1 = super::update_rcmap(&k0, &writes);
+        let k1 = super::update_rcmap(&k0, &writes.into_iter().collect());
 
         // Compute expected reference counts based on adjacency
         let expected_rcs = get_subgraph_rcs(&roots);
 
         // Verify reference counts match expectations
         for (node_id, expected_rc) in expected_rcs {
-            let actual_rc = k1.get_rc(&dag.nodes[&node_id]).unwrap();
+            let actual_rc = k1.get_rc(&dag.nodes[&node_id].clone()).unwrap();
             assert_eq!(
                 actual_rc, expected_rc,
                 "Node {:?} should have rc={}, got {}",
@@ -533,14 +605,15 @@ mod tests {
         let full_roots = [(0, 1), (0, 2)];
         let full_reachable = compute_reachable_nodes(&full_roots);
         let all_writes = to_keys(full_reachable.iter());
-        let k0: RcMap<DefaultDB> = super::update_rcmap(&RcMap::default(), &all_writes);
+        let k0: RcMap<DefaultDB> =
+            super::update_rcmap(&RcMap::default(), &all_writes.into_iter().collect());
 
         // Test GC with limited root set: only one root type
         let limited_roots = [(0, 1)];
         let roots = to_keys(limited_roots.iter());
 
         let step_limit = 1000;
-        let (k1, removed) = super::gc_rcmap(&k0, &roots, step_limit);
+        let (k1, removed) = super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), step_limit);
 
         // Compute what should remain vs be removed
         let kept_nodes = compute_reachable_nodes(&limited_roots);
@@ -555,7 +628,7 @@ mod tests {
 
         for node_id in &expected_removed {
             assert!(
-                removed.contains(&dag.nodes[node_id]),
+                removed.contains(&dag.nodes[node_id].clone()),
                 "Node {:?} should be removed as unreachable",
                 node_id
             );
@@ -570,26 +643,27 @@ mod tests {
         // Verify kept nodes
         for node_id in &kept_nodes {
             assert!(
-                !removed.contains(&dag.nodes[node_id]),
+                !removed.contains(&dag.nodes[node_id].clone()),
                 "Node {:?} should not be removed as it's reachable",
                 node_id
             );
             assert!(
-                k1.get_rc(&dag.nodes[node_id]).is_some(),
+                k1.get_rc(&dag.nodes[node_id].clone()).is_some(),
                 "Remaining node {:?} should have rc in new map",
                 node_id
             );
         }
 
         // Test step limit: should stop GC early with limited steps
-        let (k2, removed2) = super::gc_rcmap(&k0, &roots, 2);
+        let (k2, removed2) = super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), 2);
         assert!(
             removed2.len() == 2,
             "With step_limit=2, should remove 2 nodes"
         );
 
         // Test resuming GC
-        let (_k3, removed3) = super::gc_rcmap(&k2, &roots, expected_removed.len());
+        let (_k3, removed3) =
+            super::gc_rcmap(&k2, &roots.into_iter().collect(), expected_removed.len());
         let total_removed: StdHashSet<_> = removed2.union(&removed3).cloned().collect();
         assert!(
             total_removed.len() == expected_removed.len(),
@@ -637,7 +711,7 @@ mod tests {
                 .iter()
                 .map(|id| dag.nodes[id].clone())
                 .collect();
-            super::update_rcmap(&RcMap::default(), &all_writes)
+            super::update_rcmap(&RcMap::default(), &all_writes.into_iter().collect())
         };
 
         // Run GC from empty root set - should GC everything but not crash
@@ -696,21 +770,21 @@ mod tests {
             root_sets.push(selected_nodes.into_iter().collect::<Vec<_>>());
         }
 
-        // Convert root sets to ArenaKey sets
+        // Convert root sets to ArenaHash sets
         let root_sets_as_keys: Vec<StdHashSet<_>> = root_sets.iter().map(to_keys).collect();
 
         // Compute initial_write_delete_costs for each root set.
         for i in 0..root_sets.len() {
-            let results =
-                super::initial_write_delete_costs::<DefaultDB>(&root_sets_as_keys[i], |_, _| {
-                    Default::default()
-                });
+            let results = super::initial_write_delete_costs::<DefaultDB>(
+                &root_sets_as_keys[i].clone().into_iter().collect(),
+                |_, _| Default::default(),
+            );
 
             // Verify the RcMap matches what get_subgraph_rcs predicts
             let expected_rcs = get_subgraph_rcs(&root_sets[i]);
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
-            // Convert expected_rcs node IDs to ArenaKeys for comparison
+            // Convert expected_rcs node IDs to ArenaHashs for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
@@ -752,7 +826,7 @@ mod tests {
             let expected_rcs = get_subgraph_rcs(&root_sets[i]);
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
-            // Convert expected_rcs node IDs to ArenaKeys for comparison
+            // Convert expected_rcs node IDs to ArenaHashs for comparison
             let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))

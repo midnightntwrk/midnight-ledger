@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -25,7 +25,8 @@ new ClaimRewardsTransaction<S>(
    value, 
    owner, 
    nonce, 
-signature): ClaimRewardsTransaction<S>;
+   signature, 
+kind?): ClaimRewardsTransaction<S>;
 ```
 
 #### Parameters
@@ -53,6 +54,10 @@ signature): ClaimRewardsTransaction<S>;
 ##### signature
 
 `S`
+
+##### kind?
+
+[`ClaimKind`](../type-aliases/ClaimKind.md)
 
 #### Returns
 
@@ -122,6 +127,24 @@ Bounded to be a non-negative 64-bit integer
 
 ## Methods
 
+### addSignature()
+
+```ts
+addSignature(signature): ClaimRewardsTransaction<SignatureEnabled>;
+```
+
+#### Parameters
+
+##### signature
+
+`string`
+
+#### Returns
+
+`ClaimRewardsTransaction`\<[`SignatureEnabled`](SignatureEnabled.md)\>
+
+***
+
 ### eraseSignatures()
 
 ```ts
@@ -189,3 +212,42 @@ static deserialize<S>(markerS, raw): ClaimRewardsTransaction<S>;
 #### Returns
 
 `ClaimRewardsTransaction`\<`S`\>
+
+***
+
+### new()
+
+```ts
+static new(
+   network_id, 
+   value, 
+   owner, 
+   nonce, 
+kind): ClaimRewardsTransaction<SignatureErased>;
+```
+
+#### Parameters
+
+##### network\_id
+
+`string`
+
+##### value
+
+`bigint`
+
+##### owner
+
+`string`
+
+##### nonce
+
+`string`
+
+##### kind
+
+[`ClaimKind`](../type-aliases/ClaimKind.md)
+
+#### Returns
+
+`ClaimRewardsTransaction`\<[`SignatureErased`](SignatureErased.md)\>

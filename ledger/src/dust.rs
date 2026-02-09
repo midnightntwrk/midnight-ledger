@@ -18,7 +18,8 @@ use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
+    UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
@@ -44,6 +45,7 @@ use onchain_runtime::{
     state::StateValue,
 };
 use rand::{CryptoRng, Rng};
+use serde::{Deserialize, Serialize};
 #[cfg(feature = "proof-verifying")]
 use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
@@ -75,7 +77,7 @@ use zeroize::{Zeroize, ZeroizeOnDrop};
 use zswap::verify::with_outputs;
 
 #[cfg(feature = "proof-verifying")]
-const SPEND_VK_RAW: &[u8] = include_bytes!("../../static/dust/spend.verifier");
+const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
@@ -90,7 +92,7 @@ impl Resolver for DustResolver {
     async fn resolve_key(&self, key: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let file_root = match &*key.0 {
             "midnight/dust/spend" => {
-                concat!("dust/", include_str!("../../static/version"), "/spend")
+                concat!("dust/", midnight_ledger_static::version!(), "/spend")
             }
             _ => return Ok(None),
         };
@@ -169,7 +171,7 @@ pub type Seed = [u8; 32];
 pub struct DustPublicKey(pub Fr);
 tag_enforcement_test!(DustPublicKey);
 
-#[derive(Clone, PartialEq, Eq, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
+#[derive(Clone, Serializable, Storable, FieldRepr, Zeroize, ZeroizeOnDrop)]
 #[storable(base)]
 #[tag = "dust-secret-key[v1]"]
 pub struct DustSecretKey(pub Fr);
@@ -315,8 +317,7 @@ impl DustOutput {
         } else {
             0
         };
-        let value_phase_3 = value_phase_12.saturating_sub(dt_phase_3.saturating_mul(rate));
-        value_phase_3
+        value_phase_12.saturating_sub(dt_phase_3.saturating_mul(rate))
     }
 
     pub fn commitment(&self) -> DustCommitment {
@@ -510,7 +511,14 @@ impl<D: DB> DustSpend<ProofPreimageMarker, D> {
         let proof = prover
             .prove(
                 &self.proof,
-                Some(transient_hash(&(segment_id, binding).field_vec())),
+                Some(transient_hash(
+                    &(
+                        Fr::from_le_bytes(b"midnight:dust:proof"),
+                        segment_id,
+                        binding,
+                    )
+                        .field_vec(),
+                )),
             )
             .await?;
         Ok(DustSpend {
@@ -597,7 +605,14 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 ));
 
                 let mut pis = vec![];
-                pis.push(transient_hash(&(segment_id, binding).field_vec()));
+                pis.push(transient_hash(
+                    &(
+                        Fr::from_le_bytes(b"midnight:dust:proof"),
+                        segment_id,
+                        binding,
+                    )
+                        .field_vec(),
+                ));
                 for op in with_outputs(
                     prog.into_iter(),
                     [
@@ -614,11 +629,15 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
                 P::latest_proof_verify(
-                    &*SPEND_VK,
+                    &SPEND_VK,
                     &self.proof,
                     pis,
                     strictness.proof_verification_mode,
                 )
+                .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
+                    declared_time: ctime,
+                    dust_spend: Box::new(self.erase_proofs()),
+                })
             })
         } else {
             Ok(())
@@ -634,6 +653,7 @@ pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
     pub night_key: VerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
+    #[allow(clippy::type_complexity)]
     pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
@@ -659,7 +679,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
                 S::signature_verify(
                     &parent.data_to_sign(segment_id),
                     self.night_key.clone(),
-                    &sig,
+                    sig,
                 )
             }) == Some(true)
         {
@@ -667,7 +687,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
         } else {
             warn!(registration = ?self, "signature verification of dust registration failed");
             Err(MalformedTransaction::InvalidDustRegistrationSignature {
-                registration: self.erase_signatures(),
+                registration: Box::new(self.erase_signatures()),
             })
         }
     }
@@ -791,7 +811,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
                                     "insufficient fees to cover registration fee allowance"
                                 );
                                 Err(MalformedTransaction::InsufficientDustForRegistrationFee {
-                                    registration: reg.erase_signatures(),
+                                    registration: Box::new(reg.erase_signatures()),
                                     available_dust: available,
                                 })
                             } else {
@@ -805,7 +825,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, D: DB> DustActions<S, P, D> {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, Serialize, Deserialize)]
 #[storable(base)]
 #[tag = "dust-parameters[v1]"]
 pub struct DustParameters {
@@ -954,6 +974,7 @@ impl<D: DB> DustState<D> {
         Ok(state)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn apply_registration<S: SignatureKind<D>>(
         &self,
         utxo: &UtxoState<D>,
@@ -1034,6 +1055,7 @@ impl<D: DB> DustState<D> {
         Ok((state, fees_remaining))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn fresh_dust_output(
         &self,
         initial_nonce: InitialNonce,
@@ -1067,7 +1089,7 @@ impl<D: DB> DustState<D> {
         };
         if self.generation.generating_set.member(&gen_info.into()) {
             warn!(?gen_info, "already present generation info");
-            return Err(GenerationInfoAlreadyPresentError(gen_info.clone()));
+            return Err(GenerationInfoAlreadyPresentError(gen_info));
         }
         state.generation.generating_set = state.generation.generating_set.insert(gen_info.into());
         state.generation.generating_tree = state.generation.generating_tree.update_hash(
@@ -1158,7 +1180,7 @@ impl<D: DB> DustState<D> {
                 .generation
                 .generating_tree
                 .index(*idx)
-                .map(|gen_info| gen_info.1.clone())
+                .map(|gen_info| *gen_info.1)
             else {
                 error!(utxo = ?Utxo::from(input.clone()), ?idx, "invariant violated: `night_indices` reference not backed in `generating_tree`");
                 debug_assert!(false);
@@ -1178,7 +1200,7 @@ impl<D: DB> DustState<D> {
                     .generation
                     .generating_tree
                     .insertion_evidence(*idx)
-                    .expect("must be able to produce evidence for udpated path"),
+                    .expect("must be able to produce evidence for updated path"),
                 block_time: context.block_context.tblock,
             });
         }
@@ -1259,9 +1281,9 @@ tag_enforcement_test!(DustWalletUtxoState);
 
 #[derive(Debug)]
 pub enum DustSpendError {
-    BackingNightNotFound(QualifiedDustOutput),
+    BackingNightNotFound(Box<QualifiedDustOutput>),
     NotEnoughDust { available: u128, required: u128 },
-    DustUtxoNotTracked(QualifiedDustOutput),
+    DustUtxoNotTracked(Box<QualifiedDustOutput>),
     MerkleTreeNotRehashed(&'static str),
 }
 
@@ -1301,10 +1323,75 @@ pub struct DustLocalState<D: DB> {
     commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
-    sync_time: Timestamp,
+    pub sync_time: Timestamp,
     pub params: DustParameters,
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
+
+#[derive(Clone)]
+pub struct DustStateChanges {
+    pub received_utxos: Vec<QualifiedDustOutput>,
+    pub spent_utxos: Vec<QualifiedDustOutput>,
+    pub source: TransactionHash,
+}
+
+impl DustStateChanges {
+    pub fn can_merge(&self, other: &DustStateChanges) -> bool {
+        self.source == other.source
+    }
+
+    pub fn merge(&mut self, other: DustStateChanges) {
+        self.received_utxos.extend(other.received_utxos);
+        self.spent_utxos.extend(other.spent_utxos);
+    }
+}
+
+pub struct WithDustStateChanges<T> {
+    pub changes: Vec<DustStateChanges>,
+    pub result: T,
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn new(result: T) -> WithDustStateChanges<T> {
+        WithDustStateChanges {
+            changes: Vec::new(),
+            result,
+        }
+    }
+}
+
+impl<T> WithDustStateChanges<T> {
+    pub fn add_change(mut self, change: DustStateChanges) -> Self {
+        if let Some(last_change) = self.changes.last_mut() {
+            if last_change.can_merge(&change) {
+                last_change.merge(change);
+            } else {
+                self.changes.push(change);
+            }
+        } else {
+            self.changes.push(change);
+        }
+
+        WithDustStateChanges {
+            changes: self.changes,
+            result: self.result,
+        }
+    }
+
+    pub fn maybe_add_change(self, maybe_change: Option<DustStateChanges>) -> Self {
+        match maybe_change {
+            Some(change) => self.add_change(change),
+            None => self,
+        }
+    }
+
+    pub fn with_result(self, result: T) -> Self {
+        WithDustStateChanges {
+            changes: self.changes,
+            result,
+        }
+    }
+}
 
 impl<D: DB> DustLocalState<D> {
     pub fn new(params: DustParameters) -> Self {
@@ -1361,11 +1448,11 @@ impl<D: DB> DustLocalState<D> {
         let gen_idx = *self
             .night_indices
             .get(&utxo.backing_night)
-            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?;
+            .ok_or(DustSpendError::BackingNightNotFound(Box::new(*utxo)))?;
         let gen_info = self
             .generating_tree
             .index(gen_idx)
-            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?
+            .ok_or(DustSpendError::BackingNightNotFound(Box::new(*utxo)))?
             .1;
         // TODO: Fixme: This is assuming that `generating_tree` *is* associated
         // with `ctime`. That seems backwards? We should figure out what `ctime`
@@ -1373,13 +1460,13 @@ impl<D: DB> DustLocalState<D> {
         let gen_path = self
             .generating_tree
             .path_for_leaf(gen_idx, gen_info.merkle_hash())
-            .map_err(|_| DustSpendError::BackingNightNotFound(*utxo))?;
+            .map_err(|_| DustSpendError::BackingNightNotFound(Box::new(*utxo)))?;
         let old_com = utxo.commitment();
         let old_nul = utxo.nullifier(sk);
         let com_path = self
             .commitment_tree
             .path_for_leaf(utxo.mt_index, HashOutput::from(old_com))
-            .map_err(|_| DustSpendError::DustUtxoNotTracked(*utxo))?;
+            .map_err(|_| DustSpendError::DustUtxoNotTracked(Box::new(*utxo)))?;
         let v_new = DustOutput::from(*utxo).updated_value(gen_info, ctime, &self.params);
         if v_fee > v_new {
             return Err(DustSpendError::NotEnoughDust {
@@ -1399,11 +1486,10 @@ impl<D: DB> DustLocalState<D> {
             seq: utxo.seq + 1,
         };
         let new_commitment = new_output.commitment();
-        let mut utxo_entry = (*state
+        let mut utxo_entry = *state
             .dust_utxos
             .get(&old_nullifier)
-            .ok_or_else(|| DustSpendError::DustUtxoNotTracked(*utxo))?)
-        .clone();
+            .ok_or(DustSpendError::DustUtxoNotTracked(Box::new(*utxo)))?;
         utxo_entry.pending_until = Some(ctime + self.params.dust_grace_period);
         state.dust_utxos = state.dust_utxos.insert(old_nullifier, utxo_entry);
         let inputs = (
@@ -1471,7 +1557,7 @@ impl<D: DB> DustLocalState<D> {
                 true.into(),                 // nullifier root check
                 erased_spend.clone().into(), // dust spend read
                 ctime.into(),                // ctime read
-                self.params.clone().into(),  // parameter read
+                self.params.into(),          // parameter read
                 ctime.into(),                // ctime read
             ]
             .into_iter(),
@@ -1529,164 +1615,200 @@ impl<D: DB> DustLocalState<D> {
         sk: &DustSecretKey,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError> {
+        self.replay_events_with_changes(sk, events)
+            .map(|w| w.result)
+    }
+
+    pub fn replay_events_with_changes<'a>(
+        &self,
+        sk: &DustSecretKey,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithDustStateChanges<Self>, EventReplayError> {
         let pk = DustPublicKey::from(sk.clone());
         let (mut res, gen_collapses) = events.into_iter().try_fold(
-            ((*self).clone(), Vec::new()),
-            |(mut state, mut gen_collapses), event| match &event.content {
-                EventDetails::DustInitialUtxo {
-                    output,
-                    generation,
-                    generation_index,
-                    block_time,
-                } => {
-                    if *generation_index != state.generating_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.generating_tree_first_free,
-                            received: *generation_index,
-                            tree_name: "dust generation",
-                        });
-                    }
-                    state.generating_tree = state.generating_tree.update_hash(
-                        *generation_index,
-                        generation.merkle_hash(),
-                        *generation,
-                    );
-                    state.generating_tree_first_free += 1;
-                    if output.mt_index != state.commitment_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.commitment_tree_first_free,
-                            received: output.mt_index,
-                            tree_name: "dust commitment",
-                        });
-                    }
-                    state.commitment_tree = state.commitment_tree.update_hash(
-                        output.mt_index,
-                        output.commitment().into(),
-                        (),
-                    );
-                    state.commitment_tree_first_free += 1;
-                    if pk == output.owner {
-                        state.night_indices = state
-                            .night_indices
-                            .insert(output.backing_night, *generation_index);
-                        state.dust_utxos = state.dust_utxos.insert(
-                            output.nullifier(sk),
-                            DustWalletUtxoState {
-                                utxo: *output,
-                                pending_until: None,
-                            },
+            (WithDustStateChanges::new((*self).clone()), Vec::new()),
+            |(mut acc, mut gen_collapses), event| {
+                let maybe_change = match &event.content {
+                    EventDetails::DustInitialUtxo {
+                        output,
+                        generation,
+                        generation_index,
+                        block_time,
+                    } => {
+                        if *generation_index != acc.result.generating_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.generating_tree_first_free,
+                                received: *generation_index,
+                                tree_name: "dust generation",
+                            });
+                        }
+                        acc.result.generating_tree = acc.result.generating_tree.update_hash(
+                            *generation_index,
+                            generation.merkle_hash(),
+                            *generation,
                         );
-                    } else {
-                        // Carry out generation collapses *after* applying all the events,
-                        // because otherwise we might not have information around to process
-                        // partial dtime updates due to these only being rehashed on block
-                        // boundaries.
-                        gen_collapses.push(*generation_index);
-                        state.commitment_tree = state
-                            .commitment_tree
-                            .collapse(output.mt_index, output.mt_index);
-                    }
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
-                    }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::ParamChange(params) => {
-                    state.params = params.dust;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::DustSpendProcessed {
-                    commitment,
-                    commitment_index,
-                    nullifier,
-                    v_fee,
-                    declared_time,
-                    block_time,
-                } => {
-                    if *commitment_index != state.commitment_tree_first_free {
-                        return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.commitment_tree_first_free,
-                            received: *commitment_index,
-                            tree_name: "dust commitment",
-                        });
-                    }
-                    state.commitment_tree = state.commitment_tree.update_hash(
-                        *commitment_index,
-                        (*commitment).into(),
-                        (),
-                    );
-                    state.commitment_tree_first_free += 1;
-                    if let Some(utxo) = state.dust_utxos.get(&nullifier) {
-                        if let Some(gen_idx) = state.night_indices.get(&utxo.utxo.backing_night) {
-                            let gen_info = state.generating_tree.index(*gen_idx).unwrap().1;
-                            let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
-                                gen_info,
-                                *declared_time,
-                                &self.params,
-                            );
-                            let v_now = v_pre_spend.saturating_sub(*v_fee);
-                            state.dust_utxos = state.dust_utxos.remove(&nullifier);
-                            let qdo_new = QualifiedDustOutput {
-                                backing_night: utxo.utxo.backing_night,
-                                ctime: *declared_time,
-                                initial_value: v_now,
-                                seq: utxo.utxo.seq + 1,
-                                nonce: transient_hash(
-                                    (utxo.utxo.backing_night, utxo.utxo.seq + 1, sk.0)
-                                        .field_vec()
-                                        .as_ref(),
-                                ),
-                                owner: utxo.utxo.owner,
-                                mt_index: *commitment_index,
-                            };
-                            state.dust_utxos = state.dust_utxos.insert(
-                                qdo_new.nullifier(sk),
+                        acc.result.generating_tree_first_free += 1;
+                        if output.mt_index != acc.result.commitment_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.commitment_tree_first_free,
+                                received: output.mt_index,
+                                tree_name: "dust commitment",
+                            });
+                        }
+                        acc.result.commitment_tree = acc.result.commitment_tree.update_hash(
+                            output.mt_index,
+                            output.commitment().into(),
+                            (),
+                        );
+                        acc.result.commitment_tree_first_free += 1;
+                        let maybe_change = if pk == output.owner {
+                            acc.result.night_indices = acc
+                                .result
+                                .night_indices
+                                .insert(output.backing_night, *generation_index);
+                            acc.result.dust_utxos = acc.result.dust_utxos.insert(
+                                output.nullifier(sk),
                                 DustWalletUtxoState {
-                                    utxo: qdo_new,
+                                    utxo: *output,
                                     pending_until: None,
                                 },
                             );
+                            Some(DustStateChanges {
+                                received_utxos: vec![*output],
+                                spent_utxos: vec![],
+                                source: event.source.transaction_hash,
+                            })
                         } else {
-                            error!("Unable to find backing NIGHT");
+                            // Carry out generation collapses *after* applying all the events,
+                            // because otherwise we might not have information around to process
+                            // partial dtime updates due to these only being rehashed on block
+                            // boundaries.
+                            gen_collapses.push(*generation_index);
+                            acc.result.commitment_tree = acc
+                                .result
+                                .commitment_tree
+                                .collapse(output.mt_index, output.mt_index);
+                            None
+                        };
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
                         }
-                    } else {
-                        state.commitment_tree = state
-                            .commitment_tree
-                            .collapse(*commitment_index, *commitment_index);
+                        acc.result.sync_time = *block_time;
+                        maybe_change
                     }
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
+                    EventDetails::ParamChange(params) => {
+                        acc.result.params = params.dust;
+                        None
                     }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                EventDetails::DustGenerationDtimeUpdate { update, block_time } => {
-                    state.generating_tree =
-                        state.generating_tree.update_from_evidence(update.clone())?;
-                    if *block_time < state.sync_time {
-                        return Err(EventReplayError::EventForPastTime {
-                            synced: state.sync_time,
-                            event: *block_time,
-                        });
+                    EventDetails::DustSpendProcessed {
+                        commitment,
+                        commitment_index,
+                        nullifier,
+                        v_fee,
+                        declared_time,
+                        block_time,
+                    } => {
+                        if *commitment_index != acc.result.commitment_tree_first_free {
+                            return Err(EventReplayError::NonLinearInsertion {
+                                expected_next: acc.result.commitment_tree_first_free,
+                                received: *commitment_index,
+                                tree_name: "dust commitment",
+                            });
+                        }
+                        acc.result.commitment_tree = acc.result.commitment_tree.update_hash(
+                            *commitment_index,
+                            (*commitment).into(),
+                            (),
+                        );
+                        acc.result.commitment_tree_first_free += 1;
+                        let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)
+                        {
+                            if let Some(gen_idx) =
+                                acc.result.night_indices.get(&utxo.utxo.backing_night)
+                            {
+                                let gen_info =
+                                    acc.result.generating_tree.index(*gen_idx).unwrap().1;
+                                let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
+                                    gen_info,
+                                    *declared_time,
+                                    &acc.result.params,
+                                );
+                                let v_now = v_pre_spend.saturating_sub(*v_fee);
+                                let spent_utxo = utxo.utxo;
+                                acc.result.dust_utxos = acc.result.dust_utxos.remove(nullifier);
+                                let qdo_new = QualifiedDustOutput {
+                                    backing_night: spent_utxo.backing_night,
+                                    ctime: *declared_time,
+                                    initial_value: v_now,
+                                    seq: spent_utxo.seq + 1,
+                                    nonce: transient_hash(
+                                        (spent_utxo.backing_night, spent_utxo.seq + 1, sk.0)
+                                            .field_vec()
+                                            .as_ref(),
+                                    ),
+                                    owner: spent_utxo.owner,
+                                    mt_index: *commitment_index,
+                                };
+                                acc.result.dust_utxos = acc.result.dust_utxos.insert(
+                                    qdo_new.nullifier(sk),
+                                    DustWalletUtxoState {
+                                        utxo: qdo_new,
+                                        pending_until: None,
+                                    },
+                                );
+                                Some(DustStateChanges {
+                                    received_utxos: vec![qdo_new],
+                                    spent_utxos: vec![spent_utxo],
+                                    source: event.source.transaction_hash,
+                                })
+                            } else {
+                                error!("Unable to find backing NIGHT");
+                                None
+                            }
+                        } else {
+                            acc.result.commitment_tree = acc
+                                .result
+                                .commitment_tree
+                                .collapse(*commitment_index, *commitment_index);
+                            None
+                        };
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
+                        }
+                        acc.result.sync_time = *block_time;
+                        maybe_change
                     }
-                    state.sync_time = *block_time;
-                    Ok((state, gen_collapses))
-                }
-                _ => Ok((state, gen_collapses)),
+                    EventDetails::DustGenerationDtimeUpdate { update, block_time } => {
+                        debug_assert!(update.path.iter().all(|entry| entry.hash.is_some()));
+                        acc.result.generating_tree = acc
+                            .result
+                            .generating_tree
+                            .update_from_evidence(update.clone())?;
+                        if *block_time < acc.result.sync_time {
+                            return Err(EventReplayError::EventForPastTime {
+                                synced: acc.result.sync_time,
+                                event: *block_time,
+                            });
+                        }
+                        acc.result.sync_time = *block_time;
+                        None
+                    }
+                    _ => None,
+                };
+                Ok((acc.maybe_add_change(maybe_change), gen_collapses))
             },
         )?;
         for collapse in gen_collapses {
-            res.generating_tree = res.generating_tree.collapse(collapse, collapse);
+            res.result.generating_tree = res.result.generating_tree.collapse(collapse, collapse);
         }
-        res.commitment_tree = res.commitment_tree.rehash();
-        res.generating_tree = res.generating_tree.rehash();
+        res.result.commitment_tree = res.result.commitment_tree.rehash();
+        res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
     }
 }
@@ -2049,9 +2171,9 @@ impl<D: DB> DustLocalStateLight<D> {
 macro_rules! exptfile {
     ($name:literal, $desc:literal) => {
         (
-            concat!("dust/", include_str!("../../static/version"), "/", $name),
+            concat!("dust/", midnight_ledger_static::version!(), "/", $name),
             base_crypto::data_provider::hexhash(
-                &include_bytes!(concat!("../../static/dust/", $name, ".sha256"))
+                &include_bytes!(concat!("../static/dust/", $name, ".sha256"))
                     .split_at(64)
                     .0,
             ),
@@ -2070,7 +2192,7 @@ pub const DUST_EXPECTED_FILES: &[(&str, [u8; 32], &str)] = &[
     exptfile!("spend.bzkir", "ZKIR source for Dust spends"),
 ];
 
-pub const DUST_SPEND_PROOF_SIZE: usize = 3_616;
+pub const DUST_SPEND_PROOF_SIZE: usize = 2_912;
 pub const DUST_SPEND_PIS: usize = 138;
 
 #[cfg(test)]

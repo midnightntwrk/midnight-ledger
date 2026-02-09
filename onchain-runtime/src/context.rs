@@ -52,10 +52,10 @@ use serialize::{self, Deserializable, Serializable, Tagged, tag_enforcement_test
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 use std::ops::Deref;
-use storage::arena::Sp;
+use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::storage::Map;
-use storage::{Storable, arena::ArenaKey, storable::Loader};
+use storage::{Storable, storable::Loader};
 use transient_crypto::curve::Fr;
 
 // Need to: Convert to SerdeBlockContext / SerdeEffects
@@ -66,6 +66,7 @@ struct SerdeBlockContext {
     seconds_since_epoch: u64,
     seconds_since_epoch_err: u32,
     parent_block_hash: String,
+    last_block_time: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -78,6 +79,7 @@ struct SerdeCallContext {
     caller: Option<SerdePublicAddress>,
     balance: HashMap<SerdeTokenType, u128>,
     com_indices: HashMap<String, u64>,
+    last_block_time: u64,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Hash, PartialEq, Eq, PartialOrd, Ord)]
@@ -216,6 +218,7 @@ impl From<BlockContext> for SerdeBlockContext {
             seconds_since_epoch: ctxt.tblock.to_secs(),
             seconds_since_epoch_err: ctxt.tblock_err,
             parent_block_hash: ctxt.parent_block_hash.0.encode_hex(),
+            last_block_time: ctxt.last_block_time.to_secs(),
         }
     }
 }
@@ -231,6 +234,7 @@ impl TryFrom<SerdeBlockContext> for BlockContext {
             tblock: Timestamp::from_secs(ctxt.seconds_since_epoch),
             tblock_err: ctxt.seconds_since_epoch_err,
             parent_block_hash: HashOutput(hash),
+            last_block_time: Timestamp::from_secs(ctxt.last_block_time),
         })
     }
 }
@@ -256,6 +260,7 @@ impl<D: DB> From<CallContext<D>> for SerdeCallContext {
                 .iter()
                 .map(|(com, val)| (com.0.0.encode_hex(), *val))
                 .collect(),
+            last_block_time: ctxt.last_block_time.to_secs(),
         }
     }
 }
@@ -295,6 +300,7 @@ impl<D: DB> TryFrom<SerdeCallContext> for CallContext<D> {
                     ))
                 })
                 .collect::<Result<Map<CoinCommitment, u64>, _>>()?,
+            last_block_time: Timestamp::from_secs(ctxt.last_block_time),
         })
     }
 }
@@ -308,6 +314,7 @@ pub struct CallContext<D: DB> {
     pub caller: Option<PublicAddress>,
     pub balance: storage::storage::HashMap<TokenType, u128, D>,
     pub com_indices: Map<CoinCommitment, u64>,
+    pub last_block_time: Timestamp,
 }
 
 impl<D: DB> Serialize for CallContext<D> {
@@ -331,12 +338,13 @@ impl<'de, DD: DB> Deserialize<'de> for CallContext<DD> {
 }
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize, Serializable)]
-#[tag = "block-context[v1]"]
+#[tag = "block-context[v2]"]
 #[serde(try_from = "SerdeBlockContext", into = "SerdeBlockContext")]
 pub struct BlockContext {
     pub tblock: Timestamp,
     pub tblock_err: u32,
     pub parent_block_hash: HashOutput,
+    pub last_block_time: Timestamp,
 }
 tag_enforcement_test!(BlockContext);
 
@@ -633,7 +641,7 @@ impl Distribution<ClaimedContractCallsValue> for Standard {
 #[derive_where(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
-#[tag = "contract-effects[v2]"]
+#[tag = "contract-effects[v3]"]
 pub struct Effects<D: DB> {
     pub claimed_nullifiers: storage::storage::HashSet<Nullifier, D>,
     pub claimed_shielded_receives: storage::storage::HashSet<CoinCommitment, D>,
@@ -716,7 +724,7 @@ impl<'a, D: DB> From<&'a Effects<D>> for VmValue<D> {
                         eff.claimed_contract_calls
                             .iter()
                             .map(|sp_item| {
-                                let ref value_sp = *sp_item;
+                                let value_sp = &(*sp_item);
                                 let value: ClaimedContractCallsValue =
                                     (*(*value_sp).clone()).clone();
                                 (value.into(), StateValue::Null)
@@ -798,38 +806,34 @@ impl<D: DB> TryFrom<VmValue<D>> for Effects<D> {
                 Err(TranscriptRejected::EffectDecodeError)
             }
         }
-        if let StateValue::Array(arr) = &val.value {
-            if arr.len() == 9 {
-                return Ok(Effects {
-                    claimed_nullifiers: map_from::<Nullifier, (), D>(arr.get(0).unwrap())?
-                        .iter()
-                        .map(|x| *x.0)
-                        .collect(),
-                    claimed_shielded_receives: map_from::<CoinCommitment, (), D>(
-                        arr.get(1).unwrap(),
-                    )?
+        if let StateValue::Array(arr) = &val.value
+            && arr.len() == 9
+        {
+            return Ok(Effects {
+                claimed_nullifiers: map_from::<Nullifier, (), D>(arr.get(0).unwrap())?
                     .iter()
                     .map(|x| *x.0)
                     .collect(),
-                    claimed_shielded_spends: map_from::<CoinCommitment, (), D>(
-                        arr.get(2).unwrap(),
-                    )?
+                claimed_shielded_receives: map_from::<CoinCommitment, (), D>(arr.get(1).unwrap())?
                     .iter()
                     .map(|x| *x.0)
                     .collect(),
-                    claimed_contract_calls: map_from::<ClaimedContractCallsValue, (), D>(
-                        arr.get(3).unwrap(),
-                    )?
+                claimed_shielded_spends: map_from::<CoinCommitment, (), D>(arr.get(2).unwrap())?
                     .iter()
-                    .map(|x| (*x.0).clone())
+                    .map(|x| *x.0)
                     .collect(),
-                    shielded_mints: map_from(arr.get(4).unwrap())?,
-                    unshielded_mints: map_from(arr.get(5).unwrap())?,
-                    unshielded_inputs: map_from(arr.get(6).unwrap())?,
-                    unshielded_outputs: map_from(arr.get(7).unwrap())?,
-                    claimed_unshielded_spends: map_from(arr.get(8).unwrap())?,
-                });
-            }
+                claimed_contract_calls: map_from::<ClaimedContractCallsValue, (), D>(
+                    arr.get(3).unwrap(),
+                )?
+                .iter()
+                .map(|x| (*x.0).clone())
+                .collect(),
+                shielded_mints: map_from(arr.get(4).unwrap())?,
+                unshielded_mints: map_from(arr.get(5).unwrap())?,
+                unshielded_inputs: map_from(arr.get(6).unwrap())?,
+                unshielded_outputs: map_from(arr.get(7).unwrap())?,
+                claimed_unshielded_spends: map_from(arr.get(8).unwrap())?,
+            });
         }
         Err(TranscriptRejected::EffectDecodeError)
     }
@@ -883,6 +887,7 @@ impl<D: DB> From<&QueryContext<D>> for VmValue<D> {
                         Some(x) => StateValue::Cell(Sp::new(x.into())),
                         None => StateValue::Null,
                     },
+                    StateValue::Cell(Sp::new(context.call_context.last_block_time.into())),
                 ]
                 .into(),
             ),
@@ -957,12 +962,12 @@ impl<D: DB> QueryContext<D> {
         );
         state.state = new_charged_state;
         let gas_cost = res.gas_cost + state_cost;
-        if let Some(gas_limit) = gas_limit {
-            if gas_cost > gas_limit {
-                // TODO?: return a more specific error, explaining that gas
-                // limit was exceeded by write+delete vs by cpu during vm eval?
-                return Err(TranscriptRejected::Execution(OnchainProgramError::OutOfGas));
-            }
+        if let Some(gas_limit) = gas_limit
+            && gas_cost > gas_limit
+        {
+            // TODO?: return a more specific error, explaining that gas
+            // limit was exceeded by write+delete vs by cpu during vm eval?
+            return Err(TranscriptRejected::Execution(OnchainProgramError::OutOfGas));
         }
 
         trace!("transcript application successful");
@@ -987,16 +992,16 @@ impl<D: DB> QueryContext<D> {
         transcript: &Transcript<D>,
         cost_model: &CostModel,
     ) -> Result<QueryResults<ResultModeVerify, D>, TranscriptRejected<D>> {
-        Ok(self.query(
+        self.query(
             &Vec::from(&transcript.program),
             Some(transcript.gas),
             cost_model,
-        )?)
+        )
     }
 }
 
 fn ensure_fully_deserialized(data: &[u8]) -> Result<(), std::io::Error> {
-    if data.len() != 0 {
+    if !data.is_empty() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::InvalidData,
             format!("Not all bytes read, {} bytes remaining", data.len()),

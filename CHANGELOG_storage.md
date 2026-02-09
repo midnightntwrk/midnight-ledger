@@ -1,9 +1,20 @@
 # `storage` Changelog
 
+## Version `1.1.0`
+
+- Added state translation functionality to support hardforking
+
 ## Version `1.0.0`
 
 - Add `storage::delta_tracking::RcMap` for reference-counted key tracking in
   write+delete I/O cost modeling
+- feat: small nodes are now stored in-line
+- addressed audit issues:
+  - bugfix: correctly counts only non-empty MPT children
+  - bugfix: Switches to 64-bit unsigned integers for reference counts
+  - bugfix: enforce invarient that MPT Node::Extension has a path length of <= 255
+    nibbles
+- bugfix: fix non-determinism in `RcMap` processing
 
 ## Version `0.5.0`
 

@@ -13,6 +13,7 @@
 
 use crate::conversions::*;
 use crate::dust::Event;
+use crate::state_changes::ZswapStateChanges;
 use crate::zswap_keys::ZswapSecretKeys;
 use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
 use base_crypto::time::Timestamp;
@@ -25,6 +26,7 @@ use coin_structure::{
 };
 use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
 use ledger::semantics::ZswapLocalStateExt;
+use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
@@ -88,13 +90,50 @@ impl MerkleTreeCollapsedUpdate {
 }
 
 #[wasm_bindgen]
+pub struct ZswapLocalStateWithChanges {
+    inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>,
+    changes: Vec<ZswapStateChanges>,
+}
+
+impl From<WithZswapStateChanges<zswap::local::State<InMemoryDB>>> for ZswapLocalStateWithChanges {
+    fn from(inner: WithZswapStateChanges<zswap::local::State<InMemoryDB>>) -> Self {
+        let changes = inner
+            .changes
+            .iter()
+            .cloned()
+            .map(ZswapStateChanges::from)
+            .collect();
+        ZswapLocalStateWithChanges { inner, changes }
+    }
+}
+
+#[wasm_bindgen]
+impl ZswapLocalStateWithChanges {
+    #[wasm_bindgen(getter)]
+    pub fn state(&self) -> ZswapLocalState {
+        ZswapLocalState(self.inner.result.clone())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn changes(&self) -> Vec<ZswapStateChanges> {
+        self.changes.clone()
+    }
+}
+
+#[wasm_bindgen]
 pub struct ZswapLocalState(pub(crate) zswap::local::State<InMemoryDB>);
+
+impl Default for ZswapLocalState {
+    fn default() -> Self {
+        ZswapLocalState(zswap::local::State::new())
+    }
+}
 
 #[wasm_bindgen]
 impl ZswapLocalState {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        ZswapLocalState(zswap::local::State::new())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = firstFree, js_name = "firstFree")]
@@ -154,6 +193,19 @@ impl ZswapLocalState {
         ))
     }
 
+    #[wasm_bindgen(js_name = "replayEventsWithChanges")]
+    pub fn replay_events_with_changes(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        events: Vec<Event>,
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        let events = events.iter().map(|event| &event.0);
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events)?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
+    }
+
     pub fn apply(
         &self,
         secret_keys: &ZswapSecretKeys,
@@ -162,9 +214,9 @@ impl ZswapLocalState {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
         Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, &val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, &val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, &val),
+            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
         }))
     }
 
@@ -174,7 +226,7 @@ impl ZswapLocalState {
         update: &MerkleTreeCollapsedUpdate,
     ) -> Result<ZswapLocalState, JsError> {
         Ok(ZswapLocalState(
-            self.0.apply_collapsed_update(&update.as_ref())?,
+            self.0.apply_collapsed_update(update.as_ref())?,
         ))
     }
 
@@ -189,7 +241,7 @@ impl ZswapLocalState {
         &self,
         secret_keys: &ZswapSecretKeys,
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {
         let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
@@ -209,7 +261,7 @@ impl ZswapLocalState {
         &self,
         secret_keys: &ZswapSecretKeys,
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         output: &ZswapOutput,
         _ttl: Option<Date>,
     ) -> Result<JsValue, JsError> {
@@ -266,6 +318,12 @@ impl ZswapLocalState {
 #[derive(Clone)]
 pub struct ZswapChainState(pub(crate) zswap::ledger::State<InMemoryDB>);
 
+impl Default for ZswapChainState {
+    fn default() -> Self {
+        ZswapChainState(zswap::ledger::State::new())
+    }
+}
+
 impl From<zswap::ledger::State<InMemoryDB>> for ZswapChainState {
     fn from(state: zswap::ledger::State<InMemoryDB>) -> ZswapChainState {
         ZswapChainState(state)
@@ -282,7 +340,7 @@ impl From<ZswapChainState> for zswap::ledger::State<InMemoryDB> {
 impl ZswapChainState {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
-        ZswapChainState(zswap::ledger::State::new())
+        Self::default()
     }
 
     #[wasm_bindgen(getter = firstFree, js_name = "firstFree")]
@@ -327,9 +385,9 @@ impl ZswapChainState {
         use ZswapOfferTypes::*;
         let w = whitelist_from_value(whitelist)?;
         construct_apply_result(match &offer.0 {
-            ProvenOffer(val) => self.0.try_apply(&val, w)?,
-            UnprovenOffer(val) => self.0.try_apply(&val, w)?,
-            ProofErasedOffer(val) => self.0.try_apply(&val, w)?,
+            ProvenOffer(val) => self.0.try_apply(val, w)?,
+            UnprovenOffer(val) => self.0.try_apply(val, w)?,
+            ProofErasedOffer(val) => self.0.try_apply(val, w)?,
         })
     }
 

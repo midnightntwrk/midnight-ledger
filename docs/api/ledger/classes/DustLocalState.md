@@ -1,4 +1,4 @@
-[**@midnight/ledger v6.1.0-alpha.4**](../README.md)
+[**@midnight/ledger v7.0.0**](../README.md)
 
 ***
 
@@ -30,6 +30,14 @@ new DustLocalState(params): DustLocalState;
 
 ```ts
 readonly params: DustParameters;
+```
+
+***
+
+### syncTime
+
+```ts
+readonly syncTime: Date;
 ```
 
 ***
@@ -100,6 +108,28 @@ replayEvents(sk, events): DustLocalState;
 #### Returns
 
 `DustLocalState`
+
+***
+
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(sk, events): DustLocalStateWithChanges;
+```
+
+#### Parameters
+
+##### sk
+
+[`DustSecretKey`](DustSecretKey.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`DustLocalStateWithChanges`](DustLocalStateWithChanges.md)
 
 ***
 

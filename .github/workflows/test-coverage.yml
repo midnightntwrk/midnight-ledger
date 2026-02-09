@@ -2,8 +2,7 @@ name: Ledger Test Coverage
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: "0 5 * * *"
+  pull_request:
   push:
     branches:
       - master
@@ -14,26 +13,12 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_BACKTRACE : full
+  RUST_BACKTRACE: full
 
 jobs:
   coverage:
     runs-on: ubuntu-latest-8-core-x64
     steps:
-
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
 
       - name: Configure git rewrite
         run: |
@@ -44,29 +29,24 @@ jobs:
           echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout repository
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce
+        uses: cachix/install-nix-action@a809471b5c7c913aa67bec8f459a11a0decc3fce # v31.6.2
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
-            netrc-file = ~/.netrc
-            access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
-
-      - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -74,7 +54,7 @@ jobs:
       - name: Download grcov
         run: |
           mkdir -p "${HOME}/.local/bin"
-          curl -sL https://github.com/mozilla/grcov/releases/download/v0.8.18/grcov-x86_64-unknown-linux-gnu.tar.bz2 | tar jxf - -C "${HOME}/.local/bin"
+          curl -sL https://github.com/mozilla/grcov/releases/download/v0.10.5/grcov-x86_64-unknown-linux-gnu.tar.bz2 | tar jxf - -C "${HOME}/.local/bin"
           echo "$HOME/.local/bin" >> $GITHUB_PATH
 
       - name: Check test coverage
@@ -82,7 +62,6 @@ jobs:
           export CARGO_INCREMENTAL=0
           export RUSTFLAGS='-Cinstrument-coverage'
           export LLVM_PROFILE_FILE='cargo-test-%p-%m.profraw'
-          nix develop -c cargo config -Z unstable-options get net.git-fetch-with-cli
           nix develop -c cargo test --all --all-features --verbose -- --nocapture --test-threads=1
 
       - name: Generate HTML report
@@ -93,14 +72,14 @@ jobs:
           grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
 
       - name: Upload test report artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         if: success() || failure()
         with:
           name: Coverage Report
           path: target/coverage/html
 
       - name: Upload lcov test report artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
         if: success() || failure()
         with:
           name: Lcov Coverage Report

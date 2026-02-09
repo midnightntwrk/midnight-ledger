@@ -14,8 +14,8 @@
 use crate::conversions::*;
 use crate::dust::DustParameters;
 use crate::zswap_state::ZswapChainState;
-use base_crypto::hash::HashOutput;
-use coin_structure::coin::ShieldedTokenType;
+use base_crypto::cost_model::SyntheticCost;
+use js_sys::BigInt;
 use js_sys::{JsString, Map, Uint8Array};
 use onchain_runtime_wasm::context::CostModel;
 use onchain_runtime_wasm::from_value_ser;
@@ -31,17 +31,19 @@ use zswap::Delta;
 
 pub enum ZswapTransientTypes {
     ProvenTransient(zswap::Transient<Proof, InMemoryDB>),
-    UnprovenTransient(zswap::Transient<ProofPreimage, InMemoryDB>),
+    UnprovenTransient(Box<zswap::Transient<ProofPreimage, InMemoryDB>>),
     ProofErasedTransient(zswap::Transient<(), InMemoryDB>),
 }
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapTransient(ZswapTransientTypes);
+pub struct ZswapTransient(pub(crate) ZswapTransientTypes);
+
+try_ref_for_exported!(ZswapTransient);
 
 impl From<zswap::Transient<ProofPreimage, InMemoryDB>> for ZswapTransient {
     fn from(inner: zswap::Transient<ProofPreimage, InMemoryDB>) -> ZswapTransient {
-        ZswapTransient(ZswapTransientTypes::UnprovenTransient(inner))
+        ZswapTransient(ZswapTransientTypes::UnprovenTransient(Box::new(inner)))
     }
 }
 impl From<zswap::Transient<Proof, InMemoryDB>> for ZswapTransient {
@@ -67,19 +69,19 @@ impl ZswapTransient {
     #[wasm_bindgen(js_name = "newFromContractOwnedOutput")]
     pub fn new_from_contract_owned_output(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         output: &ZswapOutput,
     ) -> Result<ZswapTransient, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
                 let coin = value_to_qualified_shielded_coininfo(coin)?;
                 Ok(ZswapTransient(ZswapTransientTypes::UnprovenTransient(
-                    zswap::Transient::new_from_contract_owned_output(
+                    Box::new(zswap::Transient::new_from_contract_owned_output(
                         &mut OsRng,
                         &coin,
                         segment,
                         val.clone(),
-                    )?,
+                    )?),
                 )))
             }
             _ => Err(JsError::new(
@@ -157,9 +159,9 @@ impl ZswapTransient {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapTransientTypes::*;
         match &self.0 {
-            ProvenTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedTransient(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -180,8 +182,10 @@ impl ZswapTransient {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapTransientTypes::*;
         Ok(match &self.0 {
-            ProvenTransient(val) => JsValue::from(Proof(val.proof_input.clone().into())),
-            UnprovenTransient(val) => JsValue::from(PreProof(val.proof_input.clone().into())),
+            ProvenTransient(val) => JsValue::from(Proof(val.proof_input.deref().clone().into())),
+            UnprovenTransient(val) => {
+                JsValue::from(PreProof(val.proof_input.deref().clone().into()))
+            }
             ProofErasedTransient(_) => JsValue::from(NoProof()),
         })
     }
@@ -191,8 +195,10 @@ impl ZswapTransient {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapTransientTypes::*;
         Ok(match &self.0 {
-            ProvenTransient(val) => JsValue::from(Proof(val.proof_output.clone().into())),
-            UnprovenTransient(val) => JsValue::from(PreProof(val.proof_output.clone().into())),
+            ProvenTransient(val) => JsValue::from(Proof(val.proof_output.deref().clone().into())),
+            UnprovenTransient(val) => {
+                JsValue::from(PreProof(val.proof_output.deref().clone().into()))
+            }
             ProofErasedTransient(_) => JsValue::from(NoProof()),
         })
     }
@@ -208,7 +214,9 @@ pub enum ZswapOutputTypes {
 #[wasm_bindgen]
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct ZswapOutput(ZswapOutputTypes);
+pub struct ZswapOutput(pub(crate) ZswapOutputTypes);
+
+try_ref_for_exported!(ZswapOutput);
 
 impl From<zswap::Output<ProofPreimage, InMemoryDB>> for ZswapOutput {
     fn from(inner: zswap::Output<ProofPreimage, InMemoryDB>) -> ZswapOutput {
@@ -249,7 +257,7 @@ impl ZswapOutput {
 
     pub fn new(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         target_cpk: &str,
         target_epk: &str,
     ) -> Result<ZswapOutput, JsError> {
@@ -264,7 +272,7 @@ impl ZswapOutput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
     ) -> Result<ZswapOutput, JsError> {
         let coin = value_to_shielded_coininfo(coin)?;
@@ -339,9 +347,9 @@ impl ZswapOutput {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapOutputTypes::*;
         match &self.0 {
-            ProvenOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedOutput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedOutput(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -352,8 +360,8 @@ impl ZswapOutput {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapOutputTypes::*;
         Ok(match &self.0 {
-            ProvenOutput(val) => JsValue::from(Proof(val.proof.clone().into())),
-            UnprovenOutput(val) => JsValue::from(PreProof(val.proof.clone().into())),
+            ProvenOutput(val) => JsValue::from(Proof(val.proof.deref().clone().into())),
+            UnprovenOutput(val) => JsValue::from(PreProof(val.proof.deref().clone().into())),
             ProofErasedOutput(_) => JsValue::from(NoProof()),
         })
     }
@@ -367,7 +375,9 @@ pub enum ZswapInputTypes {
 
 #[wasm_bindgen]
 #[repr(transparent)]
-pub struct ZswapInput(ZswapInputTypes);
+pub struct ZswapInput(pub(crate) ZswapInputTypes);
+
+try_ref_for_exported!(ZswapInput);
 
 impl From<zswap::Input<ProofPreimage, InMemoryDB>> for ZswapInput {
     fn from(inner: zswap::Input<ProofPreimage, InMemoryDB>) -> ZswapInput {
@@ -397,7 +407,7 @@ impl ZswapInput {
     #[wasm_bindgen(js_name = "newContractOwned")]
     pub fn new_contract_owned(
         coin: JsValue,
-        segment: u16,
+        segment: Option<u16>,
         contract: &str,
         state: &ZswapChainState,
     ) -> Result<ZswapInput, JsError> {
@@ -461,9 +471,9 @@ impl ZswapInput {
     pub fn contract_address(&self) -> Result<Option<String>, JsError> {
         use ZswapInputTypes::*;
         match &self.0 {
-            ProvenInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            UnprovenInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
-            ProofErasedInput(val) => val.contract_address.clone().map(|x| x.deref().clone()),
+            ProvenInput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            UnprovenInput(val) => val.contract_address.clone().map(|x| *x.deref()),
+            ProofErasedInput(val) => val.contract_address.clone().map(|x| *x.deref()),
         }
         .map(|v| to_hex_ser(&v))
         .transpose()
@@ -484,8 +494,8 @@ impl ZswapInput {
         use crate::crypto::{NoProof, PreProof, Proof};
         use ZswapInputTypes::*;
         Ok(match &self.0 {
-            ProvenInput(val) => JsValue::from(Proof(val.proof.clone().into())),
-            UnprovenInput(val) => JsValue::from(PreProof(val.proof.clone().into())),
+            ProvenInput(val) => JsValue::from(Proof(val.proof.deref().clone().into())),
+            UnprovenInput(val) => JsValue::from(PreProof(val.proof.deref().clone().into())),
             ProofErasedInput(_) => JsValue::from(NoProof()),
         })
     }
@@ -563,21 +573,16 @@ impl ZswapOffer {
     }
 
     #[wasm_bindgen(js_name = "fromInput")]
-    pub fn from_input(input: &ZswapInput, type_: &str, value: u128) -> Result<ZswapOffer, JsError> {
+    pub fn from_input(
+        input: &ZswapInput,
+        _type: Option<String>,
+        _value: Option<BigInt>,
+    ) -> Result<ZswapOffer, JsError> {
         match &input.0 {
-            ZswapInputTypes::UnprovenInput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![val.clone()].into(),
-                    outputs: vec![].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: value as i128,
-                    }]
-                    .into(),
-                })))
-            }
+            ZswapInputTypes::UnprovenInput(val) => Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                zswap::Offer::new(vec![val.clone()], vec![], vec![])
+                    .expect("non-empty offer must exist"),
+            ))),
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased input.",
             )),
@@ -587,22 +592,15 @@ impl ZswapOffer {
     #[wasm_bindgen(js_name = "fromOutput")]
     pub fn from_output(
         output: &ZswapOutput,
-        type_: &str,
-        value: u128,
+        _type: Option<String>,
+        _value: Option<BigInt>,
     ) -> Result<ZswapOffer, JsError> {
         match &output.0 {
             ZswapOutputTypes::UnprovenOutput(val) => {
-                let type_: HashOutput = from_hex_ser(type_)?;
-                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
-                    inputs: vec![].into(),
-                    outputs: vec![val.clone()].into(),
-                    transient: vec![].into(),
-                    deltas: vec![Delta {
-                        token_type: ShieldedTokenType(type_),
-                        value: -(value as i128),
-                    }]
-                    .into(),
-                })))
+                Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(
+                    zswap::Offer::new(vec![], vec![val.clone()], vec![])
+                        .expect("non-empty offer must exist"),
+                )))
             }
             _ => Err(JsError::new(
                 "ZswapOffer cannot be constructed from a proven or proof-erased output.",
@@ -617,7 +615,7 @@ impl ZswapOffer {
                 Ok(ZswapOffer(ZswapOfferTypes::UnprovenOffer(zswap::Offer {
                     inputs: vec![].into(),
                     outputs: vec![].into(),
-                    transient: vec![val.clone()].into(),
+                    transient: vec![(**val).clone()].into(),
                     deltas: vec![].into(),
                 })))
             }
@@ -631,21 +629,21 @@ impl ZswapOffer {
         use ZswapOfferTypes::*;
         match (&self.0, &other.0) {
             (ProvenOffer(self_val), ProvenOffer(other_val)) => {
-                Ok(ZswapOffer(ProvenOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(ProvenOffer(self_val.merge(other_val)?)))
             }
             (UnprovenOffer(self_val), UnprovenOffer(other_val)) => {
-                let self_segment_id = offer_segment_id(&self_val)?;
-                let other_segment_id = offer_segment_id(&other_val)?;
+                let self_segment_id = offer_segment_id(self_val)?;
+                let other_segment_id = offer_segment_id(other_val)?;
                 if self_segment_id != other_segment_id {
                     return Err(JsError::new(&format!(
                         "Mismatched output segments. Self: {:?}, Other: {:?}",
                         self_segment_id, other_segment_id
                     )));
                 }
-                Ok(ZswapOffer(UnprovenOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(UnprovenOffer(self_val.merge(other_val)?)))
             }
             (ProofErasedOffer(self_val), ProofErasedOffer(other_val)) => {
-                Ok(ZswapOffer(ProofErasedOffer(self_val.merge(&other_val)?)))
+                Ok(ZswapOffer(ProofErasedOffer(self_val.merge(other_val)?)))
             }
             _ => Err(JsError::new(
                 "Only ZswapOffers of the same proof type can be merged with each other.",
@@ -851,6 +849,15 @@ impl LedgerParameters {
         TransactionCostModel(self.0.cost_model.clone())
     }
 
+    #[wasm_bindgen(js_name = "normalizeFullness")]
+    pub fn normalize_fullness(&self, fullness: JsValue) -> Result<JsValue, JsError> {
+        let synthetic: SyntheticCost = from_value(fullness)?;
+        let normalized = synthetic
+            .normalize(self.0.limits.block_limits)
+            .ok_or(JsError::new("exceeded block limits"))?;
+        Ok(to_value(&normalized)?)
+    }
+
     #[wasm_bindgen(getter)]
     pub fn dust(&self) -> Result<DustParameters, JsError> {
         Ok(DustParameters(self.0.dust))
@@ -877,7 +884,7 @@ impl LedgerParameters {
 
     #[wasm_bindgen(getter, js_name = "feePrices")]
     pub fn fee_prices(&self) -> Result<JsValue, JsError> {
-        fee_prices_to_value(&self.0.fee_prices)
+        Ok(to_value(&self.0.fee_prices)?)
     }
 }
 
@@ -1072,8 +1079,7 @@ pub(crate) fn offer_segment_id(
     let output_segments = offer
         .outputs
         .iter()
-        .map(|output| output.segment())
-        .flatten()
+        .flat_map(|output| output.segment())
         .collect::<HashSet<_>>();
 
     if output_segments.len() > 1 {
@@ -1087,8 +1093,7 @@ pub(crate) fn offer_segment_id(
     let input_segments = offer
         .inputs
         .iter()
-        .map(|input| input.segment())
-        .flatten()
+        .flat_map(|input| input.segment())
         .collect::<HashSet<_>>();
 
     if input_segments.len() > 1 {
@@ -1102,8 +1107,7 @@ pub(crate) fn offer_segment_id(
     let transient_segments = offer
         .transient
         .iter()
-        .map(|transient| transient.segment())
-        .flatten()
+        .flat_map(|transient| transient.segment())
         .collect::<HashSet<_>>();
 
     if transient_segments.len() > 1 {

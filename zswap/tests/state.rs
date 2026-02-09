@@ -37,7 +37,7 @@ fn coin_receiving() {
     let output = ZswapOutput::new(
         &mut rng,
         &coin,
-        0,
+        None,
         &keys.coin_public_key(),
         Some(keys.enc_public_key()),
     )
@@ -74,7 +74,7 @@ fn state_filtering() {
             value: OsRng.r#gen(),
         };
         let address = ContractAddress(OsRng.r#gen());
-        let output = ZswapOutput::new_contract_owned(rng, &coin, 0, address).unwrap();
+        let output = ZswapOutput::new_contract_owned(rng, &coin, None, address).unwrap();
         let offer = Offer {
             inputs: vec![].into(),
             outputs: vec![output.clone()].into(),

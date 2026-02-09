@@ -19,8 +19,7 @@ use derive_where::derive_where;
 use serialize::tag_enforcement_test;
 use serialize::{Deserializable, Serializable, Tagged};
 use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::arena::Sp;
+use storage::arena::{ArenaKey, Sp};
 use storage::db::DB;
 use storage::storable::Loader;
 // #[cfg(feature = "proptest")] TODO WG
@@ -41,7 +40,7 @@ tag_enforcement_test!(TranscriptVersion);
 #[serde(bound(serialize = "", deserialize = ""))]
 #[derive_where(Clone, PartialEq, Eq, Debug)]
 #[storable(db = D)]
-#[tag = "contract-transcript[v3]"]
+#[tag = "contract-transcript[v4]"]
 pub struct Transcript<D: DB> {
     pub gas: RunningCost,
     pub effects: Effects<D>,

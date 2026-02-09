@@ -82,6 +82,7 @@ fn generate_state_pool() -> Vec<HashMap<AlignedValue, StateValue>> {
 }
 
 // Generate state pairs with four relationship types
+#[allow(clippy::type_complexity)]
 fn generate_state_pairs() -> Vec<(
     HashMap<AlignedValue, StateValue>,
     HashMap<AlignedValue, StateValue>,
@@ -128,7 +129,6 @@ fn generate_state_pairs() -> Vec<(
 
 // Compute benchmark data from state pairs
 fn compute_benchmark_data() -> Vec<BenchmarkData> {
-    let mut uid = 0;
     let arena = &midnight_storage::storage::default_storage::<InMemoryDB>().arena;
     let state_pairs = generate_state_pairs();
     let mut benchmark_data = Vec::new();
@@ -139,7 +139,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let new_sp = arena.alloc(StateValue::Map(new_map.clone()));
 
         // Build rcmap from old state
-        let old_root = old_sp.hash().into();
+        let old_root = old_sp.as_child();
         let old_roots = StdHashSet::from([old_root]);
         println!("get_writes(old_roots)");
         let keys_for_rcmap = get_writes::<DefaultDB>(&RcMap::default(), &old_roots);
@@ -147,7 +147,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
         let old_rcmap = update_rcmap(&RcMap::default(), &keys_for_rcmap);
 
         // Get new state roots
-        let new_root = new_sp.hash().into();
+        let new_root = new_sp.as_child();
         let new_roots = StdHashSet::from([new_root]);
 
         // Pre-compute keys_added and keys_removed
@@ -164,7 +164,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             "keys_added_size": keys_added.len(),
             "keys_removed_size": keys_removed.len(),
             "relationship": relationship,
-            "uid": uid,
+            "uid": i,
         });
 
         benchmark_data.push(BenchmarkData {
@@ -176,7 +176,6 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
             _old_sp: old_sp,
             _new_sp: new_sp,
         });
-        uid += 1;
     }
 
     benchmark_data

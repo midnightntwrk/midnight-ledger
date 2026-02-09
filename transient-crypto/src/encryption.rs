@@ -82,15 +82,9 @@ impl<'de> Deserialize<'de> for PublicKey {
 
 /// A secret key, the discrete logarithm of the corresponding [`PublicKey`].
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Copy, Clone, Eq, Serializable, Zeroize)]
+#[derive(Copy, Clone, Serializable, Zeroize)]
 #[tag = "encryption-secret-key[v1]"]
 pub struct SecretKey(EmbeddedFr);
-
-impl PartialEq for SecretKey {
-    fn eq(&self, other: &Self) -> bool {
-        self.0 == other.0
-    }
-}
 
 impl Debug for SecretKey {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
@@ -98,18 +92,46 @@ impl Debug for SecretKey {
     }
 }
 
-#[cfg(feature = "proptest")]
-randomised_serialization_test!(SecretKey);
 tag_enforcement_test!(SecretKey);
 
 /// A ciphertext. The ciphertext includes an encryption of a zero element, which
 /// is used for testing decryption.
-#[derive(Clone, Debug, Serializable, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Ciphertext {
     /// The challenge `g^y`.
     pub c: EmbeddedGroupAffine,
     /// The ciphertext, encrypted with `g^{xy}`.
     pub ciph: Vec<Fr>,
+}
+
+impl Serializable for Ciphertext {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        Serializable::serialize(&self.c, writer)?;
+        Serializable::serialize(&self.ciph, writer)
+    }
+    fn serialized_size(&self) -> usize {
+        self.c.serialized_size() + self.ciph.serialized_size()
+    }
+}
+
+impl Deserializable for Ciphertext {
+    fn deserialize(
+        reader: &mut impl std::io::Read,
+        mut recursion_depth: u32,
+    ) -> std::io::Result<Self> {
+        Ciphertext::check_rec(&mut recursion_depth)?;
+        let c = EmbeddedGroupAffine::deserialize(reader, recursion_depth)?;
+        let ciph = <Vec<Fr> as Deserializable>::deserialize(reader, recursion_depth)?;
+        // See note in `decrypt` for why the identity element is excluded.
+        if c.is_identity() {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ciphertext challenge may not be the identity element",
+            ))
+        } else {
+            Ok(Ciphertext { c, ciph })
+        }
+    }
 }
 
 impl PublicKey {
@@ -170,6 +192,13 @@ impl SecretKey {
 
     /// Attempts decryption of a given ciphertext.
     pub fn decrypt<T: FromFieldRepr>(&self, ciph: &Ciphertext) -> Option<T> {
+        // NOTE: Allowing c to be the identity element would allow any key to potentially decrypt
+        // this, because k_star would always be the identity element for every secret key
+        // Effectively, this is because this is the only point that *is not* a group generator.
+        // Therefore, we exclude it.
+        if ciph.c.is_identity() {
+            return None;
+        }
         let k_star = ciph.c * self.0;
         let coords = if k_star.is_infinity() {
             (0.into(), 0.into())

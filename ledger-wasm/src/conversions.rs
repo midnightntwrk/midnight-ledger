@@ -14,7 +14,6 @@
 use crate::contract::{ContractCall, ContractCallTypes, ContractDeploy, MaintenanceUpdate};
 use crate::intent::Intent;
 use crate::zswap_wasm::ZswapOffer;
-use base_crypto::cost_model::FeePrices;
 use coin_structure::coin::{Info as ShieldedCoinInfo, QualifiedInfo as QualifiedShieldedCoinInfo};
 use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use hex::{FromHex, ToHex};
@@ -23,7 +22,7 @@ use ledger::structure::UtxoMeta;
 use ledger::structure::{ClaimKind, SignatureKind};
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable};
-use std::io::Read;
+use std::io::{BufReader, Read};
 use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::storage::HashMap;
@@ -44,6 +43,12 @@ use storage::{Storable, db::InMemoryDB};
 
 pub trait TryRef: RefFromWasmAbi<Abi = u32> {
     fn instanceof(val: &JsValue) -> bool;
+    /// # Safety
+    ///
+    /// This function assumes that the provided `JsValue` is a valid instance of the expected type,
+    /// and that its internal pointer (`__wbg_ptr`) is correctly set and points to a valid Rust object.
+    /// Calling this on an invalid or mismatched `JsValue` may result in undefined behavior, memory corruption,
+    /// or crashes. The caller must ensure that `instanceof(val)` returns true before invoking this function.
     unsafe fn unchecked_ref(_val: &JsValue) -> Result<Self::Anchor, JsError>;
     fn try_ref(val: &JsValue) -> Result<Option<Self::Anchor>, JsError> {
         if Self::instanceof(val) {
@@ -57,7 +62,7 @@ pub trait TryRef: RefFromWasmAbi<Abi = u32> {
 #[macro_export]
 macro_rules! try_ref_for_exported {
     ($ty:ident) => {
-        paste::paste! {
+        pastey::paste! {
             // Re-import $ty from the wasm-output, and expose it as a function returning the class
             // object. This is necessary, as wasm-bindgen does not provide a means to inspect the
             // class object itself, and just declaring `extern "C" type $ty;` will complain about a
@@ -114,7 +119,7 @@ pub fn to_value<T: Serialize + ?Sized>(value: &T) -> Result<JsValue, serde_wasm_
 fn from_hex_ser_checked<T: Deserializable, R: Read>(mut bytes: R) -> Result<T, std::io::Error> {
     let value = T::deserialize(&mut bytes, 0)?;
 
-    let count = bytes.bytes().count();
+    let count = BufReader::new(bytes).bytes().count();
 
     if count == 0 {
         return Ok(value);
@@ -307,18 +312,6 @@ struct PreDustParameters {
         with = "serde_wasm_bindgen::preserve"
     )]
     dust_grace_period_seconds: BigInt,
-}
-
-#[derive(Serialize, Deserialize)]
-struct PreFeePrices {
-    #[serde(rename = "readPrice")]
-    read_price: f64,
-    #[serde(rename = "computePrice")]
-    compute_price: f64,
-    #[serde(rename = "blockUsagePrice")]
-    block_usage_price: f64,
-    #[serde(rename = "writePrice")]
-    write_price: f64,
 }
 
 pub fn value_to_shielded_coininfo(value: JsValue) -> Result<ShieldedCoinInfo, JsError> {
@@ -518,7 +511,7 @@ where
 {
     match action {
         ContractAction::Call(call) => JsValue::from(ContractCall::from((**call).clone())),
-        ContractAction::Deploy(deploy) => JsValue::from(ContractDeploy(deploy.clone())),
+        ContractAction::Deploy(deploy) => JsValue::from(ContractDeploy((**deploy).clone())),
         ContractAction::Maintain(upd) => JsValue::from(MaintenanceUpdate(upd.clone())),
     }
 }
@@ -529,9 +522,9 @@ impl<P: ProofKind<InMemoryDB>> ContractActionConverter<P> {
     fn untyped_actions_try_from_value(
         action: &JsValue,
     ) -> Result<Option<ContractAction<P, InMemoryDB>>, JsError> {
-        match ContractDeploy::try_ref(&action)? {
+        match ContractDeploy::try_ref(action)? {
             Some(deploy) => Ok(Some(deploy.0.clone().into())),
-            _ => match MaintenanceUpdate::try_ref(&action)? {
+            _ => match MaintenanceUpdate::try_ref(action)? {
                 Some(update) => Ok(Some(update.0.clone().into())),
                 _ => Ok(None),
             },
@@ -544,12 +537,12 @@ impl ContractActionConverter<ProofPreimageMarker> {
         action: &JsValue,
     ) -> Result<ContractAction<ProofPreimageMarker, InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 UnprovenContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type."))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Unexpected action type provided.")),
             },
@@ -561,12 +554,12 @@ impl ContractActionConverter<ProofMarker> {
         action: &JsValue,
     ) -> Result<ContractAction<ProofMarker, InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 ProvenContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type"))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Expected action type")),
             },
@@ -576,12 +569,12 @@ impl ContractActionConverter<ProofMarker> {
 impl ContractActionConverter<()> {
     pub fn try_from_value(action: &JsValue) -> Result<ContractAction<(), InMemoryDB>, JsError> {
         use ContractCallTypes::*;
-        match ContractCall::try_ref(&action)? {
+        match ContractCall::try_ref(action)? {
             Some(contract_call) => Ok(match &contract_call.0 {
                 ProofErasedContractCall(call) => call.clone().into(),
                 _ => Err(JsError::new("Wrong ContractCall type"))?,
             }),
-            _ => match Self::untyped_actions_try_from_value(&action)? {
+            _ => match Self::untyped_actions_try_from_value(action)? {
                 Some(contract_action) => Ok(contract_action),
                 _ => Err(JsError::new("Expected action type")),
             },
@@ -629,7 +622,7 @@ where
     let res = Map::new();
     coins.iter().for_each(|coin| {
         res.set(
-            &JsValue::from(coin.0.deref().clone()),
+            &JsValue::from(*coin.0.deref()),
             &JsValue::from(ZswapOffer::from(coin.1.deref().clone())),
         );
     });
@@ -647,15 +640,6 @@ where
         new_offers = new_offers.insert(k, v.try_into()?);
     }
     Ok(new_offers)
-}
-
-pub fn fee_prices_to_value(fee_prices: &FeePrices) -> Result<JsValue, JsError> {
-    Ok(to_value(&PreFeePrices {
-        read_price: fee_prices.read_price.into(),
-        compute_price: fee_prices.compute_price.into(),
-        block_usage_price: fee_prices.block_usage_price.into(),
-        write_price: fee_prices.write_price.into(),
-    })?)
 }
 
 pub fn do_vecs_match<T: PartialEq>(a: &[T], b: &[T]) -> bool {
@@ -723,4 +707,16 @@ pub fn claim_kind_to_text(kind: &ClaimKind) -> String {
         ClaimKind::Reward => String::from("Reward"),
         ClaimKind::CardanoBridge => String::from("CardanoBridge"),
     }
+}
+
+pub fn text_to_claim_kind(value: &str) -> Result<ClaimKind, JsError> {
+    Ok(match value {
+        "Reward" => ClaimKind::Reward,
+        "CardanoBridge" => ClaimKind::CardanoBridge,
+        _ => {
+            return Err(JsError::new(
+                "Invalid 'claim kind' value, supported values are: 'Reward', 'CardanoBridge' .",
+            ));
+        }
+    })
 }

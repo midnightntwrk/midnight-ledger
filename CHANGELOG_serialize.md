@@ -3,6 +3,7 @@
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
+- fix: removed undefined behaviour in fixed-length byte deserialization
 
 ## Version `0.4.0`
 

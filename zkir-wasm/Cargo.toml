@@ -1,11 +1,14 @@
 [package]
 name = "midnight-zkir-wasm"
-version = "2.0.0-alpha.4"
+version = "2.1.0"
 edition = "2024"
 license.workspace = true
 
 [lib]
 crate-type = ["cdylib", "rlib"]
+
+[features]
+proptest = []
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
@@ -14,7 +17,7 @@ serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom = { version = "^0.2.8", features = ["js"] }
-wasm-bindgen = "=0.2.100"
+wasm-bindgen = "=0.2.104"
 wasm-bindgen-futures = "^0.4.50"
 js-sys = "^0.3.61"
 hex = "^0.4.3"

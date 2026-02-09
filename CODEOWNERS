@@ -1,7 +1,7 @@
 * @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-qa
 /.github/ISSUE_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/PULL_REQUEST_TEMPLATE/ @midnightntwrk/mn-security @midnightntwrk/mn-sre
-/.github/workflows/checkmarx.yaml @midnightntwrk/mn-security @midnightntwrk/mn-sre
+/.github/workflows/scan.yaml @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /.github/workflows/dependabot.yml @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CODE_OF_CONDUCT.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
 CODEOWNERS @midnightntwrk/mn-security @midnightntwrk/mn-sre
@@ -9,3 +9,5 @@ CONTRIBUTING.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
 LICENSE @midnightntwrk/mn-security @midnightntwrk/mn-sre
 SECURITY.md @midnightntwrk/mn-security @midnightntwrk/mn-sre
 /spec/ @midnightntwrk/mn-architects
+/zkir-v3/ @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-codeowners-compact @midnightntwrk/mn-codeowners-zk
+/zkir-v3-wasm/ @midnightntwrk/mn-codeowners-ledger @midnightntwrk/mn-codeowners-compact @midnightntwrk/mn-codeowners-zk

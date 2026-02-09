@@ -9,14 +9,15 @@ export default defineConfig({
   resolve: {
     alias: {
       ...config.resolve?.alias,
-      '@midnight-ntwrk/ledger': path.resolve(__dirname, 'lib-sources/@midnight-ntwrk/ledger-v6/midnight_ledger_wasm.js')
+      '@midnight-ntwrk/ledger': path.resolve(__dirname, 'lib-sources/@midnight-ntwrk/ledger-v7/midnight_ledger_wasm.js')
     }
   },
   test: {
     ...config.test,
     coverage: {
       ...config.test?.coverage,
-      enabled: true
+      enabled: true,
+      reportOnFailure: true
     }
   },
   plugins: [wasm()]

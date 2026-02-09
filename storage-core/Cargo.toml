@@ -1,0 +1,69 @@
+[package]
+name = "midnight-storage-core"
+version = "1.0.0"
+edition = "2024"
+license.workspace = true
+
+[features]
+proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
+sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]
+parity-db = ["dep:parity-db"]
+stress-test = ["dep:serde_json", "dep:os_pipe"]
+bench = ["dep:criterion", "dep:pprof"]
+public-internal-structure = []
+state-translation = ["public-internal-structure", "dep:hashbrown"]
+test-utilities = []
+
+[dependencies]
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+parity-db = { version = "0.5.2", optional = true }
+
+archery = "^0.5.0"
+crypto = { version = "0.5.1", features = ["digest"] }
+sha2 = "0.10.9"
+derive-where = "^1.5.0"
+macros = { path = "../storage-macros", package = "midnight-storage-macros" }
+
+serde = { version = "^1.0.219", features = ["derive", "rc"] }
+serde_json = { version = "1.0", features = ["std"], optional = true }
+fake = { version = "^2.10.0", features = ["derive"] }
+# rand 0.9.0 is not yet supported by some of our dependencies, we will
+# stick with 0.8.0 for now.
+rand = { version = "^0.8.4", features = ["getrandom"] }
+hex = "^0.4.3"
+parking_lot = "^0.12.4"
+# proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
+proptest = { version = "~1.6.0", optional = true }
+proptest-derive = { version = "0.5", optional = true }
+lru = "0.16.0"
+# The "bundled" feature means rusqlite will build its own libsqlite3 instead of
+# using OS provided version. The latest version of rusqlite, 0.32.1, is not
+# compatible with our rustc version.
+#
+# PC is also depends on sqlite, and we need all version to use the same
+# libsqlite3. So, don't update these sqlite deps without also updating PC.
+#
+# https://github.com/midnightntwrk/midnight-ledger-prototype/pull/431
+rusqlite = { version = "0.30.0", features = ["bundled"], optional = true }
+r2d2_sqlite = { version = "0.23.0", optional = true }
+# This is a dep of r2d2_sqlite, which will determine the version.
+r2d2 = { version = "0.8.10", optional = true }
+konst = "0.3.16"
+fs2 = { version = "0.4.3", optional = true }
+tempfile = "3.20"
+hashbrown = { version = "^0.16.0", optional = true }
+
+# Dev dependencies required here otherwise `cargo doc` fails
+criterion = { version = "^0.5.1", optional = true }
+itertools = "^0.14.0"
+os_pipe = { version = "1.2.2", optional = true }
+pprof = { version = "0.14", optional = true, features = ["criterion", "flamegraph"] }
+sysinfo = "0.34.2"
+
+[dev-dependencies]
+midnight-storage = { path = ".", features = ["proptest", "bench"], package = "midnight-storage-core" }
+onchain-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+rayon = "^1.10.0"
+pastey = "0.1.1"
+serde_json = "1.0"

@@ -21,7 +21,7 @@ mod proof_tests {
     use std::borrow::Cow;
     use std::fs::File;
     use std::io::BufReader;
-    use transient_crypto::curve::EmbeddedGroupAffine;
+    use transient_crypto::curve::{EmbeddedGroupAffine, FR_BYTES_STORED};
     use transient_crypto::hash::transient_hash;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::Proof;
@@ -29,6 +29,7 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
+    use transient_crypto::repr::FieldRepr;
     use zkir::{IrSource, Preprocessed};
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
@@ -64,7 +65,7 @@ mod proof_tests {
         async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
             const DIR: &str = env!("MIDNIGHT_PP");
             ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_filecoin_2p{k}"
+                "{DIR}/bls_midnight_2p{k}"
             ))?))
         }
     }
@@ -250,6 +251,55 @@ mod proof_tests {
             .unwrap();
         vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), x].into_iter())
             .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_byte_decoding_hash_proof() {
+        for bytes in [25usize, 50, 100, 200] {
+            dbg!(bytes);
+            let stored = bytes.div_ceil(FR_BYTES_STORED);
+            let input_string = (0..stored)
+                .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let ir_raw = format!(
+                r#"{{
+               "version": {{ "major": 2, "minor": 0 }},
+               "num_inputs": {stored},
+               "do_communications_commitment": false,
+               "instructions": [
+                   {{ "op": "persistent_hash", "alignment": [ {{ "tag": "atom", "value": {{ "tag": "bytes", "length": {bytes} }} }} ], "inputs": [{input_string}] }}
+               ]
+            }}"#
+            );
+            let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+            let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+            let input = (0..bytes).map(|i| i as u8).collect::<Vec<_>>();
+            let preimage = ProofPreimage {
+                binding_input: 42.into(),
+                communications_commitment: None,
+                inputs: input[..].field_vec(),
+                private_transcript: vec![],
+                public_transcript_inputs: vec![],
+                public_transcript_outputs: vec![],
+                key_location: KeyLocation(Cow::Borrowed("builtin")),
+            };
+            let (proof, _) = preimage
+                .prove::<IrSource>(
+                    &mut ChaCha20Rng::from_seed([42; 32]),
+                    &TestParams,
+                    &TestResolver {
+                        pk: pk.clone(),
+                        vk: vk.clone(),
+                        ir: ir.clone(),
+                    },
+                )
+                .await
+                .unwrap();
+            vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+                .unwrap();
+        }
     }
 
     #[actix_rt::test]

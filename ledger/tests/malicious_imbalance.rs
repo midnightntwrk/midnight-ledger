@@ -64,7 +64,7 @@ async fn malicious_imbalance() {
     let bad_output = Output::new(
         &mut rng,
         &bad_coin,
-        0,
+        Some(0),
         &state.zswap_keys.coin_public_key(),
         Some(state.zswap_keys.enc_public_key()),
     )
@@ -87,7 +87,7 @@ async fn malicious_imbalance() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, 1)
+                .spend(&mut rng, &state.zswap_keys, &coin, Some(1))
                 .unwrap()
                 .1,
         ]
@@ -101,7 +101,7 @@ async fn malicious_imbalance() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, 0)
+                .spend(&mut rng, &state.zswap_keys, &coin, Some(0))
                 .unwrap()
                 .1,
         ]
@@ -117,32 +117,40 @@ async fn malicious_imbalance() {
     // hm.insert(2, bad_offer_fallible_2.clone());
 
     for bad_offer_fallible in [bad_offer_fallible_1, bad_offer_fallible_2] {
-        let mut hm2 = std::collections::HashMap::new();
-        hm2.insert(1, bad_offer_fallible);
+        let hm2 = storage::storage::HashMap::new().insert(1, bad_offer_fallible);
 
-        let bad_tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
-            Transaction::new(
-                "local-test",
-                test_intents(
-                    &mut rng,
-                    Vec::new(),
-                    Vec::new(),
-                    vec![deploy.clone()],
-                    state.time,
-                ),
-                Some(bad_offer_guaranteed.clone()),
-                hm2,
-            );
+        let mut bad_tx: Transaction<
+            Signature,
+            ProofPreimageMarker,
+            PedersenRandomness,
+            InMemoryDB,
+        > = Transaction::new(
+            "local-test",
+            test_intents(
+                &mut rng,
+                Vec::new(),
+                Vec::new(),
+                vec![deploy.clone()],
+                state.time,
+            ),
+            Some(bad_offer_guaranteed.clone()),
+            Default::default(),
+        );
+        if let Transaction::Standard(stx) = &mut bad_tx {
+            // Insert fallible coins manually to ensure the incorrect segment declaration survives
+            stx.fallible_coins = hm2;
+            stx.recompute_binding_randomness();
+        }
         let bad_tx = tx_prove(rng.split(), &bad_tx, &RESOLVER).await.unwrap();
         // This transaction should partially succeed application, meaning that that 95m output is
         // applied, but the 100m input is not spent, leaving us with 195m left over... from 100m start.
         // Because of this, this transaction had damn well better not be considered a well-formed one!
-        match state
+        if state
             .clone()
             .apply(&bad_tx, WellFormedStrictness::default())
+            .is_ok()
         {
-            Ok(_) => panic!("unexpected success"),
-            Err(_) => (),
+            panic!("unexpected success")
         }
     }
 }
@@ -180,7 +188,7 @@ async fn malicious_imbalance_duplicate_nullifier() {
     let bad_output = Output::new(
         &mut rng,
         &bad_coin,
-        0,
+        Some(0),
         &state.zswap_keys.coin_public_key(),
         Some(state.zswap_keys.enc_public_key()),
     )
@@ -203,7 +211,7 @@ async fn malicious_imbalance_duplicate_nullifier() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, 1)
+                .spend(&mut rng, &state.zswap_keys, &coin, Some(1))
                 .unwrap()
                 .1,
         ]
@@ -217,7 +225,7 @@ async fn malicious_imbalance_duplicate_nullifier() {
         inputs: vec![
             state
                 .zswap
-                .spend(&mut rng, &state.zswap_keys, &coin, 0)
+                .spend(&mut rng, &state.zswap_keys, &coin, Some(0))
                 .unwrap()
                 .1,
         ]
@@ -228,26 +236,31 @@ async fn malicious_imbalance_duplicate_nullifier() {
     };
     // We create a transaction with these two offers, and attempting to deploy the already deployed
     // contract.
-    let mut hm = std::collections::HashMap::new();
-    hm.insert(1, bad_offer_fallible_1.clone());
-    hm.insert(2, bad_offer_fallible_2.clone());
+    let hm = storage::storage::HashMap::new()
+        .insert(1, bad_offer_fallible_1.clone())
+        .insert(2, bad_offer_fallible_2.clone());
 
-    let bad_tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
+    let mut bad_tx: Transaction<Signature, ProofPreimageMarker, PedersenRandomness, InMemoryDB> =
         Transaction::new(
             "local-test",
             test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
             Some(bad_offer_guaranteed),
-            hm,
+            Default::default(),
         );
+    if let Transaction::Standard(stx) = &mut bad_tx {
+        // Insert fallible coins manually to ensure the incorrect segment declaration survives
+        stx.fallible_coins = hm;
+        stx.recompute_binding_randomness();
+    }
     let bad_tx = tx_prove(rng.split(), &bad_tx, &RESOLVER).await.unwrap();
     // This transaction should partially succeed application, meaning that that 95m output is
     // applied, but the 100m input is not spent, leaving us with 195m left over... from 100m start.
     // Because of this, this transaction had damn well better not be considered a well-formed one!
-    match state
+    if state
         .clone()
         .apply(&bad_tx, WellFormedStrictness::default())
+        .is_ok()
     {
-        Ok(_) => panic!("unexpected success"),
-        Err(_) => (),
+        panic!("unexpected success")
     }
 }

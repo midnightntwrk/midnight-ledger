@@ -33,7 +33,7 @@ use crate::structure::{INITIAL_LIMITS, SPECKS_PER_DUST};
 #[cfg(feature = "proving")]
 use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
-use base_crypto::cost_model::SyntheticCost;
+use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
@@ -136,8 +136,10 @@ impl<D: DB> TestState<D> {
     }
 
     pub fn context(&self) -> TransactionContext<D> {
-        let mut block = BlockContext::default();
-        block.tblock = self.time;
+        let block = BlockContext {
+            tblock: self.time,
+            ..BlockContext::default()
+        };
         TransactionContext {
             ref_state: self.ledger.clone(),
             block_context: block,
@@ -145,11 +147,7 @@ impl<D: DB> TestState<D> {
         }
     }
 
-    pub async fn reward_night(
-        &mut self,
-        rng: &mut (impl Rng + CryptoRng + SplittableRng),
-        amount: u128,
-    ) {
+    pub async fn reward_night(&mut self, rng: &mut (impl CryptoRng + SplittableRng), amount: u128) {
         let amount = u128::max(amount, self.ledger.parameters.min_claimable_rewards());
         let address = UserAddress::from(self.night_key.verifying_key());
 
@@ -202,7 +200,7 @@ impl<D: DB> TestState<D> {
 
     pub async fn rewards_unshielded(
         &mut self,
-        rng: &mut (impl Rng + CryptoRng + SplittableRng),
+        rng: &mut (impl CryptoRng + SplittableRng),
         token: UnshieldedTokenType,
         amount: u128,
     ) {
@@ -223,8 +221,10 @@ impl<D: DB> TestState<D> {
         let mut intent = Intent::empty(rng, self.time);
         intent.guaranteed_unshielded_offer = Some(Sp::new(offer));
         let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1u16, intent));
-        let mut strictness = WellFormedStrictness::default();
-        strictness.enforce_balancing = false;
+        let strictness = WellFormedStrictness {
+            enforce_balancing: false,
+            ..WellFormedStrictness::default()
+        };
         self.assert_apply(&tx, strictness);
     }
 
@@ -242,7 +242,7 @@ impl<D: DB> TestState<D> {
         let output = zswap::Output::<_, D>::new(
             rng,
             &coin,
-            0u16,
+            Some(0u16),
             &self.zswap_keys.coin_public_key(),
             Some(self.zswap_keys.enc_public_key()),
         )
@@ -263,8 +263,10 @@ impl<D: DB> TestState<D> {
             Some(offer),
             HashMap::new(),
         );
-        let mut strictness = WellFormedStrictness::default();
-        strictness.enforce_balancing = false;
+        let strictness = WellFormedStrictness {
+            enforce_balancing: false,
+            ..WellFormedStrictness::default()
+        };
         self.assert_apply(&tx, strictness);
     }
 
@@ -273,14 +275,14 @@ impl<D: DB> TestState<D> {
         self.time += dur;
         self.ledger = self
             .ledger
-            .post_block_update(self.time, self.balanced_block_fullness())
+            .post_block_update(
+                self.time,
+                NormalizedCost::ZERO,
+                FixedPoint::from_u64_div(1, 2),
+            )
             .unwrap();
         self.dust = self.dust.process_ttls(self.time);
         self.dust_light = self.dust_light.process_ttls(self.time);
-    }
-
-    fn balanced_block_fullness(&self) -> SyntheticCost {
-        self.ledger.parameters.limits.block_limits * 0.5
     }
 
     pub fn step(&mut self) {
@@ -302,15 +304,17 @@ impl<D: DB> TestState<D> {
         let mut intent = Intent::empty(rng, self.time);
         intent.dust_actions = Some(Sp::new(actions));
         let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1, intent));
-        let mut strictness = WellFormedStrictness::default();
-        strictness.enforce_balancing = false;
-        strictness.verify_signatures = false;
+        let strictness = WellFormedStrictness {
+            enforce_balancing: false,
+            verify_signatures: false,
+            ..WellFormedStrictness::default()
+        };
         self.assert_apply(&tx, strictness);
     }
 
     pub async fn give_fee_token(
         &mut self,
-        rng: &mut (impl Rng + CryptoRng + SplittableRng),
+        rng: &mut (impl CryptoRng + SplittableRng),
         utxos: usize,
     ) {
         use crate::structure::STARS_PER_NIGHT;
@@ -355,7 +359,7 @@ impl<D: DB> TestState<D> {
     pub fn apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
@@ -392,19 +396,21 @@ impl<D: DB> TestState<D> {
     pub fn assert_apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        tx.cost(&self.ledger.parameters, false).ok();
-        tx.validation_cost(&self.ledger.parameters.cost_model);
-        tx.application_cost(&self.ledger.parameters.cost_model);
-
-        tx.cost(&self.ledger.parameters, false)
-            .ok()
-            .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits));
+        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
+        dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
+        dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
+        dbg!(
+            tx.cost(&self.ledger.parameters, false)
+                .ok()
+                .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
+        );
+        dbg!(&tx.erase_proofs());
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -420,7 +426,7 @@ impl<D: DB> TestState<D> {
         B: Serializable + Clone + PedersenDowngradeable<D> + Storable<D>,
     >(
         &mut self,
-        mut rng: impl Rng + CryptoRng + SplittableRng,
+        mut rng: impl CryptoRng + SplittableRng,
         mut tx: Transaction<S, P, B, D>,
         resolver: &Resolver,
     ) -> Result<Transaction<S, P, B, D>, MalformedTransaction<D>> {
@@ -453,7 +459,7 @@ impl<D: DB> TestState<D> {
                     .map(|(_, qci)| {
                         let (next_state, inp) = self
                             .zswap
-                            .spend(&mut rng, &self.zswap_keys, &*qci, seg)
+                            .spend(&mut rng, &self.zswap_keys, &qci, Some(seg))
                             .unwrap(); // TODO: unwrap
                         self.zswap = next_state;
                         inp
@@ -467,7 +473,7 @@ impl<D: DB> TestState<D> {
                 let output = ZswapOutput::new(
                     &mut rng,
                     &output_coin,
-                    seg,
+                    Some(seg),
                     &self.zswap_keys.coin_public_key(),
                     Some(self.zswap_keys.enc_public_key()),
                 )
@@ -624,7 +630,9 @@ pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<Ver
 pub fn test_resolver(test_name: &'static str) -> Resolver {
     use transient_crypto::proofs::ProvingKeyMaterial;
 
-    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR").unwrap();
+    let test_dir = env::var("MIDNIGHT_LEDGER_TEST_STATIC_DIR")
+        .expect("MIDNIGHT_LEDGER_TEST_STATIC_DIR should be set as env variable");
+
     Resolver::new(
         PUBLIC_PARAMS.clone(),
         DustResolver(
@@ -702,7 +710,7 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
     {
         if let Ok(addr) = env::var("MIDNIGHT_PROOF_SERVER") {
             let provider = ProofServerProvider {
-                base_url: addr.into(),
+                base_url: addr,
                 resolver,
             };
             tx.prove(provider, &INITIAL_COST_MODEL)
@@ -726,7 +734,7 @@ pub async fn tx_prove<S: SignatureKind<D> + Tagged, R: Rng + CryptoRng + Splitta
             // If it does, the fees associated with the mocked proof should
             // match the real one.
             if let Ok(mocked) = tx.mock_prove() {
-                let allowed_error_margin: u128 = SyntheticCost {
+                let allowed_error_margin: u128 = base_crypto::cost_model::SyntheticCost {
                     block_usage: 5,
                     ..Default::default()
                 }
@@ -816,7 +824,9 @@ impl ProvingProvider for ProofServerProvider<'_> {
         preimage: &transient_crypto::proofs::ProofPreimage,
     ) -> Result<Vec<Option<usize>>, anyhow::Error> {
         let ser = self
-            .check_request_body(&ProofPreimageVersioned::V1(preimage.clone()))
+            .check_request_body(&ProofPreimageVersioned::V2(std::sync::Arc::new(
+                preimage.clone(),
+            )))
             .await?;
         println!("    Check request: {} bytes", ser.len());
         let resp = Client::new()
@@ -843,7 +853,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
     ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
         let ser = self
             .proving_request_body(
-                &ProofPreimageVersioned::V1(preimage.clone()),
+                &ProofPreimageVersioned::V2(std::sync::Arc::new(preimage.clone())),
                 overwrite_binding_input,
             )
             .await?;
@@ -858,7 +868,7 @@ impl ProvingProvider for ProofServerProvider<'_> {
             println!("    Proving response: {} bytes", bytes.len());
             let proof: ProofVersioned = tagged_deserialize(&mut bytes.to_vec().as_slice())?;
             match proof {
-                ProofVersioned::V1(proof) => Ok(proof),
+                ProofVersioned::V2(proof) => Ok(proof),
             }
         } else {
             anyhow::bail!(
@@ -883,7 +893,6 @@ pub async fn serialize_request_body<S: SignatureKind<D> + Tagged, D: DB>(
 
     let circuits_used = tx
         .calls()
-        .into_iter()
         .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
         .collect::<Vec<_>>();
     let mut keys = HashMap::new();
@@ -980,7 +989,7 @@ pub fn well_formed_tx_builder<
     const REWARDS_AMOUNT: u128 = 5000000000;
     let token = ShieldedTokenType(Default::default());
     let coin = CoinInfo::new(&mut rng, REWARDS_AMOUNT, token);
-    let out = ZswapOutput::new(&mut rng, &coin, 0, &secret_key.coin_public_key(), None).unwrap();
+    let out = ZswapOutput::new(&mut rng, &coin, None, &secret_key.coin_public_key(), None).unwrap();
     let offer = ZswapOffer {
         inputs: vec![].into(),
         outputs: vec![out].into(),

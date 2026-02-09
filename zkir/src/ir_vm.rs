@@ -17,7 +17,6 @@ use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
-use midnight_circuits::compact_std_lib::{Relation, ZkStdLib, ZkStdLibArch};
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
@@ -30,6 +29,7 @@ use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
+use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use transient_crypto::curve::EmbeddedGroupAffine;
@@ -99,7 +99,9 @@ fn fab_decode_to_bytes_inner(
             }
             AlignmentSegment::Option(_) => {
                 error!("in-circuit decoding of alignment options is not yet implemented!");
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "in-circuit decoding of alignment options is not yet implemented!".into(),
+                ));
             }
         }
     }
@@ -116,7 +118,9 @@ fn fab_decode_to_bytes_atom(
     match align {
         AlignmentAtom::Field => {
             if inputs.is_empty() {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "Cannot decode field element from nothing".into(),
+                ));
             }
             let value = &inputs[0];
             *inputs = &inputs[1..];
@@ -136,7 +140,9 @@ fn fab_decode_to_bytes_atom(
                     Ok::<_, Error>(())
                 };
             if inputs.len() < expected_size {
-                return Err(Error::Synthesis);
+                return Err(Error::Synthesis(
+                    "Cannot decode byte value; not enough data provided".into(),
+                ));
             }
             let mut res_vec = Vec::with_bounded_capacity(*length as usize - stray);
             if stray > 0 {
@@ -145,14 +151,16 @@ fn fab_decode_to_bytes_atom(
             }
             for i in 0..chunks {
                 bytes_from(res, FR_BYTES_STORED, inputs[chunks - 1 - i].clone())?;
-                *inputs = &inputs[1..];
             }
+            *inputs = &inputs[chunks..];
             res.extend(res_vec);
             Ok(())
         }
         AlignmentAtom::Compress => {
             error!("Cannot decode compressed value from field elements");
-            Err(Error::Synthesis)
+            Err(Error::Synthesis(
+                "Cannot decode compressed value from field elements".into(),
+            ))
         }
     }
 }
@@ -506,8 +514,10 @@ impl Relation for IrSource {
 
     type Witness = Preprocessed;
 
-    fn format_instance(instance: &Self::Instance) -> Vec<outer::Scalar> {
-        instance.clone()
+    fn format_instance(
+        instance: &Self::Instance,
+    ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
+        Ok(instance.clone())
     }
 
     fn circuit(
@@ -537,7 +547,9 @@ impl Relation for IrSource {
             memory: &[AssignedNative<outer::Scalar>],
             i: u32,
         ) -> Result<&AssignedNative<outer::Scalar>, Error> {
-            memory.get(i as usize).ok_or(Error::Synthesis)
+            memory
+                .get(i as usize)
+                .ok_or(Error::Synthesis(format!("missing index {i}")))
         }
         let seq_push = |cell: AssignedNative<outer::Scalar>,
                         mem: &mut Vec<AssignedNative<outer::Scalar>>,
@@ -550,6 +562,7 @@ impl Relation for IrSource {
                 .error_if_known_and(|(preproc, v)| {
                     if idx < seq(preproc).len() && seq(preproc)[idx] != **v {
                         error!(prepare = ?seq(preproc), ?idx, ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
+                        eprintln!("Misalignment between `prepare` and `synthesize` runs. This is a bug.");
                         true
                     } else {
                         false
@@ -576,7 +589,7 @@ impl Relation for IrSource {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc.".into())
                 })
                 .unwrap()
                 .0
@@ -632,7 +645,7 @@ impl Relation for IrSource {
                         .map(|i| idx(&memory, *i).cloned())
                         .collect::<Result<Vec<_>, _>>()?;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = std.sha256(layouter, &bytes)?;
+                    let res_bytes = std.sha2_256(layouter, &bytes)?;
                     mem_push(std.convert(layouter, &res_bytes[31])?, &mut memory)?;
                     mem_push(
                         assemble_bytes(std, layouter, &res_bytes[..31])?,
@@ -756,7 +769,7 @@ impl Relation for IrSource {
             let comm_comm_rand_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
-                    Error::Synthesis
+                    Error::Synthesis("Communication commitment not present despite preproc.".into())
                 })
                 .unwrap()
                 .1
@@ -778,7 +791,6 @@ impl Relation for IrSource {
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
-        use midnight_circuits::compact_std_lib::ShaTableSize;
         let jubjub = self.instructions.iter().any(|op| {
             matches!(
                 op,
@@ -797,21 +809,23 @@ impl Relation for IrSource {
                 .instructions
                 .iter()
                 .any(|op| matches!(op, I::TransientHash { .. }));
-        let sha256 = self
+        let sha2_256 = self
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
-            sha256: if sha256 {
-                Some(ShaTableSize::Table11)
-            } else {
-                None
-            },
+            sha2_256,
+            sha2_512: false,
+            sha3_256: false,
+            keccak_256: false,
+            blake2b: false,
+            nr_pow2range_cols: 1, // TODO: Get this programmatically, not as a magic constant from Miguel :)
             secp256k1: false,
             bls12_381: false,
             base64: false,
+            automaton: false,
         }
     }
 

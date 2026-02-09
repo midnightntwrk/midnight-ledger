@@ -16,17 +16,11 @@ use crate::zswap_wasm::LedgerParameters;
 use js_sys::{Array, JsString};
 use onchain_runtime_wasm::context::QueryContext;
 use storage::db::InMemoryDB;
-use transient_crypto::curve::Fr;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
 #[derive(Debug)]
-pub struct PreTranscript {
-    context: onchain_runtime::context::QueryContext<InMemoryDB>,
-    program:
-        Vec<onchain_runtime::ops::Op<onchain_runtime::result_mode::ResultModeVerify, InMemoryDB>>,
-    comm_comm: Option<Fr>,
-}
+pub struct PreTranscript(pub(crate) ledger::construct::PreTranscript<InMemoryDB>);
 
 try_ref_for_exported!(PreTranscript);
 
@@ -38,9 +32,7 @@ impl PreTranscript {
         program: JsValue,
         comm_comm: JsValue,
     ) -> Result<PreTranscript, JsError> {
-        let comm_comm = if comm_comm.is_null() {
-            None
-        } else if comm_comm.is_undefined() {
+        let comm_comm = if comm_comm.is_null() || comm_comm.is_undefined() {
             None
         } else if comm_comm.is_string() {
             let comm_comm_str = String::from(JsString::from(comm_comm));
@@ -48,11 +40,11 @@ impl PreTranscript {
         } else {
             return Err(JsError::new("expected string | undefined"));
         };
-        Ok(PreTranscript {
+        Ok(PreTranscript(ledger::construct::PreTranscript {
             context: context.clone().into(),
             program: from_value(program)?,
             comm_comm,
-        })
+        }))
     }
 
     #[wasm_bindgen(js_name = "toString")]
@@ -81,11 +73,7 @@ pub fn partition_transcripts(
         .collect::<Result<Vec<_>, _>>()?;
     let borrowed_pre_transcripts = owned_pre_transcripts
         .iter()
-        .map(|pt| ledger::construct::PreTranscript {
-            context: &pt.context,
-            program: &pt.program,
-            comm_comm: pt.comm_comm,
-        })
+        .map(|pt| pt.0.clone())
         .collect::<Vec<_>>();
     let transcripts = ledger::construct::partition_transcripts(&borrowed_pre_transcripts, params)?;
     let res = Array::new();

@@ -1,6 +1,6 @@
 [package]
 name = "midnight-serialize"
-version = "1.0.0-alpha.4"
+version = "1.0.0"
 edition = "2024"
 license.workspace = true
 
@@ -24,4 +24,4 @@ serde_bytes = { version = "^0.11.17" }
 
 [dev-dependencies]
 serialize = { path = ".", package = "midnight-serialize", features = ["proptest"] }
-paste = "1.0.15"
+pastey = "0.1.1"

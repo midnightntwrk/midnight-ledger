@@ -17,6 +17,7 @@ import {
   Intent,
   LedgerParameters,
   type SyntheticCost,
+  type NormalizedCost,
   Transaction,
   TransactionCostModel,
   UnshieldedOffer,
@@ -55,14 +56,18 @@ describe('Ledger API - CostModel', () => {
    * block. The prices you read now apply to the *next* block.
    * 2. Each dimension increases if its utilization exceeds the target,
    * decreases if below, and remains steady near the target.
-   * 3. Price movement per block is multiplicatively bounded by `maxPriceAdjustment()` (~1.045). This cap limits how fast prices
-   * can change upward or downward between consecutive blocks.
-   * 4. Dimensions are *decoupled*:
-   *    – High compute usage raises only computePrice.
-   *    – High block usage (many proofs) raises only blockUsagePrice.
-   *    – High churn / writes raises writePrice.
-   *    – High read activity raises readPrice.
-   *    – Unused dimensions drift down gradually toward a floor ≥ 0.
+   * 3. Overall price is adjusted based on the overall fullness:
+   *    - Price movement per block is multiplicatively bounded by
+   *      `maxPriceAdjustment()` (~1.045). This cap limits how fast prices can
+   *      change upward or downward between consecutive blocks.
+   *    - Overall price will always stay > 0
+   * 4. Dimensions are *decoupled*, but *normalized*:
+   *    – High compute usage raises only computeFactor.
+   *    – High block usage (many proofs) raises only blockUsageFactor.
+   *    – High churn / writes raises writeFactor.
+   *    – High read activity raises readFactor.
+   *    – Unused dimensions drift down gradually toward a floor ≥ 1/4.
+   *    - Dimensions are normalized to have an average (mean) factor of 1.
    * 5. Empty or under-filled blocks cause all prices to drift downward monotonically but never below zero.
    * 6. Baseline compute cost is nonzero (100 ms nominal CPU), others start at 0.
    * 7. FeePrices are floating-point (not fixed-point) and tiny rounding deltas (EPS ≈ 1e-12) should be tolerated in tests.
@@ -172,13 +177,10 @@ describe('Ledger API - CostModel', () => {
 
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -193,7 +195,7 @@ describe('Ledger API - CostModel', () => {
 
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const baseFee = balanced.fees(state.ledger.parameters);
     const feesWithMargin0 = balanced.feesWithMargin(state.ledger.parameters, 0);
@@ -220,13 +222,10 @@ describe('Ledger API - CostModel', () => {
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
     });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -246,13 +245,10 @@ describe('Ledger API - CostModel', () => {
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
     });
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
   });
 
   /**
@@ -260,7 +256,7 @@ describe('Ledger API - CostModel', () => {
    * @when  Applying a single fallible unshielded intent with many inputs/outputs
    * @then  Only writePrice should increase; other dimensions should decrease
    */
-  test('writePrice increases under high churn - others decrease', () => {
+  test('writeFactor increases under high churn - others decrease', () => {
     const ITERATIONS = 118;
 
     const state = TestState.new();
@@ -292,23 +288,22 @@ describe('Ledger API - CostModel', () => {
     intent.fallibleUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
 
+    const before = state.ledger.parameters.feePrices;
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
-    const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeGreaterThan(INITIAL_FIXED_PRICE);
+    const after = state.ledger.parameters.feePrices;
+    expect(after.writeFactor).toBeGreaterThan(before.writeFactor);
+    expect(after.computeFactor).toBeLessThan(before.computeFactor);
   });
 
   /**
    * @given A block that is heavy in number of proofs (many DUST UTXOs)
    * @when  Applying a single dustActions intent with many proofs
-   * @then  blockUsagePrice increases; other dimensions fall
+   * @then  blockUsageFactor increases; other dimensions fall
    */
-  test('blockUsagePrice increases when blockUsage near limit (dustActions w/ many proofs)', () => {
-    const ITERATIONS = 58;
+  test('blockUsageFactor increases when blockUsage near limit (dustActions w/ many proofs)', () => {
+    const ITERATIONS = 54;
     const DUST_UTXO_TO_SPARE = 5; // leaves enough spends to push blockUsage but avoid hitting hard caps
 
     const state = TestState.new();
@@ -328,15 +323,14 @@ describe('Ledger API - CostModel', () => {
     intent.dustActions = new DustActions(SignatureMarker.signature, ProofMarker.preProof, state.time, spends, []);
     intent.signatureData(0xfeed);
 
+    const before = state.ledger.parameters.feePrices;
     const tx = Transaction.fromPartsRandomized(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const balanced = state.balanceTx(tx.eraseProofs());
-    state.assertApply(balanced, new WellFormedStrictness(), balanced.cost(state.ledger.parameters));
+    state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
-    const { feePrices } = state.ledger.parameters;
-    expect(feePrices.readPrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.computePrice).toBeLessThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.blockUsagePrice).toBeGreaterThan(INITIAL_FIXED_PRICE);
-    expect(feePrices.writePrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    const after = state.ledger.parameters.feePrices;
+    expect(after.blockUsageFactor).toBeGreaterThan(before.blockUsageFactor);
+    expect(after.computeFactor).toBeLessThan(before.computeFactor);
   });
 
   /**
@@ -353,13 +347,13 @@ describe('Ledger API - CostModel', () => {
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
     state.spendDust(SPENDS_PER_BLOCK);
-    const p1 = state.ledger.parameters.feePrices.computePrice;
+    const p1 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(SPENDS_PER_BLOCK);
-    const p2 = state.ledger.parameters.feePrices.computePrice;
+    const p2 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(SPENDS_PER_BLOCK);
-    const p3 = state.ledger.parameters.feePrices.computePrice;
+    const p3 = state.ledger.parameters.feePrices.overallPrice;
 
     expect(withinCap(p2, p1, maxAdj)).toBeTruthy();
     expect(withinCap(p3, p2, maxAdj)).toBeTruthy();
@@ -378,13 +372,13 @@ describe('Ledger API - CostModel', () => {
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
     state.spendDust(30);
-    const p1 = state.ledger.parameters.feePrices.computePrice;
+    const p1 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(20);
-    const p2 = state.ledger.parameters.feePrices.computePrice;
+    const p2 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(10);
-    const p3 = state.ledger.parameters.feePrices.computePrice;
+    const p3 = state.ledger.parameters.feePrices.overallPrice;
 
     expect(withinCap(p2, p1, maxAdj)).toBeTruthy();
     expect(withinCap(p3, p2, maxAdj)).toBeTruthy();
@@ -393,7 +387,7 @@ describe('Ledger API - CostModel', () => {
   /**
    * @given Increasing block usage across blocks
    * @when  Filling blocks with 10 -> 20 -> 40 spends
-   * @then  computePrice may still drift down if computeTime stays under target
+   * @then  overallPrice may still drift down if computeTime stays under target
    * We only enforce the per-block cap (compute dimension observed)
    */
   test('price bounded while usage increases (dustActions)', () => {
@@ -404,13 +398,13 @@ describe('Ledger API - CostModel', () => {
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
     state.spendDust(10);
-    const p1 = state.ledger.parameters.feePrices.computePrice;
+    const p1 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(20);
-    const p2 = state.ledger.parameters.feePrices.computePrice;
+    const p2 = state.ledger.parameters.feePrices.overallPrice;
 
     state.spendDust(40);
-    const p3 = state.ledger.parameters.feePrices.computePrice;
+    const p3 = state.ledger.parameters.feePrices.overallPrice;
 
     expect(withinCap(p2, p1, maxAdj)).toBeTruthy();
     expect(withinCap(p3, p2, maxAdj)).toBeTruthy();
@@ -419,50 +413,50 @@ describe('Ledger API - CostModel', () => {
   /**
    * @given A initial state, then two synthetic compute-heavy “blocks”
    * @when  Applying two compute spikes via fastForward (blockUsage=0)
-   * @then  computePrice increases monotonically and each step respects the cap;
-   * blockUsagePrice drifts down (we didn’t use block capacity)
+   * @then  overallPrice increases monotonically and each step respects the cap;
+   * blockUsageFactor drifts down (we didn’t use block capacity)
    */
-  test('computePrice rises under compute-heavy prior block', () => {
+  test('overallPrice rises under compute-heavy prior block', () => {
     const state = TestState.new();
 
     const A = state.ledger.parameters.feePrices;
 
     // B: compute spike
-    const spike1: SyntheticCost = {
+    const spike1: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 500_000_000_000n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, spike1);
     const B = state.ledger.parameters.feePrices;
 
     // C: another compute spike, even higher
-    const spike2: SyntheticCost = {
+    const spike2: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 800_000_000_000n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, spike2);
     const C = state.ledger.parameters.feePrices;
 
-    expect(withinCap(B.computePrice, A.computePrice, maxAdj)).toBeTruthy();
-    expect(withinCap(C.computePrice, B.computePrice, maxAdj)).toBeTruthy();
+    expect(withinCap(B.computeFactor, A.computeFactor, maxAdj)).toBeTruthy();
+    expect(withinCap(C.computeFactor, B.computeFactor, maxAdj)).toBeTruthy();
 
-    expect(B.computePrice).toBeGreaterThanOrEqual(A.computePrice);
-    expect(C.computePrice).toBeGreaterThanOrEqual(B.computePrice);
+    expect(B.computeFactor).toBeGreaterThanOrEqual(A.computeFactor);
+    expect(C.computeFactor).toBeGreaterThanOrEqual(B.computeFactor);
 
-    expect(B.blockUsagePrice).toBeLessThanOrEqual(A.blockUsagePrice);
-    expect(C.blockUsagePrice).toBeLessThanOrEqual(B.blockUsagePrice);
+    expect(B.blockUsageFactor).toBeLessThanOrEqual(A.blockUsageFactor);
+    expect(C.blockUsageFactor).toBeLessThanOrEqual(B.blockUsageFactor);
   });
 
   /**
    * @given A initial state
    * @when  Applying two read spikes via fastForward (blockUsage=0, compute/write=0)
-   * @then  readPrice changes to read load -> blockUsagePrice drifts down
+   * @then  readFactor changes to read load -> blockUsageFactor drifts down
    */
   test('readPrice responds to read-heavy prior blocks (direction-agnostic)', () => {
     const state = TestState.new();
@@ -470,34 +464,34 @@ describe('Ledger API - CostModel', () => {
     const A = state.ledger.parameters.feePrices;
 
     // B: read spike (keep under block limit: read_time <= 1s)
-    const spike1: SyntheticCost = {
-      readTime: 800_000_000n, // 0.8s
+    const spike1: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 800_000_000_000n, // 0.8s
       computeTime: 0n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, spike1);
     const B = state.ledger.parameters.feePrices;
 
     // C: larger read spike, still under limit
-    const spike2: SyntheticCost = {
-      readTime: 900_000_000n, // 0.9s
+    const spike2: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 900_000_000_000n, // 0.9s
       computeTime: 0n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, spike2);
     const C = state.ledger.parameters.feePrices;
 
-    // assert that readPrice actually changes each step
-    expect(Math.abs(B.readPrice - A.readPrice)).toBeGreaterThan(EPS);
-    expect(Math.abs(C.readPrice - B.readPrice)).toBeGreaterThan(EPS);
+    // assert that readFactor actually changes each step
+    expect(Math.abs(B.readFactor - A.readFactor)).toBeGreaterThan(EPS);
+    expect(Math.abs(C.readFactor - B.readFactor)).toBeGreaterThan(EPS);
 
     // Orthogonal dimension drifts down
-    expect(B.blockUsagePrice).toBeLessThanOrEqual(A.blockUsagePrice + EPS);
-    expect(C.blockUsagePrice).toBeLessThanOrEqual(B.blockUsagePrice + EPS);
+    expect(B.blockUsageFactor).toBeLessThanOrEqual(A.blockUsageFactor + EPS);
+    expect(C.blockUsageFactor).toBeLessThanOrEqual(B.blockUsageFactor + EPS);
   });
 
   /**
@@ -511,25 +505,23 @@ describe('Ledger API - CostModel', () => {
 
     let prev = { ...state.ledger.parameters.feePrices };
     for (let i = 0; i < ITERATIONS; i++) {
-      const empty: SyntheticCost = {
-        readTime: 0n,
-        computeTime: 0n,
-        blockUsage: 0n,
-        bytesWritten: 0n,
-        bytesChurned: 0n
+      const empty: NormalizedCost = {
+        readTime: 0,
+        computeTime: 0,
+        blockUsage: 0,
+        bytesWritten: 0,
+        bytesChurned: 0
       };
       state.fastForward(TEN_SECS, empty);
       const cur = state.ledger.parameters.feePrices;
 
-      expect(cur.readPrice).toBeLessThanOrEqual(prev.readPrice + EPS);
-      expect(cur.computePrice).toBeLessThanOrEqual(prev.computePrice + EPS);
-      expect(cur.blockUsagePrice).toBeLessThanOrEqual(prev.blockUsagePrice + EPS);
-      expect(cur.writePrice).toBeLessThanOrEqual(prev.writePrice + EPS);
+      expect(cur.overallPrice).toBeLessThanOrEqual(prev.overallPrice + EPS);
 
-      expect(cur.readPrice).toBeGreaterThanOrEqual(0);
-      expect(cur.computePrice).toBeGreaterThanOrEqual(0);
-      expect(cur.blockUsagePrice).toBeGreaterThanOrEqual(0);
-      expect(cur.writePrice).toBeGreaterThanOrEqual(0);
+      expect(cur.overallPrice).toBeGreaterThanOrEqual(0);
+      expect(cur.readFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.computeFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.blockUsageFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.writeFactor).toBeGreaterThanOrEqual(0);
 
       prev = cur;
     }
@@ -538,54 +530,56 @@ describe('Ledger API - CostModel', () => {
   /**
    * @given A initial state
    * @when  readTime is high but blockUsage is zero
-   * @then  readPrice increases while blockUsagePrice decreases (cap respected)
+   * @then  readFactor increases while blockUsageFactor decreases (cap respected)
    */
   test('mixed pressures in one update: read up, blockUsage down', () => {
     const state = TestState.new();
 
     const before = state.ledger.parameters.feePrices;
 
-    const mixed: SyntheticCost = {
+    const mixed: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 600_000_000_000n, // strong read pressure
       computeTime: 0n,
       blockUsage: 0n, // no block capacity consumed
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, mixed);
 
     const after = state.ledger.parameters.feePrices;
 
-    expect(after.readPrice).toBeGreaterThanOrEqual(before.readPrice);
-    expect(after.blockUsagePrice).toBeLessThanOrEqual(before.blockUsagePrice);
+    expect(after.readFactor).toBeGreaterThanOrEqual(before.readFactor);
+    expect(after.blockUsageFactor).toBeLessThanOrEqual(before.blockUsageFactor);
     // Others unconstrained but should not move counter to their signals here:
-    expect(after.computePrice).toBeLessThanOrEqual(before.computePrice + EPS);
-    expect(after.writePrice).toBeLessThanOrEqual(before.writePrice + EPS);
+    expect(after.computeFactor).toBeLessThanOrEqual(before.computeFactor + EPS);
+    expect(after.writeFactor).toBeLessThanOrEqual(before.writeFactor + EPS);
   });
 
   /**
    * @given A initial state
    * @when  Applying a large write spike via fastForward (below block limit)
-   * @then  writePrice increases but by no more than maxPriceAdjustment; blockUsagePrice drifts down
+   * @then  write price increases but by no more than maxPriceAdjustment; blockUsagePrice drifts down
    */
-  test('writePrice cap holds under large write spike', () => {
+  test('write price cap holds under large write spike', () => {
     const state = TestState.new();
 
     const A = state.ledger.parameters.feePrices;
 
-    const largeWrite: SyntheticCost = {
+    const largeWrite: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 0n,
       blockUsage: 0n,
       bytesWritten: 45_000n, // under 50k limit
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, largeWrite);
     const B = state.ledger.parameters.feePrices;
 
-    expect(withinCap(B.writePrice, A.writePrice, maxAdj)).toBeTruthy();
-    expect(B.writePrice).toBeGreaterThanOrEqual(A.writePrice - EPS);
-    expect(B.blockUsagePrice).toBeLessThanOrEqual(A.blockUsagePrice + EPS);
+    console.log(B, A, largeWrite);
+    expect(withinCap(B.overallPrice, A.overallPrice, maxAdj)).toBeTruthy();
+    expect(B.overallPrice).toBeGreaterThanOrEqual(A.overallPrice - EPS);
+    expect(B.writeFactor).toBeGreaterThanOrEqual(A.writeFactor - EPS);
+    expect(B.blockUsageFactor).toBeLessThanOrEqual(A.blockUsageFactor + EPS);
   });
 
   /**
@@ -599,58 +593,25 @@ describe('Ledger API - CostModel', () => {
 
     const A = state.ledger.parameters.feePrices;
 
-    const heavyAll: SyntheticCost = {
+    const heavyAll: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 900_000_000n, // 0.9s
       computeTime: 600_000_000_000n, // 0.6s
       blockUsage: 1_000n, // consume some capacity
       bytesWritten: 40_000n,
       bytesChurned: 42_000n
-    };
+    });
     state.fastForward(TEN_SECS, heavyAll);
 
     const B = state.ledger.parameters.feePrices;
 
-    expect(withinCap(B.computePrice, A.computePrice, maxAdj)).toBeTruthy();
-    expect(withinCap(B.writePrice, A.writePrice, maxAdj)).toBeTruthy();
+    expect(withinCap(B.overallPrice, A.overallPrice, maxAdj)).toBeTruthy();
+    expect(withinCap(B.computeFactor, A.computeFactor, maxAdj)).toBeTruthy();
+    expect(withinCap(B.writeFactor, A.writeFactor, maxAdj)).toBeTruthy();
 
-    // At least one “pressured” dimension moved up
-    const ups =
-      (B.readPrice >= A.readPrice - EPS ? 1 : 0) +
-      (B.computePrice >= A.computePrice - EPS ? 1 : 0) +
-      (B.writePrice >= A.writePrice - EPS ? 1 : 0) +
-      (B.blockUsagePrice >= A.blockUsagePrice - EPS ? 1 : 0);
-
-    expect(ups).toBeGreaterThanOrEqual(1);
-  });
-
-  /**
-   * @given A initial state
-   * @when  We apply a churn-heavy block (high bytesChurned) with minimal bytesWritten and no block usage
-   * @then  writePrice increases; read/compute/blockUsage drift down or stay flat
-   */
-  test('churn-only (high bytesChurned, tiny bytesWritten, no block usage) does not lift writePrice', () => {
-    const state = TestState.new();
-
-    const A = state.ledger.parameters.feePrices;
-
-    const churnHeavy: SyntheticCost = {
-      readTime: 0n,
-      computeTime: 0n,
-      blockUsage: 0n,
-      bytesWritten: 500n, // tiny write -> no meaningful upward write pressure
-      bytesChurned: 35_000n // large churn alone should not raise writePrice
-    };
-    state.fastForward(TEN_SECS, churnHeavy);
-    const B = state.ledger.parameters.feePrices;
-
-    // No upward push on write
-    expect(B.writePrice).toBeLessThanOrEqual(A.writePrice + EPS);
-    expect(withinCap(B.writePrice, A.writePrice, maxAdj)).toBeTruthy();
-
-    // Orthogonal dimensions drift down (no block capacity consumed, no read/compute pressure)
-    expect(B.blockUsagePrice).toBeLessThanOrEqual(A.blockUsagePrice + EPS);
-    expect(B.readPrice).toBeLessThanOrEqual(A.readPrice + EPS);
-    expect(B.computePrice).toBeLessThanOrEqual(A.computePrice + EPS);
+    // Overall cost moves up
+    expect(B.overallPrice).toBeGreaterThanOrEqual(A.overallPrice - EPS);
+    // Block usage factor down
+    expect(B.blockUsageFactor).toBeLessThanOrEqual(A.blockUsageFactor + EPS);
   });
 
   /**
@@ -664,28 +625,35 @@ describe('Ledger API - CostModel', () => {
 
     let prev = state.ledger.parameters.feePrices;
 
-    const empty: SyntheticCost = {
-      readTime: 0n,
-      computeTime: 0n,
-      blockUsage: 0n,
-      bytesWritten: 0n,
-      bytesChurned: 0n
+    const empty: NormalizedCost = {
+      readTime: 0,
+      computeTime: 0,
+      blockUsage: 0,
+      bytesWritten: 0,
+      bytesChurned: 0
     };
 
     for (let i = 0; i < ITERATIONS; i++) {
       state.fastForward(TEN_SECS, empty);
       const cur = state.ledger.parameters.feePrices;
 
-      // On empty blocks all dimensions should drift down or stay flat
-      expect(cur.readPrice).toBeLessThanOrEqual(prev.readPrice + EPS);
-      expect(cur.computePrice).toBeLessThanOrEqual(prev.computePrice + EPS);
-      expect(cur.blockUsagePrice).toBeLessThanOrEqual(prev.blockUsagePrice + EPS);
-      expect(cur.writePrice).toBeLessThanOrEqual(prev.writePrice + EPS);
+      // On empty blocks overall price should drift down, specific dimensions
+      // should remain roughly equal
+      expect(cur.overallPrice).toBeLessThanOrEqual(prev.overallPrice + EPS);
+      expect(cur.readFactor).toBeLessThanOrEqual(prev.readFactor + EPS);
+      expect(cur.readFactor).toBeGreaterThanOrEqual(prev.readFactor - EPS);
+      expect(cur.computeFactor).toBeLessThanOrEqual(prev.computeFactor + EPS);
+      expect(cur.computeFactor).toBeGreaterThanOrEqual(prev.computeFactor - EPS);
+      expect(cur.blockUsageFactor).toBeLessThanOrEqual(prev.blockUsageFactor + EPS);
+      expect(cur.blockUsageFactor).toBeGreaterThanOrEqual(prev.blockUsageFactor - EPS);
+      expect(cur.writeFactor).toBeLessThanOrEqual(prev.writeFactor + EPS);
+      expect(cur.writeFactor).toBeGreaterThanOrEqual(prev.writeFactor - EPS);
 
-      expect(cur.readPrice).toBeGreaterThanOrEqual(0);
-      expect(cur.computePrice).toBeGreaterThanOrEqual(0);
-      expect(cur.blockUsagePrice).toBeGreaterThanOrEqual(0);
-      expect(cur.writePrice).toBeGreaterThanOrEqual(0);
+      expect(cur.overallPrice).toBeGreaterThanOrEqual(0);
+      expect(cur.readFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.computeFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.blockUsageFactor).toBeGreaterThanOrEqual(0);
+      expect(cur.writeFactor).toBeGreaterThanOrEqual(0);
 
       prev = { ...cur };
     }
@@ -700,21 +668,22 @@ describe('Ledger API - CostModel', () => {
     const ITERATIONS = 100;
     const state = TestState.new();
 
-    const empty: SyntheticCost = {
-      readTime: 0n,
-      computeTime: 0n,
-      blockUsage: 0n,
-      bytesWritten: 0n,
-      bytesChurned: 0n
+    const empty: NormalizedCost = {
+      readTime: 0,
+      computeTime: 0,
+      blockUsage: 0,
+      bytesWritten: 0,
+      bytesChurned: 0
     };
 
     for (let i = 0; i < ITERATIONS; i++) {
       state.fastForward(TEN_SECS, empty);
       const p = state.ledger.parameters.feePrices;
-      expect(p.readPrice).toBeGreaterThanOrEqual(0);
-      expect(p.computePrice).toBeGreaterThanOrEqual(0);
-      expect(p.blockUsagePrice).toBeGreaterThanOrEqual(0);
-      expect(p.writePrice).toBeGreaterThanOrEqual(0);
+      expect(p.overallPrice).toBeGreaterThanOrEqual(0);
+      expect(p.readFactor).toBeGreaterThanOrEqual(0);
+      expect(p.computeFactor).toBeGreaterThanOrEqual(0);
+      expect(p.blockUsageFactor).toBeGreaterThanOrEqual(0);
+      expect(p.writeFactor).toBeGreaterThanOrEqual(0);
     }
   });
 
@@ -728,53 +697,53 @@ describe('Ledger API - CostModel', () => {
 
     const A = state.ledger.parameters.feePrices;
 
-    const blockUsageOnly: SyntheticCost = {
+    const blockUsageOnly: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 0n,
       blockUsage: 200_000n, // very high blockUsage
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
     state.fastForward(TEN_SECS, blockUsageOnly);
     const B = state.ledger.parameters.feePrices;
 
-    expect(B.blockUsagePrice).toBeGreaterThanOrEqual(A.blockUsagePrice - EPS);
-    expect(B.readPrice).toBeLessThanOrEqual(A.readPrice + EPS);
-    expect(B.computePrice).toBeLessThanOrEqual(A.computePrice + EPS);
-    expect(B.writePrice).toBeLessThanOrEqual(A.writePrice + EPS);
+    expect(B.blockUsageFactor).toBeGreaterThanOrEqual(A.blockUsageFactor - EPS);
+    expect(B.readFactor).toBeLessThanOrEqual(A.readFactor + EPS);
+    expect(B.computeFactor).toBeLessThanOrEqual(A.computeFactor + EPS);
+    expect(B.writeFactor).toBeLessThanOrEqual(A.writeFactor + EPS);
   });
 
   /**
    * @given Alternating pressures across blocks
    * @when  We alternate compute-heavy and empty blocks
-   * @then  computePrice is within the cap and never overshoots cap
+   * @then  overallPrice is within the cap and never overshoots cap
    */
   test('alternating compute spike and empty blocks keeps changes within cap', () => {
     const ITERATIONS = 6;
     const state = TestState.new();
 
-    const empty: SyntheticCost = {
+    const empty: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 0n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
 
-    const spike: SyntheticCost = {
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 700_000_000_000n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
 
-    let prev = state.ledger.parameters.feePrices.computePrice;
+    let prev = state.ledger.parameters.feePrices.overallPrice;
 
     for (let i = 0; i < ITERATIONS; i++) {
       // Spike: increase should be capped by maxAdj and non-decreasing
       state.fastForward(TEN_SECS, spike);
-      const afterSpike = state.ledger.parameters.feePrices.computePrice;
+      const afterSpike = state.ledger.parameters.feePrices.overallPrice;
       expect(withinCap(afterSpike, prev, maxAdj)).toBeTruthy();
       expect(afterSpike).toBeGreaterThanOrEqual(prev - EPS);
 
@@ -783,7 +752,7 @@ describe('Ledger API - CostModel', () => {
       state.fastForward(TEN_SECS, empty);
 
       // Assert monotonic down + non-negative
-      const afterEmpty = state.ledger.parameters.feePrices.computePrice;
+      const afterEmpty = state.ledger.parameters.feePrices.overallPrice;
       expect(afterEmpty).toBeLessThanOrEqual(prev + EPS);
       expect(afterEmpty).toBeGreaterThanOrEqual(0);
 
@@ -799,13 +768,13 @@ describe('Ledger API - CostModel', () => {
    * @then  The resulting fee prices are identical (within EPS) – determinism
    */
   test('identical prior-block utilization -> identical feePrices (determinism)', () => {
-    const spike: SyntheticCost = {
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 0n,
       computeTime: 700_000_000_000n,
       blockUsage: 0n,
       bytesWritten: 0n,
       bytesChurned: 0n
-    };
+    });
 
     const s1 = TestState.new();
     const before1 = s1.ledger.parameters.feePrices;
@@ -817,15 +786,17 @@ describe('Ledger API - CostModel', () => {
     s2.fastForward(TEN_SECS, spike);
     const after2 = s2.ledger.parameters.feePrices;
 
-    expect(before1.readPrice - before2.readPrice).toBeLessThanOrEqual(EPS);
-    expect(before1.computePrice - before2.computePrice).toBeLessThanOrEqual(EPS);
-    expect(before1.blockUsagePrice - before2.blockUsagePrice).toBeLessThanOrEqual(EPS);
-    expect(before1.writePrice - before2.writePrice).toBeLessThanOrEqual(EPS);
+    expect(before1.overallPrice - before2.overallPrice).toBeLessThanOrEqual(EPS);
+    expect(before1.readFactor - before2.readFactor).toBeLessThanOrEqual(EPS);
+    expect(before1.computeFactor - before2.computeFactor).toBeLessThanOrEqual(EPS);
+    expect(before1.blockUsageFactor - before2.blockUsageFactor).toBeLessThanOrEqual(EPS);
+    expect(before1.writeFactor - before2.writeFactor).toBeLessThanOrEqual(EPS);
 
-    expect(after1.readPrice - after2.readPrice).toBeLessThanOrEqual(EPS);
-    expect(after1.computePrice - after2.computePrice).toBeLessThanOrEqual(EPS);
-    expect(after1.blockUsagePrice - after2.blockUsagePrice).toBeLessThanOrEqual(EPS);
-    expect(after1.writePrice - after2.writePrice).toBeLessThanOrEqual(EPS);
+    expect(after1.overallPrice - after2.overallPrice).toBeLessThanOrEqual(EPS);
+    expect(after1.readFactor - after2.readFactor).toBeLessThanOrEqual(EPS);
+    expect(after1.computeFactor - after2.computeFactor).toBeLessThanOrEqual(EPS);
+    expect(after1.blockUsageFactor - after2.blockUsageFactor).toBeLessThanOrEqual(EPS);
+    expect(after1.writeFactor - after2.writeFactor).toBeLessThanOrEqual(EPS);
   });
 
   /**
@@ -834,13 +805,13 @@ describe('Ledger API - CostModel', () => {
    * @then  The price updates are identical (within EPS) because updates are per-block, not per-second
    */
   test('price update is invariant to inter-block time interval for same utilization', () => {
-    const spike: SyntheticCost = {
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
       readTime: 800_000_000n, // 0.8s read
       computeTime: 500_000_000_000n, // 0.5s compute
       blockUsage: 1_000n,
       bytesWritten: 20_000n,
       bytesChurned: 22_000n
-    };
+    });
 
     const s10 = TestState.new();
     const start10 = s10.ledger.parameters.feePrices;
@@ -852,14 +823,16 @@ describe('Ledger API - CostModel', () => {
     s60.fastForward(60n, spike);
     const end60 = s60.ledger.parameters.feePrices;
 
-    expect(start10.readPrice - start60.readPrice).toBeLessThanOrEqual(EPS);
-    expect(start10.computePrice - start60.computePrice).toBeLessThanOrEqual(EPS);
-    expect(start10.blockUsagePrice - start60.blockUsagePrice).toBeLessThanOrEqual(EPS);
-    expect(start10.writePrice - start60.writePrice).toBeLessThanOrEqual(EPS);
+    expect(start10.overallPrice - start60.overallPrice).toBeLessThanOrEqual(EPS);
+    expect(start10.readFactor - start60.readFactor).toBeLessThanOrEqual(EPS);
+    expect(start10.computeFactor - start60.computeFactor).toBeLessThanOrEqual(EPS);
+    expect(start10.blockUsageFactor - start60.blockUsageFactor).toBeLessThanOrEqual(EPS);
+    expect(start10.writeFactor - start60.writeFactor).toBeLessThanOrEqual(EPS);
 
-    expect(end10.readPrice - end60.readPrice).toBeLessThanOrEqual(EPS);
-    expect(end10.computePrice - end60.computePrice).toBeLessThanOrEqual(EPS);
-    expect(end10.blockUsagePrice - end60.blockUsagePrice).toBeLessThanOrEqual(EPS);
-    expect(end10.writePrice - end60.writePrice).toBeLessThanOrEqual(EPS);
+    expect(end10.overallPrice - end60.overallPrice).toBeLessThanOrEqual(EPS);
+    expect(end10.readFactor - end60.readFactor).toBeLessThanOrEqual(EPS);
+    expect(end10.computeFactor - end60.computeFactor).toBeLessThanOrEqual(EPS);
+    expect(end10.blockUsageFactor - end60.blockUsageFactor).toBeLessThanOrEqual(EPS);
+    expect(end10.writeFactor - end60.writeFactor).toBeLessThanOrEqual(EPS);
   });
 });
