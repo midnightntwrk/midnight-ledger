@@ -1887,7 +1887,7 @@ impl<D: DB> DustLocalStateLight<D> {
         let gen_info = self
             .generating_info
             .get(&utxo.backing_night)
-            .ok_or(DustSpendError::BackingNightNotFound(*utxo))?;
+            .ok_or(DustSpendError::BackingNightNotFound(Box::new(*utxo)))?;
         let v_new = DustOutput::from(*utxo).updated_value(&gen_info, ctime, &self.params);
         if v_fee > v_new {
             return Err(DustSpendError::NotEnoughDust {
@@ -1910,7 +1910,7 @@ impl<D: DB> DustLocalStateLight<D> {
         let mut utxo_entry = (*state
             .dust_utxos
             .get(&old_nullifier)
-            .ok_or_else(|| DustSpendError::DustUtxoNotTracked(*utxo))?)
+            .ok_or_else(|| DustSpendError::DustUtxoNotTracked(Box::new(*utxo)))?)
         .clone();
         utxo_entry.pending_until = Some(ctime + self.params.dust_grace_period);
         state.dust_utxos = state.dust_utxos.insert(old_nullifier, utxo_entry);
