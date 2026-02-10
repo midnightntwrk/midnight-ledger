@@ -1397,4 +1397,71 @@ mod tests {
             assert_eq!(aux, 10);
         }
     }
+
+    /// Simulates the indexer scenario: a tree is populated, then all positions
+    /// are collapsed (as `State::filter` would do when no outputs belong to the
+    /// tracked contract), and we verify that `update_hash` at `first_free`
+    /// (the next unused slot) still works because it is beyond the collapsed range.
+    #[test]
+    fn test_update_hash_after_full_collapse() {
+        let first_free: u64 = 5;
+        let mut tree = new_mt::<()>(32);
+        for i in 0..first_free {
+            tree = tree.update(i, &Fr::from(i + 1), ());
+        }
+        // Collapse all occupied positions, simulating filter() with no retained indices
+        tree = tree.collapse(0, first_free - 1);
+        // Position first_free should still be a Stub, so update_hash must succeed
+        let _tree = tree.update(first_free, &Fr::from(0xCAFEu64), ());
+    }
+
+    /// Same as above but at a power-of-two boundary, which is an edge case
+    /// for the binary tree structure.
+    #[test]
+    fn test_update_hash_after_collapse_at_power_of_two_boundary() {
+        let first_free: u64 = 8; // 2^3
+        let mut tree = new_mt::<()>(32);
+        for i in 0..first_free {
+            tree = tree.update(i, &Fr::from(i + 1), ());
+        }
+        tree = tree.collapse(0, first_free - 1);
+        let _tree = tree.update(first_free, &Fr::from(0xCAFEu64), ());
+    }
+
+    /// Demonstrates that `update_hash` panics when `first_free` erroneously
+    /// points into a collapsed region. This is the mechanism behind the WASM
+    /// crash observed in `ZswapChainState.tryApply()` — if the deserialized
+    /// state has `first_free` inside a collapsed subtree, any attempt to insert
+    /// a new coin commitment triggers this panic.
+    ///
+    /// Related: https://github.com/midnightntwrk/midnight-ledger/issues/179
+    #[test]
+    #[should_panic = "Attempted to insert into collapsed portion of Merkle tree!"]
+    fn test_update_hash_panics_when_first_free_in_collapsed_region() {
+        let mut tree = new_mt::<()>(32);
+        for i in 0..10 {
+            tree = tree.update(i, &Fr::from(i + 1), ());
+        }
+        // Collapse range 0..9 (all 10 entries)
+        tree = tree.collapse(0, 9);
+        // Attempt to insert at position 5 (within the collapsed range) — panics
+        let _tree = tree.update(5, &Fr::from(0xDEADu64), ());
+    }
+
+    /// Demonstrates the incremental insert-then-collapse pattern used by
+    /// `State::apply_output` when the output is not on the whitelist.
+    /// Each output is inserted with `update_hash`, then immediately collapsed
+    /// with `collapse(first_free, first_free)`. The next insert at first_free+1
+    /// must still succeed because the collapse only affects the single leaf,
+    /// and the adjacent position remains a Stub.
+    #[test]
+    fn test_incremental_insert_collapse_pattern() {
+        let mut tree = new_mt::<()>(32);
+        for i in 0..16u64 {
+            tree = tree.update(i, &Fr::from(i + 100), ());
+            tree = tree.collapse(i, i);
+        }
+        // After 16 rounds of insert+collapse, inserting at position 16 must work
+        let _tree = tree.update(16, &Fr::from(0xFFu64), ());
+    }
 }
