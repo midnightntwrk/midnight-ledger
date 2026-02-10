@@ -278,7 +278,7 @@ impl<D: DB> TestState<D> {
                 FixedPoint::from_u64_div(1, 2),
             )
             .unwrap();
-        self.dust = self.dust.process_ttls(self.time);
+        //self.dust = self.dust.process_ttls(self.time);
     }
 
     pub fn step(&mut self) {

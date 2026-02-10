@@ -177,8 +177,8 @@ impl<V: Storable<D>, D: DB, A: Storable<D> + Annotation<V>> MerklePatriciaTrie<V
     }
 
     /// Generate iterator over leaves, `(path, &value)`
-    pub fn iter(&self) -> MPTIter<V, D> {
-        MPTIter(Node::<V, D, A>::leaves(&self.0, &[]).into_iter())
+    pub fn iter(&self) -> MPTIter<'_, V, D> {
+        MPTIter(Node::<V, D, A>::leaves(&self.0, vec![]))
     }
 
     /// Get the number of leaves in a trie
@@ -233,11 +233,11 @@ impl<V: Storable<D> + PartialOrd, D: DB, A: Storable<D> + PartialOrd + Annotatio
 }
 
 /// Iterator over (path, value) pairs in `MerklePatriciaTrie`
-pub struct MPTIter<T: Storable<D> + 'static, D: DB>(
-    std::vec::IntoIter<(std::vec::Vec<u8>, Sp<T, D>)>,
+pub struct MPTIter<'a, T: Storable<D> + 'static, D: DB>(
+    Box<dyn Iterator<Item = (std::vec::Vec<u8>, Sp<T, D>)> + 'a>,
 );
 
-impl<T: Storable<D>, D: DB> Iterator for MPTIter<T, D> {
+impl<T: Storable<D>, D: DB> Iterator for MPTIter<'_, T, D> {
     type Item = (std::vec::Vec<u8>, Sp<T, D>);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1154,13 +1154,13 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
         }
     }
 
-    fn leaves(
-        sp: &Sp<Node<T, D, A>, D>,
-        current_path: &[u8],
-    ) -> std::vec::Vec<(std::vec::Vec<u8>, Sp<T, D>)> {
+    fn leaves<'a>(
+        sp: &'a Sp<Node<T, D, A>, D>,
+        current_path: Vec<u8>,
+    ) -> Box<dyn Iterator<Item = (std::vec::Vec<u8>, Sp<T, D>)> + 'a> {
         match sp.deref() {
-            Node::Empty => std::vec::Vec::new(),
-            Node::Leaf { value, .. } => vec![(current_path.to_vec(), value.clone())],
+            Node::Empty => Box::new(empty()),
+            Node::Leaf { value, .. } => Box::new([(current_path, value.clone())].into_iter()),
             Node::Extension {
                 compressed_path,
                 child,
@@ -1168,21 +1168,17 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
             } => {
                 let mut new_path = current_path.to_vec();
                 new_path.append(&mut compressed_path.clone());
-                Self::leaves(child, new_path.as_slice())
+                Self::leaves(child, new_path)
             }
             Node::Branch { children, .. } => {
-                let mut l = std::vec::Vec::new();
-                for (i, child) in children.iter().enumerate() {
-                    let mut new_path = current_path.to_vec();
+                Box::new(children.iter().enumerate().flat_map(move |(i, child)| {
+                    let mut new_path = current_path.clone();
                     new_path.push(i as u8);
-                    l.extend(Self::leaves(child, new_path.as_slice()));
-                }
-                l
+                    Self::leaves(child, new_path)
+                }))
             }
             Node::MidBranchLeaf { value, child, .. } => {
-                let mut leaves = Self::leaves(child, current_path);
-                leaves.push((current_path.to_vec(), value.clone()));
-                leaves
+                Box::new(Self::leaves(child, current_path.clone()).chain(once((current_path, value.clone()))))
             }
         }
     }
