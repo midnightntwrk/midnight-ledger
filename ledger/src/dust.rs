@@ -12,7 +12,8 @@
 // limitations under the License.
 
 use crate::error::{
-    EventReplayError, GenerationInfoAlreadyPresentError, MalformedTransaction, TransactionInvalid,
+    DustLocalStateError, EventReplayError, GenerationInfoAlreadyPresentError, MalformedTransaction,
+    TransactionInvalid,
 };
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
@@ -1390,21 +1391,6 @@ impl<T> WithDustStateChanges<T> {
             result,
         }
     }
-}
-
-#[derive(Debug)]
-pub enum DustLocalStateError {
-    GenerationIndexNotFound {
-        generation_index: u64,
-    },
-    NonLinearInsertion {
-        expected_next: u64,
-        received: u64,
-        tree_name: &'static str,
-    },
-    WrongGenerationInfo {
-        generation_index: u64,
-    },
 }
 
 impl<D: DB> DustLocalState<D> {

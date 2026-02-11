@@ -1367,6 +1367,46 @@ impl From<InvalidUpdate> for EventReplayError {
     }
 }
 
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum DustLocalStateError {
+    GenerationIndexNotFound {
+        generation_index: u64,
+    },
+    NonLinearInsertion {
+        expected_next: u64,
+        received: u64,
+        tree_name: &'static str,
+    },
+    WrongGenerationInfo {
+        generation_index: u64,
+    },
+}
+
+impl Display for DustLocalStateError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use DustLocalStateError::*;
+        match self {
+            GenerationIndexNotFound { generation_index } => write!(
+                f,
+                "failed to find generation info for generation index {generation_index}"
+            ),
+            NonLinearInsertion {
+                expected_next,
+                received,
+                tree_name,
+            } => write!(
+                f,
+                "values inserted non-linearly into {tree_name} tree; expected to insert index {expected_next}, but received {received}."
+            ),
+            WrongGenerationInfo { generation_index } => write!(
+                f,
+                "generation info for generation index {generation_index} is invalid"
+            ),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BlockLimitExceeded;
 
