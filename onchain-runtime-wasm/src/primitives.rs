@@ -413,7 +413,8 @@ fn jubjub_scalar_from_native(native: outer::Scalar) -> embedded::Scalar {
 
 /// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
 fn native_from_jubjub_scalar(jubjub_s: embedded::Scalar) -> outer::Scalar {
-    outer::Scalar::from_bytes_le(&jubjub_s.to_bytes()).expect("Jubjub scalar always fits as a natife field element")
+    outer::Scalar::from_bytes_le(&jubjub_s.to_bytes())
+        .expect("Jubjub scalar always fits as a natife field element")
 }
 
 #[wasm_bindgen(js_name = "jubjubSampleSigningKey")]
@@ -466,7 +467,7 @@ impl TryFrom<&ValueSlice> for SchnorrSignature {
 fn from_jsvalue<T, E>(val: JsValue) -> Result<T, JsError>
 where
     T: for<'a> TryFrom<&'a ValueSlice, Error = E>,
-    E: Into<JsError>
+    E: Into<JsError>,
 {
     let val: Value = from_value(val)?;
     T::try_from(&*val).map_err(|e| e.into())
@@ -484,9 +485,9 @@ pub fn jubjub_schnorr_sign(align: JsValue, msg: JsValue, key: JsValue) -> Result
 
     let sig = schnorr::sign(&mut OsRng, sk, &msg_fields);
 
-    // These unwraps are safe: sign() guarantees the announcement is not identity
-    let ann_x = sig.announcement.x().expect("announcement is not identity");
-    let ann_y = sig.announcement.y().expect("announcement is not identity");
+    // These unwraps are safe. Even the identity has coordinates for edwards curves.
+    let ann_x = sig.announcement.x().unwrap();
+    let ann_y = sig.announcement.y().unwrap();
     let response = Fr(native_from_jubjub_scalar(sig.response.0));
 
     let signature = SchnorrSignature {
@@ -512,7 +513,7 @@ pub fn jubjub_schnorr_verify(
         .ok_or_else(|| JsError::new("Invalid announcement point in signature"))?;
 
     let response = EmbeddedFr(jubjub_scalar_from_native(sig.response.0));
-    
+
     let schnorr_sig = schnorr::SchnorrSignature {
         announcement,
         response,
