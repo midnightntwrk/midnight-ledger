@@ -258,7 +258,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -293,7 +293,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(10, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -347,9 +347,9 @@ describe('Ledger API - TokenVault Shielded', () => {
 
     // Results in order: kernel_self, Cell_read(hasShieldedTokens), kernel_self
     const publicTranscriptResults: AlignedValue[] = [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] }, // hasShieldedTokens was false
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] }
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] }
     ];
 
     // Create ZSwap offer with negative delta (user spends tokens)
@@ -423,7 +423,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(15, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -476,9 +476,9 @@ describe('Ledger API - TokenVault Shielded', () => {
     ];
 
     let publicTranscriptResults: AlignedValue[] = [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] },
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] }
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] }
     ];
 
     let offer = ZswapOffer.fromOutput(out, token.raw, FIRST_DEPOSIT);
@@ -642,7 +642,7 @@ describe('Ledger API - TokenVault Shielded', () => {
 
     // Results: kernel_self, hasShielded=true, pot, kernel_self (for nullifiers), kernel_self (for write)
     publicTranscriptResults = [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] },
       {
         value: [
@@ -653,8 +653,8 @@ describe('Ledger API - TokenVault Shielded', () => {
         ],
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16, ATOM_BYTES_8]
       },
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] }
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] }
     ];
 
     // Build offer with pot input, merged output, and transient
@@ -723,7 +723,7 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(20, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -776,9 +776,9 @@ describe('Ledger API - TokenVault Shielded', () => {
     ];
 
     let publicTranscriptResults: AlignedValue[] = [
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] },
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] },
       { value: [EMPTY_VALUE], alignment: [ATOM_BYTES_1] },
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] }
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] }
     ];
 
     let offer = ZswapOffer.fromOutput(depositOut, token.raw, DEPOSIT_AMOUNT);
@@ -954,8 +954,8 @@ describe('Ledger API - TokenVault Shielded', () => {
         ],
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16, ATOM_BYTES_8]
       },
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] }, // kernel_self for nullifier/spend
-      { value: [encodedAddr], alignment: [ATOM_BYTES_32] } // kernel_self for write
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] }, // kernel_self for nullifier/spend
+      { value: [Static.trimTrailingZeros(encodedAddr)], alignment: [ATOM_BYTES_32] } // kernel_self for write
     ];
 
     // Build ZSwap offer: pot input → withdraw output (to user) + change output (to contract)
@@ -986,7 +986,7 @@ describe('Ledger API - TokenVault Shielded', () => {
       ops.withdrawShieldedOp,
       transcripts[0][0],
       transcripts[0][1],
-      [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner secret key for auth
+      [{ value: [Static.trimTrailingZeros(ownerSk)], alignment: [ATOM_BYTES_32] }], // Private: owner secret key for auth
       {
         value: [bigIntToValue(WITHDRAW_AMOUNT)[0]],
         alignment: [ATOM_BYTES_16]
