@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-state"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.1-hard-fork-test"
 edition = "2024"
 license.workspace = true
 
