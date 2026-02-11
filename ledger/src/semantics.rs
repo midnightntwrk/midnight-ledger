@@ -40,6 +40,7 @@ use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng};
 use serialize::{Deserializable, Serializable, Tagged};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
@@ -62,11 +63,20 @@ pub(crate) fn whitelist_matches(
     }
 }
 
-#[derive(Debug)]
 pub struct TransactionContext<D: DB> {
     pub ref_state: LedgerState<D>,
     pub block_context: BlockContext,
     pub whitelist: Option<Map<ContractAddress, ()>>,
+}
+
+impl<D: DB> Debug for TransactionContext<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionContext")
+            .field("ref_state", &self.ref_state.state_hash())
+            .field("block_context", &self.block_context)
+            .field("whitelist", &self.whitelist)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
@@ -444,7 +454,7 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    fn check_night_balance_invariant(&self) -> Result<(), InvariantViolation> {
+    pub fn check_night_balance_invariant(&self) -> Result<(), InvariantViolation> {
         let utxo_ann = self.utxo.utxos.ann();
         let treasury_night = self
             .treasury
@@ -1187,7 +1197,7 @@ impl<D: DB> LedgerState<D> {
         Ok((state, res))
     }
 
-    #[instrument(skip(self, tx), fields(tx = ?tx.hash))]
+    #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
     pub fn apply(
         &self,
         tx: &VerifiedTransaction<D>,

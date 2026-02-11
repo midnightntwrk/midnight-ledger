@@ -37,7 +37,7 @@ use transient_crypto::proofs::{KeyLocation, ProvingError, VerifyingError};
 use zswap::error::MalformedOffer;
 use zswap::{Input, Output};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InvariantViolation {
     NightBalance(u128),
 }
