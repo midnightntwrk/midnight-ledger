@@ -1392,6 +1392,21 @@ impl<T> WithDustStateChanges<T> {
     }
 }
 
+#[derive(Debug)]
+pub enum DustLocalStateError {
+    GenerationIndexNotFound {
+        generation_index: u64,
+    },
+    NonLinearInsertion {
+        expected_next: u64,
+        received: u64,
+        tree_name: &'static str,
+    },
+    WrongGenerationInfo {
+        generation_index: u64,
+    },
+}
+
 impl<D: DB> DustLocalState<D> {
     pub fn new(params: DustParameters) -> Self {
         DustLocalState {
@@ -1433,6 +1448,78 @@ impl<D: DB> DustLocalState<D> {
                 .index(*self.night_indices.get(&qdo.backing_night)?)?
                 .1,
         )
+    }
+
+    pub fn insert_generation_info(
+        &self,
+        generation_index: u64,
+        gen_info: DustGenerationInfo,
+        initial_nonce: Option<InitialNonce>,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        if generation_index != self.generating_tree_first_free {
+            return Err(DustLocalStateError::NonLinearInsertion {
+                expected_next: self.generating_tree_first_free,
+                received: generation_index,
+                tree_name: "dust generation",
+            });
+        }
+
+        let mut state = self.clone();
+
+        state.generating_tree = state.generating_tree.update_hash(
+            state.generating_tree_first_free,
+            gen_info.merkle_hash(),
+            gen_info,
+        );
+        state.generating_tree_first_free += 1;
+        if let Some(initial_nonce) = initial_nonce {
+            // TODO: shall we validate initial_nonce == gen_info.nonce ?
+            state.night_indices = state
+                .night_indices
+                .insert(initial_nonce, self.generating_tree_first_free);
+        } else {
+            state.generating_tree = state
+                .generating_tree
+                .collapse(generation_index, generation_index);
+        }
+        state.generating_tree = state.generating_tree.rehash();
+        Ok(state)
+    }
+
+    pub fn remove_generation_info(
+        &self,
+        generation_index: u64,
+        gen_info: DustGenerationInfo,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        let actual_gen_info = self
+            .generating_tree
+            .index(generation_index)
+            .ok_or(DustLocalStateError::GenerationIndexNotFound { generation_index })?
+            .1;
+
+        if gen_info != *actual_gen_info {
+            return Err(DustLocalStateError::WrongGenerationInfo { generation_index });
+        }
+
+        let mut state = self.clone();
+        state.generating_tree = state
+            .generating_tree
+            .collapse(generation_index, generation_index);
+        state.generating_tree = state.generating_tree.rehash();
+        Ok(state)
+    }
+
+    pub fn collapse_generation_tree(
+        &self,
+        generation_index_start: u64,
+        generation_index_end: u64,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        let mut state = self.clone();
+        state.generating_tree = state
+            .generating_tree
+            .collapse(generation_index_start, generation_index_end);
+        state.generating_tree = state.generating_tree.rehash();
+        Ok(state)
     }
 
     pub fn spend(

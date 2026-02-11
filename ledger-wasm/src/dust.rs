@@ -23,7 +23,8 @@ use ledger::dust::{
     DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
-    DustUtxoState as LedgerDustUtxoState, WithDustStateChanges as LedgerWithDustStateChanges,
+    DustUtxoState as LedgerDustUtxoState, InitialNonce,
+    WithDustStateChanges as LedgerWithDustStateChanges,
 };
 use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
@@ -1312,6 +1313,56 @@ impl DustLocalState {
             .map(dust_gen_info_to_value)
             .transpose()?;
         Ok(res.unwrap_or(JsValue::UNDEFINED))
+    }
+
+    #[wasm_bindgen(js_name = "insertGenerationInfo")]
+    pub fn insert_generation_info(
+        &self,
+        generation_index: BigInt,
+        generation: JsValue,
+        initial_nonce: Option<String>,
+    ) -> Result<DustLocalState, JsError> {
+        let generation = value_to_dust_gen_info(generation)?;
+        let generation_index = u64::try_from(generation_index)
+            .map_err(|_| JsError::new("generation_index is out of range"))?;
+        let initial_nonce = initial_nonce
+            .map(|s| from_hex_ser(&s).map(InitialNonce))
+            .transpose()?;
+        let new_state =
+            self.0
+                .insert_generation_info(generation_index, generation.clone(), initial_nonce)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "removeGenerationInfo")]
+    pub fn remove_generation_info(
+        &self,
+        generation_index: BigInt,
+        generation: JsValue,
+    ) -> Result<DustLocalState, JsError> {
+        let generation = value_to_dust_gen_info(generation)?;
+        let generation_index = u64::try_from(generation_index)
+            .map_err(|_| JsError::new("generation_index is out of range"))?;
+        let new_state = self
+            .0
+            .remove_generation_info(generation_index, generation.clone())?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "collapseGenerationTree")]
+    pub fn collapse_generation_tree(
+        &self,
+        generation_index_start: BigInt,
+        generation_index_end: BigInt,
+    ) -> Result<DustLocalState, JsError> {
+        let generation_index_start = u64::try_from(generation_index_start)
+            .map_err(|_| JsError::new("generation_index_start is out of range"))?;
+        let generation_index_end = u64::try_from(generation_index_end)
+            .map_err(|_| JsError::new("generation_index_end is out of range"))?;
+        let new_state = self
+            .0
+            .collapse_generation_tree(generation_index_start, generation_index_end)?;
+        Ok(DustLocalState(new_state))
     }
 
     pub fn spend(
