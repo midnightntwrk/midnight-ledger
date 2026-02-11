@@ -37,7 +37,9 @@ use std::hash::Hash;
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-pub(crate) const SMALL_OBJECT_LIMIT: usize = 1024;
+/// The size of objects that are considered small enough to be automatically in-lined by storage
+/// system
+pub const SMALL_OBJECT_LIMIT: usize = 1024;
 
 /// Super-trait containing all requirements for a Hasher
 pub trait WellBehavedHasher: Digest + Send + Sync + Default + Debug + Clone + 'static {}
@@ -279,7 +281,7 @@ impl<T: Send + Sync + 'static, D: DB> Storable<D> for PhantomData<T> {
     }
 }
 
-#[cfg(test)]
+#[cfg(feature = "test-utilities")]
 // Storable for Vec is inherently unsafe as a Vec can be arbitrarily long whereas `Storable`
 // requires that a node has no more than 16 children. However, it is useful for testing.
 impl<T: Storable<D>, D: DB> Storable<D> for std::vec::Vec<Sp<T, D>> {

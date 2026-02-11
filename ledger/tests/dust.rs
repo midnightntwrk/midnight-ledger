@@ -19,6 +19,7 @@ use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
     dust::{DustActions, DustPublicKey, DustRegistration, INITIAL_DUST_PARAMETERS, InitialNonce},
+    semantics::TransactionResult,
     structure::{
         CNightGeneratesDustEvent, Intent, SystemTransaction, Transaction, UnshieldedOffer,
         UtxoOutput, UtxoSpend,
@@ -41,11 +42,14 @@ async fn test_registration_dust_payment() {
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     let strictness = WellFormedStrictness::default();
     let verifying_key = state.night_key.verifying_key();
+    let addr = UserAddress::from(verifying_key.clone());
 
-    state.reward_night(&mut rng, 1_000_000).await;
+    const NIGHT_VAL: u128 = 1_000_000;
+    const DUST_VAL: u128 = NIGHT_VAL * INITIAL_DUST_PARAMETERS.night_dust_ratio as u128;
+
+    state.reward_night(&mut rng, NIGHT_VAL).await;
     state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
 
-    let bob_address: UserAddress = rng.r#gen();
     let utxo_ih = state.ledger.utxo.utxos.iter().next().unwrap().0.intent_hash;
 
     let mut intent = Intent::<(), _, _, _>::empty(&mut rng, state.time);
@@ -55,21 +59,22 @@ async fn test_registration_dust_payment() {
             output_no: 0,
             owner: verifying_key,
             type_: NIGHT,
-            value: 1_000_000,
+            value: NIGHT_VAL,
         }]
         .into(),
         outputs: vec![UtxoOutput {
-            owner: bob_address,
+            owner: addr,
             type_: NIGHT,
-            value: 1_000_000,
+            value: NIGHT_VAL,
         }]
         .into(),
         signatures: vec![].into(),
     }));
+    let t0 = state.time;
     intent.dust_actions = Some(Sp::new(DustActions {
         spends: vec![].into(),
         registrations: vec![DustRegistration {
-            allow_fee_payment: 1_000_000_000_000_000,
+            allow_fee_payment: DUST_VAL,
             dust_address: Some(Sp::new(DustPublicKey::from(state.dust_key.clone()))),
             night_key: state.night_key.verifying_key(),
             signature: None,
@@ -87,8 +92,25 @@ async fn test_registration_dust_payment() {
         )
         .unwrap();
     dbg!(&intent);
+    midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
-    state.assert_apply(&tx, strictness);
+    // Erase for fees due to technicality of the runtime fees calculation being slightly inaccurate
+    // due to only having the proof-erased tx to hand.
+    let dust_fee = dbg!(
+        tx.erase_proofs()
+            .erase_signatures()
+            .fees(&state.ledger.parameters, true)
+            .unwrap()
+    );
+    let result = state.apply(&tx, strictness).unwrap();
+    assert!(matches!(result, TransactionResult::Success(_)));
+    let dust_bal = state.dust.wallet_balance(state.time);
+    let dt = state.time - t0;
+    // Add dust generation from time passing
+    let dust_generated =
+        dt.as_seconds() as u128 * NIGHT_VAL * INITIAL_DUST_PARAMETERS.generation_decay_rate as u128;
+    assert!(dust_bal > dust_generated);
+    assert!(dbg!(dust_bal) <= dbg!(DUST_VAL - dust_fee + dust_generated));
 }
 
 #[tokio::test]

@@ -99,6 +99,7 @@ graph TD;
     transient-crypto-->storage;
     storage-->base-crypto;
     storage-->storage-macros;
+    storage-->storage-core;
     base-crypto-->serialize;
     base-crypto-->base-crypto-derive;
     serialize-->serialize-macros;
@@ -120,6 +121,7 @@ graph TD;
 | `serialize` | Provides serialization traits and top-level methods |
 | `serialize-macros` | Provides derive macros for serialization traits, exposed through `serialize` |
 | `storage` | Provides the ledger's storage layer and basic stored data types |
+| `storage-core` | Provides the storage backend used by ledger's storage layer |
 | `storage-macros` | Provides derive macros for storage traits, exposed through `storage` |
 | `transient-crypto` | Provides proof-system related cryptographic primitives, that may be changed over time |
 | `zkir` | Provides the zero-knowledge IR and IR to circuit compiler |

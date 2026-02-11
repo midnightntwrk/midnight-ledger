@@ -16,7 +16,7 @@
 use std::time::Instant;
 
 /// Helper for printing time elapsed between chunks of code.
-pub(crate) struct Timer {
+pub struct Timer {
     prefix: String,
     start: Instant,
     last: Instant,
@@ -26,7 +26,7 @@ impl Timer {
     /// instant
     ///
     /// The prefix is added to `Self::delta` messages.
-    pub(crate) fn new<S: AsRef<str>>(prefix: S) -> Self {
+    pub fn new<S: AsRef<str>>(prefix: S) -> Self {
         let now = Instant::now();
         Timer {
             prefix: prefix.as_ref().to_string(),
@@ -39,7 +39,7 @@ impl Timer {
     ///
     /// Returns the time since the last call to `delta`, or since
     /// construction if this is the first call to `delta`.
-    pub(crate) fn delta<S: AsRef<str>>(&mut self, msg: S) -> f32 {
+    pub fn delta<S: AsRef<str>>(&mut self, msg: S) -> f32 {
         let now = Instant::now();
         let duration_since_start = now.duration_since(self.start).as_secs_f32();
         let duration_since_last = now.duration_since(self.last).as_secs_f32();

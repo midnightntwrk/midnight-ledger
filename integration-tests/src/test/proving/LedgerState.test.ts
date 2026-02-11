@@ -45,7 +45,8 @@ describe.concurrent('Ledger API - LedgerStateX [@slow][@proving]', () => {
     const transactionContext = new TransactionContext(ledgerState, {
       secondsSinceEpoch: Static.blockTime(new Date()),
       secondsSinceEpochErr: 1_000_000,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date()) - 6n
     } as BlockContext);
 
     const strictness = new WellFormedStrictness();
@@ -75,7 +76,8 @@ describe.concurrent('Ledger API - LedgerStateX [@slow][@proving]', () => {
     const transactionContext = new TransactionContext(ledgerState, {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 1_000_000,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     } as BlockContext);
 
     const strictness = new WellFormedStrictness();
