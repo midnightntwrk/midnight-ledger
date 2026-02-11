@@ -10,6 +10,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - breaking: fix: merkle tree canonicity
 - feat: add last block time context variable
 - fix: log non-proof-erased tx hashes
+- fix: resolve non-determinism and not-to-spec iteration order in sequencing
+  check.
 
 ## 7.0.0
 
