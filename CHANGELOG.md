@@ -4,6 +4,12 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 8.0.0
+
+- breaking: fix: correctly compute change for Dust spent during registration
+- fix: resolve non-determinism and not-to-spec iteration order in sequencing
+  check.
+
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes

@@ -2388,7 +2388,11 @@ mod tests {
 
         for _ in 0..200 {
             let calls_in_intent: std::collections::BTreeMap<u32, &ContractCall<(), InMemoryDB>> =
-                calls.iter().enumerate().map(|(i, c)| (i as u32, c)).collect();
+                calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i as u32, c))
+                    .collect();
 
             let mut guaranteed_calls = HashSet::new();
             let mut fallible_calls = HashSet::new();
@@ -2426,7 +2430,13 @@ mod tests {
             }
         }
 
-        assert!(!backward_edge_found, "'related_nodes' produced backwards edges");
-        assert!(!causality_violation_found, "Spurious CausalityConstraintViolation for a valid call ordering");
+        assert!(
+            !backward_edge_found,
+            "'related_nodes' produced backwards edges"
+        );
+        assert!(
+            !causality_violation_found,
+            "Spurious CausalityConstraintViolation for a valid call ordering"
+        );
     }
 }
