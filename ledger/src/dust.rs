@@ -1899,6 +1899,23 @@ impl<D: DB> DustLocalState<D> {
         res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
     }
+
+    pub fn add_utxo(
+        &self,
+        nullifier: &DustNullifier,
+        utxo: &QualifiedDustOutput,
+        pending_until: Option<Timestamp>,
+    ) -> Result<Self, DustSpendError> {
+        let mut state = self.clone();
+        state.dust_utxos = state.dust_utxos.insert(
+            *nullifier,
+            DustWalletUtxoState {
+                utxo: *utxo,
+                pending_until,
+            },
+        );
+        Ok(state)
+    }
 }
 
 macro_rules! exptfile {

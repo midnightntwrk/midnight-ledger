@@ -19,8 +19,8 @@ use base_crypto::time::{Duration, Timestamp};
 use js_sys::{Array, BigInt, Date, Uint8Array};
 use ledger::dust::{
     DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
-    DustLocalState as LedgerDustLocalState, DustOutput as LedgerDustOutput,
-    DustParameters as LedgerDustParameters, DustPublicKey,
+    DustLocalState as LedgerDustLocalState, DustNullifier as LedgerDustNullifier,
+    DustOutput as LedgerDustOutput, DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
@@ -1435,6 +1435,21 @@ impl DustLocalState {
         let events = events.iter().map(|event| &event.0);
         let with_changes = self.0.replay_events_with_changes(&sk, events)?;
         Ok(DustLocalStateWithChanges::from(with_changes))
+    }
+
+    #[wasm_bindgen(js_name = "addUtxo")]
+    pub fn add_utxo(
+        &self,
+        nullifier: BigInt,
+        utxo: JsValue,
+        pending_until: Option<Date>,
+    ) -> Result<DustLocalState, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let pending_until =
+            pending_until.map(|time| Timestamp::from_secs(js_date_to_seconds(&time)));
+        let new_state = self.0.add_utxo(&nullifier, &qdo, pending_until)?;
+        Ok(DustLocalState(new_state))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
