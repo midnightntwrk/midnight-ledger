@@ -1407,6 +1407,8 @@ impl Display for DustLocalStateError {
     }
 }
 
+impl Error for DustLocalStateError {}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BlockLimitExceeded;
 
