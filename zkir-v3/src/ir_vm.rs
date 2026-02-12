@@ -23,6 +23,7 @@ use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
+use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
@@ -37,6 +38,7 @@ use midnight_proofs::{
     plonk::Error,
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
+use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use std::collections::HashMap;
