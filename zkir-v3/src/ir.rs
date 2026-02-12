@@ -307,7 +307,7 @@ pub enum Instruction {
     /// `Native`.
     ///
     /// The circuit may become unsatisfiable if the inputs do not encode
-    /// a valid value of the given type..
+    /// a valid value of the given type.
     Decode {
         /// The inputs to decode
         inputs: Vec<Operand>,

@@ -315,16 +315,13 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::Mul { a, b, output } => {
-                    let a = resolve_operand(&memory, a)?;
-                    let b = resolve_operand(&memory, b)?;
-                    let a: Fr = a.try_into().unwrap();
-                    let b: Fr = b.try_into().unwrap();
+                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
+                    let b: Fr = resolve_operand(&memory, b)?.try_into()?;
                     let result = IrValue::Native(a * b);
                     memory.insert(output.clone(), result);
                 }
                 I::Neg { a, output } => {
-                    let a = resolve_operand(&memory, a)?;
-                    let a: Fr = a.try_into().unwrap();
+                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
                     let result = IrValue::Native(-a);
                     memory.insert(output.clone(), result);
                 }
@@ -961,6 +958,18 @@ impl Relation for IrSource {
                     let modulus_val = resolve_operand(std, layouter, &memory, modulus)?;
                     let divisor: AssignedNative<_> = divisor_val.try_into()?;
                     let modulus: AssignedNative<_> = modulus_val.try_into()?;
+
+                    std.assert_lower_than_fixed(
+                        layouter,
+                        &divisor,
+                        &(BigUint::from(1u32) << (FR_BITS as u32 - *bits)),
+                    )?;
+                    std.assert_lower_than_fixed(
+                        layouter,
+                        &modulus,
+                        &(BigUint::from(1u32) << *bits),
+                    )?;
+
                     use group::ff::Field;
                     let result = CircuitValue::Native(std.linear_combination(
                         layouter,
