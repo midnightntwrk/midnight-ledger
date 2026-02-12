@@ -53,6 +53,13 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
+ 
+#[cfg(feature = "test-utilities")]
+/// A tracking on time spent in reconstruction of data types loading from the backend.
+///
+/// Tracks a map of type names to a pair for number of times reconstructed, and the total duration
+/// of the reconstruction.
+pub static TCONSTRUCT: std::sync::Mutex<Option<HashMap<&'static str, (usize, std::time::Duration)>>> = std::sync::Mutex::new(None);
 
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
@@ -927,6 +934,20 @@ impl<'a, D: DB> BackendLoader<'a, D> {
     }
 }
 
+#[cfg(feature = "test-utilities")]
+struct ConstructTracker(&'static str, std::time::Instant);
+
+#[cfg(feature = "test-utilities")]
+impl Drop for ConstructTracker {
+    fn drop(&mut self) {
+        let dt = self.1.elapsed();
+        let mut construct_map = TCONSTRUCT.lock().unwrap();
+        let (nconstruct, tconstruct) = construct_map.get_or_insert_default().entry(self.0).or_default();
+        *nconstruct += 1;
+        *tconstruct += dt;
+    }
+}
+
 impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     const CHECK_INVARIANTS: bool = false;
 
@@ -934,6 +955,8 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
+        #[cfg(feature = "test-utilities")]
+        let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
         let key = match child {
             ArenaKey::Direct(direct_node) => {
                 let value = T::from_binary_repr(
