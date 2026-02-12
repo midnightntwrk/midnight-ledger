@@ -7,6 +7,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 8.0.0
 
 - breaking: fix: correctly compute change for Dust spent during registration
+- breaking: fix: merkle tree canonicity
+- feat: add last block time context variable
+- fix: log non-proof-erased tx hashes
 - fix: resolve non-determinism and not-to-spec iteration order in sequencing
   check.
 

@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `2.0.0`
+
+- breaking: fix: MPT canonicity
+
 ## Version `1.1.0`
 
 - Added state translation functionality to support hardforking
