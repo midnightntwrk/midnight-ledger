@@ -166,7 +166,13 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
                 night_key,
                 &self.parameters.dust,
             )
-            .unwrap_or(0);
+            .unwrap_or_else(|e| {
+                // Missing UTXO metadata returns 0 so the check callback rejects
+                // via InsufficientDustForRegistrationFee (callers filter for
+                // allow_fee_payment > 0, guaranteeing rejection).
+                warn!(%e, "dust fee availability failed during verification");
+                0
+            });
         check(availability)
     }
     fn dust_spend_check(
@@ -285,7 +291,10 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
                 night_key,
                 &self.new_state.parameters.dust,
             )
-            .unwrap_or(0);
+            .unwrap_or_else(|e| {
+                warn!(%e, "dust fee availability failed during revalidation");
+                0
+            });
         check(availability)
     }
     fn dust_spend_check(

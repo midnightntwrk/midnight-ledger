@@ -1139,21 +1139,24 @@ impl<D: DB> DustState<D> {
                     .contains_key(&i.initial_nonce())
             });
         let Some(tend) = parent_intent.dust_actions.as_ref().map(|da| da.ctime) else {
+            // Precondition: callers should only invoke this function when dust_actions is present.
+            // Defensive return of Ok(0) rather than Err because this is a code invariant violation
+            // (not a data integrity issue), and returning zero fee is the safest fallback.
             error!("reached generationless_fee_availability without dust actions");
+            debug_assert!(false, "generationless_fee_availability called without dust_actions");
             return Ok(0);
         };
         generationless_inputs
             .try_fold(0u128, |acc, i| {
                 let vfull = i.value.saturating_mul(params.night_dust_ratio as u128);
                 let rate = i.value.saturating_mul(params.generation_decay_rate as u128);
+                let utxo = Utxo::from(i.clone());
                 let Some(tstart) = utxo_state
                     .utxos
-                    .get(&Utxo::from(i.clone()))
+                    .get(&utxo)
                     .map(|meta| meta.ctime)
                 else {
-                    return Err(TransactionInvalid::InputNotInUtxos(
-                        Box::new(Utxo::from(i.clone())),
-                    ));
+                    return Err(TransactionInvalid::InputNotInUtxos(Box::new(utxo)));
                 };
                 let dt = (tend - tstart).as_seconds();
                 let dt = if dt < 0 { 0 } else { dt as u128 };
