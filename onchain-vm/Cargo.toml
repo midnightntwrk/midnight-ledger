@@ -10,9 +10,9 @@ proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "r
 [dependencies]
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 storage = { path = "../storage", package = "midnight-storage" }
-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
 runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 
 hex = "^0.4.3"

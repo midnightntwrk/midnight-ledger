@@ -14,8 +14,8 @@ coin-structure = { path = "../coin-structure", package = "midnight-coin-structur
 onchain-runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
 onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
 storage = { path = "../storage", package = "midnight-storage" }
-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 derive-where = "^1.5.0"

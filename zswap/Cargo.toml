@@ -9,11 +9,11 @@ default = ["proof-verifying"]
 proof-verifying = []
 
 [dependencies]
-base-crypto = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-base-crypto" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { path = "../storage", package = "midnight-storage" }
-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
 midnight-onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
 midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 

@@ -10,7 +10,7 @@ crate-type = ["cdylib", "rlib"]
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 zkir-v3 = { path = "../zkir-v3" }
-serialize = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "ledger-7.0.1", package = "midnight-serialize" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom = { version = "^0.2.8", features = ["js"] }
