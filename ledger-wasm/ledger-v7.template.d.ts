@@ -359,6 +359,19 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class GenerationMerkleTreeCollapsedUpdate {
+  /**
+   * Create a new compact update from a non-compact state, and inclusive
+   * `start` and `end` indices
+   *
+   * @throws If the indices are out-of-bounds for the state, or `end < start`
+   */
+  constructor(state: DustGenerationState, start: bigint, end: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): GenerationMerkleTreeCollapsedUpdate;
+  toString(compact?: boolean): string;
+}
+
 export class DustState {
   constructor();
   serialize(): Uint8Array;
@@ -403,6 +416,7 @@ export class DustLocalState {
   insertGenerationInfo(generation_index: bigint, generation: DustGenerationInfo, initial_nonce?: DustInitialNonce): DustLocalState;
   removeGenerationInfo(generation_index: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generation_index_start: bigint, generation_index_end: bigint): DustLocalState;
+  applyGenerationCollapsedUpdate(update: GenerationMerkleTreeCollapsedUpdate): DustLocalState;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;

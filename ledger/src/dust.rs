@@ -63,12 +63,14 @@ use storage::{
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
+use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
 #[cfg(feature = "proof-verifying")]
 use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
     hash::{transient_hash, upgrade_from_transient},
+    merkle_tree,
     merkle_tree::{MerkleTree, MerkleTreeDigest},
     proofs::{KeyLocation, ProofPreimage, ProvingError, Resolver},
     repr::FieldRepr,
@@ -1506,6 +1508,20 @@ impl<D: DB> DustLocalState<D> {
             .collapse(generation_index_start, generation_index_end);
         state.generating_tree = state.generating_tree.rehash();
         Ok(state)
+    }
+
+    pub fn apply_generation_collapsed_update(
+        &self,
+        update: &MerkleTreeCollapsedUpdate,
+    ) -> Result<Self, merkle_tree::InvalidUpdate> {
+        Ok(Self {
+            generating_tree: self
+                .generating_tree
+                .apply_collapsed_update(update)?
+                .rehash(),
+            generating_tree_first_free: u64::max(self.generating_tree_first_free, update.end + 1),
+            ..self.clone()
+        })
     }
 
     pub fn spend(

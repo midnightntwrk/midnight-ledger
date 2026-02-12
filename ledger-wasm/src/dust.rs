@@ -36,6 +36,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
+use transient_crypto::merkle_tree;
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::*;
 
@@ -1365,6 +1366,16 @@ impl DustLocalState {
         Ok(DustLocalState(new_state))
     }
 
+    #[wasm_bindgen(js_name = "applyGenerationCollapsedUpdate")]
+    pub fn apply_generation_collapsed_update(
+        &self,
+        update: &GenerationMerkleTreeCollapsedUpdate,
+    ) -> Result<DustLocalState, JsError> {
+        Ok(DustLocalState(
+            self.0.apply_generation_collapsed_update(update.as_ref())?,
+        ))
+    }
+
     pub fn spend(
         &self,
         sk: &DustSecretKey,
@@ -1506,4 +1517,49 @@ pub fn updated_value(
 #[wasm_bindgen(js_name = "sampleDustSecretKey")]
 pub fn sample_dust_secret_key() -> DustSecretKey {
     DustSecretKey::wrap(LedgerDustSecretKey::sample(&mut OsRng))
+}
+
+#[wasm_bindgen]
+pub struct GenerationMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
+
+impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for GenerationMerkleTreeCollapsedUpdate {
+    fn as_ref(&self) -> &merkle_tree::MerkleTreeCollapsedUpdate {
+        &self.0
+    }
+}
+
+#[wasm_bindgen]
+impl GenerationMerkleTreeCollapsedUpdate {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        state: &DustGenerationState,
+        start: u64,
+        end: u64,
+    ) -> Result<GenerationMerkleTreeCollapsedUpdate, JsError> {
+        Ok(GenerationMerkleTreeCollapsedUpdate(
+            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.generating_tree, start, end)?,
+        ))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        tagged_serialize(&self.0, &mut res)?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<GenerationMerkleTreeCollapsedUpdate, JsError> {
+        Ok(GenerationMerkleTreeCollapsedUpdate(from_value_ser(
+            raw,
+            "GenerationMerkleTreeCollapsedUpdate",
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
 }
