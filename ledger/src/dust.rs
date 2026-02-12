@@ -2070,4 +2070,152 @@ mod tests {
             result
         );
     }
+
+    #[test]
+    fn generationless_fee_availability_returns_value_when_metadata_present() {
+        use super::*;
+        use crate::structure::{ErasedIntent, Intent, UnshieldedOffer, UtxoMeta, UtxoSpend, UtxoState};
+        use base_crypto::time::Timestamp;
+        use coin_structure::coin::NIGHT;
+        use rand::{Rng, SeedableRng, rngs::StdRng};
+        use storage::arena::Sp;
+        use transient_crypto::commitment::{Pedersen, PedersenRandomness};
+
+        let mut rng = StdRng::seed_from_u64(0x21782);
+        let night_key: VerifyingKey = rng.r#gen();
+
+        let input = UtxoSpend {
+            value: 1000,
+            owner: night_key.clone(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+
+        let utxo = Utxo::from(input.clone());
+
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input].into(),
+            outputs: vec![].into(),
+            signatures: vec![].into(),
+        };
+
+        let dust_actions: DustActions<(), (), InMemoryDB> = DustActions {
+            spends: vec![].into(),
+            registrations: vec![].into(),
+            ctime: Timestamp::from_secs(200),
+        };
+
+        let intent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: Some(Sp::new(offer)),
+            fallible_unshielded_offer: None,
+            actions: vec![].into(),
+            dust_actions: Some(Sp::new(dust_actions)),
+            ttl: Timestamp::from_secs(300),
+            binding_commitment: Pedersen::from(rng.r#gen::<PedersenRandomness>()),
+        };
+
+        // UtxoState WITH metadata for the input UTXO
+        let utxo_state: UtxoState<InMemoryDB> = UtxoState::default()
+            .insert(utxo, UtxoMeta { ctime: Timestamp::from_secs(100) });
+
+        let dust_state: DustState<InMemoryDB> = DustState::default();
+        let params = DustParameters {
+            night_dust_ratio: 10,
+            generation_decay_rate: 1,
+            dust_grace_period: base_crypto::time::Duration::from_secs(0),
+        };
+
+        let result = dust_state.generationless_fee_availability(
+            &utxo_state,
+            &intent,
+            &night_key,
+            &params,
+        );
+
+        assert!(result.is_ok(), "should succeed when UTXO metadata is present");
+        let value = result.unwrap();
+        // dt = (200 - 100) = 100 seconds; rate = 1000 * 1 = 1000; value = 100 * 1000 = 100000
+        // vfull = 1000 * 10 = 10000; clamped to min(100000, 10000) = 10000
+        assert_eq!(value, 10000, "dust fee should be clamped to vfull (value * night_dust_ratio)");
+    }
+
+    #[test]
+    fn generationless_fee_availability_rejects_on_any_missing_input() {
+        use super::*;
+        use crate::error::TransactionInvalid;
+        use crate::structure::{ErasedIntent, Intent, UnshieldedOffer, UtxoMeta, UtxoSpend, UtxoState};
+        use base_crypto::time::Timestamp;
+        use coin_structure::coin::NIGHT;
+        use rand::{Rng, SeedableRng, rngs::StdRng};
+        use storage::arena::Sp;
+        use transient_crypto::commitment::{Pedersen, PedersenRandomness};
+
+        let mut rng = StdRng::seed_from_u64(0x21783);
+        let night_key: VerifyingKey = rng.r#gen();
+
+        let input_with_metadata = UtxoSpend {
+            value: 500,
+            owner: night_key.clone(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+        let input_without_metadata = UtxoSpend {
+            value: 500,
+            owner: night_key.clone(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 1,
+        };
+
+        let utxo_present = Utxo::from(input_with_metadata.clone());
+
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input_with_metadata, input_without_metadata].into(),
+            outputs: vec![].into(),
+            signatures: vec![].into(),
+        };
+
+        let dust_actions: DustActions<(), (), InMemoryDB> = DustActions {
+            spends: vec![].into(),
+            registrations: vec![].into(),
+            ctime: Timestamp::from_secs(200),
+        };
+
+        let intent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: Some(Sp::new(offer)),
+            fallible_unshielded_offer: None,
+            actions: vec![].into(),
+            dust_actions: Some(Sp::new(dust_actions)),
+            ttl: Timestamp::from_secs(300),
+            binding_commitment: Pedersen::from(rng.r#gen::<PedersenRandomness>()),
+        };
+
+        // Only the first input has metadata; second is missing
+        let utxo_state: UtxoState<InMemoryDB> = UtxoState::default()
+            .insert(utxo_present, UtxoMeta { ctime: Timestamp::from_secs(100) });
+
+        let dust_state: DustState<InMemoryDB> = DustState::default();
+        let params = DustParameters {
+            night_dust_ratio: 10,
+            generation_decay_rate: 1,
+            dust_grace_period: base_crypto::time::Duration::from_secs(0),
+        };
+
+        let result = dust_state.generationless_fee_availability(
+            &utxo_state,
+            &intent,
+            &night_key,
+            &params,
+        );
+
+        // Should fail because the second input has no metadata, even though the first does
+        assert!(result.is_err(), "should reject when ANY input UTXO metadata is missing");
+        assert!(
+            matches!(result, Err(TransactionInvalid::InputNotInUtxos(_))),
+            "error should be InputNotInUtxos, got: {:?}",
+            result
+        );
+    }
 }
