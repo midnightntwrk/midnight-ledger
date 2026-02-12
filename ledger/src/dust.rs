@@ -1319,7 +1319,7 @@ impl Error for DustSpendError {}
 #[storable(db = D)]
 #[tag = "dust-local-state[v1]"]
 pub struct DustLocalState<D: DB> {
-    generating_tree: MerkleTree<DustGenerationInfo, D>,
+    pub generating_tree: MerkleTree<DustGenerationInfo, D>,
     generating_tree_first_free: u64,
     commitment_tree: MerkleTree<(), D>,
     commitment_tree_first_free: u64,

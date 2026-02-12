@@ -1376,6 +1376,16 @@ impl DustLocalState {
         ))
     }
 
+    #[wasm_bindgen(js_name = "generatingTreeRoot")]
+    pub fn generating_tree_root(&self) -> Result<JsValue, JsError> {
+        Ok(self
+            .0
+            .generating_tree
+            .root()
+            .map(|v| JsValue::from(fr_to_bigint(v.0)))
+            .unwrap_or(JsValue::UNDEFINED))
+    }
+
     pub fn spend(
         &self,
         sk: &DustSecretKey,

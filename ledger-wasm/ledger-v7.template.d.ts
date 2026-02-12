@@ -417,6 +417,7 @@ export class DustLocalState {
   removeGenerationInfo(generation_index: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generation_index_start: bigint, generation_index_end: bigint): DustLocalState;
   applyGenerationCollapsedUpdate(update: GenerationMerkleTreeCollapsedUpdate): DustLocalState;
+  generatingTreeRoot(): bigint | undefined;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
