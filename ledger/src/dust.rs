@@ -2003,4 +2003,71 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn generationless_fee_availability_rejects_missing_utxo_metadata() {
+        use super::*;
+        use crate::error::TransactionInvalid;
+        use crate::structure::{ErasedIntent, Intent, UnshieldedOffer, UtxoSpend, UtxoState};
+        use base_crypto::time::Timestamp;
+        use coin_structure::coin::NIGHT;
+        use rand::{Rng, SeedableRng, rngs::StdRng};
+        use storage::arena::Sp;
+        use transient_crypto::commitment::{Pedersen, PedersenRandomness};
+
+        let mut rng = StdRng::seed_from_u64(0x21781);
+        let night_key: VerifyingKey = rng.r#gen();
+
+        // Input referencing a UTXO that will NOT be in utxo_state
+        let input = UtxoSpend {
+            value: 1000,
+            owner: night_key.clone(),
+            type_: NIGHT,
+            intent_hash: rng.r#gen(),
+            output_no: 0,
+        };
+
+        let offer: UnshieldedOffer<(), InMemoryDB> = UnshieldedOffer {
+            inputs: vec![input].into(),
+            outputs: vec![].into(),
+            signatures: vec![].into(),
+        };
+
+        let dust_actions: DustActions<(), (), InMemoryDB> = DustActions {
+            spends: vec![].into(),
+            registrations: vec![].into(),
+            ctime: Timestamp::from_secs(100),
+        };
+
+        let intent: ErasedIntent<InMemoryDB> = Intent {
+            guaranteed_unshielded_offer: Some(Sp::new(offer)),
+            fallible_unshielded_offer: None,
+            actions: vec![].into(),
+            dust_actions: Some(Sp::new(dust_actions)),
+            ttl: Timestamp::from_secs(200),
+            binding_commitment: Pedersen::from(rng.r#gen::<PedersenRandomness>()),
+        };
+
+        let dust_state: DustState<InMemoryDB> = DustState::default();
+        let utxo_state: UtxoState<InMemoryDB> = UtxoState::default(); // Empty — no UTXO metadata
+        let params = DustParameters {
+            night_dust_ratio: 10,
+            generation_decay_rate: 1,
+            dust_grace_period: base_crypto::time::Duration::from_secs(0),
+        };
+
+        let result = dust_state.generationless_fee_availability(
+            &utxo_state,
+            &intent,
+            &night_key,
+            &params,
+        );
+
+        assert!(result.is_err(), "should reject when UTXO metadata is missing");
+        assert!(
+            matches!(result, Err(TransactionInvalid::InputNotInUtxos(_))),
+            "error should be InputNotInUtxos, got: {:?}",
+            result
+        );
+    }
 }
