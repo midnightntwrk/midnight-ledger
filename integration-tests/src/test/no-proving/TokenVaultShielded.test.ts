@@ -258,7 +258,11 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -293,7 +297,11 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(10, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -423,7 +431,11 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(15, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
@@ -723,7 +735,11 @@ describe('Ledger API - TokenVault Shielded', () => {
     state.giveFeeToken(20, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [Static.trimTrailingZeros(ownerSk)]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerPk, ops);
