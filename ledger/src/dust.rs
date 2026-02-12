@@ -1020,7 +1020,7 @@ impl<D: DB> DustState<D> {
             parent_intent,
             &registration.night_key,
             dust_params,
-        );
+        )?;
         let fee_paid = u128::min(
             fees_remaining,
             u128::min(registration.allow_fee_payment, dust_in),
@@ -1126,8 +1126,8 @@ impl<D: DB> DustState<D> {
         parent_intent: &ErasedIntent<D>,
         night_key: &VerifyingKey,
         params: &DustParameters,
-    ) -> u128 {
-        let generationless_inputs = parent_intent
+    ) -> Result<u128, TransactionInvalid<D>> {
+        let mut generationless_inputs = parent_intent
             .guaranteed_unshielded_offer
             .iter()
             .flat_map(|o| o.inputs.iter_deref())
@@ -1140,10 +1140,10 @@ impl<D: DB> DustState<D> {
             });
         let Some(tend) = parent_intent.dust_actions.as_ref().map(|da| da.ctime) else {
             error!("reached generationless_fee_availability without dust actions");
-            return 0;
+            return Ok(0);
         };
         generationless_inputs
-            .map(|i| {
+            .try_fold(0u128, |acc, i| {
                 let vfull = i.value.saturating_mul(params.night_dust_ratio as u128);
                 let rate = i.value.saturating_mul(params.generation_decay_rate as u128);
                 let Some(tstart) = utxo_state
@@ -1151,15 +1151,15 @@ impl<D: DB> DustState<D> {
                     .get(&Utxo::from(i.clone()))
                     .map(|meta| meta.ctime)
                 else {
-                    warn!("couldn't get metadata of input utxo, it's likely invalid");
-                    return 0;
+                    return Err(TransactionInvalid::InputNotInUtxos(
+                        Box::new(Utxo::from(i.clone())),
+                    ));
                 };
                 let dt = (tend - tstart).as_seconds();
                 let dt = if dt < 0 { 0 } else { dt as u128 };
                 let value_unchecked = dt.saturating_mul(rate);
-                u128::clamp(value_unchecked, 0, vfull)
+                Ok(acc.saturating_add(u128::clamp(value_unchecked, 0, vfull)))
             })
-            .fold(0u128, |a, b| a.saturating_add(b))
     }
 
     pub(crate) fn apply_offer<S: SignatureKind<D>>(

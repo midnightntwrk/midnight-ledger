@@ -158,12 +158,15 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
         night_key: &VerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let availability = self.dust.generationless_fee_availability(
-            &self.utxo,
-            parent_intent,
-            night_key,
-            &self.parameters.dust,
-        );
+        let availability = self
+            .dust
+            .generationless_fee_availability(
+                &self.utxo,
+                parent_intent,
+                night_key,
+                &self.parameters.dust,
+            )
+            .unwrap_or(0);
         check(availability)
     }
     fn dust_spend_check(
@@ -273,12 +276,16 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
         night_key: &VerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
-        let availability = self.new_state.dust.generationless_fee_availability(
-            &self.new_state.utxo,
-            parent_intent,
-            night_key,
-            &self.new_state.parameters.dust,
-        );
+        let availability = self
+            .new_state
+            .dust
+            .generationless_fee_availability(
+                &self.new_state.utxo,
+                parent_intent,
+                night_key,
+                &self.new_state.parameters.dust,
+            )
+            .unwrap_or(0);
         check(availability)
     }
     fn dust_spend_check(
