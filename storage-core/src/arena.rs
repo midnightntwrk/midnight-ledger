@@ -1943,7 +1943,7 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
 }
 
 /// Define bin-tree type for use in tests.
-#[cfg(any(test, feature = "stress-test"))]
+#[cfg(any(test, feature = "test-utilities"))]
 pub mod bin_tree {
     use super::*;
     use crate::{self as storage, storable::SMALL_OBJECT_LIMIT};
@@ -1991,7 +1991,7 @@ pub mod bin_tree {
         ///
         /// The point is that this forces the whole tree to be loaded.
         #[cfg(all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         ))]
         pub fn sum(&self) -> u64 {
@@ -2017,7 +2017,7 @@ pub mod bin_tree {
     #[cfg(any(
         test,
         all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
@@ -2187,14 +2187,6 @@ mod tests {
             nest = Nesty(Some(arena.alloc(nest)));
         }
         drop(nest);
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    fn array_nesting() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_memory(1 << 30)
-            .run("arena::stress_tests::array_nesting");
     }
 
     // Test that weak refs in `Arena::sp_cache` are cleaned up when the last
@@ -2430,113 +2422,6 @@ mod tests {
             // Check that we only have the forced path in memory.
             assert_eq!(arena.lock_sp_cache().borrow().len(), depth);
         }
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn drop_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::drop_deeply_nested_data");
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn serialize_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::serialize_deeply_nested_data");
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn thrash_the_cache_sqldb() {
-        thrash_the_cache("sqldb");
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn thrash_the_cache_paritydb() {
-        thrash_the_cache("paritydb");
-    }
-    #[cfg(all(
-        feature = "stress-test",
-        any(feature = "sqlite", feature = "parity-db")
-    ))]
-    /// Here `db_name` should be `paritydb` or `sqldb`.
-    fn thrash_the_cache(db_name: &str) {
-        let test_name = &format!("arena::stress_tests::thrash_the_cache_variations_{db_name}");
-        let time_limit = 10 * 60;
-        // Thrash the cache with p=0.1.
-        //
-        // Here we should see a small variation between cyclic and non-cyclic,
-        // since the cache is very small.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.1", "true"]);
-        // Thrash the cache with p=0.5.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.5", "false"]);
-        // Thrash the cache with p=0.8.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.8", "false"]);
-        // Thrash the cache with p=1.0.
-        //
-        // With cache as large as the data, cyclic vs non-cyclic should be
-        // irrelevant, and this should be the fastest.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["1.0", "true"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn load_large_tree_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_sqldb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn load_large_tree_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_paritydb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn read_write_map_loop_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_sqldb",
-                &["10000", "1000"],
-            );
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn read_write_map_loop_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_paritydb",
-                &["10000", "1000"],
-            );
     }
 
     // Stress test concurrent arena access, to trigger deadlocks from

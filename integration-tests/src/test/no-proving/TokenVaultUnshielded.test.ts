@@ -254,7 +254,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
 
     const ops = setupOperations();
     const addr = deployContract(state, ownerSk, ownerPk, ops);
@@ -297,7 +301,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     // Deploy the contract
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -334,7 +342,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       transcripts[0][1],
       [], // No private inputs
       {
-        value: [Static.encodeFromHex(tokenColor), bigIntToValue(DEPOSIT_AMOUNT)[0]],
+        value: [Static.trimTrailingZeros(Static.encodeFromHex(tokenColor)), bigIntToValue(DEPOSIT_AMOUNT)[0]],
         alignment: [ATOM_BYTES_32, { tag: 'atom', value: { tag: 'bytes', length: 16 } }]
       },
       { value: [], alignment: [] },
@@ -419,7 +427,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     // Deploy the contract with owner being the test user
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -454,7 +466,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       depositTranscripts[0][1],
       [],
       {
-        value: [Static.encodeFromHex(tokenColor), bigIntToValue(DEPOSIT_AMOUNT)[0]],
+        value: [Static.trimTrailingZeros(Static.encodeFromHex(tokenColor)), bigIntToValue(DEPOSIT_AMOUNT)[0]],
         alignment: [ATOM_BYTES_32, ATOM_BYTES_16]
       },
       { value: [], alignment: [] },
@@ -551,7 +563,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
       ops.withdrawUnshieldedOp,
       withdrawTranscripts[0][0],
       withdrawTranscripts[0][1],
-      [{ value: [ownerSk], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
+      [{ value: [Static.trimTrailingZeros(ownerSk)], alignment: [ATOM_BYTES_32] }], // Private: owner sk for auth
       {
         // Input: (color, amount, recipient: Either<ContractAddress, UserAddress>)
         // PublicAddress encoding in Rust: vec![is_contract, contract_addr, user_addr]
@@ -559,11 +571,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
         // - false is encoded as EMPTY_VALUE (empty Uint8Array), not new Uint8Array([0])
         // - () is unit type with NO bytes and NO alignment entry
         value: [
-          Static.encodeFromHex(tokenColor),
+          Static.trimTrailingZeros(Static.encodeFromHex(tokenColor)),
           bigIntToValue(WITHDRAW_AMOUNT)[0],
           EMPTY_VALUE, // false = User address (not Contract)
           // Unit value for empty contract address - NO bytes added
-          Static.encodeFromHex(userAddress)
+          Static.trimTrailingZeros(Static.encodeFromHex(userAddress))
         ],
         alignment: [
           ATOM_BYTES_32, // tokenColor
@@ -622,7 +634,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -669,7 +685,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
@@ -716,7 +736,11 @@ describe('Ledger API - TokenVault Unshielded', () => {
     state.giveFeeToken(5, INITIAL_NIGHT_AMOUNT);
 
     const ownerSk = Random.generate32Bytes();
-    const ownerPk = persistentCommit([ATOM_BYTES_32], [Static.encodeFromText('token:vault:pk')], [ownerSk]);
+    const ownerPk = persistentCommit(
+      [ATOM_BYTES_32],
+      [Static.encodeFromText('token:vault:pk')],
+      [Static.trimTrailingZeros(ownerSk)]
+    );
     const ops = setupOperations();
     const contractAddr = deployContract(state, ownerSk, ownerPk, ops);
 
