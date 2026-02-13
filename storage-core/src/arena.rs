@@ -957,60 +957,63 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     ) -> Result<Sp<T, D>, std::io::Error> {
         #[cfg(feature = "test-utilities")]
         let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
-        let key = match child {
+        let (data, children) = match child {
             ArenaKey::Direct(direct_node) => {
-                let value = T::from_binary_repr(
-                    &mut &direct_node.data[..],
-                    &mut direct_node.children.iter().cloned(),
-                    self,
-                )?;
-                return Ok(Sp::new(value));
+                (direct_node.data.clone(), direct_node.children.clone())
             }
-            ArenaKey::Ref(key) => key,
+            ArenaKey::Ref(key) => {
+                // Build from existing cached value if possible.
+
+                // Avoid race: keep the metadata locked until we call `Sp::eager` //
+                // below, so that no one can sneak in and remove `key` from the
+                // metadata in the mean time.
+                let metadata_lock = self.arena.lock_metadata();
+                let maybe_arc = self
+                    .arena
+                    .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
+                if let Some(arc) = maybe_arc {
+                    let child_repr = arc.as_child();
+                    return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
+                }
+                drop(metadata_lock);
+
+                // Otherwise, deserialize new sp from backend.
+                let obj = self
+                    .arena
+                    .lock_backend()
+                    .borrow_mut()
+                    .get(key)
+                    .ok_or(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
+                    ))?
+                    .clone();
+                (Arc::new(obj.data), Arc::new(obj.children))
+            },
         };
-        // Build from existing cached value if possible.
 
-        // Avoid race: keep the metadata locked until we call `Sp::eager` //
-        // below, so that no one can sneak in and remove `key` from the
-        // metadata in the mean time.
-        let metadata_lock = self.arena.lock_metadata();
-        let maybe_arc = self
-            .arena
-            .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
-        if let Some(arc) = maybe_arc {
-            let child_repr = arc.as_child();
-            return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
-        }
-        drop(metadata_lock);
-
-        // Otherwise, deserialize new sp from backend.
-
-        let obj = self
-            .arena
-            .lock_backend()
-            .borrow_mut()
-            .get(key)
-            .ok_or(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
-            ))?
-            .clone();
         //  Build lazy value if at max_depth.
         if self.max_depth == Some(0) {
-            // We need to hold this lock until `Sp::lazy` below is done, since
-            // that will call `Arena::increment_ref` internally, which assumes
-            // that the `track_locked` call here has been superseded by a
-            // possible `Sp::drop`.
-            let metadata_lock = self.arena.lock_metadata();
-            let child_repr = child_from(&obj.data, &obj.children);
-            self.arena.track_locked(
-                &metadata_lock,
-                key.clone(),
-                obj.data,
-                obj.children,
-                &child_repr,
-            );
-            return Ok(Sp::lazy(self.arena.clone(), key.clone(), child_repr));
+            let (_guard, child_repr) = if let ArenaKey::Ref(key) = child {
+                // We need to hold this lock until `Sp::lazy` below is done, since
+                // that will call `Arena::increment_ref` internally, which assumes
+                // that the `track_locked` call here has been superseded by a
+                // possible `Sp::drop`.
+                let metadata_lock = self.arena.lock_metadata();
+                let child_repr = child_from(&data, &children);
+                self.arena.track_locked(
+                    &metadata_lock,
+                    key.clone(),
+                    data.deref().clone(),
+                    children.deref().clone(),
+                    &child_repr,
+                );
+                (Some(metadata_lock), child_repr)
+            } else {
+                (None, child.clone())
+            };
+            let res = Ok(Sp::lazy(self.arena.clone(), child.hash().clone(), child_repr));
+            return res;
         }
         // If not at max depth, then deserialize recursively.
         let loader = BackendLoader {
@@ -1019,13 +1022,22 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             recursion_depth: self.recursion_depth + 1,
         };
         let value = T::from_binary_repr::<&[u8]>(
-            &mut &obj.data.clone()[..],
-            &mut obj.children.clone().into_iter(),
+            &mut &data.clone()[..],
+            &mut children.iter().cloned(),
             &loader,
         )?;
-        Ok(self
-            .arena
-            .new_sp(value, key.clone(), obj.data, obj.children))
+        match child {
+            ArenaKey::Ref(hash) => 
+                Ok(self
+                    .arena
+                    .new_sp(value, hash.clone(), data.deref().clone(), children.deref().clone())),
+            ArenaKey::Direct(_) => Ok(Sp {
+                arena: self.arena.clone(),
+                data: OnceLock::from(Arc::new(value)),
+                child_repr: child.clone(),
+                root: child.hash().clone(),
+            }),
+        }
     }
 
     fn alloc<T: Storable<D>>(&self, obj: T) -> Sp<T, D> {
