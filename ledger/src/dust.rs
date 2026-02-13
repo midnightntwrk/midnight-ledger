@@ -1439,6 +1439,62 @@ impl<D: DB> DustLocalState<D> {
         })
     }
 
+    pub fn add_utxo(
+        &self,
+        nullifier: &DustNullifier,
+        utxo: &QualifiedDustOutput,
+        pending_until: Option<Timestamp>,
+    ) -> Result<Self, DustSpendError> {
+        let mut state = self.clone();
+        state.dust_utxos = state.dust_utxos.insert(
+            *nullifier,
+            DustWalletUtxoState {
+                utxo: *utxo,
+                pending_until,
+            },
+        );
+        Ok(state)
+    }
+
+    pub fn remove_utxo(&self, nullifier: &DustNullifier) -> Result<Self, DustSpendError> {
+        let mut state = self.clone();
+        state.dust_utxos = state.dust_utxos.remove(nullifier);
+        Ok(state)
+    }
+
+    pub fn split_utxo(
+        &self,
+        utxo: &QualifiedDustOutput,
+        now: &Timestamp,
+        subtract_fee: u128,
+        new_commitment_index: u64,
+        sk: &DustSecretKey,
+    ) -> Result<QualifiedDustOutput, DustLocalStateError> {
+        let gen_idx = self.night_indices.get(&utxo.backing_night).ok_or(
+            DustLocalStateError::BackingNightNotFound {
+                backing_night: utxo.backing_night,
+            },
+        )?;
+
+        let gen_info = self.generating_tree.index(*gen_idx).unwrap().1;
+        let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, &self.params);
+        let v_now = v_pre_spend.saturating_sub(subtract_fee);
+        let qdo_new = QualifiedDustOutput {
+            backing_night: utxo.backing_night,
+            ctime: *now,
+            initial_value: v_now,
+            seq: utxo.seq + 1,
+            nonce: transient_hash(
+                (utxo.backing_night, utxo.seq + 1, sk.0)
+                    .field_vec()
+                    .as_ref(),
+            ),
+            owner: utxo.owner,
+            mt_index: new_commitment_index,
+        };
+        Ok(qdo_new)
+    }
+
     pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {
         Some(
             *self
@@ -1978,29 +2034,6 @@ impl<D: DB> DustLocalState<D> {
         res.result.commitment_tree = res.result.commitment_tree.rehash();
         res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
-    }
-
-    pub fn add_utxo(
-        &self,
-        nullifier: &DustNullifier,
-        utxo: &QualifiedDustOutput,
-        pending_until: Option<Timestamp>,
-    ) -> Result<Self, DustSpendError> {
-        let mut state = self.clone();
-        state.dust_utxos = state.dust_utxos.insert(
-            *nullifier,
-            DustWalletUtxoState {
-                utxo: *utxo,
-                pending_until,
-            },
-        );
-        Ok(state)
-    }
-
-    pub fn remove_utxo(&self, nullifier: &DustNullifier) -> Result<Self, DustSpendError> {
-        let mut state = self.clone();
-        state.dust_utxos = state.dust_utxos.remove(nullifier);
-        Ok(state)
     }
 }
 
