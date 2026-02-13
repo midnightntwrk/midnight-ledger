@@ -308,7 +308,9 @@ impl<
 
     /// Iterate over the key value pairs in the hash map
     #[allow(clippy::type_complexity)]
-    pub fn iter(&self) -> impl Iterator<Item = Sp<(Sp<K, D>, Sp<V, D>), D>> + use<'_, K, V, D, A> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = Sp<(Sp<K, D>, Sp<V, D>), D>> + use<'_, K, V, D, A> + '_ {
         self.0.iter().map(|(_, v)| v)
     }
 
