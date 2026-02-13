@@ -1369,7 +1369,7 @@ impl DustLocalState {
     #[wasm_bindgen(js_name = "applyGenerationCollapsedUpdate")]
     pub fn apply_generation_collapsed_update(
         &self,
-        update: &GenerationMerkleTreeCollapsedUpdate,
+        update: &DustStateMerkleTreeCollapsedUpdate,
     ) -> Result<DustLocalState, JsError> {
         Ok(DustLocalState(
             self.0.apply_generation_collapsed_update(update.as_ref())?,
@@ -1429,7 +1429,7 @@ impl DustLocalState {
     #[wasm_bindgen(js_name = "applyCommitmentCollapsedUpdate")]
     pub fn apply_commitment_collapsed_update(
         &self,
-        update: &CommitmentMerkleTreeCollapsedUpdate,
+        update: &DustStateMerkleTreeCollapsedUpdate,
     ) -> Result<DustLocalState, JsError> {
         Ok(DustLocalState(
             self.0.apply_commitment_collapsed_update(update.as_ref())?,
@@ -1605,69 +1605,42 @@ pub fn sample_dust_secret_key() -> DustSecretKey {
 }
 
 #[wasm_bindgen]
-pub struct GenerationMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
+pub struct DustStateMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
 
-impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for GenerationMerkleTreeCollapsedUpdate {
+impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for DustStateMerkleTreeCollapsedUpdate {
     fn as_ref(&self) -> &merkle_tree::MerkleTreeCollapsedUpdate {
         &self.0
     }
 }
 
 #[wasm_bindgen]
-impl GenerationMerkleTreeCollapsedUpdate {
+impl DustStateMerkleTreeCollapsedUpdate {
     #[wasm_bindgen(constructor)]
-    pub fn new(
+    pub fn new() -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Err(JsError::new(
+            "DustStateMerkleTreeCollapsedUpdate cannot be constructed directly through the WASM API.",
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "newFromGenerationTree")]
+    pub fn new_from_generation_tree(
         state: &DustGenerationState,
         start: u64,
         end: u64,
-    ) -> Result<GenerationMerkleTreeCollapsedUpdate, JsError> {
-        Ok(GenerationMerkleTreeCollapsedUpdate(
+    ) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(
             merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.generating_tree, start, end)?,
         ))
     }
 
-    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
-        let mut res = Vec::new();
-        tagged_serialize(&self.0, &mut res)?;
-        Ok(Uint8Array::from(&res[..]))
-    }
-
-    pub fn deserialize(raw: Uint8Array) -> Result<GenerationMerkleTreeCollapsedUpdate, JsError> {
-        Ok(GenerationMerkleTreeCollapsedUpdate(from_value_ser(
-            raw,
-            "GenerationMerkleTreeCollapsedUpdate",
-        )?))
-    }
-
-    #[wasm_bindgen(js_name = "toString")]
-    pub fn to_string(&self, compact: Option<bool>) -> String {
-        if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
-        } else {
-            format!("{:#?}", &self.0)
-        }
-    }
-}
-
-#[wasm_bindgen]
-pub struct CommitmentMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
-
-impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for CommitmentMerkleTreeCollapsedUpdate {
-    fn as_ref(&self) -> &merkle_tree::MerkleTreeCollapsedUpdate {
-        &self.0
-    }
-}
-
-#[wasm_bindgen]
-impl CommitmentMerkleTreeCollapsedUpdate {
-    #[wasm_bindgen(constructor)]
-    pub fn new(
-        state: &DustLocalState,
+    #[wasm_bindgen(js_name = "newFromCommitmentTree")]
+    pub fn new_from_commitment_tree(
+        state: &DustUtxoState,
         start: u64,
         end: u64,
-    ) -> Result<CommitmentMerkleTreeCollapsedUpdate, JsError> {
-        Ok(CommitmentMerkleTreeCollapsedUpdate(
-            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.commitment_tree, start, end)?,
+    ) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(
+            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.commitments, start, end)?,
         ))
     }
 
@@ -1677,10 +1650,10 @@ impl CommitmentMerkleTreeCollapsedUpdate {
         Ok(Uint8Array::from(&res[..]))
     }
 
-    pub fn deserialize(raw: Uint8Array) -> Result<CommitmentMerkleTreeCollapsedUpdate, JsError> {
-        Ok(CommitmentMerkleTreeCollapsedUpdate(from_value_ser(
+    pub fn deserialize(raw: Uint8Array) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(from_value_ser(
             raw,
-            "CommitmentMerkleTreeCollapsedUpdate",
+            "DustStateMerkleTreeCollapsedUpdate",
         )?))
     }
 

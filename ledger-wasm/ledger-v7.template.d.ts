@@ -359,29 +359,12 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
-export class GenerationMerkleTreeCollapsedUpdate {
-  /**
-   * Create a new compact update from a non-compact state, and inclusive
-   * `start` and `end` indices
-   *
-   * @throws If the indices are out-of-bounds for the state, or `end < start`
-   */
-  constructor(state: DustGenerationState, start: bigint, end: bigint);
+export class DustStateMerkleTreeCollapsedUpdate {
+  private constructor();
+  newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
+  newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
   serialize(): Uint8Array;
-  static deserialize(raw: Uint8Array): GenerationMerkleTreeCollapsedUpdate;
-  toString(compact?: boolean): string;
-}
-
-export class CommitmentMerkleTreeCollapsedUpdate {
-  /**
-   * Create a new compact update from a non-compact state, and inclusive
-   * `start` and `end` indices
-   *
-   * @throws If the indices are out-of-bounds for the state, or `end < start`
-   */
-  constructor(state: DustLocalState, start: bigint, end: bigint);
-  serialize(): Uint8Array;
-  static deserialize(raw: Uint8Array): CommitmentMerkleTreeCollapsedUpdate;
+  static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
   toString(compact?: boolean): string;
 }
 
@@ -430,12 +413,12 @@ export class DustLocalState {
   insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
-  applyGenerationCollapsedUpdate(update: GenerationMerkleTreeCollapsedUpdate): DustLocalState;
+  applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
   generatingTreeRoot(): bigint | undefined;
   insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
   removeCommitment(commitmentIndex: bigint): DustLocalState;
   collapseCommitmentTree(commitmentIndexStart: bigint, commitmentIndexEnd: bigint): DustLocalState;
-  applyCommitmentCollapsedUpdate(update: CommitmentMerkleTreeCollapsedUpdate): DustLocalState;
+  applyCommitmentCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
   commitmentTreeRoot(): bigint | undefined;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
