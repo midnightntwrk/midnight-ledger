@@ -1429,6 +1429,16 @@ impl<D: DB> DustLocalState<D> {
         })
     }
 
+    pub fn find_utxo_by_nullifier(&self, nullifier: DustNullifier) -> Option<QualifiedDustOutput> {
+        self.dust_utxos.get(&nullifier).and_then(|state| {
+            if state.pending_until.is_none() {
+                Some(state.utxo)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {
         Some(
             *self
@@ -1984,6 +1994,12 @@ impl<D: DB> DustLocalState<D> {
                 pending_until,
             },
         );
+        Ok(state)
+    }
+
+    pub fn remove_utxo(&self, nullifier: &DustNullifier) -> Result<Self, DustSpendError> {
+        let mut state = self.clone();
+        state.dust_utxos = state.dust_utxos.remove(nullifier);
         Ok(state)
     }
 }

@@ -409,7 +409,7 @@ export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
   generationInfo(qdo: QualifiedDustOutput): DustGenerationInfo | undefined;
-  // TODO: have we covered the .update_from_evidence() method?
+  // TODO: do we need to cover the .update_from_evidence() method?
   insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
@@ -425,6 +425,8 @@ export class DustLocalState {
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
   addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
+  findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
+  removeUtxo(nullifier: DustNullifier): DustLocalState;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;

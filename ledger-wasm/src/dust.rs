@@ -1512,6 +1512,24 @@ impl DustLocalState {
         Ok(DustLocalState(new_state))
     }
 
+    #[wasm_bindgen(js_name = "findUtxoByNullifier")]
+    pub fn find_utxo_by_nullifier(&self, nullifier: BigInt) -> Result<JsValue, JsError> {
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let utxo = self
+            .0
+            .find_utxo_by_nullifier(nullifier)
+            .map(|qdo| qdo_to_value(&qdo))
+            .transpose()?;
+        Ok(utxo.unwrap_or(JsValue::UNDEFINED))
+    }
+
+    #[wasm_bindgen(js_name = "removeUtxo")]
+    pub fn remove_utxo(&self, nullifier: BigInt) -> Result<DustLocalState, JsError> {
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let new_state = self.0.remove_utxo(&nullifier)?;
+        Ok(DustLocalState(new_state))
+    }
+
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
         tagged_serialize(&self.0, &mut res)?;
