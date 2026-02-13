@@ -42,7 +42,11 @@ impl From<LogLevel> for LevelFilter {
 
 pub fn init_logger(level: LogLevel) {
     Registry::default()
-        .with(tracing_subscriber::fmt::layer().with_filter(Targets::new().with_default(level)))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(Targets::new().with_default(level)),
+        )
         .try_init()
         .ok();
     info!("Welcome to ledger v{}!", env!("CARGO_PKG_VERSION"));
