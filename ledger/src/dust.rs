@@ -1454,17 +1454,14 @@ impl<D: DB> DustLocalState<D> {
 
         let mut state = self.clone();
 
-        state.generating_tree = state.generating_tree.update_hash(
-            state.generating_tree_first_free,
-            gen_info.merkle_hash(),
-            gen_info,
-        );
+        state.generating_tree =
+            state
+                .generating_tree
+                .update_hash(generation_index, gen_info.merkle_hash(), gen_info);
         state.generating_tree_first_free += 1;
         if let Some(initial_nonce) = initial_nonce {
             // TODO: shall we validate initial_nonce == gen_info.nonce ?
-            state.night_indices = state
-                .night_indices
-                .insert(initial_nonce, self.generating_tree_first_free);
+            state.night_indices = state.night_indices.insert(initial_nonce, generation_index);
         } else {
             state.generating_tree = state
                 .generating_tree
