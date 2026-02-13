@@ -428,6 +428,8 @@ export class DustLocalState {
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
   splitUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
+  utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
+  utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;

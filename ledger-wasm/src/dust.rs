@@ -1552,6 +1552,21 @@ impl DustLocalState {
         qdo_to_value(&new_utxo)
     }
 
+    #[wasm_bindgen(js_name = "utxoCommitment")]
+    pub fn utxo_commitment(&self, utxo: JsValue) -> Result<BigInt, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let commitment = qdo.commitment();
+        Ok(fr_to_bigint(commitment.0))
+    }
+
+    #[wasm_bindgen(js_name = "utxoNullifier")]
+    pub fn utxo_nullifier(&self, utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let sk = sk.try_unwrap()?;
+        let nullifier = qdo.nullifier(&sk);
+        Ok(fr_to_bigint(nullifier.0))
+    }
+
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
         tagged_serialize(&self.0, &mut res)?;
