@@ -77,7 +77,7 @@ jobs:
           docker push ghcr.io/midnight-ntwrk/proof-server:$PROOF_SERVER_VERSION-amd64
 
   docker-arm64:
-    runs-on: ubuntu-24.04-arm64
+    runs-on: ubuntu-latest-4-core-arm64
     needs: docker-amd64
 
     steps:
