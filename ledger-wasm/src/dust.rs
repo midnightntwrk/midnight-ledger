@@ -16,7 +16,7 @@ use crate::state_changes::DustStateChanges;
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
-use js_sys::{Array, BigInt, Date, Uint8Array};
+use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
     DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
     DustLocalState as LedgerDustLocalState, DustNullifier as LedgerDustNullifier,
@@ -1386,6 +1386,66 @@ impl DustLocalState {
             .unwrap_or(JsValue::UNDEFINED))
     }
 
+    #[wasm_bindgen(js_name = "insertCommitment")]
+    pub fn insert_commitment(
+        &self,
+        commitment_index: BigInt,
+        qdo: JsValue,
+        own_qdo: Boolean,
+    ) -> Result<DustLocalState, JsError> {
+        let commitment_index = u64::try_from(commitment_index)
+            .map_err(|_| JsError::new("commitment_index is out of range"))?;
+        let qdo = value_to_qdo(qdo)?;
+        let new_state = self
+            .0
+            .insert_commitment(commitment_index, qdo, own_qdo.into())?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "removeCommitment")]
+    pub fn remove_commitment(&self, commitment_index: BigInt) -> Result<DustLocalState, JsError> {
+        let commitment_index = u64::try_from(commitment_index)
+            .map_err(|_| JsError::new("commitment_index is out of range"))?;
+        let new_state = self.0.remove_commitment(commitment_index)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "collapseCommitmentTree")]
+    pub fn collapse_commitment_tree(
+        &self,
+        commitment_index_start: BigInt,
+        commitment_index_end: BigInt,
+    ) -> Result<DustLocalState, JsError> {
+        let commitment_index_start = u64::try_from(commitment_index_start)
+            .map_err(|_| JsError::new("commitment_index_start is out of range"))?;
+        let commitment_index_end = u64::try_from(commitment_index_end)
+            .map_err(|_| JsError::new("commitment_index_end is out of range"))?;
+        let new_state = self
+            .0
+            .collapse_commitment_tree(commitment_index_start, commitment_index_end)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "applyCommitmentCollapsedUpdate")]
+    pub fn apply_commitment_collapsed_update(
+        &self,
+        update: &CommitmentMerkleTreeCollapsedUpdate,
+    ) -> Result<DustLocalState, JsError> {
+        Ok(DustLocalState(
+            self.0.apply_commitment_collapsed_update(update.as_ref())?,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "commitmentTreeRoot")]
+    pub fn commitment_tree_root(&self) -> Result<JsValue, JsError> {
+        Ok(self
+            .0
+            .commitment_tree
+            .root()
+            .map(|v| JsValue::from(fr_to_bigint(v.0)))
+            .unwrap_or(JsValue::UNDEFINED))
+    }
+
     pub fn spend(
         &self,
         sk: &DustSecretKey,
@@ -1576,6 +1636,51 @@ impl GenerationMerkleTreeCollapsedUpdate {
         Ok(GenerationMerkleTreeCollapsedUpdate(from_value_ser(
             raw,
             "GenerationMerkleTreeCollapsedUpdate",
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
+}
+
+#[wasm_bindgen]
+pub struct CommitmentMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
+
+impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for CommitmentMerkleTreeCollapsedUpdate {
+    fn as_ref(&self) -> &merkle_tree::MerkleTreeCollapsedUpdate {
+        &self.0
+    }
+}
+
+#[wasm_bindgen]
+impl CommitmentMerkleTreeCollapsedUpdate {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        state: &DustLocalState,
+        start: u64,
+        end: u64,
+    ) -> Result<CommitmentMerkleTreeCollapsedUpdate, JsError> {
+        Ok(CommitmentMerkleTreeCollapsedUpdate(
+            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.commitment_tree, start, end)?,
+        ))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        tagged_serialize(&self.0, &mut res)?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<CommitmentMerkleTreeCollapsedUpdate, JsError> {
+        Ok(CommitmentMerkleTreeCollapsedUpdate(from_value_ser(
+            raw,
+            "CommitmentMerkleTreeCollapsedUpdate",
         )?))
     }
 

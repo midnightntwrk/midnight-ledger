@@ -1321,7 +1321,7 @@ impl Error for DustSpendError {}
 pub struct DustLocalState<D: DB> {
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
     generating_tree_first_free: u64,
-    commitment_tree: MerkleTree<(), D>,
+    pub commitment_tree: MerkleTree<(), D>,
     commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
@@ -1517,6 +1517,79 @@ impl<D: DB> DustLocalState<D> {
                 .apply_collapsed_update(update)?
                 .rehash(),
             generating_tree_first_free: u64::max(self.generating_tree_first_free, update.end + 1),
+            ..self.clone()
+        })
+    }
+
+    pub fn insert_commitment(
+        &self,
+        commitment_index: u64,
+        qdo: QualifiedDustOutput,
+        own_qdo: bool,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        if commitment_index != self.commitment_tree_first_free {
+            return Err(DustLocalStateError::NonLinearInsertion {
+                expected_next: self.commitment_tree_first_free,
+                received: commitment_index,
+                tree_name: "commitment",
+            });
+        }
+
+        let mut state = self.clone();
+
+        state.commitment_tree =
+            state
+                .commitment_tree
+                .update_hash(commitment_index, qdo.commitment().into(), ());
+        state.commitment_tree_first_free += 1;
+        if !own_qdo {
+            state.commitment_tree = state
+                .commitment_tree
+                .collapse(commitment_index, commitment_index);
+        }
+        state.commitment_tree = state.commitment_tree.rehash();
+        Ok(state)
+    }
+
+    pub fn remove_commitment(
+        &self,
+        commitment_index: u64,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        if self.commitment_tree.index(commitment_index).is_none() {
+            return Err(DustLocalStateError::CommitmentIndexNotFound { commitment_index });
+        }
+
+        let mut state = self.clone();
+        state.commitment_tree = state
+            .commitment_tree
+            .collapse(commitment_index, commitment_index);
+        state.commitment_tree = state.commitment_tree.rehash();
+        Ok(state)
+    }
+
+    pub fn collapse_commitment_tree(
+        &self,
+        commitment_index_start: u64,
+        commitment_index_end: u64,
+    ) -> Result<DustLocalState<D>, DustLocalStateError> {
+        let mut state = self.clone();
+        state.commitment_tree = state
+            .commitment_tree
+            .collapse(commitment_index_start, commitment_index_end);
+        state.commitment_tree = state.commitment_tree.rehash();
+        Ok(state)
+    }
+
+    pub fn apply_commitment_collapsed_update(
+        &self,
+        update: &MerkleTreeCollapsedUpdate,
+    ) -> Result<Self, merkle_tree::InvalidUpdate> {
+        Ok(Self {
+            commitment_tree: self
+                .commitment_tree
+                .apply_collapsed_update(update)?
+                .rehash(),
+            commitment_tree_first_free: u64::max(self.commitment_tree_first_free, update.end + 1),
             ..self.clone()
         })
     }

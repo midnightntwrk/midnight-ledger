@@ -372,6 +372,19 @@ export class GenerationMerkleTreeCollapsedUpdate {
   toString(compact?: boolean): string;
 }
 
+export class CommitmentMerkleTreeCollapsedUpdate {
+  /**
+   * Create a new compact update from a non-compact state, and inclusive
+   * `start` and `end` indices
+   *
+   * @throws If the indices are out-of-bounds for the state, or `end < start`
+   */
+  constructor(state: DustLocalState, start: bigint, end: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): CommitmentMerkleTreeCollapsedUpdate;
+  toString(compact?: boolean): string;
+}
+
 export class DustState {
   constructor();
   serialize(): Uint8Array;
@@ -413,11 +426,17 @@ export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
   generationInfo(qdo: QualifiedDustOutput): DustGenerationInfo | undefined;
+  // TODO: have we covered the .update_from_evidence() method?
   insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
   applyGenerationCollapsedUpdate(update: GenerationMerkleTreeCollapsedUpdate): DustLocalState;
   generatingTreeRoot(): bigint | undefined;
+  insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
+  removeCommitment(commitmentIndex: bigint): DustLocalState;
+  collapseCommitmentTree(commitmentIndexStart: bigint, commitmentIndexEnd: bigint): DustLocalState;
+  applyCommitmentCollapsedUpdate(update: CommitmentMerkleTreeCollapsedUpdate): DustLocalState;
+  commitmentTreeRoot(): bigint | undefined;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;

@@ -1381,6 +1381,9 @@ pub enum DustLocalStateError {
     WrongGenerationInfo {
         generation_index: u64,
     },
+    CommitmentIndexNotFound {
+        commitment_index: u64,
+    },
 }
 
 impl Display for DustLocalStateError {
@@ -1402,6 +1405,10 @@ impl Display for DustLocalStateError {
             WrongGenerationInfo { generation_index } => write!(
                 f,
                 "generation info for generation index {generation_index} is invalid"
+            ),
+            CommitmentIndexNotFound { commitment_index } => write!(
+                f,
+                "failed to find commitment for commitment index {commitment_index}"
             ),
         }
     }
