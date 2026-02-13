@@ -1167,9 +1167,10 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                     Self::leaves(child, new_path)
                 }))
             }
-            Node::MidBranchLeaf { value, child, .. } => {
-                Box::new(Self::leaves(child, current_path.clone()).chain(once((current_path, value.clone()))))
-            }
+            Node::MidBranchLeaf { value, child, .. } => Box::new(
+                Self::leaves(child, current_path.clone())
+                    .chain(once((current_path, value.clone()))),
+            ),
         }
     }
 
@@ -1457,8 +1458,13 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             2 => {
                 let ann = A::deserialize(reader, 0)?;
-                let Ok(children) = (0..16).map(|_| loader.get_next(child_hashes))
-                    .collect::<Result<Vec<_>, _>>()?.try_into() else { unreachable!("iterator must be of expected length") };
+                let Ok(children) = (0..16)
+                    .map(|_| loader.get_next(child_hashes))
+                    .collect::<Result<Vec<_>, _>>()?
+                    .try_into()
+                else {
+                    unreachable!("iterator must be of expected length")
+                };
 
                 Ok(Node::Branch {
                     ann,

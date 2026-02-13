@@ -218,14 +218,14 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     init_logger(midnight_ledger::LogLevel::Warn);
     for log_size in 10..=15 {
-        set_default_storage(|| mk_test_db());
+        set_default_storage(mk_test_db);
         let t0 = std::time::Instant::now();
         let size = 2u64.pow(log_size);
         let mut state = TestState::new(&mut rng);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
         rt.block_on(state.give_fee_token(&mut rng, size as usize));
         let mut lstate = Sp::new(state.ledger.clone());
-        let utxo = (&**state.utxos.iter().next().unwrap()).clone();
+        let utxo = (**state.utxos.iter().next().unwrap()).clone();
         let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
             inputs: vec![UtxoSpend {
                 value: utxo.value,
@@ -334,7 +334,6 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         state.unpersist();
         drop(state);
         drop(key);
-        drop(context);
         drop(vtx);
         drop(tx);
         println!("After dropping all data, {} remains allocated", cur_alloc());

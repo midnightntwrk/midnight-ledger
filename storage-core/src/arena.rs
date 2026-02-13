@@ -53,13 +53,15 @@ use std::{
     ops::Deref,
     sync::Arc,
 };
- 
+
 #[cfg(feature = "test-utilities")]
 /// A tracking on time spent in reconstruction of data types loading from the backend.
 ///
 /// Tracks a map of type names to a pair for number of times reconstructed, and the total duration
 /// of the reconstruction.
-pub static TCONSTRUCT: std::sync::Mutex<Option<HashMap<&'static str, (usize, std::time::Duration)>>> = std::sync::Mutex::new(None);
+pub static TCONSTRUCT: std::sync::Mutex<
+    Option<HashMap<&'static str, (usize, std::time::Duration)>>,
+> = std::sync::Mutex::new(None);
 
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
@@ -942,7 +944,10 @@ impl Drop for ConstructTracker {
     fn drop(&mut self) {
         let dt = self.1.elapsed();
         let mut construct_map = TCONSTRUCT.lock().unwrap();
-        let (nconstruct, tconstruct) = construct_map.get_or_insert_default().entry(self.0).or_default();
+        let (nconstruct, tconstruct) = construct_map
+            .get_or_insert_default()
+            .entry(self.0)
+            .or_default();
         *nconstruct += 1;
         *tconstruct += dt;
     }
@@ -989,7 +994,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                     ))?
                     .clone();
                 (Arc::new(obj.data), Arc::new(obj.children))
-            },
+            }
         };
 
         //  Build lazy value if at max_depth.
@@ -1012,7 +1017,11 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             } else {
                 (None, child.clone())
             };
-            let res = Ok(Sp::lazy(self.arena.clone(), child.hash().clone(), child_repr));
+            let res = Ok(Sp::lazy(
+                self.arena.clone(),
+                child.hash().clone(),
+                child_repr,
+            ));
             return res;
         }
         // If not at max depth, then deserialize recursively.
@@ -1027,10 +1036,12 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             &loader,
         )?;
         match child {
-            ArenaKey::Ref(hash) => 
-                Ok(self
-                    .arena
-                    .new_sp(value, hash.clone(), data.deref().clone(), children.deref().clone())),
+            ArenaKey::Ref(hash) => Ok(self.arena.new_sp(
+                value,
+                hash.clone(),
+                data.deref().clone(),
+                children.deref().clone(),
+            )),
             ArenaKey::Direct(_) => Ok(Sp {
                 arena: self.arena.clone(),
                 data: OnceLock::from(Arc::new(value)),
