@@ -60,7 +60,7 @@ futures = { version = "^0.3.31" }
 [dev-dependencies]
 midnight-transient-crypto = { path = ".", features = ["proptest"] }
 actix-rt = "^2.10.0"
-rand_chacha = "^0.3.1"
+rand_chacha = "^0.9.0"
 tracing-subscriber = "0.3.19"
 criterion = { version = "^0.5.1" }
 rayon = "^1.10.0"
