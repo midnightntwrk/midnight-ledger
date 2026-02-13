@@ -1457,13 +1457,8 @@ impl<T: Storable<D> + 'static, D: DB, A: Storable<D> + Annotation<T>> Storable<D
             }
             2 => {
                 let ann = A::deserialize(reader, 0)?;
-                let mut children: [Sp<Node<T, D, A>, D>; 16] =
-                    core::array::from_fn(|_| loader.alloc(Node::Empty));
-
-                #[allow(clippy::needless_range_loop)]
-                for child in children.iter_mut() {
-                    *child = loader.get_next(child_hashes)?;
-                }
+                let Ok(children) = (0..16).map(|_| loader.get_next(child_hashes))
+                    .collect::<Result<Vec<_>, _>>()?.try_into() else { unreachable!("iterator must be of expected length") };
 
                 Ok(Node::Branch {
                     ann,
