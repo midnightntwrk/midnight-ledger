@@ -2789,6 +2789,7 @@ dependencies = [
  "fake",
  "futures",
  "hex",
+ "indexmap 2.13.0",
  "introspection",
  "introspection-derive",
  "is_sorted",

@@ -29,6 +29,7 @@ use midnight_ledger::{
 };
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::collections::VecDeque;
+use std::ops::Deref;
 use storage::{arena::Sp, db::InMemoryDB};
 
 lazy_static! {
@@ -293,4 +294,106 @@ async fn test_cycle_transfers() {
     let tx = state.balance_tx(rng.split(), tx, &RESOLVER).await.unwrap();
     let strictness = WellFormedStrictness::default();
     state.assert_apply(&tx, strictness);
+}
+
+#[tokio::test]
+async fn test_custom_sync() {
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state = TestState::<InMemoryDB>::new(&mut rng);
+    let alice_vk = state.night_key.verifying_key();
+
+    state.give_fee_token(&mut rng, 2).await;
+    state.manual_sync();
+
+    assert_eq!(
+        state.dust.utxos().collect::<Vec<_>>(),
+        state.dust_light.utxos().collect::<Vec<_>>()
+    );
+
+    // send 2 empty txs
+    let resolver = test_resolver("");
+    {
+        let tx =
+            Transaction::<Signature, _, _, _>::from_intents("local-test", [].into_iter().collect());
+        let tx = tx_prove_bind(rng.split(), &tx, &resolver).await.unwrap();
+        let tx = state.balance_tx(rng.split(), tx, &resolver).await.unwrap();
+        let strictness = WellFormedStrictness::default();
+        state.assert_apply(&tx, strictness);
+    }
+
+    {
+        let tx =
+            Transaction::<Signature, _, _, _>::from_intents("local-test", [].into_iter().collect());
+        let tx = tx_prove_bind(rng.split(), &tx, &resolver).await.unwrap();
+        let tx = state.balance_tx(rng.split(), tx, &resolver).await.unwrap();
+        let strictness = WellFormedStrictness::default();
+        state.assert_apply(&tx, strictness);
+    }
+
+    state.manual_sync();
+
+    assert_eq!(
+        state.dust.utxos().collect::<Vec<_>>(),
+        state.dust_light.utxos().collect::<Vec<_>>()
+    );
+
+    // send Night token to another account
+    let bob_sk = SigningKey::sample(&mut rng);
+    let bob_vk = bob_sk.verifying_key();
+    let bob_addr = UserAddress::from(bob_vk.clone());
+
+    let (utxo_in, _) = state
+        .ledger
+        .utxo
+        .utxos
+        .iter()
+        .next()
+        .unwrap()
+        .deref()
+        .clone();
+
+    let mut intent = Intent::<Signature, _, _, _>::empty(&mut rng, state.time);
+    let spend = UtxoSpend {
+        intent_hash: utxo_in.intent_hash,
+        output_no: utxo_in.output_no,
+        owner: alice_vk,
+        type_: NIGHT,
+        value: utxo_in.value,
+    };
+    let spend_nonce = spend.initial_nonce();
+    intent.guaranteed_unshielded_offer = Some(Sp::new(UnshieldedOffer {
+        inputs: vec![spend].into(),
+        outputs: vec![UtxoOutput {
+            owner: bob_addr,
+            type_: NIGHT,
+            value: utxo_in.value,
+        }]
+        .into(),
+        signatures: vec![].into(),
+    }));
+    let tx = Transaction::<Signature, _, _, _>::from_intents(
+        "local-test",
+        [(1, intent)].into_iter().collect(),
+    );
+    let tx = state.balance_tx(rng.split(), tx, &resolver).await.unwrap();
+    let strictness = WellFormedStrictness::default();
+    state.assert_apply(&tx, strictness);
+
+    state.manual_sync();
+
+    assert_eq!(
+        state.dust.utxos().collect::<Vec<_>>(),
+        state.dust_light.utxos().collect::<Vec<_>>()
+    );
+    assert_eq!(state.dust_light.generating_info.size(), 2);
+
+    // verify dtime got updated
+    assert_eq!(
+        state
+            .dust_light
+            .generating_info
+            .get(&spend_nonce)
+            .map(|v| v.dtime),
+        Some(state.dust_light.sync_time)
+    );
 }

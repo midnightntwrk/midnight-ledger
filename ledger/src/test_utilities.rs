@@ -14,7 +14,8 @@
 use crate::construct::ContractCallPrototype;
 use crate::dust::DustResolver;
 use crate::dust::{
-    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
+    DustActions, DustLocalState, DustLocalStateLight, DustOutput, DustPublicKey, DustRegistration,
+    DustSecretKey,
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
@@ -34,6 +35,7 @@ use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
+use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
 use base_crypto::signatures::{Signature, SigningKey};
 use base_crypto::time::{Duration, Timestamp};
@@ -41,6 +43,7 @@ use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
 };
 use derive_where::derive_where;
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
@@ -106,8 +109,8 @@ pub struct TestState<D: DB> {
     pub zswap: ZswapLocalState<D>,
     pub utxos: HashSet<Utxo, D>,
     pub dust: DustLocalState<D>,
-    pub events: Vec<Event<D>>,
-
+    pub dust_light: DustLocalStateLight<D>,
+    pub events: IndexMap<Timestamp, Vec<Event<D>>>,
     pub time: Timestamp,
 
     pub zswap_keys: SecretKeys,
@@ -122,8 +125,8 @@ impl<D: DB> TestState<D> {
             zswap: ZswapLocalState::new(),
             utxos: HashSet::new(),
             dust: DustLocalState::new(INITIAL_PARAMETERS.dust),
-            events: Vec::new(),
-
+            dust_light: DustLocalStateLight::new(INITIAL_PARAMETERS.dust),
+            events: IndexMap::new(),
             time: Timestamp::from_secs(0),
 
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
@@ -279,6 +282,7 @@ impl<D: DB> TestState<D> {
             )
             .unwrap();
         self.dust = self.dust.process_ttls(self.time);
+        self.dust_light = self.dust_light.process_ttls(self.time);
     }
 
     pub fn step(&mut self) {
@@ -375,6 +379,7 @@ impl<D: DB> TestState<D> {
             .dust
             .replay_events(&self.dust_key, result.events())
             .expect("just applied transaction should replay");
+        assert_eq!(self.events.insert(self.time, result.events().into()), None);
         let pk = UserAddress::from(self.night_key.verifying_key());
         self.utxos = self
             .ledger
@@ -539,7 +544,38 @@ impl<D: DB> TestState<D> {
                     .spend(&self.dust_key, &qdo, v_fee, self.time)
                     .unwrap(); // TODO unwrap
                 self.dust = new_dust;
-                spends = spends.push(spend);
+                spends = spends.push(spend.clone());
+                let commitment = qdo.commitment();
+                let gen_idx = self
+                    .ledger
+                    .dust
+                    .generation
+                    .night_indices
+                    .get(&qdo.backing_night)
+                    .unwrap(); // TODO unwrap
+                if let Ok((new_dust, spend2)) = self.dust_light.spend(
+                    &self.dust_key,
+                    &qdo,
+                    v_fee,
+                    self.time,
+                    self.ledger
+                        .dust
+                        .generation
+                        .generating_tree
+                        .path_for_leaf(*gen_idx, gen_info.merkle_hash())
+                        .unwrap(), // TODO unwrap
+                    self.ledger
+                        .dust
+                        .utxo
+                        .commitments
+                        .path_for_leaf(qdo.mt_index, HashOutput::from(commitment))
+                        .unwrap(), // TODO unwrap
+                    self.ledger.dust.generation.generating_tree.root().unwrap(), // TODO unwrap
+                    self.ledger.dust.utxo.commitments.root().unwrap(),           // TODO unwrap
+                ) {
+                    self.dust_light = new_dust;
+                    assert_eq!(spend, spend2);
+                }
             }
             if dust > 0 {
                 panic!("failed to balance testing transaction's dust");
@@ -562,6 +598,22 @@ impl<D: DB> TestState<D> {
         }
         // TODO: Balance unshielded
         Ok(merged_tx)
+    }
+
+    pub fn manual_sync(&mut self) {
+        // get new transactions
+        let mut new_txs = self.events.clone();
+        let last_sync_time = self.dust_light.sync_time;
+        new_txs.retain(|block_time, _| {
+            if last_sync_time == Timestamp::default() {
+                *block_time >= last_sync_time
+            } else {
+                *block_time > last_sync_time
+            }
+        });
+
+        // trigger sync
+        self.dust_light = self.dust_light.sync(new_txs, &self.dust_key);
     }
 }
 
