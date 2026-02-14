@@ -25,7 +25,7 @@ use crate::structure::{
     ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
     SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
-use crate::utils::{KeySortedIter, SortedIter, sorted};
+use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
@@ -83,7 +83,7 @@ impl<D: DB> Debug for TransactionContext<D> {
 pub enum TransactionResult<D: DB> {
     Success(Vec<Event<D>>),
     PartialSuccess(
-        std::collections::HashMap<u16, Result<(), TransactionInvalid<D>>>,
+        std::collections::BTreeMap<u16, Result<(), TransactionInvalid<D>>>,
         Vec<Event<D>>,
     ),
     Failure(TransactionInvalid<D>),
@@ -104,9 +104,9 @@ impl<D: DB> From<&TransactionResult<D>> for ErasedTransactionResult {
         match res {
             TransactionResult::Success(_) => ErasedTransactionResult::Success,
             TransactionResult::PartialSuccess(segments, _) => {
-                ErasedTransactionResult::PartialSuccess(sorted(
-                    segments.iter().map(|(k, v)| (*k, v.is_ok())),
-                ))
+                ErasedTransactionResult::PartialSuccess(
+                    segments.iter().map(|(k, v)| (*k, v.is_ok())).collect(),
+                )
             }
             TransactionResult::Failure(_) => ErasedTransactionResult::Failure,
         }
@@ -1207,7 +1207,7 @@ impl<D: DB> LedgerState<D> {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
-                let mut segment_success = std::collections::HashMap::new();
+                let mut segment_success = std::collections::BTreeMap::new();
                 let mut events = Vec::new();
                 let mut total_success = true;
                 let mut new_st = self.clone();
