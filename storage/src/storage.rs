@@ -325,25 +325,13 @@ impl<
     }
 
     /// Returns keys
-    pub fn keys(&self) -> impl Iterator<Item = K> + use<K, V, D, A> {
-        let mut res = std::vec::Vec::<K>::new();
-
-        for (k, _) in self.iter().map(|x| (*x).clone()) {
-            res.push((*k).clone());
-        }
-
-        res.into_iter()
+    pub fn keys(&self) -> impl Iterator<Item = K> + use<'_, K, V, D, A> + '_ {
+        self.iter().map(|x| x.0.deref().clone())
     }
 
     /// Returns values
-    pub fn values(&self) -> impl Iterator<Item = V> + use<K, V, D, A> {
-        let mut res = std::vec::Vec::<V>::new();
-
-        for (_, v) in self.iter().map(|x| (*x).clone()) {
-            res.push((*v).clone());
-        }
-
-        res.into_iter()
+    pub fn values(&self) -> impl Iterator<Item = V> + use<'_, K, V, D, A> + '_ {
+        self.iter().map(|x| x.1.deref().clone())
     }
 
     /// Retrieve the annotation on the root of the trie
@@ -1052,7 +1040,7 @@ impl<
     type Item = T;
 
     fn iter_items(self) -> impl Iterator<Item = Self::Item> {
-        self.0.keys()
+        self.0.keys().collect::<Vec<_>>().into_iter()
     }
 
     fn once(item: Self::Item) -> Self {

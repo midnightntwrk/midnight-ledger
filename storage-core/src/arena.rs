@@ -1573,8 +1573,19 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     pub fn unload(&mut self) {
         // Return our data to the uninitialized state, dropping the `Arc` in
         // `data`, if any.
-        self.data.take();
+        let was_lazy = self.data.take().is_none();
         self.gc_weak_pointer();
+        // We only need to do this on refs, because others aren't actually
+        // ref-counted. Additionally, note that if we have a Direct node here,
+        // then the children contained within this Sp will do their own cleanup.
+        if let ArenaKey::Ref(hash) = &self.child_repr && !was_lazy {
+            // It's important that we unload() before calling decrement_ref(),
+            // because unload() is responsible for cleaning up the sp_cache, and
+            // decrement_ref() is responsible for cleaning up the metadata, and the
+            // invariant is that any Arc in the sp_cache must have a corresponding
+            // entry in the metadata.
+            self.arena.decrement_ref(hash);
+        }
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
@@ -1765,19 +1776,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
-        // We only need to do this on refs, because others aren't actually
-        // ref-counted. Additionally, note that if we have a Direct node here,
-        // then the children contained within this Sp will do their own cleanup.
-        let is_lazy = self.is_lazy();
         self.unload();
-        if let ArenaKey::Ref(hash) = &self.child_repr && !is_lazy {
-            // It's important that we unload() before calling decrement_ref(),
-            // because unload() is responsible for cleaning up the sp_cache, and
-            // decrement_ref() is responsible for cleaning up the metadata, and the
-            // invariant is that any Arc in the sp_cache must have a corresponding
-            // entry in the metadata.
-            self.arena.decrement_ref(hash);
-        }
     }
 }
 

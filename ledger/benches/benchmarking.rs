@@ -202,11 +202,10 @@ pub fn create_dust(c: &mut Criterion) {
 type TestDb = ParityDb;
 
 fn mk_test_db() -> storage::Storage<TestDb> {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path()).unwrap();
+    let dir = tempfile::tempdir().unwrap().keep();
     storage::Storage::new(
-        DEFAULT_CACHE_SIZE,
-        ParityDb::<DefaultHasher>::open(&dir.path().join("test-db")),
+        10,
+        ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
     )
 }
@@ -224,7 +223,10 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let size = 2u64.pow(log_size);
         let mut state = TestState::new(&mut rng);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
-        rt.block_on(state.give_fee_token(&mut rng, size as usize));
+        for _ in 0..size >> 10 {
+            rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
+            state.swizzle_to_db();
+        }
         let mut lstate = Sp::new(state.ledger.clone());
         let utxo = (**state.utxos.iter().next().unwrap()).clone();
         let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
