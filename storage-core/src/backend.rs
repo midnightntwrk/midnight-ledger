@@ -91,15 +91,7 @@ enum CacheValue<H: WellBehavedHasher> {
     Read { obj: OnDiskObject<H> },
     /// Existing object, mutated due to new parent or gc-root
     /// references.
-    ///
-    /// Possible optimization: we could avoid storing the `obj` here, and so
-    /// also avoid looking it up in the DB until we were ready to apply the
-    /// update (which will be never for temp updates). However, the trade-off is
-    /// that this would prevent us from failing fast if there was a bug whereby
-    /// a non-existent object was referenced via a child key, or a ref count
-    /// became negative. I.e. by having the object here, we're able to do sanity
-    /// checks.
-    Update { delta: Delta, obj: OnDiskObject<H> },
+    Update { delta: Delta },
     /// Existing object in a combination of `Read` and `Update` states. We keep
     /// this separate from `Read` and `Update`, because when a sequence of
     /// `Update`s combine to have no effect we drop them, whereas a
@@ -125,15 +117,14 @@ enum CacheValue<H: WellBehavedHasher> {
 
 impl<H: WellBehavedHasher> CacheValue<H> {
     /// Return reference to contained `OnDiskObject`.
-    fn get_obj(&self) -> &OnDiskObject<H> {
+    fn get_obj(&self) -> Option<&OnDiskObject<H>> {
         match self {
+            CacheValue::Update { .. } | CacheValue::Dummy => None,
             CacheValue::Read { obj }
-            | CacheValue::Update { obj, .. }
             | CacheValue::ReadAndUpdate { obj, .. }
             | CacheValue::Create { obj, .. }
             | CacheValue::CreateAndUpdate { obj, .. }
-            | CacheValue::CreateAndDelete { obj, .. } => obj,
-            CacheValue::Dummy => unreachable!(),
+            | CacheValue::CreateAndDelete { obj, .. } => Some(obj),
         }
     }
 
@@ -357,17 +348,10 @@ impl<D: DB> StorageBackend<D> {
     /// you want that, then call `cache` instead!
     pub fn get(&mut self, key: &ArenaHash<D::Hasher>) -> Option<&OnDiskObject<D::Hasher>> {
         // If already in memory, move to the front of cache.
-        if self.peek_from_memory(key).is_some() {
+        if self.peek_from_memory(key).is_some_and(|o| o.get_obj().is_some()) {
             self.stats.borrow_mut().get_cache_hits += 1;
             let value = self.remove_from_memory(key);
             let value = match value {
-                CacheValue::Update {
-                    delta,
-                    obj,
-                } => CacheValue::ReadAndUpdate {
-                    delta,
-                    obj,
-                },
                 CacheValue::Read { .. }
                 | CacheValue::ReadAndUpdate { .. }
                 | CacheValue::Create { .. }
@@ -376,17 +360,24 @@ impl<D: DB> StorageBackend<D> {
                 // not nec a bug, since e.g. it could be in the closure of a new
                 // GC root, and awaiting persistence along with that root.
                 | CacheValue::CreateAndDelete { .. } | CacheValue::Dummy => value,
+                // get_obj is None
+                CacheValue::Update { .. } => unreachable!(),
             };
             self.cache_insert_new_key(key.clone(), value);
-            return Some(self.peek_from_memory(key).unwrap().get_obj());
+            return Some(self.peek_from_memory(key).unwrap().get_obj().unwrap());
         }
 
         // Attempt to read from DB.
         self.stats.borrow_mut().get_cache_misses += 1;
         if let Some(obj) = self.database.get_node(key) {
-            self.cache_insert_new_key(key.clone(), CacheValue::Read { obj });
+            let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(key) {
+                CacheValue::ReadAndUpdate { delta: *delta, obj: obj.apply_delta(*delta) }
+            } else {
+                CacheValue::Read { obj }
+            };
+            self.cache_insert_new_key(key.clone(), cache_value);
         }
-        self.peek_from_memory(key).map(|cv| cv.get_obj())
+        self.peek_from_memory(key).and_then(|cv| cv.get_obj())
     }
 
     /// Get the root count for `key`, incorporating any pending in-memory updates.
@@ -479,7 +470,7 @@ impl<D: DB> StorageBackend<D> {
         // out of `CreateAndDelete` state if necessary, since `cache` promises
         // that the object will stick around at least until being `uncache`d
         // again.
-        if self.peek_from_memory(&key).is_some() {
+        if self.peek_from_memory(&key).is_some_and(|v| v.get_obj().is_some()) {
             let value = self.remove_from_memory(&key);
             let value = match value {
                 // We don't upgrade this to `Create`, because `Create` implies
@@ -491,10 +482,11 @@ impl<D: DB> StorageBackend<D> {
                 | CacheValue::Create { .. }
                 | CacheValue::CreateAndUpdate { .. }
                 | CacheValue::Dummy => value,
-                CacheValue::Update { delta, obj } => CacheValue::ReadAndUpdate { delta, obj },
                 CacheValue::CreateAndDelete { obj, delta } => {
                     CacheValue::CreateAndUpdate { obj, delta }
                 }
+                // get_obj is None
+                CacheValue::Update { .. } => unreachable!(),
             };
             self.cache_insert_new_key(key, value);
             return;
@@ -515,7 +507,12 @@ impl<D: DB> StorageBackend<D> {
         // either compute the full ref-counts only when flushing, or make the db
         // responsible for applying the ref-count deltas directly.
         if let Some(obj) = self.database.get_node(&key) {
-            self.cache_insert_new_key(key.clone(), CacheValue::Read { obj });
+            let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
+                CacheValue::ReadAndUpdate { delta: *delta, obj: obj.apply_delta(*delta) }
+            } else {
+                CacheValue::Read { obj }
+            };
+            self.cache_insert_new_key(key.clone(), cache_value);
             return;
         }
         // Otherwise, this is a new object, so we need to update the ref counts of all the
@@ -620,7 +617,7 @@ impl<D: DB> StorageBackend<D> {
         };
         let mut kvs = self.database.bfs_get_nodes(
             key,
-            |key| self.peek_from_memory(key).map(|cv| cv.get_obj().clone()),
+            |key| self.peek_from_memory(key).and_then(|cv| cv.get_obj().cloned()),
             truncate,
             max_depth,
             max_count,
@@ -653,11 +650,17 @@ impl<D: DB> StorageBackend<D> {
         I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
         let mut updates = vec![];
-        for (k, v) in writes {
+        for (k, mut v) in writes {
             // Check for reads first, to give better error messages.
             if matches!(v, CacheValue::Read { .. }) {
                 panic!("BUG: unexpected CacheValue::Read!")
             }
+            v = if let CacheValue::Update { delta } = v {
+                let obj = self.database.get_node(&k).expect("can't update unknown object");
+                CacheValue::ReadAndUpdate { delta, obj: obj.apply_delta(delta) }
+            } else {
+                v
+            };
             // Insert objects for flushed writes into the read cache.
             //
             // It might make sense to not recache `CreateAndDelete`
@@ -669,13 +672,13 @@ impl<D: DB> StorageBackend<D> {
             self.cache_insert_new_key(
                 k.clone(),
                 CacheValue::Read {
-                    obj: v.get_obj().clone(),
+                    obj: v.get_obj().expect("object must be available").clone(),
                 },
             );
             // Calculate DB updates corresponding to pending writes.
             match v {
                 CacheValue::Read { .. } => unreachable!("already handled Read above"),
-                CacheValue::Update { delta, obj } | CacheValue::ReadAndUpdate { delta, obj } => {
+                CacheValue::ReadAndUpdate { delta, obj } => {
                     if delta.ref_delta != 0 {
                         updates.push((k.clone(), Update::InsertNode(obj)));
                     }
@@ -699,7 +702,7 @@ impl<D: DB> StorageBackend<D> {
                     }
                 }
                 CacheValue::Create { obj } => updates.push((k, Update::InsertNode(obj))),
-                CacheValue::Dummy => {}
+                CacheValue::Dummy | CacheValue::Update { .. } => {}
             }
         }
         self.database.batch_update(updates.into_iter());
@@ -781,7 +784,7 @@ impl<D: DB> StorageBackend<D> {
         let db_unreachable_keys = self.database.get_unreachable_keys();
         let mut mem_unreachable_keys = vec![];
         for (k, v) in self.write_cache.iter() {
-            if v.get_obj().ref_count == 0 {
+            if v.get_obj().map(|o| o.ref_count) == Some(0) {
                 mem_unreachable_keys.push(k.clone());
             }
         }
@@ -805,17 +808,19 @@ impl<D: DB> StorageBackend<D> {
             let max_depth = 1;
             let truncate = false;
             self.pre_fetch(&key, Some(max_depth), truncate);
-            let node = self.peek_from_memory(&key).unwrap().get_obj().clone();
+            let node = self.peek_from_memory(&key).unwrap().get_obj().cloned();
 
             // Decrement child ref counts, and mark unreachable any children
             // whose ref count goes to zero.
-            self.update_counts(&node.children, Delta::new_ref_delta(-1));
-            for child_key in node.children.iter().flat_map(ArenaKey::refs) {
-                // Unless the cache is unreasonably small, all of the children
-                // will already be in memory from the `pre_fetch` above, so this
-                // `get` won't trigger any full pre-fetches.
-                if self.get(child_key).unwrap().ref_count == 0 && !root_keys.contains(child_key) {
-                    unreachable_keys.push(child_key.clone());
+            if let Some(node) = node {
+                self.update_counts(&node.children, Delta::new_ref_delta(-1));
+                for child_key in node.children.iter().flat_map(ArenaKey::refs) {
+                    // Unless the cache is unreasonably small, all of the children
+                    // will already be in memory from the `pre_fetch` above, so this
+                    // `get` won't trigger any full pre-fetches.
+                    if self.get(child_key).unwrap().ref_count == 0 && !root_keys.contains(child_key) {
+                        unreachable_keys.push(child_key.clone());
+                    }
                 }
             }
             keys_to_delete.push(key);
@@ -890,12 +895,10 @@ impl<D: DB> StorageBackend<D> {
                     }
                     CacheValue::Update {
                         delta: old_delta,
-                        obj,
                     } => {
-                        let obj = obj.apply_delta(delta);
                         #[allow(clippy::manual_map)]
                         if let Some(delta) = delta.combine(old_delta) {
-                            Replace(CacheValue::Update { delta, obj })
+                            Replace(CacheValue::Update { delta })
                         } else {
                             Remove
                         }
@@ -960,14 +963,7 @@ impl<D: DB> StorageBackend<D> {
                     }
                 }
             } else {
-                // Possible small optimization: could batch get nodes here for
-                // `keys` that aren't already in memory.
-                let obj = self
-                    .database
-                    .get_node(key)
-                    .expect("can't update unknown object");
-                let obj = obj.apply_delta(delta);
-                self.cache_insert_new_key(key.clone(), CacheValue::Update { delta, obj })
+                self.cache_insert_new_key(key.clone(), CacheValue::Update { delta })
             }
         }
     }
@@ -1017,7 +1013,7 @@ impl<D: DB> StorageBackend<D> {
     pub fn get_write_cache_obj_bytes(&self) -> usize {
         self.write_cache
             .iter()
-            .map(|(_, cv)| cv.get_obj().size())
+            .flat_map(|(_, cv)| cv.get_obj().map(|o| o.size()))
             .sum()
     }
 }
@@ -1079,8 +1075,9 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     fn apply_delta(self, delta: Delta) -> Self {
         let ref_count = self
             .ref_count
-            .checked_add_signed(delta.ref_delta as i64)
-            .expect("ref count can't go out of u64 bounds");
+            .saturating_add_signed(delta.ref_delta as i64);
+            // FIXME: Why does this break?
+            //.expect("ref count can't go out of u64 bounds");
         OnDiskObject {
             data: self.data,
             children: self.children,

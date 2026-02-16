@@ -2805,6 +2805,7 @@ dependencies = [
  "midnight-transient-crypto",
  "midnight-zswap",
  "pastey",
+ "pprof",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",

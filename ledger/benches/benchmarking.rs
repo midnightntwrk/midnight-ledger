@@ -22,6 +22,7 @@ use midnight_ledger::test_utilities::well_formed_tx_builder;
 use midnight_ledger::test_utilities::{TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
 use onchain_runtime::context::BlockContext;
+use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::alloc::GlobalAlloc;
@@ -50,9 +51,9 @@ fn cur_alloc() -> String {
     const GB: u64 = 1 << 30;
     match n {
         0..KB => format!("{n} B"),
-        KB..MB => format!("{} kiB", n >> 10),
-        MB..GB => format!("{} MiB", n >> 20),
-        GB.. => format!("{} GiB", n >> 30),
+        KB..MB => format!("{:.2} kiB", n as f64 / KB as f64),
+        MB..GB => format!("{:.2} MiB", n as f64 / MB as f64),
+        GB.. => format!("{:.2} GiB", n as f64 / GB as f64),
     }
 }
 
@@ -217,7 +218,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     init_logger(midnight_ledger::LogLevel::Warn);
-    for log_size in 10..=15 {
+    for log_size in 10..=17 {
         set_default_storage(mk_test_db);
         let t0 = std::time::Instant::now();
         let size = 2u64.pow(log_size);
@@ -412,7 +413,11 @@ criterion_group!(
     targets = transaction_validation
 );
 criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust);
-criterion_group!(night, night_transfer_by_utxo_set_size);
+criterion_group!(
+    name = night;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = night_transfer_by_utxo_set_size
+);
 #[cfg(feature = "proving")]
 criterion_main!(benchmarking, system_tx, night);
 #[cfg(not(feature = "proving"))]
