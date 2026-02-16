@@ -204,7 +204,7 @@ type TestDb = ParityDb;
 fn mk_test_db() -> storage::Storage<TestDb> {
     let dir = tempfile::tempdir().unwrap().keep();
     storage::Storage::new(
-        10,
+        DEFAULT_CACHE_SIZE,
         ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
     )
@@ -217,7 +217,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     init_logger(midnight_ledger::LogLevel::Warn);
-    for log_size in 10..=17 {
+    for log_size in 10..=13 {
         set_default_storage(mk_test_db);
         let t0 = std::time::Instant::now();
         let size = 2u64.pow(log_size);
