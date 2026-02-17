@@ -64,6 +64,13 @@ impl IrValue {
             IrValue::JubjubPoint(_) => IrType::JubjubPoint,
         }
     }
+
+    pub(crate) fn default(val_t: &IrType) -> Self {
+        match val_t {
+            IrType::Native => IrValue::Native(Fr::default()),
+            IrType::JubjubPoint => IrValue::JubjubPoint(JubjubSubgroup::default()),
+        }
+    }
 }
 
 /// In-circuit IR value, this is a placeholder for an [IrValue], a circuit
