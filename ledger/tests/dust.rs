@@ -284,7 +284,10 @@ async fn test_cycle_transfers() {
         let utxo_ih = intent.erase_proofs().erase_signatures().intent_hash(0);
         utxos[(i + 1) % CYCLE_LEN].push_back((utxo_ih, 0));
         let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+        let t0 = std::time::Instant::now();
         state.assert_apply(&tx, unbalanced_strictness);
+        let t1 = std::time::Instant::now();
+        dbg!(t1 - t0);
     }
     state.fast_forward(state.ledger.parameters.dust.time_to_cap());
     let tx =

@@ -35,7 +35,10 @@ use std::sync::{Arc, LazyLock};
 /// is not well motivated, and we may want to change it later, or better yet,
 /// refactor the back-end to track the memory size of the cache, instead of the
 /// number of cached objects.
-pub const DEFAULT_CACHE_SIZE: usize = 1024 * 1024;
+///
+/// That said, it *has* been set based on observation, to a point where the cache consumes under a
+/// gigabyte during typical operation.
+pub const DEFAULT_CACHE_SIZE: usize = 10_000;
 
 #[derive(Clone, Debug)]
 /// A factory for various storage objects
