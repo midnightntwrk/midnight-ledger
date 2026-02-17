@@ -11,12 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
+use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
+use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_types::{CircuitValue, IrType, IrValue};
+
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
+use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
@@ -25,17 +32,18 @@ use midnight_circuits::instructions::{
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
 };
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
+use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt};
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use transient_crypto::curve::EmbeddedGroupAffine;
+use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
-use transient_crypto::curve::{embedded, outer};
 use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
 use transient_crypto::proofs::{ProofPreimage, ProvingError};
@@ -47,20 +55,11 @@ use transient_crypto::repr::FieldRepr;
 #[derive(Clone, Debug)]
 #[allow(missing_docs)]
 pub struct Preprocessed {
-    pub memory: HashMap<Identifier, outer::Scalar>,
+    pub memory: HashMap<Identifier, IrValue>,
     pub pis: Vec<outer::Scalar>,
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
-}
-
-fn lnot(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    a: &AssignedNative<outer::Scalar>,
-) -> Result<AssignedNative<outer::Scalar>, Error> {
-    let bit = std.is_zero(layouter, a)?;
-    std.convert(layouter, &bit)
 }
 
 fn fab_decode_to_bytes(
@@ -188,24 +187,11 @@ fn assemble_bytes(
     Ok(acc)
 }
 
-fn ecc_from_parts(
-    std: &ZkStdLib,
-    layouter: &mut impl Layouter<outer::Scalar>,
-    x: &AssignedNative<outer::Scalar>,
-    y: &AssignedNative<outer::Scalar>,
-) -> Result<AssignedNativePoint<embedded::AffineExtended>, Error> {
-    let point = x
-        .value()
-        .zip(y.value())
-        .map(|(x, y)| EmbeddedGroupAffine::new(Fr(*x), Fr(*y)));
-    point.as_ref().error_if_known_and(|p| p.is_none())?;
-    let point = point.map(|p| p.expect("After is_none check, point should exist").0);
-    let point_var: AssignedNativePoint<embedded::AffineExtended> =
-        std.jubjub().assign(layouter, point)?;
-
-    std.assert_equal(layouter, x, &std.jubjub().x_coordinate(&point_var))?;
-    std.assert_equal(layouter, y, &std.jubjub().y_coordinate(&point_var))?;
-    Ok(point_var)
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
+/// TODO: Remove this function when IrType supports JubjubScalar.
+fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<JubjubFr, anyhow::Error> {
+    let s: Option<JubjubFr> = JubjubFr::from_bytes(&native.to_bytes_le()).into();
+    s.ok_or(anyhow::Error::msg("Error converting Fr to JubjubScalar"))
 }
 
 impl IrSource {
@@ -222,9 +208,9 @@ impl IrSource {
                 preimage.inputs.len()
             );
         }
-        let mut memory: HashMap<Identifier, Fr> = HashMap::new();
+        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
         for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
-            memory.insert(id.clone(), *input);
+            memory.insert(id.name.clone(), IrValue::Native(*input));
         }
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
@@ -240,20 +226,22 @@ impl IrSource {
         let mut public_transcript_outputs_idx: usize = 0;
         let mut private_transcript_outputs_idx: usize = 0;
         let mut outputs = Vec::new();
-        let idx = |memory: &HashMap<Identifier, Fr>, id: &Identifier| {
+        let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
             let res = memory
                 .get(id)
-                .copied()
+                .cloned()
                 .ok_or(anyhow!("variable not found: {:?}", id));
             trace!(?res, "retrieved from {:?}", id);
             res
         };
-        let resolve_operand = |memory: &HashMap<Identifier, Fr>, operand: &Operand| match operand {
-            Operand::Variable(id) => idx(memory, id),
-            Operand::Immediate(imm) => Ok(*imm),
-        };
-        let resolve_operand_bool = |memory: &HashMap<Identifier, Fr>, operand: &Operand| {
+        let resolve_operand =
+            |memory: &HashMap<Identifier, IrValue>, operand: &Operand| match operand {
+                Operand::Variable(id) => idx(memory, id),
+                Operand::Immediate(imm) => Ok(IrValue::Native(*imm)),
+            };
+        let resolve_operand_bool = |memory: &HashMap<Identifier, IrValue>, operand: &Operand| {
             resolve_operand(memory, operand).and_then(|val| {
+                let val: Fr = val.try_into()?;
                 if val == 0.into() {
                     Ok(false)
                 } else if val == 1.into() {
@@ -263,15 +251,11 @@ impl IrSource {
                 }
             })
         };
-        let resolve_operand_point = |memory: &HashMap<Identifier, Fr>, x: &Operand, y: &Operand| {
-            let x = resolve_operand(memory, x)?;
-            let y = resolve_operand(memory, y)?;
-            EmbeddedGroupAffine::new(x, y)
-                .ok_or(anyhow!("Elliptic curve point not on curve: ({x:?}, {y:?})"))
-        };
+
         let resolve_operand_bits =
-            |memory: &HashMap<Identifier, Fr>, operand: &Operand, constrain: Option<u32>| {
+            |memory: &HashMap<Identifier, IrValue>, operand: &Operand, constrain: Option<u32>| {
                 resolve_operand(memory, operand).and_then(|val| {
+                    let val: Fr = val.try_into()?;
                     let mut bits = val
                         .0
                         .to_bytes_le()
@@ -294,8 +278,7 @@ impl IrSource {
                     Ok(bits)
                 })
             };
-        let from_point =
-            |p: EmbeddedGroupAffine| [p.x().unwrap_or(0.into()), p.y().unwrap_or(0.into())];
+
         fn from_bits<I: DoubleEndedIterator<Item = bool>>(bits: I) -> Fr {
             bits.rev()
                 .fold(0.into(), |acc, bit| acc * 2.into() + bit.into())
@@ -303,20 +286,49 @@ impl IrSource {
         for ins in self.instructions.iter() {
             trace!(?ins, "preprocess gate");
             match ins {
+                I::Encode { input, outputs } => {
+                    let val = resolve_operand(&memory, input)?;
+                    let encoded = encode_offcircuit(&val);
+                    if encoded.len() != outputs.len() {
+                        return Err(anyhow::Error::msg(
+                            "Unexpected output length of encode instruction",
+                        ));
+                    }
+                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                        memory.insert(out_id.clone(), enc_val);
+                    }
+                }
+                I::Decode {
+                    inputs,
+                    val_t,
+                    output,
+                } => {
+                    let raw_inputs = inputs
+                        .iter()
+                        .map(|inp_id| resolve_operand(&memory, inp_id)?.try_into())
+                        .collect::<Result<Vec<Fr>, _>>()?;
+                    let decoded = decode_offcircuit(&raw_inputs, val_t)?;
+                    memory.insert(output.clone(), decoded);
+                }
                 I::Add { a, b, output } => {
-                    let result = resolve_operand(&memory, a)? + resolve_operand(&memory, b)?;
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = add_offcircuit(&a, &b)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Mul { a, b, output } => {
-                    let result = resolve_operand(&memory, a)? * resolve_operand(&memory, b)?;
+                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
+                    let b: Fr = resolve_operand(&memory, b)?.try_into()?;
+                    let result = IrValue::Native(a * b);
                     memory.insert(output.clone(), result);
                 }
                 I::Neg { a, output } => {
-                    let result = -resolve_operand(&memory, a)?;
+                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
+                    let result = IrValue::Native(-a);
                     memory.insert(output.clone(), result);
                 }
                 I::Not { a, output } => {
-                    let result = (!resolve_operand_bool(&memory, a)?).into();
+                    let result = IrValue::Native((!resolve_operand_bool(&memory, a)?).into());
                     memory.insert(output.clone(), result);
                 }
                 I::ConstrainEq { a, b } => {
@@ -342,8 +354,9 @@ impl IrSource {
                     }
                 }
                 I::TestEq { a, b, output } => {
-                    let result =
-                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into();
+                    let result = IrValue::Native(
+                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into(),
+                    );
                     memory.insert(output.clone(), result);
                 }
                 I::PublicInput { guard, output } => {
@@ -358,7 +371,7 @@ impl IrSource {
                                 .ok_or(anyhow!("Ran out of public transcript outputs"))?
                         }
                     };
-                    memory.insert(output.clone(), val);
+                    memory.insert(output.clone(), IrValue::Native(val));
                 }
                 I::PrivateInput { guard, output } => {
                     let val = match guard {
@@ -372,7 +385,7 @@ impl IrSource {
                                 .ok_or(anyhow!("Ran out of private transcript outputs"))?
                         }
                     };
-                    memory.insert(output.clone(), val);
+                    memory.insert(output.clone(), IrValue::Native(val));
                 }
                 I::Copy { val, output } => {
                     let val = resolve_operand(&memory, val)?;
@@ -392,11 +405,11 @@ impl IrSource {
                     let val_bits = resolve_operand_bits(&memory, val, None)?;
                     memory.insert(
                         outputs[0].clone(),
-                        from_bits(val_bits[*bits as usize..].iter().copied()),
+                        IrValue::Native(from_bits(val_bits[*bits as usize..].iter().copied())),
                     );
                     memory.insert(
                         outputs[1].clone(),
-                        from_bits(val_bits[..*bits as usize].iter().copied()),
+                        IrValue::Native(from_bits(val_bits[..*bits as usize].iter().copied())),
                     );
                 }
                 I::ReconstituteField {
@@ -436,8 +449,9 @@ impl IrSource {
                         bail!("Reconstituted element overflows field");
                     }
                     let power = (0..*bits).fold(Fr::from(1), |acc, _| Fr::from(2) * acc);
-                    let result = power * resolve_operand(&memory, divisor)?
-                        + resolve_operand(&memory, modulus)?;
+                    let modulus: Fr = resolve_operand(&memory, modulus)?.try_into()?;
+                    let divisor: Fr = resolve_operand(&memory, divisor)?.try_into()?;
+                    let result = IrValue::Native(power * divisor + modulus);
                     memory.insert(output.clone(), result);
                 }
                 I::LessThan { a, b, bits, output } => {
@@ -447,16 +461,17 @@ impl IrSource {
                                 resolve_operand_bits(&memory, b, Some(*bits))?.into_iter(),
                             ))
                         .into();
-                    memory.insert(output.clone(), result);
+                    memory.insert(output.clone(), IrValue::Native(result));
                 }
                 I::TransientHash { inputs, output } => {
                     let result = transient_hash(
                         &inputs
                             .iter()
                             .map(|i| resolve_operand(&memory, i))
-                            .collect::<Result<Vec<_>, _>>()?,
+                            .map(|r| r.and_then(|v| v.try_into()))
+                            .collect::<Result<Vec<Fr>, _>>()?,
                     );
-                    memory.insert(output.clone(), result);
+                    memory.insert(output.clone(), IrValue::Native(result));
                 }
                 I::PersistentHash {
                     alignment,
@@ -469,6 +484,7 @@ impl IrSource {
                     let inputs = inputs
                         .iter()
                         .map(|i| resolve_operand(&memory, i))
+                        .map(|r| r.and_then(|v| v.try_into()))
                         .collect::<Result<Vec<_>, _>>()?;
                     let value = alignment.parse_field_repr(&inputs).ok_or_else(|| {
                         error!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})");
@@ -480,8 +496,8 @@ impl IrSource {
                     let hash = persistent_hash(&repr);
                     let hash_fields = hash.field_vec();
                     if hash_fields.len() >= 2 {
-                        memory.insert(outputs[0].clone(), hash_fields[0]);
-                        memory.insert(outputs[1].clone(), hash_fields[1]);
+                        memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
+                        memory.insert(outputs[1].clone(), IrValue::Native(hash_fields[1]));
                     } else {
                         bail!("PersistentHash did not produce expected output");
                     }
@@ -489,7 +505,8 @@ impl IrSource {
                 I::Impact { guard, inputs } => {
                     let count = inputs.len();
                     for input in inputs {
-                        pis.push(resolve_operand(&memory, input)?);
+                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
+                        pis.push(x);
                         public_transcript_inputs_idx += 1;
                     }
                     if !resolve_operand_bool(&memory, guard)? {
@@ -518,59 +535,25 @@ impl IrSource {
                     }
                 }
                 I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
-                I::EcAdd {
-                    a_x,
-                    a_y,
-                    b_x,
-                    b_y,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        bail!("EcAdd requires exactly 2 outputs");
-                    }
-                    let point = resolve_operand_point(&memory, a_x, a_y)?
-                        + resolve_operand_point(&memory, b_x, b_y)?;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), x);
-                    memory.insert(outputs[1].clone(), y);
-                }
-                I::HashToCurve { inputs, outputs } => {
-                    if outputs.len() != 2 {
-                        bail!("HashToCurve requires exactly 2 outputs");
-                    }
+                I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
                         .map(|var| resolve_operand(&memory, var))
-                        .collect::<Result<Vec<_>, _>>()?;
+                        .map(|r| r.and_then(|v| v.try_into()))
+                        .collect::<Result<Vec<Fr>, _>>()?;
                     let point = hash_to_curve(&inputs);
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), x);
-                    memory.insert(outputs[1].clone(), y);
+                    memory.insert(output.clone(), IrValue::JubjubPoint(point.0));
                 }
-                I::EcMul {
-                    a_x,
-                    a_y,
-                    scalar,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        bail!("EcMul requires exactly 2 outputs");
-                    }
-                    let point = resolve_operand_point(&memory, a_x, a_y)?
-                        * resolve_operand(&memory, scalar)?;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), x);
-                    memory.insert(outputs[1].clone(), y);
+                I::EcMul { a, scalar, output } => {
+                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
+                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
+                    memory.insert(output.clone(), c);
                 }
-                I::EcMulGenerator { scalar, outputs } => {
-                    if outputs.len() != 2 {
-                        bail!("EcMulGenerator requires exactly 2 outputs");
-                    }
-                    let point =
-                        EmbeddedGroupAffine::generator() * resolve_operand(&memory, scalar)?;
-                    let [x, y] = from_point(point);
-                    memory.insert(outputs[0].clone(), x);
-                    memory.insert(outputs[1].clone(), y);
+                I::EcMulGenerator { scalar, output } => {
+                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let p = JubjubSubgroup::generator() * jubjub_scalar_from_native(s.0)?;
+                    memory.insert(output.clone(), IrValue::JubjubPoint(p));
                 }
             }
         }
@@ -595,7 +578,9 @@ impl IrSource {
                 .ok_or(anyhow!("Expected communications randomness"))?;
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
             comm_comm_inputs.extend(preimage.inputs.iter());
-            comm_comm_inputs.extend(outputs.iter());
+            for output in outputs.iter() {
+                comm_comm_inputs.push(output.clone().try_into()?);
+            }
             if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
                 error!(
                     ?comm_comm,
@@ -606,7 +591,7 @@ impl IrSource {
             }
         }
         Ok(Preprocessed {
-            memory: memory.into_iter().map(|(k, v)| (k, v.0)).collect(),
+            memory,
             pis: pis.into_iter().map(|x| x.0).collect(),
             pi_skips,
             binding_input: preimage.binding_input.0,
@@ -637,20 +622,24 @@ impl Relation for IrSource {
     ) -> Result<(), Error> {
         let mut input_values = Vec::new();
         for id in &self.inputs {
-            let value = witness
-                .as_ref()
-                .map(|preproc| preproc.memory.get(id).copied().unwrap_or(0.into()));
+            let value = witness.as_ref().map(|preproc| {
+                preproc
+                    .memory
+                    .get(&id.name)
+                    .cloned()
+                    .unwrap_or(IrValue::Native(0.into()))
+            });
             input_values.push(value);
         }
 
         let binding_input_value = witness.as_ref().map(|preproc| preproc.binding_input);
         let comm_comm_value = witness.as_ref().map(|preproc| preproc.comm_comm);
 
-        let mut memory: HashMap<Identifier, AssignedNative<outer::Scalar>> = HashMap::new();
-        let mut constant_pool: HashMap<Fr, AssignedNative<outer::Scalar>> = HashMap::new();
+        let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
+
         for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
-            let assigned = std.assign(layouter, value)?;
-            memory.insert(id.clone(), assigned);
+            let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
+            memory.insert(id.name.clone(), assigned);
         }
 
         let binding_input = std.assign(layouter, binding_input_value)?;
@@ -658,9 +647,9 @@ impl Relation for IrSource {
         let mut outputs = Vec::new();
 
         fn idx<'a>(
-            memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
+            memory: &'a HashMap<Identifier, CircuitValue>,
             id: &Identifier,
-        ) -> Result<&'a AssignedNative<outer::Scalar>, Error> {
+        ) -> Result<&'a CircuitValue, Error> {
             memory
                 .get(id)
                 .ok_or(Error::Synthesis(format!("value {id:?} not in memory")))
@@ -669,33 +658,29 @@ impl Relation for IrSource {
         fn resolve_operand<'a>(
             std: &ZkStdLib,
             layouter: &mut impl Layouter<outer::Scalar>,
-            memory: &'a HashMap<Identifier, AssignedNative<outer::Scalar>>,
-            constant_pool: &mut HashMap<Fr, AssignedNative<outer::Scalar>>,
+            memory: &'a HashMap<Identifier, CircuitValue>,
             operand: &'a Operand,
-        ) -> Result<AssignedNative<outer::Scalar>, Error> {
+        ) -> Result<CircuitValue, Error> {
             match operand {
                 Operand::Variable(id) => idx(memory, id).cloned(),
                 Operand::Immediate(imm) => {
-                    if let Some(assigned) = constant_pool.get(imm) {
-                        Ok(assigned.clone())
-                    } else {
-                        let assigned: AssignedNative<outer::Scalar> =
-                            std.assign_fixed(layouter, imm.0)?;
-                        constant_pool.insert(*imm, assigned.clone());
-                        Ok(assigned)
-                    }
+                    std.assign_fixed(layouter, imm.0).map(CircuitValue::Native)
                 }
             }
         }
 
         let mem_insert = |id: Identifier,
-                          cell: AssignedNative<outer::Scalar>,
-                          mem: &mut HashMap<Identifier, AssignedNative<outer::Scalar>>|
+                          cell: CircuitValue,
+                          mem: &mut HashMap<Identifier, CircuitValue>|
          -> Result<(), Error> {
+            // If id exists in the witness memory, make sure the value that
+            // we are inserting is the same.
+            // Miguel: This seems unnecessary to me. I would fail when calling
+            // `mem_insert` with an id that exists in the witness memory.
             witness.as_ref()
                 .zip(cell.value())
                 .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) && *expected != **v  {
+                    if let Some(expected) = preproc.memory.get(&id) && *expected != *v  {
                         error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
                         return true;
                     }
@@ -741,70 +726,92 @@ impl Relation for IrSource {
         }
         for ins in self.instructions.iter() {
             match ins {
+                I::Encode { input, outputs } => {
+                    let val = resolve_operand(std, layouter, &memory, input)?;
+                    let encoded = encode_incircuit(std, layouter, &val)?;
+                    if encoded.len() != outputs.len() {
+                        return Err(Error::Synthesis(
+                            "Unexpected output length of encode instruction".into(),
+                        ));
+                    }
+                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                        mem_insert(out_id.clone(), enc_val, &mut memory)?;
+                    }
+                }
+                I::Decode {
+                    inputs,
+                    val_t,
+                    output,
+                } => {
+                    let raw_inputs = inputs
+                        .iter()
+                        .map(|inp_id| resolve_operand(std, layouter, &memory, inp_id)?.try_into())
+                        .collect::<Result<Vec<AssignedNative<_>>, Error>>()?;
+                    let decoded = decode_incircuit(std, layouter, &raw_inputs, val_t)?;
+                    mem_insert(output.clone(), decoded, &mut memory)?;
+                }
                 I::Assert { cond } => {
-                    let cond_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, cond)?;
-                    std.assert_non_zero(layouter, &cond_val)?;
+                    let cond_val = resolve_operand(std, layouter, &memory, cond)?;
+                    let cond: AssignedNative<_> = cond_val.try_into()?;
+                    std.assert_non_zero(layouter, &cond)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
-                    let bit_val = resolve_operand(std, layouter, &memory, &mut constant_pool, bit)?;
-                    let bit = std.is_zero(layouter, &bit_val)?;
-                    // Note that b comes first here, because the is_zero negates the bit.
-                    // The negation is to ensure the bit bound. This may be
-                    // excessive, but user input could violate it otherwise.
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let result = std.select(layouter, &bit, &b_val, &a_val)?;
+                    let bit_val = resolve_operand(std, layouter, &memory, bit)?;
+                    let bit: AssignedNative<_> = bit_val.try_into()?;
+                    let bit: AssignedBit<outer::Scalar> = std.convert(layouter, &bit)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let result = CircuitValue::Native(std.select(layouter, &bit, &a, &b)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { val, bits } => {
-                    let val_assigned =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val_assigned = resolve_operand(std, layouter, &memory, val)?;
+                    let x: AssignedNative<_> = val_assigned.try_into()?;
                     drop(std.assigned_to_le_bits(
                         layouter,
-                        &val_assigned,
+                        &x,
                         Some(*bits as usize),
                         *bits as usize >= FR_BITS,
                     )?);
                 }
                 I::ConstrainEq { a, b } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    std.assert_equal(layouter, &a_val, &b_val)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    std.assert_equal(layouter, &a, &b)?;
                 }
                 I::ConstrainToBoolean { val } => {
                     // Yes, this does insert a constraint.
-                    let val_assigned =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
-                    let _: AssignedBit<_> = std.convert(layouter, &val_assigned)?;
+                    let val_assigned = resolve_operand(std, layouter, &memory, val)?;
+                    let x: AssignedNative<_> = val_assigned.try_into()?;
+                    let _: AssignedBit<_> = std.convert(layouter, &x)?;
                 }
                 I::Copy { val, output } => {
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
                 I::Impact { guard: _, inputs } => {
                     for input in inputs {
-                        let val_assigned =
-                            resolve_operand(std, layouter, &memory, &mut constant_pool, input)?;
-                        pi_push(val_assigned, &mut public_inputs)?;
+                        let val_assigned = resolve_operand(std, layouter, &memory, input)?;
+                        let x: AssignedNative<_> = val_assigned.try_into()?;
+                        pi_push(x, &mut public_inputs)?;
                     }
                 }
                 I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
                     outputs.push(val);
                 }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
-                    let result = std.poseidon(layouter, &resolved_inputs)?;
+                    let result = CircuitValue::Native(std.poseidon(layouter, &resolved_inputs)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::PersistentHash {
@@ -819,81 +826,91 @@ impl Relation for IrSource {
                     }
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
                     let res_bytes = std.sha2_256(layouter, &bytes)?;
                     mem_insert(
                         outputs[0].clone(),
-                        std.convert(layouter, &res_bytes[31])?,
+                        CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
                         &mut memory,
                     )?;
                     mem_insert(
                         outputs[1].clone(),
-                        assemble_bytes(std, layouter, &res_bytes[..31])?,
+                        CircuitValue::Native(assemble_bytes(std, layouter, &res_bytes[..31])?),
                         &mut memory,
                     )?;
                 }
                 I::TestEq { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let bit = std.is_equal(layouter, &a_val, &b_val)?;
-                    let result = std.convert(layouter, &bit)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let bit = std.is_equal(layouter, &a, &b)?;
+                    let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Add { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let result = std.add(layouter, &a_val, &b_val)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let result = add_incircuit(std, layouter, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Mul { a, b, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let result = std.mul(layouter, &a_val, &b_val, None)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let result = CircuitValue::Native(std.mul(layouter, &a, &b, None)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let result = std.neg(layouter, &a_val)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let result = CircuitValue::Native(std.neg(layouter, &a)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let result = lnot(std, layouter, &a_val)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let bit: AssignedBit<_> = std.convert(layouter, &a)?;
+                    let neg_bit = std.not(layouter, &bit)?;
+                    let result = CircuitValue::Native(std.convert(layouter, &neg_bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::LessThan { a, b, bits, output } => {
                     // Adding mod 2 to meet library constraint that this is even
                     // Hidden req that this is >= 4
-                    let a_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a)?;
-                    let b_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b)?;
-                    let bit =
-                        std.lower_than(layouter, &a_val, &b_val, u32::max(*bits + *bits % 2, 4))?;
-                    let result = std.convert(layouter, &bit)?;
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let a: AssignedNative<_> = a_val.try_into()?;
+                    let b: AssignedNative<_> = b_val.try_into()?;
+                    let bit = std.lower_than(layouter, &a, &b, u32::max(*bits + *bits % 2, 4))?;
+                    let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
                     let guard = match guard {
-                        Some(g) => Some(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            g,
-                        )?),
+                        Some(g) => Some(resolve_operand(std, layouter, &memory, g)?),
                         None => None,
                     };
-                    let value = witness
-                        .as_ref()
-                        .map(|preproc| preproc.memory.get(output).copied().unwrap_or(0.into()));
+                    let value = witness.as_ref().map_with_result(|preproc| {
+                        let x = preproc
+                            .memory
+                            .get(output)
+                            .cloned()
+                            .unwrap_or(IrValue::Native(0.into()));
+                        let x: Fr = x.try_into().map_err(|_| {
+                            Error::Synthesis(format!(
+                                "expected native value for public/private input {:?}",
+                                output
+                            ))
+                        })?;
+                        Ok::<_, midnight_proofs::plonk::Error>(x.0)
+                    })?;
                     let value_cell = std.assign(layouter, value)?;
                     // If `guard` is Some, then we want to ensure that
                     // `value` is 0 if `guard` is 0
@@ -901,12 +918,17 @@ impl Relation for IrSource {
                     // => value == 0 || guard
                     if let Some(guard) = guard {
                         let value_is_zero = std.is_zero(layouter, &value_cell)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
                         let guard_bit = std.convert(layouter, &guard)?;
                         let is_ok = std.or(layouter, &[value_is_zero, guard_bit])?;
                         let is_ok_field = std.convert(layouter, &is_ok)?;
                         std.assert_non_zero(layouter, &is_ok_field)?;
                     }
-                    mem_insert(output.clone(), value_cell, &mut memory)?;
+                    mem_insert(
+                        output.clone(),
+                        CircuitValue::Native(value_cell),
+                        &mut memory,
+                    )?;
                 }
                 I::DivModPowerOfTwo { val, bits, outputs } => {
                     if outputs.len() != 2 {
@@ -914,13 +936,16 @@ impl Relation for IrSource {
                             "Unexpected output length of DivModPowerOfTwo instruction".into(),
                         ));
                     }
-                    let val = resolve_operand(std, layouter, &memory, &mut constant_pool, val)?;
+                    let val = resolve_operand(std, layouter, &memory, val)?;
+                    let val: AssignedNative<_> = val.try_into()?;
                     let val_bits = std.assigned_to_le_bits(layouter, &val, None, true)?;
-                    let modulus =
-                        std.assigned_from_le_bits(layouter, &val_bits[..*bits as usize])?;
+                    let modulus = CircuitValue::Native(
+                        std.assigned_from_le_bits(layouter, &val_bits[..*bits as usize])?,
+                    );
 
-                    let divisor =
-                        std.assigned_from_le_bits(layouter, &val_bits[*bits as usize..])?;
+                    let divisor = CircuitValue::Native(
+                        std.assigned_from_le_bits(layouter, &val_bits[*bits as usize..])?,
+                    );
 
                     mem_insert(outputs[0].clone(), divisor, &mut memory)?;
                     mem_insert(outputs[1].clone(), modulus, &mut memory)?;
@@ -931,134 +956,63 @@ impl Relation for IrSource {
                     bits,
                     output,
                 } => {
-                    let divisor_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, divisor)?;
-                    let modulus_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, modulus)?;
-                    let divisor_bits = std.assigned_to_le_bits(
+                    let divisor_val = resolve_operand(std, layouter, &memory, divisor)?;
+                    let modulus_val = resolve_operand(std, layouter, &memory, modulus)?;
+                    let divisor: AssignedNative<_> = divisor_val.try_into()?;
+                    let modulus: AssignedNative<_> = modulus_val.try_into()?;
+
+                    std.assert_lower_than_fixed(
                         layouter,
-                        &divisor_val,
-                        Some(FR_BITS - *bits as usize),
-                        true,
+                        &divisor,
+                        &(BigUint::from(1u32) << (FR_BITS as u32 - *bits)),
                     )?;
-                    let modulus_bits = std.assigned_to_le_bits(
+                    std.assert_lower_than_fixed(
                         layouter,
-                        &modulus_val,
-                        Some(*bits as usize),
-                        true,
+                        &modulus,
+                        &(BigUint::from(1u32) << *bits),
                     )?;
-                    let reconstituted = std
-                        .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
-                    mem_insert(output.clone(), reconstituted, &mut memory)?;
+
+                    use group::ff::Field;
+                    let result = CircuitValue::Native(std.linear_combination(
+                        layouter,
+                        &[
+                            (outer::Scalar::from(1), modulus),
+                            (outer::Scalar::from(2).pow([*bits as u64]), divisor),
+                        ],
+                        outer::Scalar::from(0),
+                    )?);
+                    mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::EcAdd {
-                    a_x,
-                    a_y,
-                    b_x,
-                    b_y,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcAdd instruction".into(),
-                        ));
-                    }
-                    let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
-                    let b_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b_x)?;
-                    let b_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, b_y)?;
-                    let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
-                    let b = ecc_from_parts(std, layouter, &b_x_val, &b_y_val)?;
-                    let c = std.jubjub().add(layouter, &a, &b)?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        std.jubjub().x_coordinate(&c),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        std.jubjub().y_coordinate(&c),
-                        &mut memory,
-                    )?;
-                }
-                I::EcMul {
-                    a_x,
-                    a_y,
-                    scalar,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcMul instruction".into(),
-                        ));
-                    }
-                    let a_x_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_x)?;
-                    let a_y_val = resolve_operand(std, layouter, &memory, &mut constant_pool, a_y)?;
-                    let scalar_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, scalar)?;
-                    let a = ecc_from_parts(std, layouter, &a_x_val, &a_y_val)?;
-                    let scalar = std.jubjub().convert(layouter, &scalar_val)?;
+                I::EcMul { a, scalar, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
+                    let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
+                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
+                    let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        std.jubjub().x_coordinate(&b),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        std.jubjub().y_coordinate(&b),
-                        &mut memory,
-                    )?;
+                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
-                I::EcMulGenerator { scalar, outputs } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of EcMulGenerator instruction".into(),
-                        ));
-                    }
-                    let g: AssignedNativePoint<embedded::AffineExtended> = std
+                I::EcMulGenerator { scalar, output } => {
+                    let g: AssignedNativePoint<JubjubExtended> = std
                         .jubjub()
-                        .assign_fixed(layouter, embedded::Affine::generator())?;
-                    let scalar_val =
-                        resolve_operand(std, layouter, &memory, &mut constant_pool, scalar)?;
-                    let scalar = std.jubjub().convert(layouter, &scalar_val)?;
+                        .assign_fixed(layouter, JubjubSubgroup::generator())?;
+                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
+                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
+                    let scalar = std.jubjub().convert(layouter, &scalar)?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
-                    mem_insert(
-                        outputs[0].clone(),
-                        std.jubjub().x_coordinate(&b),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        std.jubjub().y_coordinate(&b),
-                        &mut memory,
-                    )?;
+                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
-                I::HashToCurve { inputs, outputs } => {
-                    if outputs.len() != 2 {
-                        return Err(Error::Synthesis(
-                            "Unexpected output length of HashToCurve instruction".into(),
-                        ));
-                    }
+                I::HashToCurve { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
-                        resolved_inputs.push(resolve_operand(
-                            std,
-                            layouter,
-                            &memory,
-                            &mut constant_pool,
-                            inp,
-                        )?);
+                        let x = resolve_operand(std, layouter, &memory, inp)?;
+                        let x: AssignedNative<_> = x.try_into()?;
+                        resolved_inputs.push(x);
                     }
                     let point = std.hash_to_curve(layouter, &resolved_inputs)?;
                     mem_insert(
-                        outputs[0].clone(),
-                        std.jubjub().x_coordinate(&point),
-                        &mut memory,
-                    )?;
-                    mem_insert(
-                        outputs[1].clone(),
-                        std.jubjub().y_coordinate(&point),
+                        output.clone(),
+                        CircuitValue::JubjubPoint(point),
                         &mut memory,
                     )?;
                 }
@@ -1077,11 +1031,17 @@ impl Relation for IrSource {
 
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
-                if let Some(val) = memory.get(id) {
-                    preimage.push(val.clone());
+                if let Some(val) = memory.get(&id.name) {
+                    let x: AssignedNative<_> = val.clone().try_into()?;
+                    preimage.push(x);
                 }
             }
-            preimage.extend(outputs.iter().cloned());
+
+            for output in &outputs {
+                let x: AssignedNative<_> = output.clone().try_into()?;
+                preimage.push(x);
+            }
+
             let comm_comm = std.poseidon(layouter, &preimage)?;
             // Nb. The communications commitment is the second public input
             // by convention
@@ -1094,14 +1054,27 @@ impl Relation for IrSource {
     }
 
     fn used_chips(&self) -> ZkStdLibArch {
+        let involves_types = |target_types: &[IrType]| -> bool {
+            let types_in_inputs = self
+                .inputs
+                .iter()
+                .any(|id| target_types.contains(&id.val_t));
+
+            let types_in_instructions = self.instructions.iter().any(|op| match op {
+                I::Decode { val_t, .. } => target_types.contains(val_t),
+                _ => false,
+            });
+
+            types_in_inputs || types_in_instructions
+        };
+
         let jubjub = self.instructions.iter().any(|op| {
-            matches!(
-                op,
-                I::EcAdd { .. }
-                    | I::EcMul { .. }
-                    | I::EcMulGenerator { .. }
-                    | I::HashToCurve { .. }
-            )
+            involves_types(&[IrType::JubjubPoint]) || {
+                matches!(
+                    op,
+                    I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
+                )
+            }
         });
         let hash_to_curve = self
             .instructions
