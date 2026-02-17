@@ -3,6 +3,7 @@ name = "midnight-base-crypto-derive"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+description = "Derive macros for cryptographic representation traits in Midnight's ledger."
 
 [lib]
 proc-macro = true
