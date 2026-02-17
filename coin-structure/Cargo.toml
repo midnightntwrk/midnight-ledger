@@ -1,6 +1,6 @@
 [package]
 name = "midnight-coin-structure"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -11,7 +11,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "storage/proptest", "transien
 
 [dependencies]
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+storage = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 

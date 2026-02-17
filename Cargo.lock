@@ -2735,14 +2735,14 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "fake",
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
  "midnight-serialize",
- "midnight-storage",
+ "midnight-storage-core",
  "midnight-transient-crypto",
  "pastey",
  "proptest",
