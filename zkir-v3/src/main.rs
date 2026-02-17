@@ -29,7 +29,7 @@ use tracing_subscriber::Registry;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 use transient_crypto::proofs::Zkir;
-use zkir_v3::IrSource;
+use midnight_zkir_v3::IrSource;
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
