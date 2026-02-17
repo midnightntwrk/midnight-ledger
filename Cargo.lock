@@ -2823,7 +2823,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-static"
-version = "1.0.0-rc.2"
+version = "9.0.0"
 dependencies = [
  "proc-macro2",
  "quote 1.0.44",
