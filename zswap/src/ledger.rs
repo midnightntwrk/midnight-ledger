@@ -232,7 +232,12 @@ impl<D: DB> State<D> {
         }
     }
 
+    /// Better to use `post_block_update_with` and provide the retention duration of past roots
     pub fn post_block_update(&self, tblock: Timestamp) -> Self {
+        self.post_block_update_with(tblock, Duration::from_secs(3600))
+    }
+
+    pub fn post_block_update_with(&self, tblock: Timestamp, retention_duration: Duration) -> Self {
         let mut new_st = self.clone();
         new_st.coin_coms = new_st.coin_coms.rehash();
         new_st.past_roots = new_st.past_roots.insert(
@@ -242,9 +247,7 @@ impl<D: DB> State<D> {
                 .root()
                 .expect("rehashed tree must have root"),
         );
-        new_st.past_roots = new_st
-            .past_roots
-            .filter(tblock - (Duration::from_secs(3600)));
+        new_st.past_roots = new_st.past_roots.filter(tblock - (retention_duration));
 
         new_st
     }
@@ -255,12 +258,17 @@ mod tests {
     use super::State;
     use crate::{DB, Delta};
     use crate::{Input, Offer, Output};
+    use base_crypto::time::{Duration, Timestamp};
     use coin_structure::coin::{Info as CoinInfo, ShieldedTokenType, TokenType};
     use coin_structure::contract::ContractAddress;
     use coin_structure::transfer::Recipient;
+    use itertools::Itertools;
     use rand::rngs::ThreadRng;
     use rand::{CryptoRng, Rng};
+    use std::collections::HashMap;
     use storage::db::InMemoryDB;
+    use transient_crypto::merkle_tree::MerkleTreeDigest;
+    use transient_crypto::proofs::ProofPreimage;
 
     #[test]
     fn test_filtered_spend() {
@@ -270,28 +278,9 @@ mod tests {
             n: usize,
         ) -> State<D> {
             for _ in 0..n {
-                let (type_, value) = (rng.r#gen(), rng.r#gen());
-                let delta = Delta {
-                    token_type: type_,
-                    value: value as i128,
-                };
-                let info = CoinInfo {
-                    nonce: rng.r#gen(),
-                    type_,
-                    value,
-                };
-                let cpk = coin_structure::coin::PublicKey(rng.r#gen());
-                let output = Output::new(rng, &info, None, &cpk, None).unwrap();
+                let offer = make_dummy_output_offer(rng);
                 state = state
-                    .try_apply(
-                        &Offer {
-                            inputs: vec![].into(),
-                            outputs: vec![output].into(),
-                            transient: vec![].into(),
-                            deltas: vec![delta].into(),
-                        },
-                        None,
-                    )
+                    .try_apply(&offer, None)
                     .unwrap()
                     .0
                     .post_block_update(Default::default());
@@ -331,5 +320,59 @@ mod tests {
                 .unwrap(),
         );
         Input::new_contract_owned(&mut rng, &qcoin, None, addr, &state.filter(&[addr])).unwrap();
+    }
+
+    #[test]
+    fn test_roots_retention() {
+        let mut state = State::<InMemoryDB>::new();
+        let mut rng = rand::thread_rng();
+        let mut roots_map: HashMap<Timestamp, MerkleTreeDigest> = HashMap::new();
+        let retention_duration = Duration::from_secs(5);
+        let rounds: u64 = 10;
+        for i in 0..rounds {
+            let offer = make_dummy_output_offer(&mut rng);
+            let timestamp = Timestamp::from_secs(i);
+            state = state
+                .try_apply(&offer, None)
+                .unwrap()
+                .0
+                .post_block_update_with(timestamp, retention_duration);
+            roots_map.insert(timestamp, state.coin_coms.root().unwrap());
+        }
+
+        for i in 0..(rounds - 1 - retention_duration.as_seconds() as u64) {
+            let timestamp = Timestamp::from_secs(i);
+            let digest = roots_map.get(&timestamp).unwrap();
+
+            assert!(!state.past_roots.contains(digest));
+        }
+
+        for i in 0..(retention_duration.as_seconds() as u64 + 1) {
+            let timestamp = Timestamp::from_secs(rounds - 1 - i);
+            let digest = roots_map.get(&timestamp).unwrap();
+
+            assert!(state.past_roots.contains(digest));
+        }
+    }
+
+    fn make_dummy_output_offer<R: Rng + CryptoRng, D: DB>(rng: &mut R) -> Offer<ProofPreimage, D> {
+        let (type_, value) = (rng.r#gen(), rng.r#gen());
+        let delta = Delta {
+            token_type: type_,
+            value: value as i128,
+        };
+        let info = CoinInfo {
+            nonce: rng.r#gen(),
+            type_,
+            value,
+        };
+        let cpk = coin_structure::coin::PublicKey(rng.r#gen());
+        let output = Output::new(rng, &info, None, &cpk, None).unwrap();
+        Offer {
+            inputs: vec![].into(),
+            outputs: vec![output].into(),
+            transient: vec![].into(),
+            deltas: vec![delta].into(),
+        }
     }
 }
