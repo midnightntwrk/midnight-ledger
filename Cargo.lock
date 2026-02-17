@@ -2781,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.0.0-rc.2"
+version = "8.0.0-rc.3"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2955,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.0.0-rc.2"
+version = "8.0.0-rc.3"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3299,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.0.0-rc.2"
+version = "8.0.0-rc.3"
 dependencies = [
  "criterion",
  "derive-where",
