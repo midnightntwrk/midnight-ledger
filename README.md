@@ -95,6 +95,7 @@ graph TD;
     onchain-runtime-->onchain-vm;
     onchain-vm-->onchain-state;
     onchain-state-->coin-structure;
+    onchain-state-->storage;
     coin-structure-->transient-crypto;
     transient-crypto-->storage-core;
     storage-->base-crypto;
