@@ -3122,7 +3122,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3144,7 +3144,7 @@ dependencies = [
  "midnight-curves",
  "midnight-proofs",
  "midnight-serialize",
- "midnight-storage",
+ "midnight-storage-core",
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
  "pastey",

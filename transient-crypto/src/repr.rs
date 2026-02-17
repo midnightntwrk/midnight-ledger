@@ -22,9 +22,8 @@ use base_crypto::repr::{BinaryHashRepr, MemWrite};
 use base_crypto::time::Timestamp;
 pub use derive::{FieldRepr, FromFieldRepr};
 use serialize::{Deserializable, Serializable, VecExt};
-use storage::Storable;
-use storage::db::DB;
-use storage::storage::Map;
+use storage_core::Storable;
+use storage_core::db::DB;
 
 /// A type this implements this can be transformed into an iterator of [`Fr`]s.
 pub trait FieldRepr {
@@ -294,27 +293,6 @@ impl<const N: usize> FieldRepr for [Fr; N] {
     }
     fn field_size(&self) -> usize {
         N
-    }
-}
-
-impl<K: FieldRepr + Serializable + Deserializable + Ord + Clone, V: FieldRepr + Storable<D>, D: DB>
-    FieldRepr for Map<K, V, D>
-{
-    fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
-        writer.write(&[(self.size() as u64).into()]);
-        let mut vec: Vec<_> = self.iter().collect();
-        vec.sort_by_key(|(k, _)| k.clone());
-        for (k, v) in vec.iter() {
-            k.field_repr(writer);
-            v.field_repr(writer);
-        }
-    }
-
-    fn field_size(&self) -> usize {
-        1 + self
-            .iter()
-            .map(|(k, v)| k.field_size() + v.field_size())
-            .sum::<usize>()
     }
 }
 
