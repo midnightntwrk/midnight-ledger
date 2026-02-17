@@ -37,6 +37,16 @@ pub enum IrType {
     JubjubPoint,
 }
 
+impl IrType {
+    /// Number of raw `Fr` elements needed to represent a value of this type.
+    pub fn encoded_len(&self) -> usize {
+        match self {
+            IrType::Native => 1,
+            IrType::JubjubPoint => 2,
+        }
+    }
+}
+
 /// Off-circuit IR value carrying actual data.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum IrValue {
