@@ -3,6 +3,8 @@ name = "midnight-zswap"
 edition = "2024"
 license.workspace = true
 version.workspace = true
+repository.workspace = true
+description = "Implementation of the Zswap shielded token atomic swap mechanism."
 
 [features]
 default = ["proof-verifying"]
