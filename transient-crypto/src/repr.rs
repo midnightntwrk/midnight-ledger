@@ -21,9 +21,7 @@ use crate::hash::hash_to_field;
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
 use base_crypto::time::Timestamp;
 pub use derive::{FieldRepr, FromFieldRepr};
-use serialize::{Deserializable, Serializable, VecExt};
-use storage_core::Storable;
-use storage_core::db::DB;
+use serialize::VecExt;
 
 /// A type this implements this can be transformed into an iterator of [`Fr`]s.
 pub trait FieldRepr {

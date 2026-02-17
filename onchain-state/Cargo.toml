@@ -7,7 +7,7 @@ repository.workspace = true
 description = "Defines the state format for contract states on Midnight."
 
 [features]
-proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest"]
+proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest", "storage/proptest"]
 public-internal-structure = []
 
 [dependencies]
