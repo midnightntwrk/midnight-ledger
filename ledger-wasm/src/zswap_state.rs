@@ -367,7 +367,7 @@ impl ZswapChainState {
             Some(duration_secs) => {
                 let duration = i128::try_from(duration_secs)
                     .map_err(|_| JsError::new("retention_duration is out of range"))
-                    .map(|sec| Duration::from_secs(sec))?;
+                    .map(Duration::from_secs)?;
                 self.0.post_block_update_with(block_timestamp, duration)
             }
             None => self.0.post_block_update(block_timestamp),
