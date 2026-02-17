@@ -3,6 +3,7 @@ name = "midnight-onchain-state"
 version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Defines the state format for contract states on Midnight."
 
 [features]

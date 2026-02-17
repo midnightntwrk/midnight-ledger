@@ -3,6 +3,7 @@ name = "midnight-serialize-macros"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Derive macros for `midnight-serialize`, a serialization crate for the Midnight blockchain."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html

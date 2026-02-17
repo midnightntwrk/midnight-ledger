@@ -3,6 +3,7 @@ name = "midnight-coin-structure"
 version = "2.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Describes low-level address format and shielded token representations for Midnight."
 
 [features]

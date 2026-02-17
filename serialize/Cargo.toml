@@ -3,6 +3,7 @@ name = "midnight-serialize"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Serialization primitives for Midnight's ledger."
 
 [features]

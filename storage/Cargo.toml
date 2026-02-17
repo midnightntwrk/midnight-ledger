@@ -3,6 +3,7 @@ name = "midnight-storage"
 edition = "2024"
 version = "2.0.0"
 license.workspace = true
+repository.workspace = true
 description = "Provides data structures and storage primitives for Midnight's ledger."
 
 [features]
