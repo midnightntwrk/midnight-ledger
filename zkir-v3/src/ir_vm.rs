@@ -201,17 +201,30 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
-        if preimage.inputs.len() != self.inputs.len() {
+        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
+
+        let mut idx = 0;
+        for input_id in self.inputs.iter() {
+            let w = input_id.val_t.encoded_len();
+            if idx + w > preimage.inputs.len() {
+                bail!(
+                    "Not enough raw inputs: ran out at index {} while decoding {:?}",
+                    idx,
+                    input_id.name
+                );
+            }
+            let value = decode_offcircuit(&preimage.inputs[idx..idx + w], &input_id.val_t)?;
+            memory.insert(input_id.name.clone(), value);
+            idx += w;
+        }
+        if idx != preimage.inputs.len() {
             bail!(
-                "Expected {} inputs, received {}",
-                self.inputs.len(),
+                "Expected {} raw inputs, received {}",
+                idx,
                 preimage.inputs.len()
             );
         }
-        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
-        for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
-            memory.insert(id.name.clone(), IrValue::Native(*input));
-        }
+
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
             pis.push(
