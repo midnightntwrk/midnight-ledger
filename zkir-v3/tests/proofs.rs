@@ -324,14 +324,12 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0_x", "type": "Scalar<BLS12-381>" },
-              { "name": "%p0_y", "type": "Scalar<BLS12-381>" },
+              { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<BLS12-381>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
                { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" }
