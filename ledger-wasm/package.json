@@ -1,7 +1,7 @@
 {
   "name": "@midnight/ledger",
   "license": "Apache-2.0",
-  "version": "7.0.0",
+  "version": "8.0.0-rc.2",
   "devDependencies": {
     "rimraf": "^6.0.0",
     "lodash": "^4.17.15",
@@ -10,8 +10,8 @@
   },
   "type": "module",
   "scripts": {
-    "build:assemble-dts": "rimraf ledger-v7.d.ts && node assemble-dts.js",
-    "build:markdown-docs": "npm run build:assemble-dts && rimraf ../docs/api/ledger && npx typedoc --plugin typedoc-plugin-markdown ledger-v7.d.ts --out ../docs/api/ledger"
+    "build:assemble-dts": "rimraf ledger-v8.d.ts && node assemble-dts.js",
+    "build:markdown-docs": "npm run build:assemble-dts && rimraf ../docs/api/ledger && npx typedoc --plugin typedoc-plugin-markdown ledger-v8.d.ts --out ../docs/api/ledger"
   },
   "dependencies": {
     "typescript": "^5.3.3"

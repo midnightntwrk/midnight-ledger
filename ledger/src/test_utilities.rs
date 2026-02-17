@@ -100,6 +100,16 @@ lazy_static! {
     );
 }
 
+#[non_exhaustive]
+#[derive(PartialEq, Eq, Clone)]
+pub enum TestProcessingMode {
+    Regular,
+    /// Disables some processing around UTXO and Dust processing that may, due to tracking local
+    /// state, lead to non-linear transaction processing. Primarily for use during setup of large
+    /// test states, and not 'normal' tests.
+    ForceConstantTime,
+}
+
 #[derive_where(Clone)]
 pub struct TestState<D: DB> {
     pub ledger: LedgerState<D>,
@@ -113,6 +123,8 @@ pub struct TestState<D: DB> {
     pub zswap_keys: SecretKeys,
     pub night_key: SigningKey,
     pub dust_key: DustSecretKey,
+
+    pub mode: TestProcessingMode,
 }
 
 impl<D: DB> TestState<D> {
@@ -129,6 +141,8 @@ impl<D: DB> TestState<D> {
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
             night_key: SigningKey::sample(&mut *rng),
             dust_key: DustSecretKey::sample(&mut *rng),
+
+            mode: TestProcessingMode::Regular,
         }
     }
 
@@ -278,7 +292,9 @@ impl<D: DB> TestState<D> {
                 FixedPoint::from_u64_div(1, 2),
             )
             .unwrap();
-        self.dust = self.dust.process_ttls(self.time);
+        if self.mode != TestProcessingMode::ForceConstantTime {
+            self.dust = self.dust.process_ttls(self.time);
+        }
     }
 
     pub fn step(&mut self) {
@@ -355,7 +371,7 @@ impl<D: DB> TestState<D> {
     pub fn apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
@@ -376,14 +392,18 @@ impl<D: DB> TestState<D> {
             .replay_events(&self.dust_key, result.events())
             .expect("just applied transaction should replay");
         let pk = UserAddress::from(self.night_key.verifying_key());
-        self.utxos = self
+        let utxo_iter = self
             .ledger
             .utxo
             .utxos
             .iter()
             .map(|kv| (*kv.0).clone())
-            .filter(|utxo| utxo.owner == pk)
-            .collect();
+            .filter(|utxo| utxo.owner == pk);
+
+        self.utxos = match self.mode {
+            TestProcessingMode::ForceConstantTime => utxo_iter.take(10).collect(),
+            _ => utxo_iter.collect(),
+        };
         self.step();
         Ok(result)
     }
@@ -391,7 +411,7 @@ impl<D: DB> TestState<D> {
     pub fn assert_apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,

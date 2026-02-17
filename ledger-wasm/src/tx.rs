@@ -1123,7 +1123,8 @@ impl<
         + Storable<InMemoryDB>
         + serialize::Serializable
         + std::fmt::Debug
-        + PedersenDowngradeable<InMemoryDB>,
+        + PedersenDowngradeable<InMemoryDB>
+        + Tagged,
 > Transactionable for ledger::structure::Transaction<S, P, B, InMemoryDB>
 where
     Self: Tagged,

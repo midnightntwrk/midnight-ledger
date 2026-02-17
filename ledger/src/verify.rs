@@ -39,14 +39,14 @@ use onchain_runtime::state::{
     EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
-use serialize::Serializable;
+use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
 use std::collections::{HashSet, VecDeque};
 use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
@@ -98,6 +98,7 @@ pub trait StateReference<D: DB> {
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
 }
 
 fn get_op<D: DB>(
@@ -201,6 +202,9 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
                 found: network.into(),
             })
         }
+    }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.state_hash()
     }
 }
 
@@ -338,6 +342,9 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
                 found: network.into(),
             })
         }
+    }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.new_state.state_hash()
     }
 }
 
@@ -536,14 +543,14 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D> + Storable<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D> + Tagged,
     D: DB,
 > Transaction<S, P, B, D>
 where
     Transaction<S, P, B, D>: Serializable,
 {
     // All checks that can be done without a state.
-    #[instrument(skip(self, ref_state))]
+    #[instrument(skip(self, ref_state), fields(self = ?self.transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
     /// Checks if a transaction is well-formed, performing all checks possible
     /// with a moderately stale reference state.
     ///
@@ -625,7 +632,10 @@ where
                 }
 
                 debug!("transaction well-formed");
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
             Transaction::ClaimRewards(mtx) => {
                 ref_state.network_check(&mtx.network_id)?;
@@ -635,7 +645,10 @@ where
                         move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
         }
     }
@@ -973,7 +986,7 @@ fn sequencing_correlation_check<D: DB>(
 fn sequencing_context_check<P: ProofKind<D>, D: DB>(
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
-    calls_in_intent: std::collections::HashMap<u32, &ContractCall<P, D>>,
+    calls_in_intent: std::collections::BTreeMap<u32, &ContractCall<P, D>>,
     callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>,
 ) -> Result<(), MalformedTransaction<D>> {
     // If a calls `b`, `b` must be contained within the 'lifetime' of the
@@ -1047,7 +1060,7 @@ fn relate_nodes<P: ProofKind<D>, D: DB>(
     calls_by_address: &mut std::collections::HashMap<ContractAddress, Vec<CallNode>>,
     adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
-    calls_in_intent: &std::collections::HashMap<u32, &ContractCall<P, D>>,
+    calls_in_intent: &std::collections::BTreeMap<u32, &ContractCall<P, D>>,
 ) -> Result<std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>, MalformedTransaction<D>> {
     // A map from (address, entry_point_hash, commitment) to caller nodes (+ guaranteed flag)
     let mut callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>> =
@@ -1673,13 +1686,13 @@ impl<
     }
 }
 
-fn as_indexed<I, V>(v: I) -> std::collections::HashMap<u32, V>
+fn as_indexed<I, V>(v: I) -> std::collections::BTreeMap<u32, V>
 where
     I: Iterator<Item = V>,
 {
     v.enumerate()
         .map(|(i, v)| (i as u32, v))
-        .collect::<std::collections::HashMap<u32, V>>()
+        .collect::<std::collections::BTreeMap<u32, V>>()
 }
 
 impl<D: DB> ContractDeploy<D> {
@@ -2177,7 +2190,7 @@ mod tests {
         let mut adjacencies = std::collections::HashMap::new();
         adjacencies.insert(cn_1, vec![cn_2]);
 
-        let mut calls_in_intent = std::collections::HashMap::new();
+        let mut calls_in_intent = std::collections::BTreeMap::new();
         calls_in_intent.insert(1, &cc_1);
         calls_in_intent.insert(2, &cc_2);
         let mut callers_for_addr = std::collections::HashMap::new();
@@ -2308,7 +2321,7 @@ mod tests {
         let mut adjacencies = std::collections::HashMap::new();
         adjacencies.insert(cn_1, vec![cn_2]);
 
-        let mut calls_in_intent = std::collections::HashMap::new();
+        let mut calls_in_intent = std::collections::BTreeMap::new();
         calls_in_intent.insert(1, &cc_1);
         calls_in_intent.insert(2, &cc_2);
         let mut callers_for_addr = std::collections::HashMap::new();
@@ -2331,5 +2344,112 @@ mod tests {
                 e.to_string()
             ),
         }
+    }
+
+    /// Regression: as_indexed() previously returned HashMap<u32, V>, so
+    /// relate_nodes could visit same-address calls in arbitrary order and
+    /// produce backward precedence edges, triggering spurious
+    /// CausalityConstraintViolation when guaranteed/fallible calls were mixed.
+    #[cfg(feature = "proving")]
+    #[tokio::test]
+    async fn relate_nodes_same_address_ordering() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let addr: ContractAddress = rng.r#gen();
+
+        let make_transcript = |rng: &mut StdRng| -> Sp<Transcript<InMemoryDB>, InMemoryDB> {
+            let eff = Effects {
+                claimed_nullifiers: rng.r#gen(),
+                claimed_shielded_receives: rng.r#gen(),
+                claimed_shielded_spends: rng.r#gen(),
+                claimed_contract_calls: storage::storage::HashSet::new(),
+                shielded_mints: rng.r#gen(),
+                unshielded_mints: rng.r#gen(),
+                unshielded_inputs: rng.r#gen(),
+                unshielded_outputs: rng.r#gen(),
+                claimed_unshielded_spends: rng.r#gen(),
+            };
+            Sp::new(Transcript {
+                gas: rng.r#gen(),
+                effects: eff,
+                program: storage::storage::Array::new(),
+                version: None,
+            })
+        };
+
+        // 6 calls to the same address: 0-3 guaranteed-only, 4-5 fallible-only.
+        let calls: Vec<ContractCall<(), InMemoryDB>> = (0..6u32)
+            .map(|i| {
+                let (gt, ft) = if i < 4 {
+                    (Some(make_transcript(&mut rng)), None)
+                } else {
+                    (None, Some(make_transcript(&mut rng)))
+                };
+                ContractCall {
+                    address: addr,
+                    entry_point: rng.r#gen(),
+                    guaranteed_transcript: gt,
+                    fallible_transcript: ft,
+                    communication_commitment: rng.r#gen(),
+                    proof: (),
+                }
+            })
+            .collect();
+
+        // Iterate enough times to catch nondeterministic HashMap ordering
+        let mut backward_edge_found = false;
+        let mut causality_violation_found = false;
+
+        for _ in 0..200 {
+            let calls_in_intent: std::collections::BTreeMap<u32, &ContractCall<(), InMemoryDB>> =
+                calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i as u32, c))
+                    .collect();
+
+            let mut guaranteed_calls = HashSet::new();
+            let mut fallible_calls = HashSet::new();
+            let mut calls_by_address = std::collections::HashMap::new();
+            let mut adjacencies = std::collections::HashMap::new();
+
+            let _callers = relate_nodes::<(), InMemoryDB>(
+                &mut guaranteed_calls,
+                &mut fallible_calls,
+                &mut calls_by_address,
+                &mut adjacencies,
+                1,
+                &calls_in_intent,
+            )
+            .unwrap();
+
+            // All precedence edges should be forward (lower → higher index)
+            for (from_node, to_nodes) in &adjacencies {
+                for to_node in to_nodes {
+                    if from_node.call_index > to_node.call_index {
+                        backward_edge_found = true;
+                    }
+                }
+            }
+
+            // causality_check should not reject this valid ordering
+            if causality_check::<InMemoryDB>(&guaranteed_calls, &fallible_calls, adjacencies)
+                .is_err()
+            {
+                causality_violation_found = true;
+            }
+
+            if backward_edge_found && causality_violation_found {
+                break;
+            }
+        }
+
+        assert!(
+            !backward_edge_found,
+            "'related_nodes' produced backwards edges"
+        );
+        assert!(
+            !causality_violation_found,
+            "Spurious CausalityConstraintViolation for a valid call ordering"
+        );
     }
 }

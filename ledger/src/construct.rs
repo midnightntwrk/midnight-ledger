@@ -17,7 +17,7 @@ use crate::structure::SegIntent;
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MaintenanceUpdate,
     PROOF_SIZE, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
-    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
@@ -26,6 +26,7 @@ use base_crypto::fab::AlignedValue;
 use base_crypto::signatures::Signature;
 use base_crypto::signatures::SigningKey;
 use base_crypto::time::Timestamp;
+use coin_structure::coin::TokenType;
 use coin_structure::contract::ContractAddress;
 use itertools::Itertools;
 use onchain_runtime::context::{Effects, QueryContext, QueryResults};
@@ -786,7 +787,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(),
+                    gas: res.gas_heuristic(params),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -801,12 +802,88 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(&self) -> RunningCost;
+    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost;
 }
 
+fn test_tx_from_unshielded_offer<D: DB>(
+    offer: UnshieldedOffer<Signature, D>,
+) -> Transaction<Signature, ProofPreimageMarker, PedersenRandomness, D> {
+    use rand::{SeedableRng, rngs::StdRng};
+    let intent = Intent::new(
+        &mut StdRng::seed_from_u64(0x42),
+        Some(offer),
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        None,
+        Timestamp::from_secs(0),
+    );
+    Transaction::from_intents("local-test", [(1, intent)].into_iter().collect())
+}
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(&self) -> RunningCost {
-        self.gas_cost * 1.2
+    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost {
+        let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+        let expected_unshielded_inputs_overhead = self
+            .context
+            .effects
+            .unshielded_inputs
+            .keys()
+            .map(|tt| {
+                let TokenType::Unshielded(tt) = tt else {
+                    unreachable!()
+                };
+                let input = UtxoSpend {
+                    intent_hash: Default::default(),
+                    output_no: 0,
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let output = UtxoOutput {
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let offer = UnshieldedOffer::<_, D> {
+                    inputs: vec![input].into(),
+                    outputs: vec![output].into(),
+                    signatures: Default::default(),
+                };
+                let tx = test_tx_from_unshielded_offer(offer);
+                tx.cost(params, false)
+                    .map(RunningCost::from)
+                    .unwrap_or(RunningCost::ZERO)
+            })
+            .sum();
+        let expected_unshielded_outputs_overhead = self
+            .context
+            .effects
+            .unshielded_outputs
+            .keys()
+            .map(|tt| {
+                let TokenType::Unshielded(tt) = tt else {
+                    unreachable!()
+                };
+                let output = UtxoOutput {
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let offer = UnshieldedOffer::<_, D> {
+                    inputs: Default::default(),
+                    outputs: vec![output].into(),
+                    signatures: Default::default(),
+                };
+                let tx = test_tx_from_unshielded_offer(offer);
+                tx.cost(params, false)
+                    .map(RunningCost::from)
+                    .unwrap_or(RunningCost::ZERO)
+            })
+            .sum();
+        transcript_gas_cost_with_overhead
+            + expected_unshielded_inputs_overhead
+            + expected_unshielded_outputs_overhead
     }
 }
 
@@ -948,10 +1025,10 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let mut required_budget = partial_res.gas_heuristic().max_time();
+                let mut required_budget = partial_res.gas_heuristic(params).max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next].gas_heuristic().max_time();
+                    required_budget += full_runs[next].gas_heuristic(params).max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {
