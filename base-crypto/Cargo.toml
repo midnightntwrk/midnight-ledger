@@ -3,6 +3,7 @@ name = "midnight-base-crypto"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+description = "Provides foundational cryptographic primitives for Midnight's ledger."
 
 [features]
 default = []
@@ -11,8 +12,8 @@ cli = ["dep:indicatif"]
 fixed-point-custom-serde = []
 
 [dependencies]
-derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
