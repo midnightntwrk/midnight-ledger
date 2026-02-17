@@ -201,17 +201,30 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
-        if preimage.inputs.len() != self.inputs.len() {
+        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
+
+        let mut idx = 0;
+        for input_id in self.inputs.iter() {
+            let w = input_id.val_t.encoded_len();
+            if idx + w > preimage.inputs.len() {
+                bail!(
+                    "Not enough raw inputs: ran out at index {} while decoding {:?}",
+                    idx,
+                    input_id.name
+                );
+            }
+            let value = decode_offcircuit(&preimage.inputs[idx..idx + w], &input_id.val_t)?;
+            memory.insert(input_id.name.clone(), value);
+            idx += w;
+        }
+        if idx != preimage.inputs.len() {
             bail!(
-                "Expected {} inputs, received {}",
-                self.inputs.len(),
+                "Expected {} raw inputs, received {}",
+                idx,
                 preimage.inputs.len()
             );
         }
-        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
-        for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
-            memory.insert(id.name.clone(), IrValue::Native(*input));
-        }
+
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
             pis.push(
@@ -359,33 +372,44 @@ impl IrSource {
                     );
                     memory.insert(output.clone(), result);
                 }
-                I::PublicInput { guard, output } => {
+                I::PublicInput {
+                    guard,
+                    val_t,
+                    output,
+                } => {
                     let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => 0.into(),
+                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
+                            IrValue::default(val_t)
+                        }
                         _ => {
-                            public_transcript_outputs_idx += 1;
-                            preimage
-                                .public_transcript_outputs
-                                .get(public_transcript_outputs_idx - 1)
-                                .copied()
-                                .ok_or(anyhow!("Ran out of public transcript outputs"))?
+                            let w = val_t.encoded_len();
+                            let raw_outputs = &preimage.public_transcript_outputs
+                                [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
+                            public_transcript_outputs_idx += w;
+                            decode_offcircuit(raw_outputs, val_t)?
                         }
                     };
-                    memory.insert(output.clone(), IrValue::Native(val));
+                    memory.insert(output.clone(), val);
                 }
-                I::PrivateInput { guard, output } => {
+                I::PrivateInput {
+                    guard,
+                    val_t,
+                    output,
+                } => {
                     let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => 0.into(),
+                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
+                            IrValue::default(val_t)
+                        }
                         _ => {
-                            private_transcript_outputs_idx += 1;
-                            preimage
-                                .private_transcript
-                                .get(private_transcript_outputs_idx - 1)
-                                .copied()
-                                .ok_or(anyhow!("Ran out of private transcript outputs"))?
+                            let w = val_t.encoded_len();
+                            let raw_outputs = &preimage.private_transcript
+                                [private_transcript_outputs_idx
+                                    ..private_transcript_outputs_idx + w];
+                            private_transcript_outputs_idx += w;
+                            decode_offcircuit(raw_outputs, val_t)?
                         }
                     };
-                    memory.insert(output.clone(), IrValue::Native(val));
+                    memory.insert(output.clone(), val);
                 }
                 I::Copy { val, output } => {
                     let val = resolve_operand(&memory, val)?;
@@ -793,11 +817,18 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard: _, inputs } => {
+                I::Impact { guard, inputs } => {
+                    let zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
+                    let guard: AssignedBit<_> = {
+                        let guard = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
+                        std.convert(layouter, &guard)?
+                    };
                     for input in inputs {
                         let val_assigned = resolve_operand(std, layouter, &memory, input)?;
                         let x: AssignedNative<_> = val_assigned.try_into()?;
-                        pi_push(x, &mut public_inputs)?;
+                        let guarded_x = std.select(layouter, &guard, &x, &zero)?;
+                        pi_push(guarded_x, &mut public_inputs)?;
                     }
                 }
                 I::Output { val } => {
@@ -892,41 +923,30 @@ impl Relation for IrSource {
                     let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
-                    let guard = match guard {
-                        Some(g) => Some(resolve_operand(std, layouter, &memory, g)?),
-                        None => None,
-                    };
+                I::PublicInput {
+                    guard: _,
+                    val_t,
+                    output,
+                }
+                | I::PrivateInput {
+                    guard: _,
+                    val_t,
+                    output,
+                } => {
                     let value = witness.as_ref().map_with_result(|preproc| {
-                        let x = preproc
+                        preproc
                             .memory
                             .get(output)
                             .cloned()
-                            .unwrap_or(IrValue::Native(0.into()));
-                        let x: Fr = x.try_into().map_err(|_| {
-                            Error::Synthesis(format!(
-                                "expected native value for public/private input {:?}",
+                            .ok_or(Error::Synthesis(format!(
+                                "Output {:?} not found in witness memory",
                                 output
-                            ))
-                        })?;
-                        Ok::<_, midnight_proofs::plonk::Error>(x.0)
+                            )))
                     })?;
-                    let value_cell = std.assign(layouter, value)?;
-                    // If `guard` is Some, then we want to ensure that
-                    // `value` is 0 if `guard` is 0
-                    // That is: guard == 0 -> value == 0
-                    // => value == 0 || guard
-                    if let Some(guard) = guard {
-                        let value_is_zero = std.is_zero(layouter, &value_cell)?;
-                        let guard: AssignedNative<_> = guard.try_into()?;
-                        let guard_bit = std.convert(layouter, &guard)?;
-                        let is_ok = std.or(layouter, &[value_is_zero, guard_bit])?;
-                        let is_ok_field = std.convert(layouter, &is_ok)?;
-                        std.assert_non_zero(layouter, &is_ok_field)?;
-                    }
+
                     mem_insert(
                         output.clone(),
-                        CircuitValue::Native(value_cell),
+                        assign_incircuit(std, layouter, val_t, &[value])?[0].clone(),
                         &mut memory,
                     )?;
                 }

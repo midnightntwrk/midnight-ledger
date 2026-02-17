@@ -376,6 +376,13 @@ pub enum Instruction {
     ///
     /// No outputs, but adds the inputs as public inputs and activity information to
     /// [`IrSource::prove`] and [`IrSource::check`].
+    ///
+    /// In-circuit, if `guard` is `false`, instead of adding the `inputs` as public inputs,
+    /// it will add `n` zeros as public inputs (where `n` is the number of `inputs`).
+    /// This is enforced with in-circuit constraints.
+    ///
+    /// NB: Currently, we require that all `inputs` be of type `Native`.
+    /// A runtime error will be raised otherwise.
     Impact {
         /// The boolean condition under which the public inputs are active
         guard: Operand,
@@ -533,25 +540,48 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a public input from the public transcript outputs.
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the public transcript outputs.
+    /// Outputs one element, the next public transcript output, or a default value
+    /// if the `guard` fails.
     ///
-    /// Outputs one element, the next public transcript output, or `0` if the
-    /// guard fails
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PrivateInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the public transcript outputs in this case).
     PublicInput {
         /// An optional condition for retrieving the next public transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a private input from the private transcript outputs.
+
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the private transcript outputs.
+    /// Outputs one element, the next private transcript output, or a default value
+    /// if the `guard` fails.
     ///
-    /// Outputs one element, the next private transcript output, or `0` if the
-    /// guard fails
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PublicInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the private transcript outputs in this case).
     PrivateInput {
         /// An optional condition for retrieving the next private transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
     },

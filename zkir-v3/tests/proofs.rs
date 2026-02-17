@@ -13,7 +13,9 @@
 
 #[cfg(test)]
 mod proof_tests {
-    use rand::SeedableRng;
+    use group::Group;
+    use midnight_curves::JubjubSubgroup;
+    use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
@@ -324,17 +326,17 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0_x", "type": "Scalar<BLS12-381>" },
-              { "name": "%p0_y", "type": "Scalar<BLS12-381>" },
+              { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<BLS12-381>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
-               { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" }
+               { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" },
+               { "op": "private_input", "type": "Point<Jubjub>", "guard": null, "output": "%p4" },
+               { "op": "ec_mul", "a": "%p4", "scalar": "%s0", "output": "%p5" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -357,11 +359,12 @@ mod proof_tests {
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
         let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![p.x().unwrap(), p.y().unwrap(), 42.into(), 63.into()],
-            private_transcript: vec![],
+            private_transcript: vec![q.x().unwrap(), q.y().unwrap()],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
@@ -392,8 +395,8 @@ mod proof_tests {
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
-               { "op": "private_input", "guard": null, "output": "%v_3" },
-               { "op": "private_input", "guard": null, "output": "%v_4" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%v_3" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%v_4" },
                { "op": "constrain_eq", "a": "%v_1", "b": "%v_3" },
                { "op": "constrain_eq", "a": "%v_2", "b": "%v_4" },
                { "op": "reconstitute_field", "divisor": "%v_1", "modulus": "%v_2", "bits": 3, "output": "%v_5" },
