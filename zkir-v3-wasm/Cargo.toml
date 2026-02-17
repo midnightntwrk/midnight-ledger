@@ -3,6 +3,7 @@ name = "midnight-zkir-v3-wasm"
 version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+publish = false
 
 [lib]
 crate-type = ["cdylib", "rlib"]

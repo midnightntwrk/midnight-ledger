@@ -3,6 +3,7 @@ name = "midnight-base-crypto"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Provides foundational cryptographic primitives for Midnight's ledger."
 
 [features]

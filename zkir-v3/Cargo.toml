@@ -3,6 +3,8 @@ name = "midnight-zkir-v3"
 version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+publish = false
 
 [[bin]]
 name = "zkir"

@@ -3,6 +3,7 @@ name = "midnight-transient-crypto"
 version = "2.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
 description = "Cryptographic primitives for Midnight that may change over time."
 
 [features]
