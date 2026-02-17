@@ -9,7 +9,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-zkir-v3 = { path = "../zkir-v3" }
+zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }

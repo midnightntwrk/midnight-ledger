@@ -1,8 +1,10 @@
 [package]
-name = "zkir"
+name = "midnight-zkir"
 version = "2.1.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Zero-knowledge intermediate representation used for Midnight."
 
 [[bin]]
 name = "zkir"
@@ -21,9 +23,9 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
 midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
@@ -56,5 +58,5 @@ proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
-zkir = { path = ".", features = ["proptest"] }
+zkir = { path = ".", features = ["proptest"], package = "midnight-zkir" }
 actix-rt = "^2.9.0"
