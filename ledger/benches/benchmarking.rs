@@ -217,16 +217,18 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     init_logger(midnight_ledger::LogLevel::Warn);
+    set_default_storage(mk_test_db);
+    let mut state = TestState::new(&mut rng);
+    let mut reached_size = 0;
     for log_size in 10..=13 {
-        set_default_storage(mk_test_db);
         let t0 = std::time::Instant::now();
         let size = 2u64.pow(log_size);
-        let mut state = TestState::new(&mut rng);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
-        for _ in 0..size >> 10 {
+        for _ in (reached_size >> 10)..(size >> 10) {
             rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
             state.swizzle_to_db();
         }
+        reached_size = size;
         let mut lstate = Sp::new(state.ledger.clone());
         let utxo = (**state.utxos.iter().next().unwrap()).clone();
         let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
@@ -267,9 +269,6 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let tx = rt
             .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
             .unwrap();
-        //dbg!(&lstate.dust);
-        //dbg!(&tx);
-        //dbg!(tx.application_cost(&lstate.parameters.cost_model));
         let strictness = WellFormedStrictness::default();
         let vtx = tx.well_formed(&*lstate, strictness, state.time).unwrap();
         let context = state.context().block_context;
@@ -280,10 +279,9 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             t1 - t0,
             cur_alloc()
         );
-        //println!("{:?}", tx.application_cost(&lstate.parameters.cost_model));
         lstate.persist();
         drop(lstate);
-        drop(state);
+        state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
             b.flush_cache_evictions_to_db();
@@ -333,18 +331,13 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
                 .map(|(_, (_, d))| d)
                 .sum::<Duration>()
         );
-        let state = default_storage::<TestDb>().get_lazy(&key).unwrap();
-        state.unpersist();
-        drop(state);
+        let lstate = default_storage::<TestDb>().get_lazy(&key).unwrap();
+        lstate.unpersist();
+        drop(lstate);
         drop(key);
         drop(vtx);
         drop(tx);
         println!("After dropping all data, {} remains allocated", cur_alloc());
-        unsafe_drop_default_storage::<TestDb>();
-        println!(
-            "After dropped DB and all caches, {} remains allocated",
-            cur_alloc()
-        );
     }
     group.finish();
 }

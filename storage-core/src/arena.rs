@@ -1516,27 +1516,6 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     ///
     /// See `[StorageBackend::persist]`.
     pub fn persist(&mut self) {
-        // Promote self to Ref if not already
-        if let ArenaKey::Direct(..) = self.child_repr {
-            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-            let value = self
-                .data
-                .get()
-                .expect("A Direct node must contain it's data");
-            value
-                .to_binary_repr(&mut data)
-                .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
-            let new_sp = self.arena.new_sp_locked(
-                &mut self.arena.lock_metadata(),
-                value.as_ref().clone(),
-                self.root.clone(),
-                data,
-                self.children(),
-                child_repr,
-            );
-            *self = new_sp;
-        }
         self.arena.with_backend(|backend| {
             self.child_repr
                 .refs()
