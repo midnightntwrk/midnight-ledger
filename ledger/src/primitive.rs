@@ -11,18 +11,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::hash::Hash;
+use std::cmp::Ord;
+use std::collections::BTreeMap;
 
 #[derive(Clone, PartialEq, Eq)]
-pub(crate) struct MultiSet<T: Eq + Hash> {
-    elements: HashMap<T, usize>,
+pub(crate) struct MultiSet<T: Eq + Ord> {
+    elements: BTreeMap<T, usize>,
 }
 
-impl<T: Eq + Hash> MultiSet<T> {
+impl<T: Eq + Ord> MultiSet<T> {
     pub(crate) fn new() -> Self {
         MultiSet {
-            elements: std::collections::HashMap::new(),
+            elements: BTreeMap::new(),
         }
     }
 
@@ -45,16 +45,16 @@ impl<T: Eq + Hash> MultiSet<T> {
     }
 }
 
-impl<T: Eq + Hash> IntoIterator for MultiSet<T> {
+impl<T: Eq + Ord> IntoIterator for MultiSet<T> {
     type Item = (T, usize);
-    type IntoIter = std::collections::hash_map::IntoIter<T, usize>;
+    type IntoIter = std::collections::btree_map::IntoIter<T, usize>;
 
     fn into_iter(self) -> Self::IntoIter {
         self.elements.into_iter()
     }
 }
 
-impl<T: Eq + Hash + Clone> FromIterator<T> for MultiSet<T> {
+impl<T: Eq + Ord + Clone> FromIterator<T> for MultiSet<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let mut multiset = MultiSet::new();
         for item in iter {

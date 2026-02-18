@@ -62,7 +62,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             D,
         >,
     ) -> Self {
-        Self::new(network_id, intents, None, std::collections::HashMap::new())
+        Self::new(network_id, intents, None, storage::storage::HashMap::new())
     }
 }
 
@@ -77,7 +77,7 @@ impl<S: SignatureKind<D>, D: DB>
             D,
         >,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
+        fallible_coins: storage::storage::HashMap<u16, ZswapOffer<ProofPreimage, D>, D>,
     ) -> Self {
         let mut res = StandardTransaction {
             network_id: network_id.into(),
@@ -439,7 +439,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             D,
         >,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
+        fallible_coins: storage::storage::HashMap<u16, ZswapOffer<ProofPreimage, D>, D>,
     ) -> Self {
         let mut stx = StandardTransaction {
             network_id: network_id.into(),

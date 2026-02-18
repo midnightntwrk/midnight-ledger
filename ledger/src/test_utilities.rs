@@ -51,13 +51,12 @@ use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
-use std::collections::HashMap;
 use std::env;
 use std::io;
 use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
-use storage::storage::{HashMap as SHashMap, HashSet};
+use storage::storage::{HashMap, HashSet};
 #[cfg(feature = "proving")]
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
@@ -231,7 +230,7 @@ impl<D: DB> TestState<D> {
         };
         let mut intent = Intent::empty(rng, self.time);
         intent.guaranteed_unshielded_offer = Some(Sp::new(offer));
-        let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1u16, intent));
+        let tx = Transaction::from_intents("local-test", HashMap::new().insert(1u16, intent));
         let strictness = WellFormedStrictness {
             enforce_balancing: false,
             ..WellFormedStrictness::default()
@@ -270,7 +269,7 @@ impl<D: DB> TestState<D> {
         };
         let tx = Transaction::<(), _, _, D>::new(
             "local-test",
-            SHashMap::new(),
+            HashMap::new(),
             Some(offer),
             HashMap::new(),
         );
@@ -315,7 +314,7 @@ impl<D: DB> TestState<D> {
         };
         let mut intent = Intent::empty(rng, self.time);
         intent.dust_actions = Some(Sp::new(actions));
-        let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1, intent));
+        let tx = Transaction::from_intents("local-test", HashMap::new().insert(1, intent));
         let strictness = WellFormedStrictness {
             enforce_balancing: false,
             verify_signatures: false,
@@ -510,14 +509,14 @@ impl<D: DB> TestState<D> {
                 if seg == 0 {
                     Transaction::<S, ProofPreimageMarker, PedersenRandomness, D>::new(
                         "local-test",
-                        SHashMap::new(),
+                        HashMap::new(),
                         Some(offer),
                         HashMap::new(),
                     )
                 } else {
                     let mut fc = HashMap::new();
-                    fc.insert(seg, offer);
-                    Transaction::new("local-test", SHashMap::new(), None, fc)
+                    fc = fc.insert(seg, offer);
+                    Transaction::new("local-test", HashMap::new(), None, fc)
                 }
             })
             .collect::<Vec<_>>();
@@ -570,7 +569,7 @@ impl<D: DB> TestState<D> {
                 registrations: vec![].into(),
                 ctime: self.time,
             }));
-            let hm = SHashMap::new().insert(0xFEED, intent);
+            let hm = HashMap::new().insert(0xFEED, intent);
             let tx2_unproven = Transaction::from_intents("local-test", hm);
             let tx2_mock = P::mock_from_unproven(tx2_unproven.clone());
             merged_tx = tx.merge(&tx2_mock)?;
@@ -863,7 +862,7 @@ pub async fn serialize_request_body<S: SignatureKind<D> + Tagged, D: DB>(
         .calls()
         .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
         .collect::<Vec<_>>();
-    let mut keys = HashMap::new();
+    let mut keys = std::collections::HashMap::new();
     for k in circuits_used.into_iter() {
         let k = KeyLocation(std::borrow::Cow::Owned(k));
         let data = resolver
@@ -981,7 +980,7 @@ pub fn well_formed_tx_builder<
                 "local-test",
                 storage::storage::HashMap::new(),
                 Some(offer),
-                std::collections::HashMap::new(),
+                storage::storage::HashMap::new(),
             ),
             resolver,
         )
