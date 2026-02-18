@@ -1331,7 +1331,7 @@ impl DustLocalState {
             .transpose()?;
         let new_state =
             self.0
-                .insert_generation_info(generation_index, generation.clone(), initial_nonce)?;
+                .insert_generation_info(generation_index, generation, initial_nonce)?;
         Ok(DustLocalState(new_state))
     }
 
@@ -1346,7 +1346,7 @@ impl DustLocalState {
             .map_err(|_| JsError::new("generation_index is out of range"))?;
         let new_state = self
             .0
-            .remove_generation_info(generation_index, generation.clone())?;
+            .remove_generation_info(generation_index, generation)?;
         Ok(DustLocalState(new_state))
     }
 
