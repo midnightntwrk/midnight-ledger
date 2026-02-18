@@ -361,8 +361,8 @@ export class DustGenerationState {
 
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
-  newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
-  newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
+  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
+  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
   toString(compact?: boolean): string;
