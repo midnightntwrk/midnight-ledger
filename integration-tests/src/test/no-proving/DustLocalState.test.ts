@@ -18,7 +18,6 @@ import {
   type DustPublicKey,
   DustRegistration,
   DustStateMerkleTreeCollapsedUpdate,
-  DustGenerationState,
   Intent,
   type IntentHash,
   type PreProof,
