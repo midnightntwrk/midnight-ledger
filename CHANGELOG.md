@@ -7,6 +7,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 ## 8.0.0
 
 - breaking: fix: correctly compute change for Dust spent during registration
+- breaking: fix: merkle tree canonicity
+- feat: add last block time context variable
+- fix: log non-proof-erased tx hashes
+- fix: resolve non-determinism and not-to-spec iteration order in sequencing
+  check.
+- feat: add `with_genesis_settings` ledger state constructor, that allows providing initial parameters, and initial pool value allocations
+- bugfix: remove accidental structured logging of the full ledger state in some places
 
 ## 7.0.0
 

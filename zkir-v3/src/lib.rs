@@ -15,6 +15,8 @@
 extern crate tracing;
 
 pub mod ir;
+pub mod ir_instructions;
+pub mod ir_types;
 pub mod ir_vm;
 
 pub use ir::{Identifier, Instruction, IrSource};

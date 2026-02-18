@@ -308,7 +308,9 @@ impl<
 
     /// Iterate over the key value pairs in the hash map
     #[allow(clippy::type_complexity)]
-    pub fn iter(&self) -> impl Iterator<Item = Sp<(Sp<K, D>, Sp<V, D>), D>> + use<K, V, D, A> {
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = Sp<(Sp<K, D>, Sp<V, D>), D>> + use<'_, K, V, D, A> + '_ {
         self.0.iter().map(|(_, v)| v)
     }
 
@@ -1517,7 +1519,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
     }
 
     /// Iterate over the key-value pairs in the map in a deterministic, but unspecified order.
-    pub fn iter(&self) -> impl Iterator<Item = (K, Sp<V, D>)> + use<K, V, D, A> {
+    pub fn iter(&self) -> impl Iterator<Item = (K, Sp<V, D>)> + use<'_, K, V, D, A> + '_ {
         self.mpt.iter().filter_map(|(p, v)| {
             // The path should always decode as nibbles if the map is well
             // formed, but at the moment a ill-formed maps can be created by
@@ -1528,7 +1530,7 @@ impl<K: Serializable + Deserializable, V: Storable<D>, D: DB, A: Storable<D> + A
     }
 
     /// Iterator over the keys in the map in a deterministic, but unspecified order.
-    pub fn keys(&self) -> impl Iterator<Item = K> + use<K, V, D, A> {
+    pub fn keys(&self) -> impl Iterator<Item = K> + use<'_, K, V, D, A> + '_ {
         self.iter().map(|(k, _)| k)
     }
 

@@ -2781,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "7.0.0"
+version = "8.0.0-rc.2"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2801,6 +2801,7 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
+ "midnight-storage-core",
  "midnight-transient-crypto",
  "midnight-zswap",
  "pastey",
@@ -2812,6 +2813,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2829,7 +2831,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "7.0.0"
+version = "8.0.0-rc.2"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -2857,7 +2859,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -2888,7 +2890,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
  "hex",
@@ -2908,7 +2910,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -2929,7 +2931,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "1.0.1"
+version = "2.0.0"
 dependencies = [
  "derive-where",
  "fake",
@@ -2953,7 +2955,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "7.0.0"
+version = "8.0.0-rc.2"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3039,7 +3041,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "1.1.0"
+version = "2.0.0"
 dependencies = [
  "criterion",
  "crypto",
@@ -3107,7 +3109,7 @@ dependencies = [
  "derive-where",
  "midnight-serialize",
  "midnight-serialize-macros",
- "midnight-storage",
+ "midnight-storage-core",
  "pastey",
  "proc-macro2",
  "proptest",
@@ -3224,7 +3226,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "7.0.0"
+version = "8.0.0-rc.2"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3451,9 +3453,9 @@ checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "objc2-core-foundation"
-version = "0.3.2"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a180dd8642fa45cdb7dd721cd4c11b1cadd4929ce112ebd8b9f5803cc79d536"
+checksum = "1c10c2894a6fed806ade6027bcd50662746363a9589d3ec9d9bef30a4e4bc166"
 dependencies = [
  "bitflags 2.10.0",
 ]
@@ -5000,9 +5002,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.46"
+version = "0.3.47"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9da98b7d9b7dad93488a84b8248efc35352b0b2657397d4167e7ad67e5d535e5"
+checksum = "743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c"
 dependencies = [
  "deranged",
  "itoa",
@@ -5021,9 +5023,9 @@ checksum = "7694e1cfe791f8d31026952abf09c69ca6f6fa4e1a1229e18988f06a04a12dca"
 
 [[package]]
 name = "time-macros"
-version = "0.2.26"
+version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "78cc610bac2dcee56805c99642447d4c5dbde4d01f752ffea0199aee1f601dc4"
+checksum = "2e70e4c5a0e0a8a4823ad65dfe1a6930e4f4d756dcd9dd7939022b5e8c501215"
 dependencies = [
  "num-conv",
  "time-core",
@@ -6095,10 +6097,12 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-circuits",
+ "midnight-curves",
  "midnight-proofs",
  "midnight-serialize",
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
+ "num-bigint",
  "pastey",
  "proptest",
  "proptest-derive",
