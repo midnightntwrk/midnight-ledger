@@ -710,7 +710,10 @@ impl<D: DB> StorageBackend<D> {
                         // already been removed from DB.
                         let db_root_count = self.database.get_root_count(&k) as i32;
                         let root_count = db_root_count + delta.root_delta;
-                        assert!(root_count >= 0, "roots counts can't be negative (for {k:?})!");
+                        assert!(
+                            root_count >= 0,
+                            "roots counts can't be negative (for {k:?})!"
+                        );
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -719,7 +722,10 @@ impl<D: DB> StorageBackend<D> {
                     updates.push((k.clone(), Update::InsertNode(obj)));
                     if delta.root_delta != 0 {
                         // This a new object that's not yet in the DB.
-                        assert!(delta.root_delta > 0, "root count can't be negative (for {k:?})");
+                        assert!(
+                            delta.root_delta > 0,
+                            "root count can't be negative (for {k:?})"
+                        );
                         let root_count = delta.root_delta as u32;
                         updates.push((k, Update::SetRootCount(root_count)));
                     }
