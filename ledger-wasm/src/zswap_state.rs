@@ -237,9 +237,9 @@ impl ZswapLocalState {
     pub fn apply_failed(&self, offer: &ZswapOffer) -> ZswapLocalState {
         use ZswapOfferTypes::*;
         ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply_failed(&val),
-            UnprovenOffer(val) => self.0.apply_failed(&val),
-            ProofErasedOffer(val) => self.0.apply_failed(&val),
+            ProvenOffer(val) => self.0.apply_failed(val),
+            UnprovenOffer(val) => self.0.apply_failed(val),
+            ProofErasedOffer(val) => self.0.apply_failed(val),
         })
     }
 
