@@ -794,7 +794,7 @@ impl<D: DB> Arena<D> {
         let mut metadata = RefCell::borrow_mut(metadata);
         let rc = metadata
             .get_mut(key)
-            .expect(&format!("attempted to increment non-existant ref {key:?}"));
+            .expect("attempted to increment non-existant ref");
         rc.ref_count += 1;
     }
 
@@ -985,7 +985,12 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                     .arena
                     .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
                 if let Some(arc) = maybe_arc {
-                    return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child.clone()));
+                    return Ok(Sp::eager(
+                        self.arena.clone(),
+                        key.clone(),
+                        arc,
+                        child.clone(),
+                    ));
                 }
                 drop(metadata_lock);
 
@@ -1010,11 +1015,8 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             max_depth: self.max_depth.map(|max_depth| max_depth - 1),
             recursion_depth: self.recursion_depth + 1,
         };
-        let value = T::from_binary_repr::<&[u8]>(
-            &mut &data[..],
-            &mut children.iter().cloned(),
-            &loader,
-        )?;
+        let value =
+            T::from_binary_repr::<&[u8]>(&mut &data[..], &mut children.iter().cloned(), &loader)?;
         match child {
             ArenaKey::Ref(hash) => Ok(self.arena.new_sp(
                 value,
@@ -1391,7 +1393,9 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
-        if let ArenaKey::Ref(_) = self.child_repr && !self.is_lazy() {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         Sp {
@@ -1406,7 +1410,9 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr && !self.is_lazy() {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get() {
@@ -1431,7 +1437,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
     /// failure to a context where a failure panics.
     pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
-        if let ArenaKey::Ref(_) = self.child_repr && !self.is_lazy() {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
@@ -1450,7 +1458,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
 impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
     /// Casts this pointer into a dynamically typed `Any` pointer.
     pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
-        if let ArenaKey::Ref(_) = self.child_repr && !self.is_lazy() {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
@@ -1578,7 +1588,9 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // We only need to do this on refs, because others aren't actually
         // ref-counted. Additionally, note that if we have a Direct node here,
         // then the children contained within this Sp will do their own cleanup.
-        if let ArenaKey::Ref(hash) = &self.child_repr && !was_lazy {
+        if let ArenaKey::Ref(hash) = &self.child_repr
+            && !was_lazy
+        {
             // It's important that we unload() before calling decrement_ref(),
             // because unload() is responsible for cleaning up the sp_cache, and
             // decrement_ref() is responsible for cleaning up the metadata, and the
@@ -1664,7 +1676,11 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         .take()
                         .expect("result of Sp::from_arena should be initialized");
                     if let ArenaKey::Ref(_) = &self.child_repr {
-                        self.arena.write_sp_cache_locked(&self.arena.lock_sp_cache(), self.root.clone(), arc.clone());
+                        self.arena.write_sp_cache_locked(
+                            &self.arena.lock_sp_cache(),
+                            self.root.clone(),
+                            arc.clone(),
+                        );
                     }
                     arc
                 }
