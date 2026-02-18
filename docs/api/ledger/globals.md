@@ -1,8 +1,8 @@
-[**@midnight/ledger v8.0.0-performance.1**](README.md)
+[**@midnight/ledger v8.0.0-rc.3**](README.md)
 
 ***
 
-# @midnight/ledger v8.0.0-performance.1
+# @midnight/ledger v8.0.0-rc.3
 
 ## Classes
 
