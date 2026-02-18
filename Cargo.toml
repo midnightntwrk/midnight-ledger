@@ -1,6 +1,7 @@
 [workspace]
 package.license = "Apache-2.0"
-package.version = "8.0.0-performance.1"
+package.repository = "https://github.com/midnightntwrk/midnight-ledger"
+package.version = "8.0.0-rc.2"
 members = [
     "zswap",
     "ledger",
