@@ -1087,7 +1087,7 @@ impl ClaimRewardable for ledger::structure::ClaimRewardsTransaction<(), InMemory
     }
 }
 
-trait Transactionable {
+pub(crate) trait Transactionable {
     fn imbalances(&self, segment: u16, fees: Option<BigInt>) -> Result<Map, JsError>;
     fn cost(
         &self,
@@ -1114,6 +1114,7 @@ trait Transactionable {
         strictness: &WellFormedStrictness,
         tblock: &Date,
     ) -> Result<VerifiedTransaction, JsError>;
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB>;
 }
 
 impl<
@@ -1271,9 +1272,12 @@ where
             tblock,
         )?))
     }
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB> {
+        self.erase_proofs().erase_signatures()
+    }
 }
 
-fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
+pub(crate) fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
     match tx {
         TransactionTypes::UnprovenWithSignaturePreBinding(val) => Box::new(val),
         TransactionTypes::UnprovenWithSignatureBinding(val) => Box::new(val),

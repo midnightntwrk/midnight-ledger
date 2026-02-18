@@ -1648,7 +1648,17 @@ export class ZswapLocalState {
    * Locally applies an offer to the current state, returning the updated state
    */
   apply<P extends Proofish>(secretKeys: ZswapSecretKeys, offer: ZswapOffer<P>): ZswapLocalState;
-
+  /**
+   * Locally reverts pending outputs/spends from an offer known to have failed
+   * or which has been discarded.
+   */
+  applyFailed<P extends Proofish>(offer: ZswapOffer<P>): ZswapLocalState;
+  /**
+   * Locally reverts all pending outputs/spends from a transaction which has been discarded.
+   *
+   * Behaves as {@link applyFailed} for the entire transaction.
+   */
+  revertTransaction<S extends Signaturish, P extends Proofish, B extends Bindingish>(transaction: Transaction<S, P, B>): ZswapLocalState;
   /**
    * Clears pending outputs / spends that have passed their TTL without being included in
    * a block.
@@ -1656,6 +1666,8 @@ export class ZswapLocalState {
    * Note that as TTLs are *from a block perspective*, and there is some
    * latency between the block and the wallet, the time passed in here should
    * not be the current time, but incorporate a latency buffer.
+   *
+   * NOTE: This API endpoint is currently non-functional and works as a no-op.
    */
   clearPending(time: Date): ZswapLocalState;
 
