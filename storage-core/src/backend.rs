@@ -1615,6 +1615,7 @@ mod tests {
                     .peek_from_memory(&n.key)
                     .unwrap()
                     .get_obj()
+                    .unwrap()
                     .ref_count,
                 n.ref_count
             );
@@ -1650,6 +1651,7 @@ mod tests {
                     .peek_from_memory(&n.key)
                     .unwrap()
                     .get_obj()
+                    .unwrap()
                     .ref_count,
                 r
             );

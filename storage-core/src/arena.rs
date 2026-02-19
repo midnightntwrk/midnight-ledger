@@ -1512,28 +1512,6 @@ impl<T: ?Sized, D: DB> Sp<T, D> {
 }
 
 impl<T: Storable<D>, D: DB> Sp<T, D> {
-    // Very weird behaviour that needs to be preserved for backwards compatibility.
-    fn as_persisted(&self) -> Self {
-        let mut res = self.clone();
-        // Promote self to Ref if not already
-        if let ArenaKey::Direct(..) = self.child_repr {
-            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-            let value = self.force_as_arc();
-            value
-                .to_binary_repr(&mut data)
-                .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
-            res = self.arena.new_sp_locked(
-                &mut self.arena.lock_metadata(),
-                value.as_ref().clone(),
-                self.root.clone(),
-                data,
-                self.children(),
-                child_repr,
-            );
-        }
-        res
-    }
     /// Notify the storage back-end to increment the persist count on this object.
     ///
     /// See `[StorageBackend::persist]`.
@@ -1543,7 +1521,26 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// results *before* and *after* `persist`ing. A change to this would be a major breaking
     /// change, and is therefore deferred.
     pub fn persist(&mut self) {
-        *self = self.as_persisted();
+        // Promote self to Ref if not already
+        //
+        // We don't *really* want to do this, but it's baked into behaviour now due to the above.
+        if let ArenaKey::Direct(..) = self.child_repr {
+            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+            let value = self.force_as_arc();
+            value
+                .to_binary_repr(&mut data)
+                .expect("Storable data should be able to be represented in binary");
+            let child_repr = ArenaKey::Ref(self.root.clone());
+            let new_sp = self.arena.new_sp_locked(
+                &mut self.arena.lock_metadata(),
+                value.as_ref().clone(),
+                self.root.clone(),
+                data,
+                self.children(),
+                child_repr,
+            );
+            *self = new_sp;
+        }
         self.arena.with_backend(|backend| {
             self.child_repr
                 .refs()
@@ -1558,11 +1555,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
         self.arena.with_backend(|backend| {
-            self.as_persisted()
-                .child_repr
-                .refs()
-                .into_iter()
-                .for_each(|ref_| backend.unpersist(ref_))
+            // Because `.persist` uses the hash, we use it here too.
+            backend.unpersist(&self.root)
         });
     }
 
