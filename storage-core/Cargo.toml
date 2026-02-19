@@ -1,8 +1,9 @@
 [package]
 name = "midnight-storage-core"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 license.workspace = true
+description = "Provides the low-level storage primitives for Midnight's ledger."
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
@@ -14,15 +15,15 @@ state-translation = ["public-internal-structure", "dep:hashbrown"]
 test-utilities = []
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 parity-db = { version = "0.5.2", optional = true }
 
 archery = "^0.5.0"
 crypto = { version = "0.5.1", features = ["digest"] }
 sha2 = "0.10.9"
 derive-where = "^1.5.0"
-macros = { path = "../storage-macros", package = "midnight-storage-macros" }
+macros = { version = "1.0.0", path = "../storage-macros", package = "midnight-storage-macros" }
 
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 fake = { version = "^2.10.0", features = ["derive"] }

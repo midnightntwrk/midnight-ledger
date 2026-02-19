@@ -36,13 +36,14 @@ use std::hash::Hash;
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
 use std::ops::Deref;
-use storage::DefaultDB;
-use storage::Storable;
-use storage::arena::{ArenaKey, Sp};
-use storage::db::DB;
+use storage_core as storage;
+use storage_core::DefaultDB;
+use storage_core::Storable;
+use storage_core::arena::{ArenaKey, Sp};
+use storage_core::db::DB;
 #[cfg(test)]
-use storage::db::InMemoryDB;
-use storage::storable::Loader;
+use storage_core::db::InMemoryDB;
+use storage_core::storable::Loader;
 
 /// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]
@@ -1221,7 +1222,7 @@ where
 mod tests {
     use sha2::Sha256;
 
-    use storage::db::InMemoryDB;
+    use storage_core::db::InMemoryDB;
 
     use super::*;
 
