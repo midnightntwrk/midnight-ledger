@@ -32,19 +32,8 @@ pub use storage::Storage;
 
 mod cache;
 
-#[cfg(any(
-    test,
-    all(
-        feature = "stress-test",
-        any(feature = "parity-db", feature = "sqlite")
-    )
-))]
+#[cfg(feature = "test-utilities")]
 pub mod test;
-
-// Stress testing utilities. Needs to be pub since we call it from a bin
-// target. But not meant to be consumed by library users.
-#[cfg(feature = "stress-test")]
-pub mod stress_test;
 
 /// The default storage mechanism.
 pub type DefaultHasher = sha2::Sha256;

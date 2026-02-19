@@ -51,6 +51,7 @@
 import type { AlignedValue, Op } from '@midnight-ntwrk/ledger';
 import { bigIntToValue } from '@midnight-ntwrk/ledger';
 import { ATOM_BYTES_1, ATOM_BYTES_16, ATOM_BYTES_32, ONE_VALUE } from '@/test/utils/value-alignment';
+import { Static } from '@/test-objects';
 
 // Effects structure indices for unshielded operations
 const EFFECTS_UNSHIELDED_INPUTS_IDX = 6;
@@ -86,7 +87,7 @@ export function encodeUnshieldedTokenType(color: string): AlignedValue {
   const colorBytes = hexToBytes(color);
   const emptyPadding = new Uint8Array(0); // Empty for unused variant
   return {
-    value: [ONE_VALUE, colorBytes, emptyPadding],
+    value: [ONE_VALUE, Static.trimTrailingZeros(colorBytes), emptyPadding],
     alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
   };
 }
