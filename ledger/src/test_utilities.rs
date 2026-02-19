@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::construct::ContractCallPrototype;
-use crate::dust::DustResolver;
 use crate::dust::{
-    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
+    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustResolver,
+    DustSecretKey,
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
@@ -56,7 +56,7 @@ use std::io;
 use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
-use storage::storage::{HashMap, HashSet};
+use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
@@ -143,6 +143,26 @@ impl<D: DB> TestState<D> {
 
             mode: TestProcessingMode::Regular,
         }
+    }
+
+    pub fn swizzle_to_db(&mut self) {
+        use std::ops::Deref;
+        let mut lstate = Sp::new(self.ledger.clone());
+        let mut zstate = Sp::new(self.zswap.clone());
+        let mut dstate = Sp::new(self.dust.clone());
+        lstate.persist();
+        zstate.persist();
+        dstate.persist();
+        lstate.unload();
+        zstate.unload();
+        dstate.unload();
+        self.ledger = lstate.deref().clone();
+        self.zswap = zstate.deref().clone();
+        self.dust = dstate.deref().clone();
+        default_storage::<D>().with_backend(|b| {
+            b.flush_all_changes_to_db();
+            b.gc();
+        });
     }
 
     pub fn context(&self) -> TransactionContext<D> {
@@ -355,14 +375,18 @@ impl<D: DB> TestState<D> {
             .replay_events(&self.dust_key, events.iter())
             .expect("just applied transaction should replay");
         let pk = UserAddress::from(self.night_key.verifying_key());
-        self.utxos = self
+        let utxo_iter = self
             .ledger
             .utxo
             .utxos
             .iter()
             .map(|kv| (*kv.0).clone())
-            .filter(|utxo| utxo.owner == pk)
-            .collect();
+            .filter(|utxo| utxo.owner == pk);
+
+        self.utxos = match self.mode {
+            TestProcessingMode::ForceConstantTime => utxo_iter.take(10).collect(),
+            _ => utxo_iter.collect(),
+        };
         self.step();
         Ok(())
     }
@@ -535,10 +559,12 @@ impl<D: DB> TestState<D> {
         {
             dust += last_dust;
             last_dust = dust;
-            eprintln!(
-                "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
-                self.dust.wallet_balance(self.time)
-            );
+            if self.mode != TestProcessingMode::ForceConstantTime {
+                eprintln!(
+                    "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
+                    self.dust.wallet_balance(self.time)
+                );
+            }
             let mut spends = storage::storage::Array::new();
             for qdo in old_dust.utxos() {
                 if dust == 0 {
