@@ -1048,8 +1048,7 @@ describe('Ledger API - DustLocalState', () => {
 
     // Create a new local state and add the UTXO with pending timestamp
     const newLocalState = new DustLocalState(initialParameters);
-    const pendingUntil = new Date(Date.now() + 60000); // 1 minute from now
-    const updatedState = newLocalState.addUtxo(nullifier, qdo, pendingUntil);
+    const updatedState = newLocalState.addUtxo(nullifier, qdo);
 
     // Find the UTXO by nullifier
     const foundUtxo = updatedState.findUtxoByNullifier(nullifier);
