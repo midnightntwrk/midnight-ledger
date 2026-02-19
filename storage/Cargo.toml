@@ -3,20 +3,22 @@ name = "midnight-storage"
 edition = "2024"
 version = "2.0.0"
 license.workspace = true
+repository.workspace = true
+description = "Provides data structures and storage primitives for Midnight's ledger."
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "base-crypto/proptest"]
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
-stress-test = ["storage-core/stress-test"]
+stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation"]
 
 [dependencies]
-storage-core = { path = "../storage-core", package = "midnight-storage-core" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 derive-where = "^1.5.0"
 crypto = { version = "0.5.1", features = ["digest"] }
@@ -29,7 +31,9 @@ proptest-derive = { version = "0.5", optional = true }
 tempfile = "3.20"
 hashbrown = { version = "^0.16.0", optional = true }
 pprof = { version = "0.14", optional = true, features = ["criterion", "flamegraph"] }
+os_pipe = { version = "1.2.2", optional = true }
 criterion = { version = "^0.5.1", optional = true }
+sysinfo = "0.34.2"
 
 [dev-dependencies]
 pastey = "0.1.1"
