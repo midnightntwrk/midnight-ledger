@@ -1583,6 +1583,9 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// e.g. because a clone of this `Sp` is owned by some larger data
     /// structure, then the underlying data won't actually be dropped until all
     /// such `Sp`s go out of scope or have `unload` called on them.
+    ///
+    /// Warning: If this *is* the last reference to the Sp, and the Sp is *not* persisted,
+    /// dereferencing it after unload may fail, because nothing is keeping the data alive.
     pub fn unload(&mut self) {
         // Return our data to the uninitialized state, dropping the `Arc` in
         // `data`, if any.
@@ -2383,6 +2386,7 @@ mod tests {
                 bt = BinTree::new(i, Some(arena.alloc(bt.clone())), Some(arena.alloc(bt)));
             }
             let mut bt = arena.alloc(bt);
+            bt.persist();
             bt.unload();
             let mut p = Some(&bt);
             for _ in 0..depth {
@@ -2411,6 +2415,7 @@ mod tests {
             // Unload and get second pointer.
 
             let key = bt1.as_typed_key();
+            bt1.persist();
             bt1.unload();
             let bt2 = arena.get_lazy::<BinTree>(&key).unwrap();
 
@@ -2444,6 +2449,7 @@ mod tests {
 
             // Unload the tree and lazy load a random path.
 
+            bt.persist();
             bt.unload();
             let mut p = Some(&bt);
             // https://xkcd.com/221/
@@ -2738,6 +2744,7 @@ mod tests {
         let mut sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
 
         assert!(!sp.is_lazy());
+        sp.persist();
         sp.unload();
         assert!(sp.is_lazy());
         let _ = sp.deref();
