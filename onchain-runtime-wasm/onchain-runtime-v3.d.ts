@@ -302,6 +302,10 @@ export type CallContext = {
    * A public address identifying an entity.
    */
   caller?: PublicAddress,
+  /**
+   * The {@link secondsSinceEpoch} of the previous block
+   */
+  lastBlockTime: bigint,
 };
 /**
  * Context information about the block forwarded to {@link CallContext}.
