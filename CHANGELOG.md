@@ -15,6 +15,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add `with_genesis_settings` ledger state constructor, that allows providing initial parameters, and initial pool value allocations
 - bugfix: remove accidental structured logging of the full ledger state in some places
 - feat: pull in `storage-core` fix, lazy loading of embedded small nodes
+- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction` that applies every offer in a transaction as failed.
 
 ## 7.0.0
 
