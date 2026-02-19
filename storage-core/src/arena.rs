@@ -1340,8 +1340,6 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// Create a new `Sp` with an uninitialized data payload.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
         let data = OnceLock::new();
-        if let ArenaKey::Ref(_) = child_repr {
-        }
         Sp {
             data,
             arena,
