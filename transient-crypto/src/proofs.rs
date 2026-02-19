@@ -46,10 +46,10 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::{any::Any, cmp::Ordering};
 use std::{borrow::Cow, num::NonZeroUsize};
-use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::db::DB;
-use storage::storable::Loader;
+use storage_core::Storable;
+use storage_core::arena::ArenaKey;
+use storage_core::db::DB;
+use storage_core::storable::Loader;
 use zeroize::{Zeroize, ZeroizeOnDrop};
 
 /// A provider of prover parameters.
