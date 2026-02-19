@@ -1413,7 +1413,7 @@ async fn composable_funded() {
                     state.time,
                 ),
                 Some(offer),
-                std::collections::HashMap::new(),
+                storage::storage::HashMap::new(),
             );
         dbg!(&pre_tx);
         tx_prove(rng.split(), &pre_tx, &RESOLVER).await.unwrap()

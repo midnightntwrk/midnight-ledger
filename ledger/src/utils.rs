@@ -41,12 +41,6 @@ impl<R: Read> CapturingReader<R> {
     }
 }
 
-pub(crate) fn sorted<T: Ord>(iter: impl Iterator<Item = T>) -> Vec<T> {
-    let mut res: Vec<T> = iter.collect();
-    res.sort();
-    res
-}
-
 pub(crate) trait SortedIter {
     type Item<'a>
     where

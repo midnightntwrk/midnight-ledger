@@ -371,7 +371,7 @@ impl Error for FeeCalculationError {}
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum MalformedContractDeploy {
-    NonZeroBalance(std::collections::HashMap<TokenType, u128>),
+    NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
 }
 
@@ -380,7 +380,7 @@ impl Display for MalformedContractDeploy {
         use MalformedContractDeploy::*;
         match self {
             NonZeroBalance(balance) => {
-                let filtered: std::collections::HashMap<_, _> =
+                let filtered: std::collections::BTreeMap<_, _> =
                     balance.iter().filter(|&(_, value)| *value > 0).collect();
                 write!(
                     formatter,
@@ -642,16 +642,16 @@ impl Error for SequencingCheckError {}
 #[derive_where(Clone, Debug)]
 pub enum DisjointCheckError<D: DB> {
     ShieldedInputsDisjointFailure {
-        shielded_inputs: std::collections::HashSet<Input<(), D>>,
-        transient_inputs: std::collections::HashSet<Input<(), D>>,
+        shielded_inputs: std::collections::BTreeSet<Input<(), D>>,
+        transient_inputs: std::collections::BTreeSet<Input<(), D>>,
     },
     ShieldedOutputsDisjointFailure {
-        shielded_outputs: std::collections::HashSet<Output<(), D>>,
-        transient_outputs: std::collections::HashSet<Output<(), D>>,
+        shielded_outputs: std::collections::BTreeSet<Output<(), D>>,
+        transient_outputs: std::collections::BTreeSet<Output<(), D>>,
     },
     UnshieldedInputsDisjointFailure {
-        unshielded_inputs: std::collections::HashSet<UtxoSpend>,
-        offer_inputs: std::collections::HashSet<UtxoSpend>,
+        unshielded_inputs: std::collections::BTreeSet<UtxoSpend>,
+        offer_inputs: std::collections::BTreeSet<UtxoSpend>,
     },
 }
 

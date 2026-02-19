@@ -315,7 +315,7 @@ async fn test_unshielded_contract_deposit() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        HashMap::new(),
     ));
 
     // Prove the contract call against the ZKIR
@@ -579,7 +579,7 @@ async fn test_unshielded_contract_withdraw() {
         "local-test",
         deposit_intents,
         None,
-        std::collections::HashMap::new(),
+        HashMap::new(),
     ));
 
     // Prove the transaction against ZKIR
@@ -765,7 +765,7 @@ async fn test_unshielded_contract_withdraw() {
         "local-test",
         withdraw_intents,
         None,
-        std::collections::HashMap::new(),
+        HashMap::new(),
     ));
 
     // Prove the transaction against ZKIR

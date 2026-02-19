@@ -12,7 +12,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng, seq::SliceRandom};
 use serde_json::json;
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeSet;
 use std::hint::black_box;
 
 pub fn sp_new(c: &mut Criterion) {
@@ -45,8 +45,8 @@ pub fn map_insert(c: &mut Criterion) {
 struct BenchmarkData {
     old_rcmap: RcMap,
     new_rcmap: RcMap,
-    new_roots: StdHashSet<ArenaKey>,
-    keys_added: StdHashSet<ArenaKey>,
+    new_roots: BTreeSet<ArenaKey>,
+    keys_added: BTreeSet<ArenaKey>,
     json: serde_json::Value,
     _old_sp: Sp<StateValue>, // Keep StateValue alive in backend
     _new_sp: Sp<StateValue>, // Keep StateValue alive in backend
@@ -140,7 +140,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
 
         // Build rcmap from old state
         let old_root = old_sp.as_child();
-        let old_roots = StdHashSet::from([old_root]);
+        let old_roots = BTreeSet::from([old_root]);
         println!("get_writes(old_roots)");
         let keys_for_rcmap = get_writes::<DefaultDB>(&RcMap::default(), &old_roots);
         println!("update_rcmap(old_roots)");
@@ -148,7 +148,7 @@ fn compute_benchmark_data() -> Vec<BenchmarkData> {
 
         // Get new state roots
         let new_root = new_sp.as_child();
-        let new_roots = StdHashSet::from([new_root]);
+        let new_roots = BTreeSet::from([new_root]);
 
         // Pre-compute keys_added and keys_removed
         println!("get_writes(new_roots)");
