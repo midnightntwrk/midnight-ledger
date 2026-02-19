@@ -54,6 +54,15 @@ use std::{
     sync::Arc,
 };
 
+#[cfg(feature = "test-utilities")]
+/// A tracking on time spent in reconstruction of data types loading from the backend.
+///
+/// Tracks a map of type names to a pair for number of times reconstructed, and the total duration
+/// of the reconstruction.
+pub static TCONSTRUCT: std::sync::Mutex<
+    Option<HashMap<&'static str, (usize, std::time::Duration)>>,
+> = std::sync::Mutex::new(None);
+
 pub(crate) fn hash<'a, H: WellBehavedHasher>(
     root_binary_repr: &[u8],
     child_hashes: impl Iterator<Item = &'a ArenaHash<H>>,
@@ -927,6 +936,23 @@ impl<'a, D: DB> BackendLoader<'a, D> {
     }
 }
 
+#[cfg(feature = "test-utilities")]
+struct ConstructTracker(&'static str, std::time::Instant);
+
+#[cfg(feature = "test-utilities")]
+impl Drop for ConstructTracker {
+    fn drop(&mut self) {
+        let dt = self.1.elapsed();
+        let mut construct_map = TCONSTRUCT.lock().unwrap();
+        let (nconstruct, tconstruct) = construct_map
+            .get_or_insert_default()
+            .entry(self.0)
+            .or_default();
+        *nconstruct += 1;
+        *tconstruct += dt;
+    }
+}
+
 impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     const CHECK_INVARIANTS: bool = false;
 
@@ -934,60 +960,69 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
-        let key = match child {
+        #[cfg(feature = "test-utilities")]
+        let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
+        let (data, children) = match child {
             ArenaKey::Direct(direct_node) => {
-                let value = T::from_binary_repr(
-                    &mut &direct_node.data[..],
-                    &mut direct_node.children.iter().cloned(),
-                    self,
-                )?;
-                return Ok(Sp::new(value));
+                (direct_node.data.clone(), direct_node.children.clone())
             }
-            ArenaKey::Ref(key) => key,
+            ArenaKey::Ref(key) => {
+                // Build from existing cached value if possible.
+
+                // Avoid race: keep the metadata locked until we call `Sp::eager` //
+                // below, so that no one can sneak in and remove `key` from the
+                // metadata in the mean time.
+                let metadata_lock = self.arena.lock_metadata();
+                let maybe_arc = self
+                    .arena
+                    .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
+                if let Some(arc) = maybe_arc {
+                    let child_repr = arc.as_child();
+                    return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
+                }
+                drop(metadata_lock);
+
+                // Otherwise, deserialize new sp from backend.
+                let obj = self
+                    .arena
+                    .lock_backend()
+                    .borrow_mut()
+                    .get(key)
+                    .ok_or(io::Error::new(
+                        io::ErrorKind::NotFound,
+                        format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
+                    ))?
+                    .clone();
+                (Arc::new(obj.data), Arc::new(obj.children))
+            }
         };
-        // Build from existing cached value if possible.
 
-        // Avoid race: keep the metadata locked until we call `Sp::eager` //
-        // below, so that no one can sneak in and remove `key` from the
-        // metadata in the mean time.
-        let metadata_lock = self.arena.lock_metadata();
-        let maybe_arc = self
-            .arena
-            .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
-        if let Some(arc) = maybe_arc {
-            let child_repr = arc.as_child();
-            return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
-        }
-        drop(metadata_lock);
-
-        // Otherwise, deserialize new sp from backend.
-
-        let obj = self
-            .arena
-            .lock_backend()
-            .borrow_mut()
-            .get(key)
-            .ok_or(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("BackendLoader::get(): key {key:?} not in storage arena. Are you sure you persisted this key or one of its ancestors?"),
-            ))?
-            .clone();
         //  Build lazy value if at max_depth.
         if self.max_depth == Some(0) {
-            // We need to hold this lock until `Sp::lazy` below is done, since
-            // that will call `Arena::increment_ref` internally, which assumes
-            // that the `track_locked` call here has been superseded by a
-            // possible `Sp::drop`.
-            let metadata_lock = self.arena.lock_metadata();
-            let child_repr = child_from(&obj.data, &obj.children);
-            self.arena.track_locked(
-                &metadata_lock,
-                key.clone(),
-                obj.data,
-                obj.children,
-                &child_repr,
-            );
-            return Ok(Sp::lazy(self.arena.clone(), key.clone(), child_repr));
+            let (_guard, child_repr) = if let ArenaKey::Ref(key) = child {
+                // We need to hold this lock until `Sp::lazy` below is done, since
+                // that will call `Arena::increment_ref` internally, which assumes
+                // that the `track_locked` call here has been superseded by a
+                // possible `Sp::drop`.
+                let metadata_lock = self.arena.lock_metadata();
+                let child_repr = child_from(&data, &children);
+                self.arena.track_locked(
+                    &metadata_lock,
+                    key.clone(),
+                    data.deref().clone(),
+                    children.deref().clone(),
+                    &child_repr,
+                );
+                (Some(metadata_lock), child_repr)
+            } else {
+                (None, child.clone())
+            };
+            let res = Ok(Sp::lazy(
+                self.arena.clone(),
+                child.hash().clone(),
+                child_repr,
+            ));
+            return res;
         }
         // If not at max depth, then deserialize recursively.
         let loader = BackendLoader {
@@ -996,13 +1031,24 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             recursion_depth: self.recursion_depth + 1,
         };
         let value = T::from_binary_repr::<&[u8]>(
-            &mut &obj.data.clone()[..],
-            &mut obj.children.clone().into_iter(),
+            &mut &data.clone()[..],
+            &mut children.iter().cloned(),
             &loader,
         )?;
-        Ok(self
-            .arena
-            .new_sp(value, key.clone(), obj.data, obj.children))
+        match child {
+            ArenaKey::Ref(hash) => Ok(self.arena.new_sp(
+                value,
+                hash.clone(),
+                data.deref().clone(),
+                children.deref().clone(),
+            )),
+            ArenaKey::Direct(_) => Ok(Sp {
+                arena: self.arena.clone(),
+                data: OnceLock::from(Arc::new(value)),
+                child_repr: child.clone(),
+                root: child.hash().clone(),
+            }),
+        }
     }
 
     fn alloc<T: Storable<D>>(&self, obj: T) -> Sp<T, D> {
@@ -1943,7 +1989,7 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
 }
 
 /// Define bin-tree type for use in tests.
-#[cfg(any(test, feature = "stress-test"))]
+#[cfg(any(test, feature = "test-utilities"))]
 pub mod bin_tree {
     use super::*;
     use crate::{self as storage, storable::SMALL_OBJECT_LIMIT};
@@ -1991,7 +2037,7 @@ pub mod bin_tree {
         ///
         /// The point is that this forces the whole tree to be loaded.
         #[cfg(all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         ))]
         pub fn sum(&self) -> u64 {
@@ -2017,7 +2063,7 @@ pub mod bin_tree {
     #[cfg(any(
         test,
         all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
@@ -2187,14 +2233,6 @@ mod tests {
             nest = Nesty(Some(arena.alloc(nest)));
         }
         drop(nest);
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    fn array_nesting() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_memory(1 << 30)
-            .run("arena::stress_tests::array_nesting");
     }
 
     // Test that weak refs in `Arena::sp_cache` are cleaned up when the last
@@ -2430,113 +2468,6 @@ mod tests {
             // Check that we only have the forced path in memory.
             assert_eq!(arena.lock_sp_cache().borrow().len(), depth);
         }
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn drop_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::drop_deeply_nested_data");
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn serialize_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::serialize_deeply_nested_data");
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn thrash_the_cache_sqldb() {
-        thrash_the_cache("sqldb");
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn thrash_the_cache_paritydb() {
-        thrash_the_cache("paritydb");
-    }
-    #[cfg(all(
-        feature = "stress-test",
-        any(feature = "sqlite", feature = "parity-db")
-    ))]
-    /// Here `db_name` should be `paritydb` or `sqldb`.
-    fn thrash_the_cache(db_name: &str) {
-        let test_name = &format!("arena::stress_tests::thrash_the_cache_variations_{db_name}");
-        let time_limit = 10 * 60;
-        // Thrash the cache with p=0.1.
-        //
-        // Here we should see a small variation between cyclic and non-cyclic,
-        // since the cache is very small.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.1", "true"]);
-        // Thrash the cache with p=0.5.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.5", "false"]);
-        // Thrash the cache with p=0.8.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.8", "false"]);
-        // Thrash the cache with p=1.0.
-        //
-        // With cache as large as the data, cyclic vs non-cyclic should be
-        // irrelevant, and this should be the fastest.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["1.0", "true"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn load_large_tree_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_sqldb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn load_large_tree_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_paritydb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn read_write_map_loop_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_sqldb",
-                &["10000", "1000"],
-            );
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn read_write_map_loop_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_paritydb",
-                &["10000", "1000"],
-            );
     }
 
     // Stress test concurrent arena access, to trigger deadlocks from

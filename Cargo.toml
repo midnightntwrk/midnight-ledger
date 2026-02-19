@@ -1,6 +1,7 @@
 [workspace]
 package.license = "Apache-2.0"
-package.version = "0.0.0-build-test"
+package.repository = "https://github.com/midnightntwrk/midnight-ledger"
+package.version = "8.0.0-rc.3"
 members = [
     "zswap",
     "ledger",
@@ -24,7 +25,7 @@ members = [
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
     "static",
-	"storage-core"
+    "storage-core"
 ]
 default-members = [
     "zswap",

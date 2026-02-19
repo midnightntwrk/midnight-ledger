@@ -1,19 +1,21 @@
 [package]
 name = "midnight-onchain-state"
-version = "2.0.0"
+version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Defines the state format for contract states on Midnight."
 
 [features]
-proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest"]
+proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "serialize/proptest", "storage/proptest"]
 public-internal-structure = []
 
 [dependencies]
-coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-storage = { path = "../storage", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 
 hex = "^0.4.3"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
