@@ -33,7 +33,8 @@ import {
   type UserAddress,
   type UtxoOutput,
   type UtxoSpend,
-  WellFormedStrictness
+  WellFormedStrictness,
+  updatedValue
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -835,12 +836,23 @@ describe('Ledger API - DustLocalState', () => {
     const emptyRoot = newLocalState.generatingTreeRoot();
     expect(emptyRoot).toEqual(0n);
 
-    const updatedState = newLocalState.insertGenerationInfo(0n, generationInfo!);
+    const updatedState = newLocalState.insertGenerationInfo(0n, generationInfo!, qdo.backingNight);
 
     // Tree root should now be defined and match the original
     const newRoot = updatedState.generatingTreeRoot();
     expect(newRoot).toBeDefined();
     expect(newRoot).toEqual(initialRoot);
+
+    assertSerializationSuccess(updatedState);
+
+    // Create a new collapsed local state with manually inserted generation info
+    const newCollapsedLocalState = new DustLocalState(initialParameters);
+
+    const updatedCollapsedState = newCollapsedLocalState.insertGenerationInfo(0n, generationInfo!);
+    expect(updatedCollapsedState.toString()).toMatch(/0..=0: <collapsed>.*/);
+
+    // Tree root should match the original
+    expect(updatedCollapsedState.generatingTreeRoot()).toEqual(initialRoot);
 
     assertSerializationSuccess(updatedState);
   });
@@ -850,7 +862,7 @@ describe('Ledger API - DustLocalState', () => {
    *
    * @given A DustLocalState with generation info
    * @when Calling removeGenerationInfo
-   * @then Should update the generation tree by removing the info
+   * @then Should update the generation tree by removing the info and keeping the root unchanged
    */
   test('should remove generation info from generating tree', () => {
     const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
@@ -868,7 +880,7 @@ describe('Ledger API - DustLocalState', () => {
     const updatedState = localState.removeGenerationInfo(0n, generationInfo!);
     expect(updatedState.toString()).toMatch(/0..=0: <collapsed>.*/);
 
-    // Root should not be different after removal
+    // Root should not change after removal
     const rootAfterRemove = updatedState.generatingTreeRoot();
     expect(rootAfterRemove).toBeDefined();
     expect(rootAfterRemove).toEqual(rootBeforeRemove);
@@ -1028,6 +1040,10 @@ describe('Ledger API - DustLocalState', () => {
     expect(foundUtxo).toBeDefined();
     expect(foundUtxo).toEqual(qdo);
 
+    // Spend this UTXO and verify the nullifier
+    const [, spend] = state.dust.spend(state.dustKey.secretKey, qdo, 0n, state.time);
+    expect(spend.oldNullifier).toEqual(nullifier);
+
     assertSerializationSuccess(updatedState);
   });
 
@@ -1042,18 +1058,26 @@ describe('Ledger API - DustLocalState', () => {
     const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
     const localState = state.dust;
     const { secretKey } = state.dustKey;
+    const now = new Date(state.time.getTime() + 1000);
 
     const qdo = localState.utxos[0];
+    const genInfo = state.dust.generationInfo(qdo)!;
     const nullifier = localState.utxoNullifier(qdo, secretKey);
 
-    // Create a new local state and add the UTXO with pending timestamp
+    // Create a new local state and add the UTXO with a pending timestamp
+    const pendingUntil = new Date(now.getTime() + 1000);
     const newLocalState = new DustLocalState(initialParameters);
-    const updatedState = newLocalState.addUtxo(nullifier, qdo);
 
-    // Find the UTXO by nullifier
-    const foundUtxo = updatedState.findUtxoByNullifier(nullifier);
-    expect(foundUtxo).toBeDefined();
-    expect(foundUtxo).toEqual(qdo);
+    const updatedState = newLocalState
+      .insertGenerationInfo(0n, genInfo, qdo.backingNight)
+      .addUtxo(nullifier, qdo, pendingUntil);
+    expect(updatedState.findUtxoByNullifier(nullifier)).toBeUndefined();
+
+    const matured = updatedState.processTtls(new Date(pendingUntil.getTime() + 10000));
+    expect(matured.findUtxoByNullifier(nullifier)).toEqual(qdo);
+
+    const removed = matured.removeUtxo(nullifier);
+    expect(removed.findUtxoByNullifier(nullifier)).toBeUndefined();
 
     assertSerializationSuccess(updatedState);
   });
@@ -1141,14 +1165,21 @@ describe('Ledger API - DustLocalState', () => {
     const { secretKey } = state.dustKey;
 
     const qdo = localState.utxos[0];
-    const originalBalance = localState.walletBalance(state.time);
+    const newCommitmentIndex = qdo.mtIndex + 1n;
+    const genInfo = localState.generationInfo(qdo)!;
+    const now = state.time;
     const fee = 1000n;
-    const newCommitmentIndex = 1n;
+    const expectedValue = updatedValue(qdo.ctime, qdo.initialValue, genInfo, state.time, initialParameters) - fee;
 
     // Split the UTXO
     const newUtxo = localState.splitUtxo(qdo, state.time, fee, newCommitmentIndex, secretKey);
 
-    expect(newUtxo).toBeDefined();
+    expect(newUtxo.seq).toEqual(qdo.seq + 1);
+    expect(newUtxo.ctime).toEqual(now);
+    expect(newUtxo.initialValue).toEqual(expectedValue);
+    expect(newUtxo.mtIndex).toEqual(qdo.mtIndex + 1n);
+    expect(newUtxo.nonce).not.toEqual(qdo.nonce);
+    expect(newUtxo.backingNight).toEqual(qdo.backingNight);
 
     // The new UTXO should have a different commitment
     const originalCommitment = localState.utxoCommitment(qdo);
