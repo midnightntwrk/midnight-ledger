@@ -589,15 +589,15 @@ impl<D: DB> Arena<D> {
         key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ArenaKey<D::Hasher>>,
+        child_repr: ArenaKey<D::Hasher>,
     ) -> Sp<T, D> {
-        let child_node = child_from(&data, &children);
         self.new_sp_locked(
             &mut self.lock_metadata(),
             value,
             key,
             data,
             children,
-            child_node,
+            child_repr,
         )
     }
 
@@ -1023,6 +1023,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                 hash.clone(),
                 data.deref().clone(),
                 children.deref().clone(),
+                child.clone(),
             )),
             ArenaKey::Direct(_) => Ok(Sp {
                 arena: self.arena.clone(),
@@ -1339,6 +1340,8 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// Create a new `Sp` with an uninitialized data payload.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
         let data = OnceLock::new();
+        if let ArenaKey::Ref(_) = child_repr {
+        }
         Sp {
             data,
             arena,
@@ -2705,7 +2708,6 @@ mod tests {
         // Serialize the tree in another thread, panicking if that takes too
         // long.
 
-        println!("serializing ...");
         let handle = std::thread::spawn(move || {
             let mut serialized = vec![];
             Sp::serialize(&sp, &mut serialized).unwrap();
@@ -2726,7 +2728,6 @@ mod tests {
         // Deserialize the tree in another thread, panicking if that takes too
         // long.
 
-        println!("deserializing ...");
         let handle = std::thread::spawn(move || {
             let recursive_depth = 0;
             Sp::<BinTree>::deserialize(&mut serialized.as_slice(), recursive_depth).unwrap();

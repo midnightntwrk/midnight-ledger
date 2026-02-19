@@ -11,7 +11,7 @@ parity-db = ["storage-core/parity-db"]
 stress-test = ["storage-core/stress-test"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
 public-internal-structure = ["storage-core/public-internal-structure"]
-state-translation = ["storage-core/state-translation"]
+state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
 
 [dependencies]
 storage-core = { path = "../storage-core", package = "midnight-storage-core" }
