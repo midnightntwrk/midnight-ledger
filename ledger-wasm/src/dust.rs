@@ -16,14 +16,15 @@ use crate::state_changes::DustStateChanges;
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
-use js_sys::{Array, BigInt, Date, Uint8Array};
+use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
     DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
-    DustLocalState as LedgerDustLocalState, DustOutput as LedgerDustOutput,
-    DustParameters as LedgerDustParameters, DustPublicKey,
+    DustLocalState as LedgerDustLocalState, DustNullifier as LedgerDustNullifier,
+    DustOutput as LedgerDustOutput, DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
-    DustUtxoState as LedgerDustUtxoState, WithDustStateChanges as LedgerWithDustStateChanges,
+    DustUtxoState as LedgerDustUtxoState, InitialNonce,
+    WithDustStateChanges as LedgerWithDustStateChanges,
 };
 use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
@@ -35,6 +36,7 @@ use std::ops::Deref;
 use std::rc::Rc;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
+use transient_crypto::merkle_tree;
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::*;
 
@@ -1314,6 +1316,136 @@ impl DustLocalState {
         Ok(res.unwrap_or(JsValue::UNDEFINED))
     }
 
+    #[wasm_bindgen(js_name = "insertGenerationInfo")]
+    pub fn insert_generation_info(
+        &self,
+        generation_index: BigInt,
+        generation: JsValue,
+        initial_nonce: Option<String>,
+    ) -> Result<DustLocalState, JsError> {
+        let generation = value_to_dust_gen_info(generation)?;
+        let generation_index = u64::try_from(generation_index)
+            .map_err(|_| JsError::new("generation_index is out of range"))?;
+        let initial_nonce = initial_nonce
+            .map(|s| from_hex_ser(&s).map(InitialNonce))
+            .transpose()?;
+        let new_state =
+            self.0
+                .insert_generation_info(generation_index, generation, initial_nonce)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "removeGenerationInfo")]
+    pub fn remove_generation_info(
+        &self,
+        generation_index: BigInt,
+        generation: JsValue,
+    ) -> Result<DustLocalState, JsError> {
+        let generation = value_to_dust_gen_info(generation)?;
+        let generation_index = u64::try_from(generation_index)
+            .map_err(|_| JsError::new("generation_index is out of range"))?;
+        let new_state = self
+            .0
+            .remove_generation_info(generation_index, generation)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "collapseGenerationTree")]
+    pub fn collapse_generation_tree(
+        &self,
+        generation_index_start: BigInt,
+        generation_index_end: BigInt,
+    ) -> Result<DustLocalState, JsError> {
+        let generation_index_start = u64::try_from(generation_index_start)
+            .map_err(|_| JsError::new("generation_index_start is out of range"))?;
+        let generation_index_end = u64::try_from(generation_index_end)
+            .map_err(|_| JsError::new("generation_index_end is out of range"))?;
+        let new_state = self
+            .0
+            .collapse_generation_tree(generation_index_start, generation_index_end)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "applyGenerationCollapsedUpdate")]
+    pub fn apply_generation_collapsed_update(
+        &self,
+        update: &DustStateMerkleTreeCollapsedUpdate,
+    ) -> Result<DustLocalState, JsError> {
+        Ok(DustLocalState(
+            self.0.apply_generation_collapsed_update(update.as_ref())?,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "generatingTreeRoot")]
+    pub fn generating_tree_root(&self) -> Result<JsValue, JsError> {
+        Ok(self
+            .0
+            .generating_tree
+            .root()
+            .map(|v| JsValue::from(fr_to_bigint(v.0)))
+            .unwrap_or(JsValue::UNDEFINED))
+    }
+
+    #[wasm_bindgen(js_name = "insertCommitment")]
+    pub fn insert_commitment(
+        &self,
+        commitment_index: BigInt,
+        qdo: JsValue,
+        own_qdo: Boolean,
+    ) -> Result<DustLocalState, JsError> {
+        let commitment_index = u64::try_from(commitment_index)
+            .map_err(|_| JsError::new("commitment_index is out of range"))?;
+        let qdo = value_to_qdo(qdo)?;
+        let new_state = self
+            .0
+            .insert_commitment(commitment_index, qdo, own_qdo.into())?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "removeCommitment")]
+    pub fn remove_commitment(&self, commitment_index: BigInt) -> Result<DustLocalState, JsError> {
+        let commitment_index = u64::try_from(commitment_index)
+            .map_err(|_| JsError::new("commitment_index is out of range"))?;
+        let new_state = self.0.remove_commitment(commitment_index)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "collapseCommitmentTree")]
+    pub fn collapse_commitment_tree(
+        &self,
+        commitment_index_start: BigInt,
+        commitment_index_end: BigInt,
+    ) -> Result<DustLocalState, JsError> {
+        let commitment_index_start = u64::try_from(commitment_index_start)
+            .map_err(|_| JsError::new("commitment_index_start is out of range"))?;
+        let commitment_index_end = u64::try_from(commitment_index_end)
+            .map_err(|_| JsError::new("commitment_index_end is out of range"))?;
+        let new_state = self
+            .0
+            .collapse_commitment_tree(commitment_index_start, commitment_index_end)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "applyCommitmentCollapsedUpdate")]
+    pub fn apply_commitment_collapsed_update(
+        &self,
+        update: &DustStateMerkleTreeCollapsedUpdate,
+    ) -> Result<DustLocalState, JsError> {
+        Ok(DustLocalState(
+            self.0.apply_commitment_collapsed_update(update.as_ref())?,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "commitmentTreeRoot")]
+    pub fn commitment_tree_root(&self) -> Result<JsValue, JsError> {
+        Ok(self
+            .0
+            .commitment_tree
+            .root()
+            .map(|v| JsValue::from(fr_to_bigint(v.0)))
+            .unwrap_or(JsValue::UNDEFINED))
+    }
+
     pub fn spend(
         &self,
         sk: &DustSecretKey,
@@ -1363,6 +1495,76 @@ impl DustLocalState {
         let events = events.iter().map(|event| &event.0);
         let with_changes = self.0.replay_events_with_changes(&sk, events)?;
         Ok(DustLocalStateWithChanges::from(with_changes))
+    }
+
+    #[wasm_bindgen(js_name = "addUtxo")]
+    pub fn add_utxo(
+        &self,
+        nullifier: BigInt,
+        utxo: JsValue,
+        pending_until: Option<Date>,
+    ) -> Result<DustLocalState, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let pending_until =
+            pending_until.map(|time| Timestamp::from_secs(js_date_to_seconds(&time)));
+        let new_state = self.0.add_utxo(&nullifier, &qdo, pending_until)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "findUtxoByNullifier")]
+    pub fn find_utxo_by_nullifier(&self, nullifier: BigInt) -> Result<JsValue, JsError> {
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let utxo = self
+            .0
+            .find_utxo_by_nullifier(nullifier)
+            .map(|qdo| qdo_to_value(&qdo))
+            .transpose()?;
+        Ok(utxo.unwrap_or(JsValue::UNDEFINED))
+    }
+
+    #[wasm_bindgen(js_name = "removeUtxo")]
+    pub fn remove_utxo(&self, nullifier: BigInt) -> Result<DustLocalState, JsError> {
+        let nullifier = LedgerDustNullifier(bigint_to_fr(nullifier)?);
+        let new_state = self.0.remove_utxo(&nullifier)?;
+        Ok(DustLocalState(new_state))
+    }
+
+    #[wasm_bindgen(js_name = "splitUtxo")]
+    pub fn split_utxo(
+        &self,
+        utxo: JsValue,
+        now: &Date,
+        subtract_fee: BigInt,
+        new_commitment_index: BigInt,
+        sk: &DustSecretKey,
+    ) -> Result<JsValue, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let now = Timestamp::from_secs(js_date_to_seconds(now));
+        let subtract_fee = u128::try_from(subtract_fee)
+            .map_err(|_| JsError::new("subtract_fee is out of range"))?;
+        let new_commitment_index = u64::try_from(new_commitment_index)
+            .map_err(|_| JsError::new("new_commitment_index is out of range"))?;
+        let sk = sk.try_unwrap()?;
+        let new_utxo = self
+            .0
+            .split_utxo(&qdo, &now, subtract_fee, new_commitment_index, &sk)?;
+        qdo_to_value(&new_utxo)
+    }
+
+    #[wasm_bindgen(js_name = "utxoCommitment")]
+    pub fn utxo_commitment(&self, utxo: JsValue) -> Result<BigInt, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let commitment = qdo.commitment();
+        Ok(fr_to_bigint(commitment.0))
+    }
+
+    #[wasm_bindgen(js_name = "utxoNullifier")]
+    pub fn utxo_nullifier(&self, utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsError> {
+        let qdo = value_to_qdo(utxo)?;
+        let sk = sk.try_unwrap()?;
+        let nullifier = qdo.nullifier(&sk);
+        Ok(fr_to_bigint(nullifier.0))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
@@ -1455,4 +1657,67 @@ pub fn updated_value(
 #[wasm_bindgen(js_name = "sampleDustSecretKey")]
 pub fn sample_dust_secret_key() -> DustSecretKey {
     DustSecretKey::wrap(LedgerDustSecretKey::sample(&mut OsRng))
+}
+
+#[wasm_bindgen]
+pub struct DustStateMerkleTreeCollapsedUpdate(pub(crate) merkle_tree::MerkleTreeCollapsedUpdate);
+
+impl AsRef<merkle_tree::MerkleTreeCollapsedUpdate> for DustStateMerkleTreeCollapsedUpdate {
+    fn as_ref(&self) -> &merkle_tree::MerkleTreeCollapsedUpdate {
+        &self.0
+    }
+}
+
+#[wasm_bindgen]
+impl DustStateMerkleTreeCollapsedUpdate {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Err(JsError::new(
+            "DustStateMerkleTreeCollapsedUpdate cannot be constructed directly through the WASM API.",
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "newFromGenerationTree")]
+    pub fn new_from_generation_tree(
+        state: &DustGenerationState,
+        start: u64,
+        end: u64,
+    ) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(
+            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.generating_tree, start, end)?,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "newFromCommitmentTree")]
+    pub fn new_from_commitment_tree(
+        state: &DustUtxoState,
+        start: u64,
+        end: u64,
+    ) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(
+            merkle_tree::MerkleTreeCollapsedUpdate::new(&state.0.commitments, start, end)?,
+        ))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        tagged_serialize(&self.0, &mut res)?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<DustStateMerkleTreeCollapsedUpdate, JsError> {
+        Ok(DustStateMerkleTreeCollapsedUpdate(from_value_ser(
+            raw,
+            "DustStateMerkleTreeCollapsedUpdate",
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
 }
