@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `2.0.1`
+
+- feat: expose optimisations in `storage-core` `1.0.2`
+
 ## Version `2.0.0`
 
 - breaking: fix: MPT canonicity
