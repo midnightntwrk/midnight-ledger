@@ -28,11 +28,11 @@ export type Nullifier = string;
  */
 export type CoinCommitment = string;
 /**
- * A contract address, as a hex-encoded 35-byte string
+ * A contract address, as a hex-encoded 32-byte string
  */
 export type ContractAddress = string;
 /**
- * A user public key address, as a hex-encoded 35-byte string
+ * A user public key address, as a hex-encoded 32-byte string
  */
 export type UserAddress = string;
 /**
@@ -41,11 +41,11 @@ export type UserAddress = string;
 export type RawTokenType = string;
 
 /**
- * Unshielded token type (or color), as a hex-encoded 35-byte string
+ * Unshielded token type (or color), as a hex-encoded 32-byte string
  */
 export type UnshieldedTokenType = { tag: 'unshielded', raw: RawTokenType };
 /**
- * Shielded token type (or color), as a hex-encoded 35-byte string
+ * Shielded token type (or color), as a hex-encoded 32-byte string
  */
 export type ShieldedTokenType = { tag: 'shielded', raw: RawTokenType };
 /**
@@ -53,7 +53,7 @@ export type ShieldedTokenType = { tag: 'shielded', raw: RawTokenType };
  */
 export type DustTokenType = { tag: 'dust' };
 /**
- * A token type (or color), as a hex-encoded 35-byte string, shielded, unshielded, or Dust
+ * A token type (or color), as a hex-encoded 32-byte string, shielded, unshielded, or Dust
  */
 export type TokenType = UnshieldedTokenType | ShieldedTokenType | DustTokenType;
 /**
@@ -61,7 +61,7 @@ export type TokenType = UnshieldedTokenType | ShieldedTokenType | DustTokenType;
  */
 export type DomainSeparator = Uint8Array;
 /**
- * A user public key capable of receiving Zswap coins, as a hex-encoded 35-byte
+ * A user public key capable of receiving Zswap coins, as a hex-encoded 32-byte
  * string
  */
 export type CoinPublicKey = string;

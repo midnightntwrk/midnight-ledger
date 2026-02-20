@@ -1548,8 +1548,11 @@ export class ZswapChainState {
    *
    * Typically, `postBlockUpdate` should be run after any (sequence of)
    * (system)-transaction application(s).
+   *
+   * @param tblock - timestamp of a block last batch of updates was applied at
+   * @param retentionDuration - number of seconds to retain past Merkle tree roots
    */
-  postBlockUpdate(tblock: Date): ZswapChainState;
+  postBlockUpdate(tblock: Date, retentionDuration?: bigint): ZswapChainState;
 
   /**
    * Try to apply an {@link ZswapOffer} to the state, returning the updated state
