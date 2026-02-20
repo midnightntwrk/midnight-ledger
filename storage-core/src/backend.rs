@@ -667,7 +667,12 @@ impl<D: DB> StorageBackend<D> {
         I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
         let mut updates = vec![];
-        for (k, mut v) in writes {
+        let mut updates_ref_count = vec![];
+        let writes = writes.collect::<Vec<_>>();
+        let rc_updates = writes.iter().filter(|(_, cv)| matches!(cv, CacheValue::Update { .. } | CacheValue::ReadAndUpdate { .. })).count();
+        let total = writes.len();
+        let t0 = std::time::Instant::now();
+        for (k, mut v) in writes.into_iter() {
             // Check for reads first, to give better error messages.
             if matches!(v, CacheValue::Read { .. }) {
                 panic!("BUG: unexpected CacheValue::Read!")
@@ -714,7 +719,7 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
-                        updates.push((k, Update::SetRootCount(root_count as u32)));
+                        updates_ref_count.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
                 CacheValue::CreateAndUpdate { obj, delta }
@@ -727,14 +732,19 @@ impl<D: DB> StorageBackend<D> {
                             "root count can't be negative (for {k:?})"
                         );
                         let root_count = delta.root_delta as u32;
-                        updates.push((k, Update::SetRootCount(root_count)));
+                        updates_ref_count.push((k, Update::SetRootCount(root_count)));
                     }
                 }
                 CacheValue::Create { obj } => updates.push((k, Update::InsertNode(obj))),
                 CacheValue::Dummy | CacheValue::Update { .. } => {}
             }
         }
+        let t1 = std::time::Instant::now();
         self.database.batch_update(updates.into_iter());
+        let t2 = std::time::Instant::now();
+        self.database.batch_update(updates_ref_count.into_iter());
+        let t3 = std::time::Instant::now();
+        //println!("flush_to_db: {} real writes, {} rc updates ({} total), took {:?} ({:?} compute / {:?} real / {:?} ref count)", total - rc_updates, rc_updates, total, t3 - t0, t1 - t0, t2 - t1, t3 - t2);
     }
 
     /// Push pending writes to shrink the write cache to `self.cache_size`.

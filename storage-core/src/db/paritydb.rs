@@ -176,6 +176,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
@@ -190,6 +191,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             ),
         ];
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_update<I>(&mut self, iter: I)
@@ -236,6 +238,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             }
         }
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_get_nodes<I>(
@@ -268,6 +271,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         )];
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {

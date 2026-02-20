@@ -33,7 +33,7 @@ use std::time::Duration;
 use storage::DefaultHasher;
 use storage::arena::{Sp, TCONSTRUCT};
 use storage::backend::StorageBackendStats;
-use storage::db::{InMemoryDB, ParityDb};
+use storage::db::{InMemoryDB, ParityDb, SqlDB, DB};
 use storage::storage::{
     DEFAULT_CACHE_SIZE, default_storage, set_default_storage, unsafe_drop_default_storage,
 };
@@ -202,12 +202,55 @@ pub fn create_dust(c: &mut Criterion) {
 type TestDb = ParityDb;
 
 fn mk_test_db() -> storage::Storage<TestDb> {
-    let dir = tempfile::tempdir().unwrap().keep();
+    //let dir = tempfile::tempdir().unwrap().keep();
     storage::Storage::new(
-        DEFAULT_CACHE_SIZE,
-        ParityDb::<DefaultHasher>::open(&dir),
+        10,
+        //DEFAULT_CACHE_SIZE,
+        Default::default(),
+        //SqlDB::default(),
+        //ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
     )
+}
+
+fn write_times_inner<D: DB>(db_str: &str, log_batch_size: usize) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut state: TestState<D> = TestState::new(&mut rng);
+    let mut reached_size = 0;
+    const CUTOFF: std::time::Duration = std::time::Duration::from_secs(120);
+    'outer: for log_size in 10.. {
+        let t0 = std::time::Instant::now();
+        let mut dt_save_to_disk = std::time::Duration::default();
+        let size = 2u64.pow(log_size);
+        state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
+        for _ in (reached_size >> log_batch_size)..(size >> log_batch_size) {
+            rt.block_on(state.give_fee_token(&mut rng, 1 << log_batch_size));
+            let tpre_save = std::time::Instant::now();
+            state.swizzle_to_db();
+            dt_save_to_disk += tpre_save.elapsed();
+            if dt_save_to_disk > CUTOFF {
+                println!("{db_str}\t{log_batch_size}\t{log_size}\t> cutoff");
+                break 'outer;
+            }
+        }
+        println!("{db_str}\t{log_batch_size}\t{log_size}\t{}", dt_save_to_disk.as_nanos() / (size - reached_size) as u128 / 1000);
+        reached_size = size;
+    }
+}
+
+pub fn write_times_by_utxo_set_and_batch_size(_: &mut Criterion) {
+    println!("db\tbatch\tsize\ttime_micros");
+    for log_batch_size in [2, 4, 6, 8, 10] {
+        set_default_storage::<SqlDB>(|| storage::Storage::new(10, Default::default()));
+        set_default_storage::<ParityDb>(|| storage::Storage::new(10, Default::default()));
+        write_times_inner::<SqlDB>("SQLite", log_batch_size);
+        write_times_inner::<ParityDb>("ParityDB", log_batch_size);
+        unsafe_drop_default_storage::<SqlDB>();
+        unsafe_drop_default_storage::<ParityDb>();
+    }
 }
 
 pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
@@ -220,13 +263,16 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     set_default_storage(mk_test_db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
-    for log_size in 10..=13 {
+    for log_size in 10.. {
         let t0 = std::time::Instant::now();
+        let mut dt_save_to_disk = std::time::Duration::default();
         let size = 2u64.pow(log_size);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
         for _ in (reached_size >> 10)..(size >> 10) {
             rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
+            let tpre_save = std::time::Instant::now();
             state.swizzle_to_db();
+            dt_save_to_disk += tpre_save.elapsed();
         }
         reached_size = size;
         let mut lstate = Sp::new(state.ledger.clone());
@@ -273,10 +319,10 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let vtx = tx.well_formed(&*lstate, strictness, state.time).unwrap();
         let context = state.context().block_context;
         let key = lstate.as_typed_key();
-        let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} to init {size} entries, with {} allocated",
-            t1 - t0,
+            "Took {:?} (of which {:?} flushing to disk) to init {size} entries, with {} allocated",
+            t0.elapsed(),
+            dt_save_to_disk,
             cur_alloc()
         );
         lstate.persist();
@@ -285,7 +331,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
             b.flush_cache_evictions_to_db();
-            b.gc();
+            //b.gc();
         });
         let mut runs = 0;
         let mut total_construct_time =
@@ -340,6 +386,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         println!("After dropping all data, {} remains allocated", cur_alloc());
     }
     group.finish();
+    unsafe_drop_default_storage::<TestDb>();
 }
 
 pub fn create_and_destroy_dust(c: &mut Criterion) {
@@ -411,7 +458,7 @@ criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust);
 criterion_group!(
     name = night;
     config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
-    targets = night_transfer_by_utxo_set_size
+    targets = write_times_by_utxo_set_and_batch_size//night_transfer_by_utxo_set_size
 );
 #[cfg(feature = "proving")]
 criterion_main!(benchmarking, system_tx, night);
