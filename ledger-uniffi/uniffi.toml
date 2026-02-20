@@ -1,0 +1,11 @@
+[package]
+name = "ledger-uniffi"
+version = "0.1.0"
+
+[bindings.kotlin]
+jni = true
+package_name = "uniffi.ledger_uniffi"
+
+[bindings.swift]
+package_name = "LedgerUniffi"
+
