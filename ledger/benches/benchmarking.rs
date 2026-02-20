@@ -22,6 +22,7 @@ use midnight_ledger::test_utilities::well_formed_tx_builder;
 use midnight_ledger::test_utilities::{TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
 use onchain_runtime::context::BlockContext;
+use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::alloc::GlobalAlloc;
@@ -50,9 +51,9 @@ fn cur_alloc() -> String {
     const GB: u64 = 1 << 30;
     match n {
         0..KB => format!("{n} B"),
-        KB..MB => format!("{} kiB", n >> 10),
-        MB..GB => format!("{} MiB", n >> 20),
-        GB.. => format!("{} GiB", n >> 30),
+        KB..MB => format!("{:.2} kiB", n as f64 / KB as f64),
+        MB..GB => format!("{:.2} MiB", n as f64 / MB as f64),
+        GB.. => format!("{:.2} GiB", n as f64 / GB as f64),
     }
 }
 
@@ -201,11 +202,10 @@ pub fn create_dust(c: &mut Criterion) {
 type TestDb = ParityDb;
 
 fn mk_test_db() -> storage::Storage<TestDb> {
-    let dir = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(dir.path()).unwrap();
+    let dir = tempfile::tempdir().unwrap().keep();
     storage::Storage::new(
         DEFAULT_CACHE_SIZE,
-        ParityDb::<DefaultHasher>::open(&dir.path().join("test-db")),
+        ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
     )
 }
@@ -217,13 +217,18 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     init_logger(midnight_ledger::LogLevel::Warn);
-    for log_size in 10..=15 {
-        set_default_storage(mk_test_db);
+    set_default_storage(mk_test_db);
+    let mut state = TestState::new(&mut rng);
+    let mut reached_size = 0;
+    for log_size in 10..=13 {
         let t0 = std::time::Instant::now();
         let size = 2u64.pow(log_size);
-        let mut state = TestState::new(&mut rng);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
-        rt.block_on(state.give_fee_token(&mut rng, size as usize));
+        for _ in (reached_size >> 10)..(size >> 10) {
+            rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
+            state.swizzle_to_db();
+        }
+        reached_size = size;
         let mut lstate = Sp::new(state.ledger.clone());
         let utxo = (**state.utxos.iter().next().unwrap()).clone();
         let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
@@ -264,9 +269,6 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let tx = rt
             .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
             .unwrap();
-        //dbg!(&lstate.dust);
-        //dbg!(&tx);
-        //dbg!(tx.application_cost(&lstate.parameters.cost_model));
         let strictness = WellFormedStrictness::default();
         let vtx = tx.well_formed(&*lstate, strictness, state.time).unwrap();
         let context = state.context().block_context;
@@ -277,10 +279,9 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             t1 - t0,
             cur_alloc()
         );
-        //println!("{:?}", tx.application_cost(&lstate.parameters.cost_model));
         lstate.persist();
         drop(lstate);
-        drop(state);
+        state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
             b.flush_cache_evictions_to_db();
@@ -330,18 +331,13 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
                 .map(|(_, (_, d))| d)
                 .sum::<Duration>()
         );
-        let state = default_storage::<TestDb>().get_lazy(&key).unwrap();
-        state.unpersist();
-        drop(state);
+        let lstate = default_storage::<TestDb>().get_lazy(&key).unwrap();
+        lstate.unpersist();
+        drop(lstate);
         drop(key);
         drop(vtx);
         drop(tx);
         println!("After dropping all data, {} remains allocated", cur_alloc());
-        unsafe_drop_default_storage::<TestDb>();
-        println!(
-            "After dropped DB and all caches, {} remains allocated",
-            cur_alloc()
-        );
     }
     group.finish();
 }
@@ -412,7 +408,11 @@ criterion_group!(
     targets = transaction_validation
 );
 criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust);
-criterion_group!(night, night_transfer_by_utxo_set_size);
+criterion_group!(
+    name = night;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = night_transfer_by_utxo_set_size
+);
 #[cfg(feature = "proving")]
 criterion_main!(benchmarking, system_tx, night);
 #[cfg(not(feature = "proving"))]

@@ -2781,7 +2781,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger"
-version = "8.0.0-rc.3"
+version = "8.0.0-rc.4"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2806,6 +2806,7 @@ dependencies = [
  "midnight-zkir",
  "midnight-zswap",
  "pastey",
+ "pprof",
  "proptest",
  "proptest-derive",
  "rand 0.8.5",
@@ -2831,7 +2832,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm"
-version = "8.0.0-rc.2"
+version = "8.0.0-rc.4"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -2955,7 +2956,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.0.0-rc.3"
+version = "8.0.0-rc.4"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3041,7 +3042,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage"
-version = "2.0.0"
+version = "2.0.1"
 dependencies = [
  "criterion",
  "crypto",
@@ -3068,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-storage-core"
-version = "1.0.1"
+version = "1.0.2"
 dependencies = [
  "archery",
  "criterion",
@@ -3298,7 +3299,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.0.0-rc.3"
+version = "8.0.0-rc.4"
 dependencies = [
  "criterion",
  "derive-where",

@@ -1,6 +1,6 @@
 [package]
 name = "midnight-storage-core"
-version = "1.0.1"
+version = "1.0.2"
 edition = "2024"
 license.workspace = true
 description = "Provides the low-level storage primitives for Midnight's ledger."
