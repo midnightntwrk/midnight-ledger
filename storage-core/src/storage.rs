@@ -290,6 +290,14 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db.set_root_count(key, count)
     }
 
+    fn set_ref_count(&self, key: ArenaHash<Self::Hasher>, count: u64) {
+        self.db.set_ref_count(key, count)
+    }
+
+    fn get_ref_count(&self, key: &ArenaHash<Self::Hasher>) -> u64 {
+        self.db.get_ref_count(key)
+    }
+
     fn get_roots(&self) -> std::collections::HashMap<ArenaHash<Self::Hasher>, u32> {
         self.db.get_roots()
     }

@@ -30,11 +30,12 @@ use super::{DB, DummyArbitrary, Update};
 
 // Different value to Substrate: polkadot-sdk/substrate/client/db/src/utils.rs
 // This means the `storage` database must be stored in a different file
-const NUM_COLUMNS: u8 = 3;
+const NUM_COLUMNS: u8 = 4;
 const NODE_COLUMN: u8 = 0;
 const GC_ROOT_COLUMN: u8 = 1;
 // Column to track which nodes have a ref count of zero
 const REF_COUNT_ZERO: u8 = 2;
+const REF_COUNT_COLUMN: u8 = 3;
 
 /// A database back-end using the `ParityDB` library.
 pub struct ParityDb<H: WellBehavedHasher = DefaultHasher> {
@@ -167,15 +168,31 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             NODE_COLUMN,
             parity_db::Operation::Set(key.0.to_vec(), serialize_node(&object)),
         )];
-        ops.push((
-            REF_COUNT_ZERO,
-            if object.ref_count == 0 {
-                parity_db::Operation::Set(key.0.to_vec(), vec![])
-            } else {
-                parity_db::Operation::Dereference(key.0.to_vec())
-            },
-        ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
+    }
+
+    fn set_ref_count(&self, key: ArenaHash<Self::Hasher>, count: u64) {
+        let mut ops = vec![
+            (
+                REF_COUNT_ZERO,
+                if count == 0 {
+                    parity_db::Operation::Set(key.0.to_vec(), vec![])
+                } else {
+                    parity_db::Operation::Dereference(key.0.to_vec())
+                },
+            ),
+            (
+                REF_COUNT_COLUMN,
+                parity_db::Operation::Set(key.0.to_vec(), count.to_le_bytes().to_vec())
+            ),
+        ];
+        self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
+    }
+
+    fn get_ref_count(&self, key: &ArenaHash<Self::Hasher>) -> u64 {
+        self.db.get(REF_COUNT_COLUMN, &key.0).expect("Failed to read from db").and_then(|data| <[u8; 8]>::try_from(&data[..]).ok()).map(u64::from_le_bytes).unwrap_or(0)
     }
 
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
@@ -190,6 +207,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             ),
         ];
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_update<I>(&mut self, iter: I)
@@ -232,10 +250,58 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                         REF_COUNT_ZERO,
                         parity_db::Operation::Dereference(key.0.to_vec()),
                     ));
+                    ops.push((
+                        REF_COUNT_COLUMN,
+                        parity_db::Operation::Dereference(key.0.to_vec()),
+                    ));
+                }
+                Update::SetRefCount(count) => {
+                    ops.push((
+                        REF_COUNT_ZERO,
+                        if count == 0 {
+                            parity_db::Operation::Set(key.0.to_vec(), vec![])
+                        } else {
+                            parity_db::Operation::Dereference(key.0.to_vec())
+                        },
+                    ));
+                    ops.push((
+                        REF_COUNT_COLUMN,
+                        parity_db::Operation::Set(key.0.to_vec(), count.to_le_bytes().to_vec())
+                    ));
+                }
+                Update::Delta(delta) => {
+                    if delta.ref_delta != 0 {
+                        let old_ref_c = self.get_ref_count(&key);
+                        let ref_c = old_ref_c.checked_add_signed(delta.ref_delta as i64).expect("ref count must be non-negative");
+                        ops.push((REF_COUNT_COLUMN, parity_db::Operation::Set(key.0.to_vec(), vec![])));
+                        if old_ref_c == 0 {
+                            ops.push((
+                                REF_COUNT_ZERO,
+                                parity_db::Operation::Set(key.0.to_vec(), vec![])
+                            ));
+                        } else if ref_c == 0 {
+                            ops.push((
+                                REF_COUNT_ZERO,
+                                parity_db::Operation::Dereference(key.0.to_vec())
+                            ));
+                        }
+                    }
+                    if delta.root_delta != 0 {
+                        let count = self.get_root_count(&key).checked_add_signed(delta.root_delta).expect("root count must be non-negative");
+                        ops.push((
+                            GC_ROOT_COLUMN,
+                            if count == 0 {
+                                parity_db::Operation::Dereference(key.0.to_vec())
+                            } else {
+                                parity_db::Operation::Set(key.0.to_vec(), count.to_le_bytes().to_vec())
+                            },
+                        ));
+                    }
                 }
             }
         }
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_get_nodes<I>(
@@ -268,6 +334,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         )];
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {

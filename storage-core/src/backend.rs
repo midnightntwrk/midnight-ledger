@@ -29,7 +29,7 @@ use rand::distributions::{Distribution, Standard};
 use serialize::{Deserializable, Serializable};
 use std::{
     cell::RefCell,
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet}, time::Duration,
 };
 
 #[derive(PartialEq, Debug, Clone, Copy)]
@@ -38,9 +38,9 @@ use std::{
 ///
 /// Invariant: at least one of `ref_delta` and `root_delta` are non-zero. This
 /// is the "non-trivial" part.
-struct Delta {
-    ref_delta: i32,
-    root_delta: i32,
+pub(crate) struct Delta {
+    pub(crate) ref_delta: i32,
+    pub(crate) root_delta: i32,
 }
 impl Delta {
     /// Create a new delta that increments the ref count by `ref_delta`.
@@ -666,24 +666,22 @@ impl<D: DB> StorageBackend<D> {
     where
         I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
-        let mut updates = vec![];
-        for (k, mut v) in writes {
+        let writes = writes.collect::<Vec<_>>();
+        let mut updates = Vec::with_capacity(writes.len());
+        let mut updates_ref_count = Vec::with_capacity(writes.len());
+        let rc_updates = writes.iter().filter(|(_, cv)| matches!(cv, CacheValue::Update { .. } | CacheValue::ReadAndUpdate { .. })).count();
+        let total = writes.len();
+        let mut dta1 = Duration::default();
+        let mut dta2 = Duration::default();
+        let mut dta3 = Duration::default();
+        let t0 = std::time::Instant::now();
+        for (k, mut v) in writes.into_iter() {
+            let ta0 = std::time::Instant::now();
             // Check for reads first, to give better error messages.
             if matches!(v, CacheValue::Read { .. }) {
                 panic!("BUG: unexpected CacheValue::Read!")
             }
-            v = if let CacheValue::Update { delta } = v {
-                let obj = self
-                    .database
-                    .get_node(&k)
-                    .expect("can't update unknown object");
-                CacheValue::ReadAndUpdate {
-                    delta,
-                    obj: obj.apply_delta(delta),
-                }
-            } else {
-                v
-            };
+            let ta1 = std::time::Instant::now();
             // Insert objects for flushed writes into the read cache.
             //
             // It might make sense to not recache `CreateAndDelete`
@@ -692,19 +690,29 @@ impl<D: DB> StorageBackend<D> {
             // `CreateAndDelete` arises is when the `Arena` unloads an
             // object into "lazy" form. If the unloaded data gets loaded
             // again, then it will be better for it to still be in the
-            self.cache_insert_new_key(
-                k.clone(),
-                CacheValue::Read {
-                    obj: v.get_obj().expect("object must be available").clone(),
-                },
-            );
+            if !matches!(v, CacheValue::Update { .. }) {
+                self.cache_insert_new_key(
+                    k.clone(),
+                    CacheValue::Read {
+                        obj: v.get_obj().expect("object must be available").clone(),
+                    },
+                );
+            }
+            let ta2 = std::time::Instant::now();
             // Calculate DB updates corresponding to pending writes.
             match v {
                 CacheValue::Read { .. } => unreachable!("already handled Read above"),
+                CacheValue::Update { delta } => {
+                    //updates_ref_count.push((k, Update::Delta(delta)));
+                    //let mut obj = self.database.get_node(&k).unwrap();
+                    //obj = obj.apply_delta(delta);
+                    //updates.push((k, Update::InsertNode(obj)));
+                }
                 CacheValue::ReadAndUpdate { delta, obj } => {
-                    if delta.ref_delta != 0 {
-                        updates.push((k.clone(), Update::InsertNode(obj)));
-                    }
+                    //if delta.ref_delta != 0 {
+                    //    updates.push((k.clone(), Update::InsertNode(obj)));
+                    ////    updates_ref_count.push((k.clone(), Update::SetRefCount(obj.ref_count)));
+                    //}
                     if delta.root_delta != 0 {
                         // Can't use self.get_root_count here, since `v` has
                         // already been removed from DB.
@@ -714,11 +722,14 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
-                        updates.push((k, Update::SetRootCount(root_count as u32)));
+                        updates_ref_count.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
                 CacheValue::CreateAndUpdate { obj, delta }
                 | CacheValue::CreateAndDelete { obj, delta } => {
+                    //if delta.ref_delta != 0 {
+                    //    updates_ref_count.push((k.clone(), Update::SetRefCount(obj.ref_count)));
+                    //}
                     updates.push((k.clone(), Update::InsertNode(obj)));
                     if delta.root_delta != 0 {
                         // This a new object that's not yet in the DB.
@@ -727,14 +738,26 @@ impl<D: DB> StorageBackend<D> {
                             "root count can't be negative (for {k:?})"
                         );
                         let root_count = delta.root_delta as u32;
-                        updates.push((k, Update::SetRootCount(root_count)));
+                        updates_ref_count.push((k, Update::SetRootCount(root_count)));
                     }
                 }
-                CacheValue::Create { obj } => updates.push((k, Update::InsertNode(obj))),
-                CacheValue::Dummy | CacheValue::Update { .. } => {}
+                CacheValue::Create { obj } => {
+                    //updates_ref_count.push((k.clone(), Update::SetRefCount(obj.ref_count)));
+                    updates.push((k, Update::InsertNode(obj)));
+                },
+                CacheValue::Dummy => {}
             }
+            let ta3 = std::time::Instant::now();
+            dta1 += ta1 - ta0;
+            dta2 += ta2 - ta1;
+            dta3 += ta3 - ta2;
         }
+        let t1 = std::time::Instant::now();
         self.database.batch_update(updates.into_iter());
+        let t2 = std::time::Instant::now();
+        self.database.batch_update(updates_ref_count.into_iter());
+        let t3 = std::time::Instant::now();
+        //println!("flush_to_db: {} real writes, {} rc updates ({} total), took {:?} ({:?} compute / {:?} real / {:?} ref count) {dta1:?} / {dta2:?} / {dta3:?}", total - rc_updates, rc_updates, total, t3 - t0, t1 - t0, t2 - t1, t3 - t2);
     }
 
     /// Push pending writes to shrink the write cache to `self.cache_size`.
@@ -808,7 +831,7 @@ impl<D: DB> StorageBackend<D> {
     // bounded version, assuming we have enough time to calculate the full
     // initial set of `unreachable_keys`, we could just partially process this
     // set, instead of fully processing it as we do now.
-    pub fn gc(&mut self) {
+    pub fn gc(&mut self) -> usize {
         // Compute unreachable keys, taking memory into account.
         let db_unreachable_keys = self.database.get_unreachable_keys();
         let mut mem_unreachable_keys = vec![];
@@ -861,8 +884,10 @@ impl<D: DB> StorageBackend<D> {
             self.write_cache.remove(key);
             self.read_cache.remove(key);
         }
+        let gcs = keys_to_delete.len();
         let batch_deletes = keys_to_delete.into_iter().map(|k| (k, Update::DeleteNode));
         self.database.batch_update(batch_deletes);
+        gcs
     }
 
     /// Attempt to get in-memory value, without updating cache ordering.
@@ -1053,7 +1078,7 @@ impl<D: DB> StorageBackend<D> {
 /// other public use.
 pub struct OnDiskObject<H: WellBehavedHasher> {
     /// Binary representation of the object
-    pub(crate) data: std::vec::Vec<u8>,
+    pub data: std::vec::Vec<u8>,
     /// The number of parent->child references to this object. The object may be
     /// deleted by GC when `ref_count` is zero and the object is not
     /// `persist`ed. Note that the `persist` counts are stored separately -- see

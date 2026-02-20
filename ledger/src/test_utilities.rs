@@ -54,7 +54,7 @@ use serialize::{tagged_deserialize, tagged_serialize};
 use std::env;
 use std::io;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{Sp, TypedArenaKey};
 use storage::db::DB;
 use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
@@ -124,6 +124,7 @@ pub struct TestState<D: DB> {
     pub dust_key: DustSecretKey,
 
     pub mode: TestProcessingMode,
+    pub debug_print: bool,
 }
 
 impl<D: DB> TestState<D> {
@@ -142,15 +143,19 @@ impl<D: DB> TestState<D> {
             dust_key: DustSecretKey::sample(&mut *rng),
 
             mode: TestProcessingMode::Regular,
+            debug_print: false,
         }
     }
 
-    pub fn swizzle_to_db(&mut self) {
+    pub fn swizzle_to_db(&mut self) -> (TypedArenaKey<LedgerState<D>, D::Hasher>, TypedArenaKey<zswap::local::State<D>, D::Hasher>, TypedArenaKey<DustLocalState<D>, D::Hasher>) {
         use std::ops::Deref;
         let mut lstate = Sp::new(self.ledger.clone());
         let mut zstate = Sp::new(self.zswap.clone());
         let mut dstate = Sp::new(self.dust.clone());
         lstate.persist();
+        let k1 = lstate.as_typed_key();
+        let k2 = zstate.as_typed_key();
+        let k3 = dstate.as_typed_key();
         zstate.persist();
         dstate.persist();
         lstate.unload();
@@ -161,8 +166,9 @@ impl<D: DB> TestState<D> {
         self.dust = dstate.deref().clone();
         default_storage::<D>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.gc();
+            //b.gc();
         });
+        (k1, k2, k3)
     }
 
     pub fn context(&self) -> TransactionContext<D> {
@@ -320,7 +326,7 @@ impl<D: DB> TestState<D> {
         self.fast_forward(Duration::from_secs(10))
     }
 
-    fn dust_generation_register(&mut self, rng: &mut (impl Rng + CryptoRng)) {
+    pub fn dust_generation_register(&mut self, rng: &mut (impl Rng + CryptoRng)) {
         let reg: DustRegistration<(), D> = DustRegistration {
             allow_fee_payment: 0,
             dust_address: Some(Sp::new(DustPublicKey::from(self.dust_key.clone()))),
@@ -440,15 +446,17 @@ impl<D: DB> TestState<D> {
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
-        dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
-        dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
-        dbg!(
-            tx.cost(&self.ledger.parameters, false)
-                .ok()
-                .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
-        );
-        dbg!(&tx.erase_proofs());
+        if self.debug_print {
+            dbg!(tx.cost(&self.ledger.parameters, false)).ok();
+            dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
+            dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
+            dbg!(
+                tx.cost(&self.ledger.parameters, false)
+                    .ok()
+                    .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
+            );
+            dbg!(&tx.erase_proofs());
+        }
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -559,7 +567,7 @@ impl<D: DB> TestState<D> {
         {
             dust += last_dust;
             last_dust = dust;
-            if self.mode != TestProcessingMode::ForceConstantTime {
+            if self.mode != TestProcessingMode::ForceConstantTime && self.debug_print{
                 eprintln!(
                     "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
                     self.dust.wallet_balance(self.time)
@@ -577,7 +585,9 @@ impl<D: DB> TestState<D> {
                     &self.ledger.parameters.dust,
                 );
                 let v_fee = u128::min(value, dust);
-                eprintln!("adding utxo of {v_fee} Dust atomic units");
+                if self.debug_print {
+                    eprintln!("adding utxo of {v_fee} Dust atomic units");
+                }
                 dust = dust.saturating_sub(value);
                 let (new_dust, spend) = self
                     .dust

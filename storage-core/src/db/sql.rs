@@ -579,10 +579,12 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         I: Iterator<Item = (ArenaHash<H>, Update<H>)>,
     {
         use Update::*;
+        let t0 = std::time::Instant::now();
         // For batching at the SQL level, this approach is supposed to be faster
         // (and easier!) than building up large INSERTs:
         // https://stackoverflow.com/a/5209093/470844
         self.with_tx(Immediate, |tx| {
+            let t1 = std::time::Instant::now();
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
             let mut insert_node = tx.prepare(sql).unwrap();
@@ -613,11 +615,14 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     }
                 };
             }
+            let t2 = std::time::Instant::now();
             insert_node.finalize().unwrap();
             delete_node.finalize().unwrap();
             set_root_count.finalize().unwrap();
             delete_root_count.finalize().unwrap();
-        })
+            //println!("batch update tx: prep: {:?} / finalize: {:?}", t2 - t1, t2.elapsed());
+        });
+        //println!("batch update full: {:?}", t0.elapsed());
     }
 
     fn size(&self) -> usize {

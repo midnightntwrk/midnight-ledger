@@ -23,7 +23,7 @@ mod paritydb;
 pub use paritydb::ParityDb;
 
 use crate::DefaultHasher;
-use crate::backend::OnDiskObject;
+use crate::backend::{OnDiskObject, Delta};
 use crate::{
     WellBehavedHasher,
     arena::{ArenaHash, ArenaKey},
@@ -50,6 +50,10 @@ pub enum Update<H: WellBehavedHasher> {
     /// Set the root count of a DAG node. Setting this to zero means the node is
     /// no longer a GC root.
     SetRootCount(u32),
+    /// FIXME
+    SetRefCount(u64),
+    /// FIXME
+    Delta(Delta),
 }
 
 #[cfg(feature = "proptest")]
@@ -265,9 +269,15 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// root. Returns 0 if the node is not a GC root.
     fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32;
 
+    /// Get the number of times the node with key `key` has been referenced
+    fn get_ref_count(&self, key: &ArenaHash<Self::Hasher>) -> u64;
+
     /// Set the root count of the node with key `key` to `count`. If `count` is
     /// 0, the node will no longer be a GC root.
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32);
+
+    /// FIXME
+    fn set_ref_count(&self, key: ArenaHash<Self::Hasher>, count: u64);
 
     /// Return a mapping from key to root count, for all the roots in this
     /// DB. All mapped root counts will be positive.
@@ -291,6 +301,11 @@ where
             InsertNode(value) => db.insert_node(k, value),
             DeleteNode => db.delete_node(&k),
             SetRootCount(count) => db.set_root_count(k, count),
+            SetRefCount(count) => db.set_ref_count(k, count),
+            Delta(delta) => {
+                db.set_root_count(k.clone(), db.get_root_count(&k).checked_add_signed(delta.root_delta).expect("root count can't go out of u32 bounds"));
+                db.set_ref_count(k.clone(), db.get_ref_count(&k).checked_add_signed(delta.ref_delta as i64).expect("ref count can't go out of u64 bounds"));
+            }
         }
     }
 }
@@ -315,6 +330,7 @@ where
 pub struct InMemoryDB<H: WellBehavedHasher = DefaultHasher> {
     nodes: Arc<Mutex<HashMap<ArenaHash<H>, OnDiskObject<H>>>>,
     roots: Arc<Mutex<HashMap<ArenaHash<H>, u32>>>,
+    refs: Arc<Mutex<HashMap<ArenaHash<H>, u64>>>,
 }
 
 impl<H: WellBehavedHasher> DummyArbitrary for InMemoryDB<H> {}
@@ -374,13 +390,27 @@ impl<H: WellBehavedHasher> InMemoryDB<H> {
     fn lock_roots(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, u32>> {
         self.roots.lock().expect("db lock poisoned")
     }
+
+    fn lock_refs(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, u64>> {
+        self.refs.lock().expect("db lock poisoned")
+    }
 }
 
 impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
     type Hasher = H;
 
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
-        self.lock_nodes().get(key).cloned()
+        let mut node = self.lock_nodes().get(key).cloned()?;
+        node.ref_count = self.lock_refs().get(key).copied().unwrap_or(0);
+        Some(node)
+    }
+
+    fn set_ref_count(&self, key: ArenaHash<Self::Hasher>, count: u64) {
+        self.lock_refs().insert(key, count);
+    }
+
+    fn get_ref_count(&self, key: &ArenaHash<Self::Hasher>) -> u64 {
+        self.lock_refs().get(key).copied().unwrap_or(0)
     }
 
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
@@ -446,6 +476,7 @@ impl<H: WellBehavedHasher> Default for InMemoryDB<H> {
         Self {
             nodes: Arc::default(),
             roots: Arc::default(),
+            refs: Arc::default(),
         }
     }
 }

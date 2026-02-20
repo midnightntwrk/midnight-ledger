@@ -394,7 +394,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir --features binary";
+              cargoBuildFlags = "--package midnight-zkir --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];
@@ -420,7 +420,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir-v3 --features binary";
+              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];
