@@ -1,6 +1,6 @@
 [package]
 name = "midnight-base-crypto"
-version = "1.0.0"
+version = "1.0.0-hard-fork-test"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -13,8 +13,8 @@ cli = ["dep:indicatif"]
 fixed-point-custom-serde = []
 
 [dependencies]
-derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
