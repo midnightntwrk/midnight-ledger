@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
 use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
@@ -1366,6 +1366,63 @@ impl From<InvalidUpdate> for EventReplayError {
         EventReplayError::MerkleTreeUpdate(err)
     }
 }
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum DustLocalStateError {
+    GenerationIndexNotFound {
+        generation_index: u64,
+    },
+    NonLinearInsertion {
+        expected_next: u64,
+        received: u64,
+        tree_name: &'static str,
+    },
+    WrongGenerationInfo {
+        generation_index: u64,
+    },
+    CommitmentIndexNotFound {
+        commitment_index: u64,
+    },
+    BackingNightNotFound {
+        backing_night: InitialNonce,
+    },
+}
+
+impl Display for DustLocalStateError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use DustLocalStateError::*;
+        match self {
+            GenerationIndexNotFound { generation_index } => write!(
+                f,
+                "failed to find generation info for generation index {generation_index}"
+            ),
+            NonLinearInsertion {
+                expected_next,
+                received,
+                tree_name,
+            } => write!(
+                f,
+                "values inserted non-linearly into {tree_name} tree; expected to insert index {expected_next}, but received {received}."
+            ),
+            WrongGenerationInfo { generation_index } => write!(
+                f,
+                "generation info for generation index {generation_index} is invalid"
+            ),
+            CommitmentIndexNotFound { commitment_index } => write!(
+                f,
+                "failed to find commitment for commitment index {commitment_index}"
+            ),
+            BackingNightNotFound { backing_night } => write!(
+                f,
+                "failed to find generation info for backing night {:?}",
+                backing_night.0
+            ),
+        }
+    }
+}
+
+impl Error for DustLocalStateError {}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BlockLimitExceeded;
