@@ -365,6 +365,9 @@ impl<D: DB> TestState<D> {
 
         let res = self.ledger.apply_system_tx(tx, self.time)?;
         let (res, events) = res;
+        // Reapply to test determinism
+        let cmp = self.ledger.apply_system_tx(tx, self.time)?.0;
+        assert_eq!(res.state_hash(), cmp.state_hash());
         self.ledger = res;
         self.zswap = self
             .zswap
@@ -405,6 +408,9 @@ impl<D: DB> TestState<D> {
         let context = self.context();
         let vtx = tx.well_formed(&self.ledger, strictness, self.time)?;
         let (new_st, result) = self.ledger.apply(&vtx, &context);
+        // Reapply to test determinism
+        let cmp = self.ledger.apply(&vtx, &context).0;
+        assert_eq!(new_st.state_hash(), cmp.state_hash());
         self.ledger = new_st;
         self.zswap = self
             .zswap

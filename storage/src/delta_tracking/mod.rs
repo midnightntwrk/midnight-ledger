@@ -581,7 +581,10 @@ mod tests {
         let k0: RcMap<DefaultDB> = RcMap::default();
         let writes = to_keys(reachable.iter());
 
-        let k1 = super::update_rcmap(&k0, &writes.into_iter().collect());
+        let keys_added = writes.into_iter().collect();
+        let k1 = super::update_rcmap(&k0, &keys_added);
+        let k1_cmp = super::update_rcmap(&k0, &keys_added);
+        assert_eq!(Sp::new(k1.clone()).hash(), Sp::new(k1_cmp).hash());
 
         // Compute expected reference counts based on adjacency
         let expected_rcs = get_subgraph_rcs(&roots);
@@ -614,6 +617,10 @@ mod tests {
 
         let step_limit = 1000;
         let (k1, removed) = super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), step_limit);
+        let (k1_cmp, removed_cmp) =
+            super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), step_limit);
+        assert_eq!(Sp::new(k1.clone()).hash(), Sp::new(k1_cmp).hash());
+        assert_eq!(&removed, &removed_cmp);
 
         // Compute what should remain vs be removed
         let kept_nodes = compute_reachable_nodes(&limited_roots);
@@ -656,10 +663,13 @@ mod tests {
 
         // Test step limit: should stop GC early with limited steps
         let (k2, removed2) = super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), 2);
+        let (k2_cmp, removed2_cmp) = super::gc_rcmap(&k0, &roots.clone().into_iter().collect(), 2);
         assert!(
             removed2.len() == 2,
             "With step_limit=2, should remove 2 nodes"
         );
+        assert_eq!(Sp::new(k2.clone()).hash(), Sp::new(k2_cmp).hash());
+        assert_eq!(&removed2, &removed2_cmp);
 
         // Test resuming GC
         let (_k3, removed3) =
