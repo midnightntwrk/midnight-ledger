@@ -32,7 +32,7 @@ jobs:
 
       - name: Configure git rewrite
         run: |
-          mkdir -p $HOME/.config/git
+          mkdir -p "$HOME/.config/git"
           echo '[url "https://github.com/"]' >> $HOME/.config/git/config
           echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
           echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
@@ -52,8 +52,8 @@ jobs:
         run: |
           cd ./scripts/hardfork_version_patch/
           cargo build --release
-          mkdir -p $HOME/tools
-          cp target/release/hardfork_version_patch $HOME/tools/
+          mkdir -p "$HOME/tools"
+          cp target/release/hardfork_version_patch "$HOME/tools/"
 
       - name: Checkout repository at tag
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
@@ -68,7 +68,7 @@ jobs:
 
       - name: Patch the sources
         run: |
-          $HOME/tools/hardfork_version_patch --tags standard-transaction
+          "$HOME/tools/hardfork_version_patch" --tags standard-transaction
           sed -i -e 's/^version\(\s*\)=\(\s*\)"\(.*\)"$/version\1=\2"\3-hard-fork-test"/g' */Cargo.toml
           # Remove version constraints from path dependencies so they work with patched prerelease versions
           sed -i -e '/path\s*=\s*"/ s/version\s*=\s*"[^"]*",\s*//' */Cargo.toml
