@@ -1,0 +1,32 @@
+{
+  "name": "rn-demo-app",
+  "version": "0.1.0",
+  "private": true,
+  "description": "React Native demo app for ledger-uniffi using legacy native module",
+  "main": "index.js",
+  "scripts": {
+    "start": "npx react-native start",
+    "android": "npx react-native run-android",
+    "ios": "npx react-native run-ios",
+    "clean": "rm -rf node_modules ios android .gradle package-lock.json yarn.lock"
+  },
+  "dependencies": {
+    "@react-native-community/cli-platform-ios": "^20.0.1",
+    "invariant": "^2.2.4",
+    "react": "19.0.0",
+    "react-native": "0.79.6",
+    "react-native-ledger-ffi": "file:../react-native-ledger-ffi"
+  },
+  "devDependencies": {
+    "@babel/plugin-proposal-nullish-coalescing-operator": "^7.18.6",
+    "@babel/plugin-proposal-optional-chaining": "^7.21.0",
+    "@babel/preset-env": "^7.28.3",
+    "@babel/preset-react": "^7.27.1",
+    "@react-native-community/cli": "latest",
+    "@react-native/babel-preset": "^0.81.1",
+    "@react-native/metro-config": "^0.81.1",
+    "@types/react": "^19.0.0",
+    "@types/react-native": "^0.73.0",
+    "typescript": "^5.4.0"
+  }
+}

@@ -1,0 +1,56 @@
+
+# Rust
+target/
+Cargo.lock
+
+# Generated UniFFI bindings (should be regenerated, not committed)
+react-native-ledger-ffi/android/src/main/kotlin/com/midnight/ledgerffi/uniffi/
+react-native-ledger-ffi/ios/LedgerUniffi/
+react-native-ledger-ffi/ios/ledger_uniffi.swift
+react-native-ledger-ffi/ios/ledger_uniffiFFI.h
+react-native-ledger-ffi/ios/ledger_uniffiFFI.modulemap
+
+# Native libraries (should be built, not committed)
+react-native-ledger-ffi/ios/libledger_uniffi.a
+react-native-ledger-ffi/android/src/main/jniLibs/arm64-v8a/libledger_uniffi.so
+react-native-ledger-ffi/android/src/main/jniLibs/arm64-v8a/libjnidispatch.so
+rn-demo-app/ios/build/ExpoLedgerModule/libledger_uniffi.a
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
+# React Native
+react-native-ledger-ffi/dist/
+react-native-ledger-ffi/*.tsbuildinfo
+rn-demo-app/node_modules/
+rn-demo-app/android/app/build/
+rn-demo-app/android/build/
+rn-demo-app/android/.gradle/
+rn-demo-app/android/local.properties
+rn-demo-app/ios/build/
+rn-demo-app/ios/Pods/
+rn-demo-app/ios/Podfile.lock
+
+# Build artifacts
+react-native-ledger-ffi/android/build/
+react-native-ledger-ffi/android/.gradle/
+react-native-ledger-ffi/android/local.properties
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
