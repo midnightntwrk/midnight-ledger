@@ -370,15 +370,322 @@ pub fn hash_to_curve(align: JsValue, val: JsValue) -> Result<JsValue, JsError> {
     ))?)
 }
 
+// ============================================================
+// Field-parameterized scalar operations
+// ============================================================
+
+/// Parses a JS BigInt into raw little-endian bytes.
+fn bigint_to_le_bytes(x: BigInt) -> Result<Vec<u8>, JsError> {
+    let hex_str = String::from(
+        x.to_string(16)
+            .map_err(|err| JsError::new(&String::from(err.to_string())))?,
+    );
+    let padded_str = if hex_str.len() % 2 == 1 {
+        "0".to_owned() + &hex_str
+    } else {
+        hex_str
+    };
+    let mut bytes = <Vec<u8>>::from_hex(padded_str.as_bytes())?;
+    bytes.reverse();
+    Ok(bytes)
+}
+
+/// Converts little-endian bytes back to a JS BigInt.
+fn le_bytes_to_bigint(bytes: &[u8]) -> Result<BigInt, JsError> {
+    let mut be_bytes = bytes.to_vec();
+    be_bytes.reverse();
+    BigInt::new(&JsString::from(format!(
+        "0x{}",
+        be_bytes.encode_hex::<String>()
+    )))
+    .map_err(|err| JsError::new(&String::from(err.to_string())))
+}
+
+/// Parses a JS BigInt into a native field element (curve::Fr).
+fn bigint_to_fr(x: BigInt) -> Result<curve::Fr, JsError> {
+    let bytes = bigint_to_le_bytes(x)?;
+    curve::Fr::from_le_bytes(&bytes)
+        .ok_or_else(|| JsError::new("value out of bounds for native field"))
+}
+
+/// Converts a native field element back to a JS BigInt.
+fn fr_to_bigint(val: curve::Fr) -> Result<BigInt, JsError> {
+    le_bytes_to_bigint(&val.as_le_bytes())
+}
+
+/// Parses a JS BigInt into an embedded scalar field element (curve::EmbeddedFr).
+fn bigint_to_embedded_fr(x: BigInt) -> Result<curve::EmbeddedFr, JsError> {
+    let bytes = bigint_to_le_bytes(x)?;
+    curve::EmbeddedFr::from_le_bytes(&bytes)
+        .ok_or_else(|| JsError::new("value out of bounds for embedded scalar field"))
+}
+
+/// Converts an embedded scalar field element back to a JS BigInt.
+fn embedded_fr_to_bigint(val: curve::EmbeddedFr) -> Result<BigInt, JsError> {
+    le_bytes_to_bigint(&val.as_le_bytes())
+}
+
+/// Dispatches a binary field operation on the appropriate field type.
+/// Supported fields:
+///   "native", "bls12381.scalar", "jubjub.base", "native.base"  → curve::Fr
+///   "jubjub.scalar", "native.scalar"                            → curve::EmbeddedFr
+fn dispatch_field_binop(
+    field_name: &str,
+    a: BigInt,
+    b: BigInt,
+    fr_op: fn(curve::Fr, curve::Fr) -> curve::Fr,
+    efr_op: fn(curve::EmbeddedFr, curve::EmbeddedFr) -> curve::EmbeddedFr,
+) -> Result<BigInt, JsError> {
+    match field_name {
+        "native" | "bls12381.scalar" | "jubjub.base" | "native.base" => {
+            fr_to_bigint(fr_op(bigint_to_fr(a)?, bigint_to_fr(b)?))
+        }
+        "jubjub.scalar" | "native.scalar" => {
+            embedded_fr_to_bigint(efr_op(bigint_to_embedded_fr(a)?, bigint_to_embedded_fr(b)?))
+        }
+        "secp256k1.scalar" | "secp256k1.base" => Err(JsError::new(
+            "Secp256k1 field operations are not yet supported",
+        )),
+        "bls12381.base" => Err(JsError::new(
+            "BLS12-381 base field operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown field: {}", field_name))),
+    }
+}
+
+#[wasm_bindgen(js_name = "fieldAdd")]
+pub fn field_add(field_name: &str, a: BigInt, b: BigInt) -> Result<BigInt, JsError> {
+    dispatch_field_binop(
+        field_name,
+        a,
+        b,
+        |a, b| a + b,
+        |a, b| a + b,
+    )
+}
+
+#[wasm_bindgen(js_name = "fieldSub")]
+pub fn field_sub(field_name: &str, a: BigInt, b: BigInt) -> Result<BigInt, JsError> {
+    dispatch_field_binop(
+        field_name,
+        a,
+        b,
+        |a, b| a - b,
+        |a, b| a - b,
+    )
+}
+
+#[wasm_bindgen(js_name = "fieldMul")]
+pub fn field_mul(field_name: &str, a: BigInt, b: BigInt) -> Result<BigInt, JsError> {
+    dispatch_field_binop(
+        field_name,
+        a,
+        b,
+        |a, b| a * b,
+        |a, b| a * b,
+    )
+}
+
+#[wasm_bindgen(js_name = "fieldNeg")]
+pub fn field_neg(field_name: &str, a: BigInt) -> Result<BigInt, JsError> {
+    match field_name {
+        "native" | "bls12381.scalar" | "jubjub.base" | "native.base" => {
+            fr_to_bigint(-bigint_to_fr(a)?)
+        }
+        "jubjub.scalar" | "native.scalar" => {
+            embedded_fr_to_bigint(-bigint_to_embedded_fr(a)?)
+        }
+        "secp256k1.scalar" | "secp256k1.base" => Err(JsError::new(
+            "Secp256k1 field operations are not yet supported",
+        )),
+        "bls12381.base" => Err(JsError::new(
+            "BLS12-381 base field operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown field: {}", field_name))),
+    }
+}
+
+#[wasm_bindgen(js_name = "fieldInv")]
+pub fn field_inv(field_name: &str, a: BigInt) -> Result<BigInt, JsError> {
+    match field_name {
+        "native" | "bls12381.scalar" | "jubjub.base" | "native.base" => {
+            let val = bigint_to_fr(a)?;
+            // Division by zero check: invert() returns CtOption
+            let inv = (curve::Fr::from(1u64)) / val;
+            fr_to_bigint(inv)
+        }
+        "jubjub.scalar" | "native.scalar" => {
+            let val = bigint_to_embedded_fr(a)?;
+            let inv = (curve::EmbeddedFr::from(1u64)) / val;
+            embedded_fr_to_bigint(inv)
+        }
+        "secp256k1.scalar" | "secp256k1.base" => Err(JsError::new(
+            "Secp256k1 field operations are not yet supported",
+        )),
+        "bls12381.base" => Err(JsError::new(
+            "BLS12-381 base field operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown field: {}", field_name))),
+    }
+}
+
+#[wasm_bindgen(js_name = "fieldValidate")]
+pub fn field_validate(field_name: &str, x: BigInt) -> Result<bool, JsError> {
+    let bytes = bigint_to_le_bytes(x)?;
+    match field_name {
+        "native" | "bls12381.scalar" | "jubjub.base" | "native.base" => {
+            Ok(curve::Fr::from_le_bytes(&bytes).is_some())
+        }
+        "jubjub.scalar" | "native.scalar" => {
+            Ok(curve::EmbeddedFr::from_le_bytes(&bytes).is_some())
+        }
+        "secp256k1.scalar" | "secp256k1.base" => Err(JsError::new(
+            "Secp256k1 field operations are not yet supported",
+        )),
+        "bls12381.base" => Err(JsError::new(
+            "BLS12-381 base field operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown field: {}", field_name))),
+    }
+}
+
+#[wasm_bindgen(js_name = "fieldModulus")]
+pub fn field_modulus(field_name: &str) -> Result<BigInt, JsError> {
+    match field_name {
+        "native" | "bls12381.scalar" | "jubjub.base" | "native.base" => {
+            le_bytes_to_bigint(&curve::Fr::modulus_le_bytes())
+        }
+        "jubjub.scalar" | "native.scalar" => {
+            le_bytes_to_bigint(&curve::EmbeddedFr::modulus_le_bytes())
+        }
+        "secp256k1.scalar" | "secp256k1.base" => Err(JsError::new(
+            "Secp256k1 field operations are not yet supported",
+        )),
+        "bls12381.base" => Err(JsError::new(
+            "BLS12-381 base field operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown field: {}", field_name))),
+    }
+}
+
+// ============================================================
+// Curve-parameterized point operations
+// ============================================================
+
+/// Dispatches embedded (Jubjub/Native) point addition.
+fn embedded_point_add(a: &Value, b: &Value) -> Result<Value, JsError> {
+    let res =
+        curve::EmbeddedGroupAffine::try_from(&**a)? + curve::EmbeddedGroupAffine::try_from(&**b)?;
+    Ok(Value::from(res))
+}
+
+/// Dispatches embedded (Jubjub/Native) scalar multiplication.
+fn embedded_point_mul(point: &Value, scalar: &Value) -> Result<Value, JsError> {
+    let res =
+        curve::EmbeddedGroupAffine::try_from(&**point)? * curve::EmbeddedFr::try_from(&**scalar)?;
+    Ok(Value::from(res))
+}
+
+/// Dispatches embedded (Jubjub/Native) generator scalar multiplication.
+fn embedded_point_mul_generator(scalar: &Value) -> Result<Value, JsError> {
+    let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&**scalar)?;
+    Ok(Value::from(res))
+}
+
+/// Dispatches embedded (Jubjub/Native) point negation.
+fn embedded_point_neg(point: &Value) -> Result<Value, JsError> {
+    let pt = curve::EmbeddedGroupAffine::try_from(&**point)?;
+    Ok(Value::from(-pt))
+}
+
+/// Returns the embedded (Jubjub/Native) generator point.
+fn embedded_point_generator() -> Result<Value, JsError> {
+    Ok(Value::from(curve::EmbeddedGroupAffine::generator()))
+}
+
+/// Validates that (x, y) is a valid point on the embedded (Jubjub/Native) curve.
+fn embedded_point_validate(x: &Value, y: &Value) -> Result<bool, JsError> {
+    let x_fr = curve::Fr::try_from(&**x)?;
+    let y_fr = curve::Fr::try_from(&**y)?;
+    Ok(curve::EmbeddedGroupAffine::new(x_fr, y_fr).is_some())
+}
+
+/// Helper: checks that a curve name refers to the embedded curve (Jubjub/Native).
+/// Returns an error for unsupported curves.
+fn require_embedded_curve(curve_name: &str) -> Result<(), JsError> {
+    match curve_name {
+        "jubjub" | "native" => Ok(()),
+        "secp256k1" => Err(JsError::new(
+            "Secp256k1 curve operations are not yet supported",
+        )),
+        "bls12381" => Err(JsError::new(
+            "BLS12-381 curve operations are not yet supported",
+        )),
+        _ => Err(JsError::new(&format!("Unknown curve: {}", curve_name))),
+    }
+}
+
+#[wasm_bindgen(js_name = "pointAdd")]
+// function pointAdd(curve: string, a: Value, b: Value): Value
+pub fn point_add(curve_name: &str, a: JsValue, b: JsValue) -> Result<JsValue, JsError> {
+    require_embedded_curve(curve_name)?;
+    let a: Value = from_value(a)?;
+    let b: Value = from_value(b)?;
+    Ok(to_value(&embedded_point_add(&a, &b)?)?)
+}
+
+#[wasm_bindgen(js_name = "pointMul")]
+// function pointMul(curve: string, point: Value, scalar: Value): Value
+pub fn point_mul(curve_name: &str, point: JsValue, scalar: JsValue) -> Result<JsValue, JsError> {
+    require_embedded_curve(curve_name)?;
+    let point: Value = from_value(point)?;
+    let scalar: Value = from_value(scalar)?;
+    Ok(to_value(&embedded_point_mul(&point, &scalar)?)?)
+}
+
+#[wasm_bindgen(js_name = "pointMulGenerator")]
+// function pointMulGenerator(curve: string, scalar: Value): Value
+pub fn point_mul_generator(curve_name: &str, scalar: JsValue) -> Result<JsValue, JsError> {
+    require_embedded_curve(curve_name)?;
+    let scalar: Value = from_value(scalar)?;
+    Ok(to_value(&embedded_point_mul_generator(&scalar)?)?)
+}
+
+#[wasm_bindgen(js_name = "pointNeg")]
+// function pointNeg(curve: string, point: Value): Value
+pub fn point_neg(curve_name: &str, point: JsValue) -> Result<JsValue, JsError> {
+    require_embedded_curve(curve_name)?;
+    let point: Value = from_value(point)?;
+    Ok(to_value(&embedded_point_neg(&point)?)?)
+}
+
+#[wasm_bindgen(js_name = "pointGenerator")]
+// function pointGenerator(curve: string): Value
+pub fn point_generator(curve_name: &str) -> Result<JsValue, JsError> {
+    require_embedded_curve(curve_name)?;
+    Ok(to_value(&embedded_point_generator()?)?)
+}
+
+#[wasm_bindgen(js_name = "pointValidate")]
+// function pointValidate(curve: string, x: Value, y: Value): boolean
+pub fn point_validate(curve_name: &str, x: JsValue, y: JsValue) -> Result<bool, JsError> {
+    require_embedded_curve(curve_name)?;
+    let x: Value = from_value(x)?;
+    let y: Value = from_value(y)?;
+    embedded_point_validate(&x, &y)
+}
+
+// ============================================================
+// Legacy EC operations (delegate to curve-parameterized versions)
+// ============================================================
+
 #[wasm_bindgen(js_name = "ecAdd")]
 // function ecAdd(a: Value, b: Value): Value
 // circuit ec_add(a: CurvePoint, b: CurvePoint): CurvePoint
 pub fn ec_add(a: JsValue, b: JsValue) -> Result<JsValue, JsError> {
     let a: Value = from_value(a)?;
     let b: Value = from_value(b)?;
-    let res =
-        curve::EmbeddedGroupAffine::try_from(&*a)? + curve::EmbeddedGroupAffine::try_from(&*b)?;
-    Ok(to_value(&Value::from(res))?)
+    Ok(to_value(&embedded_point_add(&a, &b)?)?)
 }
 
 #[wasm_bindgen(js_name = "ecMul")]
@@ -387,8 +694,7 @@ pub fn ec_add(a: JsValue, b: JsValue) -> Result<JsValue, JsError> {
 pub fn ec_mul(a: JsValue, b: JsValue) -> Result<JsValue, JsError> {
     let a: Value = from_value(a)?;
     let b: Value = from_value(b)?;
-    let res = curve::EmbeddedGroupAffine::try_from(&*a)? * curve::EmbeddedFr::try_from(&*b)?;
-    Ok(to_value(&Value::from(res))?)
+    Ok(to_value(&embedded_point_mul(&a, &b)?)?)
 }
 
 #[wasm_bindgen(js_name = "ecMulGenerator")]
@@ -396,6 +702,5 @@ pub fn ec_mul(a: JsValue, b: JsValue) -> Result<JsValue, JsError> {
 // circuit ec_mul_generator(val: Field): CurvePoint
 pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     let val: Value = from_value(val)?;
-    let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&*val)?;
-    Ok(to_value(&Value::from(res))?)
+    Ok(to_value(&embedded_point_mul_generator(&val)?)?)
 }
