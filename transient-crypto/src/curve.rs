@@ -370,6 +370,30 @@ impl Fr {
     pub fn as_le_bytes(&self) -> Vec<u8> {
         self.0.to_bytes_le().to_vec()
     }
+
+    /// Returns the prime modulus of this field as little-endian bytes.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use midnight_transient_crypto::curve::Fr;
+    /// let p = Fr::modulus_le_bytes();
+    /// // p - 1 should be representable as an Fr (it's the field's -1)
+    /// assert!(Fr::from_le_bytes(&p).is_none()); // p itself is out of range
+    /// ```
+    pub fn modulus_le_bytes() -> Vec<u8> {
+        let mut bytes = (-Fr::from(1u64)).as_le_bytes();
+        let mut carry = 1u16;
+        for byte in bytes.iter_mut() {
+            let sum = *byte as u16 + carry;
+            *byte = sum as u8;
+            carry = sum >> 8;
+            if carry == 0 {
+                break;
+            }
+        }
+        bytes
+    }
 }
 
 impl EmbeddedFr {
@@ -387,6 +411,21 @@ impl EmbeddedFr {
     /// Output an [`EmbeddedFr`] as a little-endian bytes-string
     pub fn as_le_bytes(&self) -> Vec<u8> {
         self.0.to_bytes().to_vec()
+    }
+
+    /// Returns the prime modulus of this field as little-endian bytes.
+    pub fn modulus_le_bytes() -> Vec<u8> {
+        let mut bytes = (-EmbeddedFr::from(1u64)).as_le_bytes();
+        let mut carry = 1u16;
+        for byte in bytes.iter_mut() {
+            let sum = *byte as u16 + carry;
+            *byte = sum as u8;
+            carry = sum >> 8;
+            if carry == 0 {
+                break;
+            }
+        }
+        bytes
     }
 }
 
@@ -412,10 +451,8 @@ impl Mul<Fr> for EmbeddedGroupAffine {
     type Output = EmbeddedGroupAffine;
 
     fn mul(self, mut rhs: Fr) -> EmbeddedGroupAffine {
-        let embedded_m1 = EmbeddedFr::from(0u64) - EmbeddedFr::from(1u64);
-        let embedded_modulus = Fr::from_le_bytes(&embedded_m1.as_le_bytes())
-            .expect("embedded modulus should fit in scalar field")
-            + Fr::from(1);
+        let embedded_modulus = Fr::from_le_bytes(&EmbeddedFr::modulus_le_bytes())
+            .expect("embedded modulus should fit in scalar field");
         while rhs >= embedded_modulus {
             rhs = rhs - embedded_modulus;
         }

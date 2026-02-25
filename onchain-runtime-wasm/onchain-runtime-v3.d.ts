@@ -614,6 +614,67 @@ export function valueToBigInt(x: Value): bigint;
 export function bigIntToValue(x: bigint): Value;
 
 /**
+ * Valid curve identifiers for curve-parameterized operations.
+ */
+export type CurveName = 'jubjub' | 'native' | 'secp256k1' | 'bls12381';
+
+/**
+ * Valid field identifiers for field-parameterized operations.
+ *
+ * Fields follow the convention `<curve>.<fieldtype>` where fieldtype is
+ * "scalar" or "base", with "native" as a standalone alias for "bls12381.scalar".
+ */
+export type FieldName =
+  | 'native'
+  | 'bls12381.scalar' | 'bls12381.base'
+  | 'jubjub.scalar' | 'jubjub.base'
+  | 'native.scalar' | 'native.base'
+  | 'secp256k1.scalar' | 'secp256k1.base';
+
+/**
+ * Field-parameterized addition of two field elements.
+ * @throws If the field is unsupported or inputs are out of bounds
+ */
+export function fieldAdd(field: FieldName, a: bigint, b: bigint): bigint;
+
+/**
+ * Field-parameterized subtraction of two field elements.
+ * @throws If the field is unsupported or inputs are out of bounds
+ */
+export function fieldSub(field: FieldName, a: bigint, b: bigint): bigint;
+
+/**
+ * Field-parameterized multiplication of two field elements.
+ * @throws If the field is unsupported or inputs are out of bounds
+ */
+export function fieldMul(field: FieldName, a: bigint, b: bigint): bigint;
+
+/**
+ * Field-parameterized negation of a field element.
+ * @throws If the field is unsupported or the input is out of bounds
+ */
+export function fieldNeg(field: FieldName, a: bigint): bigint;
+
+/**
+ * Field-parameterized multiplicative inverse of a field element.
+ * @throws If the field is unsupported or the input is zero or out of bounds
+ */
+export function fieldInv(field: FieldName, a: bigint): bigint;
+
+/**
+ * Validates that a value is a valid element of the specified field.
+ * @returns true if the value is in the field, false otherwise
+ * @throws If the field is unsupported
+ */
+export function fieldValidate(field: FieldName, x: bigint): boolean;
+
+/**
+ * Returns the prime modulus of the specified field.
+ * @throws If the field is unsupported
+ */
+export function fieldModulus(field: FieldName): bigint;
+
+/**
  * Internal implementation of the transient hash primitive
  * @internal
  * @throws If {@link val} does not have alignment {@link align}
@@ -667,14 +728,53 @@ export function upgradeFromTransient(transient: Value): Value;
 export function hashToCurve(align: Alignment, val: Value): Value;
 
 /**
- * Internal implementation of the elliptic curve addition primitive
+ * Curve-parameterized point addition.
+ * @throws If the curve is unsupported or inputs do not encode valid curve points
+ */
+export function pointAdd(curve: CurveName, a: Value, b: Value): Value;
+
+/**
+ * Curve-parameterized scalar multiplication of a point.
+ * @throws If the curve is unsupported or inputs are invalid
+ */
+export function pointMul(curve: CurveName, point: Value, scalar: Value): Value;
+
+/**
+ * Curve-parameterized scalar multiplication of the generator point.
+ * @throws If the curve is unsupported or the scalar is invalid
+ */
+export function pointMulGenerator(curve: CurveName, scalar: Value): Value;
+
+/**
+ * Curve-parameterized point negation.
+ * @throws If the curve is unsupported or the input is not a valid point
+ */
+export function pointNeg(curve: CurveName, point: Value): Value;
+
+/**
+ * Returns the generator point for the specified curve.
+ * @throws If the curve is unsupported
+ */
+export function pointGenerator(curve: CurveName): Value;
+
+/**
+ * Validates that (x, y) is a point on the specified curve.
+ * @returns true if the point is valid, false otherwise
+ * @throws If the curve is unsupported
+ */
+export function pointValidate(curve: CurveName, x: Value, y: Value): boolean;
+
+/**
+ * Internal implementation of the elliptic curve addition primitive.
+ * @deprecated Use {@link pointAdd} with curve="jubjub" instead
  * @internal
  * @throws If either input does not encode an elliptic curve point
  */
 export function ecAdd(a: Value, b: Value): Value;
 
 /**
- * Internal implementation of the elliptic curve multiplication primitive
+ * Internal implementation of the elliptic curve multiplication primitive.
+ * @deprecated Use {@link pointMul} with curve="jubjub" instead
  * @internal
  * @throws If {@link a} does not encode an elliptic curve point or {@link b}
  * does not encode a field element
@@ -683,7 +783,8 @@ export function ecMul(a: Value, b: Value): Value;
 
 /**
  * Internal implementation of the elliptic curve generator multiplication
- * primitive
+ * primitive.
+ * @deprecated Use {@link pointMulGenerator} with curve="jubjub" instead
  * @internal
  * @throws if {@link val} does not encode a field element
  */
