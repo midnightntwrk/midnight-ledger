@@ -1,4 +1,4 @@
-**@midnight/ledger v7.0.1**
+**@midnight/ledger v7.0.2**
 
 ***
 
