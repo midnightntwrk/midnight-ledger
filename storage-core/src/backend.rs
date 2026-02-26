@@ -1239,6 +1239,7 @@ pub(crate) mod raw_node {
     }
 
     impl<H: WellBehavedHasher> RawNode<H> {
+        #[allow(unused_variables, reason = "feature flags")]
         pub(crate) fn new(
             key: &[u8],
             ref_count: u64,
@@ -1732,7 +1733,7 @@ mod tests {
         // deleted, while things that are still referenced by `cache`d nodes
         // stick around.
         backend.uncache(&n11.key);
-        for (n, r) in [(&n41, 2), (&n31, 0), (&n33, 0)] {
+        for (n, _r) in [(&n41, 2), (&n31, 0), (&n33, 0)] {
             #[cfg(not(feature = "layout-v2"))]
             assert_eq!(
                 backend
@@ -1741,7 +1742,7 @@ mod tests {
                     .get_obj()
                     .unwrap()
                     .ref_count,
-                r
+                _r
             );
             assert_eq!(backend.get_root_count(&n.key), 0);
         }

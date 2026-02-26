@@ -6,7 +6,7 @@ license.workspace = true
 description = "Provides the low-level storage primitives for Midnight's ledger."
 
 [features]
-default = []#"layout-v2"]
+default = []
 
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
 sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]

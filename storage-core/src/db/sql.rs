@@ -750,6 +750,7 @@ mod tests {
     use rand::Rng;
     use rusqlite::TransactionBehavior::Deferred;
     use rusqlite::types::FromSql;
+    #[cfg(not(feature = "layout-v2"))]
     use std::collections::HashSet;
 
     /// This test always fails due to db locking errors. Since we don't intend
