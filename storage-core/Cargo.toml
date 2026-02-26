@@ -20,15 +20,15 @@ layout-v1 = []
 layout-v2 = ["layout-v1"]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+base-crypto = { version = "1.0.0", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", package = "midnight-serialize" }
 parity-db = { version = "0.5.2", optional = true }
 
 archery = "^0.5.0"
 crypto = { version = "0.5.1", features = ["digest"] }
 sha2 = "0.10.9"
 derive-where = "^1.5.0"
-macros = { version = "1.0.0", path = "../storage-macros", package = "midnight-storage-macros" }
+macros = { version = "1.0.0", package = "midnight-storage-macros" }
 
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
 fake = { version = "^2.10.0", features = ["derive"] }

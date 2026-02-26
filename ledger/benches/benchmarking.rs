@@ -233,18 +233,21 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let end = size >> BATCH_SIZE;
         let mut last_str_len = 0usize;
         for i in start..end {
-            rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
             let ta = std::time::Instant::now();
+            rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
+            let tb = std::time::Instant::now();
             state.swizzle_to_db();
-            swizzle_time += ta.elapsed();
+            swizzle_time += tb.elapsed();
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
             let string = format!(
-                "[{}{}] ETA: {:?}, TPS: {}",
+                "[{}{}] ETA: {:?}, TPS: {:.2}, size: {}, write cost: {:?}",
                 "#".repeat(segments),
                 " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
                 t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
-                ((i + 1 - start) << BATCH_SIZE) as f64 / t0.elapsed().as_secs_f64()
+                (1 << BATCH_SIZE) as f64 / ta.elapsed().as_secs_f64(),
+                (i + 1) << BATCH_SIZE,
+                swizzle_time / ((i + 1 - start) << BATCH_SIZE) as u32,
             );
             print!(
                 "\r{string}{}",
