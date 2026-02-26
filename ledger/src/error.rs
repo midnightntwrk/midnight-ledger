@@ -229,6 +229,7 @@ pub enum TransactionInvalid<D: DB> {
         claimed: u128,
         minimum: u128,
     },
+    DivideByZero,
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -303,6 +304,7 @@ impl<D: DB> Display for TransactionInvalid<D> {
             ),
             GenerationInfoAlreadyPresent(e) => e.fmt(formatter),
             InvariantViolation(e) => e.fmt(formatter),
+            DivideByZero => write!(formatter, "attempted to divide by zero"),
         }
     }
 }
