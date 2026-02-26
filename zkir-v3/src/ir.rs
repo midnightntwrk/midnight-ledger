@@ -392,7 +392,10 @@ pub enum Instruction {
         inputs: Vec<Operand>,
     },
     /// Multiplies an elliptic curve point by a scalar.
-    /// curve point.
+    ///
+    /// This operation will result in an error if the operand given as `a`
+    /// is not of type `JubjubPoint`, or if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -404,6 +407,9 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Multiplies the group generator by a scalar.
+    ///
+    /// This operation will result in an error if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMulGenerator {
