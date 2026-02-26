@@ -11,9 +11,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use midnight_circuits::instructions::EccInstructions;
+use midnight_circuits::instructions::{DecompositionInstructions, EccInstructions};
 use midnight_circuits::{ecc::curves::CircuitCurve, types::AssignedNative};
-use midnight_curves::JubjubExtended;
+use midnight_curves::{Fr as JubjubFr, JubjubExtended};
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -48,6 +48,13 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
                 "Expected exactly two values for JubjubPoint decoding",
             )),
         },
+
+        IrType::JubjubScalar => match encoded {
+            [x] => Ok(IrValue::JubjubScalar(native_to_jubjub_scalar(x))),
+            _ => Err(anyhow::Error::msg(
+                "Expected exactly one value for JubjubScalar decoding",
+            )),
+        },
     }
 }
 
@@ -80,5 +87,23 @@ pub fn decode_incircuit(
                 "Expected exactly two values for JubjubPoint decoding".into(),
             )),
         },
+        IrType::JubjubScalar => match encoded {
+            [x] => {
+                let x_bytes = std_lib.assigned_to_le_bytes(layouter, x, None)?;
+                let s = std_lib.jubjub().scalar_from_le_bytes(layouter, &x_bytes)?;
+                Ok(CircuitValue::JubjubScalar(s))
+            }
+            _ => Err(plonk::Error::Synthesis(
+                "Expected exactly one value for JubjubScalar decoding".into(),
+            )),
+        },
     }
+}
+
+/// Converts a native field element to a Jubjub scalar by reducing modulo
+/// the Jubjub scalar field order if necessary.
+pub fn native_to_jubjub_scalar(native: &Fr) -> JubjubFr {
+    let mut bytes = [0u8; 64];
+    bytes[..32].copy_from_slice(&native.0.to_bytes_le());
+    JubjubFr::from_bytes_wide(&bytes)
 }

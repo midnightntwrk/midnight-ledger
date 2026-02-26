@@ -13,7 +13,7 @@
 
 use midnight_circuits::{
     instructions::PublicInputInstructions,
-    types::{AssignedNative, AssignedNativePoint, Instantiable},
+    types::{AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable},
 };
 use midnight_curves::JubjubExtended;
 use midnight_proofs::{circuit::Layouter, plonk::Error};
@@ -30,6 +30,9 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
     let encoded = match value {
         IrValue::Native(x) => AssignedNative::<F>::as_public_input(&x.0),
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
+        IrValue::JubjubScalar(s) => {
+            AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s)
+        }
     };
     encoded
         .into_iter()
@@ -46,6 +49,7 @@ pub fn encode_incircuit(
     let encoded = match value {
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
+        CircuitValue::JubjubScalar(s) => std_lib.jubjub().as_public_input(layouter, s),
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
 }
