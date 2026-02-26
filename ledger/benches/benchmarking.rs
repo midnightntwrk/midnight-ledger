@@ -227,12 +227,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
         const PROGRESS_BAR_SEGMENTS: usize = 100;
         const BATCH_SIZE: u64 = 4;
-        print!(
-            "[{}]",
-            std::iter::repeat(' ')
-                .take(PROGRESS_BAR_SEGMENTS)
-                .collect::<String>()
-        );
+        print!("[{}]", " ".repeat(PROGRESS_BAR_SEGMENTS));
         stdout().flush().unwrap();
         let start = reached_size >> BATCH_SIZE;
         let end = size >> BATCH_SIZE;
@@ -246,18 +241,14 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
             let string = format!(
                 "[{}{}] ETA: {:?}, TPS: {}",
-                std::iter::repeat('#').take(segments).collect::<String>(),
-                std::iter::repeat(' ')
-                    .take(PROGRESS_BAR_SEGMENTS - segments)
-                    .collect::<String>(),
+                "#".repeat(segments),
+                " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
                 t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
                 ((i + 1 - start) << BATCH_SIZE) as f64 / t0.elapsed().as_secs_f64()
             );
             print!(
                 "\r{string}{}",
-                std::iter::repeat(' ')
-                    .take(last_str_len.saturating_sub(string.len()))
-                    .collect::<String>()
+                " ".repeat(last_str_len.saturating_sub(string.len()))
             );
             last_str_len = string.len();
             stdout().flush().unwrap();
