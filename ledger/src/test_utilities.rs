@@ -124,6 +124,7 @@ pub struct TestState<D: DB> {
     pub dust_key: DustSecretKey,
 
     pub mode: TestProcessingMode,
+    pub debug_print: bool,
 }
 
 impl<D: DB> TestState<D> {
@@ -142,6 +143,7 @@ impl<D: DB> TestState<D> {
             dust_key: DustSecretKey::sample(&mut *rng),
 
             mode: TestProcessingMode::Regular,
+            debug_print: false,
         }
     }
 
@@ -161,7 +163,6 @@ impl<D: DB> TestState<D> {
         self.dust = dstate.deref().clone();
         default_storage::<D>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.gc();
         });
     }
 
@@ -440,15 +441,17 @@ impl<D: DB> TestState<D> {
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
-        dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
-        dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
-        dbg!(
-            tx.cost(&self.ledger.parameters, false)
-                .ok()
-                .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
-        );
-        dbg!(&tx.erase_proofs());
+        if self.debug_print {
+            dbg!(tx.cost(&self.ledger.parameters, false)).ok();
+            dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
+            dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
+            dbg!(
+                tx.cost(&self.ledger.parameters, false)
+                    .ok()
+                    .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
+            );
+            dbg!(&tx.erase_proofs());
+        }
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -559,7 +562,7 @@ impl<D: DB> TestState<D> {
         {
             dust += last_dust;
             last_dust = dust;
-            if self.mode != TestProcessingMode::ForceConstantTime {
+            if self.mode != TestProcessingMode::ForceConstantTime && self.debug_print {
                 eprintln!(
                     "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
                     self.dust.wallet_balance(self.time)
@@ -577,7 +580,9 @@ impl<D: DB> TestState<D> {
                     &self.ledger.parameters.dust,
                 );
                 let v_fee = u128::min(value, dust);
-                eprintln!("adding utxo of {v_fee} Dust atomic units");
+                if self.debug_print {
+                    eprintln!("adding utxo of {v_fee} Dust atomic units");
+                }
                 dust = dust.saturating_sub(value);
                 let (new_dust, spend) = self
                     .dust

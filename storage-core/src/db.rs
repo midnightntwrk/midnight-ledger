@@ -126,6 +126,7 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// Get node in DAG with key `key`.
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
 
+    #[cfg(not(feature = "layout-v2"))]
     /// Get the keys for all the unreachable nodes, i.e. the nodes with
     /// `ref_count == 0`, which aren't marked as GC roots.
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>>;
@@ -383,6 +384,7 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         self.lock_nodes().get(key).cloned()
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         let nodes_guard = self.lock_nodes();
         let roots_guard = self.lock_roots();
@@ -852,16 +854,17 @@ mod tests {
         assert_eq!(keys.len(), 5);
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     #[test]
     fn get_unreachable_keys_inmemorydb() {
         test_get_unreachable_keys::<InMemoryDB>();
     }
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn get_unreachable_keys_sqldb() {
         test_get_unreachable_keys::<crate::db::SqlDB>();
     }
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn get_unreachable_keys_paritydb() {
         test_get_unreachable_keys::<crate::db::ParityDb>();
@@ -870,6 +873,7 @@ mod tests {
     /// API.
     ///
     /// This is also called in `crate::db::sql::tests::get_unreachable_keys`.
+    #[cfg(not(feature = "layout-v2"))]
     fn test_get_unreachable_keys<D: DB<Hasher = DefaultHasher>>() {
         let mut db = D::default();
         let n41 = RawNode::new(&[4, 1], 0, vec![]);
