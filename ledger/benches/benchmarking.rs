@@ -220,7 +220,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     set_default_storage(mk_test_db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
-    for log_size in 10.. {
+    for log_size in 10..=13 {
         let t0 = std::time::Instant::now();
         let mut swizzle_time = std::time::Duration::default();
         let size = 2u64.pow(log_size);
