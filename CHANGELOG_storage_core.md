@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Version `1.1.0`
+
+- feat: add layout version 2, which removes reference counting. For now, it disables garbage collection as well.
+
 ## Version `1.0.2`
 
 - feat: optimised Sp allocations to minimise cache use and disk interactions
