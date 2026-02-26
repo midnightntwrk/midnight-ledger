@@ -1,11 +1,13 @@
 [package]
 name = "midnight-storage-core"
-version = "1.0.2"
+version = "1.1.0"
 edition = "2024"
 license.workspace = true
 description = "Provides the low-level storage primitives for Midnight's ledger."
 
 [features]
+default = []
+
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
 sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]
 parity-db = ["dep:parity-db"]
@@ -13,6 +15,9 @@ bench = ["dep:criterion", "dep:pprof"]
 public-internal-structure = []
 state-translation = ["public-internal-structure", "dep:hashbrown"]
 test-utilities = []
+
+layout-v1 = []
+layout-v2 = ["layout-v1"]
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }

@@ -30,9 +30,11 @@ use super::{DB, DummyArbitrary, Update};
 
 // Different value to Substrate: polkadot-sdk/substrate/client/db/src/utils.rs
 // This means the `storage` database must be stored in a different file
+// NOTE: We stay at 3 columns even with layout v2, to reserve a column for future GC purposes
 const NUM_COLUMNS: u8 = 3;
 const NODE_COLUMN: u8 = 0;
 const GC_ROOT_COLUMN: u8 = 1;
+#[cfg(not(feature = "layout-v2"))]
 // Column to track which nodes have a ref count of zero
 const REF_COUNT_ZERO: u8 = 2;
 
@@ -99,7 +101,8 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         let mut options = parity_db::Options::with_columns(path, NUM_COLUMNS);
         // Add indexes to all columns - we need this to be able to iterate over them
         options.columns[GC_ROOT_COLUMN as usize].btree_index = true;
-        options.columns[REF_COUNT_ZERO as usize].btree_index = true;
+        // NOTE: Hardcoded because the constant is behind a feature flag.
+        options.columns[2].btree_index = true;
         options.columns[NODE_COLUMN as usize].btree_index = true;
         let db = parity_db::Db::open_or_create(&options).unwrap_or_else(|e| {
             panic!(
@@ -142,6 +145,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             })
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
         let mut it = self
             .db
@@ -163,10 +167,12 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
         key: crate::arena::ArenaHash<Self::Hasher>,
         object: OnDiskObject<Self::Hasher>,
     ) {
+        #[allow(unused_mut, reason = "for feature flags")]
         let mut ops = vec![(
             NODE_COLUMN,
             parity_db::Operation::Set(key.0.to_vec(), serialize_node(&object)),
         )];
+        #[cfg(not(feature = "layout-v2"))]
         ops.push((
             REF_COUNT_ZERO,
             if object.ref_count == 0 {
@@ -179,16 +185,16 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     }
 
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
-        let ops = vec![
-            (
-                NODE_COLUMN,
-                parity_db::Operation::Dereference(key.0.to_vec()),
-            ),
-            (
-                REF_COUNT_ZERO,
-                parity_db::Operation::Dereference(key.0.to_vec()),
-            ),
-        ];
+        #[allow(unused_mut, reason = "for feature flags")]
+        let mut ops = vec![(
+            NODE_COLUMN,
+            parity_db::Operation::Dereference(key.0.to_vec()),
+        )];
+        #[cfg(not(feature = "layout-v2"))]
+        ops.push((
+            REF_COUNT_ZERO,
+            parity_db::Operation::Dereference(key.0.to_vec()),
+        ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
     }
 
@@ -204,6 +210,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                         NODE_COLUMN,
                         parity_db::Operation::Set(key.0.to_vec(), serialize_node(&object)),
                     ));
+                    #[cfg(not(feature = "layout-v2"))]
                     ops.push((
                         REF_COUNT_ZERO,
                         if object.ref_count == 0 {
@@ -228,6 +235,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                         NODE_COLUMN,
                         parity_db::Operation::Dereference(key.0.to_vec()),
                     ));
+                    #[cfg(not(feature = "layout-v2"))]
                     ops.push((
                         REF_COUNT_ZERO,
                         parity_db::Operation::Dereference(key.0.to_vec()),

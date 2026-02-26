@@ -74,8 +74,10 @@ use rusqlite::{
     types::FromSql,
 };
 use serialize::{Deserializable, Serializable};
+#[cfg(not(feature = "layout-v2"))]
+use std::collections::HashSet;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs::{File, OpenOptions},
     marker::PhantomData,
     path::Path,
@@ -246,15 +248,25 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     /// Create database tables and indices if they don't already exist.
     fn create_tables(&self) {
         self.with_tx(Immediate, |tx| {
+            #[cfg(not(feature = "layout-v2"))]
             let sql = "CREATE TABLE IF NOT EXISTS node (
                      key BLOB NOT NULL PRIMARY KEY,
                      data BLOB NOT NULL,
                      ref_count INT NOT NULL,
                      children BLOB NOT NULL
                    )";
+            #[cfg(feature = "layout-v2")]
+            let sql = "CREATE TABLE IF NOT EXISTS node (
+                     key BLOB NOT NULL PRIMARY KEY,
+                     data BLOB NOT NULL,
+                     children BLOB NOT NULL
+                   )";
             tx.execute(sql, ()).unwrap();
-            let sql = "CREATE INDEX IF NOT EXISTS ix_node_ref_count ON node (ref_count)";
-            tx.execute(sql, ()).unwrap();
+            #[cfg(not(feature = "layout-v2"))]
+            {
+                let sql = "CREATE INDEX IF NOT EXISTS ix_node_ref_count ON node (ref_count)";
+                tx.execute(sql, ()).unwrap();
+            }
             // Altho the `root.key` is logically a foreign key referencing
             // `node.key`, we don't enforce that here, because we need to allow
             // out of order updates -- e.g. updating the root count for a key
@@ -331,6 +343,7 @@ impl<H: WellBehavedHasher> SqlDB<H> {
     /// but means this function is not sufficient to clean up the db after a
     /// crash which left the db in an inconsistent state, in terms of db-stored
     /// reference counts.
+    #[cfg(not(feature = "layout-v2"))]
     fn _gc(&mut self, additional_roots: HashSet<ArenaHash<H>>) {
         self.with_tx(Immediate, |tx| {
             // Select keys that are not roots and have a `ref_count` of 0.
@@ -471,16 +484,24 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         let key = key.clone();
         self.with_tx(Deferred, |tx| {
+            #[cfg(not(feature = "layout-v2"))]
             let sql = "SELECT data, ref_count, children FROM node WHERE key = (?1)";
+            #[cfg(feature = "layout-v2")]
+            let sql = "SELECT data, children FROM node WHERE key = (?1)";
             let mut stmt = tx.prepare(sql).unwrap();
             let result = stmt
                 .query_row(params![key], |row| {
                     let data = row.get(0)?;
+                    #[cfg(not(feature = "layout-v2"))]
                     let ref_count = row.get(1)?;
+                    #[cfg(not(feature = "layout-v2"))]
                     let children: Children<H> = row.get(2)?;
+                    #[cfg(feature = "layout-v2")]
+                    let children: Children<H> = row.get(1)?;
                     let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                     Ok(OnDiskObject {
                         data,
+                        #[cfg(not(feature = "layout-v2"))]
                         ref_count,
                         children,
                     })
@@ -492,6 +513,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         })
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     fn get_unreachable_keys(&self) -> Vec<ArenaHash<H>> {
         self.with_tx(Deferred, |tx| {
             // Select keys that are not roots and have a `ref_count` of 0.
@@ -518,18 +540,26 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     {
         let keys = keys.collect::<Vec<_>>();
         self.with_tx(Deferred, |tx| {
+            #[cfg(not(feature = "layout-v2"))]
             let sql = "SELECT data, ref_count, children FROM node WHERE key = (?1)";
+            #[cfg(feature = "layout-v2")]
+            let sql = "SELECT data, children FROM node WHERE key = (?1)";
             let mut stmt = tx.prepare(sql).unwrap();
             let result = keys
                 .into_iter()
                 .filter_map(|key| {
                     stmt.query_row(params![key.clone()], |row| {
                         let data = row.get(0)?;
+                        #[cfg(not(feature = "layout-v2"))]
                         let ref_count = row.get(1)?;
+                        #[cfg(not(feature = "layout-v2"))]
                         let children: Children<H> = row.get(2)?;
+                        #[cfg(feature = "layout-v2")]
+                        let children: Children<H> = row.get(1)?;
                         let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
                         let obj = OnDiskObject {
                             data,
+                            #[cfg(not(feature = "layout-v2"))]
                             ref_count,
                             children,
                         };
@@ -547,9 +577,14 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
     /// Always use `batch_update` instead if you have a lot of keys to insert!
     fn insert_node(&mut self, key: ArenaHash<H>, object: OnDiskObject<H>) {
         self.with_tx(Immediate, |tx| {
+            #[cfg(not(feature = "layout-v2"))]
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
+            #[cfg(feature = "layout-v2")]
+            let sql = "INSERT OR REPLACE INTO node (key, data, children) \
+                       VALUES (?1, ?2, ?4)";
             let mut stmt = tx.prepare(sql).unwrap();
+            #[cfg(not(feature = "layout-v2"))]
             stmt.execute(params![
                 key,
                 object.data,
@@ -557,6 +592,9 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                 Children(object.children)
             ])
             .unwrap();
+            #[cfg(feature = "layout-v2")]
+            stmt.execute(params![key, object.data, Children(object.children)])
+                .unwrap();
             stmt.finalize().unwrap();
         })
     }
@@ -583,8 +621,12 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         // (and easier!) than building up large INSERTs:
         // https://stackoverflow.com/a/5209093/470844
         self.with_tx(Immediate, |tx| {
+            #[cfg(not(feature = "layout-v2"))]
             let sql = "INSERT OR REPLACE INTO node (key, data, ref_count, children) \
                        VALUES (?1, ?2, ?3, ?4)";
+            #[cfg(feature = "layout-v2")]
+            let sql = "INSERT OR REPLACE INTO node (key, data, children) \
+                       VALUES (?1, ?2, ?4)";
             let mut insert_node = tx.prepare(sql).unwrap();
             let sql = "DELETE FROM node WHERE key = (?1)";
             let mut delete_node = tx.prepare(sql).unwrap();
@@ -596,6 +638,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             for (key, update) in iter {
                 match update {
                     DeleteNode => delete_node.execute(params![key]).unwrap(),
+                    #[cfg(not(feature = "layout-v2"))]
                     InsertNode(object) => insert_node
                         .execute(params![
                             key,
@@ -603,6 +646,10 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                             object.ref_count,
                             Children(object.children)
                         ])
+                        .unwrap(),
+                    #[cfg(feature = "layout-v2")]
+                    InsertNode(object) => insert_node
+                        .execute(params![key, object.data, Children(object.children)])
                         .unwrap(),
                     SetRootCount(count) => {
                         if count > 0 {
@@ -703,6 +750,7 @@ mod tests {
     use rand::Rng;
     use rusqlite::TransactionBehavior::Deferred;
     use rusqlite::types::FromSql;
+    #[cfg(not(feature = "layout-v2"))]
     use std::collections::HashSet;
 
     /// This test always fails due to db locking errors. Since we don't intend
@@ -794,6 +842,7 @@ mod tests {
     /// db-level GC can only be run when the db is in a logically consistent
     /// state, i.e. when there are no pending writes in the back-end.
     #[test]
+    #[cfg(not(feature = "layout-v2"))]
     fn db_level_gc() {
         use crate::backend::raw_node::RawNode;
 

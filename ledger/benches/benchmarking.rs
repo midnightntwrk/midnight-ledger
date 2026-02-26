@@ -8,7 +8,6 @@ use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use lazy_static::lazy_static;
 use midnight_ledger::dust::{DustPublicKey, InitialNonce};
-use midnight_ledger::init_logger;
 use midnight_ledger::prove::Resolver;
 use midnight_ledger::semantics::{TransactionContext, TransactionResult};
 use midnight_ledger::structure::{
@@ -26,6 +25,7 @@ use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use std::alloc::GlobalAlloc;
+use std::io::{Write, stdout};
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
@@ -204,6 +204,7 @@ type TestDb = ParityDb;
 fn mk_test_db() -> storage::Storage<TestDb> {
     let dir = tempfile::tempdir().unwrap().keep();
     storage::Storage::new(
+        //10,
         DEFAULT_CACHE_SIZE,
         ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
@@ -216,18 +217,43 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         .unwrap();
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
-    init_logger(midnight_ledger::LogLevel::Warn);
     set_default_storage(mk_test_db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
     for log_size in 10..=13 {
         let t0 = std::time::Instant::now();
+        let mut swizzle_time = std::time::Duration::default();
         let size = 2u64.pow(log_size);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
-        for _ in (reached_size >> 10)..(size >> 10) {
-            rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
+        const PROGRESS_BAR_SEGMENTS: usize = 100;
+        const BATCH_SIZE: u64 = 4;
+        print!("[{}]", " ".repeat(PROGRESS_BAR_SEGMENTS));
+        stdout().flush().unwrap();
+        let start = reached_size >> BATCH_SIZE;
+        let end = size >> BATCH_SIZE;
+        let mut last_str_len = 0usize;
+        for i in start..end {
+            rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
+            let ta = std::time::Instant::now();
             state.swizzle_to_db();
+            swizzle_time += ta.elapsed();
+            let frac = (i + 1 - start) as f64 / (end - start) as f64;
+            let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
+            let string = format!(
+                "[{}{}] ETA: {:?}, TPS: {}",
+                "#".repeat(segments),
+                " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
+                t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
+                ((i + 1 - start) << BATCH_SIZE) as f64 / t0.elapsed().as_secs_f64()
+            );
+            print!(
+                "\r{string}{}",
+                " ".repeat(last_str_len.saturating_sub(string.len()))
+            );
+            last_str_len = string.len();
+            stdout().flush().unwrap();
         }
+        println!();
         reached_size = size;
         let mut lstate = Sp::new(state.ledger.clone());
         let utxo = (**state.utxos.iter().next().unwrap()).clone();
@@ -275,8 +301,10 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} to init {size} entries, with {} allocated",
+            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated",
             t1 - t0,
+            (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
+            swizzle_time / ((end - start) << BATCH_SIZE) as u32,
             cur_alloc()
         );
         lstate.persist();
@@ -284,8 +312,6 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.flush_cache_evictions_to_db();
-            b.gc();
         });
         let mut runs = 0;
         let mut total_construct_time =

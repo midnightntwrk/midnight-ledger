@@ -266,6 +266,7 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db.get_node(key)
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         self.db.get_unreachable_keys()
     }
