@@ -286,8 +286,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the input type:
     ///
-    ///  - Native:      1 output
-    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    ///  - Native:       1 output
+    ///  - JubjubPoint:  2 outputs (x and y coordinates)
+    ///  - JubjubScalar: 1 output
     Encode {
         /// The value to encode
         input: Operand,
@@ -300,8 +301,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the given type:
     ///
-    ///  - Native:      1 input
-    ///  - JubjubPoint: 2 inputs (x and y coordinates)
+    ///  - Native:       1 input
+    ///  - JubjubPoint:  2 inputs (x and y coordinates)
+    ///  - JubjubScalar: 1 input
     ///
     /// It will also result in an error if the operands are not of type
     /// `Native`.
