@@ -17,6 +17,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: pull in `storage-core` fix, lazy loading of embedded small nodes
 - feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction` that applies every offer in a transaction as failed.
 - feat: proof server built natively on Arm
+- fix: Change divide-by-zero in `dust.rs` from panic to error
 
 ## 7.0.0
 
