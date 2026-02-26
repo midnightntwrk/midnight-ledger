@@ -3,6 +3,8 @@ name = "midnight-ledger"
 edition = "2024"
 license.workspace = true
 version.workspace = true
+repository.workspace = true
+description = "Provides the transaction format and semantics for Midnight."
 
 [features]
 default = ["proof-verifying"]
@@ -17,16 +19,16 @@ mock-verify = ["transient-crypto/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
-coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
-onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { path = "../zswap", package = "midnight-zswap" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto"}
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-storage = { path = "../storage", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { version = "3.0.0-rc.1", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+zswap = { version = "8.0.0-rc.5", path = "../zswap", package = "midnight-zswap" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
-zkir_v2 = { path = "../zkir", package = "zkir", optional = true }
+zkir_v2 = { version = "2.1.0", path = "../zkir", package = "midnight-zkir", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
@@ -58,7 +60,12 @@ proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
 midnight-ledger = { path = ".", features = ["test-utilities", "proptest"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["parity-db"] }
+storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities"] }
+tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }
 criterion = { version = "^0.5.1" }
+pprof = { version = "0.14", features = ["criterion", "flamegraph"] }
+tempfile = "3.20"
 pastey = "0.1.1"
 serde_json = "^1.0.140"
 hex = "^0.4.3"
@@ -66,4 +73,3 @@ hex = "^0.4.3"
 [[bench]]
 name = "benchmarking"
 harness = false
-required-features = ["proving"]

@@ -39,14 +39,14 @@ use onchain_runtime::state::{
     EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
-use serialize::Serializable;
+use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
@@ -98,6 +98,7 @@ pub trait StateReference<D: DB> {
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
 }
 
 fn get_op<D: DB>(
@@ -201,6 +202,9 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
                 found: network.into(),
             })
         }
+    }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.state_hash()
     }
 }
 
@@ -339,6 +343,9 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             })
         }
     }
+    fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
+        self.new_state.state_hash()
+    }
 }
 
 impl<D: DB> ContractStateExt<D> for ContractState<D> {
@@ -419,9 +426,9 @@ impl Default for WellFormedStrictness {
 fn no_duplicates<T>(iter: T) -> bool
 where
     T: IntoIterator,
-    T::Item: Eq + std::hash::Hash,
+    T::Item: Ord + std::hash::Hash,
 {
-    let mut uniq = HashSet::new();
+    let mut uniq = BTreeSet::new();
     iter.into_iter().all(|x| uniq.insert(x))
 }
 
@@ -536,14 +543,14 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 impl<
     S: SignatureKind<D>,
     P: ProofKind<D> + Storable<D>,
-    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D> + BindingKind<S, P, D> + Tagged,
     D: DB,
 > Transaction<S, P, B, D>
 where
     Transaction<S, P, B, D>: Serializable,
 {
     // All checks that can be done without a state.
-    #[instrument(skip(self, ref_state))]
+    #[instrument(skip(self, ref_state), fields(self = ?self.transaction_hash().0, ref_state = ?ref_state.ref_state_hash()))]
     /// Checks if a transaction is well-formed, performing all checks possible
     /// with a moderately stale reference state.
     ///
@@ -625,7 +632,10 @@ where
                 }
 
                 debug!("transaction well-formed");
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
             Transaction::ClaimRewards(mtx) => {
                 ref_state.network_check(&mtx.network_id)?;
@@ -635,7 +645,10 @@ where
                         move || <ClaimRewardsTransaction<S, D> as Clone>::clone(mtx).well_formed(),
                     ))
                 })?;
-                Ok(VerifiedTransaction(self.erase_proofs().erase_signatures()))
+                Ok(VerifiedTransaction {
+                    inner: self.erase_proofs().erase_signatures(),
+                    hash: self.transaction_hash(),
+                })
             }
         }
     }
@@ -648,10 +661,10 @@ where
     pub fn balance(
         &self,
         fees: Option<u128>,
-    ) -> Result<std::collections::HashMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
+    ) -> Result<std::collections::BTreeMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
         match self {
             Self::Standard(stx) => stx.balance(fees),
-            Self::ClaimRewards(_) => Ok(std::collections::HashMap::new()),
+            Self::ClaimRewards(_) => Ok(std::collections::BTreeMap::new()),
         }
     }
 }
@@ -660,7 +673,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
     pub fn balance(
         &self,
         fees: Option<u128>,
-    ) -> Result<std::collections::HashMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
+    ) -> Result<std::collections::BTreeMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
         self.balance_maybe_deltas_only(fees, false)
     }
 
@@ -668,9 +681,9 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
         &self,
         fees: Option<u128>,
         deltas_only: bool,
-    ) -> Result<std::collections::HashMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
-        let mut res: std::collections::HashMap<(TokenType, u16), i128> =
-            std::collections::HashMap::new();
+    ) -> Result<std::collections::BTreeMap<(TokenType, u16), i128>, MalformedTransaction<D>> {
+        let mut res: std::collections::BTreeMap<(TokenType, u16), i128> =
+            std::collections::BTreeMap::new();
 
         fn interpret(operation: BalanceOperation) -> fn(i128, i128) -> Option<i128> {
             match operation {
@@ -680,7 +693,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> StandardTransa
         }
 
         fn update_balance<T, D: DB>(
-            res: &mut std::collections::HashMap<(TokenType, u16), i128>,
+            res: &mut std::collections::BTreeMap<(TokenType, u16), i128>,
             token_type: TokenType,
             segment: u16,
             value: T,
@@ -857,7 +870,7 @@ struct CallNode {
     pub call_index: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct CallKey {
     pub addr: ContractAddress,
     pub ep_hash: HashOutput,
@@ -865,9 +878,9 @@ struct CallKey {
 }
 
 fn causality_check<D: DB>(
-    guaranteed_calls: &HashSet<CallNode>,
-    fallible_calls: &HashSet<CallNode>,
-    adjacencies: std::collections::HashMap<CallNode, Vec<CallNode>>,
+    guaranteed_calls: &BTreeSet<CallNode>,
+    fallible_calls: &BTreeSet<CallNode>,
+    adjacencies: std::collections::BTreeMap<CallNode, Vec<CallNode>>,
 ) -> Result<(), MalformedTransaction<D>> {
     let mut queue: VecDeque<CallNode> = fallible_calls.iter().cloned().collect();
 
@@ -901,7 +914,7 @@ fn causality_check<D: DB>(
 fn call_sequencing_check<P: ProofKind<D>, D: DB>(
     context_call_position: u32,
     contextual_call: &ContractCall<P, D>,
-    call_lookup: &std::collections::HashMap<(ContractAddress, HashOutput, Fr), Vec<u32>>,
+    call_lookup: &std::collections::BTreeMap<(ContractAddress, HashOutput, Fr), Vec<u32>>,
 ) -> Result<Vec<(u32, u64, ContractAddress)>, MalformedTransaction<D>> {
     // A vec of all calls to whom the current call in context (`call1`)
     // makes calls to, which also reside in _this_ intent
@@ -971,10 +984,10 @@ fn sequencing_correlation_check<D: DB>(
 }
 
 fn sequencing_context_check<P: ProofKind<D>, D: DB>(
-    adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
+    adjacencies: &mut std::collections::BTreeMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
-    calls_in_intent: std::collections::HashMap<u32, &ContractCall<P, D>>,
-    callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>,
+    calls_in_intent: std::collections::BTreeMap<u32, &ContractCall<P, D>>,
+    callers_for_addr: std::collections::BTreeMap<CallKey, Vec<(CallNode, bool)>>,
 ) -> Result<(), MalformedTransaction<D>> {
     // If a calls `b`, `b` must be contained within the 'lifetime' of the
     // call instruction in `a`.
@@ -1042,16 +1055,16 @@ fn sequencing_context_check<P: ProofKind<D>, D: DB>(
 // TODO: Document this clearly
 #[allow(clippy::type_complexity)]
 fn relate_nodes<P: ProofKind<D>, D: DB>(
-    guaranteed_calls: &mut HashSet<CallNode>,
-    fallible_calls: &mut HashSet<CallNode>,
-    calls_by_address: &mut std::collections::HashMap<ContractAddress, Vec<CallNode>>,
-    adjacencies: &mut std::collections::HashMap<CallNode, Vec<CallNode>>,
+    guaranteed_calls: &mut BTreeSet<CallNode>,
+    fallible_calls: &mut BTreeSet<CallNode>,
+    calls_by_address: &mut std::collections::BTreeMap<ContractAddress, Vec<CallNode>>,
+    adjacencies: &mut std::collections::BTreeMap<CallNode, Vec<CallNode>>,
     segment_id: u16,
-    calls_in_intent: &std::collections::HashMap<u32, &ContractCall<P, D>>,
-) -> Result<std::collections::HashMap<CallKey, Vec<(CallNode, bool)>>, MalformedTransaction<D>> {
+    calls_in_intent: &std::collections::BTreeMap<u32, &ContractCall<P, D>>,
+) -> Result<std::collections::BTreeMap<CallKey, Vec<(CallNode, bool)>>, MalformedTransaction<D>> {
     // A map from (address, entry_point_hash, commitment) to caller nodes (+ guaranteed flag)
-    let mut callers_for_addr: std::collections::HashMap<CallKey, Vec<(CallNode, bool)>> =
-        std::collections::HashMap::new();
+    let mut callers_for_addr: std::collections::BTreeMap<CallKey, Vec<(CallNode, bool)>> =
+        std::collections::BTreeMap::new();
 
     for (cid, call) in calls_in_intent {
         let this_node: CallNode = CallNode {
@@ -1139,9 +1152,9 @@ impl<
 {
     #[allow(clippy::mutable_key_type)]
     fn disjoint_check(&self) -> Result<(), MalformedTransaction<D>> {
-        let mut shielded_inputs = HashSet::new();
-        let mut shielded_outputs = HashSet::new();
-        let mut unshielded_inputs = HashSet::new();
+        let mut shielded_inputs = BTreeSet::new();
+        let mut shielded_outputs = BTreeSet::new();
+        let mut unshielded_inputs = BTreeSet::new();
         let shielded_offers = self
             .guaranteed_coins
             .clone()
@@ -1150,10 +1163,10 @@ impl<
             .chain(self.fallible_coins.values());
 
         for offer in shielded_offers {
-            let mut inputs: HashSet<_> = offer.inputs.iter_deref().cloned().collect();
+            let mut inputs: BTreeSet<_> = offer.inputs.iter_deref().cloned().collect();
             inputs.extend(offer.transient.iter_deref().map(Transient::as_input));
 
-            let mut outputs: HashSet<_> = offer.outputs.iter_deref().cloned().collect();
+            let mut outputs: BTreeSet<_> = offer.outputs.iter_deref().cloned().collect();
             outputs.extend(offer.transient.iter_deref().map(Transient::as_output));
 
             if !(shielded_inputs.is_disjoint(&inputs)) {
@@ -1196,7 +1209,7 @@ impl<
         for offer in unshielded_offers {
             let inputs = offer
                 .map(|o| o.inputs.iter_deref().cloned().collect())
-                .unwrap_or(HashSet::new());
+                .unwrap_or(BTreeSet::new());
             if !(unshielded_inputs.is_disjoint(&inputs)) {
                 return Err(MalformedTransaction::<D>::DisjointCheckFailure(
                     DisjointCheckError::UnshieldedInputsDisjointFailure {
@@ -1211,14 +1224,14 @@ impl<
     }
 
     pub fn sequencing_check(&self) -> Result<(), MalformedTransaction<D>> {
-        let mut adjacencies: std::collections::HashMap<CallNode, Vec<CallNode>> =
-            std::collections::HashMap::new();
+        let mut adjacencies: std::collections::BTreeMap<CallNode, Vec<CallNode>> =
+            std::collections::BTreeMap::new();
 
         // ALL guaranteed calls
-        let mut guaranteed_calls: HashSet<CallNode> = HashSet::new();
+        let mut guaranteed_calls: BTreeSet<CallNode> = BTreeSet::new();
 
         // ALL fallible calls
-        let mut fallible_calls: HashSet<CallNode> = HashSet::new();
+        let mut fallible_calls: BTreeSet<CallNode> = BTreeSet::new();
 
         let mut intents_sorted: Vec<(u16, Intent<_, _, _, _>)> = self
             .intents
@@ -1232,18 +1245,18 @@ impl<
         // This map essentially keeps track of which intents share top level calls to the same address
         // Note that the `ContractAddress` in the key == the `ContractAddress` in the value
         // To be super clear, this is more or less a map from ContractAddress to intents (via segment_id) which contain that ContractAddress
-        let mut calls_by_address: std::collections::HashMap<ContractAddress, Vec<CallNode>> =
-            std::collections::HashMap::new();
+        let mut calls_by_address: std::collections::BTreeMap<ContractAddress, Vec<CallNode>> =
+            std::collections::BTreeMap::new();
 
         for (segment_id, intent) in intents_sorted {
             let calls_in_intent = as_indexed(intent.calls());
 
             // A mapping from (address, entry_point, communication_commitment) to that call's position within this intent
             // This is so we can easily check that the calling order is valid (sequential) in the next step
-            let mut call_lookup: std::collections::HashMap<
+            let mut call_lookup: std::collections::BTreeMap<
                 (ContractAddress, HashOutput, Fr),
                 Vec<u32>,
-            > = std::collections::HashMap::new();
+            > = std::collections::BTreeMap::new();
             for (cid, call) in &calls_in_intent {
                 call_lookup
                     .entry((
@@ -1407,7 +1420,7 @@ impl<
                     )
             })
             .collect();
-        let offers: std::collections::HashMap<_, _> = self
+        let offers: std::collections::BTreeMap<_, _> = self
             .guaranteed_coins
             .iter()
             .map(|sp| (0, sp.deref().clone()))
@@ -1673,13 +1686,13 @@ impl<
     }
 }
 
-fn as_indexed<I, V>(v: I) -> std::collections::HashMap<u32, V>
+fn as_indexed<I, V>(v: I) -> std::collections::BTreeMap<u32, V>
 where
     I: Iterator<Item = V>,
 {
     v.enumerate()
         .map(|(i, v)| (i as u32, v))
-        .collect::<std::collections::HashMap<u32, V>>()
+        .collect::<std::collections::BTreeMap<u32, V>>()
 }
 
 impl<D: DB> ContractDeploy<D> {
@@ -1690,7 +1703,7 @@ impl<D: DB> ContractDeploy<D> {
         // `DeployContractState`, and the new version with `balance` could be called ContractState
         // `ContractDeploy` would contain `DeployContractState`. Then, this check isn't required.
         if self.initial_state.balance.iter().any(|bal| *bal.1 > 0) {
-            let mut err_data = std::collections::HashMap::new();
+            let mut err_data = std::collections::BTreeMap::new();
             for val in self.initial_state.balance.clone().iter() {
                 err_data.insert(*val.0, *val.1);
             }
@@ -1950,13 +1963,13 @@ mod tests {
             call_index: 2,
         };
 
-        let mut guaranteed_calls = std::collections::HashSet::new();
+        let mut guaranteed_calls = std::collections::BTreeSet::new();
         guaranteed_calls.insert(cn_1);
 
-        let mut fallible_calls = std::collections::HashSet::new();
+        let mut fallible_calls = std::collections::BTreeSet::new();
         fallible_calls.insert(cn_2);
 
-        let mut adjacencies = std::collections::HashMap::new();
+        let mut adjacencies = std::collections::BTreeMap::new();
         adjacencies.insert(cn_2, vec![cn_1]);
 
         let res = causality_check::<InMemoryDB>(&guaranteed_calls, &fallible_calls, adjacencies);
@@ -2026,10 +2039,10 @@ mod tests {
             proof: (),
         };
 
-        let mut call_lookup: std::collections::HashMap<
+        let mut call_lookup: std::collections::BTreeMap<
             (ContractAddress, HashOutput, Fr),
             Vec<u32>,
-        > = std::collections::HashMap::new();
+        > = std::collections::BTreeMap::new();
 
         call_lookup.insert((addr_1, claimed_call_hash, claimed_call_rng), vec![1]);
         call_lookup.insert((addr_2, rng.r#gen(), rng.r#gen()), vec![2]);
@@ -2166,21 +2179,21 @@ mod tests {
             proof: (),
         };
 
-        let mut call_lookup: std::collections::HashMap<
+        let mut call_lookup: std::collections::BTreeMap<
             (ContractAddress, HashOutput, Fr),
             Vec<i128>,
-        > = std::collections::HashMap::new();
+        > = std::collections::BTreeMap::new();
 
         call_lookup.insert((addr_1, cn_1_ep.ep_hash(), cn_1_commitment), vec![1]);
         call_lookup.insert((addr_2, cn_2_ep.ep_hash(), cn_2_commitment), vec![2]);
 
-        let mut adjacencies = std::collections::HashMap::new();
+        let mut adjacencies = std::collections::BTreeMap::new();
         adjacencies.insert(cn_1, vec![cn_2]);
 
-        let mut calls_in_intent = std::collections::HashMap::new();
+        let mut calls_in_intent = std::collections::BTreeMap::new();
         calls_in_intent.insert(1, &cc_1);
         calls_in_intent.insert(2, &cc_2);
-        let mut callers_for_addr = std::collections::HashMap::new();
+        let mut callers_for_addr = std::collections::BTreeMap::new();
         callers_for_addr.insert(ck_2, vec![(cn_1, false)]);
 
         let res = sequencing_context_check::<(), InMemoryDB>(
@@ -2297,21 +2310,21 @@ mod tests {
             proof: (),
         };
 
-        let mut call_lookup: std::collections::HashMap<
+        let mut call_lookup: std::collections::BTreeMap<
             (ContractAddress, HashOutput, Fr),
             Vec<i128>,
-        > = std::collections::HashMap::new();
+        > = std::collections::BTreeMap::new();
 
         call_lookup.insert((addr_1, cn_1_ep.ep_hash(), cn_1_commitment), vec![1]);
         call_lookup.insert((addr_2, cn_2_ep.ep_hash(), cn_2_commitment), vec![2]);
 
-        let mut adjacencies = std::collections::HashMap::new();
+        let mut adjacencies = std::collections::BTreeMap::new();
         adjacencies.insert(cn_1, vec![cn_2]);
 
-        let mut calls_in_intent = std::collections::HashMap::new();
+        let mut calls_in_intent = std::collections::BTreeMap::new();
         calls_in_intent.insert(1, &cc_1);
         calls_in_intent.insert(2, &cc_2);
-        let mut callers_for_addr = std::collections::HashMap::new();
+        let mut callers_for_addr = std::collections::BTreeMap::new();
         callers_for_addr.insert(ck_2, vec![(cn_1, true)]);
 
         let res = sequencing_context_check::<(), InMemoryDB>(
@@ -2331,5 +2344,112 @@ mod tests {
                 e.to_string()
             ),
         }
+    }
+
+    /// Regression: as_indexed() previously returned HashMap<u32, V>, so
+    /// relate_nodes could visit same-address calls in arbitrary order and
+    /// produce backward precedence edges, triggering spurious
+    /// CausalityConstraintViolation when guaranteed/fallible calls were mixed.
+    #[cfg(feature = "proving")]
+    #[tokio::test]
+    async fn relate_nodes_same_address_ordering() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let addr: ContractAddress = rng.r#gen();
+
+        let make_transcript = |rng: &mut StdRng| -> Sp<Transcript<InMemoryDB>, InMemoryDB> {
+            let eff = Effects {
+                claimed_nullifiers: rng.r#gen(),
+                claimed_shielded_receives: rng.r#gen(),
+                claimed_shielded_spends: rng.r#gen(),
+                claimed_contract_calls: storage::storage::HashSet::new(),
+                shielded_mints: rng.r#gen(),
+                unshielded_mints: rng.r#gen(),
+                unshielded_inputs: rng.r#gen(),
+                unshielded_outputs: rng.r#gen(),
+                claimed_unshielded_spends: rng.r#gen(),
+            };
+            Sp::new(Transcript {
+                gas: rng.r#gen(),
+                effects: eff,
+                program: storage::storage::Array::new(),
+                version: None,
+            })
+        };
+
+        // 6 calls to the same address: 0-3 guaranteed-only, 4-5 fallible-only.
+        let calls: Vec<ContractCall<(), InMemoryDB>> = (0..6u32)
+            .map(|i| {
+                let (gt, ft) = if i < 4 {
+                    (Some(make_transcript(&mut rng)), None)
+                } else {
+                    (None, Some(make_transcript(&mut rng)))
+                };
+                ContractCall {
+                    address: addr,
+                    entry_point: rng.r#gen(),
+                    guaranteed_transcript: gt,
+                    fallible_transcript: ft,
+                    communication_commitment: rng.r#gen(),
+                    proof: (),
+                }
+            })
+            .collect();
+
+        // Iterate enough times to catch nondeterministic HashMap ordering
+        let mut backward_edge_found = false;
+        let mut causality_violation_found = false;
+
+        for _ in 0..200 {
+            let calls_in_intent: std::collections::BTreeMap<u32, &ContractCall<(), InMemoryDB>> =
+                calls
+                    .iter()
+                    .enumerate()
+                    .map(|(i, c)| (i as u32, c))
+                    .collect();
+
+            let mut guaranteed_calls = BTreeSet::new();
+            let mut fallible_calls = BTreeSet::new();
+            let mut calls_by_address = std::collections::BTreeMap::new();
+            let mut adjacencies = std::collections::BTreeMap::new();
+
+            let _callers = relate_nodes::<(), InMemoryDB>(
+                &mut guaranteed_calls,
+                &mut fallible_calls,
+                &mut calls_by_address,
+                &mut adjacencies,
+                1,
+                &calls_in_intent,
+            )
+            .unwrap();
+
+            // All precedence edges should be forward (lower → higher index)
+            for (from_node, to_nodes) in &adjacencies {
+                for to_node in to_nodes {
+                    if from_node.call_index > to_node.call_index {
+                        backward_edge_found = true;
+                    }
+                }
+            }
+
+            // causality_check should not reject this valid ordering
+            if causality_check::<InMemoryDB>(&guaranteed_calls, &fallible_calls, adjacencies)
+                .is_err()
+            {
+                causality_violation_found = true;
+            }
+
+            if backward_edge_found && causality_violation_found {
+                break;
+            }
+        }
+
+        assert!(
+            !backward_edge_found,
+            "'related_nodes' produced backwards edges"
+        );
+        assert!(
+            !causality_violation_found,
+            "Spurious CausalityConstraintViolation for a valid call ordering"
+        );
     }
 }

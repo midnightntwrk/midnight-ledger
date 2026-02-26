@@ -1,8 +1,8 @@
-[**@midnight/ledger v7.0.0-alpha.1**](README.md)
+[**@midnight/ledger v8.0.0-rc.5**](README.md)
 
 ***
 
-# @midnight/ledger v7.0.0-alpha.1
+# @midnight/ledger v8.0.0-rc.5
 
 ## Classes
 
@@ -22,11 +22,13 @@
 - [DustActions](classes/DustActions.md)
 - [DustGenerationState](classes/DustGenerationState.md)
 - [DustLocalState](classes/DustLocalState.md)
+- [DustLocalStateWithChanges](classes/DustLocalStateWithChanges.md)
 - [DustParameters](classes/DustParameters.md)
 - [DustRegistration](classes/DustRegistration.md)
 - [DustSecretKey](classes/DustSecretKey.md)
 - [DustSpend](classes/DustSpend.md)
 - [DustState](classes/DustState.md)
+- [DustStateChanges](classes/DustStateChanges.md)
 - [DustUtxoState](classes/DustUtxoState.md)
 - [EncryptionSecretKey](classes/EncryptionSecretKey.md)
 - [Event](classes/Event.md)
@@ -67,9 +69,11 @@
 - [ZswapChainState](classes/ZswapChainState.md)
 - [ZswapInput](classes/ZswapInput.md)
 - [ZswapLocalState](classes/ZswapLocalState.md)
+- [ZswapLocalStateWithChanges](classes/ZswapLocalStateWithChanges.md)
 - [ZswapOffer](classes/ZswapOffer.md)
 - [ZswapOutput](classes/ZswapOutput.md)
 - [ZswapSecretKeys](classes/ZswapSecretKeys.md)
+- [ZswapStateChanges](classes/ZswapStateChanges.md)
 - [ZswapTransient](classes/ZswapTransient.md)
 
 ## Type Aliases

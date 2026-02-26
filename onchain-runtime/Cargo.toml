@@ -1,8 +1,10 @@
 [package]
 name = "midnight-onchain-runtime"
-version = "2.0.0-alpha.1"
+version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "The full smart contract runtime for Midnight's ledger."
 
 [features]
 default = ["vendored"]
@@ -10,13 +12,13 @@ vendored = []
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "onchain-runtime-state/proptest", "onchain-vm/proptest"]
 
 [dependencies]
-coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
-onchain-runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
-onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
-storage = { path = "../storage", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime-state = { version = "3.0.0-rc.1", path = "../onchain-state", package = "midnight-onchain-state" }
+onchain-vm = { version = "3.0.0-rc.1", path = "../onchain-vm", package = "midnight-onchain-vm" }
+storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 derive-where = "^1.5.0"
 enum_index = "^0.2.0"

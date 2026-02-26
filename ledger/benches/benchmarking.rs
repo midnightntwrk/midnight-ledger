@@ -1,25 +1,96 @@
 #![deny(warnings)]
+#![allow(unused_imports)]
+#![allow(unused)]
 use base_crypto::rng::SplittableRng;
+use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
 use lazy_static::lazy_static;
 use midnight_ledger::dust::{DustPublicKey, InitialNonce};
+use midnight_ledger::init_logger;
 use midnight_ledger::prove::Resolver;
-use midnight_ledger::semantics::TransactionContext;
+use midnight_ledger::semantics::{TransactionContext, TransactionResult};
 use midnight_ledger::structure::{
-    CNightGeneratesDustActionType, CNightGeneratesDustEvent, LedgerState,
-    OutputInstructionUnshielded, ProofMarker, SystemTransaction,
+    CNightGeneratesDustActionType, CNightGeneratesDustEvent, Intent, LedgerState,
+    OutputInstructionUnshielded, ProofMarker, SystemTransaction, UnshieldedOffer, UtxoOutput,
+    UtxoSpend,
 };
 use midnight_ledger::structure::{ClaimKind, Transaction};
-use midnight_ledger::test_utilities::{test_resolver, well_formed_tx_builder};
+#[cfg(feature = "proving")]
+use midnight_ledger::test_utilities::well_formed_tx_builder;
+use midnight_ledger::test_utilities::{TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
 use onchain_runtime::context::BlockContext;
+use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use storage::db::InMemoryDB;
+use std::alloc::GlobalAlloc;
+use std::ops::Deref;
+use std::path::PathBuf;
+use std::sync::atomic::AtomicU64;
+use std::time::Duration;
+use storage::DefaultHasher;
+use storage::arena::{Sp, TCONSTRUCT};
+use storage::backend::StorageBackendStats;
+use storage::db::{InMemoryDB, ParityDb};
+use storage::storage::{
+    DEFAULT_CACHE_SIZE, default_storage, set_default_storage, unsafe_drop_default_storage,
+};
 use transient_crypto::commitment::PedersenRandomness;
 use zswap::keys::SecretKeys;
+
+#[global_allocator]
+static GLOBAL_ALLOC: Allocator<std::alloc::System> = Allocator(std::alloc::System);
+static CURALLOC: AtomicU64 = AtomicU64::new(0);
+
+fn cur_alloc() -> String {
+    let n = CURALLOC.load(std::sync::atomic::Ordering::SeqCst);
+    const KB: u64 = 1 << 10;
+    const MB: u64 = 1 << 20;
+    const GB: u64 = 1 << 30;
+    match n {
+        0..KB => format!("{n} B"),
+        KB..MB => format!("{:.2} kiB", n as f64 / KB as f64),
+        MB..GB => format!("{:.2} MiB", n as f64 / MB as f64),
+        GB.. => format!("{:.2} GiB", n as f64 / GB as f64),
+    }
+}
+
+struct Allocator<A: GlobalAlloc>(A);
+
+unsafe impl<A: GlobalAlloc> GlobalAlloc for Allocator<A> {
+    unsafe fn alloc(&self, layout: std::alloc::Layout) -> *mut u8 {
+        CURALLOC
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |x| Some(x + layout.size() as u64),
+            )
+            .unwrap();
+        unsafe { self.0.alloc(layout) }
+    }
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: std::alloc::Layout) {
+        CURALLOC
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |x| Some(x - layout.size() as u64),
+            )
+            .unwrap();
+        unsafe { self.0.dealloc(ptr, layout) }
+    }
+    unsafe fn alloc_zeroed(&self, layout: std::alloc::Layout) -> *mut u8 {
+        CURALLOC
+            .fetch_update(
+                std::sync::atomic::Ordering::SeqCst,
+                std::sync::atomic::Ordering::SeqCst,
+                |x| Some(x + layout.size() as u64),
+            )
+            .unwrap();
+        unsafe { self.0.alloc_zeroed(layout) }
+    }
+}
 
 lazy_static! {
     static ref RESOLVER: Resolver = test_resolver("");
@@ -63,6 +134,7 @@ pub fn rewards(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "proving")]
 pub fn transaction_validation(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
@@ -127,6 +199,149 @@ pub fn create_dust(c: &mut Criterion) {
     group.finish();
 }
 
+type TestDb = ParityDb;
+
+fn mk_test_db() -> storage::Storage<TestDb> {
+    let dir = tempfile::tempdir().unwrap().keep();
+    storage::Storage::new(
+        DEFAULT_CACHE_SIZE,
+        ParityDb::<DefaultHasher>::open(&dir),
+        //InMemoryDB::default(),
+    )
+}
+
+pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .build()
+        .unwrap();
+    let mut rng = StdRng::seed_from_u64(0x42);
+    let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
+    init_logger(midnight_ledger::LogLevel::Warn);
+    set_default_storage(mk_test_db);
+    let mut state = TestState::new(&mut rng);
+    let mut reached_size = 0;
+    for log_size in 10..=13 {
+        let t0 = std::time::Instant::now();
+        let size = 2u64.pow(log_size);
+        state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
+        for _ in (reached_size >> 10)..(size >> 10) {
+            rt.block_on(state.give_fee_token(&mut rng, 1 << 10));
+            state.swizzle_to_db();
+        }
+        reached_size = size;
+        let mut lstate = Sp::new(state.ledger.clone());
+        let utxo = (**state.utxos.iter().next().unwrap()).clone();
+        let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
+            inputs: vec![UtxoSpend {
+                value: utxo.value,
+                owner: state.night_key.verifying_key(),
+                type_: utxo.type_,
+                intent_hash: utxo.intent_hash,
+                output_no: utxo.output_no,
+            }]
+            .into(),
+            outputs: vec![
+                UtxoOutput {
+                    value: 100,
+                    owner: UserAddress::from(state.night_key.verifying_key()),
+                    type_: utxo.type_,
+                },
+                UtxoOutput {
+                    value: utxo.value - 100,
+                    owner: UserAddress::from(state.night_key.verifying_key()),
+                    type_: utxo.type_,
+                },
+            ]
+            .into(),
+            signatures: vec![].into(),
+        };
+        let intent = Intent::new(
+            &mut rng,
+            Some(offer),
+            None,
+            vec![],
+            vec![],
+            vec![],
+            None,
+            state.time,
+        );
+        let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+        let tx = rt
+            .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
+            .unwrap();
+        let strictness = WellFormedStrictness::default();
+        let vtx = tx.well_formed(&*lstate, strictness, state.time).unwrap();
+        let context = state.context().block_context;
+        let key = lstate.as_typed_key();
+        let t1 = std::time::Instant::now();
+        println!(
+            "Took {:?} to init {size} entries, with {} allocated",
+            t1 - t0,
+            cur_alloc()
+        );
+        lstate.persist();
+        drop(lstate);
+        state.swizzle_to_db();
+        default_storage::<TestDb>().with_backend(|b| {
+            b.flush_all_changes_to_db();
+            b.flush_cache_evictions_to_db();
+            b.gc();
+        });
+        let mut runs = 0;
+        let mut total_construct_time =
+            std::collections::HashMap::<&'static str, (usize, std::time::Duration)>::new();
+        group.bench_with_input(BenchmarkId::from_parameter(log_size), &log_size, |b, _| {
+            b.iter_custom(|i| {
+                let mut dt = Default::default();
+                for _ in 0..i {
+                    let pre_cache = default_storage::<TestDb>().with_backend(|b| b.get_stats());
+                    let tconstruct0 = TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
+                    let t0 = std::time::Instant::now();
+                    let state = black_box(default_storage().get_lazy(&key)).unwrap();
+                    let context = TransactionContext {
+                        ref_state: state.deref().clone(),
+                        block_context: context.clone(),
+                        whitelist: None,
+                    };
+                    let (_, res) = black_box(state.apply(black_box(&vtx), &context));
+                    dt += t0.elapsed();
+                    let tconstruct1 = TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
+                    for (k, v) in tconstruct1 {
+                        total_construct_time.entry(k).or_default().0 +=
+                            v.0 - tconstruct0.get(k).copied().unwrap_or_default().0;
+                        total_construct_time.entry(k).or_default().1 +=
+                            v.1 - tconstruct0.get(k).copied().unwrap_or_default().1;
+                    }
+                    let post_cache = default_storage::<TestDb>().with_backend(|b| b.get_stats());
+                    runs += 1;
+                    assert!(matches!(res, TransactionResult::Success(..)));
+                }
+                dt
+            });
+        });
+        let mut total_construct_time = total_construct_time
+            .into_iter()
+            .map(|(k, (n, d))| (k, (n / runs as usize, d / runs)))
+            .collect::<Vec<_>>();
+        total_construct_time.sort_by_key(|v| v.1.1);
+        println!(
+            "Construct time: {:?}",
+            total_construct_time
+                .iter()
+                .map(|(_, (_, d))| d)
+                .sum::<Duration>()
+        );
+        let lstate = default_storage::<TestDb>().get_lazy(&key).unwrap();
+        lstate.unpersist();
+        drop(lstate);
+        drop(key);
+        drop(vtx);
+        drop(tx);
+        println!("After dropping all data, {} remains allocated", cur_alloc());
+    }
+    group.finish();
+}
+
 pub fn create_and_destroy_dust(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     fn mk_tx<R: Rng>(rng: &mut R, n: usize) -> SystemTransaction {
@@ -186,10 +401,19 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
     group.finish();
 }
 
+#[cfg(feature = "proving")]
 criterion_group!(
     name = benchmarking;
     config = Criterion::default().sample_size(10);
     targets = transaction_validation
 );
 criterion_group!(system_tx, rewards, create_dust, create_and_destroy_dust);
-criterion_main!(benchmarking, system_tx);
+criterion_group!(
+    name = night;
+    config = Criterion::default().with_profiler(PProfProfiler::new(100, Output::Flamegraph(None)));
+    targets = night_transfer_by_utxo_set_size
+);
+#[cfg(feature = "proving")]
+criterion_main!(benchmarking, system_tx, night);
+#[cfg(not(feature = "proving"))]
+criterion_main!(system_tx, night);

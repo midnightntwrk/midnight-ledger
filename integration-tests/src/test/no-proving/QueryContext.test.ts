@@ -250,6 +250,7 @@ describe('Ledger API - QueryContext', () => {
       secondsSinceEpoch: Static.blockTime(new Date()),
       secondsSinceEpochErr: 0,
       parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date()) - 6n,
       caller: addressToPublic(userAddress, 'user'),
       balance: new Map(),
       comIndices: new Map()

@@ -1,17 +1,19 @@
 [package]
 name = "midnight-coin-structure"
-version = "2.0.0-alpha.1"
+version = "2.0.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Describes low-level address format and shielded token representations for Midnight."
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "storage/proptest", "transient-crypto/proptest", "serialize/proptest"]
 
 [dependencies]
-serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+storage = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 lazy_static = "^1.5.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

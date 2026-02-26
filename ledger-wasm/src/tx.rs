@@ -40,11 +40,11 @@ use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
-use std::collections::HashMap;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
+use storage::storage::HashMap;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
@@ -228,7 +228,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            HashMap::from([(1u16, offer)])
+            [(1u16, offer)].into_iter().collect()
         } else {
             HashMap::new()
         };
@@ -301,7 +301,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            HashMap::from([(segment_id, offer)])
+            [(segment_id, offer)].into_iter().collect()
         } else {
             HashMap::new()
         };
@@ -1087,7 +1087,7 @@ impl ClaimRewardable for ledger::structure::ClaimRewardsTransaction<(), InMemory
     }
 }
 
-trait Transactionable {
+pub(crate) trait Transactionable {
     fn imbalances(&self, segment: u16, fees: Option<BigInt>) -> Result<Map, JsError>;
     fn cost(
         &self,
@@ -1114,6 +1114,7 @@ trait Transactionable {
         strictness: &WellFormedStrictness,
         tblock: &Date,
     ) -> Result<VerifiedTransaction, JsError>;
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB>;
 }
 
 impl<
@@ -1123,7 +1124,8 @@ impl<
         + Storable<InMemoryDB>
         + serialize::Serializable
         + std::fmt::Debug
-        + PedersenDowngradeable<InMemoryDB>,
+        + PedersenDowngradeable<InMemoryDB>
+        + Tagged,
 > Transactionable for ledger::structure::Transaction<S, P, B, InMemoryDB>
 where
     Self: Tagged,
@@ -1270,9 +1272,12 @@ where
             tblock,
         )?))
     }
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB> {
+        self.erase_proofs().erase_signatures()
+    }
 }
 
-fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
+pub(crate) fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
     match tx {
         TransactionTypes::UnprovenWithSignaturePreBinding(val) => Box::new(val),
         TransactionTypes::UnprovenWithSignatureBinding(val) => Box::new(val),

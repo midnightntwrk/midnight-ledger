@@ -17,6 +17,7 @@ use crate::dust::DUST_SPEND_PIS;
 use crate::dust::DUST_SPEND_PROOF_SIZE;
 use crate::dust::{DustActions, DustParameters, DustState, INITIAL_DUST_PARAMETERS};
 use crate::error::FeeCalculationError;
+use crate::error::InvariantViolation;
 use crate::error::MalformedTransaction;
 use crate::verify::ProofVerificationMode;
 use base_crypto::BinaryHashRepr;
@@ -49,7 +50,7 @@ use serialize::{
     self, Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_serialize,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::{self, Formatter};
@@ -1287,12 +1288,15 @@ pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB
 tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 
 #[derive_where(Debug, Clone)]
-pub struct VerifiedTransaction<D: DB>(pub(crate) Transaction<(), (), Pedersen, D>);
+pub struct VerifiedTransaction<D: DB> {
+    pub(crate) inner: Transaction<(), (), Pedersen, D>,
+    pub(crate) hash: TransactionHash,
+}
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
     type Target = Transaction<(), (), Pedersen, D>;
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.inner
     }
 }
 
@@ -1414,7 +1418,7 @@ impl<
                         (None, None) => None,
                     },
                     fallible_coins: {
-                        let mut result: std::collections::HashMap<
+                        let mut result: std::collections::BTreeMap<
                             u16,
                             ZswapOffer<P::LatestProof, D>,
                         > = stx1.fallible_coins.clone().into_iter().collect();
@@ -1833,7 +1837,7 @@ where
                 let vk_reads = self
                     .calls()
                     .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<StdHashSet<_>>()
+                    .collect::<BTreeSet<_>>()
                     .len();
                 let mut cost = model.baseline_cost;
                 cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)
@@ -2441,6 +2445,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
             caller,
             balance: state.balance,
             com_indices: com_indices.clone(),
+            last_block_time: block.last_block_time,
         }
     }
 
@@ -2995,22 +3000,49 @@ pub const STARS_PER_NIGHT: u128 = 1_000_000;
 pub const SPECKS_PER_DUST: u128 = 1_000_000_000_000_000;
 
 impl<D: DB> LedgerState<D> {
+    /// Constructs a new ledger state with default parameters.
     pub fn new(network_id: impl Into<String>) -> Self {
-        LedgerState {
+        Self::with_genesis_settings(network_id, INITIAL_PARAMETERS, 0, MAX_SUPPLY, 0)
+            .expect("default state should be legal")
+    }
+
+    /// Constructs a new ledger state with given genesis parameterisation.
+    ///
+    /// From the ledger's perspective, this includes the network ID, initial parameters, as well as
+    /// three system-controlled pools:
+    /// - The locked pool, which represents funds locked on Midnight due to being circulating as
+    ///   cNIGHT on Cardano
+    /// - The reserve pool, which represents funds set aside as a reward for rewarding protocol
+    ///   participation
+    /// - The treasury pool, which holds funds to be controlled by governance for strategic use (at
+    ///   genesis, this should equal the Illiquid Circulating Supply, or ICS on Cardano, which
+    ///   represents tokens locked on Cardano, which at genesis is *only* the treasury.
+    pub fn with_genesis_settings(
+        network_id: impl Into<String>,
+        parameters: LedgerParameters,
+        locked_pool: u128,
+        reserve_pool: u128,
+        treasury: u128,
+    ) -> Result<Self, InvariantViolation> {
+        let result = LedgerState {
             network_id: network_id.into(),
-            parameters: Sp::new(INITIAL_PARAMETERS),
-            locked_pool: 0,
+            parameters: Sp::new(parameters),
+            locked_pool,
             bridge_receiving: Map::new(),
-            reserve_pool: MAX_SUPPLY,
+            reserve_pool,
+            treasury: [(TokenType::Unshielded(NIGHT), treasury)]
+                .into_iter()
+                .collect(),
             block_reward_pool: 0,
             unclaimed_block_rewards: Map::new(),
-            treasury: Map::new(),
             zswap: Sp::new(zswap::ledger::State::new()),
             contract: Map::new(),
             utxo: Sp::new(UtxoState::default()),
             replay_protection: Sp::new(ReplayProtectionState::default()),
             dust: Sp::new(DustState::default()),
-        }
+        };
+        result.check_night_balance_invariant()?;
+        Ok(result)
     }
 
     pub fn state_hash(&self) -> ArenaHash<D::Hasher> {
@@ -3076,6 +3108,40 @@ mod tests {
         let adj = f64::from(INITIAL_PARAMETERS.max_price_adjustment());
         assert!(1.045 <= adj);
         assert!(adj <= 1.047);
+    }
+
+    #[test]
+    fn test_genesis_state() {
+        assert_eq!(
+            LedgerState::<InMemoryDB>::with_genesis_settings(
+                "local-test",
+                INITIAL_PARAMETERS,
+                10_000_000_000_000_000,
+                10_000_000_000_000_000,
+                10_000_000_000_000_000,
+            ),
+            Err(InvariantViolation::NightBalance(30_000_000_000_000_000))
+        );
+        assert_eq!(
+            LedgerState::<InMemoryDB>::with_genesis_settings(
+                "local-test",
+                INITIAL_PARAMETERS,
+                1_000_000_000_000_000,
+                1_000_000_000_000_000,
+                1_000_000_000_000_000,
+            ),
+            Err(InvariantViolation::NightBalance(3_000_000_000_000_000))
+        );
+        assert!(
+            LedgerState::<InMemoryDB>::with_genesis_settings(
+                "local-test",
+                INITIAL_PARAMETERS,
+                10_000_000_000_000_000,
+                10_000_000_000_000_000,
+                4_000_000_000_000_000,
+            )
+            .is_ok()
+        );
     }
 
     #[test]

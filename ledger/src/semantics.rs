@@ -25,7 +25,8 @@ use crate::structure::{
     ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
     SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
 };
-use crate::utils::{KeySortedIter, SortedIter, sorted};
+use crate::utils::{KeySortedIter, SortedIter};
+use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::hash::HashOutput;
 use base_crypto::rng::SplittableRng;
@@ -39,6 +40,7 @@ use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng};
 use serialize::{Deserializable, Serializable, Tagged};
 use std::borrow::Cow;
+use std::fmt::Debug;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
@@ -61,18 +63,27 @@ pub(crate) fn whitelist_matches(
     }
 }
 
-#[derive(Debug)]
 pub struct TransactionContext<D: DB> {
     pub ref_state: LedgerState<D>,
     pub block_context: BlockContext,
     pub whitelist: Option<Map<ContractAddress, ()>>,
 }
 
+impl<D: DB> Debug for TransactionContext<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionContext")
+            .field("ref_state", &self.ref_state.state_hash())
+            .field("block_context", &self.block_context)
+            .field("whitelist", &self.whitelist)
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 pub enum TransactionResult<D: DB> {
     Success(Vec<Event<D>>),
     PartialSuccess(
-        std::collections::HashMap<u16, Result<(), TransactionInvalid<D>>>,
+        std::collections::BTreeMap<u16, Result<(), TransactionInvalid<D>>>,
         Vec<Event<D>>,
     ),
     Failure(TransactionInvalid<D>),
@@ -93,9 +104,9 @@ impl<D: DB> From<&TransactionResult<D>> for ErasedTransactionResult {
         match res {
             TransactionResult::Success(_) => ErasedTransactionResult::Success,
             TransactionResult::PartialSuccess(segments, _) => {
-                ErasedTransactionResult::PartialSuccess(sorted(
-                    segments.iter().map(|(k, v)| (*k, v.is_ok())),
-                ))
+                ErasedTransactionResult::PartialSuccess(
+                    segments.iter().map(|(k, v)| (*k, v.is_ok())).collect(),
+                )
             }
             TransactionResult::Failure(_) => ErasedTransactionResult::Failure,
         }
@@ -127,6 +138,12 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError>;
+    #[must_use = "return value must be used"]
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError>;
 }
 
 impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
@@ -225,18 +242,40 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         events: impl IntoIterator<Item = &'a Event<D>>,
     ) -> Result<Self, EventReplayError> {
+        self.replay_events_with_changes(secret_keys, events)
+            .map(|w| w.result)
+    }
+
+    fn replay_events_with_changes<'a>(
+        &self,
+        secret_keys: &SecretKeys,
+        events: impl IntoIterator<Item = &'a Event<D>>,
+    ) -> Result<WithZswapStateChanges<Self>, EventReplayError> {
         use coin_structure::transfer::SenderEvidence;
 
-        let mut res = events
-            .into_iter()
-            .try_fold(self.clone(), |mut state, event| match &event.content {
+        let mut res = events.into_iter().try_fold(
+            WithZswapStateChanges::new(self.clone()),
+            |mut acc, event| match &event.content {
                 EventDetails::ZswapInput {
                     nullifier,
                     contract: None,
                 } => {
-                    state.coins = state.coins.remove(nullifier);
-                    state.pending_spends = state.pending_spends.remove(nullifier);
-                    Ok(state)
+                    let maybe_change = if acc.result.coins.contains_key(nullifier) {
+                        acc.result
+                            .coins
+                            .get(nullifier)
+                            .map(|qci| ZswapStateChanges {
+                                received_coins: vec![],
+                                spent_coins: vec![*qci],
+                                source: event.source.transaction_hash,
+                            })
+                    } else {
+                        None
+                    };
+                    acc.result.coins = acc.result.coins.remove(nullifier);
+                    acc.result.pending_spends = acc.result.pending_spends.remove(nullifier);
+
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 EventDetails::ZswapOutput {
                     commitment,
@@ -244,37 +283,55 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     mt_index,
                     ..
                 } => {
-                    if *mt_index != state.first_free {
+                    if *mt_index != acc.result.first_free {
                         return Err(EventReplayError::NonLinearInsertion {
-                            expected_next: state.first_free,
+                            expected_next: acc.result.first_free,
                             received: *mt_index,
                             tree_name: "zswap commitment",
                         });
                     }
-                    state.merkle_tree = state.merkle_tree.update_hash(*mt_index, commitment.0, ());
-                    state.first_free += 1;
-                    if let Some(ci) = state.pending_outputs.get(commitment) {
+                    acc.result.merkle_tree =
+                        acc.result
+                            .merkle_tree
+                            .update_hash(*mt_index, commitment.0, ());
+                    acc.result.first_free += 1;
+                    let maybe_change = if let Some(ci) = acc.result.pending_outputs.get(commitment)
+                    {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
                         let qci = ci.qualify(*mt_index);
-                        state.pending_outputs = state.pending_outputs.remove(commitment);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.pending_outputs = acc.result.pending_outputs.remove(commitment);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else if let Some(ci) = preimage_evidence.try_with_keys(secret_keys) {
                         let nullifier = ci.nullifier(&SenderEvidence::User(Cow::Borrowed(
                             &secret_keys.coin_secret_key,
                         )));
                         let qci = ci.qualify(*mt_index);
-                        state.coins = state.coins.insert(nullifier, qci);
+                        acc.result.coins = acc.result.coins.insert(nullifier, qci);
+                        Some(ZswapStateChanges {
+                            received_coins: vec![qci],
+                            spent_coins: vec![],
+                            source: event.source.transaction_hash,
+                        })
                     } else {
-                        state.merkle_tree = state.merkle_tree.collapse(*mt_index, *mt_index);
-                    }
-                    Ok(state)
+                        acc.result.merkle_tree =
+                            acc.result.merkle_tree.collapse(*mt_index, *mt_index);
+                        None
+                    };
+                    Ok(acc.maybe_add_change(maybe_change))
                 }
                 #[allow(unreachable_patterns)]
-                _ => Ok(state),
-            })?;
-        res.merkle_tree = res.merkle_tree.rehash();
+                _ => Ok(acc),
+            },
+        )?;
+        res.result.merkle_tree = res.result.merkle_tree.rehash();
+
         Ok(res)
     }
 }
@@ -397,7 +454,7 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    fn check_night_balance_invariant(&self) -> Result<(), InvariantViolation> {
+    pub fn check_night_balance_invariant(&self) -> Result<(), InvariantViolation> {
         let utxo_ann = self.utxo.utxos.ann();
         let treasury_night = self
             .treasury
@@ -423,7 +480,7 @@ impl<D: DB> LedgerState<D> {
         }
     }
 
-    #[instrument(skip(self, tx))]
+    #[instrument(skip(self, tx), fields(tx = ?tx.transaction_hash().0))]
     pub fn apply_system_tx(
         &self,
         tx: &SystemTransaction,
@@ -871,12 +928,12 @@ impl<D: DB> LedgerState<D> {
     >(
         &self,
         tx: &StandardTransaction<S, P, B, D>,
+        transaction_hash: TransactionHash,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
         let mut events: Vec<Event<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
-        let transaction_hash = Transaction::Standard(tx.clone()).transaction_hash();
         if segment == 0 {
             // Apply replay protection
             state.replay_protection = Sp::new(
@@ -987,7 +1044,7 @@ impl<D: DB> LedgerState<D> {
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
-                                &state.utxo,
+                                &context.ref_state.utxo,
                                 fees_remaining,
                                 &erased,
                                 reg,
@@ -1140,22 +1197,22 @@ impl<D: DB> LedgerState<D> {
         Ok((state, res))
     }
 
-    #[instrument(skip(self, tx, context))]
+    #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
     pub fn apply(
         &self,
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        let res = match &tx.0 {
+        let res = match &tx.inner {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
-                let mut segment_success = std::collections::HashMap::new();
+                let mut segment_success = std::collections::BTreeMap::new();
                 let mut events = Vec::new();
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
@@ -1186,7 +1243,7 @@ impl<D: DB> LedgerState<D> {
                 rewards,
                 &context.block_context,
                 EventSource {
-                    transaction_hash: tx.transaction_hash(),
+                    transaction_hash: tx.hash,
                     logical_segment: 0,
                     physical_segment: 0,
                 },
@@ -1196,7 +1253,7 @@ impl<D: DB> LedgerState<D> {
             "state transition: {:?} => {:?} [transaction {:?}]",
             self.state_hash(),
             res.0.state_hash(),
-            tx.transaction_hash().0
+            tx.hash,
         );
         debug!(
             "transaction result: {:?}",

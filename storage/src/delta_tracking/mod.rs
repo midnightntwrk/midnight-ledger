@@ -24,7 +24,7 @@ use serialize::Serializable;
 use crate::arena::ArenaKey;
 use crate::db::DB;
 use base_crypto::cost_model::{CostDuration, RunningCost};
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeSet;
 
 /// Result of write and delete cost computation
 pub struct WriteDeleteResults<D: DB> {
@@ -49,12 +49,12 @@ pub struct WriteDeleteResults<D: DB> {
 /// WARNING: this requires the keys in `r0` to be in the back-end; see similar
 /// warning in `incremental_write_delete_costs` for more details.
 pub fn initial_write_delete_costs<D: DB>(
-    r0: &StdHashSet<ArenaKey<D::Hasher>>,
+    r0: &BTreeSet<ArenaKey<D::Hasher>>,
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
 ) -> WriteDeleteResults<D> {
     let rcmap = RcMap::default();
     let keys_reachable_from_r0 = get_writes(&rcmap, r0);
-    let keys_removed = StdHashSet::new();
+    let keys_removed = BTreeSet::new();
     let k0 = update_rcmap(&rcmap, &keys_reachable_from_r0);
     WriteDeleteResults::new(keys_reachable_from_r0, keys_removed, k0, cpu_cost)
 }
@@ -73,7 +73,7 @@ pub fn initial_write_delete_costs<D: DB>(
 /// from the output `StateValue` of the VM.
 pub fn incremental_write_delete_costs<D: DB>(
     k0: &RcMap<D>,
-    r1: &StdHashSet<ArenaKey<D::Hasher>>,
+    r1: &BTreeSet<ArenaKey<D::Hasher>>,
     cpu_cost: impl Fn(u64, u64) -> RunningCost,
     gc_limit: impl FnOnce(RunningCost) -> usize,
 ) -> WriteDeleteResults<D> {
@@ -88,7 +88,7 @@ pub fn incremental_write_delete_costs<D: DB>(
 }
 
 /// Compute total bytes from a set of keys by summing their node sizes.
-fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64 {
+fn compute_bytes_from_keys<D: DB>(keys: &BTreeSet<ArenaKey<D::Hasher>>) -> u64 {
     let arena = &crate::storage::default_storage::<D>().arena;
     arena.with_backend(|backend| {
         keys.iter()
@@ -118,8 +118,8 @@ fn compute_bytes_from_keys<D: DB>(keys: &StdHashSet<ArenaKey<D::Hasher>>) -> u64
 impl<D: DB> WriteDeleteResults<D> {
     /// Compute `WriteDeleteResults` for new `RcMap` and key deltas.
     fn new(
-        keys_added: StdHashSet<ArenaKey<D::Hasher>>,
-        keys_removed: StdHashSet<ArenaKey<D::Hasher>>,
+        keys_added: BTreeSet<ArenaKey<D::Hasher>>,
+        keys_removed: BTreeSet<ArenaKey<D::Hasher>>,
         new_charged_keys: RcMap<D>,
         cpu_cost: impl Fn(u64, u64) -> RunningCost,
     ) -> Self {
@@ -155,11 +155,12 @@ impl<D: DB> WriteDeleteResults<D> {
 /// keys in `roots`.
 pub fn get_writes<D: DB>(
     rcmap: &RcMap<D>,
-    roots: &StdHashSet<ArenaKey<D::Hasher>>,
-) -> StdHashSet<ArenaKey<D::Hasher>> {
+    roots: &BTreeSet<ArenaKey<D::Hasher>>,
+) -> BTreeSet<ArenaKey<D::Hasher>> {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut queue: Vec<ArenaKey<D::Hasher>> = roots.iter().cloned().collect();
-    let mut keys_added = StdHashSet::new();
+    queue.sort();
+    let mut keys_added = BTreeSet::new();
 
     while let Some(key) = queue.pop() {
         if !rcmap.contains(&key) && !keys_added.contains(&key) {
@@ -197,7 +198,7 @@ pub fn get_writes<D: DB>(
 #[must_use]
 pub fn update_rcmap<D: DB>(
     rcmap: &RcMap<D>,
-    keys_added: &StdHashSet<ArenaKey<D::Hasher>>,
+    keys_added: &BTreeSet<ArenaKey<D::Hasher>>,
 ) -> RcMap<D> {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut rcmap = rcmap.clone();
@@ -206,7 +207,7 @@ pub fn update_rcmap<D: DB>(
     let mut inc_map = keys_added
         .iter()
         .map(|k| (k.clone(), 0))
-        .collect::<std::collections::HashMap<_, _>>();
+        .collect::<std::collections::BTreeMap<_, _>>();
     // Initialize all new keys with rc = 0
     // Update reference counts for all edges from new keys
     for key in keys_added {
@@ -228,7 +229,9 @@ pub fn update_rcmap<D: DB>(
             }
         }
     }
-    for (k, by) in inc_map.into_iter() {
+    let mut inc_vec = inc_map.into_iter().collect::<Vec<_>>();
+    inc_vec.sort();
+    for (k, by) in inc_vec.into_iter() {
         match &k {
             ArenaKey::Ref(r) => {
                 let old_rc = rcmap.get_rc(&k).unwrap_or(0);
@@ -248,18 +251,18 @@ pub fn update_rcmap<D: DB>(
 #[must_use]
 pub fn gc_rcmap<D: DB>(
     orig_rcmap: &RcMap<D>,
-    roots: &StdHashSet<ArenaKey<D::Hasher>>,
+    roots: &BTreeSet<ArenaKey<D::Hasher>>,
     step_limit: usize,
-) -> (RcMap<D>, StdHashSet<ArenaKey<D::Hasher>>) {
+) -> (RcMap<D>, BTreeSet<ArenaKey<D::Hasher>>) {
     let arena = &crate::storage::default_storage::<D>().arena;
     let mut rcmap = orig_rcmap.clone();
-    let mut keys_removed = StdHashSet::new();
+    let mut keys_removed = BTreeSet::new();
     let mut step = 0;
     let mut storage_queue = orig_rcmap.get_unreachable_keys_not_in(roots);
     // Invariant: keys in queue have rc == 0 and aren't in r1.
     let mut queue: Vec<ArenaKey<D::Hasher>> = Vec::new();
-    let mut rc_cache = std::collections::HashMap::new();
-    let mut update_queue = std::collections::HashMap::new();
+    let mut rc_cache = std::collections::BTreeMap::new();
+    let mut update_queue = std::collections::BTreeMap::new();
 
     // First, accumulate update information (to churn storage less)
     while let Some(key) = storage_queue.next().or_else(|| queue.pop()) {
@@ -299,8 +302,10 @@ pub fn gc_rcmap<D: DB>(
         keys_removed.insert(key);
     }
 
+    let mut update_vec = update_queue.into_iter().collect::<Vec<_>>();
+    update_vec.sort();
     // Execute on the update information
-    for (key, update) in update_queue.into_iter() {
+    for (key, update) in update_vec.into_iter() {
         match &key {
             ArenaKey::Ref(r) => {
                 let original = rc_cache
@@ -313,7 +318,9 @@ pub fn gc_rcmap<D: DB>(
         }
     }
 
-    for key in keys_removed.iter() {
+    let mut removed_vec = keys_removed.iter().collect::<Vec<_>>();
+    removed_vec.sort();
+    for key in removed_vec.into_iter() {
         // Remove key.
         //
         // WARNING: the order here is important, i.e. first decrementing
@@ -348,7 +355,7 @@ mod tests {
     use crate::{DefaultDB, Storable};
     use derive_where::derive_where;
     use serialize::Tagged;
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     // Simple test node that can form arbitrary DAGs
     #[derive(Storable, Debug, Hash)]
@@ -373,7 +380,7 @@ mod tests {
     }
 
     struct Dag<D: DB = DefaultDB> {
-        nodes: HashMap<(u8, u8), ArenaKey<D::Hasher>>,
+        nodes: BTreeMap<(u8, u8), ArenaKey<D::Hasher>>,
         // Sps of the roots to keep them in backend.
         _roots: Vec<Sp<Node<D>, D>>,
     }
@@ -416,7 +423,7 @@ mod tests {
     // Build the actual DAG from the adjacency list
     fn build_test_dag<D: DB>() -> Dag<D> {
         let adjacency = test_dag_adjacency();
-        let mut nodes: HashMap<(u8, u8), Sp<Node<D>, D>> = HashMap::new();
+        let mut nodes: BTreeMap<(u8, u8), Sp<Node<D>, D>> = BTreeMap::new();
 
         // Build bottom-up: iterate adjacency list in reverse order, because
         // there are no back or sideways edges
@@ -430,7 +437,7 @@ mod tests {
         }
 
         // Convert to ArenaHash map for easier test access
-        let mut arena_nodes = HashMap::new();
+        let mut arena_nodes = BTreeMap::new();
         for ((layer, id), node) in &nodes {
             arena_nodes.insert((*layer, *id), node.child_repr.clone());
         }
@@ -442,9 +449,9 @@ mod tests {
     }
 
     // Compute all nodes reachable from given roots using adjacency list
-    fn compute_reachable_nodes(roots: &[(u8, u8)]) -> StdHashSet<(u8, u8)> {
+    fn compute_reachable_nodes(roots: &[(u8, u8)]) -> BTreeSet<(u8, u8)> {
         let adjacency = test_dag_adjacency();
-        let mut reachable = StdHashSet::new();
+        let mut reachable = BTreeSet::new();
         let mut queue: Vec<(u8, u8)> = roots.to_vec();
 
         while let Some(node_id) = queue.pop() {
@@ -465,10 +472,10 @@ mod tests {
     }
 
     // Get subgraph reference counts for nodes reachable from roots
-    fn get_subgraph_rcs(roots: &[(u8, u8)]) -> HashMap<(u8, u8), u64> {
+    fn get_subgraph_rcs(roots: &[(u8, u8)]) -> BTreeMap<(u8, u8), u64> {
         let adjacency = test_dag_adjacency();
         let reachable = compute_reachable_nodes(roots);
-        let mut rcs = HashMap::new();
+        let mut rcs = BTreeMap::new();
 
         // Initialize all reachable nodes with rc=0
         for node_id in &reachable {
@@ -489,7 +496,7 @@ mod tests {
     }
 
     // Convert node IDs to ArenaHashs using the DAG
-    fn to_keys<'a, I>(node_ids: I) -> StdHashSet<ArenaKey<crate::DefaultHasher>>
+    fn to_keys<'a, I>(node_ids: I) -> BTreeSet<ArenaKey<crate::DefaultHasher>>
     where
         I: IntoIterator<Item = &'a (u8, u8)>,
     {
@@ -538,7 +545,7 @@ mod tests {
 
         // Compute what should be written: reachable from roots minus what's in K0
         let reachable_from_r1 = compute_reachable_nodes(&roots);
-        let k0_set: StdHashSet<_> = k0_node_ids.iter().copied().collect();
+        let k0_set: BTreeSet<_> = k0_node_ids.iter().copied().collect();
         let expected_writes = &reachable_from_r1 - &k0_set;
         let expected_writes_keys = to_keys(expected_writes.iter());
 
@@ -610,7 +617,7 @@ mod tests {
 
         // Compute what should remain vs be removed
         let kept_nodes = compute_reachable_nodes(&limited_roots);
-        let expected_removed: StdHashSet<_> = &full_reachable - &kept_nodes;
+        let expected_removed: BTreeSet<_> = &full_reachable - &kept_nodes;
 
         // Verify removed nodes
         assert_eq!(
@@ -657,16 +664,16 @@ mod tests {
         // Test resuming GC
         let (_k3, removed3) =
             super::gc_rcmap(&k2, &roots.into_iter().collect(), expected_removed.len());
-        let total_removed: StdHashSet<_> = removed2.union(&removed3).cloned().collect();
+        let total_removed: BTreeSet<_> = removed2.union(&removed3).cloned().collect();
         assert!(
             total_removed.len() == expected_removed.len(),
             "Resuming GC should make progress"
         );
 
         // Run gc one step at a time until no progress is possible
-        let empty_roots = StdHashSet::new();
+        let empty_roots = BTreeSet::new();
         let mut current_rcmap = k0.clone();
-        let mut total_single_step_removed = StdHashSet::new();
+        let mut total_single_step_removed = BTreeSet::new();
         loop {
             let (new_rcmap, removed_single) = super::gc_rcmap(&current_rcmap, &empty_roots, 1);
             if removed_single.is_empty() {
@@ -688,7 +695,7 @@ mod tests {
     fn rcmap_survives_gc_with_only_references() {
         use crate::db::InMemoryDB;
         use crate::storage::WrappedDB;
-        use std::collections::HashSet as StdHashSet;
+        use std::collections::BTreeSet;
 
         struct Tag;
         type W = WrappedDB<InMemoryDB, Tag>;
@@ -700,7 +707,7 @@ mod tests {
             let dag = build_test_dag::<W>();
             let full_roots = [(0, 1), (0, 2)];
             let all_reachable = compute_reachable_nodes(&full_roots);
-            let all_writes: StdHashSet<_> = all_reachable
+            let all_writes: BTreeSet<_> = all_reachable
                 .iter()
                 .map(|id| dag.nodes[id].clone())
                 .collect();
@@ -708,7 +715,7 @@ mod tests {
         };
 
         // Run GC from empty root set - should GC everything but not crash
-        let empty_roots = StdHashSet::new();
+        let empty_roots = BTreeSet::new();
         let (_final_rcmap, _removed) = super::gc_rcmap(&rcmap, &empty_roots, 1000);
 
         // If we reach here without panics, RcMap successfully survived GC
@@ -722,7 +729,7 @@ mod tests {
     fn write_delete_costs() {
         use rand::rngs::StdRng;
         use rand::{Rng, SeedableRng};
-        use std::collections::{HashMap, HashSet as StdHashSet};
+        use std::collections::{BTreeMap, BTreeSet};
 
         let dag = build_test_dag::<DefaultDB>();
 
@@ -754,7 +761,7 @@ mod tests {
             };
 
             // Randomly select nodes for this root set
-            let mut selected_nodes = StdHashSet::new();
+            let mut selected_nodes = BTreeSet::new();
             while selected_nodes.len() < root_set_size {
                 let idx = rng.gen_range(0..all_node_ids.len());
                 selected_nodes.insert(all_node_ids[idx]);
@@ -764,7 +771,7 @@ mod tests {
         }
 
         // Convert root sets to ArenaHash sets
-        let root_sets_as_keys: Vec<StdHashSet<_>> = root_sets.iter().map(to_keys).collect();
+        let root_sets_as_keys: Vec<BTreeSet<_>> = root_sets.iter().map(to_keys).collect();
 
         // Compute initial_write_delete_costs for each root set.
         for i in 0..root_sets.len() {
@@ -778,7 +785,7 @@ mod tests {
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
             // Convert expected_rcs node IDs to ArenaHashs for comparison
-            let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
+            let expected_rcs_as_keys: BTreeMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
                 .collect();
@@ -820,7 +827,7 @@ mod tests {
             let actual_rcs = results.updated_charged_keys.get_rcs();
 
             // Convert expected_rcs node IDs to ArenaHashs for comparison
-            let expected_rcs_as_keys: HashMap<_, _> = expected_rcs
+            let expected_rcs_as_keys: BTreeMap<_, _> = expected_rcs
                 .into_iter()
                 .map(|(node_id, rc)| (dag.nodes[&node_id].clone(), rc))
                 .collect();

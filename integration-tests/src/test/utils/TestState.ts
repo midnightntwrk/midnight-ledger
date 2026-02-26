@@ -196,10 +196,12 @@ export class TestState {
   }
 
   context() {
+    const secondsSinceEpoch = BigInt(this.time.getTime() / 1000);
     const block: BlockContext = {
-      secondsSinceEpoch: BigInt(this.time.getTime() / 1000),
+      secondsSinceEpoch,
       secondsSinceEpochErr: 0,
-      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex')
+      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex'),
+      lastBlockTime: secondsSinceEpoch > 6n ? secondsSinceEpoch - 6n : 0n
     };
     return new TransactionContext(this.ledger, block);
   }

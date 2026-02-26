@@ -4,6 +4,21 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 8.0.0
+
+- breaking: fix: correctly compute change for Dust spent during registration
+- breaking: fix: merkle tree canonicity
+- feat: add last block time context variable
+- fix: log non-proof-erased tx hashes
+- fix: resolve non-determinism and not-to-spec iteration order in sequencing
+  check.
+- feat: add `with_genesis_settings` ledger state constructor, that allows providing initial parameters, and initial pool value allocations
+- bugfix: remove accidental structured logging of the full ledger state in some places
+- feat: pull in `storage-core` fix, lazy loading of embedded small nodes
+- feat: re-add `ZswapLocalState.applyFailed`, along with a new `ZswapLocalState.revertTransaction` that applies every offer in a transaction as failed.
+- feat: proof server built natively on Arm
+- fix: Change divide-by-zero in `dust.rs` from panic to error
+
 ## 7.0.0
 
 - breaking: pull in breaking proof-system changes
@@ -11,6 +26,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
   governance is in place
 - fix: bug in JS handling of `undefined` returned by a `ProvingProvider`'s
   `check` method.
+- feat: add `replayEventsWithChanges` on `ZswapLocalState` and `DustLocalState`,
+  returning `ZswapLocalStateWithChanges` and `DustLocalStateWithChanges` with
+  `ZswapStateChanges` and `DustStateChanges` (received and spent coins or UTXOs
+  per event). Exposed via wasm.
+- fix: fix non-determinism in processing smart-contract GC.
 
 ## 6.2.0
 

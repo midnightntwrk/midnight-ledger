@@ -1,11 +1,13 @@
 [package]
-name = "zkir-v3"
-version = "3.0.0-alpha.1"
+name = "midnight-zkir-v3"
+version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+publish = false
 
 [[bin]]
-name = "zkir-v3"
+name = "zkir"
 path = "src/main.rs"
 required-features = ["binary"]
 
@@ -21,10 +23,11 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
+midnight-curves = { version = "0.2.0" }
 midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
@@ -50,11 +53,12 @@ tokio = { version = "^1.46.1", features = ["rt", "macros", "rt-multi-thread"], o
 indicatif = { version = "^0.17.11", optional = true }
 console = { version = "^0.15.11", optional = true }
 futures-executor = { version = "^0.3.31", optional = true }
+num-bigint = { version = "0.4" }
 
 pastey = { version = "0.1.1", optional = true }
 proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
-zkir-v3 = { path = ".", features = ["proptest"] }
+midnight-zkir-v3 = { path = ".", features = ["proptest"] }
 actix-rt = "^2.9.0"

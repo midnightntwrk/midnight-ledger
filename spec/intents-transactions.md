@@ -702,17 +702,24 @@ struct LedgerState {
     params: LedgerParameters,
 }
 
+struct TransactionContext {
+    // The state that transactions were validated against, e.g. the start of
+    // the block
+    ref_state: LedgerState,
+    block_context: BlockContext,
+}
+
 impl LedgerState {
     fn apply<S, P, B>(
         mut self,
         tx: Transaction<S, P, B>,
-        block_context: BlockContext,
+        context: TransactionContext,
     ) -> (Self, TransactionResult) {
         let segments = tx.segments();
         let mut segment_success = Map::new();
         let mut total_success = true;
         for segment in segments.iter() {
-            match self.apply_segment(tx, segment, block_context) {
+            match self.apply_segment(tx, segment, context) {
                 Ok(state) => {
                     self = state;
                     segment_success = segment_success.insert(segment, true);
@@ -738,13 +745,13 @@ impl LedgerState {
         mut self,
         tx: Transaction<S, P, B>,
         segment: u16,
-        block_context: BlockContext,
+        context: TransactionContext,
     ) -> Result<Self> {
         if segment == 0 {
             // Apply replay protection
             self.replay_protection = self.replay_protection.apply_tx(
                 tx,
-                block_context.tblock,
+                context.block_context.tblock,
             )?;
             let com_indicies = if let Some(offer) = tx.guaranteed_offer {
                 (self.zswap, indicies) = self.zswap.apply(offer)?;
@@ -764,20 +771,20 @@ impl LedgerState {
                         offer,
                         0,
                         erased,
-                        block_context.tblock,
+                        context.block_context.tblock,
                     )?;
                     self.dust = self.dust.apply_offer(
                         offer,
                         0,
                         erased,
-                        block_context.tblock,
+                        context.block_context.tblock,
                     )?;
                 }
                 for action in intent.actions.iter() {
                     self.contract = self.contract.apply_action(
                         action,
                         true,
-                        block_context,
+                        context.block_context,
                         erased,
                         com_indicies,
                     )?;
@@ -801,13 +808,13 @@ impl LedgerState {
                     .flat_map(|a| a.registrations.iter().map(|reg| (a.ctime, reg)))
                 {
                     (self.dust, fees_remaining) = self.dust.apply_registration(
-                        self.utxo,
+                        context.ref_state.utxo,
                         fees_remaining,
                         intent.erase_proofs(),
                         reg,
                         self.params.dust,
                         ctime,
-                        block_context,
+                        context.block_context,
                     )?;
                 }
             }
@@ -826,20 +833,20 @@ impl LedgerState {
                         offer,
                         segment,
                         erased,
-                        block_context.tblock,
+                        context.block_context.tblock,
                     )?;
                     self.dust = self.dust.apply_offer(
                         offer,
                         segment,
                         erased,
-                        block_context.tblock,
+                        context.block_context.tblock,
                     )?;
                 }
                 for action in intent.actions.iter() {
                     self.contract = self.contract.apply_action(
                         action,
                         false,
-                        block_context,
+                        context.block_context,
                         erased,
                         com_indicies,
                     )?;

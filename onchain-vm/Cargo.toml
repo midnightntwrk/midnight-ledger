@@ -1,19 +1,21 @@
 [package]
 name = "midnight-onchain-vm"
-version = "1.0.1-alpha.1"
+version = "3.0.0-rc.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Implements the onchain VM for Midnight's ledger."
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "runtime-state/proptest"]
 
 [dependencies]
-coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
-transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-storage = { path = "../storage", package = "midnight-storage" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+runtime-state = { version = "3.0.0-rc.1", path = "../onchain-state", package = "midnight-onchain-state" }
 
 hex = "^0.4.3"
 konst = "0.3.16"

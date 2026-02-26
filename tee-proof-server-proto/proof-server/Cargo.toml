@@ -68,7 +68,7 @@ base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../../transient-crypto", package = "midnight-transient-crypto" }
 storage = { path = "../../storage", package = "midnight-storage" }
 serialize = { path = "../../serialize", package = "midnight-serialize" }
-zkir_v2 = { path = "../../zkir", package = "zkir" }
+zkir_v2 = { path = "../../zkir", package = "midnight-zkir" }
 introspection = "0.1.0"
 rand = { version = "0.8.4", features = ["getrandom"] }
 lazy_static = "1.5.0"

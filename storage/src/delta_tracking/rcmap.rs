@@ -22,8 +22,8 @@ use derive_where::derive_where;
 use rand::distributions::{Distribution, Standard};
 use serialize::{Deserializable, Serializable, Tagged};
 #[cfg(test)]
-use std::collections::HashMap;
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeMap;
+use std::collections::BTreeSet;
 #[cfg(feature = "proptest")]
 use {proptest::prelude::Arbitrary, serialize::NoStrategy, std::marker::PhantomData};
 
@@ -259,7 +259,7 @@ impl<D: DB> RcMap<D> {
     /// This is used to initialize garbage collection.
     pub(crate) fn get_unreachable_keys_not_in(
         &self,
-        roots: &StdHashSet<ArenaKey<D::Hasher>>,
+        roots: &BTreeSet<ArenaKey<D::Hasher>>,
     ) -> impl Iterator<Item = ArenaKey<D::Hasher>> {
         self.rc_0.keys().filter(|key| !roots.contains(key))
     }
@@ -281,8 +281,8 @@ impl<D: DB> RcMap<D> {
 
     /// Get all charged keys and their reference counts (for testing).
     #[cfg(test)]
-    pub(crate) fn get_rcs(&self) -> HashMap<ArenaKey<D::Hasher>, u64> {
-        let mut result = HashMap::new();
+    pub(crate) fn get_rcs(&self) -> BTreeMap<ArenaKey<D::Hasher>, u64> {
+        let mut result = BTreeMap::new();
 
         // Add all keys with rc = 0
         for key in self.rc_0.keys() {
@@ -358,7 +358,7 @@ pub(crate) mod tests {
         let mut reader = &bytes[..];
         let mut child_iter = keyrefs.children().into_iter();
         let arena = &crate::storage::default_storage().arena;
-        let loader = crate::arena::BackendLoader::new(arena, None);
+        let loader = storage_core::arena::BackendLoader::new(arena, None);
         let deserialized: Vec<Sp<ChildRef<InMemoryDB>, InMemoryDB>> =
             Storable::from_binary_repr(&mut reader, &mut child_iter, &loader).unwrap();
 
@@ -369,8 +369,8 @@ pub(crate) mod tests {
     #[cfg(test)]
     pub(crate) fn get_rcmap_descendants<D: DB>(
         rcmap: &RcMap<D>,
-    ) -> std::collections::HashSet<ArenaKey<D::Hasher>> {
-        let mut visited = std::collections::HashSet::new();
+    ) -> std::collections::BTreeSet<ArenaKey<D::Hasher>> {
+        let mut visited = std::collections::BTreeSet::new();
         let mut to_visit = rcmap.children();
         let arena = &crate::storage::default_storage::<D>().arena;
         while let Some(current) = to_visit.pop() {

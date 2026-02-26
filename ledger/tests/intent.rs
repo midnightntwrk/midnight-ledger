@@ -493,7 +493,7 @@ async fn merge_failure_segment_clash() {
         "local-test",
         storage::storage::HashMap::from_iter(once((segment_id, intent.clone()))),
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     );
 
     let res = tx.clone().merge(&tx);
@@ -681,7 +681,7 @@ async fn balanced_utxos_1_intent() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     ));
 
     let balanced_tx = state
@@ -973,7 +973,7 @@ async fn intents_cannot_balance_across_segments() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     ));
 
     let balanced_tx = state
@@ -1279,7 +1279,7 @@ async fn causality_check_sanity_check() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     ));
 
     let balanced_tx = state
@@ -1462,7 +1462,7 @@ async fn imbalanced_utxos_1_intent() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     ));
 
     // Balance only the Shielded, to handle fees
@@ -1646,7 +1646,7 @@ async fn imbalanced_utxos_1_intent_fallible() {
         "local-test",
         intents,
         None,
-        std::collections::HashMap::new(),
+        storage::storage::HashMap::new(),
     ));
 
     // Balance only the Shielded, to handle fees

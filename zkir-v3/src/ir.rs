@@ -28,13 +28,15 @@ use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash, Zkir,
 };
 
+use crate::ir_types::IrType;
+
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
 #[tag = "ir-source[v3]"]
 pub struct IrSource {
     /// The list of input identifiers for this circuit
-    pub inputs: Vec<Identifier>,
+    pub inputs: Vec<TypedIdentifier>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -82,6 +84,18 @@ impl Zkir for IrSource {
 pub struct Identifier(pub String);
 
 tag_enforcement_test!(Identifier);
+
+/// A typed identifier for a variable in the circuit memory
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[tag = "zkir-typed-identifier[v1]"]
+pub struct TypedIdentifier {
+    pub(crate) name: Identifier,
+    #[serde(rename = "type")]
+    pub(crate) val_t: IrType,
+}
+
+tag_enforcement_test!(TypedIdentifier);
 
 /// An operand that can be either a variable reference or an immediate value
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -266,6 +280,43 @@ tag_enforcement_test!(Operand);
 #[serde(rename_all = "snake_case", tag = "op")]
 #[tag = "ir-instruction[v3]"]
 pub enum Instruction {
+    /// Encodes the given value as a vector of raw Fr elements.
+    ///
+    /// This operation will result in an error if the number of outputs
+    /// is not the exact number of raw Fr elements required to represent a
+    /// value of the input type:
+    ///
+    ///  - Native:      1 output
+    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    Encode {
+        /// The value to encode
+        input: Operand,
+        /// The output variable names
+        outputs: Vec<Identifier>,
+    },
+    /// Decodes the given raw Fr elements as a value of the given type.
+    ///
+    /// This operation will result in an error if the number of inputs
+    /// is not the exact number of raw Fr elements required to represent a
+    /// value of the given type:
+    ///
+    ///  - Native:      1 input
+    ///  - JubjubPoint: 2 inputs (x and y coordinates)
+    ///
+    /// It will also result in an error if the operands are not of type
+    /// `Native`.
+    ///
+    /// The circuit may become unsatisfiable if the inputs do not encode
+    /// a valid value of the given type.
+    Decode {
+        /// The inputs to decode
+        inputs: Vec<Operand>,
+        /// The type to decode as
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
     /// No outputs
@@ -331,52 +382,36 @@ pub enum Instruction {
         /// The sequence of values to declare as public inputs
         inputs: Vec<Operand>,
     },
-    /// Adds two elliptic curve points. UB if either is not a valid curve point.
-    ///
-    /// Outputs 2 elements, `c_x`, `c_y`
-    EcAdd {
-        /// The affine x coordinate of `a`
-        a_x: Operand,
-        /// The affine y coordinate of `a`
-        a_y: Operand,
-        /// The affine x coordinate of `b`
-        b_x: Operand,
-        /// The affine y coordinate of `b`
-        b_y: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
-    },
-    /// Multiplies an elliptic curve point by a scalar. UB if it is not a valid
+    /// Multiplies an elliptic curve point by a scalar.
     /// curve point.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the product
     EcMul {
-        /// The affine x coordinate of `a`
-        a_x: Operand,
-        /// The affine y coordinate of `a`
-        a_y: Operand,
+        /// The point to be multiplied
+        a: Operand,
         /// The scalar to multiply by
         scalar: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The result of multiplication
+        output: Identifier,
     },
     /// Multiplies the group generator by a scalar.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the product
     EcMulGenerator {
         /// The scalar to multiply by
         scalar: Operand,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The result of multiplication
+        output: Identifier,
     },
     /// Hashes a sequence of field elements to an embedded curve point.
+    /// All inputs are required to be of type `Native`. Failure otherwise.
     ///
-    /// Outputs 2 elements, `c_x`, `c_y`
+    /// Outputs 1 element, the point
     HashToCurve {
         /// The values to hash to a curve point
         inputs: Vec<Operand>,
-        /// The output coordinates: [x, y]
-        outputs: Vec<Identifier>,
+        /// The resulting point
+        output: Identifier,
     },
     /// Divides with remainder by a power of two (number of bits).
     ///
@@ -443,7 +478,8 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Adds `a` and `b` in the prime field.
+    /// Adds `a` and `b`.
+    /// Supported on types: `Native, `JubjubPoint`.
     ///
     /// One output `a + b`
     Add {

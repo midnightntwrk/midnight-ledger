@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v8.0.0-rc.5**](../README.md)
 
 ***
 
@@ -108,6 +108,28 @@ replayEvents(sk, events): DustLocalState;
 #### Returns
 
 `DustLocalState`
+
+***
+
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(sk, events): DustLocalStateWithChanges;
+```
+
+#### Parameters
+
+##### sk
+
+[`DustSecretKey`](DustSecretKey.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`DustLocalStateWithChanges`](DustLocalStateWithChanges.md)
 
 ***
 

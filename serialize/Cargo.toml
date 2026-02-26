@@ -1,15 +1,17 @@
 [package]
 name = "midnight-serialize"
-version = "1.0.0-rc.3"
+version = "1.0.0"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Serialization primitives for Midnight's ledger."
 
 [features]
 proptest = ["dep:proptest", "dep:proptest-derive", "dep:rand"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-macros = { path = "../serialize-macros", package = "midnight-serialize-macros" }
+macros = { version = "1.0.0", path = "../serialize-macros", package = "midnight-serialize-macros" }
 lazy_static = "^1.5.0"
 konst = { version = "0.3.16", features = ["cmp"] }
 crypto = { version = "0.5.1", features = ["digest"] }

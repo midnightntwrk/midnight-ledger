@@ -361,9 +361,9 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v2"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v3"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v7"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v8"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
@@ -394,7 +394,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir --features binary";
+              cargoBuildFlags = "--package midnight-zkir --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];
@@ -420,7 +420,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir-v3 --features binary";
+              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];

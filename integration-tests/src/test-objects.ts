@@ -169,11 +169,15 @@ export class Static {
 
   static userAddress = () => dummyUserAddress();
 
-  static blockContext = (blockTime: Date): BlockContext => ({
-    secondsSinceEpoch: Static.blockTime(blockTime),
-    secondsSinceEpochErr: 0,
-    parentBlockHash: Static.parentBlockHash()
-  });
+  static blockContext = (blockTime: Date): BlockContext => {
+    const secondsSinceEpoch = Static.blockTime(blockTime);
+    return {
+      secondsSinceEpoch,
+      secondsSinceEpochErr: 0,
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: secondsSinceEpoch > 6n ? secondsSinceEpoch - 6n : 0n
+    };
+  };
 
   static shieldedCoinInfo = (value: bigint = Static.bigInt()): ShieldedCoinInfo => {
     const token = shieldedToken() as ShieldedTokenType;
