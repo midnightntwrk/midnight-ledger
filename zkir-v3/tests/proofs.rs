@@ -327,8 +327,8 @@ mod proof_tests {
            "version": { "major": 3, "minor": 0 },
            "inputs": [
               { "name": "%p0", "type": "Point<Jubjub>" },
-              { "name": "%s0", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1", "type": "Scalar<BLS12-381>" }
+              { "name": "%s0", "type": "Scalar<Jubjub>" },
+              { "name": "%s1", "type": "Scalar<Jubjub>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
