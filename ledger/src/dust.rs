@@ -1038,7 +1038,17 @@ impl<D: DB> DustState<D> {
                 const DISTRIBUTION_RESOLUTION: u128 = 10_000;
                 // NOTE: This arithmetic *should* be safe because of the NIGHT / DUST caps, and the
                 // resolution, but we use saturating arithmetic anyway just in case.
-                let ratio = output.value.saturating_mul(DISTRIBUTION_RESOLUTION) / output_sum;
+                // NOTE: The corner case of output_sum = 0 can occur, because we currently don't
+                // explicitly reject zero-value outputs. In this case, we *used to* panic here,
+                // which the node would unwind by catching the panic, and rejecting the
+                // transaction.
+                // Instead, we now mark the transaction invalid. As this also results in
+                // transaction rejection, this is a *backwards-compatible* fix.
+                let ratio = output
+                    .value
+                    .saturating_mul(DISTRIBUTION_RESOLUTION)
+                    .checked_div(output_sum)
+                    .ok_or(TransactionInvalid::DivideByZero)?;
                 let initial_value = ratio.saturating_mul(dust_out) / DISTRIBUTION_RESOLUTION;
                 state = state.fresh_dust_output(
                     initial_nonce(output_no as u32, parent_intent.intent_hash(0)),
