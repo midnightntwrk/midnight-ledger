@@ -28,7 +28,7 @@ storage = { version = "1.0.0", path = "../storage", package = "midnight-storage"
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
-zkir_v2 = { version = "2.1.0", path = "../zkir", package = "zkir", optional = true }
+zkir_v2 = { version = "2.1.0", path = "../zkir", package = "midnight-zkir", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"

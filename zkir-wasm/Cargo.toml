@@ -12,7 +12,7 @@ proptest = []
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-zkir = { path = "../zkir" }
+zkir = { path = "../zkir", package = "midnight-zkir" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
