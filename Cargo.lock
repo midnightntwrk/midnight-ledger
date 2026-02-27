@@ -2802,6 +2802,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
+ "midnight-zkir",
  "midnight-zswap",
  "pastey",
  "proptest",
@@ -2816,7 +2817,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
- "zkir",
 ]
 
 [[package]]
@@ -2974,6 +2974,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
+ "midnight-zkir",
  "midnight-zswap",
  "rand 0.8.5",
  "regex",
@@ -2987,7 +2988,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
- "zkir",
  "zkir-v3",
 ]
 
@@ -3184,6 +3184,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-zkir"
+version = "2.1.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "clap",
+ "console",
+ "const-hex",
+ "env_logger",
+ "futures-executor",
+ "group",
+ "hex",
+ "indicatif",
+ "log",
+ "midnight-base-crypto",
+ "midnight-circuits",
+ "midnight-proofs",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "midnight-zk-stdlib",
+ "midnight-zkir",
+ "pastey",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.5",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "midnight-zkir-v3-wasm"
 version = "3.0.0-rc.1"
 dependencies = [
@@ -3208,10 +3243,10 @@ dependencies = [
  "js-sys",
  "midnight-serialize",
  "midnight-transient-crypto",
+ "midnight-zkir",
  "rand 0.8.5",
  "wasm-bindgen",
  "wasm-bindgen-futures",
- "zkir",
 ]
 
 [[package]]
@@ -3242,6 +3277,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
+ "midnight-zkir",
  "pastey",
  "rand 0.8.5",
  "rayon",
@@ -3251,7 +3287,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "zeroize",
- "zkir",
 ]
 
 [[package]]
@@ -6042,41 +6077,6 @@ dependencies = [
  "proc-macro2",
  "quote 1.0.44",
  "syn 2.0.114",
-]
-
-[[package]]
-name = "zkir"
-version = "2.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "clap",
- "console",
- "const-hex",
- "env_logger",
- "futures-executor",
- "group",
- "hex",
- "indicatif",
- "log",
- "midnight-base-crypto",
- "midnight-circuits",
- "midnight-proofs",
- "midnight-serialize",
- "midnight-transient-crypto",
- "midnight-zk-stdlib",
- "pastey",
- "proptest",
- "proptest-derive",
- "rand 0.8.5",
- "rand_chacha 0.3.1",
- "serde",
- "serde_bytes",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "zkir",
 ]
 
 [[package]]
