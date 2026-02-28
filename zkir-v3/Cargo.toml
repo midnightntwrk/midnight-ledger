@@ -1,6 +1,6 @@
 [package]
 name = "midnight-zkir-v3"
-version = "3.0.0-rc.1"
+version = "3.0.0-rc.1-hard-fork-test"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -23,9 +23,9 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
 midnight-curves = { version = "0.2.0" }
 midnight-proofs = { version = "^0.7.0" }

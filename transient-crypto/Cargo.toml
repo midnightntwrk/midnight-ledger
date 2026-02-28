@@ -1,6 +1,6 @@
 [package]
 name = "midnight-transient-crypto"
-version = "2.0.1"
+version = "2.0.1-hard-fork-test"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -20,10 +20,10 @@ mock-verify = []
 public-internal-structure = []
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+storage-core = { path = "../storage-core", package = "midnight-storage-core" }
 
 ff = "^0.13.1"
 group = "^0.13.0"

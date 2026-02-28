@@ -19,16 +19,16 @@ mock-verify = ["transient-crypto/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
-coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
-onchain-runtime = { version = "3.0.0-rc.1", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { version = "8.0.0-rc.5", path = "../zswap", package = "midnight-zswap" }
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
-storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
-serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+zswap = { path = "../zswap", package = "midnight-zswap" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+storage = { path = "../storage", package = "midnight-storage" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+midnight-ledger-static = { path = "../static", package = "midnight-ledger-static" }
 
-zkir_v2 = { version = "2.1.0", path = "../zkir", package = "midnight-zkir", optional = true }
+zkir_v2 = { path = "../zkir", package = "midnight-zkir", optional = true }
 
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
