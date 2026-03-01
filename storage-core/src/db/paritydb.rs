@@ -64,28 +64,46 @@ impl GcPhase {
     }
 }
 
-/// Persisted GC metadata: phase + generation.
+/// Persisted GC metadata: phase + generation + optional sweep cursor.
 ///
 /// The generation alternates between 0 and 1 across GC cycles. A node is
 /// "black" (reached) if its GC_MARK entry matches the current generation, and
 /// "white" (unreached) otherwise. Flipping the generation at the start of each
 /// cycle avoids a costly O(live_nodes) reset of GC_MARK.
-#[derive(Debug, Clone, Copy)]
+///
+/// The sweep cursor tracks the last NODE_COLUMN key examined during an
+/// incremental sweep step, so subsequent steps skip past already-checked keys.
+#[derive(Debug, Clone)]
 struct GcMeta {
     phase: GcPhase,
     generation: u8,
+    /// Last key examined during sweep. `None` means start from the beginning.
+    sweep_cursor: Option<Vec<u8>>,
 }
 
 impl GcMeta {
-    fn to_bytes(&self) -> [u8; 2] {
-        [self.phase as u8, self.generation]
+    fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = vec![self.phase as u8, self.generation];
+        if let Some(ref cursor) = self.sweep_cursor {
+            let len = cursor.len() as u16;
+            buf.extend_from_slice(&len.to_le_bytes());
+            buf.extend_from_slice(cursor);
+        }
+        buf
     }
 
     fn from_bytes(bytes: &[u8]) -> Self {
-        assert_eq!(bytes.len(), 2, "GcMeta should be exactly 2 bytes");
+        assert!(bytes.len() >= 2, "GcMeta needs at least 2 bytes");
+        let sweep_cursor = if bytes.len() > 2 {
+            let len = u16::from_le_bytes([bytes[2], bytes[3]]) as usize;
+            Some(bytes[4..4 + len].to_vec())
+        } else {
+            None
+        };
         GcMeta {
             phase: GcPhase::from_byte(bytes[0]),
             generation: bytes[1],
+            sweep_cursor,
         }
     }
 }
@@ -194,7 +212,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
     /// Run a full GC cycle. Blocks until complete.
     pub fn gc(&self) {
         self.gc_start();
-        while self.gc_step(1024) {}
+        while self.gc_step(usize::MAX) {}
     }
 
     /// Returns true if a GC cycle is currently in progress.
@@ -232,6 +250,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         self.gc_write_meta(&GcMeta {
             phase: GcPhase::Mark,
             generation: new_gen,
+            sweep_cursor: None,
         });
     }
 
@@ -249,20 +268,27 @@ impl<H: WellBehavedHasher> ParityDb<H> {
                     self.gc_write_meta(&GcMeta {
                         phase: GcPhase::Sweep,
                         generation: meta.generation,
+                        sweep_cursor: None,
                     });
                 }
                 true
             }
             GcPhase::Sweep => {
-                let (_deleted, sweep_done) = self.gc_sweep_step(&meta, budget);
+                let (_deleted, sweep_done, new_cursor) = self.gc_sweep_step(&meta, budget);
                 if sweep_done {
                     self.gc_write_meta(&GcMeta {
                         phase: GcPhase::Clean,
                         generation: meta.generation,
+                        sweep_cursor: None,
                     });
                     self.db.flush();
                     false
                 } else {
+                    self.gc_write_meta(&GcMeta {
+                        phase: GcPhase::Sweep,
+                        generation: meta.generation,
+                        sweep_cursor: new_cursor,
+                    });
                     true
                 }
             }
@@ -279,6 +305,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
             .unwrap_or(GcMeta {
                 phase: GcPhase::Clean,
                 generation: 0,
+                sweep_cursor: None,
             })
     }
 
@@ -286,7 +313,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         self.db
             .commit_changes(vec![(
                 GC_META,
-                Operation::Set(GC_META_KEY.to_vec(), meta.to_bytes().to_vec()),
+                Operation::Set(GC_META_KEY.to_vec(), meta.to_bytes()),
             )])
             .expect("failed to write gc_meta");
         self.gc_active
@@ -297,7 +324,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
     fn gc_mark_step(&self, meta: &GcMeta, budget: usize) -> (usize, bool) {
         // Collect up to `budget` grey keys.
         let mut grey_iter = self.db.iter(GC_GREY).expect("Failed to iterate GC_GREY");
-        let mut grey_batch: Vec<Vec<u8>> = Vec::with_capacity(budget);
+        let mut grey_batch: Vec<Vec<u8>> = Vec::with_capacity(budget.min(1024));
         while grey_batch.len() < budget {
             match grey_iter
                 .next()
@@ -366,15 +393,26 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         (processed, grey_empty)
     }
 
-    /// Delete up to `budget` unreachable nodes. Returns `(deleted, sweep_done)`.
-    fn gc_sweep_step(&self, meta: &GcMeta, budget: usize) -> (usize, bool) {
+    /// Delete up to `budget` unreachable nodes. Returns `(deleted, sweep_done, new_cursor)`.
+    ///
+    /// The sweep cursor (`meta.sweep_cursor`) tracks the last NODE_COLUMN key
+    /// examined in a previous step. Keys at or before the cursor are skipped
+    /// cheaply (byte comparison only, no GC_MARK lookup), so total sweep work
+    /// across all incremental steps is O(n) iterations rather than O(n * steps).
+    fn gc_sweep_step(
+        &self,
+        meta: &GcMeta,
+        budget: usize,
+    ) -> (usize, bool, Option<Vec<u8>>) {
         let current_gen = meta.generation;
+        let cursor = meta.sweep_cursor.as_deref();
         let mut node_iter = self
             .db
             .iter(NODE_COLUMN)
             .expect("Failed to iterate NODE_COLUMN");
         let mut ops = Vec::new();
         let mut deleted = 0;
+        let mut last_key: Option<Vec<u8>>;
 
         loop {
             match node_iter
@@ -382,6 +420,13 @@ impl<H: WellBehavedHasher> ParityDb<H> {
                 .expect("Failed to get next from NODE_COLUMN iterator")
             {
                 Some((k, _)) => {
+                    // Skip keys we already examined in a previous step.
+                    if let Some(c) = cursor {
+                        if k.as_slice() <= c {
+                            continue;
+                        }
+                    }
+                    last_key = Some(k.clone());
                     let is_marked = self
                         .db
                         .get(GC_MARK, &k)
@@ -405,7 +450,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
                             .commit_changes(ops)
                             .expect("Failed to commit gc sweep step");
                     }
-                    return (deleted, true);
+                    return (deleted, true, None);
                 }
             }
         }
@@ -416,7 +461,7 @@ impl<H: WellBehavedHasher> ParityDb<H> {
                 .commit_changes(ops)
                 .expect("Failed to commit gc sweep step");
         }
-        (deleted, false)
+        (deleted, false, last_key)
     }
 }
 
@@ -569,6 +614,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                 self.gc_write_meta(&GcMeta {
                     phase: GcPhase::Mark,
                     generation: meta.generation,
+                    sweep_cursor: None,
                 });
             }
         }
@@ -618,6 +664,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                 self.gc_write_meta(&GcMeta {
                     phase: GcPhase::Mark,
                     generation: meta.generation,
+                    sweep_cursor: None,
                 });
             }
         }
