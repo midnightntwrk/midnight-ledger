@@ -183,6 +183,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
@@ -197,6 +198,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             parity_db::Operation::Dereference(key.0.to_vec()),
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_update<I>(&mut self, iter: I)
@@ -245,6 +247,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             }
         }
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_get_nodes<I>(
@@ -277,6 +280,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         )];
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
@@ -507,6 +511,7 @@ impl<H: WellBehavedHasher> DB for ParityDbTree<H> {
         self.db
             .commit_changes(ops)
             .expect("Failed to commit tree to db");
+        self.db.flush();
 
         // Read back the wrapper root to get the actual root's address
         let (_, wrapper_children) = self
@@ -533,6 +538,7 @@ impl<H: WellBehavedHasher> DB for ParityDbTree<H> {
         self.db
             .commit_changes(ops)
             .expect("Failed to reference tree in db");
+        self.db.flush();
     }
 
     fn dereference_tree(&mut self, key: &ArenaHash<Self::Hasher>) {
@@ -543,6 +549,7 @@ impl<H: WellBehavedHasher> DB for ParityDbTree<H> {
         self.db
             .commit_changes(ops)
             .expect("Failed to dereference tree in db");
+        self.db.flush();
     }
 
     fn get_tree_root(

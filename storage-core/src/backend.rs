@@ -21,7 +21,7 @@
 
 use crate::{
     WellBehavedHasher,
-    arena::{ArenaHash, ArenaKey, NodeAddress},
+    arena::{ArenaHash, ArenaKey, DirectChildNode, NodeAddress},
     cache::Cache,
     db::{DB, NewTreeNode, TreeChildRef, encode_tree_node_data},
 };
@@ -339,6 +339,11 @@ impl<D: DB> StorageBackend<D> {
                 get_cache_misses: 0,
             }),
         }
+    }
+
+    /// TODO
+    pub fn get_db(&mut self) -> &mut D {
+        &mut self.database
     }
 
     /// Get object with key, trying to get object from memory and falling back
@@ -850,84 +855,75 @@ impl<D: DB> StorageBackend<D> {
         let children = obj
             .children
             .iter()
-            .map(|child| match child {
-                ArenaKey::Ref(hash, lock) => {
-                    if let Some(addr) = lock.get() {
-                        // Child already in DB with known address.
-                        TreeChildRef::Existing(*addr)
-                    } else if let Some(&addr) = self.hash_to_addr.get(hash) {
-                        // Child in DB with address from hash_to_addr mapping.
-                        let _ = lock.set(addr);
-                        TreeChildRef::Existing(addr)
-                    } else if let Some((child_obj, _)) = new_objects.get(hash) {
-                        // Child is a new object in the write cache.
-                        // Replace the lock entry for the child — the recursive call
-                        // will push its own entry as part of DFS pre-order.
-                        // But first, record the lock for this child-from-parent.
-                        let saved_len = addr_locks.len();
-                        let child_tree = self.build_new_tree_node(
-                            hash,
-                            child_obj,
-                            new_objects,
-                            addr_locks,
-                        );
-                        // Overwrite the child's own entry with the parent's lock.
-                        addr_locks[saved_len].1 = Some(lock.clone());
-                        TreeChildRef::New(child_tree)
-                    } else if let Some(cv) = self.peek_from_memory(hash) {
-                        if cv.get_obj().is_some() {
-                            // Child is in read cache (already in DB).
-                            // Look up its address.
-                            if let Some(&addr) = self.hash_to_addr.get(hash) {
-                                let _ = lock.set(addr);
-                                TreeChildRef::Existing(addr)
-                            } else {
-                                panic!("child {hash:?} in read cache but no known address")
-                            }
-                        } else {
-                            panic!("child {hash:?} has no object in cache")
-                        }
-                    } else {
-                        panic!("child {hash:?} not found in cache or DB")
-                    }
-                }
-                ArenaKey::Direct(d) => {
-                    // Expand Direct children into new tree nodes.
-                    let child_hash = &d.hash;
-                    let data = encode_tree_node_data::<D::Hasher>(child_hash, &d.data);
-                    // Direct children's children need recursive expansion too.
-                    let direct_children = d
-                        .children
-                        .iter()
-                        .map(|grandchild| match grandchild {
-                            ArenaKey::Ref(h, lock) => {
-                                if let Some(addr) = lock.get() {
-                                    TreeChildRef::Existing(*addr)
-                                } else if let Some(&addr) = self.hash_to_addr.get(h) {
-                                    let _ = lock.set(addr);
-                                    TreeChildRef::Existing(addr)
-                                } else {
-                                    panic!("Direct child's grandchild {h:?} has no known address")
-                                }
-                            }
-                            ArenaKey::Direct(_) => {
-                                // Nested direct children — rare but handle recursively.
-                                // For now, panic to keep things simple.
-                                panic!("nested Direct children not yet supported in tree flush")
-                            }
-                        })
-                        .collect();
-                    addr_locks.push((child_hash.clone(), None));
-                    TreeChildRef::New(NewTreeNode {
-                        data,
-                        children: direct_children,
-                    })
-                }
-            })
+            .map(|child| self.arena_key_to_tree_child_ref(child, new_objects, addr_locks))
             .collect();
 
         let data = encode_tree_node_data::<D::Hasher>(key, &obj.data);
         NewTreeNode { data, children }
+    }
+
+    /// Recursively expand a `Direct` child node into a `TreeChildRef::New`.
+    fn build_direct_tree_node(
+        &self,
+        d: &DirectChildNode<D::Hasher>,
+        new_objects: &HashMap<ArenaHash<D::Hasher>, (OnDiskObject<D::Hasher>, Option<Delta>)>,
+        addr_locks: &mut Vec<(ArenaHash<D::Hasher>, Option<Arc<std::sync::OnceLock<NodeAddress>>>)>,
+    ) -> TreeChildRef {
+        let child_hash = &d.hash;
+        let data = encode_tree_node_data::<D::Hasher>(child_hash, &d.data);
+        // Push self BEFORE children to match DFS pre-order address assignment
+        addr_locks.push((child_hash.clone(), None));
+        let children = d
+            .children
+            .iter()
+            .map(|grandchild| self.arena_key_to_tree_child_ref(grandchild, new_objects, addr_locks))
+            .collect();
+        TreeChildRef::New(NewTreeNode { data, children })
+    }
+
+    /// Convert an `ArenaKey` child reference into a `TreeChildRef` for tree insertion.
+    fn arena_key_to_tree_child_ref(
+        &self,
+        child: &ArenaKey<D::Hasher>,
+        new_objects: &HashMap<ArenaHash<D::Hasher>, (OnDiskObject<D::Hasher>, Option<Delta>)>,
+        addr_locks: &mut Vec<(ArenaHash<D::Hasher>, Option<Arc<std::sync::OnceLock<NodeAddress>>>)>,
+    ) -> TreeChildRef {
+        match child {
+            ArenaKey::Ref(hash, lock) => {
+                if let Some(addr) = lock.get() {
+                    TreeChildRef::Existing(*addr)
+                } else if let Some(&addr) = self.hash_to_addr.get(hash) {
+                    let _ = lock.set(addr);
+                    TreeChildRef::Existing(addr)
+                } else if let Some((child_obj, _)) = new_objects.get(hash) {
+                    let saved_len = addr_locks.len();
+                    let child_tree =
+                        self.build_new_tree_node(hash, child_obj, new_objects, addr_locks);
+                    addr_locks[saved_len].1 = Some(lock.clone());
+                    TreeChildRef::New(child_tree)
+                } else if let Some(cv) = self.peek_from_memory(hash) {
+                    if cv.get_obj().is_some() {
+                        if let Some(&addr) = self.hash_to_addr.get(hash) {
+                            let _ = lock.set(addr);
+                            TreeChildRef::Existing(addr)
+                        } else {
+                            panic!("child {hash:?} in read cache but no known address")
+                        }
+                    } else {
+                        panic!("child {hash:?} has no object in cache")
+                    }
+                } else {
+                    panic!("child {hash:?} not found in cache or DB")
+                }
+            }
+            ArenaKey::Direct(d) => {
+                if let Some(&addr) = self.hash_to_addr.get(&d.hash) {
+                    TreeChildRef::Existing(addr)
+                } else {
+                    self.build_direct_tree_node(d, new_objects, addr_locks)
+                }
+            }
+        }
     }
 
     /// Push pending writes to shrink the write cache to `self.cache_size`.
