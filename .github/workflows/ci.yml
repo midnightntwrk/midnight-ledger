@@ -94,7 +94,7 @@ jobs:
           nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
 
       - name: Upload Logs
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: logs-${{ matrix.os }}
           path: integration-tests/logs/
@@ -145,14 +145,14 @@ jobs:
       #    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Test Results
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # ratchet:actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # ratchet:actions/upload-artifact@v4
         if: always()
         with:
           name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
           path: "./integration-tests/reports/ctrf-report.json"
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
           path: ./integration-tests/reports/test-report.xml
@@ -281,7 +281,7 @@ jobs:
       #      **/target/test-*.xml
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: "proof-server-test-results-${{ matrix.os }}"
           path: target/test-*
