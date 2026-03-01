@@ -131,7 +131,7 @@ impl<D: DB> Deserializable for ChildRef<D> {
 
 impl<D: DB> Distribution<ChildRef<D>> for Standard {
     fn sample<R: rand::Rng + ?Sized>(&self, rng: &mut R) -> ChildRef<D> {
-        ChildRef::new(ArenaKey::Ref(rng.r#gen()))
+        ChildRef::new(ArenaKey::new_ref(rng.r#gen()))
     }
 }
 
@@ -181,7 +181,7 @@ impl<D: DB> RcMap<D> {
     /// Get the current reference count for a key.
     /// Returns Some(n) if key is charged (n >= 0), None if key is not in `RcMap`.
     pub(crate) fn get_rc(&self, key: &ArenaKey<D::Hasher>) -> Option<u64> {
-        if let ArenaKey::Ref(key) = key
+        if let ArenaKey::Ref(key, _) = key
             && let Some(count) = self.rc_ge_1.get(key)
         {
             Some(*count)
@@ -220,8 +220,8 @@ impl<D: DB> RcMap<D> {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.clone(),
                     rc_0: self.rc_0.insert(
-                        ArenaKey::Ref(key.clone()),
-                        ChildRef::new(ArenaKey::Ref(key.clone())),
+                        ArenaKey::new_ref(key.clone()),
+                        ChildRef::new(ArenaKey::new_ref(key.clone())),
                     ),
                 }
             }
@@ -230,7 +230,7 @@ impl<D: DB> RcMap<D> {
             {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.insert(key.clone(), updated),
-                    rc_0: self.rc_0.remove(&ArenaKey::Ref(key.clone())),
+                    rc_0: self.rc_0.remove(&ArenaKey::new_ref(key.clone())),
                 }
             }
             (1.., 1..) =>
@@ -247,8 +247,8 @@ impl<D: DB> RcMap<D> {
                 RcMap {
                     rc_ge_1: self.rc_ge_1.remove(key),
                     rc_0: self.rc_0.insert(
-                        ArenaKey::Ref(key.clone()),
-                        ChildRef::new(ArenaKey::Ref(key.clone())),
+                        ArenaKey::new_ref(key.clone()),
+                        ChildRef::new(ArenaKey::new_ref(key.clone())),
                     ),
                 }
             }
@@ -291,7 +291,7 @@ impl<D: DB> RcMap<D> {
 
         // Add all keys with rc >= 1
         for (key, count) in self.rc_ge_1.iter() {
-            result.insert(ArenaKey::Ref(key.clone()), *count);
+            result.insert(ArenaKey::new_ref(key.clone()), *count);
         }
 
         result
@@ -379,7 +379,7 @@ pub(crate) mod tests {
             }
             match current {
                 ArenaKey::Direct(d) => to_visit.extend(d.children.iter().cloned()),
-                ArenaKey::Ref(ref r) => {
+                ArenaKey::Ref(ref r, _) => {
                     arena.with_backend(|backend| {
                         let disk_obj = backend.get(r).expect("Key should exist in backend");
                         to_visit.extend(disk_obj.children.clone());
@@ -398,7 +398,7 @@ pub(crate) mod tests {
 
         // Create RcMap with key in rc_0
         let rcmap = RcMap::<InMemoryDB>::default().modify_rc(&key, 0);
-        assert!(rcmap.rc_0.contains_key(&ArenaKey::Ref(key.clone())));
+        assert!(rcmap.rc_0.contains_key(&ArenaKey::new_ref(key.clone())));
 
         let descendants = get_rcmap_descendants(&rcmap);
         assert!(
@@ -413,17 +413,17 @@ pub(crate) mod tests {
         // Create test keys using simple u8 values
         let val1 = Sp::<_, InMemoryDB>::new([1u8; 1024]);
         let key1 = val1.as_child();
-        let ArenaKey::Ref(hash1) = key1.clone() else {
+        let ArenaKey::Ref(hash1, _) = key1.clone() else {
             panic!("testing refs");
         };
         let val2 = Sp::<_, InMemoryDB>::new([2u8; 1024]);
         let key2 = val2.as_child();
-        let ArenaKey::Ref(hash2) = key2.clone() else {
+        let ArenaKey::Ref(hash2, _) = key2.clone() else {
             panic!("testing refs");
         };
         let val3 = Sp::<_, InMemoryDB>::new([3u8; 1024]);
         let key3 = val3.as_child();
-        let ArenaKey::Ref(hash3) = key3.clone() else {
+        let ArenaKey::Ref(hash3, _) = key3.clone() else {
             panic!("testing refs");
         };
 

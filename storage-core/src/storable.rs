@@ -143,7 +143,7 @@ pub(crate) fn child_from<H: WellBehavedHasher>(
     if is_in_small_object_limit(data, children) {
         ArenaKey::Direct(DirectChildNode::new(data.to_vec(), children.to_vec()))
     } else {
-        ArenaKey::Ref(hash(data, children.iter().map(ArenaKey::hash)))
+        ArenaKey::new_ref(hash(data, children.iter().map(ArenaKey::hash)))
     }
 }
 

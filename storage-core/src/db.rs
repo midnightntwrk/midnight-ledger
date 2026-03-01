@@ -13,20 +13,22 @@
 
 //! A database of content-addressed DAG nodes.
 
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
 mod sql;
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
 pub use sql::SqlDB;
 #[cfg(feature = "parity-db")]
 mod paritydb;
 #[cfg(feature = "parity-db")]
 pub use paritydb::ParityDb;
+#[cfg(feature = "parity-db")]
+pub use paritydb::ParityDbTree;
 
 use crate::DefaultHasher;
 use crate::backend::OnDiskObject;
 use crate::{
     WellBehavedHasher,
-    arena::{ArenaHash, ArenaKey},
+    arena::{ArenaHash, ArenaKey, NodeAddress},
 };
 #[cfg(feature = "proptest")]
 use proptest::{
@@ -60,6 +62,51 @@ pub trait DummyArbitrary: Arbitrary {}
 /// Arbitrary is required on DB to be able to easily derive Arbitrary on Sp types, depending on
 /// feature flag "proptest"
 pub trait DummyArbitrary {}
+
+// ============================================================================
+// Tree node types for ParityDB multitree operations
+// ============================================================================
+
+/// A node being inserted into a tree. Contains the node's data and references
+/// to its children, which may themselves be new nodes or existing nodes
+/// identified by their `NodeAddress`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NewTreeNode {
+    /// Encoded node data: `[hash || payload]`.
+    ///
+    /// The hash is the content hash of this node. The payload is the binary
+    /// representation of the stored value. Child hashes are not embedded;
+    /// they can be obtained by reading child nodes.
+    pub data: Vec<u8>,
+    /// References to child nodes.
+    pub children: Vec<TreeChildRef>,
+}
+
+/// A reference to a child node within a tree being inserted.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum TreeChildRef {
+    /// A new node being inserted for the first time.
+    New(NewTreeNode),
+    /// An existing node already in the database, referenced by address.
+    Existing(NodeAddress),
+}
+
+/// A node read back from the tree database.
+///
+/// Children are returned as bare `NodeAddress` values. The caller
+/// (typically `StorageBackend`) is responsible for pairing addresses with
+/// hashes — either from its own cache or by reading the child nodes.
+#[derive(Clone, Debug)]
+pub struct TreeReadNode<H: WellBehavedHasher> {
+    /// The content hash of this node.
+    pub hash: ArenaHash<H>,
+    /// The payload data (the binary representation of the stored value).
+    pub data: Vec<u8>,
+    /// Addresses of this node's children in the tree database.
+    pub children: Vec<NodeAddress>,
+    /// This node's own address in the tree database.
+    pub addr: NodeAddress,
+}
 
 /// A database of Merkle DAG nodes.
 ///
@@ -123,27 +170,73 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// The hasher used in this DB.
     type Hasher: WellBehavedHasher;
 
+    // ====================================================================
+    // Shared methods (required)
+    // ====================================================================
+
+    /// Return a mapping from key to root count, for all the roots in this
+    /// DB. All mapped root counts will be positive.
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32>;
+
+    /// Return the number of nodes in this DB.
+    ///
+    /// Only used for diagnostics/testing. Returns 0 by default.
+    fn size(&self) -> usize {
+        0
+    }
+
+    /// Get the number of times the node with key `key` has been marked as a GC
+    /// root. Returns 0 if the node is not a GC root.
+    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32 {
+        self.get_roots().get(key).copied().unwrap_or(0)
+    }
+
+    // ====================================================================
+    // Flat KV methods (legacy; panicking defaults for tree-only impls)
+    // ====================================================================
+
     /// Get node in DAG with key `key`.
-    fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
+    fn get_node(&self, _key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     #[cfg(not(feature = "layout-v2"))]
     /// Get the keys for all the unreachable nodes, i.e. the nodes with
     /// `ref_count == 0`, which aren't marked as GC roots.
-    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>>;
+    fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     /// Insert a DAG node with key `key`.
-    fn insert_node(&mut self, key: ArenaHash<Self::Hasher>, object: OnDiskObject<Self::Hasher>);
+    fn insert_node(
+        &mut self,
+        _key: ArenaHash<Self::Hasher>,
+        _object: OnDiskObject<Self::Hasher>,
+    ) {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     /// Remove the DAG node with key `key`.
-    fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>);
+    fn delete_node(&mut self, _key: &ArenaHash<Self::Hasher>) {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
+
+    /// Set the root count of the node with key `key` to `count`. If `count` is
+    /// 0, the node will no longer be a GC root.
+    fn set_root_count(&mut self, _key: ArenaHash<Self::Hasher>, _count: u32) {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     /// Batch update the database.
     ///
     /// For `DB`s that use expensive write transactions, implementors should
     /// combine many updates in a single transaction.
-    fn batch_update<I>(&mut self, iter: I)
+    fn batch_update<I>(&mut self, _iter: I)
     where
-        I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>;
+        I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>,
+    {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     /// Batch get nodes.
     ///
@@ -152,10 +245,13 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     #[allow(clippy::type_complexity)]
     fn batch_get_nodes<I>(
         &self,
-        keys: I,
+        _keys: I,
     ) -> std::vec::Vec<(ArenaHash<Self::Hasher>, Option<OnDiskObject<Self::Hasher>>)>
     where
-        I: Iterator<Item = ArenaHash<Self::Hasher>>;
+        I: Iterator<Item = ArenaHash<Self::Hasher>>,
+    {
+        unimplemented!("flat KV operations not supported by this DB implementation")
+    }
 
     /// Get all nodes reachable from the node with key `key` using a breadth
     /// first search.
@@ -262,21 +358,64 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
         kvs
     }
 
-    /// Get the number of times the node with key `key` has been marked as a GC
-    /// root. Returns 0 if the node is not a GC root.
-    fn get_root_count(&self, key: &ArenaHash<Self::Hasher>) -> u32;
+    // ====================================================================
+    // Tree methods for ParityDB multitree operations
+    // (panicking defaults for flat-only impls)
+    // ====================================================================
 
-    /// Set the root count of the node with key `key` to `count`. If `count` is
-    /// 0, the node will no longer be a GC root.
-    fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32);
+    /// Insert a tree under the given root key.
+    ///
+    /// Returns `NodeAddress` values for all `TreeChildRef::New` nodes in the
+    /// tree, in DFS pre-order (skipping `Existing` refs). The root node's
+    /// address is the first element.
+    fn insert_tree(
+        &mut self,
+        _key: ArenaHash<Self::Hasher>,
+        _root: NewTreeNode,
+    ) -> Vec<NodeAddress> {
+        unimplemented!("tree operations not supported by this DB implementation")
+    }
 
-    /// Return a mapping from key to root count, for all the roots in this
-    /// DB. All mapped root counts will be positive.
-    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32>;
+    /// Increment the reference count of the tree at the given root key.
+    fn reference_tree(&mut self, _key: &ArenaHash<Self::Hasher>) {
+        unimplemented!("tree operations not supported by this DB implementation")
+    }
 
-    /// Return the number of nodes in this DB.
-    fn size(&self) -> usize;
+    /// Decrement the reference count of the tree at the given root key.
+    /// The tree (and any exclusively-owned subtrees) is removed when the
+    /// count reaches zero.
+    fn dereference_tree(&mut self, _key: &ArenaHash<Self::Hasher>) {
+        unimplemented!("tree operations not supported by this DB implementation")
+    }
+
+    /// Read a tree's root node by its root key.
+    ///
+    /// Returns the decoded node with hash, payload, and children as
+    /// bare `NodeAddress` values.
+    fn get_tree_root(
+        &self,
+        _key: &ArenaHash<Self::Hasher>,
+    ) -> Option<TreeReadNode<Self::Hasher>> {
+        unimplemented!("tree operations not supported by this DB implementation")
+    }
+
+    /// Read a node by its `NodeAddress`.
+    fn get_node_by_addr(&self, _addr: NodeAddress) -> Option<TreeReadNode<Self::Hasher>> {
+        unimplemented!("tree operations not supported by this DB implementation")
+    }
+
+    /// Batch read nodes by their `NodeAddress` values.
+    fn batch_get_nodes_by_addr(
+        &self,
+        addrs: &[NodeAddress],
+    ) -> Vec<Option<TreeReadNode<Self::Hasher>>> {
+        addrs
+            .iter()
+            .map(|addr| self.get_node_by_addr(*addr))
+            .collect()
+    }
 }
+
 
 /// A dubious default implementation of `DB::batch_update`.
 ///
@@ -452,6 +591,276 @@ impl<H: WellBehavedHasher> Default for InMemoryDB<H> {
     }
 }
 
+// ============================================================================
+// Tree node data encoding/decoding helpers
+// ============================================================================
+
+/// Encode a tree node's data in the format: `[hash || payload]`.
+///
+/// The hash is the content hash of the node. The payload is the binary
+/// representation of the stored value. Child information is stored
+/// separately by the tree database (as `NodeAddress` values).
+pub fn encode_tree_node_data<H: WellBehavedHasher>(
+    hash: &ArenaHash<H>,
+    payload: &[u8],
+) -> Vec<u8> {
+    let hash_size = <H as crypto::digest::OutputSizeUser>::output_size();
+    let mut data = Vec::with_capacity(hash_size + payload.len());
+    data.extend_from_slice(&hash.0);
+    data.extend_from_slice(payload);
+    data
+}
+
+/// Decode a tree node's data from the format produced by [`encode_tree_node_data`].
+///
+/// Returns the hash and payload. The child addresses and this node's own
+/// address come separately from the tree database.
+pub fn decode_tree_node_data<H: WellBehavedHasher>(
+    data: &[u8],
+    child_addresses: Vec<NodeAddress>,
+    addr: NodeAddress,
+) -> Option<TreeReadNode<H>> {
+    use crypto::digest::OutputSizeUser;
+    let hash_size = <H as OutputSizeUser>::output_size();
+
+    if data.len() < hash_size {
+        return None;
+    }
+
+    #[allow(deprecated)]
+    let hash = ArenaHash(
+        crypto::digest::crypto_common::generic_array::GenericArray::clone_from_slice(
+            &data[..hash_size],
+        ),
+    );
+
+    let payload = data[hash_size..].to_vec();
+
+    Some(TreeReadNode {
+        hash,
+        data: payload,
+        children: child_addresses,
+        addr,
+    })
+}
+
+// ============================================================================
+// InMemoryTreeDB: in-memory implementation of TreeDB for testing
+// ============================================================================
+
+/// Internal representation of a stored tree node in `InMemoryTreeDB`.
+#[derive(Clone, Debug)]
+struct StoredTreeNode {
+    /// The encoded data blob (same format as would be stored in ParityDB).
+    data: Vec<u8>,
+    /// Addresses of child nodes.
+    child_addresses: Vec<NodeAddress>,
+    /// Reference count (number of parent nodes referencing this node).
+    ref_count: u32,
+}
+
+#[derive(Clone, Debug)]
+/// An in-memory tree database, simulating ParityDB's multitree semantics.
+pub struct InMemoryTreeDB<H: WellBehavedHasher = crate::DefaultHasher> {
+    /// All stored nodes, keyed by their assigned `NodeAddress`.
+    nodes: Arc<Mutex<HashMap<NodeAddress, StoredTreeNode>>>,
+    /// Root keys mapped to (wrapper_node_address, ref_count).
+    /// The wrapper node has a single child which is the actual root.
+    roots: Arc<Mutex<HashMap<ArenaHash<H>, (NodeAddress, u32)>>>,
+    /// Next address to assign.
+    next_addr: Arc<Mutex<NodeAddress>>,
+}
+
+impl<H: WellBehavedHasher> Default for InMemoryTreeDB<H> {
+    fn default() -> Self {
+        Self {
+            nodes: Arc::default(),
+            roots: Arc::default(),
+            next_addr: Arc::new(Mutex::new(1)), // start at 1 so 0 is never used
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> DummyArbitrary for InMemoryTreeDB<H> {}
+
+#[cfg(feature = "proptest")]
+impl<H: WellBehavedHasher> Arbitrary for InMemoryTreeDB<H> {
+    type Parameters = ();
+    type Strategy = DummyDBStrategy<Self>;
+
+    fn arbitrary_with(_args: Self::Parameters) -> Self::Strategy {
+        DummyDBStrategy::<Self>(PhantomData)
+    }
+}
+
+impl<H: WellBehavedHasher> InMemoryTreeDB<H> {
+    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, HashMap<NodeAddress, StoredTreeNode>> {
+        self.nodes.lock().expect("db lock poisoned")
+    }
+
+    fn lock_roots(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, (NodeAddress, u32)>> {
+        self.roots.lock().expect("db lock poisoned")
+    }
+
+    fn alloc_addr(&self) -> NodeAddress {
+        let mut next = self.next_addr.lock().expect("db lock poisoned");
+        let addr = *next;
+        *next += 1;
+        addr
+    }
+
+    /// Recursively insert a `NewTreeNode` tree, assigning addresses to all new
+    /// nodes and incrementing ref counts for existing ones. Returns the
+    /// addresses of all `New` nodes in DFS pre-order.
+    fn insert_tree_recursive(
+        &self,
+        node: NewTreeNode,
+        new_addrs: &mut Vec<NodeAddress>,
+        nodes: &mut std::sync::MutexGuard<'_, HashMap<NodeAddress, StoredTreeNode>>,
+    ) -> NodeAddress {
+        let addr = self.alloc_addr();
+        new_addrs.push(addr);
+
+        let mut child_addresses = Vec::with_capacity(node.children.len());
+        for child_ref in node.children {
+            match child_ref {
+                TreeChildRef::New(child_node) => {
+                    let child_addr =
+                        self.insert_tree_recursive(child_node, new_addrs, nodes);
+                    // New nodes start with ref_count = 1 (from this parent).
+                    // The ref_count was already set to 1 when the child was inserted.
+                    child_addresses.push(child_addr);
+                }
+                TreeChildRef::Existing(child_addr) => {
+                    // Increment ref count of existing node.
+                    if let Some(existing) = nodes.get_mut(&child_addr) {
+                        existing.ref_count += 1;
+                    }
+                    child_addresses.push(child_addr);
+                }
+            }
+        }
+
+        nodes.insert(
+            addr,
+            StoredTreeNode {
+                data: node.data,
+                child_addresses,
+                ref_count: 1, // one reference from parent (or root table)
+            },
+        );
+
+        addr
+    }
+
+    /// Recursively decrement ref counts and remove unreferenced nodes.
+    fn dereference_recursive(
+        &self,
+        addr: NodeAddress,
+        nodes: &mut std::sync::MutexGuard<'_, HashMap<NodeAddress, StoredTreeNode>>,
+    ) {
+        let should_remove = if let Some(node) = nodes.get_mut(&addr) {
+            node.ref_count = node.ref_count.saturating_sub(1);
+            node.ref_count == 0
+        } else {
+            return;
+        };
+
+        if should_remove {
+            let node = nodes.remove(&addr).unwrap();
+            for child_addr in node.child_addresses {
+                self.dereference_recursive(child_addr, nodes);
+            }
+        }
+    }
+
+    fn read_node(
+        &self,
+        addr: NodeAddress,
+        nodes: &std::sync::MutexGuard<'_, HashMap<NodeAddress, StoredTreeNode>>,
+    ) -> Option<TreeReadNode<H>> {
+        let stored = nodes.get(&addr)?;
+        decode_tree_node_data(&stored.data, stored.child_addresses.clone(), addr)
+    }
+}
+
+impl<H: WellBehavedHasher> DB for InMemoryTreeDB<H> {
+    type Hasher = H;
+
+    fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
+        self.lock_roots()
+            .iter()
+            .map(|(k, (_, count))| (k.clone(), *count))
+            .collect()
+    }
+
+    fn size(&self) -> usize {
+        self.lock_nodes().len()
+    }
+
+    fn insert_tree(
+        &mut self,
+        key: ArenaHash<Self::Hasher>,
+        root: NewTreeNode,
+    ) -> Vec<NodeAddress> {
+        let mut new_addrs = Vec::new();
+        let mut nodes = self.lock_nodes();
+        let root_addr = self.insert_tree_recursive(root, &mut new_addrs, &mut nodes);
+        drop(nodes);
+
+        let mut roots = self.lock_roots();
+        // If tree already exists for this key, dereference old one
+        if let Some((old_addr, _)) = roots.remove(&key) {
+            let mut nodes = self.lock_nodes();
+            self.dereference_recursive(old_addr, &mut nodes);
+        }
+        roots.insert(key, (root_addr, 1));
+
+        new_addrs
+    }
+
+    fn reference_tree(&mut self, key: &ArenaHash<Self::Hasher>) {
+        let mut roots = self.lock_roots();
+        if let Some((_, ref_count)) = roots.get_mut(key) {
+            *ref_count += 1;
+        }
+    }
+
+    fn dereference_tree(&mut self, key: &ArenaHash<Self::Hasher>) {
+        let mut roots = self.lock_roots();
+        let should_remove = if let Some((_, ref_count)) = roots.get_mut(key) {
+            *ref_count = ref_count.saturating_sub(1);
+            *ref_count == 0
+        } else {
+            return;
+        };
+
+        if should_remove {
+            let (root_addr, _) = roots.remove(key).unwrap();
+            drop(roots);
+            let mut nodes = self.lock_nodes();
+            self.dereference_recursive(root_addr, &mut nodes);
+        }
+    }
+
+    fn get_tree_root(
+        &self,
+        key: &ArenaHash<Self::Hasher>,
+    ) -> Option<TreeReadNode<Self::Hasher>> {
+        let roots = self.lock_roots();
+        let (root_addr, _) = roots.get(key)?;
+        let root_addr = *root_addr;
+        drop(roots);
+        let nodes = self.lock_nodes();
+        self.read_node(root_addr, &nodes)
+    }
+
+    fn get_node_by_addr(&self, addr: NodeAddress) -> Option<TreeReadNode<Self::Hasher>> {
+        let nodes = self.lock_nodes();
+        self.read_node(addr, &nodes)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Update::*;
@@ -492,7 +901,7 @@ mod tests {
     /// The above is for tests compiled with optimization, e.g.
     ///
     ///    cargo test --all-features --release -p midnight-storage --lib -- tests::bulk_read_sqldb_file --nocapture
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn bulk_read_sqldb_memory() {
         for chunk_size in [10, 100, 1000] {
@@ -515,7 +924,7 @@ mod tests {
     /// The above is for tests compiled with optimization, e.g.
     ///
     ///    cargo test --all-features --release -p midnight-storage --lib -- tests::bulk_read_sqldb_file --nocapture
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn bulk_read_sqldb_file() {
         for chunk_size in [10, 100, 1000] {
@@ -628,14 +1037,14 @@ mod tests {
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
     /// Run time, 3 runs, 10,000 kvs: 1.73 s, 1.78 s, 1.76 s
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn all_ops_sqldb_memory() {
         let mut db = crate::db::SqlDB::<DefaultHasher>::memory();
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
     /// Run time, 3 runs, 10,000 kvs: 2.51 s, 2.52 s, 2.62 s
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn all_ops_sqldb_file() {
         let file = tempfile::NamedTempFile::new().unwrap();
@@ -751,20 +1160,22 @@ mod tests {
         t.delta("batch delete and get kvs and root counts");
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     #[test]
     fn bfs_get_nodes_inmemorydb() {
         test_bfs_get_nodes::<InMemoryDB>();
     }
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn bfs_get_nodes_sqldb() {
         test_bfs_get_nodes::<crate::db::SqlDB>();
     }
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn bfs_get_nodes_paritydb() {
         test_bfs_get_nodes::<crate::db::ParityDb>();
     }
+    #[cfg(not(feature = "layout-v2"))]
     fn test_bfs_get_nodes<D: DB<Hasher = DefaultHasher>>() {
         use crate::backend::raw_node::RawNode;
         // Arranging the nodes in layers, the variables names here are
@@ -909,16 +1320,17 @@ mod tests {
         db.set_root_count(n22.key.clone(), 0);
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     #[test]
     fn update_ref_count_inmemorydb() {
         test_update_ref_count::<InMemoryDB>();
     }
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn update_ref_count_sqldb() {
         test_update_ref_count::<crate::db::SqlDB>();
     }
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn update_ref_count_paritydb() {
         test_update_ref_count::<crate::db::ParityDb>();
@@ -927,6 +1339,7 @@ mod tests {
     /// correctly. This is of interest because ref-counts are not included in
     /// node key hashes, so an implementation that accidentally assumes content
     /// addressing may get this wrong.
+    #[cfg(not(feature = "layout-v2"))]
     fn test_update_ref_count<D: DB>() {
         let mut db = D::default();
         let n1 = RawNode::new(&[1], 0, vec![]);
@@ -938,5 +1351,160 @@ mod tests {
         assert_eq!(db.get_node(&k1).unwrap(), n1.into_obj());
         n2.insert_into_db(&mut db);
         assert_eq!(db.get_node(&k1).unwrap(), n2.into_obj());
+    }
+
+    // ========================================================================
+    // TreeDB tests
+    // ========================================================================
+
+    use super::{
+        InMemoryTreeDB, NewTreeNode, TreeChildRef, encode_tree_node_data,
+    };
+
+    /// Helper to create a leaf `NewTreeNode` with a given hash and payload.
+    fn make_leaf(hash_bytes: &[u8], payload: &[u8]) -> (ArenaHash<DefaultHasher>, NewTreeNode) {
+        let hash = ArenaHash::<DefaultHasher>::_from_bytes(hash_bytes);
+        let data = encode_tree_node_data::<DefaultHasher>(&hash, payload);
+        (hash, NewTreeNode { data, children: vec![] })
+    }
+
+    /// Helper to create a branch `NewTreeNode` with children.
+    fn make_branch(
+        hash_bytes: &[u8],
+        payload: &[u8],
+        children: Vec<TreeChildRef>,
+    ) -> (ArenaHash<DefaultHasher>, NewTreeNode) {
+        let hash = ArenaHash::<DefaultHasher>::_from_bytes(hash_bytes);
+        let data = encode_tree_node_data::<DefaultHasher>(&hash, payload);
+        (hash, NewTreeNode { data, children })
+    }
+
+    #[test]
+    fn tree_db_insert_and_read_leaf() {
+        let mut db = InMemoryTreeDB::<DefaultHasher>::default();
+        let (hash, leaf) = make_leaf(&[1, 2, 3], &[10, 20, 30]);
+
+        let addrs = db.insert_tree(hash.clone(), leaf);
+        assert_eq!(addrs.len(), 1);
+
+        let read_back = db.get_tree_root(&hash).expect("root should exist");
+        assert_eq!(read_back.hash, hash);
+        assert_eq!(read_back.data, vec![10, 20, 30]);
+        assert!(read_back.children.is_empty());
+    }
+
+    #[test]
+    fn tree_db_insert_and_read_tree() {
+        let mut db = InMemoryTreeDB::<DefaultHasher>::default();
+
+        let (leaf_hash, leaf) = make_leaf(&[1, 0, 0], &[1]);
+        let (root_hash, root) = make_branch(
+            &[2, 0, 0],
+            &[2],
+            vec![TreeChildRef::New(leaf)],
+        );
+
+        let addrs = db.insert_tree(root_hash.clone(), root);
+        // Should return addresses for root + leaf = 2 new nodes
+        assert_eq!(addrs.len(), 2);
+
+        let root_node = db.get_tree_root(&root_hash).expect("root should exist");
+        assert_eq!(root_node.hash, root_hash);
+        assert_eq!(root_node.data, vec![2]);
+        assert_eq!(root_node.children.len(), 1);
+
+        // Read child by its address
+        let child_addr = root_node.children[0];
+        let child_node = db.get_node_by_addr(child_addr).expect("child should exist");
+        assert_eq!(child_node.hash, leaf_hash);
+        assert_eq!(child_node.data, vec![1]);
+        assert!(child_node.children.is_empty());
+    }
+
+    #[test]
+    fn tree_db_reference_counting() {
+        let mut db = InMemoryTreeDB::<DefaultHasher>::default();
+        let (hash, leaf) = make_leaf(&[1, 2, 3], &[42]);
+
+        db.insert_tree(hash.clone(), leaf);
+        assert_eq!(db.size(), 1);
+        assert_eq!(db.get_roots().len(), 1);
+        assert_eq!(*db.get_roots().get(&hash).unwrap(), 1);
+
+        // Reference again
+        db.reference_tree(&hash);
+        assert_eq!(*db.get_roots().get(&hash).unwrap(), 2);
+
+        // Dereference once - should still exist
+        db.dereference_tree(&hash);
+        assert_eq!(db.size(), 1);
+        assert_eq!(*db.get_roots().get(&hash).unwrap(), 1);
+
+        // Dereference again - should be removed
+        db.dereference_tree(&hash);
+        assert_eq!(db.size(), 0);
+        assert!(db.get_roots().is_empty());
+        assert!(db.get_tree_root(&hash).is_none());
+    }
+
+    #[test]
+    fn tree_db_shared_subtree() {
+        let mut db = InMemoryTreeDB::<DefaultHasher>::default();
+
+        // Insert first tree: root1 -> shared_leaf
+        let (_shared_hash, shared_leaf) = make_leaf(&[1, 0, 0], &[1]);
+        let (root1_hash, root1) = make_branch(
+            &[2, 0, 0],
+            &[2],
+            vec![TreeChildRef::New(shared_leaf)],
+        );
+
+        let addrs1 = db.insert_tree(root1_hash.clone(), root1);
+        assert_eq!(addrs1.len(), 2);
+        assert_eq!(db.size(), 2); // root1 + shared_leaf
+
+        // Get the shared leaf's address
+        let root1_node = db.get_tree_root(&root1_hash).unwrap();
+        let shared_addr = root1_node.children[0];
+
+        // Insert second tree: root2 -> shared_leaf (existing)
+        let (root2_hash, root2) = make_branch(
+            &[3, 0, 0],
+            &[3],
+            vec![TreeChildRef::Existing(shared_addr)],
+        );
+
+        let addrs2 = db.insert_tree(root2_hash.clone(), root2);
+        assert_eq!(addrs2.len(), 1); // only root2 is new
+        assert_eq!(db.size(), 3); // root1 + shared_leaf + root2
+
+        // Dereference tree1 - shared leaf should survive
+        db.dereference_tree(&root1_hash);
+        assert_eq!(db.size(), 2); // shared_leaf + root2
+        assert!(db.get_tree_root(&root1_hash).is_none());
+        assert!(db.get_node_by_addr(shared_addr).is_some());
+
+        // Dereference tree2 - everything should be gone
+        db.dereference_tree(&root2_hash);
+        assert_eq!(db.size(), 0);
+        assert!(db.get_node_by_addr(shared_addr).is_none());
+    }
+
+    #[test]
+    fn tree_db_encode_decode_roundtrip() {
+        let hash = ArenaHash::<DefaultHasher>::_from_bytes(&[1, 2, 3]);
+        let payload = vec![10, 20, 30, 40];
+
+        let encoded = encode_tree_node_data::<DefaultHasher>(&hash, &payload);
+
+        let child_addrs = vec![100, 200];
+        let node_addr = 42;
+        let decoded = super::decode_tree_node_data::<DefaultHasher>(&encoded, child_addrs.clone(), node_addr)
+            .expect("decode should succeed");
+
+        assert_eq!(decoded.hash, hash);
+        assert_eq!(decoded.data, payload);
+        assert_eq!(decoded.children, child_addrs);
+        assert_eq!(decoded.addr, node_addr);
     }
 }

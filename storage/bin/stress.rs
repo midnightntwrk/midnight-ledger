@@ -10,9 +10,9 @@
 //!
 //! See [`midnight_storage::stress_test`] for more information.
 
-#[cfg(feature = "parity-db")]
+#[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
 use midnight_storage::db::ParityDb;
-#[cfg(feature = "sqlite")]
+#[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
 use midnight_storage::db::SqlDB;
 
 /// A stress testing function as stored in the `TESTS` map.
@@ -67,32 +67,32 @@ static TESTS: LazyLock<HashMap<&str, TestFn>> = {
                 "arena::stress_tests::serialize_deeply_nested_data",
                 no_args(midnight_storage::stress_tests::serialize_deeply_nested_data),
             ),
-            #[cfg(feature = "sqlite")]
+            #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::thrash_the_cache_variations_sqldb",
                 Box::new(midnight_storage::stress_tests::thrash_the_cache_variations_sqldb),
             ),
-            #[cfg(feature = "parity-db")]
+            #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::thrash_the_cache_variations_paritydb",
                 Box::new(midnight_storage::stress_tests::thrash_the_cache_variations_paritydb),
             ),
-            #[cfg(feature = "sqlite")]
+            #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::load_large_tree_sqldb",
                 Box::new(midnight_storage::stress_tests::load_large_tree_sqldb),
             ),
-            #[cfg(feature = "parity-db")]
+            #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::load_large_tree_paritydb",
                 Box::new(midnight_storage::stress_tests::load_large_tree_paritydb),
             ),
-            #[cfg(feature = "sqlite")]
+            #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::read_write_map_loop_sqldb",
                 Box::new(midnight_storage::stress_tests::read_write_map_loop::<SqlDB>),
             ),
-            #[cfg(feature = "parity-db")]
+            #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
             (
                 "arena::stress_tests::read_write_map_loop_paritydb",
                 Box::new(midnight_storage::stress_tests::read_write_map_loop::<ParityDb>),

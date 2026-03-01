@@ -38,4 +38,4 @@ pub mod test;
 /// The default storage mechanism.
 pub type DefaultHasher = sha2::Sha256;
 /// The default database.
-pub type DefaultDB = db::InMemoryDB<DefaultHasher>;
+pub type DefaultDB = db::InMemoryTreeDB<DefaultHasher>;

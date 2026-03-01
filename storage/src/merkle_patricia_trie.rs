@@ -1512,8 +1512,7 @@ mod tests {
     use sha2::Sha256;
 
     use crate::{
-        Storage,
-        db::InMemoryDB,
+        DefaultDB, Storage,
         storable::SMALL_OBJECT_LIMIT,
         storage::{WrappedDB, default_storage, set_default_storage},
     };
@@ -1601,7 +1600,7 @@ mod tests {
 
     #[test]
     fn long_extension_paths_serialization() {
-        let mut mpt: MerklePatriciaTrie<u8, InMemoryDB<Sha256>> = MerklePatriciaTrie::new();
+        let mut mpt: MerklePatriciaTrie<u8, DefaultDB> = MerklePatriciaTrie::new();
         mpt = mpt.insert(&(vec![2; 300]), 100);
 
         let mut bytes = std::vec::Vec::new();
@@ -1628,7 +1627,7 @@ mod tests {
     #[test]
     fn mpt_structure() {
         fn validate_long_path(
-            mpt: &MerklePatriciaTrie<u8, InMemoryDB<Sha256>>,
+            mpt: &MerklePatriciaTrie<u8, DefaultDB>,
             path_length: u64,
             validate_value: u8,
         ) {

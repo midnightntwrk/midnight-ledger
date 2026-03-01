@@ -2192,7 +2192,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn persist_to_disk_sqldb() {
         use crate::{DefaultHasher, db::SqlDB};
@@ -2201,7 +2201,7 @@ mod tests {
         test_persist_to_disk::<SqlDB<DefaultHasher>>(|| SqlDB::exclusive_file(&path));
     }
 
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn persist_to_disk_paritydb() {
         use crate::{DefaultHasher, db::ParityDb};

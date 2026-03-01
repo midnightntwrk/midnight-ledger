@@ -285,36 +285,153 @@ impl<H: Digest> ArenaHash<H> {
     }
 }
 
-#[derive(Debug, Clone, Storable, Serializable)]
-#[derive_where(Hash, PartialEq, Eq, PartialOrd, Ord)]
-#[storable(base)]
-#[tag = "storage-key[v2]"]
-#[phantom(H)]
+/// A database-assigned node address, used by tree-oriented DB backends.
+pub type NodeAddress = u64;
+
+#[derive(Debug, Clone)]
 /// A representataion of an individual child of a [Storable] object.
 pub enum ArenaKey<H: WellBehavedHasher = DefaultHasher> {
     /// A by-reference child, which can be looked up in the storage arena.
-    Ref(ArenaHash<H>),
+    /// The `Arc<OnceLock<NodeAddress>>` carries the DB-assigned node address,
+    /// populated after the node is written to a tree-oriented database.
+    Ref(ArenaHash<H>, Arc<OnceLock<NodeAddress>>),
     /// A direct child, typically reserved for small children, represented as its raw data.
     Direct(DirectChildNode<H>),
 }
 
+// PartialEq, Eq, Hash, PartialOrd, Ord: compare only the ArenaHash, ignoring the OnceLock<NodeAddress>.
+impl<H: WellBehavedHasher> PartialEq for ArenaKey<H> {
+    fn eq(&self, other: &Self) -> bool {
+        self.hash() == other.hash()
+    }
+}
+impl<H: WellBehavedHasher> Eq for ArenaKey<H> {}
+
+impl<H: WellBehavedHasher> std::hash::Hash for ArenaKey<H> {
+    fn hash<HH: std::hash::Hasher>(&self, state: &mut HH) {
+        core::mem::discriminant(self).hash(state);
+        self.hash().hash(state);
+    }
+}
+
+impl<H: WellBehavedHasher> PartialOrd for ArenaKey<H> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl<H: WellBehavedHasher> Ord for ArenaKey<H> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        match (self, other) {
+            (ArenaKey::Ref(a, _), ArenaKey::Ref(b, _)) => a.cmp(b),
+            (ArenaKey::Ref(..), ArenaKey::Direct(..)) => std::cmp::Ordering::Less,
+            (ArenaKey::Direct(..), ArenaKey::Ref(..)) => std::cmp::Ordering::Greater,
+            (ArenaKey::Direct(a), ArenaKey::Direct(b)) => a.cmp(b),
+        }
+    }
+}
+
+// Serializable/Deserializable: serialize only the discriminant + hash/direct data, skip OnceLock.
+impl<H: WellBehavedHasher> Serializable for ArenaKey<H> {
+    fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
+        match self {
+            ArenaKey::Ref(hash, _) => {
+                0u8.serialize(writer)?;
+                hash.serialize(writer)
+            }
+            ArenaKey::Direct(d) => {
+                1u8.serialize(writer)?;
+                d.serialize(writer)
+            }
+        }
+    }
+    fn serialized_size(&self) -> usize {
+        1 + match self {
+            ArenaKey::Ref(hash, _) => hash.serialized_size(),
+            ArenaKey::Direct(d) => d.serialized_size(),
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for ArenaKey<H> {
+    fn deserialize(
+        reader: &mut impl std::io::Read,
+        recursion_depth: u32,
+    ) -> std::io::Result<Self> {
+        let disc = u8::deserialize(reader, recursion_depth)?;
+        match disc {
+            0 => {
+                let hash = ArenaHash::<H>::deserialize(reader, recursion_depth)?;
+                Ok(ArenaKey::new_ref(hash))
+            }
+            1 => {
+                let d = DirectChildNode::<H>::deserialize(reader, recursion_depth)?;
+                Ok(ArenaKey::Direct(d))
+            }
+            _ => Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid ArenaKey discriminant: {disc}"),
+            )),
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> Tagged for ArenaKey<H> {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        "storage-key[v2]".into()
+    }
+    fn tag_unique_factor() -> String {
+        "storage-key[v2]".into()
+    }
+}
+
+impl<D: crate::db::DB> crate::Storable<D> for ArenaKey<D::Hasher> {
+    fn children(&self) -> std::vec::Vec<ArenaKey<D::Hasher>> {
+        std::vec::Vec::new()
+    }
+
+    fn to_binary_repr<W: std::io::Write>(&self, writer: &mut W) -> Result<(), std::io::Error> {
+        Serializable::serialize(self, writer)
+    }
+
+    fn from_binary_repr<R: std::io::Read>(
+        reader: &mut R,
+        _child_hashes: &mut impl Iterator<Item = ArenaKey<D::Hasher>>,
+        loader: &impl crate::storable::Loader<D>,
+    ) -> Result<Self, std::io::Error> {
+        Deserializable::deserialize(reader, loader.get_recursion_depth())
+    }
+}
+
 impl<H: WellBehavedHasher> From<ArenaHash<H>> for ArenaKey<H> {
     fn from(value: ArenaHash<H>) -> Self {
-        ArenaKey::Ref(value)
+        ArenaKey::new_ref(value)
     }
 }
 
 impl<H: WellBehavedHasher> Distribution<ArenaKey<H>> for Standard {
     fn sample<R: Rng + ?Sized>(&self, rng: &mut R) -> ArenaKey<H> {
-        ArenaKey::Ref(rng.r#gen())
+        ArenaKey::new_ref(rng.r#gen())
     }
 }
 
 impl<H: WellBehavedHasher> ArenaKey<H> {
+    /// Create a new `Ref` variant with a fresh (empty) `NodeAddress` lock.
+    pub fn new_ref(hash: ArenaHash<H>) -> Self {
+        ArenaKey::Ref(hash, Arc::new(OnceLock::new()))
+    }
+
+    /// Create a new `Ref` variant with a known `NodeAddress`.
+    pub fn new_ref_with_addr(hash: ArenaHash<H>, addr: NodeAddress) -> Self {
+        let lock = OnceLock::new();
+        lock.set(addr)
+            .expect("fresh OnceLock should accept set");
+        ArenaKey::Ref(hash, Arc::new(lock))
+    }
+
     /// Returns the hash of this child.
     pub fn hash(&self) -> &ArenaHash<H> {
         match self {
-            ArenaKey::Ref(h) => h,
+            ArenaKey::Ref(h, _) => h,
             ArenaKey::Direct(n) => &n.hash,
         }
     }
@@ -326,18 +443,43 @@ impl<H: WellBehavedHasher> ArenaKey<H> {
         frontier.push(self);
         while let Some(node) = frontier.pop() {
             match node {
-                ArenaKey::Ref(n) => res.push(n),
+                ArenaKey::Ref(n, _) => res.push(n),
                 ArenaKey::Direct(d) => frontier.extend(d.children.iter()),
             }
         }
         res
     }
 
+    /// Get the database-assigned node address, if known.
+    pub fn node_address(&self) -> Option<NodeAddress> {
+        match self {
+            ArenaKey::Ref(_, lock) => lock.get().copied(),
+            ArenaKey::Direct(_) => None,
+        }
+    }
+
+    /// Set the database-assigned node address.
+    /// Returns `Err` if this is a `Direct` variant or the address was already set.
+    pub fn set_node_address(&self, addr: NodeAddress) -> Result<(), NodeAddress> {
+        match self {
+            ArenaKey::Ref(_, lock) => lock.set(addr),
+            ArenaKey::Direct(_) => Err(addr),
+        }
+    }
+
+    /// Returns the `Arc<OnceLock<NodeAddress>>` for `Ref` variants, `None` for `Direct`.
+    pub fn addr_lock(&self) -> Option<&Arc<OnceLock<NodeAddress>>> {
+        match self {
+            ArenaKey::Ref(_, lock) => Some(lock),
+            ArenaKey::Direct(_) => None,
+        }
+    }
+
     /// Returns Some(key) if Ref, None otherwise
     #[cfg(test)]
     pub fn into_ref(&self) -> Option<&ArenaHash<H>> {
         match self {
-            ArenaKey::Ref(key) => Some(key),
+            ArenaKey::Ref(key, _) => Some(key),
             ArenaKey::Direct(..) => None,
         }
     }
@@ -537,7 +679,7 @@ impl<D: DB> Arena<D> {
             .expect("Storable data should be able to be represented in binary");
         let child_repr = child_from(&data, &children);
         let root_hash = child_repr.hash().clone();
-        if let ArenaKey::Ref(_) = &child_repr {
+        if let ArenaKey::Ref(..) = &child_repr {
             self.new_sp_locked(
                 &mut self.lock_metadata(),
                 value,
@@ -746,7 +888,7 @@ impl<D: DB> Arena<D> {
     ) {
         if !RefCell::borrow(metadata).contains_key(&key) {
             RefCell::borrow_mut(metadata).insert(key.clone(), Node::new());
-            if let ArenaKey::Ref(_) = child_repr {
+            if let ArenaKey::Ref(..) = child_repr {
                 RefCell::borrow_mut(&self.lock_backend()).cache(key, data, children);
             }
         }
@@ -901,7 +1043,7 @@ impl<D: DB> Arena<D> {
             visited: Rc::new(RefCell::new(HashSet::new())),
             key_to_child_repr,
         }
-        .get(&ArenaKey::Ref(key))?;
+        .get(&ArenaKey::new_ref(key))?;
         if nodes == res.serialize_to_node_list() {
             Ok(res)
         } else {
@@ -974,7 +1116,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             ArenaKey::Direct(direct_node) => {
                 (direct_node.data.clone(), direct_node.children.clone())
             }
-            ArenaKey::Ref(key) => {
+            ArenaKey::Ref(key, _) => {
                 // Build from existing cached value if possible.
 
                 // Avoid race: keep the metadata locked until we call `Sp::eager` //
@@ -1018,7 +1160,7 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         let value =
             T::from_binary_repr::<&[u8]>(&mut &data[..], &mut children.iter().cloned(), &loader)?;
         match child {
-            ArenaKey::Ref(hash) => Ok(self.arena.new_sp(
+            ArenaKey::Ref(hash, _) => Ok(self.arena.new_sp(
                 value,
                 hash.clone(),
                 data.deref().clone(),
@@ -1108,7 +1250,7 @@ impl<D: DB> Loader<D> for IrLoader<'_, D> {
                 )?;
                 return Ok(self.arena.alloc(value));
             }
-            ArenaKey::Ref(key) => key,
+            ArenaKey::Ref(key, _) => key,
         };
         // We need to use typed keys to avoid conflating identical keys at
         // different types T.
@@ -1301,7 +1443,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         arc: Arc<T>,
         child_repr: ArenaKey<D::Hasher>,
     ) -> Self {
-        if let ArenaKey::Ref(_) = child_repr {
+        if let ArenaKey::Ref(..) = child_repr {
             arena.increment_ref(&root);
         };
         let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
@@ -1318,7 +1460,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     pub fn into_tracked(&self) -> Self {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
-                let child_repr = ArenaKey::Ref(self.root.clone());
+                let child_repr = ArenaKey::new_ref(self.root.clone());
                 self.arena.track_locked(
                     &self.arena.lock_metadata(),
                     self.root.clone(),
@@ -1333,7 +1475,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
                     root: self.root.clone(),
                 }
             }
-            ArenaKey::Ref(_) => self.clone(),
+            ArenaKey::Ref(..) => self.clone(),
         }
     }
 
@@ -1394,7 +1536,7 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
-        if let ArenaKey::Ref(_) = self.child_repr
+        if let ArenaKey::Ref(..) = self.child_repr
             && !self.is_lazy()
         {
             self.arena.increment_ref(&self.root);
@@ -1411,7 +1553,7 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr
+        if let ArenaKey::Ref(..) = self.child_repr
             && !self.is_lazy()
         {
             self.arena.increment_ref(&self.root);
@@ -1438,7 +1580,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
     /// failure to a context where a failure panics.
     pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
-        if let ArenaKey::Ref(_) = self.child_repr
+        if let ArenaKey::Ref(..) = self.child_repr
             && !self.is_lazy()
         {
             self.arena.increment_ref(&self.root);
@@ -1459,7 +1601,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
 impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
     /// Casts this pointer into a dynamically typed `Any` pointer.
     pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
-        if let ArenaKey::Ref(_) = self.child_repr
+        if let ArenaKey::Ref(..) = self.child_repr
             && !self.is_lazy()
         {
             self.arena.increment_ref(&self.root);
@@ -1531,7 +1673,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             value
                 .to_binary_repr(&mut data)
                 .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
+            let child_repr = ArenaKey::new_ref(self.root.clone());
             let new_sp = self.arena.new_sp_locked(
                 &mut self.arena.lock_metadata(),
                 value.as_ref().clone(),
@@ -1594,7 +1736,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // We only need to do this on refs, because others aren't actually
         // ref-counted. Additionally, note that if we have a Direct node here,
         // then the children contained within this Sp will do their own cleanup.
-        if let ArenaKey::Ref(hash) = &self.child_repr
+        if let ArenaKey::Ref(hash, _) = &self.child_repr
             && !was_lazy
         {
             // It's important that we unload() before calling decrement_ref(),
@@ -1658,7 +1800,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), &self.root);
             let arc: Arc<T> = match maybe_arc {
                 Some(arc) => {
-                    if let ArenaKey::Ref(_) = self.child_repr {
+                    if let ArenaKey::Ref(..) = self.child_repr {
                         self.arena.increment_ref(&self.root);
                     }
                     arc
@@ -1681,7 +1823,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         .data
                         .take()
                         .expect("result of Sp::from_arena should be initialized");
-                    if let ArenaKey::Ref(_) = &self.child_repr {
+                    if let ArenaKey::Ref(..) = &self.child_repr {
                         self.arena.write_sp_cache_locked(
                             &self.arena.lock_sp_cache(),
                             self.root.clone(),
@@ -1733,7 +1875,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 continue;
             }
             let node = match child {
-                ArenaKey::Ref(ref key) => arena
+                ArenaKey::Ref(ref key, _) => arena
                     .lock_backend()
                     .borrow_mut()
                     .get(key)
@@ -1907,7 +2049,7 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     fn children(&self) -> std::vec::Vec<ArenaKey<<D as DB>::Hasher>> {
         match &self.child_repr {
             ArenaKey::Direct(key) => key.children.deref().clone(),
-            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+            ArenaKey::Ref(hash, _) => self.arena.with_backend(|backend| {
                 backend
                     .get(hash)
                     .expect("ref Sp must be in backend")
@@ -1932,7 +2074,7 @@ impl<D: DB> Storable<D> for Sp<dyn Any + Send + Sync, D> {
     {
         match &self.child_repr {
             ArenaKey::Direct(key) => writer.write_all(&key.data),
-            ArenaKey::Ref(hash) => self.arena.with_backend(|backend| {
+            ArenaKey::Ref(hash, _) => self.arena.with_backend(|backend| {
                 writer.write_all(&backend.get(hash).expect("ref Sp must be in backend").data)
             }),
         }

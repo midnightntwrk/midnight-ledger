@@ -94,7 +94,7 @@ fn compute_bytes_from_keys<D: DB>(keys: &BTreeSet<ArenaKey<D::Hasher>>) -> u64 {
         keys.iter()
             .map(|key| {
                 match key {
-                    ArenaKey::Ref(key) => {
+                    ArenaKey::Ref(key, _) => {
                         backend
                         .get(key)
                         // WARNING: this requires the keys to be in the backend,
@@ -165,7 +165,7 @@ pub fn get_writes<D: DB>(
     while let Some(key) = queue.pop() {
         if !rcmap.contains(&key) && !keys_added.contains(&key) {
             match &key {
-                ArenaKey::Ref(key) => {
+                ArenaKey::Ref(key, _) => {
                     let children = arena
                         .children(key)
                         .expect("children for write update should be loadable");
@@ -173,11 +173,11 @@ pub fn get_writes<D: DB>(
                         children
                             .iter()
                             .flat_map(ArenaKey::refs)
-                            .map(|r| ArenaKey::Ref(r.clone())),
+                            .map(|r| ArenaKey::new_ref(r.clone())),
                     );
                 }
                 ArenaKey::Direct(_) => {
-                    queue.extend(key.refs().into_iter().map(|r| ArenaKey::Ref(r.clone())))
+                    queue.extend(key.refs().into_iter().map(|r| ArenaKey::new_ref(r.clone())))
                 }
             }
             keys_added.insert(key);
@@ -212,18 +212,18 @@ pub fn update_rcmap<D: DB>(
     // Update reference counts for all edges from new keys
     for key in keys_added {
         match key {
-            ArenaKey::Ref(key) => {
+            ArenaKey::Ref(key, _) => {
                 let children = arena.children(key).expect("children should be loadable");
                 for child in children
                     .iter()
                     .flat_map(ArenaKey::refs)
-                    .map(|r| ArenaKey::Ref(r.clone()))
+                    .map(|r| ArenaKey::new_ref(r.clone()))
                 {
                     *inc_map.entry(child).or_default() += 1;
                 }
             }
             ArenaKey::Direct(_) => {
-                for child in key.refs().into_iter().map(|r| ArenaKey::Ref(r.clone())) {
+                for child in key.refs().into_iter().map(|r| ArenaKey::new_ref(r.clone())) {
                     *inc_map.entry(child).or_default() += 1;
                 }
             }
@@ -233,7 +233,7 @@ pub fn update_rcmap<D: DB>(
     inc_vec.sort();
     for (k, by) in inc_vec.into_iter() {
         match &k {
-            ArenaKey::Ref(r) => {
+            ArenaKey::Ref(r, _) => {
                 let old_rc = rcmap.get_rc(&k).unwrap_or(0);
                 rcmap = rcmap.modify_rc(r, old_rc + by);
             }
@@ -273,7 +273,7 @@ pub fn gc_rcmap<D: DB>(
 
         // Decrement reference counts of key's children
         let children_refs: Box<dyn Iterator<Item = _>> = match &key {
-            ArenaKey::Ref(key) => Box::new(
+            ArenaKey::Ref(key, _) => Box::new(
                 arena
                     .children(key)
                     .expect("children should be loadable")
@@ -288,7 +288,7 @@ pub fn gc_rcmap<D: DB>(
             ),
             ArenaKey::Direct(_) => Box::new(key.refs().into_iter().cloned()),
         };
-        for child in children_refs.map(|r| ArenaKey::Ref(r.clone())) {
+        for child in children_refs.map(|r| ArenaKey::new_ref(r.clone())) {
             let existing = rc_cache
                 .entry(child.clone())
                 .or_insert_with(|| rcmap.get_rc(&child).unwrap_or(0));
@@ -307,7 +307,7 @@ pub fn gc_rcmap<D: DB>(
     // Execute on the update information
     for (key, update) in update_vec.into_iter() {
         match &key {
-            ArenaKey::Ref(r) => {
+            ArenaKey::Ref(r, _) => {
                 let original = rc_cache
                     .get(&key)
                     .expect("must have cached decremented key");

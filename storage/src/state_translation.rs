@@ -52,7 +52,7 @@ impl<D: DB> TranslationCacheKey<D> {
         TranslationCacheKey {
             tlid: tlid.clone(),
             hash: key.hash().clone(),
-            persist: matches!(key, ArenaKey::Ref(_)),
+            persist: matches!(key, ArenaKey::Ref(..)),
         }
     }
 }

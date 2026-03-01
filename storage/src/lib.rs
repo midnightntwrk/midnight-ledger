@@ -111,7 +111,7 @@ pub mod stress_tests {
     }
 
     /// See `thrash_the_cache_variations_inner` for details.
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     pub fn thrash_the_cache_variations_sqldb(args: &[String]) {
         use crate::db::SqlDB;
         fn mk_open_db() -> impl Fn() -> SqlDB {
@@ -122,7 +122,7 @@ pub mod stress_tests {
     }
 
     /// See `thrash_the_cache_variations_inner` for details.
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     pub fn thrash_the_cache_variations_paritydb(args: &[String]) {
         use crate::db::ParityDb;
         fn mk_open_db() -> impl Fn() -> ParityDb {
@@ -132,7 +132,7 @@ pub mod stress_tests {
         thrash_the_cache_variations(args, mk_open_db);
     }
 
-    #[cfg(any(feature = "parity-db", feature = "sqlite"))]
+    #[cfg(all(any(feature = "parity-db", feature = "sqlite"), not(feature = "layout-v2")))]
     fn thrash_the_cache_variations<D: DB, O: Fn() -> D>(
         args: &[String],
         mk_open_db: impl Fn() -> O,
@@ -319,7 +319,7 @@ pub mod stress_tests {
     /// or not, which is used for ref-counting. If I comment that check out,
     /// which is irrelevant for this test, then creation time drops to 3.5 s, larger than an 80 %
     /// improvement.
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     pub fn load_large_tree_sqldb(args: &[String]) {
         use crate::db::SqlDB;
         let path = tempfile::NamedTempFile::new().unwrap().into_temp_path();
@@ -356,7 +356,7 @@ pub mod stress_tests {
     /// because parity-db does many operations asynchronously, returning to the
     /// caller immediately after work is passed off to a background thread),
     /// which then needs to be finished before the db can be dropped.
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     pub fn load_large_tree_paritydb(args: &[String]) {
         use crate::db::ParityDb;
         let path = tempfile::TempDir::new().unwrap().keep();
@@ -364,7 +364,7 @@ pub mod stress_tests {
         load_large_tree(args, open_db);
     }
 
-    #[cfg(any(feature = "parity-db", feature = "sqlite"))]
+    #[cfg(all(any(feature = "parity-db", feature = "sqlite"), not(feature = "layout-v2")))]
     fn load_large_tree<D: DB>(args: &[String], open_db: impl Fn() -> D) {
         let msg = "load_large_tree(height: usize)";
         if args.len() != 1 {
@@ -781,7 +781,7 @@ mod tests {
             .run_with_args("arena::stress_tests::load_large_tree_paritydb", &["15"]);
     }
 
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
+    #[cfg(all(feature = "stress-test", feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn read_write_map_loop_sqldb() {
         crate::stress_test::runner::StressTest::new()
@@ -791,7 +791,7 @@ mod tests {
                 &["10000", "1000"],
             );
     }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
+    #[cfg(all(feature = "stress-test", feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn read_write_map_loop_paritydb() {
         crate::stress_test::runner::StressTest::new()

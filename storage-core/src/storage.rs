@@ -17,7 +17,7 @@ use crate::DefaultDB;
 use crate::Storable;
 use crate::arena::{Arena, ArenaHash, Sp};
 use crate::backend::StorageBackend;
-use crate::db::{DB, DummyArbitrary, InMemoryDB};
+use crate::db::{DB, DummyArbitrary, InMemoryDB, InMemoryTreeDB};
 use derive_where::derive_where;
 use parking_lot::{Mutex, MutexGuard};
 #[cfg(feature = "proptest")]
@@ -121,8 +121,10 @@ pub fn default_storage<D: DB + Any>() -> Arc<Storage<D>> {
     match try_get_default_storage() {
         Some(arc) => arc,
         _ => {
-            if TypeId::of::<D>() == TypeId::of::<InMemoryDB>() {
-                // Implicit initialization, but only for InMemoryDB backed storage!
+            if TypeId::of::<D>() == TypeId::of::<InMemoryDB>()
+                || TypeId::of::<D>() == TypeId::of::<InMemoryTreeDB>()
+            {
+                // Implicit initialization for in-memory backed storage!
                 set_default_storage(Storage::<D>::default).unwrap_or_else(|s| s)
             } else {
                 panic!(
@@ -335,6 +337,43 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
     {
         self.db
             .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)
+    }
+
+    fn insert_tree(
+        &mut self,
+        key: ArenaHash<Self::Hasher>,
+        root: crate::db::NewTreeNode,
+    ) -> Vec<crate::arena::NodeAddress> {
+        self.db.insert_tree(key, root)
+    }
+
+    fn reference_tree(&mut self, key: &ArenaHash<Self::Hasher>) {
+        self.db.reference_tree(key)
+    }
+
+    fn dereference_tree(&mut self, key: &ArenaHash<Self::Hasher>) {
+        self.db.dereference_tree(key)
+    }
+
+    fn get_tree_root(
+        &self,
+        key: &ArenaHash<Self::Hasher>,
+    ) -> Option<crate::db::TreeReadNode<Self::Hasher>> {
+        self.db.get_tree_root(key)
+    }
+
+    fn get_node_by_addr(
+        &self,
+        addr: crate::arena::NodeAddress,
+    ) -> Option<crate::db::TreeReadNode<Self::Hasher>> {
+        self.db.get_node_by_addr(addr)
+    }
+
+    fn batch_get_nodes_by_addr(
+        &self,
+        addrs: &[crate::arena::NodeAddress],
+    ) -> Vec<Option<crate::db::TreeReadNode<Self::Hasher>>> {
+        self.db.batch_get_nodes_by_addr(addrs)
     }
 }
 
