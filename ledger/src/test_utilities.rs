@@ -51,10 +51,11 @@ use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
+use std::collections::VecDeque;
 use std::env;
 use std::io;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
@@ -125,6 +126,7 @@ pub struct TestState<D: DB> {
 
     pub mode: TestProcessingMode,
     pub debug_print: bool,
+    pub swizzle_queue: std::collections::VecDeque<(ArenaHash<D::Hasher>, ArenaHash<D::Hasher>, ArenaHash<D::Hasher>)>,
 }
 
 impl<D: DB> TestState<D> {
@@ -144,6 +146,7 @@ impl<D: DB> TestState<D> {
 
             mode: TestProcessingMode::Regular,
             debug_print: false,
+            swizzle_queue: VecDeque::new(),
         }
     }
 
@@ -155,6 +158,19 @@ impl<D: DB> TestState<D> {
         lstate.persist();
         zstate.persist();
         dstate.persist();
+        self.swizzle_queue.push_back((
+            lstate.hash(),
+            zstate.hash(),
+            dstate.hash(),
+        ));
+        if self.swizzle_queue.len() > 5 {
+            let (lkey, zkey, dkey) = self.swizzle_queue.pop_front().unwrap();
+            default_storage::<D>().with_backend(|b| {
+                b.unpersist(&lkey);
+                b.unpersist(&zkey);
+                b.unpersist(&dkey);
+            });
+        }
         lstate.unload();
         zstate.unload();
         dstate.unload();

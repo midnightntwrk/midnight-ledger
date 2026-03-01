@@ -390,6 +390,11 @@ impl<D: DB> StorageBackend<D> {
         self.peek_from_memory(key).and_then(|cv| cv.get_obj())
     }
 
+    /// TODO
+    pub fn get_db(&mut self) -> &mut D {
+        &mut self.database
+    }
+
     /// Get the root count for `key`, incorporating any pending in-memory updates.
     pub(crate) fn get_root_count(&self, key: &ArenaHash<D::Hasher>) -> u32 {
         let db_root_count = self.database.get_root_count(key);

@@ -18,7 +18,7 @@ use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use proptest::prelude::*;
 use serialize::{Deserializable, Serializable};
 
-use parity_db;
+use parity_db::{self, CompressionType, Operation};
 #[allow(deprecated)]
 use sha2::digest::generic_array::GenericArray;
 
@@ -100,10 +100,13 @@ impl<H: WellBehavedHasher> ParityDb<H> {
 
         let mut options = parity_db::Options::with_columns(path, NUM_COLUMNS);
         // Add indexes to all columns - we need this to be able to iterate over them
+        for col in options.columns.iter_mut() {
+            col.uniform = true;
+        }
         options.columns[GC_ROOT_COLUMN as usize].btree_index = true;
-        // NOTE: Hardcoded because the constant is behind a feature flag.
-        options.columns[2].btree_index = true;
         options.columns[NODE_COLUMN as usize].btree_index = true;
+        options.columns[NODE_COLUMN as usize].preimage = true;
+        options.columns[NODE_COLUMN as usize].compression = CompressionType::Lz4;
         let db = parity_db::Db::open_or_create(&options).unwrap_or_else(|e| {
             panic!(
                 "parity-db open error: {e}. Note: Check db isn't already open. Path: {}",
@@ -116,6 +119,39 @@ impl<H: WellBehavedHasher> ParityDb<H> {
             _phantom: PhantomData,
         }
     }
+
+    /// TODO
+    pub fn gc(&self) {
+        let mut marked = std::collections::HashSet::new();
+        let mut frontier = Vec::new();
+        let mut roots_iter = self.db.iter(GC_ROOT_COLUMN).expect("Failed to iterate over db");
+        while let Some((k, _)) = roots_iter.next().expect("Failed to get next form iterator") {
+            let hash = bytes_to_arena_key(k);
+            frontier.push(hash.clone());
+            marked.insert(hash);
+        }
+        while let Some(item) = frontier.pop() {
+            let node = self.get_node(&item).unwrap();
+            for k in node.children.iter().flat_map(|k| k.refs()) {
+                if !marked.contains(k) {
+                    marked.insert(k.clone());
+                    frontier.push(k.clone());
+                }
+            }
+        }
+        let mut to_delete = Vec::new();
+        let mut nodes_iter = self.db.iter(NODE_COLUMN).expect("Failed to iterate over db");
+        while let Some((k, _)) = nodes_iter.next().expect("Failed to get next from iterator") {
+            let hash = bytes_to_arena_key(k);
+            if !marked.contains(&hash) {
+                to_delete.push(hash);
+            }
+        }
+        self.db.commit_changes(to_delete.into_iter().map(|k| (NODE_COLUMN, Operation::Dereference(k.0.to_vec())))
+        ).unwrap();
+        self.db.flush();
+    }
+
 }
 
 #[cfg(feature = "proptest")]
@@ -182,6 +218,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             },
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
@@ -196,6 +233,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             parity_db::Operation::Dereference(key.0.to_vec()),
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_update<I>(&mut self, iter: I)
@@ -244,6 +282,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             }
         }
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_get_nodes<I>(

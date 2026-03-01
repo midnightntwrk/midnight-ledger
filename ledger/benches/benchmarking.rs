@@ -27,7 +27,7 @@ use rand::{Rng, SeedableRng};
 use std::alloc::GlobalAlloc;
 use std::io::{Write, stdout};
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::time::Duration;
 use storage::DefaultHasher;
@@ -44,8 +44,7 @@ use zswap::keys::SecretKeys;
 static GLOBAL_ALLOC: Allocator<std::alloc::System> = Allocator(std::alloc::System);
 static CURALLOC: AtomicU64 = AtomicU64::new(0);
 
-fn cur_alloc() -> String {
-    let n = CURALLOC.load(std::sync::atomic::Ordering::SeqCst);
+fn pprint_size(n: u64) -> String {
     const KB: u64 = 1 << 10;
     const MB: u64 = 1 << 20;
     const GB: u64 = 1 << 30;
@@ -55,6 +54,10 @@ fn cur_alloc() -> String {
         MB..GB => format!("{:.2} MiB", n as f64 / MB as f64),
         GB.. => format!("{:.2} GiB", n as f64 / GB as f64),
     }
+}
+
+fn cur_alloc() -> String {
+    pprint_size(CURALLOC.load(std::sync::atomic::Ordering::SeqCst))
 }
 
 struct Allocator<A: GlobalAlloc>(A);
@@ -201,14 +204,31 @@ pub fn create_dust(c: &mut Criterion) {
 
 type TestDb = ParityDb;
 
-fn mk_test_db() -> storage::Storage<TestDb> {
+fn mk_test_db() -> (PathBuf, storage::Storage<TestDb>) {
     let dir = tempfile::tempdir().unwrap().keep();
-    storage::Storage::new(
+    let storage = storage::Storage::new(
         //10,
         DEFAULT_CACHE_SIZE,
         ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
-    )
+    );
+    (dir, storage)
+}
+
+fn du(dir: PathBuf) -> std::io::Result<u64> {
+    let mut frontier = vec![dir];
+    let mut total = 0;
+    while let Some(dir) = frontier.pop() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                frontier.push(entry.path());
+            } else {
+                total += entry.metadata()?.len();
+            }
+        }
+    }
+    Ok(total)
 }
 
 pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
@@ -217,15 +237,16 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         .unwrap();
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
-    set_default_storage(mk_test_db);
+    let (dir, storage) = mk_test_db();
+    set_default_storage(|| storage);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
-    for log_size in 10..=13 {
+    for log_size in 10..=16 {
         let t0 = std::time::Instant::now();
         let mut swizzle_time = std::time::Duration::default();
         let size = 2u64.pow(log_size);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
-        const PROGRESS_BAR_SEGMENTS: usize = 100;
+        const PROGRESS_BAR_SEGMENTS: usize = 50;
         const BATCH_SIZE: u64 = 4;
         print!("[{}]", " ".repeat(PROGRESS_BAR_SEGMENTS));
         stdout().flush().unwrap();
@@ -233,18 +254,25 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let end = size >> BATCH_SIZE;
         let mut last_str_len = 0usize;
         for i in start..end {
-            rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
             let ta = std::time::Instant::now();
+            rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
+            let tb = std::time::Instant::now();
             state.swizzle_to_db();
-            swizzle_time += ta.elapsed();
+            let swizzle_delta = tb.elapsed();
+            swizzle_time += swizzle_delta;
+            if i % 4 == 3 {
+                default_storage::<TestDb>().with_backend(|b| b.get_db().gc());
+            }
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
             let string = format!(
-                "[{}{}] ETA: {:?}, TPS: {}",
+                "[{}{}] ETA: {:?}, TPS: {:.2}, size: {}, write time: {:?}",
                 "#".repeat(segments),
                 " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
                 t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
-                ((i + 1 - start) << BATCH_SIZE) as f64 / t0.elapsed().as_secs_f64()
+                (1 << BATCH_SIZE) as f64 / ta.elapsed().as_secs_f64(),
+                (i + 1) << BATCH_SIZE,
+                swizzle_delta / (1 << BATCH_SIZE) as u32,
             );
             print!(
                 "\r{string}{}",
@@ -301,17 +329,19 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated",
+            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB)",
             t1 - t0,
             (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
             swizzle_time / ((end - start) << BATCH_SIZE) as u32,
-            cur_alloc()
+            cur_alloc(),
+            pprint_size(du(dir.clone()).unwrap()),
         );
         lstate.persist();
         drop(lstate);
         state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
+            b.get_db().gc();
         });
         let mut runs = 0;
         let mut total_construct_time =
