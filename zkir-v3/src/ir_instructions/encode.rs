@@ -31,7 +31,17 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         IrValue::Native(x) => AssignedNative::<F>::as_public_input(&x.0),
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
         IrValue::JubjubScalar(s) => {
-            AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s)
+            let encoded = AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s);
+            // In ZKIRv3, an assigned scalar can only originate from:
+            //   (i)  a circuit input, or
+            //   (ii) a `decode` instruction.
+            //
+            // Circuit inputs yield canonical assigned scalars (whose internal
+            // representation uses at most 252 bits). The `decode` path is carefully
+            // implemented in [crate::ir_instructions::decode::decode_incircuit] to
+            // also produce canonical assigned scalars.
+            assert_eq!(encoded.len(), 1);
+            encoded
         }
     };
     encoded
@@ -49,7 +59,19 @@ pub fn encode_incircuit(
     let encoded = match value {
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
-        CircuitValue::JubjubScalar(s) => std_lib.jubjub().as_public_input(layouter, s),
+        CircuitValue::JubjubScalar(s) => {
+            let encoded = std_lib.jubjub().as_public_input(layouter, s)?;
+            // In ZKIRv3, an assigned scalar can only originate from:
+            //   (i)  a circuit input, or
+            //   (ii) a `decode` instruction.
+            //
+            // Circuit inputs yield canonical assigned scalars (whose internal
+            // representation uses at most 252 bits). The `decode` path is carefully
+            // implemented in [crate::ir_instructions::decode::decode_incircuit] to
+            // also produce canonical assigned scalars.
+            assert_eq!(encoded.len(), 1);
+            Ok(encoded)
+        }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
 }

@@ -6104,6 +6104,7 @@ dependencies = [
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
  "num-bigint",
+ "num-traits",
  "pastey",
  "proptest",
  "proptest-derive",
