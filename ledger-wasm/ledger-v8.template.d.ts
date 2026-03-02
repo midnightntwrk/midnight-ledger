@@ -359,6 +359,15 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class DustStateMerkleTreeCollapsedUpdate {
+  private constructor();
+  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
+  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
+  toString(compact?: boolean): string;
+}
+
 export class DustState {
   constructor();
   serialize(): Uint8Array;
@@ -400,10 +409,27 @@ export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
   generationInfo(qdo: QualifiedDustOutput): DustGenerationInfo | undefined;
+  // TODO: do we need to cover the .update_from_evidence() method?
+  insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
+  removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
+  collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
+  applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  generatingTreeRoot(): bigint | undefined;
+  insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
+  removeCommitment(commitmentIndex: bigint): DustLocalState;
+  collapseCommitmentTree(commitmentIndexStart: bigint, commitmentIndexEnd: bigint): DustLocalState;
+  applyCommitmentCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  commitmentTreeRoot(): bigint | undefined;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
+  addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
+  findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
+  removeUtxo(nullifier: DustNullifier): DustLocalState;
+  splitUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
+  utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
+  utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
