@@ -286,8 +286,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the input type:
     ///
-    ///  - Native:      1 output
-    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    ///  - Native:       1 output
+    ///  - JubjubPoint:  2 outputs (x and y coordinates)
+    ///  - JubjubScalar: 1 output
     Encode {
         /// The value to encode
         input: Operand,
@@ -300,8 +301,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the given type:
     ///
-    ///  - Native:      1 input
-    ///  - JubjubPoint: 2 inputs (x and y coordinates)
+    ///  - Native:       1 input
+    ///  - JubjubPoint:  2 inputs (x and y coordinates)
+    ///  - JubjubScalar: 1 input
     ///
     /// It will also result in an error if the operands are not of type
     /// `Native`.
@@ -390,7 +392,10 @@ pub enum Instruction {
         inputs: Vec<Operand>,
     },
     /// Multiplies an elliptic curve point by a scalar.
-    /// curve point.
+    ///
+    /// This operation will result in an error if the operand given as `a`
+    /// is not of type `JubjubPoint`, or if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -402,6 +407,9 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Multiplies the group generator by a scalar.
+    ///
+    /// This operation will result in an error if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMulGenerator {
