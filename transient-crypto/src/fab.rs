@@ -18,7 +18,7 @@
 
 use std::iter::once;
 
-use crate::curve::{EmbeddedFr, EmbeddedGroupAffine};
+use crate::curve::{EmbeddedFr, EmbeddedGroupAffine, embedded};
 use crate::curve::{FR_BYTES, FR_BYTES_STORED, Fr};
 use crate::hash::transient_commit;
 use crate::merkle_tree::{MerklePath, MerkleTreeDigest};
@@ -169,7 +169,9 @@ impl TryFrom<&ValueAtom> for EmbeddedFr {
 
     fn try_from(value: &ValueAtom) -> Result<EmbeddedFr, InvalidBuiltinDecode> {
         if value.0.len() <= FR_BYTES {
-            EmbeddedFr::from_le_bytes(&value.0).ok_or(InvalidBuiltinDecode("EmbeddedFr"))
+            let mut bytes = [0u8; 64];
+            bytes[..32].copy_from_slice(&value.0);
+            Ok(EmbeddedFr(embedded::Scalar::from_bytes_wide(&bytes)))
         } else {
             Err(InvalidBuiltinDecode("EmbeddedFr"))
         }
