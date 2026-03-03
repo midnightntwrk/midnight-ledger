@@ -414,6 +414,13 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
             .map(|addr| self.get_node_by_addr(*addr))
             .collect()
     }
+
+    /// Flush any pending writes to stable storage.
+    ///
+    /// For databases with write-ahead logs (e.g. ParityDB), this ensures
+    /// logged operations are applied to the underlying data files. No-op
+    /// by default.
+    fn flush(&mut self) {}
 }
 
 

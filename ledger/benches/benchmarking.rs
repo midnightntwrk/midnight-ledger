@@ -238,6 +238,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
     let (dir, db) = mk_test_db();
+    dbg!(&dir);
     set_default_storage(|| db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;

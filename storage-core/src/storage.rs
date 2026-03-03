@@ -375,6 +375,10 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
     ) -> Vec<Option<crate::db::TreeReadNode<Self::Hasher>>> {
         self.db.batch_get_nodes_by_addr(addrs)
     }
+
+    fn flush(&mut self) {
+        self.db.flush();
+    }
 }
 
 #[cfg(feature = "proptest")]

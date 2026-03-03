@@ -578,6 +578,10 @@ impl<H: WellBehavedHasher> DB for ParityDbTree<H> {
 
         Self::decode_parity_node(&data, child_addrs, addr)
     }
+
+    fn flush(&mut self) {
+        self.db.flush();
+    }
 }
 
 #[cfg(test)]

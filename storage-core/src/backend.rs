@@ -836,6 +836,8 @@ impl<D: DB> StorageBackend<D> {
                 }
             }
         }
+
+        self.database.flush();
     }
 
     /// Recursively build a `NewTreeNode` from an object in the cache,
@@ -945,6 +947,14 @@ impl<D: DB> StorageBackend<D> {
             evictions.insert(k, v);
         }
         self.flush_to_db(evictions.into_iter());
+    }
+
+    /// Flush the underlying database to stable storage.
+    ///
+    /// Ensures any pending WAL entries are applied to the data files.
+    /// Useful for benchmarking to ensure timing reflects actual I/O.
+    pub fn flush_db(&mut self) {
+        self.database.flush();
     }
 
     /// Push all pending writes to the DB.
