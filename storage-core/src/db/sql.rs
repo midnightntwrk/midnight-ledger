@@ -582,7 +582,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                        VALUES (?1, ?2, ?3, ?4)";
             #[cfg(feature = "layout-v2")]
             let sql = "INSERT OR REPLACE INTO node (key, data, children) \
-                       VALUES (?1, ?2, ?4)";
+                       VALUES (?1, ?2, ?3)";
             let mut stmt = tx.prepare(sql).unwrap();
             #[cfg(not(feature = "layout-v2"))]
             stmt.execute(params![
@@ -626,7 +626,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                        VALUES (?1, ?2, ?3, ?4)";
             #[cfg(feature = "layout-v2")]
             let sql = "INSERT OR REPLACE INTO node (key, data, children) \
-                       VALUES (?1, ?2, ?4)";
+                       VALUES (?1, ?2, ?3)";
             let mut insert_node = tx.prepare(sql).unwrap();
             let sql = "DELETE FROM node WHERE key = (?1)";
             let mut delete_node = tx.prepare(sql).unwrap();
