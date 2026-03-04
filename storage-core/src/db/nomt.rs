@@ -11,7 +11,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crypto::digest::OutputSizeUser;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -24,9 +23,6 @@ use std::{
 use proptest::prelude::*;
 use serialize::{Deserializable, Serializable};
 
-#[allow(deprecated)]
-use sha2::digest::generic_array::GenericArray;
-
 use nomt::{hasher::Blake3Hasher, trie::KeyPath, KeyReadWrite, Nomt, Options, SessionParams};
 
 use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject};
@@ -35,32 +31,11 @@ use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskO
 use super::DummyDBStrategy;
 use super::{DB, DummyArbitrary, Update};
 
-/// Key prefix bytes for namespace separation in NOMT's flat `[u8; 32]` key space.
-const PREFIX_NODE: u8 = 0x00;
-const PREFIX_GC_ROOT: u8 = 0x01;
-const PREFIX_META_NODE_COUNT: u8 = 0xFF;
-
-/// The fixed metadata key for persisting node count.
-const META_NODE_COUNT_KEY: KeyPath = {
-    let mut k = [0u8; 32];
-    k[0] = PREFIX_META_NODE_COUNT;
-    k[1] = 0x01;
-    k
-};
-
-/// The fixed metadata key for persisting the roots index.
-const META_ROOTS_INDEX_KEY: KeyPath = {
-    let mut k = [0u8; 32];
-    k[0] = PREFIX_META_NODE_COUNT;
-    k[1] = 0x02;
-    k
-};
-
 /// A database back-end using NOMT (Nearly Optimal Merkle Trie).
 ///
-/// NOMT uses fixed `[u8; 32]` keys. We map `ArenaHash` keys into this space
-/// using a prefix byte for namespace separation (nodes, GC roots, metadata),
-/// followed by the first 31 bytes of the `ArenaHash`.
+/// Only node data is stored in NOMT. ArenaHash keys are used directly as
+/// NOMT KeyPaths (padded/truncated to 32 bytes). GC root counts, node count,
+/// and other metadata are kept purely in memory.
 pub struct NomtDb<H: WellBehavedHasher = DefaultHasher> {
     inner: Arc<RwLock<NomtDbInner<H>>>,
 }
@@ -69,49 +44,11 @@ struct NomtDbInner<H: WellBehavedHasher> {
     nomt: Nomt<Blake3Hasher>,
     /// Write buffer: None value means delete.
     pending_nodes: HashMap<KeyPath, Option<Vec<u8>>>,
-    /// Track pending GC root count changes.
-    pending_roots: HashMap<KeyPath, Option<Vec<u8>>>,
-    /// In-memory index of all roots with their counts (mirrors persisted state).
+    /// In-memory index of all roots with their counts.
     roots_index: HashMap<ArenaHash<H>, u32>,
     /// In-memory node count tracker.
     node_count: usize,
     _phantom: PhantomData<H>,
-}
-
-/// Serialize the roots index as: [hash_size (u32 LE)] then repeated [hash_bytes | count (u32 LE)].
-fn serialize_roots_index<H: WellBehavedHasher>(roots: &HashMap<ArenaHash<H>, u32>) -> Vec<u8> {
-    let hash_size = <H as OutputSizeUser>::output_size();
-    let entry_size = hash_size + 4;
-    let mut buf = Vec::with_capacity(4 + roots.len() * entry_size);
-    buf.extend_from_slice(&(hash_size as u32).to_le_bytes());
-    for (key, count) in roots {
-        #[allow(deprecated)]
-        buf.extend_from_slice(key.0.as_slice());
-        buf.extend_from_slice(&count.to_le_bytes());
-    }
-    buf
-}
-
-/// Deserialize the roots index.
-fn deserialize_roots_index<H: WellBehavedHasher>(data: &[u8]) -> HashMap<ArenaHash<H>, u32> {
-    if data.len() < 4 {
-        return HashMap::new();
-    }
-    let hash_size = u32::from_le_bytes(data[0..4].try_into().unwrap()) as usize;
-    let entry_size = hash_size + 4;
-    let entries_data = &data[4..];
-    let mut map = HashMap::new();
-    let mut offset = 0;
-    while offset + entry_size <= entries_data.len() {
-        let hash_bytes = &entries_data[offset..offset + hash_size];
-        let count_bytes = &entries_data[offset + hash_size..offset + entry_size];
-        let count = u32::from_le_bytes(count_bytes.try_into().unwrap());
-        #[allow(deprecated)]
-        let key = ArenaHash(GenericArray::from_iter(hash_bytes.iter().copied()));
-        map.insert(key, count);
-        offset += entry_size;
-    }
-    map
 }
 
 fn serialize_node<H: WellBehavedHasher>(node: &OnDiskObject<H>) -> Vec<u8> {
@@ -121,27 +58,16 @@ fn serialize_node<H: WellBehavedHasher>(node: &OnDiskObject<H>) -> Vec<u8> {
     bytes
 }
 
-/// Construct a 32-byte NOMT key from a prefix byte and an `ArenaHash`.
-/// Uses the first 31 bytes of the hash to fill bytes 1..32.
-fn make_key<H: WellBehavedHasher>(prefix: u8, hash: &ArenaHash<H>) -> KeyPath {
+/// Construct a 32-byte NOMT KeyPath directly from an `ArenaHash`.
+/// For Sha256 (32 bytes) this is a direct copy. For other hash sizes
+/// the result is padded with zeros or truncated.
+fn make_key<H: WellBehavedHasher>(hash: &ArenaHash<H>) -> KeyPath {
     let mut key = [0u8; 32];
-    key[0] = prefix;
     #[allow(deprecated)]
     let hash_bytes = hash.0.as_slice();
-    let copy_len = hash_bytes.len().min(31);
-    key[1..1 + copy_len].copy_from_slice(&hash_bytes[..copy_len]);
+    let copy_len = hash_bytes.len().min(32);
+    key[..copy_len].copy_from_slice(&hash_bytes[..copy_len]);
     key
-}
-
-#[allow(dead_code)]
-fn bytes_to_arena_key<H: WellBehavedHasher>(nomt_key: &KeyPath) -> ArenaHash<H> {
-    // Reconstruct ArenaHash from bytes 1..32 of the NOMT key, padding with zeros if needed.
-    let hash_size = <H as OutputSizeUser>::output_size();
-    let mut hash_bytes = vec![0u8; hash_size];
-    let copy_len = hash_size.min(31);
-    hash_bytes[..copy_len].copy_from_slice(&nomt_key[1..1 + copy_len]);
-    #[allow(deprecated)]
-    ArenaHash(GenericArray::from_iter(hash_bytes))
 }
 
 impl<H: WellBehavedHasher> NomtDb<H> {
@@ -151,33 +77,12 @@ impl<H: WellBehavedHasher> NomtDb<H> {
         opts.path(path);
         let nomt = Nomt::<Blake3Hasher>::open(opts).expect("Failed to open NOMT database");
 
-        // Load persisted node count from metadata key.
-        let node_count = nomt
-            .read(META_NODE_COUNT_KEY)
-            .expect("Failed to read NOMT metadata")
-            .map(|bytes| {
-                if bytes.len() == 8 {
-                    usize::from_le_bytes(bytes.try_into().unwrap())
-                } else {
-                    0
-                }
-            })
-            .unwrap_or(0);
-
-        // Load persisted roots index.
-        let roots_index = nomt
-            .read(META_ROOTS_INDEX_KEY)
-            .expect("Failed to read NOMT roots index")
-            .map(|bytes| deserialize_roots_index::<H>(&bytes))
-            .unwrap_or_default();
-
         NomtDb {
             inner: Arc::new(RwLock::new(NomtDbInner {
                 nomt,
                 pending_nodes: HashMap::new(),
-                pending_roots: HashMap::new(),
-                roots_index,
-                node_count,
+                roots_index: HashMap::new(),
+                node_count: 0,
                 _phantom: PhantomData,
             })),
         }
@@ -185,52 +90,18 @@ impl<H: WellBehavedHasher> NomtDb<H> {
 
     /// Flush all pending writes to NOMT in a single session.
     fn flush(inner: &mut NomtDbInner<H>) {
-        if inner.pending_nodes.is_empty() && inner.pending_roots.is_empty() {
+        if inner.pending_nodes.is_empty() {
             return;
         }
 
-        // Collect all actuals (key + read-then-write operations).
         let mut actuals: Vec<(KeyPath, KeyReadWrite)> = Vec::new();
 
         for (key, value) in inner.pending_nodes.drain() {
-            // Read the current value first.
             let prev = inner
                 .nomt
                 .read(key)
                 .expect("Failed to read from NOMT during flush");
             actuals.push((key, KeyReadWrite::ReadThenWrite(prev, value)));
-        }
-
-        for (key, value) in inner.pending_roots.drain() {
-            let prev = inner
-                .nomt
-                .read(key)
-                .expect("Failed to read from NOMT during flush");
-            actuals.push((key, KeyReadWrite::ReadThenWrite(prev, value)));
-        }
-
-        // Persist metadata: node count and roots index.
-        {
-            let prev = inner
-                .nomt
-                .read(META_NODE_COUNT_KEY)
-                .expect("Failed to read NOMT metadata during flush");
-            let new_val = inner.node_count.to_le_bytes().to_vec();
-            actuals.push((
-                META_NODE_COUNT_KEY,
-                KeyReadWrite::ReadThenWrite(prev, Some(new_val)),
-            ));
-        }
-        {
-            let prev = inner
-                .nomt
-                .read(META_ROOTS_INDEX_KEY)
-                .expect("Failed to read NOMT roots index during flush");
-            let new_val = serialize_roots_index(&inner.roots_index);
-            actuals.push((
-                META_ROOTS_INDEX_KEY,
-                KeyReadWrite::ReadThenWrite(prev, Some(new_val)),
-            ));
         }
 
         // Sort actuals by key — NOMT requires sorted key order.
@@ -278,7 +149,7 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
 
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
         let inner = self.inner.read().expect("lock poisoned");
-        let nomt_key = make_key(PREFIX_NODE, key);
+        let nomt_key = make_key(key);
 
         // Check pending writes first.
         if let Some(pending) = inner.pending_nodes.get(&nomt_key) {
@@ -299,17 +170,20 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
             })
     }
 
+    fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
+        Vec::new()
+    }
+
     fn insert_node(
         &mut self,
         key: ArenaHash<Self::Hasher>,
         object: OnDiskObject<Self::Hasher>,
     ) {
         let mut inner = self.inner.write().expect("lock poisoned");
-        let nomt_key = make_key(PREFIX_NODE, &key);
+        let nomt_key = make_key(&key);
 
-        // Check if this is a new insert (not overwrite) for node count tracking.
         let is_new = if let Some(pending) = inner.pending_nodes.get(&nomt_key) {
-            pending.is_none() // was deleted, so re-inserting counts as new
+            pending.is_none()
         } else {
             inner
                 .nomt
@@ -331,9 +205,8 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
 
     fn delete_node(&mut self, key: &ArenaHash<Self::Hasher>) {
         let mut inner = self.inner.write().expect("lock poisoned");
-        let nomt_key = make_key(PREFIX_NODE, key);
+        let nomt_key = make_key(key);
 
-        // Check if node actually exists for count tracking.
         let exists = if let Some(pending) = inner.pending_nodes.get(&nomt_key) {
             pending.is_some()
         } else {
@@ -362,7 +235,7 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
         for (key, update) in iter {
             match update {
                 Update::InsertNode(object) => {
-                    let nomt_key = make_key(PREFIX_NODE, &key);
+                    let nomt_key = make_key(&key);
 
                     let is_new = if let Some(pending) = inner.pending_nodes.get(&nomt_key) {
                         pending.is_none()
@@ -383,7 +256,7 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
                     }
                 }
                 Update::DeleteNode => {
-                    let nomt_key = make_key(PREFIX_NODE, &key);
+                    let nomt_key = make_key(&key);
 
                     let exists = if let Some(pending) = inner.pending_nodes.get(&nomt_key) {
                         pending.is_some()
@@ -402,14 +275,9 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
                     }
                 }
                 Update::SetRootCount(count) => {
-                    let nomt_key = make_key(PREFIX_GC_ROOT, &key);
                     if count == 0 {
-                        inner.pending_roots.insert(nomt_key, None);
                         inner.roots_index.remove(&key);
                     } else {
-                        inner
-                            .pending_roots
-                            .insert(nomt_key, Some(count.to_le_bytes().to_vec()));
                         inner.roots_index.insert(key.clone(), count);
                     }
                 }
@@ -436,19 +304,12 @@ impl<H: WellBehavedHasher> DB for NomtDb<H> {
 
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         let mut inner = self.inner.write().expect("lock poisoned");
-        let nomt_key = make_key(PREFIX_GC_ROOT, &key);
 
         if count == 0 {
-            inner.pending_roots.insert(nomt_key, None);
             inner.roots_index.remove(&key);
         } else {
-            inner
-                .pending_roots
-                .insert(nomt_key, Some(count.to_le_bytes().to_vec()));
             inner.roots_index.insert(key, count);
         }
-
-        Self::flush(&mut inner);
     }
 
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
