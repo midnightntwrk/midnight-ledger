@@ -10,6 +10,7 @@ description = "Provides data structures and storage primitives for Midnight's le
 proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "base-crypto/proptest"]
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
+nomt = ["storage-core/nomt"]
 stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
 bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
 public-internal-structure = ["storage-core/public-internal-structure"]

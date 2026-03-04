@@ -33,7 +33,7 @@ use std::time::Duration;
 use storage::DefaultHasher;
 use storage::arena::{Sp, TCONSTRUCT};
 use storage::backend::StorageBackendStats;
-use storage::db::{InMemoryDB, ParityDb};
+use storage::db::{InMemoryDB, NomtDb};
 use storage::storage::{
     DEFAULT_CACHE_SIZE, default_storage, set_default_storage, unsafe_drop_default_storage,
 };
@@ -44,8 +44,7 @@ use zswap::keys::SecretKeys;
 static GLOBAL_ALLOC: Allocator<std::alloc::System> = Allocator(std::alloc::System);
 static CURALLOC: AtomicU64 = AtomicU64::new(0);
 
-fn cur_alloc() -> String {
-    let n = CURALLOC.load(std::sync::atomic::Ordering::SeqCst);
+fn pprint_size(n: u64) -> String {
     const KB: u64 = 1 << 10;
     const MB: u64 = 1 << 20;
     const GB: u64 = 1 << 30;
@@ -55,6 +54,26 @@ fn cur_alloc() -> String {
         MB..GB => format!("{:.2} MiB", n as f64 / MB as f64),
         GB.. => format!("{:.2} GiB", n as f64 / GB as f64),
     }
+}
+
+fn cur_alloc() -> String {
+    pprint_size(CURALLOC.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+fn du(dir: PathBuf) -> std::io::Result<u64> {
+    let mut frontier = vec![dir];
+    let mut total = 0;
+    while let Some(dir) = frontier.pop() {
+        for entry in std::fs::read_dir(dir)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir() {
+                frontier.push(entry.path());
+            } else {
+                total += entry.metadata()?.len();
+            }
+        }
+    }
+    Ok(total)
 }
 
 struct Allocator<A: GlobalAlloc>(A);
@@ -199,16 +218,15 @@ pub fn create_dust(c: &mut Criterion) {
     group.finish();
 }
 
-type TestDb = ParityDb;
+type TestDb = NomtDb;
 
-fn mk_test_db() -> storage::Storage<TestDb> {
+fn mk_test_db() -> (PathBuf, storage::Storage<TestDb>) {
     let dir = tempfile::tempdir().unwrap().keep();
-    storage::Storage::new(
-        //10,
+    let db = storage::Storage::new(
         DEFAULT_CACHE_SIZE,
-        ParityDb::<DefaultHasher>::open(&dir),
-        //InMemoryDB::default(),
-    )
+        NomtDb::<DefaultHasher>::open(&dir),
+    );
+    (dir, db)
 }
 
 pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
@@ -217,7 +235,9 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         .unwrap();
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
-    set_default_storage(mk_test_db);
+    let (dir, db) = mk_test_db();
+    dbg!(&dir);
+    set_default_storage(|| db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
     for log_size in 10..=13 {
@@ -301,11 +321,12 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated",
+            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB)",
             t1 - t0,
             (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
             swizzle_time / ((end - start) << BATCH_SIZE) as u32,
-            cur_alloc()
+            cur_alloc(),
+            pprint_size(du(dir.clone()).unwrap()),
         );
         lstate.persist();
         drop(lstate);

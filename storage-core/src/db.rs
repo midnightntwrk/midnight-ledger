@@ -21,6 +21,10 @@ pub use sql::SqlDB;
 mod paritydb;
 #[cfg(feature = "parity-db")]
 pub use paritydb::ParityDb;
+#[cfg(feature = "nomt")]
+mod nomt;
+#[cfg(feature = "nomt")]
+pub use self::nomt::NomtDb;
 
 use crate::DefaultHasher;
 use crate::backend::OnDiskObject;
@@ -552,6 +556,16 @@ mod tests {
             test_bulk_read(num_kvs, chunk_size, mk_db);
         }
     }
+    #[cfg(feature = "nomt")]
+    #[test]
+    fn bulk_read_nomtdb() {
+        for chunk_size in [10, 100, 1000] {
+            let path = tempfile::TempDir::new().unwrap().keep();
+            let mk_db = || crate::db::NomtDb::<DefaultHasher>::open(&path);
+            let num_kvs = BULK_READ_NUM_KVS;
+            test_bulk_read(num_kvs, chunk_size, mk_db);
+        }
+    }
     /// Compare bulk reading to reading one-by-one.
     ///
     /// The `open_db` argument should open a connection to the *same* db every
@@ -655,6 +669,12 @@ mod tests {
     #[test]
     fn all_ops_paritydb() {
         let mut db = crate::db::ParityDb::<DefaultHasher>::default();
+        test_all_ops(ALL_OPS_NUM_KVS, &mut db);
+    }
+    #[cfg(feature = "nomt")]
+    #[test]
+    fn all_ops_nomtdb() {
+        let mut db = crate::db::NomtDb::<DefaultHasher>::default();
         test_all_ops(ALL_OPS_NUM_KVS, &mut db);
     }
     /// Test all db operations, without concurrency.
@@ -765,6 +785,11 @@ mod tests {
     fn bfs_get_nodes_paritydb() {
         test_bfs_get_nodes::<crate::db::ParityDb>();
     }
+    #[cfg(feature = "nomt")]
+    #[test]
+    fn bfs_get_nodes_nomtdb() {
+        test_bfs_get_nodes::<crate::db::NomtDb>();
+    }
     fn test_bfs_get_nodes<D: DB<Hasher = DefaultHasher>>() {
         use crate::backend::raw_node::RawNode;
         // Arranging the nodes in layers, the variables names here are
@@ -869,6 +894,8 @@ mod tests {
     fn get_unreachable_keys_paritydb() {
         test_get_unreachable_keys::<crate::db::ParityDb>();
     }
+    // Note: NomtDb get_unreachable_keys is stubbed (returns empty) in prototype,
+    // so we skip that test for now.
     /// Helper for creating DB-specific tests of the `DB::get_unreachable_keys`
     /// API.
     ///
@@ -922,6 +949,11 @@ mod tests {
     #[test]
     fn update_ref_count_paritydb() {
         test_update_ref_count::<crate::db::ParityDb>();
+    }
+    #[cfg(feature = "nomt")]
+    #[test]
+    fn update_ref_count_nomtdb() {
+        test_update_ref_count::<crate::db::NomtDb>();
     }
     /// Test that updating the ref count of an existing node works
     /// correctly. This is of interest because ref-counts are not included in
