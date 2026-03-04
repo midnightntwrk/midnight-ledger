@@ -1,5 +1,9 @@
 # `transient-crypto` Changelog
 
+## Version `2.0.1`
+
+- bug fix: generalize ecMul to support scalars over the Jubjub order
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking midnight-zk changes
