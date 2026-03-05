@@ -50,11 +50,11 @@ jobs:
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
-      - name: Configure cargo
-        run: .github/scripts/configure-cargo.sh
-
       - name: Cache dependencies
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -121,13 +121,8 @@ jobs:
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
-      - name: Get nix rustc version
-        run: echo "RUSTC_VERSION=$(nix develop .#ci -c rustc --version)" >> $GITHUB_ENV
-
       - name: Cache dependencies
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-        with:
-          key: ${{ env.RUSTC_VERSION }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -188,13 +183,8 @@ jobs:
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
-      - name: Get nix rustc version
-        run: echo "RUSTC_VERSION=$(nix develop .#ci -c rustc --version)" >> $GITHUB_ENV
-
       - name: Cache dependencies
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-        with:
-          key: ${{ env.RUSTC_VERSION }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
@@ -258,13 +248,8 @@ jobs:
           cache: midnight-public
           access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
 
-      - name: Get nix rustc version
-        run: echo "RUSTC_VERSION=$(nix develop .#ci -c rustc --version)" >> $GITHUB_ENV
-
       - name: Cache dependencies
         uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
-        with:
-          key: ${{ env.RUSTC_VERSION }}
 
       - name: Configure cargo
         run: .github/scripts/configure-cargo.sh
