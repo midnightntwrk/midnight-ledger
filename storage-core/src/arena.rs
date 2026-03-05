@@ -285,7 +285,7 @@ impl<H: Digest> ArenaHash<H> {
     }
 }
 
-#[derive(Debug, Clone, Storable, Serializable)]
+#[derive(Debug, Clone, Storable)]
 #[derive_where(Hash, PartialEq, Eq, PartialOrd, Ord)]
 #[storable(base)]
 #[tag = "storage-key[v2]"]
@@ -296,6 +296,84 @@ pub enum ArenaKey<H: WellBehavedHasher = DefaultHasher> {
     Ref(ArenaHash<H>),
     /// A direct child, typically reserved for small children, represented as its raw data.
     Direct(DirectChildNode<H>),
+}
+
+impl<H: WellBehavedHasher> Tagged for ArenaKey<H> {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("storage-key[v2]")
+    }
+    fn tag_unique_factor() -> String {
+        "[storage-hash,storage-direct-child-node[v1]]".into()
+    }
+}
+
+impl<H: WellBehavedHasher> Serializable for ArenaKey<H> {
+    fn serialize(&self, writer: &mut impl io::Write) -> std::io::Result<()> {
+        match self {
+            ArenaKey::Ref(h) => {
+                0u8.serialize(writer)?;
+                h.serialize(writer)
+            }
+            ArenaKey::Direct(d) => {
+                1u8.serialize(writer)?;
+                d.serialize(writer)
+            }
+        }
+    }
+    fn serialized_size(&self) -> usize {
+        1 + match self {
+            ArenaKey::Ref(h) => h.serialized_size(),
+            ArenaKey::Direct(d) => d.serialized_size(),
+        }
+    }
+}
+
+impl<H: WellBehavedHasher> Deserializable for ArenaKey<H> {
+    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<Self> {
+        // Stack of DirectChildNode's missing child keys, and the number of keys they are missing.
+        // Represented as:
+        // (data: Vec<u8>, children: Vec<ArenaKey>, missing_children: usize)
+        let mut unfinished_direct_stack = vec![];
+        loop {
+            let discrim = u8::deserialize(reader, recursion_depth)?;
+            let mut completed_node = match discrim {
+                0u8 => {
+                    let hash = ArenaHash::deserialize(reader, recursion_depth)?;
+                    Some(ArenaKey::Ref(hash))
+                }
+                1u8 => {
+                    let data = <Vec<u8>>::deserialize(reader, recursion_depth)?;
+                    let n_children = u32::deserialize(reader, recursion_depth)? as usize;
+                    if n_children == 0 {
+                        Some(ArenaKey::Direct(DirectChildNode::new(data, vec![])))
+                    } else {
+                        unfinished_direct_stack.push((data, vec![], n_children));
+                        None
+                    }
+                }
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unknown discriminant for ArenaKey",
+                    ));
+                }
+            };
+            while let Some(node) = completed_node.take() {
+                if let Some((data, mut children, mut missing)) = unfinished_direct_stack.pop() {
+                    children.push(node);
+                    missing -= 1;
+                    if missing == 0 {
+                        completed_node =
+                            Some(ArenaKey::Direct(DirectChildNode::new(data, children)));
+                    } else {
+                        unfinished_direct_stack.push((data, children, missing));
+                    }
+                } else {
+                    return Ok(node);
+                }
+            }
+        }
+    }
 }
 
 impl<H: WellBehavedHasher> From<ArenaHash<H>> for ArenaKey<H> {
