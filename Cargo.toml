@@ -20,12 +20,12 @@ members = [
   # "base-crypto",
   # "base-crypto-derive",
   # "coin-structure",
-  # "serialize",
+  "serialize",
   # "serialize-macros",
   # "generate-cost-model",
   # "wasm-proving-demos/zkir-mt",
   # "static",
-  "storage-core"
+  # "storage-core"
 ]
 default-members = [
   # "zswap",
@@ -39,10 +39,10 @@ default-members = [
   # "base-crypto-derive",
   # "transient-crypto",
   # "coin-structure",
-  # "serialize",
+  "serialize",
   # "serialize-macros",
   # "generate-cost-model",
-  "storage-core"
+  # "storage-core"
 ]
 resolver = "2"
 exclude = [

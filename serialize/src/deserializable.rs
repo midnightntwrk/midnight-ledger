@@ -77,12 +77,13 @@ where
     fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> std::io::Result<Self>;
 
     fn check_rec(depth: &mut u32) -> std::io::Result<()> {
+        let trace = std::backtrace::Backtrace::force_capture();
         if Self::LIMIT_RECURSION {
             *depth += 1;
             if *depth > RECURSION_LIMIT {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::InvalidData,
-                    "exceeded recursion depth deserializing",
+                    format!("exceeded recursion depth deserializing:\n{trace:?}"),
                 ));
             }
         }
