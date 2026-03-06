@@ -906,6 +906,64 @@ impl<D: DB> StorageBackend<D> {
         self.database.batch_update(batch_deletes);
     }
 
+    /// Mark-and-sweep garbage collection.
+    ///
+    /// Marks all nodes reachable from GC roots and live allocations, then
+    /// sweeps (deletes) all unreachable nodes from the database and memory
+    /// caches.
+    #[cfg(feature = "layout-v2")]
+    pub fn gc(&mut self) {
+        // Collect all root keys: persisted GC roots + live inserts (temporary roots).
+        let mut marked = HashSet::new();
+        let mut frontier = Vec::new();
+        for key in self.get_roots().into_keys().chain(self.live_inserts.clone()) {
+            if marked.insert(key.clone()) {
+                frontier.push(key);
+            }
+        }
+
+        // Mark phase: traverse from roots, resolving nodes from memory first,
+        // then falling back to the database.
+        while let Some(key) = frontier.pop() {
+            let node = self
+                .peek_from_memory(&key)
+                .and_then(|cv| cv.get_obj())
+                .cloned()
+                .or_else(|| self.database.get_node(&key));
+
+            if let Some(node) = node {
+                for child_key in node.children.iter().flat_map(ArenaKey::refs) {
+                    if marked.insert(child_key.clone()) {
+                        frontier.push(child_key.clone());
+                    }
+                }
+            }
+        }
+
+        // Sweep: delete unmarked nodes from the database.
+        self.database.gc_sweep(&marked);
+
+        // Clean up memory caches for unreachable nodes.
+        let read_keys_to_remove: std::vec::Vec<_> = self
+            .read_cache
+            .iter()
+            .filter(|(k, _)| !marked.contains(k))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in read_keys_to_remove {
+            self.read_cache.remove(&key);
+        }
+        let write_keys_to_remove: std::vec::Vec<_> = self
+            .write_cache
+            .iter()
+            .filter(|(k, _)| !marked.contains(k))
+            .map(|(k, _)| k.clone())
+            .collect();
+        for key in write_keys_to_remove {
+            self.write_cache.remove(&key);
+        }
+    }
+
     /// Attempt to get in-memory value, without updating cache ordering.
     fn peek_from_memory(&self, key: &ArenaHash<D::Hasher>) -> Option<&CacheValue<D::Hasher>> {
         // Here `peek` gets a key from the cache without moving it to the front.
@@ -2057,6 +2115,141 @@ mod tests {
         // them. Cache o nodes into memory, mark some as roots, and uncache
         // them. Additionally mark and unmark some n nodes as roots in memory. Gc and see
         // what remains is what we expect.
+
+        let backend = &mut mk_backend();
+        for n in n_nodes {
+            n.cache_into_backend(backend);
+        }
+        backend.persist(&n33.key);
+        backend.persist(&n44.key);
+        backend.flush_all_changes_to_db();
+        for n in n_nodes {
+            backend.uncache(&n.key);
+        }
+
+        for n in o_nodes {
+            n.cache_into_backend(backend);
+        }
+        backend.persist(&o21.key);
+        for n in o_nodes {
+            backend.uncache(&n.key);
+        }
+
+        backend.unpersist(&n33.key); // Now a root in DB, but not a root in mem.
+        backend.persist(&n31.key); // A root only in mem.
+        backend.persist(&n44.key); // A root in DB and a double root in mem.
+
+        backend.gc();
+
+        let reachable_n_nodes = [&n31, &n41, &n42, &n44];
+        let reachable_o_nodes = [&o21, &o31, &o32];
+        let unreachable_n_nodes = [&n11, &n21, &n22, &n32, &n33, &n43];
+        let unreachable_o_nodes = [&o11];
+        for n in unreachable_n_nodes.iter().chain(unreachable_o_nodes.iter()) {
+            assert!(backend.get(&n.key).is_none());
+        }
+        for n in reachable_o_nodes.iter().chain(reachable_n_nodes.iter()) {
+            assert!(backend.get(&n.key).is_some());
+        }
+        for n in reachable_n_nodes {
+            assert!(backend.database.get_node(&n.key).is_some());
+        }
+    }
+
+    #[cfg(feature = "layout-v2")]
+    #[test]
+    fn gc_v2_inmemorydb() {
+        test_gc_v2::<InMemoryDB>();
+    }
+    #[cfg(all(feature = "sqlite", feature = "layout-v2"))]
+    #[test]
+    fn gc_v2_sqldb() {
+        test_gc_v2::<crate::db::SqlDB>();
+    }
+    #[cfg(all(feature = "parity-db", feature = "layout-v2"))]
+    #[test]
+    fn gc_v2_paritydb() {
+        test_gc_v2::<crate::db::ParityDb>();
+    }
+    #[cfg(feature = "layout-v2")]
+    fn test_gc_v2<D: DB>() {
+        use crate::backend::raw_node::RawNode;
+        // Arranging the nodes in layers, the variables names here are
+        // `n<layer><column>` for the`column`th node in layer `layer`.
+        let n41 = RawNode::new(&[1, 4, 1], 0, vec![]);
+        let n42 = RawNode::new(&[1, 4, 2], 0, vec![]);
+        let n43 = RawNode::new(&[1, 4, 3], 0, vec![]);
+        let n44 = RawNode::new(&[1, 4, 4], 0, vec![]);
+        let n31 = RawNode::new(&[1, 3, 1], 0, vec![&n41, &n42]);
+        let n32 = RawNode::new(&[1, 3, 2], 0, vec![&n42, &n43]);
+        let n33 = RawNode::new(&[1, 3, 3], 0, vec![&n43, &n44]);
+        let n21 = RawNode::new(&[1, 2, 1], 0, vec![&n31, &n42, &n32]);
+        let n22 = RawNode::new(&[1, 2, 2], 0, vec![&n32, &n33]);
+        let n11 = RawNode::new(&[1, 1, 1], 0, vec![&n31, &n21, &n22]);
+
+        let o31 = RawNode::new(&[2, 3, 1], 0, vec![]);
+        let o32 = RawNode::new(&[2, 3, 2], 0, vec![]);
+        let o21 = RawNode::new(&[2, 2, 1], 0, vec![&o31, &o32]);
+        let o11 = RawNode::new(&[2, 1, 1], 0, vec![&n21, &n44, &o21]);
+
+        let n_nodes = [&n41, &n42, &n43, &n44, &n31, &n32, &n33, &n21, &n22, &n11];
+        let o_nodes = [&o31, &o32, &o21, &o11];
+
+        let mk_backend = || {
+            let cache_size = 100;
+            StorageBackend::new(cache_size, D::default())
+        };
+
+        ////////////////////////////////////////////////////////////////
+        // Insert all nodes into DB with no roots, then GC: everything
+        // gets cleaned up.
+
+        let backend = &mut mk_backend();
+        for n in n_nodes.iter().chain(o_nodes.iter()) {
+            n.cache_into_backend(backend);
+        }
+        backend.flush_all_changes_to_db();
+        for n in n_nodes.iter().chain(o_nodes.iter()) {
+            backend.uncache(&n.key);
+        }
+        assert_eq!(backend.database.size(), n_nodes.len() + o_nodes.len());
+
+        backend.gc();
+        assert_eq!(backend.database.size(), 0);
+        assert_eq!(backend.read_cache.len(), 0);
+        assert_eq!(backend.write_cache.len(), 0);
+
+        ////////////////////////////////////////////////////////////////
+        // Insert n nodes into DB and uncache them, then cache o nodes
+        // into memory (live_inserts), then GC: o nodes are treated as
+        // temporary roots, so their transitive closure is preserved.
+
+        let backend = &mut mk_backend();
+        for n in n_nodes {
+            n.cache_into_backend(backend);
+        }
+        backend.flush_all_changes_to_db();
+        for n in n_nodes {
+            backend.uncache(&n.key);
+        }
+        for n in o_nodes {
+            n.cache_into_backend(backend);
+        }
+
+        backend.gc();
+        // o11 references n21, n44, o21; these and their transitive closures survive.
+        let reachable_n_nodes = [&n21, &n31, &n32, &n41, &n42, &n43, &n44];
+        let unreachable_n_nodes = [&n11, &n22, &n33];
+
+        for n in unreachable_n_nodes {
+            assert!(backend.get(&n.key).is_none());
+        }
+        for n in o_nodes.iter().chain(reachable_n_nodes.iter()) {
+            assert!(backend.get(&n.key).is_some());
+        }
+
+        ////////////////////////////////////////////////////////////////
+        // Test with explicit persist/unpersist roots.
 
         let backend = &mut mk_backend();
         for n in n_nodes {

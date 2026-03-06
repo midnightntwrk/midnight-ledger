@@ -261,7 +261,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             let swizzle_delta = tb.elapsed();
             swizzle_time += swizzle_delta;
             if i % 4 == 3 {
-                default_storage::<TestDb>().with_backend(|b| b.get_db().gc());
+                default_storage::<TestDb>().with_backend(|b| b.gc());
             }
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
@@ -341,7 +341,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.get_db().gc();
+            b.gc();
         });
         let mut runs = 0;
         let mut total_construct_time =

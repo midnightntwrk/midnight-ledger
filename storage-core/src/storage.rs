@@ -336,6 +336,14 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db
             .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)
     }
+
+    #[cfg(feature = "layout-v2")]
+    fn gc_sweep(
+        &mut self,
+        reachable: &std::collections::HashSet<ArenaHash<Self::Hasher>>,
+    ) {
+        self.db.gc_sweep(reachable)
+    }
 }
 
 #[cfg(feature = "proptest")]

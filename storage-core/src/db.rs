@@ -276,6 +276,11 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Return the number of nodes in this DB.
     fn size(&self) -> usize;
+
+    #[cfg(feature = "layout-v2")]
+    /// Delete all nodes from the database whose keys are NOT in `reachable`.
+    /// Used by mark-and-sweep garbage collection.
+    fn gc_sweep(&mut self, reachable: &HashSet<ArenaHash<Self::Hasher>>);
 }
 
 /// A dubious default implementation of `DB::batch_update`.
@@ -440,6 +445,11 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         dubious_batch_get_nodes(self, keys)
+    }
+
+    #[cfg(feature = "layout-v2")]
+    fn gc_sweep(&mut self, reachable: &HashSet<ArenaHash<Self::Hasher>>) {
+        self.lock_nodes().retain(|k, _| reachable.contains(k));
     }
 }
 

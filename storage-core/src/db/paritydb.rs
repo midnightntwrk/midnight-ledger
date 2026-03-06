@@ -18,7 +18,9 @@ use std::{collections::HashMap, fmt::Debug, marker::PhantomData};
 use proptest::prelude::*;
 use serialize::{Deserializable, Serializable};
 
-use parity_db::{self, CompressionType, Operation};
+use parity_db::{self, CompressionType};
+#[cfg(feature = "layout-v2")]
+use parity_db::Operation;
 #[allow(deprecated)]
 use sha2::digest::generic_array::GenericArray;
 
@@ -120,37 +122,6 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         }
     }
 
-    /// TODO
-    pub fn gc(&self) {
-        let mut marked = std::collections::HashSet::new();
-        let mut frontier = Vec::new();
-        let mut roots_iter = self.db.iter(GC_ROOT_COLUMN).expect("Failed to iterate over db");
-        while let Some((k, _)) = roots_iter.next().expect("Failed to get next form iterator") {
-            let hash = bytes_to_arena_key(k);
-            frontier.push(hash.clone());
-            marked.insert(hash);
-        }
-        while let Some(item) = frontier.pop() {
-            let node = self.get_node(&item).unwrap();
-            for k in node.children.iter().flat_map(|k| k.refs()) {
-                if !marked.contains(k) {
-                    marked.insert(k.clone());
-                    frontier.push(k.clone());
-                }
-            }
-        }
-        let mut to_delete = Vec::new();
-        let mut nodes_iter = self.db.iter(NODE_COLUMN).expect("Failed to iterate over db");
-        while let Some((k, _)) = nodes_iter.next().expect("Failed to get next from iterator") {
-            let hash = bytes_to_arena_key(k);
-            if !marked.contains(&hash) {
-                to_delete.push(hash);
-            }
-        }
-        self.db.commit_changes(to_delete.into_iter().map(|k| (NODE_COLUMN, Operation::Dereference(k.0.to_vec())))
-        ).unwrap();
-        self.db.flush();
-    }
 
 }
 
@@ -347,6 +318,27 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             count += 1;
         }
         count
+    }
+
+    #[cfg(feature = "layout-v2")]
+    fn gc_sweep(&mut self, reachable: &std::collections::HashSet<ArenaHash<Self::Hasher>>) {
+        let mut to_delete = Vec::new();
+        let mut nodes_iter = self.db.iter(NODE_COLUMN).expect("Failed to iterate over db");
+        while let Some((k, _)) = nodes_iter.next().expect("Failed to get next from iterator") {
+            let hash = bytes_to_arena_key(k);
+            if !reachable.contains(&hash) {
+                to_delete.push(hash);
+            }
+        }
+        drop(nodes_iter);
+        self.db
+            .commit_changes(
+                to_delete
+                    .into_iter()
+                    .map(|k| (NODE_COLUMN, Operation::Dereference(k.0.to_vec()))),
+            )
+            .unwrap();
+        self.db.flush();
     }
 }
 

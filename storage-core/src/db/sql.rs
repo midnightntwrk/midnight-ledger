@@ -726,6 +726,27 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             result
         })
     }
+
+    #[cfg(feature = "layout-v2")]
+    fn gc_sweep(&mut self, reachable: &std::collections::HashSet<ArenaHash<Self::Hasher>>) {
+        use crate::db::Update;
+        let all_keys: Vec<ArenaHash<H>> = self.with_tx(Deferred, |tx| {
+            let sql = "SELECT key FROM node";
+            let mut stmt = tx.prepare(sql).unwrap();
+            let result = stmt
+                .query_map([], |row| row.get(0))
+                .unwrap()
+                .map(|r| r.unwrap())
+                .collect();
+            stmt.finalize().unwrap();
+            result
+        });
+        let batch_deletes = all_keys
+            .into_iter()
+            .filter(|k| !reachable.contains(k))
+            .map(|k| (k, Update::DeleteNode));
+        self.batch_update(batch_deletes);
+    }
 }
 
 impl<H: WellBehavedHasher> DummyArbitrary for SqlDB<H> {}
