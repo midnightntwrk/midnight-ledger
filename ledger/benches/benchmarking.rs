@@ -325,8 +325,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
                 let tx = rt
                     .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
                     .unwrap();
-                let strictness = WellFormedStrictness::default();
-                tx.well_formed(&*lstate, strictness, state.time).unwrap()
+                tx
             })
             .collect::<Vec<_>>();
         let context = state.context().block_context;
@@ -351,11 +350,20 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             std::collections::HashMap::<&'static str, (usize, std::time::Duration)>::new();
         #[derive(Copy, Clone, PartialEq, Eq, Debug)]
         enum Mode {
+            Verify,
+            ReadVerify,
             Compute,
             Write,
             ReadCompute,
         };
-        for mode in [Mode::Compute, Mode::Write, Mode::ReadCompute] {
+        let time = state.time;
+        for mode in [
+            Mode::Verify,
+            Mode::ReadVerify,
+            Mode::Compute,
+            Mode::Write,
+            Mode::ReadCompute,
+        ] {
             group.bench_with_input(
                 BenchmarkId::new(format!("{mode:?}"), log_size),
                 &log_size,
@@ -373,11 +381,29 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
                                 block_context: context.clone(),
                                 whitelist: None,
                             };
-                            let vtxs = txs
+                            let txs = txs
                                 .choose_multiple(&mut rng, 1 << BATCH_SIZE)
                                 .cloned()
                                 .collect::<Vec<_>>();
                             let mut t0 = std::time::Instant::now();
+                            let strictness = WellFormedStrictness::default();
+                            let vtxs = txs
+                                .iter()
+                                .map(|tx| tx.well_formed(&*state, strictness, time).unwrap())
+                                .collect::<Vec<_>>();
+                            if mode == Mode::ReadVerify {
+                                dt += t0.elapsed();
+                                continue;
+                            } else if mode == Mode::Verify {
+                                t0 = std::time::Instant::now();
+                                let _ = txs
+                                    .iter()
+                                    .map(|tx| tx.well_formed(&*state, strictness, time).unwrap())
+                                    .collect::<Vec<_>>();
+                                dt += t0.elapsed();
+                                continue;
+                            }
+                            t0 = std::time::Instant::now();
                             let (s, _) = black_box(
                                 state.batch_apply_all_or_nothing(black_box(&vtxs), &context),
                             )
