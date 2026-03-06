@@ -21,7 +21,7 @@ use crate::structure::{
     ClaimKind, ContractAction, IntentHash, LedgerState, Transaction, Utxo, VerifiedTransaction,
 };
 
-pub(crate) struct PrefetchPaths {
+pub struct PrefetchPaths {
     zswap_nullifiers: Vec<Nullifier>,
     zswap_coin_coms: Vec<Commitment>,
     zswap_merkle_roots: Vec<MerkleTreeDigest>,
@@ -35,31 +35,47 @@ pub(crate) struct PrefetchPaths {
     bridge_addresses: Vec<UserAddress>,
 }
 
-pub(crate) fn collect_prefetch_paths<D: DB>(tx: &VerifiedTransaction<D>) -> PrefetchPaths {
-    let mut paths = PrefetchPaths {
-        zswap_nullifiers: Vec::new(),
-        zswap_coin_coms: Vec::new(),
-        zswap_merkle_roots: Vec::new(),
-        contract_addresses: Vec::new(),
-        utxo_keys: Vec::new(),
-        replay_intent_hashes: Vec::new(),
-        dust_nullifiers: Vec::new(),
-        dust_delegation_addresses: Vec::new(),
-        dust_night_indices: Vec::new(),
-        reward_addresses: Vec::new(),
-        bridge_addresses: Vec::new(),
-    };
+impl PrefetchPaths {
+    pub fn new() -> Self {
+        PrefetchPaths {
+            zswap_nullifiers: Vec::new(),
+            zswap_coin_coms: Vec::new(),
+            zswap_merkle_roots: Vec::new(),
+            contract_addresses: Vec::new(),
+            utxo_keys: Vec::new(),
+            replay_intent_hashes: Vec::new(),
+            dust_nullifiers: Vec::new(),
+            dust_delegation_addresses: Vec::new(),
+            dust_night_indices: Vec::new(),
+            reward_addresses: Vec::new(),
+            bridge_addresses: Vec::new(),
+        }
+    }
 
+    pub fn collect<D: DB>(&mut self, tx: &VerifiedTransaction<D>) {
+        collect_into(self, tx);
+    }
+}
+
+pub fn collect_prefetch_paths<D: DB>(tx: &VerifiedTransaction<D>) -> PrefetchPaths {
+    let mut paths = PrefetchPaths::new();
+
+    collect_into(&mut paths, tx);
+
+    paths
+}
+
+fn collect_into<D: DB>(paths: &mut PrefetchPaths, tx: &VerifiedTransaction<D>) {
     match &tx.inner {
         Transaction::Standard(stx) => {
             // Zswap: guaranteed coins
             if let Some(offer) = &stx.guaranteed_coins {
-                collect_zswap_paths(&mut paths, offer);
+                collect_zswap_paths(paths, offer);
             }
 
             // Zswap: fallible coins
             for entry in stx.fallible_coins.iter() {
-                collect_zswap_paths(&mut paths, &entry.1);
+                collect_zswap_paths(paths, &entry.1);
             }
 
             // Per-intent paths
@@ -73,13 +89,13 @@ pub(crate) fn collect_prefetch_paths<D: DB>(tx: &VerifiedTransaction<D>) -> Pref
                 // Guaranteed unshielded offer
                 if let Some(offer) = &intent.guaranteed_unshielded_offer {
                     let intent_hash = intent.intent_hash(0);
-                    collect_unshielded_paths(&mut paths, offer, intent_hash);
+                    collect_unshielded_paths(paths, offer, intent_hash);
                 }
 
                 // Fallible unshielded offer
                 if let Some(offer) = &intent.fallible_unshielded_offer {
                     let intent_hash = intent.intent_hash(segment_id);
-                    collect_unshielded_paths(&mut paths, offer, intent_hash);
+                    collect_unshielded_paths(paths, offer, intent_hash);
                 }
 
                 // Contract actions
@@ -110,8 +126,6 @@ pub(crate) fn collect_prefetch_paths<D: DB>(tx: &VerifiedTransaction<D>) -> Pref
             }
         }
     }
-
-    paths
 }
 
 fn collect_zswap_paths<D: DB>(
@@ -158,7 +172,7 @@ fn collect_unshielded_paths<D: DB>(
     }
 }
 
-pub(crate) fn execute_prefetch<D: DB>(state: &LedgerState<D>, paths: &PrefetchPaths) {
+pub fn execute_prefetch<D: DB>(state: &LedgerState<D>, paths: &PrefetchPaths) {
     use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 
     rayon::scope(|s| {

@@ -45,7 +45,7 @@ use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
@@ -585,7 +585,9 @@ impl<D: DB> TestState<D> {
                 );
             }
             let mut spends = storage::storage::Array::new();
-            for qdo in old_dust.utxos() {
+            let mut utxos = old_dust.utxos().collect::<Vec<_>>();
+            utxos.shuffle(&mut rng);
+            for qdo in utxos.into_iter() {
                 if dust == 0 {
                     break;
                 }

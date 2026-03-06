@@ -26,7 +26,7 @@ pub mod error;
 pub mod events;
 #[path = "tracing.rs"]
 mod ledger_tracing;
-mod prefetch;
+pub mod prefetch;
 mod primitive;
 mod prior_versions;
 pub mod prove;

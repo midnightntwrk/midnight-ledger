@@ -23,7 +23,7 @@ use midnight_ledger::verify::WellFormedStrictness;
 use onchain_runtime::context::BlockContext;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
-use rand::{Rng, SeedableRng};
+use rand::{Rng, SeedableRng, seq::SliceRandom};
 use std::alloc::GlobalAlloc;
 use std::io::{Write, stdout};
 use std::ops::Deref;
@@ -44,7 +44,7 @@ use zswap::keys::SecretKeys;
 static GLOBAL_ALLOC: Allocator<std::alloc::System> = Allocator(std::alloc::System);
 static CURALLOC: AtomicU64 = AtomicU64::new(0);
 
-fn pprint_size(n: u64) -> String {
+fn pprint_bytes(n: u64) -> String {
     const KB: u64 = 1 << 10;
     const MB: u64 = 1 << 20;
     const GB: u64 = 1 << 30;
@@ -57,7 +57,24 @@ fn pprint_size(n: u64) -> String {
 }
 
 fn cur_alloc() -> String {
-    pprint_size(CURALLOC.load(std::sync::atomic::Ordering::SeqCst))
+    pprint_bytes(CURALLOC.load(std::sync::atomic::Ordering::SeqCst))
+}
+
+fn du(dir: PathBuf) -> std::io::Result<u64> {
+    let mut frontier = vec![dir];
+    let mut total = 0;
+    while let Some(dir) = frontier.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let meta = entry.metadata()?;
+            if meta.is_dir() {
+                frontier.push(entry.path());
+            } else {
+                total += meta.len();
+            }
+        }
+    }
+    Ok(total)
 }
 
 struct Allocator<A: GlobalAlloc>(A);
@@ -206,29 +223,13 @@ type TestDb = ParityDb;
 
 fn mk_test_db() -> (PathBuf, storage::Storage<TestDb>) {
     let dir = tempfile::tempdir().unwrap().keep();
-    let storage = storage::Storage::new(
+    let db = storage::Storage::new(
         //10,
         DEFAULT_CACHE_SIZE,
         ParityDb::<DefaultHasher>::open(&dir),
         //InMemoryDB::default(),
     );
-    (dir, storage)
-}
-
-fn du(dir: PathBuf) -> std::io::Result<u64> {
-    let mut frontier = vec![dir];
-    let mut total = 0;
-    while let Some(dir) = frontier.pop() {
-        for entry in std::fs::read_dir(dir)? {
-            let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                frontier.push(entry.path());
-            } else {
-                total += entry.metadata()?.len();
-            }
-        }
-    }
-    Ok(total)
+    (dir, db)
 }
 
 pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
@@ -237,11 +238,11 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         .unwrap();
     let mut rng = StdRng::seed_from_u64(0x42);
     let mut group = c.benchmark_group("night-transfer-by-utxo-set-size");
-    let (dir, storage) = mk_test_db();
-    set_default_storage(|| storage);
+    let (dir, db) = mk_test_db();
+    set_default_storage(|| db);
     let mut state = TestState::new(&mut rng);
     let mut reached_size = 0;
-    for log_size in 10..=16 {
+    for log_size in 10.. {
         let t0 = std::time::Instant::now();
         let mut swizzle_time = std::time::Duration::default();
         let size = 2u64.pow(log_size);
@@ -258,21 +259,17 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
             let tb = std::time::Instant::now();
             state.swizzle_to_db();
-            let swizzle_delta = tb.elapsed();
-            swizzle_time += swizzle_delta;
-            if i % 4 == 3 {
-                default_storage::<TestDb>().with_backend(|b| b.gc());
-            }
+            swizzle_time += tb.elapsed();
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
             let string = format!(
-                "[{}{}] ETA: {:?}, TPS: {:.2}, size: {}, write time: {:?}",
+                "[{}{}] ETA: {:?}, TPS: {}, size: {}, write time: {:?}",
                 "#".repeat(segments),
                 " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
                 t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
                 (1 << BATCH_SIZE) as f64 / ta.elapsed().as_secs_f64(),
                 (i + 1) << BATCH_SIZE,
-                swizzle_delta / (1 << BATCH_SIZE) as u32,
+                swizzle_time / ((i + 1 - start) << BATCH_SIZE) as u32,
             );
             print!(
                 "\r{string}{}",
@@ -284,47 +281,53 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         println!();
         reached_size = size;
         let mut lstate = Sp::new(state.ledger.clone());
-        let utxo = (**state.utxos.iter().next().unwrap()).clone();
-        let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
-            inputs: vec![UtxoSpend {
-                value: utxo.value,
-                owner: state.night_key.verifying_key(),
-                type_: utxo.type_,
-                intent_hash: utxo.intent_hash,
-                output_no: utxo.output_no,
-            }]
-            .into(),
-            outputs: vec![
-                UtxoOutput {
-                    value: 100,
-                    owner: UserAddress::from(state.night_key.verifying_key()),
-                    type_: utxo.type_,
-                },
-                UtxoOutput {
-                    value: utxo.value - 100,
-                    owner: UserAddress::from(state.night_key.verifying_key()),
-                    type_: utxo.type_,
-                },
-            ]
-            .into(),
-            signatures: vec![].into(),
-        };
-        let intent = Intent::new(
-            &mut rng,
-            Some(offer),
-            None,
-            vec![],
-            vec![],
-            vec![],
-            None,
-            state.time,
-        );
-        let tx = Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
-        let tx = rt
-            .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
-            .unwrap();
-        let strictness = WellFormedStrictness::default();
-        let vtx = tx.well_formed(&*lstate, strictness, state.time).unwrap();
+        let mut utxos = lstate.utxo.utxos.keys().collect::<Vec<_>>();
+        utxos.shuffle(&mut rng);
+        let txs = (0..256)
+            .map(|_| {
+                let utxo = utxos.pop().unwrap();
+                let offer: UnshieldedOffer<Signature, TestDb> = UnshieldedOffer {
+                    inputs: vec![UtxoSpend {
+                        value: utxo.value,
+                        owner: state.night_key.verifying_key(),
+                        type_: utxo.type_,
+                        intent_hash: utxo.intent_hash,
+                        output_no: utxo.output_no,
+                    }]
+                    .into(),
+                    outputs: vec![
+                        UtxoOutput {
+                            value: 100,
+                            owner: UserAddress::from(state.night_key.verifying_key()),
+                            type_: utxo.type_,
+                        },
+                        UtxoOutput {
+                            value: utxo.value - 100,
+                            owner: UserAddress::from(state.night_key.verifying_key()),
+                            type_: utxo.type_,
+                        },
+                    ]
+                    .into(),
+                    signatures: vec![].into(),
+                };
+                let intent = Intent::new(
+                    &mut rng,
+                    Some(offer),
+                    None,
+                    vec![],
+                    vec![],
+                    vec![],
+                    None,
+                    state.time,
+                );
+                let tx =
+                    Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
+                let tx = rt
+                    .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
+                    .unwrap();
+                tx
+            })
+            .collect::<Vec<_>>();
         let context = state.context().block_context;
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
@@ -334,47 +337,123 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
             swizzle_time / ((end - start) << BATCH_SIZE) as u32,
             cur_alloc(),
-            pprint_size(du(dir.clone()).unwrap()),
+            pprint_bytes(du(dir.clone()).unwrap()),
         );
         lstate.persist();
         drop(lstate);
         state.swizzle_to_db();
         default_storage::<TestDb>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.gc();
         });
         let mut runs = 0;
         let mut total_construct_time =
             std::collections::HashMap::<&'static str, (usize, std::time::Duration)>::new();
-        group.bench_with_input(BenchmarkId::from_parameter(log_size), &log_size, |b, _| {
-            b.iter_custom(|i| {
-                let mut dt = Default::default();
-                for _ in 0..i {
-                    let pre_cache = default_storage::<TestDb>().with_backend(|b| b.get_stats());
-                    let tconstruct0 = TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
-                    let t0 = std::time::Instant::now();
-                    let state = black_box(default_storage().get_lazy(&key)).unwrap();
-                    let context = TransactionContext {
-                        ref_state: state.deref().clone(),
-                        block_context: context.clone(),
-                        whitelist: None,
-                    };
-                    let (_, res) = black_box(state.apply(black_box(&vtx), &context));
-                    dt += t0.elapsed();
-                    let tconstruct1 = TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
-                    for (k, v) in tconstruct1 {
-                        total_construct_time.entry(k).or_default().0 +=
-                            v.0 - tconstruct0.get(k).copied().unwrap_or_default().0;
-                        total_construct_time.entry(k).or_default().1 +=
-                            v.1 - tconstruct0.get(k).copied().unwrap_or_default().1;
-                    }
-                    let post_cache = default_storage::<TestDb>().with_backend(|b| b.get_stats());
-                    runs += 1;
-                    assert!(matches!(res, TransactionResult::Success(..)));
-                }
-                dt
-            });
-        });
+        #[derive(Copy, Clone, PartialEq, Eq, Debug)]
+        enum Mode {
+            Verify,
+            ReadVerify,
+            Compute,
+            Write,
+            ReadCompute,
+        };
+        let time = state.time;
+        for mode in [
+            Mode::Verify,
+            Mode::ReadVerify,
+            Mode::Compute,
+            Mode::Write,
+            Mode::ReadCompute,
+        ] {
+            group.bench_with_input(
+                BenchmarkId::new(format!("{mode:?}"), log_size),
+                &log_size,
+                |b, _| {
+                    b.iter_custom(|i| {
+                        let mut dt = Default::default();
+                        for _ in 0..i {
+                            let pre_cache =
+                                default_storage::<TestDb>().with_backend(|b| b.get_stats());
+                            let tconstruct0 =
+                                TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
+                            let state = black_box(default_storage().get_lazy(&key)).unwrap();
+                            let context = TransactionContext {
+                                ref_state: state.deref().clone(),
+                                block_context: context.clone(),
+                                whitelist: None,
+                            };
+                            let txs = txs
+                                .choose_multiple(&mut rng, 1 << BATCH_SIZE)
+                                .cloned()
+                                .collect::<Vec<_>>();
+                            let mut t0 = std::time::Instant::now();
+                            let strictness = WellFormedStrictness::default();
+                            let vtxs = txs
+                                .iter()
+                                .map(|tx| tx.well_formed(&*state, strictness, time).unwrap())
+                                .collect::<Vec<_>>();
+                            if mode == Mode::ReadVerify {
+                                dt += t0.elapsed();
+                                continue;
+                            } else if mode == Mode::Verify {
+                                t0 = std::time::Instant::now();
+                                let _ = txs
+                                    .iter()
+                                    .map(|tx| tx.well_formed(&*state, strictness, time).unwrap())
+                                    .collect::<Vec<_>>();
+                                dt += t0.elapsed();
+                                continue;
+                            }
+                            // Prefetch state paths for the batch
+                            {
+                                let mut paths =
+                                    midnight_ledger::prefetch::PrefetchPaths::new();
+                                for vtx in &vtxs {
+                                    paths.collect(vtx);
+                                }
+                                midnight_ledger::prefetch::execute_prefetch(
+                                    &*state, &paths,
+                                );
+                            }
+                            t0 = std::time::Instant::now();
+                            let (s, _) = black_box(
+                                state.batch_apply_all_or_nothing(black_box(&vtxs), &context),
+                            )
+                            .unwrap();
+                            // Re-run it, it's guaranteed to be in cache now!
+                            if mode == Mode::Compute {
+                                t0 = std::time::Instant::now();
+                                let _ = black_box(
+                                    state.batch_apply_all_or_nothing(black_box(&vtxs), &context),
+                                )
+                                .unwrap();
+                            } else if mode == Mode::Write {
+                                let mut s = Sp::new(s);
+                                t0 = std::time::Instant::now();
+                                s.persist();
+                                default_storage::<TestDb>()
+                                    .with_backend(|b| b.flush_all_changes_to_db());
+                                s.unpersist();
+                            }
+                            dt += t0.elapsed();
+                            let tconstruct1 =
+                                TCONSTRUCT.lock().unwrap().clone().unwrap_or_default();
+                            if mode == Mode::ReadCompute {
+                                for (k, v) in tconstruct1 {
+                                    total_construct_time.entry(k).or_default().0 +=
+                                        v.0 - tconstruct0.get(k).copied().unwrap_or_default().0;
+                                    total_construct_time.entry(k).or_default().1 +=
+                                        v.1 - tconstruct0.get(k).copied().unwrap_or_default().1;
+                                }
+                                let post_cache =
+                                    default_storage::<TestDb>().with_backend(|b| b.get_stats());
+                                runs += 1;
+                            }
+                        }
+                        dt
+                    });
+                },
+            );
+        }
         let mut total_construct_time = total_construct_time
             .into_iter()
             .map(|(k, (n, d))| (k, (n / runs as usize, d / runs)))
@@ -391,8 +470,8 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         lstate.unpersist();
         drop(lstate);
         drop(key);
-        drop(vtx);
-        drop(tx);
+        drop(utxos);
+        drop(txs);
         println!("After dropping all data, {} remains allocated", cur_alloc());
     }
     group.finish();
