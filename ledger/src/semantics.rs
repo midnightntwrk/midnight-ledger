@@ -1203,6 +1203,9 @@ impl<D: DB> LedgerState<D> {
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
+        let paths = crate::prefetch::collect_prefetch_paths(tx);
+        crate::prefetch::execute_prefetch(self, &paths);
+
         let res = match &tx.inner {
             Transaction::Standard(stx) => {
                 let cloned_stx = stx.clone();
