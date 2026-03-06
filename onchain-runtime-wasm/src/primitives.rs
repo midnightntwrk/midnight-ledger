@@ -13,14 +13,13 @@
 
 use std::borrow::Cow;
 
-use crate::state::from_maybe_string;
-use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
-use base_crypto::fab::{AlignedValue, Alignment, Value};
+use base_crypto::fab::{AlignedValue, Alignment, Value, ValueSlice};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
 use base_crypto::{hash, signatures};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
+use ff::Field;
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, JsString, Uint8Array};
 use onchain_runtime::ops::Op;
@@ -28,14 +27,18 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::EntryPointBuf;
 use rand::Rng;
 use rand::rngs::OsRng;
+use serde::{Deserialize, Serialize};
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
 use transient_crypto;
-use transient_crypto::curve;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{self, EmbeddedFr, Fr, embedded, outer};
 use transient_crypto::fab::{AlignedValueExt, AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::repr::FieldRepr;
+use transient_crypto::schnorr;
 use wasm_bindgen::prelude::*;
+
+use crate::state::from_maybe_string;
+use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 
 #[wasm_bindgen(js_name = "entryPointHash")]
 pub fn entry_point_hash(entry_point: JsValue) -> Result<String, JsError> {
@@ -398,4 +401,127 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     let val: Value = from_value(val)?;
     let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&*val)?;
     Ok(to_value(&Value::from(res))?)
+}
+
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element,
+/// reducing modulo the Jubjub scalar field modulus.
+fn jubjub_scalar_from_native(native: outer::Scalar) -> embedded::Scalar {
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&native.to_bytes_le());
+    embedded::Scalar::from_bytes_wide(&wide)
+}
+
+/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
+fn native_from_jubjub_scalar(jubjub_s: embedded::Scalar) -> outer::Scalar {
+    outer::Scalar::from_bytes_le(&jubjub_s.to_bytes())
+        .expect("Jubjub scalar always fits as a natife field element")
+}
+
+#[wasm_bindgen(js_name = "jubjubSampleSigningKey")]
+/// Sample a random JubJub scalar.
+pub fn jubjub_sample_signing_key() -> Result<JsValue, JsError> {
+    let scalar = embedded::Scalar::random(OsRng);
+    let scalar = native_from_jubjub_scalar(scalar);
+    Ok(to_value(&Value::from(Fr(scalar)))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrVerifyingKey")]
+/// Compute the Schnorr verifying key, given the signing key `sk`.
+pub fn jubjub_schnorr_verifying_key(sk: JsValue) -> Result<JsValue, JsError> {
+    ec_mul_generator(sk)
+}
+
+#[derive(Serialize, Deserialize)]
+/// Schnorr signature, containing the two coordinates from the announcement, `announcement_x` and `announcement_y`,
+/// and the `response`.
+pub struct SchnorrSignature {
+    ann_x: Fr,
+    ann_y: Fr,
+    response: Fr,
+}
+
+impl From<SchnorrSignature> for Value {
+    fn from(sig: SchnorrSignature) -> Value {
+        Value::concat([
+            &Value::from(sig.ann_x),
+            &Value::from(sig.ann_y),
+            &Value::from(sig.response),
+        ])
+    }
+}
+
+impl TryFrom<&ValueSlice> for SchnorrSignature {
+    type Error = JsError;
+
+    fn try_from(value: &ValueSlice) -> Result<Self, Self::Error> {
+        let (ann_x, ann_y, response) =
+            <(Fr, Fr, Fr)>::try_from(value).map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(SchnorrSignature {
+            ann_x,
+            ann_y,
+            response,
+        })
+    }
+}
+
+fn from_jsvalue<T, E>(val: JsValue) -> Result<T, JsError>
+where
+    T: for<'a> TryFrom<&'a ValueSlice, Error = E>,
+    E: Into<JsError>,
+{
+    let val: Value = from_value(val)?;
+    T::try_from(&*val).map_err(|e| e.into())
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrSign")]
+/// Produce a Schnorr signature over the native curve, Jubjub.
+pub fn jubjub_schnorr_sign(align: JsValue, msg: JsValue, key: JsValue) -> Result<JsValue, JsError> {
+    let sk_native: Fr = from_jsvalue(key)?;
+    let sk = EmbeddedFr(jubjub_scalar_from_native(sk_native.0));
+
+    let msg_value = AlignedValue::new(from_value(msg)?, from_value(align)?)
+        .ok_or(JsError::new("invalid alignment supplied"))?;
+    let msg_fields: Vec<Fr> = ValueReprAlignedValue(msg_value).field_vec();
+
+    let sig = schnorr::sign(&mut OsRng, sk, &msg_fields);
+
+    // These unwraps are safe. Even the identity has coordinates for edwards curves.
+    let ann_x = sig.announcement.x().unwrap();
+    let ann_y = sig.announcement.y().unwrap();
+    let response = Fr(native_from_jubjub_scalar(sig.response.0));
+
+    let signature = SchnorrSignature {
+        ann_x,
+        ann_y,
+        response,
+    };
+    Ok(to_value(&Value::from(signature))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubSchnorrVerify")]
+/// Verify a Schnorr signature over the native curve Jubjub.
+pub fn jubjub_schnorr_verify(
+    align: JsValue,
+    msg: JsValue,
+    pk: JsValue,
+    signature: JsValue,
+) -> Result<bool, JsError> {
+    let pk_point: curve::EmbeddedGroupAffine = from_jsvalue(pk)?;
+
+    let sig: SchnorrSignature = from_jsvalue(signature)?;
+    let announcement = curve::EmbeddedGroupAffine::new(sig.ann_x, sig.ann_y)
+        .ok_or_else(|| JsError::new("Invalid announcement point in signature"))?;
+
+    let response = EmbeddedFr(jubjub_scalar_from_native(sig.response.0));
+
+    let schnorr_sig = schnorr::SchnorrSignature {
+        announcement,
+        response,
+    };
+
+    let msg_value = AlignedValue::new(from_value(msg)?, from_value(align)?)
+        .ok_or(JsError::new("invalid alignment supplied"))?;
+    let msg_fields: Vec<Fr> = ValueReprAlignedValue(msg_value).field_vec();
+
+    Ok(schnorr::verify(pk_point, &msg_fields, &schnorr_sig))
 }

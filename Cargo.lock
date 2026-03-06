@@ -2893,10 +2893,13 @@ dependencies = [
 name = "midnight-onchain-runtime-wasm"
 version = "3.0.0-rc.1"
 dependencies = [
+ "ff",
  "getrandom 0.2.17",
+ "group",
  "hex",
  "js-sys",
  "midnight-base-crypto",
+ "midnight-circuits",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
  "midnight-serialize",
