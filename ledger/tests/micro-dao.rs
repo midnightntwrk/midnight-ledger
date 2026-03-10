@@ -458,7 +458,7 @@ async fn micro_dao_inner(mode: TestMode) {
                     "local-test",
                     test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
                     Some(offer),
-                    std::collections::HashMap::new(),
+                    HashMap::new(),
                 );
                 let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
                 tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
@@ -940,7 +940,7 @@ async fn micro_dao_inner(mode: TestMode) {
                 "local-test",
                 test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
                 Some(offer),
-                std::collections::HashMap::new(),
+                HashMap::new(),
             );
             let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
             tx.well_formed(&state.ledger, unbalanced_strictness, state.time)

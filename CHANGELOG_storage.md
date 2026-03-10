@@ -1,5 +1,9 @@
 # `storage` Changelog
 
+## Version `2.0.1`
+
+- fix: Using `BTreeMap` instead of `HashMap` in `rcmap` in order to have deterministic orderings
+
 ## Version `2.0.0`
 
 - breaking: fix: MPT canonicity

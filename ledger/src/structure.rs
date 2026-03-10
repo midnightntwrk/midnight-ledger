@@ -50,7 +50,7 @@ use serialize::{
     self, Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_serialize,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::{self, Formatter};
@@ -1418,7 +1418,7 @@ impl<
                         (None, None) => None,
                     },
                     fallible_coins: {
-                        let mut result: std::collections::HashMap<
+                        let mut result: std::collections::BTreeMap<
                             u16,
                             ZswapOffer<P::LatestProof, D>,
                         > = stx1.fallible_coins.clone().into_iter().collect();
@@ -1837,7 +1837,7 @@ where
                 let vk_reads = self
                     .calls()
                     .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<StdHashSet<_>>()
+                    .collect::<BTreeSet<_>>()
                     .len();
                 let mut cost = model.baseline_cost;
                 cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)
