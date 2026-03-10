@@ -428,8 +428,6 @@ export class DustLocalState {
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
   splitUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
-  utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
-  utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
@@ -1391,6 +1389,17 @@ export function coinCommitment(coin: ShieldedCoinInfo, coinPublicKey: CoinPublic
  * Calculate nullifier of a coin owned by a user
  */
 export function coinNullifier(coin: ShieldedCoinInfo, coinSecretKey: CoinSecretKey): Nullifier;
+
+/**
+ * Calculate commitment of an utxo owned by a user
+ */
+export function utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
+
+/**
+ * Calculate nullifier of an utxo owned by a user
+ */
+export function utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
+
 
 /**
  * Parameters used by the Midnight ledger, including transaction fees and

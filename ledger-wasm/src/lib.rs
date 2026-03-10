@@ -26,6 +26,7 @@ pub mod zswap_keys;
 pub mod zswap_state;
 pub mod zswap_wasm;
 
+use crate::dust::DustSecretKey;
 use base_crypto::hash::HashOutput;
 use base_crypto::signatures;
 use coin_structure::{
@@ -36,7 +37,8 @@ use coin_structure::{
     transfer::{Recipient, SenderEvidence},
 };
 use conversions::{
-    bigint_to_fr, from_hex_ser, shielded_coininfo_to_value, value_to_shielded_coininfo,
+    bigint_to_fr, fr_to_bigint, from_hex_ser, shielded_coininfo_to_value, value_to_qdo,
+    value_to_shielded_coininfo,
 };
 use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
 use ledger::{
@@ -132,6 +134,21 @@ pub fn coin_commitment(coin: JsValue, coin_public_key: String) -> Result<String,
     let coin_public_key_parsed: CoinPublicKey = from_hex_ser(&coin_public_key)?;
     let commitment = coin_info_parsed.commitment(&Recipient::User(coin_public_key_parsed));
     to_value_hex_ser(&commitment)
+}
+
+#[wasm_bindgen(js_name = "utxoCommitment")]
+pub fn utxo_commitment(utxo: JsValue) -> Result<BigInt, JsError> {
+    let qdo = value_to_qdo(utxo)?;
+    let commitment = qdo.commitment();
+    Ok(fr_to_bigint(commitment.0))
+}
+
+#[wasm_bindgen(js_name = "utxoNullifier")]
+pub fn utxo_nullifier(utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsError> {
+    let qdo = value_to_qdo(utxo)?;
+    let sk = sk.try_unwrap()?;
+    let nullifier = qdo.nullifier(&sk);
+    Ok(fr_to_bigint(nullifier.0))
 }
 
 #[wasm_bindgen(js_name = "addressFromKey")]
