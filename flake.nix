@@ -490,7 +490,7 @@
           devShells.ci = mkShell {
             inputsFrom = with packages; [ledger];
             packages = [
-              packages.rust-dev-toolchain
+              fenix.packages.${system}.minimal.toolchain
               pkgs.nodejs_22
               pkgs.yarn
               pkgs.jq
