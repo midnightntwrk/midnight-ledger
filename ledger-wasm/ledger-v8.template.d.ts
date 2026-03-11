@@ -409,7 +409,6 @@ export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
   generationInfo(qdo: QualifiedDustOutput): DustGenerationInfo | undefined;
-  // TODO: do we need to cover the .update_from_evidence() method?
   insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
@@ -1399,6 +1398,11 @@ export function utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
  * Calculate nullifier of an utxo owned by a user
  */
 export function utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
+
+/**
+ * Calculate dust nonce
+ */
+export function dustNonce(initialNonce: DustInitialNonce, seq: number, sk: DustSecretKey): DustNonce;
 
 
 /**

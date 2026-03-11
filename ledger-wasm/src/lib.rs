@@ -43,6 +43,7 @@ use conversions::{
 use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
 use ledger::{
     self,
+    dust::InitialNonce,
     structure::{FEE_TOKEN, IntentHash, ProofPreimageVersioned},
 };
 use rand::Rng;
@@ -149,6 +150,17 @@ pub fn utxo_nullifier(utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsErr
     let sk = sk.try_unwrap()?;
     let nullifier = qdo.nullifier(&sk);
     Ok(fr_to_bigint(nullifier.0))
+}
+
+#[wasm_bindgen(js_name = "dustNonce")]
+pub fn dust_nonce(initial_nonce: String, seq: u64, sk: &DustSecretKey) -> Result<BigInt, JsError> {
+    if seq > u32::MAX as u64 {
+        return Err(JsError::new("seq exceeded u32 max"));
+    }
+    let initial_nonce = InitialNonce(from_hex_ser(&initial_nonce)?);
+    let sk = sk.try_unwrap()?;
+    let nonce = ledger::dust::dust_nonce(&initial_nonce, seq as u32, &sk);
+    Ok(fr_to_bigint(nonce))
 }
 
 #[wasm_bindgen(js_name = "addressFromKey")]
