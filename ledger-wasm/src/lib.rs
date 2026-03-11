@@ -163,6 +163,16 @@ pub fn dust_nonce(initial_nonce: String, seq: u64, sk: &DustSecretKey) -> Result
     Ok(fr_to_bigint(nonce))
 }
 
+#[wasm_bindgen(js_name = "dustInitialNonce")]
+pub fn dust_initial_nonce(output_no: u64, intent_hash: String) -> Result<String, JsError> {
+    if output_no > u32::MAX as u64 {
+        return Err(JsError::new("output_no exceeded u32 max"));
+    }
+    let initial_hash = IntentHash(from_hex_ser(&intent_hash)?);
+    let nonce = ledger::dust::initial_nonce(output_no as u32, initial_hash);
+    to_value_hex_ser(&nonce)
+}
+
 #[wasm_bindgen(js_name = "addressFromKey")]
 pub fn address_from_key(key: &str) -> Result<String, JsError> {
     let key: signatures::VerifyingKey = from_value_hex_ser(key)?;

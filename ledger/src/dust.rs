@@ -242,7 +242,7 @@ impl DustSecretKey {
 pub struct InitialNonce(pub HashOutput);
 tag_enforcement_test!(InitialNonce);
 
-pub(crate) fn initial_nonce(output_no: u32, intent_hash: IntentHash) -> InitialNonce {
+pub fn initial_nonce(output_no: u32, intent_hash: IntentHash) -> InitialNonce {
     InitialNonce(persistent_commit(&output_no, intent_hash.0))
 }
 

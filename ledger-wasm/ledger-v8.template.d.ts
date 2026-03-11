@@ -1404,6 +1404,10 @@ export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): Dust
  */
 export function dustNonce(initialNonce: DustInitialNonce, seq: number, sk: DustSecretKey): DustNonce;
 
+/**
+ * Calculate dust initial nonce
+ */
+export function dustInitialNonce(outputNo: number, intentHash: IntentHash): DustInitialNonce;
 
 /**
  * Parameters used by the Midnight ledger, including transaction fees and
