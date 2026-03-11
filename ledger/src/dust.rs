@@ -1498,7 +1498,7 @@ impl<D: DB> DustLocalState<D> {
             ctime: *now,
             initial_value: v_now,
             seq: utxo.seq + 1,
-            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, &sk),
+            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
             owner: utxo.owner,
             mt_index: new_commitment_index,
         };
@@ -1712,7 +1712,7 @@ impl<D: DB> DustLocalState<D> {
             ctime,
             initial_value: v_new - v_fee,
             owner: utxo.owner,
-            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, &sk),
+            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
             seq: utxo.seq + 1,
         };
         let new_commitment = new_output.commitment();
@@ -1977,7 +1977,7 @@ impl<D: DB> DustLocalState<D> {
                                     nonce: dust_nonce(
                                         &spent_utxo.backing_night,
                                         spent_utxo.seq + 1,
-                                        &sk,
+                                        sk,
                                     ),
                                     owner: spent_utxo.owner,
                                     mt_index: *commitment_index,
