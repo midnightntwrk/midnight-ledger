@@ -137,15 +137,15 @@ pub fn coin_commitment(coin: JsValue, coin_public_key: String) -> Result<String,
     to_value_hex_ser(&commitment)
 }
 
-#[wasm_bindgen(js_name = "utxoCommitment")]
-pub fn utxo_commitment(utxo: JsValue) -> Result<BigInt, JsError> {
+#[wasm_bindgen(js_name = "dustCommitment")]
+pub fn dust_commitment(utxo: JsValue) -> Result<BigInt, JsError> {
     let qdo = value_to_qdo(utxo)?;
     let commitment = qdo.commitment();
     Ok(fr_to_bigint(commitment.0))
 }
 
-#[wasm_bindgen(js_name = "utxoNullifier")]
-pub fn utxo_nullifier(utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsError> {
+#[wasm_bindgen(js_name = "dustNullifier")]
+pub fn dust_nullifier(utxo: JsValue, sk: &DustSecretKey) -> Result<BigInt, JsError> {
     let qdo = value_to_qdo(utxo)?;
     let sk = sk.try_unwrap()?;
     let nullifier = qdo.nullifier(&sk);

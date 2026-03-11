@@ -1390,14 +1390,14 @@ export function coinCommitment(coin: ShieldedCoinInfo, coinPublicKey: CoinPublic
 export function coinNullifier(coin: ShieldedCoinInfo, coinSecretKey: CoinSecretKey): Nullifier;
 
 /**
- * Calculate commitment of an utxo owned by a user
+ * Calculate commitment of Dust utxo owned by a user
  */
-export function utxoCommitment(qdo: QualifiedDustOutput): DustCommitment;
+export function dustCommitment(qdo: QualifiedDustOutput): DustCommitment;
 
 /**
- * Calculate nullifier of an utxo owned by a user
+ * Calculate nullifier of Dust utxo owned by a user
  */
-export function utxoNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
+export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
 
 /**
  * Calculate dust nonce

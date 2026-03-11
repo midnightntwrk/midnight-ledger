@@ -35,8 +35,8 @@ import {
   type UtxoSpend,
   WellFormedStrictness,
   updatedValue,
-  utxoCommitment,
-  utxoNullifier
+  dustCommitment,
+  dustNullifier
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -1118,7 +1118,7 @@ describe('Ledger API - DustLocalState', () => {
     const { secretKey } = state.dustKey;
 
     const qdo = localState.utxos[0];
-    const nullifier = utxoNullifier(qdo, secretKey);
+    const nullifier = dustNullifier(qdo, secretKey);
 
     // Create a new local state and manually add the UTXO
     const newLocalState = new DustLocalState(initialParameters);
@@ -1151,7 +1151,7 @@ describe('Ledger API - DustLocalState', () => {
 
     const qdo = localState.utxos[0];
     const genInfo = state.dust.generationInfo(qdo)!;
-    const nullifier = utxoNullifier(qdo, secretKey);
+    const nullifier = dustNullifier(qdo, secretKey);
 
     // Create a new local state and add the UTXO with a pending timestamp
     const pendingUntil = new Date(now.getTime() + 1000);
@@ -1184,7 +1184,7 @@ describe('Ledger API - DustLocalState', () => {
     const { secretKey } = state.dustKey;
 
     const qdo = localState.utxos[0];
-    const nullifier = utxoNullifier(qdo, secretKey);
+    const nullifier = dustNullifier(qdo, secretKey);
 
     // Add the UTXO to a new local state
     const newLocalState = new DustLocalState(initialParameters);
@@ -1205,10 +1205,10 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
-   * Test utility methods - utxoCommitment
+   * Test utility methods - dustCommitment
    *
    * @given A DustLocalState with a UTXO
-   * @when Calling utxoCommitment
+   * @when Calling dustCommitment
    * @then Should return the commitment for the UTXO
    */
   test('should get UTXO commitment', () => {
@@ -1216,17 +1216,17 @@ describe('Ledger API - DustLocalState', () => {
     const localState = state.dust;
 
     const qdo = localState.utxos[0];
-    const commitment = utxoCommitment(qdo);
+    const commitment = dustCommitment(qdo);
 
     expect(commitment).toBeDefined();
     expect(typeof commitment).toBe('bigint');
   });
 
   /**
-   * Test utility methods - utxoNullifier
+   * Test utility methods - dustNullifier
    *
    * @given A DustLocalState with a UTXO and secret key
-   * @when Calling utxoNullifier
+   * @when Calling dustNullifier
    * @then Should return the nullifier for the UTXO
    */
   test('should get UTXO nullifier', () => {
@@ -1235,7 +1235,7 @@ describe('Ledger API - DustLocalState', () => {
     const { secretKey } = state.dustKey;
 
     const qdo = localState.utxos[0];
-    const nullifier = utxoNullifier(qdo, secretKey);
+    const nullifier = dustNullifier(qdo, secretKey);
 
     expect(nullifier).toBeDefined();
     expect(typeof nullifier).toBe('bigint');
@@ -1271,8 +1271,8 @@ describe('Ledger API - DustLocalState', () => {
     expect(newUtxo.backingNight).toEqual(qdo.backingNight);
 
     // The new UTXO should have a different commitment
-    const originalCommitment = utxoCommitment(qdo);
-    const newCommitment = utxoCommitment(newUtxo);
+    const originalCommitment = dustCommitment(qdo);
+    const newCommitment = dustCommitment(newUtxo);
     expect(newCommitment).not.toEqual(originalCommitment);
   });
 });
