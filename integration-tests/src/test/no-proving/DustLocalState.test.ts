@@ -36,6 +36,8 @@ import {
   WellFormedStrictness,
   updatedValue,
   dustCommitment,
+  dustInitialNonce,
+  dustNonce,
   dustNullifier
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
@@ -1274,5 +1276,49 @@ describe('Ledger API - DustLocalState', () => {
     const originalCommitment = dustCommitment(qdo);
     const newCommitment = dustCommitment(newUtxo);
     expect(newCommitment).not.toEqual(originalCommitment);
+  });
+
+  /**
+   * Test utility methods - dustNonce
+   *
+   * @given A DustLocalState with a UTXO
+   * @when Calling dustNonce to get the Dust nonce
+   * @then Should return the calculated Dust nonce equal to the stored one
+   */
+  test('should return Dust nonce', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const localState = state.dust;
+    const { secretKey } = state.dustKey;
+    const qdo = localState.utxos[0];
+
+    // we can't calculate the nonce for seq=0
+    expect(qdo.seq).toEqual(0);
+    expect(() => dustNonce(qdo.backingNight, BigInt(qdo.seq), secretKey)).toThrow();
+
+    const newCommitmentIndex = qdo.mtIndex + 1n;
+    const fee = 1000n;
+
+    const newUtxo = localState.splitUtxo(qdo, state.time, fee, newCommitmentIndex, secretKey);
+    const calculatedNonce = dustNonce(qdo.backingNight, BigInt(newUtxo.seq), secretKey);
+
+    expect(calculatedNonce).toEqual(newUtxo.nonce);
+  });
+
+  /**
+   * Test utility methods - dustInitialNonce
+   *
+   * @given A DustLocalState with a UTXO
+   * @when Calling dustInitialNonce to get the Dust initial nonce
+   * @then Should return the Dust initial nonce equal to backing night
+   */
+  test('should return Dust initial nonce', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const localState = state.dust;
+    const qdo = localState.utxos[0];
+    const genInfo = state.dust.generationInfo(qdo)!;
+    const night = [...state.utxos].at(0)!;
+    const calculatedInitialNonce = dustInitialNonce(BigInt(night.outputNo), night.intentHash);
+    expect(qdo.backingNight).toEqual(calculatedInitialNonce);
+    expect(genInfo.nonce).toEqual(calculatedInitialNonce);
   });
 });

@@ -157,6 +157,11 @@ pub fn dust_nonce(initial_nonce: String, seq: u64, sk: &DustSecretKey) -> Result
     if seq > u32::MAX as u64 {
         return Err(JsError::new("seq exceeded u32 max"));
     }
+    if seq == 0 {
+        return Err(JsError::new(
+            "for seq=0 we use DustPublicKey instead of DustSecretKey",
+        ));
+    }
     let initial_nonce = InitialNonce(from_hex_ser(&initial_nonce)?);
     let sk = sk.try_unwrap()?;
     let nonce = ledger::dust::dust_nonce(&initial_nonce, seq as u32, &sk);
@@ -170,7 +175,7 @@ pub fn dust_initial_nonce(output_no: u64, intent_hash: String) -> Result<String,
     }
     let initial_hash = IntentHash(from_hex_ser(&intent_hash)?);
     let nonce = ledger::dust::initial_nonce(output_no as u32, initial_hash);
-    to_value_hex_ser(&nonce)
+    to_value_hex_ser(&nonce.0)
 }
 
 #[wasm_bindgen(js_name = "addressFromKey")]
