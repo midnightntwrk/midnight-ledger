@@ -1,6 +1,6 @@
 [package]
 name = "midnight-storage-macros"
-version = "1.0.0"
+version = "1.0.0-hard-fork-test"
 edition = "2024"
 license.workspace = true
 description = "Provides derive macros for the Midnight ledger's storage system."
@@ -9,7 +9,7 @@ description = "Provides derive macros for the Midnight ledger's storage system."
 
 [dependencies]
 syn = { version = "^2.0", features = ["full", "extra-traits"] }
-serialize-macros = { version = "1.0.0", path = "../serialize-macros", package = "midnight-serialize-macros" }
+serialize-macros = { path = "../serialize-macros", package = "midnight-serialize-macros" }
 quote = "^1.0"
 proc-macro2 = "1"
 
