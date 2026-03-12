@@ -1741,6 +1741,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     .clone(),
                 ArenaKey::Direct(ref d) => OnDiskObject {
                     data: d.data.as_ref().clone(),
+                    #[cfg(not(feature = "layout-v2"))]
                     ref_count: 0,
                     children: d.children.as_ref().clone(),
                 },
