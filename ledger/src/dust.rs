@@ -1476,7 +1476,7 @@ impl<D: DB> DustLocalState<D> {
         Ok(state)
     }
 
-    pub fn split_utxo(
+    pub fn successor_utxo(
         &self,
         utxo: &QualifiedDustOutput,
         now: &Timestamp,

@@ -1530,8 +1530,8 @@ impl DustLocalState {
         Ok(DustLocalState(new_state))
     }
 
-    #[wasm_bindgen(js_name = "splitUtxo")]
-    pub fn split_utxo(
+    #[wasm_bindgen(js_name = "successorUtxo")]
+    pub fn successor_utxo(
         &self,
         utxo: JsValue,
         now: &Date,
@@ -1546,9 +1546,9 @@ impl DustLocalState {
         let new_commitment_index = u64::try_from(new_commitment_index)
             .map_err(|_| JsError::new("new_commitment_index is out of range"))?;
         let sk = sk.try_unwrap()?;
-        let new_utxo = self
-            .0
-            .split_utxo(&qdo, &now, subtract_fee, new_commitment_index, &sk)?;
+        let new_utxo =
+            self.0
+                .successor_utxo(&qdo, &now, subtract_fee, new_commitment_index, &sk)?;
         qdo_to_value(&new_utxo)
     }
 

@@ -427,9 +427,9 @@ export class DustLocalState {
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
   /**
-   * Split a UTXO into a new UTXO with a reduced value and the sequential nonce
+   * Returns a new UTXO with a reduced value and the sequential nonce
    */
-  splitUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
+  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
