@@ -161,7 +161,6 @@ impl<D: DB> TestState<D> {
         self.dust = dstate.deref().clone();
         default_storage::<D>().with_backend(|b| {
             b.flush_all_changes_to_db();
-            b.gc();
         });
     }
 
