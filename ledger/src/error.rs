@@ -86,10 +86,11 @@ pub enum SystemTransactionError {
         distributed_amount: u128,
         reserve_supply: u128,
     },
-    GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
+    GenerationInfoAlreadyPresent(DustGenerationInfo),
     InvalidBasisPoints(u32),
     InvariantViolation(InvariantViolation),
     TreasuryDisabled,
+    MerkleTreeError(InvalidUpdate),
 }
 
 impl Display for SystemTransactionError {
@@ -162,7 +163,11 @@ impl Display for SystemTransactionError {
                     "illegal distribution of {distributed_amount} reserve tokens, exceeding remaining supply of {reserve_supply}"
                 )
             }
-            SystemTransactionError::GenerationInfoAlreadyPresent(e) => e.fmt(f),
+            SystemTransactionError::GenerationInfoAlreadyPresent(gen_info) => write!(
+                f,
+                "attempted to insert new Dust generation info {:?}, but this already exists",
+                gen_info
+            ),
             SystemTransactionError::InvalidBasisPoints(bp) => {
                 write!(
                     f,
@@ -174,22 +179,8 @@ impl Display for SystemTransactionError {
                 f,
                 "invalid attempt to access treasury; the treasury is disabled until governance for it has been agreed"
             ),
+            SystemTransactionError::MerkleTreeError(e) => e.fmt(f),
         }
-    }
-}
-
-impl Error for SystemTransactionError {
-    fn cause(&self) -> Option<&dyn Error> {
-        match self {
-            SystemTransactionError::GenerationInfoAlreadyPresent(e) => Some(e),
-            _ => None,
-        }
-    }
-}
-
-impl From<GenerationInfoAlreadyPresentError> for SystemTransactionError {
-    fn from(err: GenerationInfoAlreadyPresentError) -> SystemTransactionError {
-        SystemTransactionError::GenerationInfoAlreadyPresent(err)
     }
 }
 
@@ -223,13 +214,14 @@ pub enum TransactionInvalid<D: DB> {
     InputNotInUtxos(Box<Utxo>),
     DustDoubleSpend(DustNullifier),
     DustDeregistrationNotRegistered(UserAddress),
-    GenerationInfoAlreadyPresent(GenerationInfoAlreadyPresentError),
+    GenerationInfoAlreadyPresent(DustGenerationInfo),
     InvariantViolation(InvariantViolation),
     RewardTooSmall {
         claimed: u128,
         minimum: u128,
     },
     DivideByZero,
+    MerkleTreeError(InvalidUpdate),
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -302,9 +294,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "claimed reward ({claimed} STARs) below payout threshold ({minimum} STARs)"
             ),
-            GenerationInfoAlreadyPresent(e) => e.fmt(formatter),
+            GenerationInfoAlreadyPresent(gen_info) => write!(
+                formatter,
+                "attempted to insert new Dust generation info {:?}, but this already exists",
+                gen_info
+            ),
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
+            MerkleTreeError(err) => err.fmt(formatter),
         }
     }
 }
@@ -315,7 +312,6 @@ impl<D: DB> Error for TransactionInvalid<D> {
             TransactionInvalid::Zswap(e) => Some(e),
             TransactionInvalid::Transcript(e) => Some(e),
             TransactionInvalid::ReplayProtectionViolation(e) => Some(e),
-            TransactionInvalid::GenerationInfoAlreadyPresent(e) => Some(e),
             _ => None,
         }
     }
@@ -333,9 +329,25 @@ impl<D: DB> From<onchain_runtime::error::TranscriptRejected<D>> for TransactionI
     }
 }
 
-impl<D: DB> From<GenerationInfoAlreadyPresentError> for TransactionInvalid<D> {
-    fn from(err: GenerationInfoAlreadyPresentError) -> TransactionInvalid<D> {
-        TransactionInvalid::GenerationInfoAlreadyPresent(err)
+impl<D: DB> From<DustStateError> for TransactionInvalid<D> {
+    fn from(err: DustStateError) -> TransactionInvalid<D> {
+        match err {
+            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
+                TransactionInvalid::GenerationInfoAlreadyPresent(gen_info)
+            }
+            DustStateError::MerkleTreeError(err) => TransactionInvalid::MerkleTreeError(err),
+        }
+    }
+}
+
+impl From<DustStateError> for SystemTransactionError {
+    fn from(err: DustStateError) -> SystemTransactionError {
+        match err {
+            DustStateError::GenerationInfoAlreadyPresent(gen_info) => {
+                SystemTransactionError::GenerationInfoAlreadyPresent(gen_info)
+            }
+            DustStateError::MerkleTreeError(err) => SystemTransactionError::MerkleTreeError(err),
+        }
     }
 }
 
@@ -1292,21 +1304,6 @@ impl<D: DB> Error for PartitionFailure<D> {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct GenerationInfoAlreadyPresentError(pub DustGenerationInfo);
-
-impl Display for GenerationInfoAlreadyPresentError {
-    fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(
-            formatter,
-            "attempted to insert new Dust generation info {:?}, but this already exists",
-            self.0,
-        )
-    }
-}
-
-impl Error for GenerationInfoAlreadyPresentError {}
-
 #[derive(Clone, Debug)]
 #[non_exhaustive]
 pub enum EventReplayError {
@@ -1323,7 +1320,7 @@ pub enum EventReplayError {
         synced: Timestamp,
         event: Timestamp,
     },
-    MerkleTreeUpdate(InvalidUpdate),
+    MerkleTreeError(InvalidUpdate),
 }
 
 impl Display for EventReplayError {
@@ -1349,7 +1346,7 @@ impl Display for EventReplayError {
                 f,
                 "received an event with a timestamp prior to the time already synced to (synced to: {synced:?}, event time: {event:?})"
             ),
-            MerkleTreeUpdate(err) => err.fmt(f),
+            MerkleTreeError(err) => err.fmt(f),
         }
     }
 }
@@ -1357,7 +1354,7 @@ impl Display for EventReplayError {
 impl Error for EventReplayError {
     fn cause(&self) -> Option<&dyn Error> {
         match self {
-            EventReplayError::MerkleTreeUpdate(err) => Some(err),
+            EventReplayError::MerkleTreeError(err) => Some(err),
             _ => None,
         }
     }
@@ -1365,7 +1362,7 @@ impl Error for EventReplayError {
 
 impl From<InvalidUpdate> for EventReplayError {
     fn from(err: InvalidUpdate) -> Self {
-        EventReplayError::MerkleTreeUpdate(err)
+        EventReplayError::MerkleTreeError(err)
     }
 }
 
@@ -1389,6 +1386,7 @@ pub enum DustLocalStateError {
     BackingNightNotFound {
         backing_night: InitialNonce,
     },
+    MerkleTreeError(InvalidUpdate),
 }
 
 impl Display for DustLocalStateError {
@@ -1420,11 +1418,35 @@ impl Display for DustLocalStateError {
                 "failed to find generation info for backing night {:?}",
                 backing_night.0
             ),
+            MerkleTreeError(err) => err.fmt(f),
         }
     }
 }
 
 impl Error for DustLocalStateError {}
+
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum DustStateError {
+    GenerationInfoAlreadyPresent(DustGenerationInfo),
+    MerkleTreeError(InvalidUpdate),
+}
+
+impl Display for DustStateError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        use DustStateError::*;
+        match self {
+            GenerationInfoAlreadyPresent(gen_info) => write!(
+                f,
+                "attempted to insert new Dust generation info {:?}, but this already exists",
+                gen_info
+            ),
+            MerkleTreeError(err) => err.fmt(f),
+        }
+    }
+}
+
+impl Error for DustStateError {}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub struct BlockLimitExceeded;
