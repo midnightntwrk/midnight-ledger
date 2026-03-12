@@ -3594,8 +3594,7 @@ dependencies = [
 [[package]]
 name = "parity-db"
 version = "0.5.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6985a45b0597d68448dac9db2907f9f72bbaf63fe3383d4ba15f99096c87212f"
+source = "git+https://github.com/tkerber/parity-db?branch=add-db-flush#159abd5afcda86febe073173e04a5f9f424441eb"
 dependencies = [
  "blake2",
  "crc32fast",

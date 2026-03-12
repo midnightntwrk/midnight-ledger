@@ -246,6 +246,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             }
         }
         self.db.commit_changes(ops).expect("Failed to commit to db");
+        self.db.flush();
     }
 
     fn batch_get_nodes<I>(
