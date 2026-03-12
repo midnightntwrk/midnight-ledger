@@ -391,12 +391,11 @@ impl<'de, A: Deserialize<'de> + Storable<D>, D: DB> Deserialize<'de> for MerkleT
     fn deserialize<D2: Deserializer<'de>>(de: D2) -> Result<Self, D2::Error> {
         let (height, data): (u8, std::collections::HashMap<u64, (HashOutput, A)>) =
             Deserialize::deserialize(de)?;
-        Ok(data
-            .into_iter()
+        data.into_iter()
             .try_fold(MerkleTree::blank(height), |mt, (k, (v, a))| {
                 MerkleTree::update_hash(&mt, k, v, a)
-                    .map_err(|error| <D2::Error as serde::de::Error>::custom(error))
-            })?)
+                    .map_err(<D2::Error as serde::de::Error>::custom)
+            })
     }
 }
 
