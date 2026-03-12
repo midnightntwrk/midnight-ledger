@@ -1,4 +1,4 @@
-**@midnight-ntwrk/onchain-runtime v3.0.0-rc.1**
+**@midnight-ntwrk/onchain-runtime v3.0.0**
 
 ***
 

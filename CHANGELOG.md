@@ -4,7 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## 8.0.0
+## 8.0.2
+
+- fix: removed `gc` call from within `swizzle_to_db` in `test-utilities`
+
+## 8.0.1
 
 - breaking: fix: correctly compute change for Dust spent during registration
 - breaking: fix: merkle tree canonicity
