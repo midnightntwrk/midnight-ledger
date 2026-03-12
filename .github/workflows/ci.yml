@@ -133,13 +133,6 @@ jobs:
           sudo chown -R $USER:nixbld /nix/var/nix/{profiles,gcroots}/per-user/$USER
         shell: bash # Ensure bash is used for these commands
 
-      - name: Add Homebrew and git bin to PATH for Yarn, verify git is installed
-        run: |
-          echo "/opt/homebrew/bin" >> $GITHUB_PATH
-          echo "/usr/bin" >> $GITHUB_PATH
-          which git
-          git --version
-
       - name: Build ledger-wasm
         run: nix build .#ledger-wasm
 
