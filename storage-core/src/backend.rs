@@ -19,6 +19,8 @@
 //!
 //! See [`StorageBackend`] for a detailed overview and the public API.
 
+#[cfg(feature = "gc-v1")]
+use crate::gc::GcState;
 use crate::{
     WellBehavedHasher,
     arena::{ArenaHash, ArenaKey},
@@ -289,6 +291,9 @@ pub struct StorageBackend<D: DB> {
     /// Run-time stats to help with performance tuning.
     // Use interior mutability to allow updating stats in "pure" functions.
     stats: RefCell<StorageBackendStats>,
+    /// Intermediate garbage collection state
+    #[cfg(all(feature = "layout-v2", feature = "gc-v1"))]
+    gc_state: GcState<D>,
 }
 
 /// Run-time stats to help with performance tuning.
@@ -330,6 +335,8 @@ impl<D: DB> StorageBackend<D> {
                 get_cache_hits: 0,
                 get_cache_misses: 0,
             }),
+            #[cfg(feature = "gc-v1")]
+            gc_state: Default::default(),
         }
     }
 
@@ -803,6 +810,26 @@ impl<D: DB> StorageBackend<D> {
             .into_iter();
         self.write_cache.clear();
         self.flush_to_db(iter);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// FIXME
+    pub fn gc(&mut self, bound: std::time::Duration) {
+        let culled = self.gc_state.run(
+            self.live_inserts.iter().cloned(),
+            bound,
+            &mut self.database,
+            |key| {
+                self.write_cache
+                    .peek(&key)
+                    .or_else(|| self.read_cache.peek(&key))
+                    .and_then(|v| v.get_obj())
+            },
+        );
+        for hash in culled {
+            self.write_cache.remove(&hash);
+            self.read_cache.remove(&hash);
+        }
     }
 
     /// Remove all unreachable nodes from memory and the DB.

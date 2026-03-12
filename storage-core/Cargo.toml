@@ -19,6 +19,8 @@ test-utilities = []
 layout-v1 = []
 layout-v2 = ["layout-v1"]
 
+gc-v1 = ["layout-v2"]
+
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
@@ -65,6 +67,6 @@ pprof = { version = "0.14", optional = true, features = ["criterion", "flamegrap
 sysinfo = "0.34.2"
 
 [dev-dependencies]
-storage-core = { path = ".", package = "midnight-storage-core", features = ["test-utilities"] }
+storage-core = { path = ".", package = "midnight-storage-core", features = ["test-utilities", "gc-v1"] }
 rayon = "^1.10.0"
 pastey = "0.1.1"
