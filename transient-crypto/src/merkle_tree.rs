@@ -1306,9 +1306,8 @@ mod tests {
     }
 
     #[test]
-    #[should_panic = "Attempted to insert into collapsed portion of Merkle tree!"]
     fn test_collapse_bad_update() {
-        let _tree = new_mt::<()>(32)
+        let tree = new_mt::<()>(32)
             .update(0, &Fr::from(42u64), ())
             .and_then(|mt| mt.update(0, &Fr::from(41u64), ()))
             .and_then(|mt| mt.update(3, &Fr::from(43u64), ()))
@@ -1316,6 +1315,7 @@ mod tests {
             .unwrap()
             .collapse(0, 61)
             .update(61, &Fr::from(0xdeadbeefu64), ());
+        assert_eq!(tree, Err(InvalidUpdate::CollapsedIndex(1, 1)));
     }
 
     #[test]
