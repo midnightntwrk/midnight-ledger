@@ -1469,7 +1469,11 @@ impl<D: DB> LedgerState<D> {
             ..(*self.parameters).clone()
         });
         new_st.replay_protection = Sp::new(new_st.replay_protection.post_block_update(tblock));
-        new_st.zswap = Sp::new(new_st.zswap.post_block_update(tblock));
+        new_st.zswap = Sp::new(
+            new_st
+                .zswap
+                .post_block_update_with(tblock, self.parameters.global_ttl),
+        );
         new_st.dust = Sp::new(
             new_st
                 .dust
