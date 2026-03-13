@@ -422,7 +422,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
             contract_address: self.contract_address.clone(),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
                 .update_hash(0, self.coin_com.0, ())
-                .expect("the empty tree isn't collapsed")
+                .expect("updating hash on non-collapsed tree should always succeed")
                 .rehash()
                 .root()
                 .expect("rehashed tree must have root"),

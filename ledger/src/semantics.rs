@@ -125,7 +125,7 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
     fn apply_system_tx(&self, secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self;
-    #[must_use]
+    #[must_use = "return value must be used"]
     #[deprecated = "deprecated in favour of `replay_events`"]
     fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>>(
         &self,
