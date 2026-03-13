@@ -167,10 +167,13 @@ impl LedgerState {
 
     #[wasm_bindgen(js_name = "applySystemTx")]
     pub fn apply_system_tx(&self, tx: &SystemTransaction, tblock: &Date) -> Result<Array, JsError> {
-        let (state, events) = self.0.apply_system_tx(
-            tx.as_ref(),
-            Timestamp::from_secs(js_date_to_seconds(tblock)),
-        )?;
+        let (state, events) = self
+            .0
+            .apply_system_tx(
+                tx.as_ref(),
+                Timestamp::from_secs(js_date_to_seconds(tblock)),
+            )
+            .map_err(|err| JsError::new(&err.to_string()))?;
         let events: Vec<_> = events.into_iter().map(Event::from).collect();
 
         let tuple = Array::new();
@@ -233,7 +236,10 @@ impl LedgerState {
         let amount = u128::try_from(amount).map_err(|_| JsError::new("amount is out of range"))?;
         let sys_tx_distribute = ledger::structure::SystemTransaction::DistributeReserve(amount);
         let time = Timestamp::from_secs(js_date_to_seconds(tblock));
-        let (ledger, _) = self.0.apply_system_tx(&sys_tx_distribute, time)?;
+        let (ledger, _) = self
+            .0
+            .apply_system_tx(&sys_tx_distribute, time)
+            .map_err(|err| JsError::new(&err.to_string()))?;
 
         let sys_tx_rewards = ledger::structure::SystemTransaction::DistributeNight(
             ClaimKind::Reward,
@@ -243,7 +249,9 @@ impl LedgerState {
                 nonce: OsRng.r#gen(),
             }],
         );
-        let (ledger, _) = ledger.apply_system_tx(&sys_tx_rewards, time)?;
+        let (ledger, _) = ledger
+            .apply_system_tx(&sys_tx_rewards, time)
+            .map_err(|err| JsError::new(&err.to_string()))?;
 
         Ok(LedgerState(ledger))
     }
