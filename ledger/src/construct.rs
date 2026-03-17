@@ -787,7 +787,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(params),
+                    gas: res.gas_heuristic(params, false),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -802,7 +802,7 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost;
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost;
 }
 
 fn test_tx_from_unshielded_offer<D: DB>(
@@ -822,8 +822,11 @@ fn test_tx_from_unshielded_offer<D: DB>(
     Transaction::from_intents("local-test", [(1, intent)].into_iter().collect())
 }
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost {
+    fn gas_heuristic(&self, params: &LedgerParameters, include_external: bool) -> RunningCost {
         let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+        if !include_external {
+            return transcript_gas_cost_with_overhead;
+        }
         let expected_unshielded_inputs_overhead = self
             .context
             .effects
@@ -1025,10 +1028,10 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let mut required_budget = partial_res.gas_heuristic(params).max_time();
+                let mut required_budget = partial_res.gas_heuristic(params, true).max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next].gas_heuristic(params).max_time();
+                    required_budget += full_runs[next].gas_heuristic(params, true).max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {
