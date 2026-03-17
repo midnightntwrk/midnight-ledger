@@ -308,6 +308,11 @@ pub struct StorageBackendStats {
 }
 
 impl<D: DB> StorageBackend<D> {
+    /// FIXME
+    pub fn get_database(&mut self) -> &mut D {
+        &mut self.database
+    }
+
     /// Create a new `StorageBackend` with cache bound `cache_size` and optional
     /// database.
     ///
@@ -558,6 +563,12 @@ impl<D: DB> StorageBackend<D> {
             },
         );
     }
+    pub(crate) fn cache_lazy(
+        &mut self,
+        key: ArenaHash<D::Hasher>,
+    ) {
+        self.live_inserts.insert(key);
+    }
 
     /// Mark object for `key` as no longer live, allowing it to fall out of the
     /// cache later if possible. If the object for `key` still has pending
@@ -742,6 +753,8 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -755,6 +768,8 @@ impl<D: DB> StorageBackend<D> {
                             "root count can't be negative (for {k:?})"
                         );
                         let root_count = delta.root_delta as u32;
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count)));
                     }
                 }
@@ -770,6 +785,8 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -814,7 +831,7 @@ impl<D: DB> StorageBackend<D> {
 
     #[cfg(feature = "gc-v1")]
     /// FIXME
-    pub fn gc(&mut self, bound: std::time::Duration) {
+    pub fn gc(&mut self, bound: std::time::Duration) -> usize {
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
             bound,
@@ -826,10 +843,11 @@ impl<D: DB> StorageBackend<D> {
                     .and_then(|v| v.get_obj())
             },
         );
-        for hash in culled {
-            self.write_cache.remove(&hash);
-            self.read_cache.remove(&hash);
+        for hash in culled.iter() {
+            self.write_cache.remove(hash);
+            self.read_cache.remove(hash);
         }
+        culled.len()
     }
 
     /// Remove all unreachable nodes from memory and the DB.
@@ -1175,6 +1193,10 @@ impl<H: WellBehavedHasher> Deserializable for OnDiskObject<H> {
 }
 
 impl<H: WellBehavedHasher> OnDiskObject<H> {
+    pub(crate) fn hash(&self) -> ArenaHash<H> {
+        crate::arena::hash(&self.data, self.children.iter().map(ArenaKey::hash))
+    }
+
     #[cfg(not(feature = "layout-v2"))]
     /// Compute new obj with `delta.ref_delta` applied to `ref_count`.
     ///

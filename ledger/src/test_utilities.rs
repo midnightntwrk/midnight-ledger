@@ -51,10 +51,11 @@ use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
+use std::collections::VecDeque;
 use std::env;
 use std::io;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
 use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
@@ -124,6 +125,8 @@ pub struct TestState<D: DB> {
     pub dust_key: DustSecretKey,
 
     pub mode: TestProcessingMode,
+    pub past_state_window: VecDeque<ArenaHash<D::Hasher>>,
+    pub past_state_window_len: usize,
     pub debug_print: bool,
 }
 
@@ -143,6 +146,8 @@ impl<D: DB> TestState<D> {
             dust_key: DustSecretKey::sample(&mut *rng),
 
             mode: TestProcessingMode::Regular,
+            past_state_window: VecDeque::new(),
+            past_state_window_len: 20,
             debug_print: false,
         }
     }
@@ -155,6 +160,8 @@ impl<D: DB> TestState<D> {
         lstate.persist();
         zstate.persist();
         dstate.persist();
+        let new_roots = [lstate.hash(), zstate.hash(), dstate.hash()];
+        self.past_state_window.extend(new_roots);
         lstate.unload();
         zstate.unload();
         dstate.unload();
@@ -162,6 +169,9 @@ impl<D: DB> TestState<D> {
         self.zswap = zstate.deref().clone();
         self.dust = dstate.deref().clone();
         default_storage::<D>().with_backend(|b| {
+            while self.past_state_window.len() > self.past_state_window_len {
+                b.unpersist(&self.past_state_window.pop_front().unwrap());
+            }
             b.flush_all_changes_to_db();
         });
     }

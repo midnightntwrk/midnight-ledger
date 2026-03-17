@@ -33,7 +33,7 @@ use std::time::Duration;
 use storage::DefaultHasher;
 use storage::arena::{Sp, TCONSTRUCT};
 use storage::backend::StorageBackendStats;
-use storage::db::{InMemoryDB, ParityDb};
+use storage::db::{DB, InMemoryDB, ParityDb};
 use storage::storage::{
     DEFAULT_CACHE_SIZE, default_storage, set_default_storage, unsafe_drop_default_storage,
 };
@@ -245,6 +245,7 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
     for log_size in 10.. {
         let t0 = std::time::Instant::now();
         let mut swizzle_time = std::time::Duration::default();
+        let mut gc_time = std::time::Duration::default();
         let size = 2u64.pow(log_size);
         state.mode = midnight_ledger::test_utilities::TestProcessingMode::ForceConstantTime;
         const PROGRESS_BAR_SEGMENTS: usize = 50;
@@ -254,22 +255,32 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let start = reached_size >> BATCH_SIZE;
         let end = size >> BATCH_SIZE;
         let mut last_str_len = 0usize;
+        let mut culled = 0usize;
         for i in start..end {
             let ta = std::time::Instant::now();
             rt.block_on(state.give_fee_token(&mut rng, 1 << BATCH_SIZE));
             let tb = std::time::Instant::now();
             state.swizzle_to_db();
             swizzle_time += tb.elapsed();
+            let tc = std::time::Instant::now();
+            state.swizzle_to_db();
+            if i % 10== 3 {
+            culled += default_storage::<TestDb>().with_backend(|b| {
+                b.gc(std::time::Duration::from_secs(10))
+            });
+            }
+            gc_time += tc.elapsed();
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
             let string = format!(
-                "[{}{}] ETA: {:?}, TPS: {}, size: {}, write time: {:?}",
+                "[{}{}] ETA: {:?}, TPS: {}, size: {}, write time: {:?}, GC time: {:?}, culled: {culled}",
                 "#".repeat(segments),
                 " ".repeat(PROGRESS_BAR_SEGMENTS - segments),
                 t0.elapsed().div_f64(frac).mul_f64(1.0 - frac),
                 (1 << BATCH_SIZE) as f64 / ta.elapsed().as_secs_f64(),
                 (i + 1) << BATCH_SIZE,
                 swizzle_time / ((i + 1 - start) << BATCH_SIZE) as u32,
+                gc_time / ((i + 1 - start) << BATCH_SIZE) as u32,
             );
             print!(
                 "\r{string}{}",
@@ -332,12 +343,13 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB)",
+            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB / {} objects)",
             t1 - t0,
             (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
             swizzle_time / ((end - start) << BATCH_SIZE) as u32,
             cur_alloc(),
             pprint_bytes(du(dir.clone()).unwrap()),
+            default_storage::<TestDb>().with_backend(|b| b.get_database().size()),
         );
         lstate.persist();
         drop(lstate);
