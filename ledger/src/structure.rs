@@ -1022,7 +1022,7 @@ pub struct TransactionCostModel {
 }
 
 impl TransactionCostModel {
-    fn cell_read(&self, size: u64) -> RunningCost {
+    pub(crate) fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
     }
     fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
@@ -1038,10 +1038,10 @@ impl TransactionCostModel {
             ..RunningCost::ZERO
         }
     }
-    fn map_index(&self, log_size: usize) -> RunningCost {
+    pub(crate) fn map_index(&self, log_size: usize) -> RunningCost {
         self.runtime_cost_model.read_map(log_size, true)
     }
-    fn proof_verify(&self, size: usize) -> RunningCost {
+    pub(crate) fn proof_verify(&self, size: usize) -> RunningCost {
         let time = self.runtime_cost_model.proof_verify_constant
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
@@ -1783,6 +1783,7 @@ impl<S: SignatureKind<D>, D: DB> Debug for ClaimRewardsTransaction<S, D> {
     }
 }
 
+pub(crate) const MIN_PROOF_SIZE: usize = DUST_SPEND_PROOF_SIZE;
 pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
 // Retrieved from zswap key size. Unfortunately varies with circuits, this
 // should be an upper bound.
@@ -3099,6 +3100,7 @@ pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
 mod tests {
+    use serialize::tagged_deserialize;
     use storage::db::InMemoryDB;
 
     use super::*;
@@ -3150,5 +3152,21 @@ mod tests {
         let mut ser = Vec::new();
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
+    }
+
+    #[test]
+    fn test_pm_21589() {
+        let tx: Transaction<Signature, ProofMarker, PureGeneratorPedersen, InMemoryDB> =
+            tagged_deserialize(
+                std::fs::File::open("/home/tk/Downloads/tx-1773771207184-receiveNightTokens.bin")
+                    .unwrap(),
+            )
+            .unwrap();
+        let par: LedgerParameters =
+            tagged_deserialize(std::fs::File::open("/tmp/bad-param").unwrap()).unwrap();
+        dbg!(&tx);
+        dbg!(tx.cost(&par, true)).ok();
+        dbg!(tx.balance(None)).ok();
+        assert!(false);
     }
 }
