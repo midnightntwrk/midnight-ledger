@@ -210,7 +210,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| !**f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(0));
         let fallible_coins = ZswapOffer::new(
             zswap_inputs
                 .iter()
@@ -230,7 +231,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| **f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(segment));
         if let Some(offer) = guaranteed_coins {
             res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
                 old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
@@ -999,7 +1001,7 @@ pub fn partition_transcripts<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let closure_budgets = closures
+    let mut closure_budgets = closures
         .iter()
         .map(|closure| {
             closure
@@ -1008,6 +1010,12 @@ pub fn partition_transcripts<D: DB>(
                 .sum::<CostDuration>()
         })
         .collect::<Vec<_>>();
+    // Allow creep-up to the min time to dismiss, up to 70% usage
+    let spare_min_time_to_dismiss =
+        params.limits.min_time_to_dismiss * 0.7f64 - closure_budgets.iter().copied().sum();
+    for budget in closure_budgets.iter_mut() {
+        *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
+    }
 
     // Step 4: Partition the root nodes:
     //      4a: Split root nodes on `ckpt`s.

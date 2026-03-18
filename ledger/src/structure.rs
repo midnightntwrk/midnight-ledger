@@ -3100,7 +3100,6 @@ pub const FEE_TOKEN: TokenType = TokenType::Dust;
 
 #[cfg(test)]
 mod tests {
-    use serialize::tagged_deserialize;
     use storage::db::InMemoryDB;
 
     use super::*;
@@ -3152,21 +3151,5 @@ mod tests {
         let mut ser = Vec::new();
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
-    }
-
-    #[test]
-    fn test_pm_21589() {
-        let tx: Transaction<Signature, ProofMarker, PureGeneratorPedersen, InMemoryDB> =
-            tagged_deserialize(
-                std::fs::File::open("/home/tk/Downloads/tx-1773771207184-receiveNightTokens.bin")
-                    .unwrap(),
-            )
-            .unwrap();
-        let par: LedgerParameters =
-            tagged_deserialize(std::fs::File::open("/tmp/bad-param").unwrap()).unwrap();
-        dbg!(&tx);
-        dbg!(tx.cost(&par, true)).ok();
-        dbg!(tx.balance(None)).ok();
-        assert!(false);
     }
 }
