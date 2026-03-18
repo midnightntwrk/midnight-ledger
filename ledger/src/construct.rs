@@ -810,7 +810,7 @@ trait QueryResultsExt {
         &self,
         params: &LedgerParameters,
         include_external: bool,
-        pis: usize,
+        public_input_count: usize,
     ) -> RunningCost;
 }
 
@@ -835,7 +835,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
         &self,
         params: &LedgerParameters,
         include_external: bool,
-        pis: usize,
+        public_input_count: usize,
     ) -> RunningCost {
         let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
         if !include_external {
@@ -898,7 +898,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
                     .unwrap_or(RunningCost::ZERO)
             })
             .sum();
-        let proof_verify = params.cost_model.proof_verify(pis)
+        let proof_verify = params.cost_model.proof_verify(public_input_count)
             + params.cost_model.cell_read(VERIFIER_KEY_SIZE as u64)
             + params.cost_model.map_index(EXPECTED_CONTRACT_DEPTH)
             + params.cost_model.map_index(EXPECTED_OPERATIONS_DEPTH);
@@ -1053,11 +1053,15 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let pis = calls[root].program.field_size() + 2;
-                let mut required_budget = partial_res.gas_heuristic(params, true, pis).max_time();
+                let public_input_count = calls[root].program.field_size() + 2;
+                let mut required_budget = partial_res
+                    .gas_heuristic(params, true, public_input_count)
+                    .max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next].gas_heuristic(params, true, pis).max_time();
+                    required_budget += full_runs[next]
+                        .gas_heuristic(params, true, public_input_count)
+                        .max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {
