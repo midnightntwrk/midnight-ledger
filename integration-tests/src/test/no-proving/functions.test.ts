@@ -266,7 +266,6 @@ describe('Ledger API - functions', () => {
       communicationCommitment(Static.alignedValueCompress, Static.alignedValue, communicationCommitmentRandomness())
     );
     const transcripts = partitionTranscripts([preTranscript, preTranscript2], LedgerParameters.initialParameters());
-    console.log(transcripts);
 
     expect(transcripts).toHaveLength(2);
     expect(transcripts.at(0)).toBeDefined();
