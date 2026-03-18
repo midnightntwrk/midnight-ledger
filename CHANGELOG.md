@@ -4,6 +4,14 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## 8.0.3
+
+- fix: various fixed to transcript partioning:
+  - correct accounting of unshielded inputs and outputs to not be declared as gas use 
+  - account for proof verification time for processing budget
+  - use the smaller of the possible proof sizes as the base for the budget
+- fix: correctly retarget newly added Zswap parts when using `addCalls`
+
 ## 8.0.2
 
 - fix: removed `gc` call from within `swizzle_to_db` in `test-utilities`
