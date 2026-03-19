@@ -457,8 +457,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 let tx = Transaction::new(
                     "local-test",
                     test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                    Some(offer),
-                    HashMap::new(),
+                    None,
+                    [(1, offer)].into_iter().collect(),
                 );
                 let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
                 tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
@@ -939,8 +939,8 @@ async fn micro_dao_inner(mode: TestMode) {
             let tx = Transaction::new(
                 "local-test",
                 test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                Some(offer),
-                HashMap::new(),
+                None,
+                [(1, offer)].into_iter().collect(),
             );
             let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
             tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
