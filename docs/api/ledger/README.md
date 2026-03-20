@@ -1,4 +1,4 @@
-**@midnight/ledger v8.0.3-rc.1**
+**@midnight/ledger v8.0.3**
 
 ***
 
