@@ -1233,7 +1233,6 @@ where
         for i in 0..height {
             if let Ok(updated) = mt.update(i.into(), &rng.r#gen::<Fr>(), rng.r#gen()) {
                 mt = updated;
-                // TODO: should we panic here?
             }
         }
 

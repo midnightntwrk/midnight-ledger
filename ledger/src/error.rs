@@ -184,6 +184,15 @@ impl Display for SystemTransactionError {
     }
 }
 
+impl Error for SystemTransactionError {
+    fn cause(&self) -> Option<&dyn Error> {
+        match self {
+            SystemTransactionError::MerkleTreeError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub enum TransactionInvalid<D: DB> {
