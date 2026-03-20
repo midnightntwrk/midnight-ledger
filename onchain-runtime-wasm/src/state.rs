@@ -129,11 +129,11 @@ impl StateBoundedMerkleTree {
     // update(index: number, leaf: AlignedValue): MerkleTree
     pub fn update(&self, index: u64, leaf: JsValue) -> Result<StateBoundedMerkleTree, JsError> {
         let leaf: AlignedValue = from_value(leaf)?;
-        Ok(StateBoundedMerkleTree(
-            self.0
-                .update(index, &ValueReprAlignedValue(leaf), ())
-                .map_err(|err| JsError::new(&err.to_string()))?,
-        ))
+        Ok(StateBoundedMerkleTree(self.0.update(
+            index,
+            &ValueReprAlignedValue(leaf),
+            (),
+        )?))
     }
 
     pub fn rehash(&self) -> StateBoundedMerkleTree {

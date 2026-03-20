@@ -221,8 +221,7 @@ impl ZswapLocalState {
                 ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
                 UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
                 ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
-            })
-            .map_err(|err| JsError::new(&err.to_string()))?,
+            })?,
         ))
     }
 
