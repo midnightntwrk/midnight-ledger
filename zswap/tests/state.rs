@@ -48,7 +48,7 @@ fn coin_receiving() {
         transient: vec![].into(),
         deltas: vec![].into(),
     };
-    state = state.apply(&keys, &offer);
+    state = state.apply(&keys, &offer).unwrap();
     assert_eq!(
         state
             .coins
