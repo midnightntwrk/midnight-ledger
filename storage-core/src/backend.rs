@@ -551,17 +551,33 @@ impl<D: DB> StorageBackend<D> {
         // Otherwise, this is a new object, so we need to update the ref counts of all the
         // children, and insert a `Create`.
         self.update_counts(&children, Delta::new_ref_delta(1));
-        self.cache_insert_new_key(
-            key,
-            CacheValue::Create {
-                obj: OnDiskObject {
-                    data,
-                    #[cfg(not(feature = "layout-v2"))]
-                    ref_count: 0,
-                    children,
-                },
+        // With layout-v2 we skip the DB existence check above, so there may
+        // already be a pending `Update` delta for this key (e.g. from a
+        // `persist` call before the node was cached). Merge the pending delta
+        // into the new Create so it isn't lost.
+        #[cfg(feature = "layout-v2")]
+        let cache_value =
+            if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
+                let delta = *delta;
+                self.remove_from_memory(&key);
+                CacheValue::CreateAndUpdate {
+                    obj: OnDiskObject { data, children },
+                    delta,
+                }
+            } else {
+                CacheValue::Create {
+                    obj: OnDiskObject { data, children },
+                }
+            };
+        #[cfg(not(feature = "layout-v2"))]
+        let cache_value = CacheValue::Create {
+            obj: OnDiskObject {
+                data,
+                ref_count: 0,
+                children,
             },
-        );
+        };
+        self.cache_insert_new_key(key, cache_value);
     }
     pub(crate) fn cache_lazy(
         &mut self,
@@ -762,12 +778,29 @@ impl<D: DB> StorageBackend<D> {
                 | CacheValue::CreateAndDelete { obj, delta } => {
                     updates.push((k.clone(), Update::InsertNode(obj)));
                     if delta.root_delta != 0 {
-                        // This a new object that's not yet in the DB.
-                        assert!(
-                            delta.root_delta > 0,
-                            "root count can't be negative (for {k:?})"
-                        );
-                        let root_count = delta.root_delta as u32;
+                        // With layout-v2, cache() skips the DB existence check,
+                        // so Create variants can occur for nodes already in the
+                        // DB. Read the existing root_count and add the delta.
+                        #[cfg(feature = "layout-v2")]
+                        let root_count = {
+                            let db_root_count =
+                                self.database.get_root_count(&k) as i32;
+                            let root_count = db_root_count + delta.root_delta;
+                            assert!(
+                                root_count >= 0,
+                                "root count can't be negative (for {k:?})"
+                            );
+                            root_count as u32
+                        };
+                        #[cfg(not(feature = "layout-v2"))]
+                        let root_count = {
+                            // Without layout-v2, Create is genuinely new.
+                            assert!(
+                                delta.root_delta > 0,
+                                "root count can't be negative (for {k:?})"
+                            );
+                            delta.root_delta as u32
+                        };
                         #[cfg(feature = "gc-v1")]
                         self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count)));
