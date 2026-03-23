@@ -13,11 +13,13 @@
 
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
-use crate::structure::SegIntent;
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MaintenanceUpdate,
-    PROOF_SIZE, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
+    ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MIN_PROOF_SIZE,
+    MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
     SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer, UtxoOutput, UtxoSpend,
+};
+use crate::structure::{
+    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
@@ -208,7 +210,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| !**f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(0));
         let fallible_coins = ZswapOffer::new(
             zswap_inputs
                 .iter()
@@ -228,7 +231,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| **f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(segment));
         if let Some(offer) = guaranteed_coins {
             res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
                 old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
@@ -740,7 +744,7 @@ impl<D: DB> PreTranscript<D> {
     }
 
     fn guaranteed_budget(&self, params: &LedgerParameters) -> CostDuration {
-        let est_size = PROOF_SIZE
+        let est_size = MIN_PROOF_SIZE
             + Serializable::serialized_size(&(
                 ContractAddress::default(),
                 Effects::<D>::default(),
@@ -787,7 +791,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(params),
+                    gas: res.gas_heuristic(params, false, 0),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -802,7 +806,12 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost;
+    fn gas_heuristic(
+        &self,
+        params: &LedgerParameters,
+        include_external: bool,
+        public_input_count: usize,
+    ) -> RunningCost;
 }
 
 fn test_tx_from_unshielded_offer<D: DB>(
@@ -822,8 +831,16 @@ fn test_tx_from_unshielded_offer<D: DB>(
     Transaction::from_intents("local-test", [(1, intent)].into_iter().collect())
 }
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(&self, params: &LedgerParameters) -> RunningCost {
+    fn gas_heuristic(
+        &self,
+        params: &LedgerParameters,
+        include_external: bool,
+        public_input_count: usize,
+    ) -> RunningCost {
         let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+        if !include_external {
+            return transcript_gas_cost_with_overhead;
+        }
         let expected_unshielded_inputs_overhead = self
             .context
             .effects
@@ -881,9 +898,14 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
                     .unwrap_or(RunningCost::ZERO)
             })
             .sum();
+        let proof_verify = params.cost_model.proof_verify(public_input_count)
+            + params.cost_model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + params.cost_model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + params.cost_model.map_index(EXPECTED_OPERATIONS_DEPTH);
         transcript_gas_cost_with_overhead
             + expected_unshielded_inputs_overhead
             + expected_unshielded_outputs_overhead
+            + proof_verify
     }
 }
 
@@ -979,7 +1001,7 @@ pub fn partition_transcripts<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let closure_budgets = closures
+    let mut closure_budgets = closures
         .iter()
         .map(|closure| {
             closure
@@ -988,6 +1010,12 @@ pub fn partition_transcripts<D: DB>(
                 .sum::<CostDuration>()
         })
         .collect::<Vec<_>>();
+    // Allow creep-up to the min time to dismiss, up to 70% usage
+    let spare_min_time_to_dismiss =
+        params.limits.min_time_to_dismiss * 0.7f64 - closure_budgets.iter().copied().sum();
+    for budget in closure_budgets.iter_mut() {
+        *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
+    }
 
     // Step 4: Partition the root nodes:
     //      4a: Split root nodes on `ckpt`s.
@@ -1025,10 +1053,15 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let mut required_budget = partial_res.gas_heuristic(params).max_time();
+                let public_input_count = calls[root].program.field_size() + 2;
+                let mut required_budget = partial_res
+                    .gas_heuristic(params, true, public_input_count)
+                    .max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next].gas_heuristic(params).max_time();
+                    required_budget += full_runs[next]
+                        .gas_heuristic(params, true, public_input_count)
+                        .max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {
