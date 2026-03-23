@@ -1315,30 +1315,26 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// This forces the Sp to be considered a reference when used as a child of
     /// other Sps, and places it into internal caches, and eventually the
     /// database if persisted or a parent is persisted.
-    pub fn into_tracked(&self) -> Self {
+    pub fn into_tracked(&self) -> Self
+    where
+        T: Storable<D>,
+    {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
+                let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+                let value = self.force_as_arc();
+                value
+                    .to_binary_repr(&mut data)
+                    .expect("Storable data should be able to be represented in binary");
                 let child_repr = ArenaKey::Ref(self.root.clone());
-                self.arena.track_locked(
-                    &self.arena.lock_metadata(),
+                self.arena.new_sp_locked(
+                    &mut self.arena.lock_metadata(),
+                    value.as_ref().clone(),
                     self.root.clone(),
-                    (*dcn.data).clone(),
-                    (*dcn.children).clone(),
-                    &child_repr,
-                );
-
-                let sp = Sp {
-                    data: self.data.clone(),
+                    data,
+                    dcn.children.deref().clone(),
                     child_repr,
-                    arena: self.arena.clone(),
-                    root: self.root.clone(),
-                };
-
-                if !sp.is_lazy() {
-                    self.arena.increment_ref(&sp.root);
-                }
-
-                sp
+                )
             }
             ArenaKey::Ref(_) => self.clone(),
         }
@@ -1533,21 +1529,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         //
         // We don't *really* want to do this, but it's baked into behaviour now due to the above.
         if let ArenaKey::Direct(..) = self.child_repr {
-            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-            let value = self.force_as_arc();
-            value
-                .to_binary_repr(&mut data)
-                .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
-            let new_sp = self.arena.new_sp_locked(
-                &mut self.arena.lock_metadata(),
-                value.as_ref().clone(),
-                self.root.clone(),
-                data,
-                self.children(),
-                child_repr,
-            );
-            *self = new_sp;
+            *self = self.into_tracked();
         }
         self.arena.with_backend(|backend| {
             self.child_repr
