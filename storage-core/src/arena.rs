@@ -486,10 +486,6 @@ type SpCache<D> =
 
 #[allow(clippy::type_complexity)]
 impl<D: DB> Arena<D> {
-    /// FIXME
-    pub fn cache_len(&self) -> (usize, usize) {
-        (self.lock_sp_cache().borrow().len(), self.lock_metadata().borrow().len())
-    }
     #[allow(clippy::type_complexity)]
     fn lock_metadata(&self) -> MutexGuard<'_, RefCell<MetaData<D>>> {
         self.metadata.lock()
@@ -756,7 +752,12 @@ impl<D: DB> Arena<D> {
         }
     }
 
-    fn track_lazy(&self, metadata: &MutexGuard<'_, RefCell<MetaData<D>>>, key: ArenaHash<D::Hasher>, child_repr: &ArenaKey<D::Hasher>) {
+    fn track_lazy(
+        &self,
+        metadata: &MutexGuard<'_, RefCell<MetaData<D>>>,
+        key: ArenaHash<D::Hasher>,
+        child_repr: &ArenaKey<D::Hasher>,
+    ) {
         if !RefCell::borrow(metadata).contains_key(&key) {
             RefCell::borrow_mut(metadata).insert(key.clone(), Node::new());
             if let ArenaKey::Ref(_) = child_repr {
@@ -976,7 +977,8 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
     ) -> Result<Sp<T, D>, std::io::Error> {
         if self.max_depth == Some(0) {
             if let ArenaKey::Ref(key) = child {
-                self.arena.track_lazy(&self.arena.lock_metadata(), key.clone(), child);
+                self.arena
+                    .track_lazy(&self.arena.lock_metadata(), key.clone(), child);
             }
             return Ok(Sp::lazy(
                 self.arena.clone(),
@@ -1604,8 +1606,7 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // We only need to do this on refs, because others aren't actually
         // ref-counted. Additionally, note that if we have a Direct node here,
         // then the children contained within this Sp will do their own cleanup.
-        if let ArenaKey::Ref(hash) = &self.child_repr
-        {
+        if let ArenaKey::Ref(hash) = &self.child_repr {
             // It's important that we unload() before calling decrement_ref(),
             // because unload() is responsible for cleaning up the sp_cache, and
             // decrement_ref() is responsible for cleaning up the metadata, and the

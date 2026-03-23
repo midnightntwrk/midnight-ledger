@@ -264,9 +264,8 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             swizzle_time += tb.elapsed();
             let tc = std::time::Instant::now();
             state.swizzle_to_db();
-            culled += default_storage::<TestDb>().with_backend(|b| {
-                b.gc(std::time::Duration::from_millis(500))
-            });
+            culled += default_storage::<TestDb>()
+                .with_backend(|b| b.gc(std::time::Duration::from_millis(500)));
             gc_time += tc.elapsed();
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
@@ -341,13 +340,12 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
         let key = lstate.as_typed_key();
         let t1 = std::time::Instant::now();
         println!(
-            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB / {} objects)",
+            "Took {:?} ({:?} per; of which {:?} writes) to init {size} entries, with {} allocated ({} DB)",
             t1 - t0,
             (t1 - t0) / ((end - start) << BATCH_SIZE) as u32,
             swizzle_time / ((end - start) << BATCH_SIZE) as u32,
             cur_alloc(),
             pprint_bytes(du(dir.clone()).unwrap()),
-            default_storage::<TestDb>().with_backend(|b| b.get_database().size()),
         );
         lstate.persist();
         drop(lstate);

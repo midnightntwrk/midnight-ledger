@@ -66,7 +66,8 @@ impl RunningBenchmark {
     }
 
     fn read_batch_measurement(&mut self, batch_size: usize, took: Duration) {
-        self.read_model.measure(took.as_micros() as f64, batch_size as f64);
+        self.read_model
+            .measure(took.as_micros() as f64, batch_size as f64);
     }
 
     // During sweep phase, how many children to scan *on disk* in one batch, *including* deletions
@@ -84,7 +85,8 @@ impl RunningBenchmark {
     }
 
     fn scan_batch_measurement(&mut self, batch_size: usize, took: Duration) {
-        self.scan_model.measure(took.as_micros() as f64, batch_size as f64);
+        self.scan_model
+            .measure(took.as_micros() as f64, batch_size as f64);
     }
 }
 
@@ -135,7 +137,12 @@ impl<D: DB> GcState<D> {
             let db_len = db_keys.len();
             self.last_roots = roots.chain(db_keys.into_keys()).collect();
             //dbg!(db_len, self.last_roots.len());
-            self.grey_set.extend(self.last_roots.iter().filter(|r| !self.mark_set.contains(r)).cloned());
+            self.grey_set.extend(
+                self.last_roots
+                    .iter()
+                    .filter(|r| !self.mark_set.contains(r))
+                    .cloned(),
+            );
             self.rescan = false;
         } else {
             for root in roots {

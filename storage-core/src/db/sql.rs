@@ -481,6 +481,9 @@ impl<H: WellBehavedHasher> FromSql for Children<H> {
 impl<H: WellBehavedHasher> DB for SqlDB<H> {
     type Hasher = H;
 
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = ArenaHash<H>;
+
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         let key = key.clone();
         self.with_tx(Deferred, |tx| {
@@ -724,6 +727,54 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                 .collect();
             stmt.finalize().unwrap();
             result
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        self.with_tx(Deferred, |tx| {
+            let parse_row = |row: &rusqlite::Row| {
+                let key: ArenaHash<H> = row.get(0)?;
+                let data = row.get(1)?;
+                let children: Children<H> = row.get(2)?;
+                let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
+                Ok((key, OnDiskObject { data, children }))
+            };
+            let rows: Vec<_> = if let Some(ref handle) = resume_from {
+                let sql = "SELECT key, data, children FROM node \
+                           WHERE key > (?1) ORDER BY key LIMIT ?2";
+                let mut stmt = tx.prepare(sql).expect("Failed to prepare scan statement");
+                let result = stmt
+                    .query_map(params![handle, batch_size as u32], parse_row)
+                    .expect("Failed to execute scan query")
+                    .map(|r| r.expect("Failed to read scan row"))
+                    .collect();
+                stmt.finalize().expect("Failed to finalize scan statement");
+                result
+            } else {
+                let sql = "SELECT key, data, children FROM node ORDER BY key LIMIT ?1";
+                let mut stmt = tx.prepare(sql).expect("Failed to prepare scan statement");
+                let result = stmt
+                    .query_map(params![batch_size as u32], parse_row)
+                    .expect("Failed to execute scan query")
+                    .map(|r| r.expect("Failed to read scan row"))
+                    .collect();
+                stmt.finalize().expect("Failed to finalize scan statement");
+                result
+            };
+            let handle = if rows.len() == batch_size {
+                rows.last().map(|(k, _)| k.clone())
+            } else {
+                None
+            };
+            (rows, handle)
         })
     }
 }

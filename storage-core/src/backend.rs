@@ -308,11 +308,6 @@ pub struct StorageBackendStats {
 }
 
 impl<D: DB> StorageBackend<D> {
-    /// FIXME
-    pub fn get_database(&mut self) -> &mut D {
-        &mut self.database
-    }
-
     /// Create a new `StorageBackend` with cache bound `cache_size` and optional
     /// database.
     ///
@@ -556,19 +551,18 @@ impl<D: DB> StorageBackend<D> {
         // `persist` call before the node was cached). Merge the pending delta
         // into the new Create so it isn't lost.
         #[cfg(feature = "layout-v2")]
-        let cache_value =
-            if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
-                let delta = *delta;
-                self.remove_from_memory(&key);
-                CacheValue::CreateAndUpdate {
-                    obj: OnDiskObject { data, children },
-                    delta,
-                }
-            } else {
-                CacheValue::Create {
-                    obj: OnDiskObject { data, children },
-                }
-            };
+        let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
+            let delta = *delta;
+            self.remove_from_memory(&key);
+            CacheValue::CreateAndUpdate {
+                obj: OnDiskObject { data, children },
+                delta,
+            }
+        } else {
+            CacheValue::Create {
+                obj: OnDiskObject { data, children },
+            }
+        };
         #[cfg(not(feature = "layout-v2"))]
         let cache_value = CacheValue::Create {
             obj: OnDiskObject {
@@ -579,10 +573,7 @@ impl<D: DB> StorageBackend<D> {
         };
         self.cache_insert_new_key(key, cache_value);
     }
-    pub(crate) fn cache_lazy(
-        &mut self,
-        key: ArenaHash<D::Hasher>,
-    ) {
+    pub(crate) fn cache_lazy(&mut self, key: ArenaHash<D::Hasher>) {
         self.live_inserts.insert(key);
     }
 
@@ -783,13 +774,9 @@ impl<D: DB> StorageBackend<D> {
                         // DB. Read the existing root_count and add the delta.
                         #[cfg(feature = "layout-v2")]
                         let root_count = {
-                            let db_root_count =
-                                self.database.get_root_count(&k) as i32;
+                            let db_root_count = self.database.get_root_count(&k) as i32;
                             let root_count = db_root_count + delta.root_delta;
-                            assert!(
-                                root_count >= 0,
-                                "root count can't be negative (for {k:?})"
-                            );
+                            assert!(root_count >= 0, "root count can't be negative (for {k:?})");
                             root_count as u32
                         };
                         #[cfg(not(feature = "layout-v2"))]
@@ -863,7 +850,12 @@ impl<D: DB> StorageBackend<D> {
     }
 
     #[cfg(feature = "gc-v1")]
-    /// FIXME
+    /// Runs an incremental garbage collector. The GC will run with a given time bound, and returns
+    /// the number of items removed from storage.
+    ///
+    /// Note that the bound is approximate; garbage collection will attempt to target this time,
+    /// but may over- or under-shoot. A return value of `0` does *not* mean no progress is being
+    /// made.
     pub fn gc(&mut self, bound: std::time::Duration) -> usize {
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
