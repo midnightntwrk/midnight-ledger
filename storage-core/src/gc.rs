@@ -23,55 +23,22 @@ use crate::{
     db::{DB, Update},
 };
 
+// A through-origin linear regression, we just keep the sum of x and y values.
 #[derive(Debug, Default)]
 struct IncrementalLinRegress {
-    n: u64,
     sum_x: f64,
     sum_y: f64,
-    sum_xy: f64,
-    sum_x_squared: f64,
-    sum_y_squared: f64,
 }
 
 impl IncrementalLinRegress {
     fn measure(&mut self, x: f64, y: f64) {
-        self.n += 1;
         self.sum_x += x;
         self.sum_y += y;
-        self.sum_xy += x * y;
-        self.sum_x_squared += x * x;
-        self.sum_y_squared += y * y;
     }
     fn predict(&self, x: f64) -> Option<f64> {
-        if self.n < 3 {
-            return None;
-        }
-        let n = self.n as f64;
-        let sxx = n * self.sum_x_squared - self.sum_x.powi(2);
-        if sxx.abs() < 1e-9 {
-            return None;
-        }
-        // b = (n·Σxy - Σx·Σy) / (n·Σx² - (Σx)²)
-        let b = (n * self.sum_xy - self.sum_x * self.sum_y) / sxx;
-        // a = (Σy - b·Σx) / n
-        let a = (self.sum_y - b * self.sum_x) / n;
-        // ŷ = a + b·x
-        let y = a + b * x;
-        if !y.is_finite() {
-            return None;
-        }
-        // Prediction standard error: SE = sqrt(MSE · (1 + 1/n + n·(x - x̄)²/Sxx))
-        let sse = self.sum_y_squared - a * self.sum_y - b * self.sum_xy;
-        let mse = sse / (n - 2.0);
-        if mse < 0.0 || !mse.is_finite() {
-            return None;
-        }
-        let x_bar = self.sum_x / n;
-        let se = (mse * (1.0 + 1.0 / n + n * (x - x_bar).powi(2) / sxx)).sqrt();
-        if !se.is_finite() || se > y.abs() {
-            return None;
-        }
-        Some(y)
+        let a = self.sum_y / self.sum_x;
+        let y = a * x;
+        y.is_finite().then_some(y)
     }
 }
 
@@ -90,14 +57,12 @@ impl RunningBenchmark {
         if budget.is_zero() {
             return None;
         }
-        Some(DEFAULT_BATCH_SIZE)
-        // FIXME: This breaks
-        //match self.read_model.predict(budget.as_micros() as f64) {
-        //    Some(batch) if batch > BATCH_LIMIT as f64 => Some(BATCH_LIMIT),
-        //    Some(batch) if batch > 0f64 => Some(batch.ceil() as usize),
-        //    None => Some(DEFAULT_BATCH_SIZE),
-        //    Some(_) => None,
-        //}
+        match self.read_model.predict(budget.as_micros() as f64) {
+            Some(batch) if batch > BATCH_LIMIT as f64 => Some(BATCH_LIMIT),
+            Some(batch) if batch > 0f64 => Some(batch.ceil() as usize),
+            None => Some(DEFAULT_BATCH_SIZE),
+            Some(_) => None,
+        }
     }
 
     fn read_batch_measurement(&mut self, batch_size: usize, took: Duration) {
@@ -110,14 +75,12 @@ impl RunningBenchmark {
         if budget.is_zero() {
             return None;
         }
-        Some(DEFAULT_BATCH_SIZE)
-        // FIXME: This breaks
-        //match self.scan_model.predict(budget.as_micros() as f64) {
-        //    Some(batch) if batch > BATCH_LIMIT as f64 => Some(BATCH_LIMIT),
-        //    Some(batch) if batch > 1f64 => Some(batch.ceil() as usize),
-        //    None => Some(DEFAULT_BATCH_SIZE),
-        //    Some(_) => None,
-        //}
+        match self.scan_model.predict(budget.as_micros() as f64) {
+            Some(batch) if batch > BATCH_LIMIT as f64 => Some(BATCH_LIMIT),
+            Some(batch) if batch > 1f64 => Some(batch.ceil() as usize),
+            None => Some(DEFAULT_BATCH_SIZE),
+            Some(_) => None,
+        }
     }
 
     fn scan_batch_measurement(&mut self, batch_size: usize, took: Duration) {

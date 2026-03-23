@@ -264,11 +264,9 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
             swizzle_time += tb.elapsed();
             let tc = std::time::Instant::now();
             state.swizzle_to_db();
-            if i % 10== 3 {
             culled += default_storage::<TestDb>().with_backend(|b| {
-                b.gc(std::time::Duration::from_secs(10))
+                b.gc(std::time::Duration::from_millis(500))
             });
-            }
             gc_time += tc.elapsed();
             let frac = (i + 1 - start) as f64 / (end - start) as f64;
             let segments = (frac * PROGRESS_BAR_SEGMENTS as f64).round() as usize;
