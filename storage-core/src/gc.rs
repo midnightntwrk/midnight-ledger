@@ -123,6 +123,7 @@ impl<D: DB> GcState<D> {
         bound: Duration,
         db: &'b mut D,
         cache_read: impl Fn(ArenaHash<D::Hasher>) -> Option<&'a OnDiskObject<D::Hasher>>,
+        db_roots: impl for<'c> FnOnce(&'c mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> Vec<ArenaHash<D::Hasher>> {
         let t0 = Instant::now();
         // First, we need to update our root set. We take the new root set `roots`, and note any
@@ -132,8 +133,7 @@ impl<D: DB> GcState<D> {
         // If `rescan` is true, we instead go fetch the full root set from disk, and init
         // `last_roots` entirely from there.
         if self.rescan {
-            let db_keys = db.get_roots();
-            self.last_roots = roots.chain(db_keys.into_keys()).collect();
+            self.last_roots = roots.chain(db_roots(db)).collect();
             self.grey_set.extend(
                 self.last_roots
                     .iter()

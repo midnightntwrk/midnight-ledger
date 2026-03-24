@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.
+
 ## Version `1.1.0`
 
 - feat: add layout version 2, which removes reference counting. For now, it disables garbage collection as well.

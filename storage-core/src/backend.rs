@@ -857,6 +857,20 @@ impl<D: DB> StorageBackend<D> {
     /// but may over- or under-shoot. A return value of `0` does *not* mean no progress is being
     /// made.
     pub fn gc(&mut self, bound: std::time::Duration) -> usize {
+        self.gc_override_gc_roots(bound, |db| db.get_roots().keys().cloned().collect())
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Acts a [`gc`], but forcibly overrides the database roots with a specified root set.
+    ///
+    /// **Warning**: this effectively unpersists any roots not passed in. This is irreversible, and
+    /// should only be done if this is the deliberate goal, for instance because roots that are
+    /// still required are being tracked elsewhere.
+    pub fn gc_override_gc_roots(
+        &mut self,
+        bound: std::time::Duration,
+        roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
+    ) -> usize {
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
             bound,
@@ -867,6 +881,7 @@ impl<D: DB> StorageBackend<D> {
                     .or_else(|| self.read_cache.peek(&key))
                     .and_then(|v| v.get_obj())
             },
+            roots,
         );
         for hash in culled.iter() {
             self.write_cache.remove(hash);
