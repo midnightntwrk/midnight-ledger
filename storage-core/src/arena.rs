@@ -1603,17 +1603,6 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         // sp_cache entry can be cleaned up.
         let _ = self.data.take();
         self.gc_weak_pointer();
-        // We only need to do this on refs, because others aren't actually
-        // ref-counted. Additionally, note that if we have a Direct node here,
-        // then the children contained within this Sp will do their own cleanup.
-        if let ArenaKey::Ref(hash) = &self.child_repr {
-            // It's important that we unload() before calling decrement_ref(),
-            // because unload() is responsible for cleaning up the sp_cache, and
-            // decrement_ref() is responsible for cleaning up the metadata, and the
-            // invariant is that any Arc in the sp_cache must have a corresponding
-            // entry in the metadata.
-            self.arena.decrement_ref(hash);
-        }
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
@@ -1805,6 +1794,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
         self.unload();
+        // Decrement the ref count only when the Sp is truly destroyed.
+        // This must happen after unload(), which is responsible for cleaning
+        // up the sp_cache — the invariant is that any Arc in the sp_cache
+        // must have a corresponding entry in the metadata.
+        if let ArenaKey::Ref(hash) = &self.child_repr {
+            self.arena.decrement_ref(hash);
+        }
     }
 }
 
