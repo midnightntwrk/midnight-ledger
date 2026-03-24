@@ -1218,10 +1218,6 @@ impl<H: WellBehavedHasher> Deserializable for OnDiskObject<H> {
 }
 
 impl<H: WellBehavedHasher> OnDiskObject<H> {
-    pub(crate) fn hash(&self) -> ArenaHash<H> {
-        crate::arena::hash(&self.data, self.children.iter().map(ArenaKey::hash))
-    }
-
     #[cfg(not(feature = "layout-v2"))]
     /// Compute new obj with `delta.ref_delta` applied to `ref_count`.
     ///

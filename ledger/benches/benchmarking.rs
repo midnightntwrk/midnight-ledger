@@ -330,10 +330,8 @@ pub fn night_transfer_by_utxo_set_size(c: &mut Criterion) {
                 );
                 let tx =
                     Transaction::from_intents("local-test", [(1, intent)].into_iter().collect());
-                let tx = rt
-                    .block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
-                    .unwrap();
-                tx
+                rt.block_on(state.balance_tx(rng.split(), tx, &test_resolver("benchmarks")))
+                    .unwrap()
             })
             .collect::<Vec<_>>();
         let context = state.context().block_context;

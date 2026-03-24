@@ -12,12 +12,11 @@
 // limitations under the License.
 
 use std::{
-    collections::{BinaryHeap, HashSet},
+    collections::HashSet,
     time::{Duration, Instant},
 };
 
 use crate::{
-    WellBehavedHasher,
     arena::ArenaHash,
     backend::OnDiskObject,
     db::{DB, Update},
@@ -134,9 +133,7 @@ impl<D: DB> GcState<D> {
         // `last_roots` entirely from there.
         if self.rescan {
             let db_keys = db.get_roots();
-            let db_len = db_keys.len();
             self.last_roots = roots.chain(db_keys.into_keys()).collect();
-            //dbg!(db_len, self.last_roots.len());
             self.grey_set.extend(
                 self.last_roots
                     .iter()
@@ -189,7 +186,7 @@ impl<D: DB> GcState<D> {
                 .read_batch_size(bound.saturating_sub(t0.elapsed()))
         {
             let batch_start = Instant::now();
-            let batch: Vec<_> = self.grey_set.iter().cloned().take(batch_size).collect();
+            let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
             let batch_size = batch.len();
             let batch_read = db.batch_get_nodes(batch.iter().cloned());
             self.mark_set.extend(batch);
@@ -225,7 +222,7 @@ impl<D: DB> GcState<D> {
             .scan_batch_size(bound.saturating_sub(t0.elapsed()))
         {
             let batch_start = Instant::now();
-            let (mut nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
+            let (nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
             self.sweep_resume = handle;
             let batch_size = nodes.len();
             // Cull all nodes in the batch that are *not* marked.
