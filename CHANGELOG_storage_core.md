@@ -1,5 +1,10 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: prevent a panic in `Sp` serialization with a mix of 'promoted' and 'unpromoted' keys.
+- fix: correct `Sp::into_tracked` behaviour
+
 ## Version `1.1.0`
 
 - feat: add layout version 2, which removes reference counting. For now, it disables garbage collection as well.
