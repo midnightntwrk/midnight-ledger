@@ -269,7 +269,7 @@ jobs:
           cp test-results-proof-server.json ../target/
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: "proof-server-test-results-${{ matrix.os }}"
           path: target/test-*
