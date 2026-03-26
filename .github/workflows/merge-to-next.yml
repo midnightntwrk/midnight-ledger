@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout ledger-8
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           ref: ledger-8
           fetch-depth: 0
