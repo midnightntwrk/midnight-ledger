@@ -79,7 +79,7 @@ jobs:
           nix develop -c cargo test --workspace --all-features --release  --no-fail-fast -- --nocapture --test-threads=1 | tee test-output.log
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
           name: Test results
           path: test-output.log
