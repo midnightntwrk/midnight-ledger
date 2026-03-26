@@ -84,6 +84,9 @@ jobs:
       - name: Cargo clippy (--all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes)
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo clippy --all-targets --workspace --all-features --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
 
+      - name: Cargo doc
+        run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 MIDNIGHT_PP='' cargo doc --all-features --no-deps
+
       - name: Cargo audit
         run: MIDNIGHT_LEDGER_EXPERIMENTAL=1 nix develop .#ci -c cargo audit
 
@@ -194,10 +197,6 @@ jobs:
           echo "/usr/bin" >> $GITHUB_PATH
           which git
           git --version
-
-      - name: Build Docs
-        run: |
-          nix run .#doc
 
       - name: Build and Test (default features)
         run: |
