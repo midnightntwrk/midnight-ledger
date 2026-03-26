@@ -6,7 +6,7 @@ on:
     - cron: "0 5 * * *"
   push:
     branches:
-      - main
+      - 'ledger-*'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
