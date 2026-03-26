@@ -31,7 +31,7 @@ midnight-curves = { version = "^0.2.0" }
 midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
-anyhow = { version = "^1.0.98" }
+anyhow = { version = "^1.0.102" }
 lru = "0.16.0"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
