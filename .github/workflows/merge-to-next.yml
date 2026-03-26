@@ -1,0 +1,49 @@
+name: Merge current release into next
+
+on:
+  push:
+    branches:
+      - tkerber/merge-to-next-ci
+  workflow_dispatch:
+  schedule:
+    # Every Friday at 08:00 UTC
+    - cron: "0 8 * * 5"
+
+jobs:
+  create-merge-pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout ledger-8
+        uses: actions/checkout@v4
+        with:
+          ref: ledger-8
+          fetch-depth: 0
+
+      - name: Check for new commits
+        id: check
+        run: |
+          git fetch origin ledger-9
+          if git merge-base --is-ancestor ledger-8 origin/ledger-9; then
+            echo "No new commits on ledger-8 since last merge."
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.check.outputs.has_changes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Check if an open PR already exists
+          existing=$(gh pr list --base ledger-9 --head ledger-8 --state open --json number --jq '.[0].number')
+          if [ -n "$existing" ]; then
+            echo "PR #$existing already open, skipping."
+            exit 0
+          fi
+
+          gh pr create \
+            --base ledger-9 \
+            --head ledger-8 \
+            --title "Merge ledger-8 into ledger-9" \
+            --body "Automated weekly PR to merge \`ledger-8\` into \`ledger-9\`."
