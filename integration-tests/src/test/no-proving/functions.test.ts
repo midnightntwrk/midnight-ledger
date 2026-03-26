@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -270,8 +270,8 @@ describe('Ledger API - functions', () => {
     expect(transcripts).toHaveLength(2);
     expect(transcripts.at(0)).toBeDefined();
     expect(transcripts.at(1)).toBeDefined();
-    expect(transcripts.at(0)?.at(0)?.program).toEqual([{ noop: { n: 0 } }]);
-    expect(transcripts.at(0)?.at(0)?.effects).toEqual({
+    expect(transcripts.at(0)?.at(1)?.program).toEqual([{ noop: { n: 0 } }]);
+    expect(transcripts.at(0)?.at(1)?.effects).toEqual({
       claimedContractCalls: [],
       claimedNullifiers: [],
       claimedShieldedReceives: [],
@@ -282,9 +282,9 @@ describe('Ledger API - functions', () => {
       unshieldedOutputs: new Map(),
       claimedUnshieldedSpends: new Map()
     });
-    expect(transcripts.at(0)?.at(0)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
-    expect(transcripts.at(1)?.at(0)?.program).toEqual([{ noop: { n: 1 } }]);
-    expect(transcripts.at(1)?.at(0)?.effects).toEqual({
+    expect(transcripts.at(0)?.at(1)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
+    expect(transcripts.at(1)?.at(1)?.program).toEqual([{ noop: { n: 1 } }]);
+    expect(transcripts.at(1)?.at(1)?.effects).toEqual({
       claimedContractCalls: [],
       claimedNullifiers: [],
       claimedShieldedReceives: [],
@@ -295,7 +295,7 @@ describe('Ledger API - functions', () => {
       unshieldedOutputs: new Map(),
       claimedUnshieldedSpends: new Map()
     });
-    expect(transcripts.at(1)?.at(0)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
+    expect(transcripts.at(1)?.at(1)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
   });
 
   /**

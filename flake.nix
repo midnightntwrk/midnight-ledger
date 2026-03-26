@@ -1,5 +1,5 @@
 # This file is part of midnight-ledger.
-# Copyright (C) 2025 Midnight Foundation
+# Copyright (C) Midnight Foundation
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License");
 # You may not use this file except in compliance with the License.
@@ -143,8 +143,7 @@
               }.${if isCrossArm then "aarch64-linux" else system};
 
               checkPhase = ''
-                cargo fmt -- --check
-                cargo check --all-targets --workspace
+                cargo clippy --all-targets --workspace --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
                 ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
               cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
@@ -538,7 +537,6 @@
               cargo-audit
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_104
-              pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];
 

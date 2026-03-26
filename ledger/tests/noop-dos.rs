@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -193,7 +193,7 @@ async fn noop_dos() {
                 .unwrap())
             .clone();
 
-            call_action.guaranteed_transcript = Some(Sp::new(
+            call_action.fallible_transcript = Some(Sp::new(
                 partition_transcripts(
                     &[PreTranscript {
                         context: QueryContext::new(state.ledger.index(addr).unwrap().data, addr),
@@ -203,7 +203,7 @@ async fn noop_dos() {
                     &INITIAL_PARAMETERS,
                 )
                 .unwrap()[0]
-                    .0
+                    .1
                     .clone()
                     .unwrap(),
             ));
