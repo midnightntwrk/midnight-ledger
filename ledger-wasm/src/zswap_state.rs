@@ -14,6 +14,7 @@
 use crate::conversions::*;
 use crate::dust::Event;
 use crate::state_changes::ZswapStateChanges;
+use crate::tx::{Transaction, get_dyn_transaction};
 use crate::zswap_keys::ZswapSecretKeys;
 use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
 use base_crypto::time::Timestamp;
@@ -31,6 +32,7 @@ use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serialize::tagged_serialize;
+use std::ops::Deref;
 use storage::{db::InMemoryDB, storage::Map as SMap};
 use transient_crypto::merkle_tree;
 use wasm_bindgen::prelude::*;
@@ -121,6 +123,7 @@ impl ZswapLocalStateWithChanges {
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct ZswapLocalState(pub(crate) zswap::local::State<InMemoryDB>);
 
 impl Default for ZswapLocalState {
@@ -228,6 +231,31 @@ impl ZswapLocalState {
         Ok(ZswapLocalState(
             self.0.apply_collapsed_update(update.as_ref())?,
         ))
+    }
+
+    #[wasm_bindgen(js_name = "applyFailed")]
+    pub fn apply_failed(&self, offer: &ZswapOffer) -> ZswapLocalState {
+        use ZswapOfferTypes::*;
+        ZswapLocalState(match &offer.0 {
+            ProvenOffer(val) => self.0.apply_failed(val),
+            UnprovenOffer(val) => self.0.apply_failed(val),
+            ProofErasedOffer(val) => self.0.apply_failed(val),
+        })
+    }
+
+    #[wasm_bindgen(js_name = "revertTransaction")]
+    pub fn revert_transaction(&self, tx: &Transaction) -> ZswapLocalState {
+        let tx = get_dyn_transaction(tx.0.clone()).as_erased();
+        let ledger::structure::Transaction::Standard(tx) = tx else {
+            return self.clone();
+        };
+        ZswapLocalState(
+            tx.guaranteed_coins
+                .iter()
+                .map(|o| o.deref().clone())
+                .chain(tx.fallible_coins.values())
+                .fold(self.0.clone(), |st, offer| st.apply_failed(&offer)),
+        )
     }
 
     #[wasm_bindgen(js_name = "clearPending")]

@@ -236,7 +236,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
@@ -367,7 +367,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
@@ -534,7 +534,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();

@@ -3,12 +3,13 @@ name = "midnight-storage-macros"
 version = "1.0.0"
 edition = "2024"
 license.workspace = true
+description = "Provides derive macros for the Midnight ledger's storage system."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 syn = { version = "^2.0", features = ["full", "extra-traits"] }
-serialize-macros = { path = "../serialize-macros", package = "midnight-serialize-macros" }
+serialize-macros = { version = "1.0.0", path = "../serialize-macros", package = "midnight-serialize-macros" }
 quote = "^1.0"
 proc-macro2 = "1"
 

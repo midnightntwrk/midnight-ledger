@@ -1198,7 +1198,7 @@ describe('Ledger API - Transaction', () => {
         alignment: [ATOM_BYTES_32, ATOM_BYTES_32, ATOM_BYTES_16]
       },
       {
-        value: [EMPTY_VALUE, EMPTY_VALUE, encodedAddr],
+        value: [EMPTY_VALUE, EMPTY_VALUE, Static.trimTrailingZeros(encodedAddr)],
         alignment: [ATOM_BYTES_1, ATOM_BYTES_32, ATOM_BYTES_32]
       }
     );

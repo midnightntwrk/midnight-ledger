@@ -1,8 +1,10 @@
 [package]
 name = "midnight-transient-crypto"
-version = "2.0.0"
+version = "2.0.1"
 edition = "2024"
 license.workspace = true
+repository.workspace = true
+description = "Cryptographic primitives for Midnight that may change over time."
 
 [features]
 default = []
@@ -12,16 +14,16 @@ proptest = [
   "dep:proptest-derive",
   "base-crypto/proptest",
   "serialize/proptest",
-  "storage/proptest",
+  "storage-core/proptest",
 ]
 mock-verify = []
 public-internal-structure = []
 
 [dependencies]
-base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
-derive = { path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
-serialize = { path = "../serialize", package = "midnight-serialize" }
-storage = { path = "../storage", package = "midnight-storage" }
+base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+derive = { version = "1.0.0", path = "../base-crypto-derive", package = "midnight-base-crypto-derive" }
+serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
 
 ff = "^0.13.1"
 group = "^0.13.0"
