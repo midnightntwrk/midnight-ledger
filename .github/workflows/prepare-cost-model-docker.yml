@@ -79,7 +79,7 @@ jobs:
           profile: minimal # Installs rustc, cargo, and rust-std. Use 'default' for rustfmt, clippy, etc.
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Create and push cost model docker image
         run: |

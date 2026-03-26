@@ -54,7 +54,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -128,7 +128,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -183,7 +183,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
@@ -244,7 +244,7 @@ jobs:
         run: .github/scripts/configure-cargo.sh
 
       - name: Cache dependencies
-        uses: Swatinem/rust-cache@f13886b937689c021905a6b90929199931d60db1
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
 
       - name: Fix Nix permissions (needed on macos self hosted runner)
         run: |
