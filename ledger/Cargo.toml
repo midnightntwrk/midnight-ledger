@@ -35,7 +35,7 @@ lazy_static = "^1.5.0"
 sha2 = "^0.10.9"
 introspection-derive = "0.1"
 introspection = "0.1"
-derive-where = "^1.5.0"
+derive-where = "^1.6.1"
 anyhow = { version = "^1.0.102" }
 
 is_sorted = "^0.1.1"
