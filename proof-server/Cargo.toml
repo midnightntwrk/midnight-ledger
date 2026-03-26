@@ -3,6 +3,7 @@ name = "midnight-proof-server"
 edition = "2024"
 license.workspace = true
 version.workspace = true
+publish = false
 
 [features]
 default = []
@@ -16,8 +17,8 @@ transient-crypto = { path = "../transient-crypto", package = "midnight-transient
 storage = { path = "../storage", package = "midnight-storage" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
-zkir = { path = "../zkir", package = "zkir" }
-zkir-v3 = { path = "../zkir-v3", optional = true }
+zkir = { path = "../zkir", package = "midnight-zkir" }
+zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
 
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

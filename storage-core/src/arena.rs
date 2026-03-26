@@ -589,15 +589,15 @@ impl<D: DB> Arena<D> {
         key: ArenaHash<D::Hasher>,
         data: std::vec::Vec<u8>,
         children: std::vec::Vec<ArenaKey<D::Hasher>>,
+        child_repr: ArenaKey<D::Hasher>,
     ) -> Sp<T, D> {
-        let child_node = child_from(&data, &children);
         self.new_sp_locked(
             &mut self.lock_metadata(),
             value,
             key,
             data,
             children,
-            child_node,
+            child_repr,
         )
     }
 
@@ -791,10 +791,11 @@ impl<D: DB> Arena<D> {
         metadata: &mut MutexGuard<'_, RefCell<MetaData<D>>>,
         key: &ArenaHash<D::Hasher>,
     ) {
-        RefCell::borrow_mut(metadata)
+        let mut metadata = RefCell::borrow_mut(metadata);
+        let rc = metadata
             .get_mut(key)
-            .expect("attempted to increment non-existant ref")
-            .ref_count += 1;
+            .expect("attempted to increment non-existant ref");
+        rc.ref_count += 1;
     }
 
     fn increment_ref(&self, key: &ArenaHash<D::Hasher>) {
@@ -960,6 +961,13 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         &self,
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
+        if self.max_depth == Some(0) {
+            return Ok(Sp::lazy(
+                self.arena.clone(),
+                child.hash().clone(),
+                child.clone(),
+            ));
+        }
         #[cfg(feature = "test-utilities")]
         let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
         let (data, children) = match child {
@@ -977,8 +985,12 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
                     .arena
                     .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), key);
                 if let Some(arc) = maybe_arc {
-                    let child_repr = arc.as_child();
-                    return Ok(Sp::eager(self.arena.clone(), key.clone(), arc, child_repr));
+                    return Ok(Sp::eager(
+                        self.arena.clone(),
+                        key.clone(),
+                        arc,
+                        child.clone(),
+                    ));
                 }
                 drop(metadata_lock);
 
@@ -997,50 +1009,21 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             }
         };
 
-        //  Build lazy value if at max_depth.
-        if self.max_depth == Some(0) {
-            let (_guard, child_repr) = if let ArenaKey::Ref(key) = child {
-                // We need to hold this lock until `Sp::lazy` below is done, since
-                // that will call `Arena::increment_ref` internally, which assumes
-                // that the `track_locked` call here has been superseded by a
-                // possible `Sp::drop`.
-                let metadata_lock = self.arena.lock_metadata();
-                let child_repr = child_from(&data, &children);
-                self.arena.track_locked(
-                    &metadata_lock,
-                    key.clone(),
-                    data.deref().clone(),
-                    children.deref().clone(),
-                    &child_repr,
-                );
-                (Some(metadata_lock), child_repr)
-            } else {
-                (None, child.clone())
-            };
-            let res = Ok(Sp::lazy(
-                self.arena.clone(),
-                child.hash().clone(),
-                child_repr,
-            ));
-            return res;
-        }
         // If not at max depth, then deserialize recursively.
         let loader = BackendLoader {
             arena: self.arena,
             max_depth: self.max_depth.map(|max_depth| max_depth - 1),
             recursion_depth: self.recursion_depth + 1,
         };
-        let value = T::from_binary_repr::<&[u8]>(
-            &mut &data.clone()[..],
-            &mut children.iter().cloned(),
-            &loader,
-        )?;
+        let value =
+            T::from_binary_repr::<&[u8]>(&mut &data[..], &mut children.iter().cloned(), &loader)?;
         match child {
             ArenaKey::Ref(hash) => Ok(self.arena.new_sp(
                 value,
                 hash.clone(),
                 data.deref().clone(),
                 children.deref().clone(),
+                child.clone(),
             )),
             ArenaKey::Direct(_) => Ok(Sp {
                 arena: self.arena.clone(),
@@ -1246,13 +1229,6 @@ pub struct Sp<T: ?Sized + 'static, D: DB = DefaultDB> {
     ///
     /// The `Arc` is to allow sharing of the data with other `Sp`s. The
     /// `OnceLock` is to support lazy loading.
-    ///
-    /// The implementation attempts, via use of the `Arena::sp_cache`, to
-    /// enforce that there will never be two `Sp`s with the same key with
-    /// distinct `Arc` payloads. I.e., if `x, y: Sp<T>` and `x.root == y.root`,
-    /// then it should always be true that if `x.data.get().is_some()` and
-    /// `y.data.get().is_some()` then `Arc::ptr_eq(x.data.get().unwrap(),
-    /// y.data.get().unwrap())` is true.
     data: OnceLock<Arc<T>>,
     /// This Sp represented as a child node (for easy access)
     pub child_repr: ArenaKey<D::Hasher>,
@@ -1325,7 +1301,10 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         arc: Arc<T>,
         child_repr: ArenaKey<D::Hasher>,
     ) -> Self {
-        let sp = Sp::lazy(arena, root, child_repr);
+        if let ArenaKey::Ref(_) = child_repr {
+            arena.increment_ref(&root);
+        };
+        let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
         let _ = sp.data.set(arc);
         sp
     }
@@ -1336,41 +1315,33 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// This forces the Sp to be considered a reference when used as a child of
     /// other Sps, and places it into internal caches, and eventually the
     /// database if persisted or a parent is persisted.
-    pub fn into_tracked(&self) -> Self {
+    pub fn into_tracked(&self) -> Self
+    where
+        T: Storable<D>,
+    {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
+                let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+                let value = self.force_as_arc();
+                value
+                    .to_binary_repr(&mut data)
+                    .expect("Storable data should be able to be represented in binary");
                 let child_repr = ArenaKey::Ref(self.root.clone());
-                self.arena.track_locked(
-                    &self.arena.lock_metadata(),
+                self.arena.new_sp_locked(
+                    &mut self.arena.lock_metadata(),
+                    value.as_ref().clone(),
                     self.root.clone(),
-                    (*dcn.data).clone(),
-                    (*dcn.children).clone(),
-                    &child_repr,
-                );
-                Sp {
-                    data: self.data.clone(),
+                    data,
+                    dcn.children.deref().clone(),
                     child_repr,
-                    arena: self.arena.clone(),
-                    root: self.root.clone(),
-                }
+                )
             }
             ArenaKey::Ref(_) => self.clone(),
         }
     }
 
     /// Create a new `Sp` with an uninitialized data payload.
-    ///
-    /// Note: this function assumes that `root` is already in `metadata`, and
-    /// will panic if not. If you're creating a new `Sp` for a key x type that's
-    /// new to the cache, then you should call `Arena::track_locked` to register
-    /// the `Sp` before creating it. Note that `track_locked` is a no-op for
-    /// already registered root keys, so there is no harm in calling it if
-    /// you're not sure.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
-        // This `increment_ref` will panic if the child ref is not in `metadata`.
-        if let ArenaKey::Ref(hash) = &child_repr {
-            arena.increment_ref(hash);
-        }
         let data = OnceLock::new();
         Sp {
             data,
@@ -1426,7 +1397,9 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
-        if let ArenaKey::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         Sp {
@@ -1441,7 +1414,9 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get() {
@@ -1466,7 +1441,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
     /// failure to a context where a failure panics.
     pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
-        if let ArenaKey::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
@@ -1485,7 +1462,9 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
 impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
     /// Casts this pointer into a dynamically typed `Any` pointer.
     pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
-        if let ArenaKey::Ref(_) = self.child_repr {
+        if let ArenaKey::Ref(_) = self.child_repr
+            && !self.is_lazy()
+        {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
@@ -1540,27 +1519,17 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// Notify the storage back-end to increment the persist count on this object.
     ///
     /// See `[StorageBackend::persist]`.
+    ///
+    /// Note: Due to a technicality in past behaviour, this converts the `Sp` into a `Ref`
+    /// internally. In particular, this means that `Sp::as_typed_key` will provide different
+    /// results *before* and *after* `persist`ing. A change to this would be a major breaking
+    /// change, and is therefore deferred.
     pub fn persist(&mut self) {
         // Promote self to Ref if not already
+        //
+        // We don't *really* want to do this, but it's baked into behaviour now due to the above.
         if let ArenaKey::Direct(..) = self.child_repr {
-            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-            let value = self
-                .data
-                .get()
-                .expect("A Direct node must contain it's data");
-            value
-                .to_binary_repr(&mut data)
-                .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
-            let new_sp = self.arena.new_sp_locked(
-                &mut self.arena.lock_metadata(),
-                value.as_ref().clone(),
-                self.root.clone(),
-                data,
-                self.children(),
-                child_repr,
-            );
-            *self = new_sp;
+            *self = self.into_tracked();
         }
         self.arena.with_backend(|backend| {
             self.child_repr
@@ -1576,10 +1545,8 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     /// See `[StorageBackend::unpersist]`.
     pub fn unpersist(&self) {
         self.arena.with_backend(|backend| {
-            self.child_repr
-                .refs()
-                .into_iter()
-                .for_each(|ref_| backend.unpersist(ref_))
+            // Because `.persist` uses the hash, we use it here too.
+            backend.unpersist(&self.root)
         });
     }
 
@@ -1605,11 +1572,27 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// e.g. because a clone of this `Sp` is owned by some larger data
     /// structure, then the underlying data won't actually be dropped until all
     /// such `Sp`s go out of scope or have `unload` called on them.
+    ///
+    /// Warning: If this *is* the last reference to the Sp, and the Sp is *not* persisted,
+    /// dereferencing it after unload may fail, because nothing is keeping the data alive.
     pub fn unload(&mut self) {
         // Return our data to the uninitialized state, dropping the `Arc` in
         // `data`, if any.
-        self.data.take();
+        let was_lazy = self.data.take().is_none();
         self.gc_weak_pointer();
+        // We only need to do this on refs, because others aren't actually
+        // ref-counted. Additionally, note that if we have a Direct node here,
+        // then the children contained within this Sp will do their own cleanup.
+        if let ArenaKey::Ref(hash) = &self.child_repr
+            && !was_lazy
+        {
+            // It's important that we unload() before calling decrement_ref(),
+            // because unload() is responsible for cleaning up the sp_cache, and
+            // decrement_ref() is responsible for cleaning up the metadata, and the
+            // invariant is that any Arc in the sp_cache must have a corresponding
+            // entry in the metadata.
+            self.arena.decrement_ref(hash);
+        }
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
@@ -1663,14 +1646,19 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 .arena
                 .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), &self.root);
             let arc: Arc<T> = match maybe_arc {
-                Some(arc) => arc,
+                Some(arc) => {
+                    if let ArenaKey::Ref(_) = self.child_repr {
+                        self.arena.increment_ref(&self.root);
+                    }
+                    arc
+                }
                 None => {
                     let max_depth = Some(1);
                     // All we really want is the inner `Arc` here, but the
                     // easiest way to get that is to just create the lazy `Sp`
                     // for that `Arc`, i.e. what `self` will become when
                     // `force_as_arc` is done!
-                    let sp: Sp<T, _> =
+                    let mut sp: Sp<T, _> =
                         match Sp::from_arena(&self.arena, &self.as_child(), max_depth) {
                             Ok(v) => v,
                             Err(e) => panic!(
@@ -1680,9 +1668,16 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         };
                     let arc = sp
                         .data
-                        .get()
+                        .take()
                         .expect("result of Sp::from_arena should be initialized");
-                    arc.clone()
+                    if let ArenaKey::Ref(_) = &self.child_repr {
+                        self.arena.write_sp_cache_locked(
+                            &self.arena.lock_sp_cache(),
+                            self.root.clone(),
+                            arc.clone(),
+                        );
+                    }
+                    arc
                 }
             };
             // We don't care if this succeeds: failure just means
@@ -1719,7 +1714,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         //
         // node hash -> incoming
         // node hash -> OnDiskObjecct
-        let mut incoming_vertices: HashMap<_, usize> = HashMap::new();
+        let mut incoming_vertices: HashMap<ArenaHash<_>, usize> = HashMap::new();
         let mut disk_objects = HashMap::new();
         let mut frontier = vec![root.clone()];
         while let Some(child) = frontier.pop() {
@@ -1735,12 +1730,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     .clone(),
                 ArenaKey::Direct(ref d) => OnDiskObject {
                     data: d.data.as_ref().clone(),
+                    #[cfg(not(feature = "layout-v2"))]
                     ref_count: 0,
                     children: d.children.as_ref().clone(),
                 },
             };
             for child in node.children.iter() {
-                *incoming_vertices.entry(child.clone()).or_default() += 1;
+                *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());
             }
             raw_size_limit = raw_size_limit
@@ -1748,22 +1744,22 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             disk_objects.insert(child.hash().clone(), node);
         }
         // now we can use Kahn's algorithm as specified
-        let mut list_indices = HashMap::new();
+        let mut list_indices: HashMap<ArenaHash<_>, u64> = HashMap::new();
         // Note that only the root should have no incoming edges to start
-        let mut empty_incoming_nodes = vec![root.clone()];
-        while let Some(node) = empty_incoming_nodes.pop() {
-            if list_indices.contains_key(&node) {
+        let mut empty_incoming_nodes = vec![root.hash().clone()];
+        while let Some(node_hash) = empty_incoming_nodes.pop() {
+            if list_indices.contains_key(&node_hash) {
                 continue;
             }
-            let disk = disk_objects.get(node.hash()).expect("node must be present");
-            list_indices.insert(node.clone(), list_indices.len() as u64);
+            let disk = disk_objects.get(&node_hash).expect("node must be present");
+            list_indices.insert(node_hash, list_indices.len() as u64);
             for child in disk.children.iter() {
                 let incoming = incoming_vertices
-                    .get_mut(child)
+                    .get_mut(child.hash())
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
-                    empty_incoming_nodes.push(child.clone());
+                    empty_incoming_nodes.push(child.hash().clone());
                 }
             }
         }
@@ -1771,9 +1767,9 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         let mut list = TopoSortedNodes {
             nodes: vec![TopoSortedNode::default(); len],
         };
-        for (child_node, idx) in list_indices.iter() {
+        for (child_hash, idx) in list_indices.iter() {
             let disk = disk_objects
-                .remove(child_node.hash())
+                .remove(child_hash)
                 .expect("node must be present");
             // We flip the index ordering, as it a) makes deserialization easier, and b) makes leaf
             // nodes have smaller indexes, which is usually more sensible.
@@ -1781,7 +1777,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_indices: disk
                     .children
                     .iter()
-                    .map(|child| len as u64 - 1 - list_indices[child])
+                    .map(|child| len as u64 - 1 - list_indices[child.hash()])
                     .collect(),
                 data: disk.data,
             };
@@ -1792,18 +1788,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
-        // We only need to do this on refs, because others aren't actually
-        // ref-counted. Additionally, note that if we have a Direct node here,
-        // then the children contained within this Sp will do their own cleanup.
         self.unload();
-        if let ArenaKey::Ref(hash) = &self.child_repr {
-            // It's important that we unload() before calling decrement_ref(),
-            // because unload() is responsible for cleaning up the sp_cache, and
-            // decrement_ref() is responsible for cleaning up the metadata, and the
-            // invariant is that any Arc in the sp_cache must have a corresponding
-            // entry in the metadata.
-            self.arena.decrement_ref(hash);
-        }
     }
 }
 
@@ -1989,7 +1974,7 @@ impl<T: Storable<D>, D: DB> Deserializable for Sp<T, D> {
 }
 
 /// Define bin-tree type for use in tests.
-#[cfg(any(test, feature = "stress-test"))]
+#[cfg(any(test, feature = "test-utilities"))]
 pub mod bin_tree {
     use super::*;
     use crate::{self as storage, storable::SMALL_OBJECT_LIMIT};
@@ -2037,7 +2022,7 @@ pub mod bin_tree {
         ///
         /// The point is that this forces the whole tree to be loaded.
         #[cfg(all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         ))]
         pub fn sum(&self) -> u64 {
@@ -2063,7 +2048,7 @@ pub mod bin_tree {
     #[cfg(any(
         test,
         all(
-            feature = "stress-test",
+            feature = "test-utilities",
             any(feature = "parity-db", feature = "sqlite")
         )
     ))]
@@ -2235,14 +2220,6 @@ mod tests {
         drop(nest);
     }
 
-    #[cfg(feature = "stress-test")]
-    #[test]
-    fn array_nesting() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_memory(1 << 30)
-            .run("arena::stress_tests::array_nesting");
-    }
-
     // Test that weak refs in `Arena::sp_cache` are cleaned up when the last
     // strong ref to an `Sp` is dropped, but not before that, meaning that `Sp`s for the same
     // root hash share the same `Arc`, i.e. the one in the cache.
@@ -2399,6 +2376,7 @@ mod tests {
                 bt = BinTree::new(i, Some(arena.alloc(bt.clone())), Some(arena.alloc(bt)));
             }
             let mut bt = arena.alloc(bt);
+            bt.persist();
             bt.unload();
             let mut p = Some(&bt);
             for _ in 0..depth {
@@ -2427,6 +2405,7 @@ mod tests {
             // Unload and get second pointer.
 
             let key = bt1.as_typed_key();
+            bt1.persist();
             bt1.unload();
             let bt2 = arena.get_lazy::<BinTree>(&key).unwrap();
 
@@ -2460,6 +2439,7 @@ mod tests {
 
             // Unload the tree and lazy load a random path.
 
+            bt.persist();
             bt.unload();
             let mut p = Some(&bt);
             // https://xkcd.com/221/
@@ -2476,113 +2456,6 @@ mod tests {
             // Check that we only have the forced path in memory.
             assert_eq!(arena.lock_sp_cache().borrow().len(), depth);
         }
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn drop_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::drop_deeply_nested_data");
-    }
-
-    #[cfg(feature = "stress-test")]
-    #[test]
-    // Remove this "should_panic" once implicit recursion in Sp drop is fixed.
-    #[should_panic = "has overflowed its stack"]
-    fn serialize_deeply_nested_data() {
-        crate::stress_test::runner::StressTest::new()
-            // Must capture, so we can match the output with `should_panic`.
-            .with_nocapture(false)
-            .run("arena::stress_tests::serialize_deeply_nested_data");
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn thrash_the_cache_sqldb() {
-        thrash_the_cache("sqldb");
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn thrash_the_cache_paritydb() {
-        thrash_the_cache("paritydb");
-    }
-    #[cfg(all(
-        feature = "stress-test",
-        any(feature = "sqlite", feature = "parity-db")
-    ))]
-    /// Here `db_name` should be `paritydb` or `sqldb`.
-    fn thrash_the_cache(db_name: &str) {
-        let test_name = &format!("arena::stress_tests::thrash_the_cache_variations_{db_name}");
-        let time_limit = 10 * 60;
-        // Thrash the cache with p=0.1.
-        //
-        // Here we should see a small variation between cyclic and non-cyclic,
-        // since the cache is very small.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.1", "true"]);
-        // Thrash the cache with p=0.5.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.5", "false"]);
-        // Thrash the cache with p=0.8.
-        //
-        // Don't include cyclic, since it will be the same as in the last test.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["0.8", "false"]);
-        // Thrash the cache with p=1.0.
-        //
-        // With cache as large as the data, cyclic vs non-cyclic should be
-        // irrelevant, and this should be the fastest.
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(time_limit)
-            .run_with_args(test_name, &["1.0", "true"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn load_large_tree_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_sqldb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn load_large_tree_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(5 * 60)
-            .with_max_memory(2 << 30)
-            .run_with_args("arena::stress_tests::load_large_tree_paritydb", &["15"]);
-    }
-
-    #[cfg(all(feature = "stress-test", feature = "sqlite"))]
-    #[test]
-    fn read_write_map_loop_sqldb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_sqldb",
-                &["10000", "1000"],
-            );
-    }
-    #[cfg(all(feature = "stress-test", feature = "parity-db"))]
-    #[test]
-    fn read_write_map_loop_paritydb() {
-        crate::stress_test::runner::StressTest::new()
-            .with_max_runtime(60)
-            .run_with_args(
-                "arena::stress_tests::read_write_map_loop_paritydb",
-                &["10000", "1000"],
-            );
     }
 
     // Stress test concurrent arena access, to trigger deadlocks from
@@ -2714,7 +2587,6 @@ mod tests {
         // Serialize the tree in another thread, panicking if that takes too
         // long.
 
-        println!("serializing ...");
         let handle = std::thread::spawn(move || {
             let mut serialized = vec![];
             Sp::serialize(&sp, &mut serialized).unwrap();
@@ -2735,7 +2607,6 @@ mod tests {
         // Deserialize the tree in another thread, panicking if that takes too
         // long.
 
-        println!("deserializing ...");
         let handle = std::thread::spawn(move || {
             let recursive_depth = 0;
             Sp::<BinTree>::deserialize(&mut serialized.as_slice(), recursive_depth).unwrap();
@@ -2863,6 +2734,7 @@ mod tests {
         let mut sp = arena.alloc([42u8; SMALL_OBJECT_LIMIT]);
 
         assert!(!sp.is_lazy());
+        sp.persist();
         sp.unload();
         assert!(sp.is_lazy());
         let _ = sp.deref();
@@ -2887,5 +2759,41 @@ mod tests {
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();
         assert_eq!(sp, other_sp);
+    }
+
+    /// Regression: serialize_to_node_list_bounded panicked when the same content
+    /// hash appeared as both ArenaKey::Direct and ArenaKey::Ref
+    #[test]
+    fn serialize_direct_and_ref_same_hash() {
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct DualLeaf {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = &new_arena();
+
+        let leaf: Sp<u32, DefaultDB> = arena.alloc(42u32);
+        assert!(matches!(leaf.child_repr, ArenaKey::Direct(_)));
+
+        let leaf_tracked = leaf.into_tracked();
+        assert!(matches!(leaf_tracked.child_repr, ArenaKey::Ref(_)));
+        assert_eq!(leaf.child_repr.hash(), leaf_tracked.child_repr.hash());
+        assert_ne!(leaf.child_repr, leaf_tracked.child_repr);
+
+        let root = arena.alloc(DualLeaf {
+            a: leaf,
+            b: leaf_tracked,
+        });
+
+        let nodes = root.serialize_to_node_list();
+        assert_eq!(nodes.nodes.len(), 2, "root + one deduplicated leaf");
+        let root_node = nodes.nodes.last().unwrap();
+        assert_eq!(
+            root_node.child_indices[0], root_node.child_indices[1],
+            "both children deduplicate to the same leaf index"
+        );
     }
 }

@@ -30,10 +30,10 @@ use rand::{CryptoRng, Rng};
 use serde::Serialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::ops::{Add, Neg, Sub};
-use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::db::DB;
-use storage::storable::Loader;
+use storage_core::Storable;
+use storage_core::arena::ArenaKey;
+use storage_core::db::DB;
+use storage_core::storable::Loader;
 
 /// Homomorphic Pedersen commitment.
 /// a) Summed commitments should verify against their summed randomness.

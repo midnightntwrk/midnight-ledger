@@ -13,6 +13,7 @@
 
 #[cfg(test)]
 mod proof_tests {
+    use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
@@ -30,7 +31,6 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
 

@@ -50,7 +50,7 @@ use serialize::{
     self, Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_serialize,
 };
 use sha2::{Digest, Sha256};
-use std::collections::HashSet as StdHashSet;
+use std::collections::BTreeSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::{self, Formatter};
@@ -1022,7 +1022,7 @@ pub struct TransactionCostModel {
 }
 
 impl TransactionCostModel {
-    fn cell_read(&self, size: u64) -> RunningCost {
+    pub(crate) fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
     }
     fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
@@ -1038,10 +1038,10 @@ impl TransactionCostModel {
             ..RunningCost::ZERO
         }
     }
-    fn map_index(&self, log_size: usize) -> RunningCost {
+    pub(crate) fn map_index(&self, log_size: usize) -> RunningCost {
         self.runtime_cost_model.read_map(log_size, true)
     }
-    fn proof_verify(&self, size: usize) -> RunningCost {
+    pub(crate) fn proof_verify(&self, size: usize) -> RunningCost {
         let time = self.runtime_cost_model.proof_verify_constant
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
@@ -1418,7 +1418,7 @@ impl<
                         (None, None) => None,
                     },
                     fallible_coins: {
-                        let mut result: std::collections::HashMap<
+                        let mut result: std::collections::BTreeMap<
                             u16,
                             ZswapOffer<P::LatestProof, D>,
                         > = stx1.fallible_coins.clone().into_iter().collect();
@@ -1783,6 +1783,7 @@ impl<S: SignatureKind<D>, D: DB> Debug for ClaimRewardsTransaction<S, D> {
     }
 }
 
+pub(crate) const MIN_PROOF_SIZE: usize = DUST_SPEND_PROOF_SIZE;
 pub(crate) const PROOF_SIZE: usize = zswap::INPUT_PROOF_SIZE;
 // Retrieved from zswap key size. Unfortunately varies with circuits, this
 // should be an upper bound.
@@ -1837,7 +1838,7 @@ where
                 let vk_reads = self
                     .calls()
                     .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<StdHashSet<_>>()
+                    .collect::<BTreeSet<_>>()
                     .len();
                 let mut cost = model.baseline_cost;
                 cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)

@@ -808,4 +808,91 @@ describe('Ledger API - DustLocalState', () => {
     expect(withTransferChanges.state.utxos[0]).toEqual(receivedUtxo);
     assertSerializationSuccess(withTransferChanges.state);
   });
+
+  /**
+   * Test that zero-value NIGHT outputs during dust registration are rejected gracefully.
+   *
+   * This is a regression test for a bug where a transaction with zero-value NIGHT outputs
+   * owned by a dust-registered address would cause a divide-by-zero panic during dust
+   * distribution in apply_registration. The fix returns a TransactionInvalid::DivideByZero
+   * error instead.
+   *
+   * @given A TestState with a NIGHT UTXO
+   * @when Applying a transaction that registers for dust with a zero-value NIGHT output
+   * @then The transaction should be rejected with a divide-by-zero error, not panic
+   */
+  test('should reject zero-value NIGHT outputs during dust registration without panic', () => {
+    const state = TestState.new();
+
+    state.rewardNight(INITIAL_NIGHT_AMOUNT);
+
+    const utxoIh: IntentHash = state.ledger.utxo.utxos.values().next().value!.intentHash;
+    const intent = Intent.new(state.time);
+
+    const inputs: UtxoSpend[] = [
+      {
+        value: INITIAL_NIGHT_AMOUNT,
+        owner: state.nightKey.verifyingKey(),
+        type: DEFAULT_TOKEN_TYPE,
+        intentHash: utxoIh,
+        outputNo: 0
+      }
+    ];
+
+    const zeroNightOutputs: UtxoOutput[] = [
+      {
+        owner: state.initialNightAddress,
+        type: DEFAULT_TOKEN_TYPE,
+        value: 0n
+      }
+    ];
+
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, zeroNightOutputs, []);
+
+    const baseRegistrations: DustRegistration<SignatureEnabled>[] = [
+      new DustRegistration(
+        SignatureMarker.signature,
+        state.nightKey.verifyingKey(),
+        state.dustKey.publicKey(),
+        BALANCING_OVERHEAD
+      )
+    ];
+
+    intent.dustActions = new DustActions<SignatureEnabled, PreProof>(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations
+    );
+
+    const intentSignatureData = intent.signatureData(1);
+    const signatureEnabled = new SignatureEnabled(signData(state.nightKey.signingKey, intentSignatureData));
+
+    intent.dustActions = new DustActions(
+      SignatureMarker.signature,
+      ProofMarker.preProof,
+      state.time,
+      [],
+      baseRegistrations.map(
+        (reg) =>
+          new DustRegistration(
+            SignatureMarker.signature,
+            reg.nightKey,
+            reg.dustAddress,
+            reg.allowFeePayment,
+            signatureEnabled
+          )
+      )
+    );
+
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+
+    const result = state.apply(tx, strictness);
+
+    expect(result.type).not.toEqual('success');
+    expect(result.error).toContain('divide by zero');
+  });
 });
