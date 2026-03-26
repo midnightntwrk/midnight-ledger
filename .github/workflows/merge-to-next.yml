@@ -1,9 +1,6 @@
 name: Merge current release into next
 
 on:
-  push:
-    branches:
-      - tkerber/merge-to-next-ci
   workflow_dispatch:
   schedule:
     # Every Friday at 08:00 UTC
