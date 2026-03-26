@@ -32,7 +32,7 @@ signature = "^2.2.0"
 reqwest = { version = "^0.12.22", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
 atomic-write-file = { version = "^0.2.3" }
 futures = { version = "^0.3.31" }
-indicatif = { version = "^0.17.11", optional = true }
+indicatif = { version = "^0.18.4", optional = true }
 tracing = { version = "^0.1.41" }
 ethnum = "^1.5.2"
 zeroize = { version = "^1.8.0", features = ["derive"] }
