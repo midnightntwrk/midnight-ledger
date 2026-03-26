@@ -377,7 +377,10 @@ impl<D: DB> StorageBackend<D> {
             {
                 CacheValue::ReadAndUpdate {
                     delta: *delta,
+                    #[cfg(not(feature = "layout-v2"))]
                     obj: obj.apply_delta(*delta),
+                    #[cfg(feature = "layout-v2")]
+                    obj,
                 }
             } else {
                 CacheValue::Read { obj }
@@ -516,6 +519,10 @@ impl<D: DB> StorageBackend<D> {
         // deltas, instead of full ref-counts like we track currently. Then we
         // either compute the full ref-counts only when flushing, or make the db
         // responsible for applying the ref-count deltas directly.
+        #[cfg(not(feature = "layout-v2"))]
+        // NOTE: For layout-v2, we skip this entirely. We don't care about the on-disk reference
+        // counts, because they don't exist, so we just treat this as a creation, and remain blind
+        // to the fact that this object already existed.
         if let Some(obj) = self.database.get_node(&key) {
             let cache_value =
                 if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
@@ -537,6 +544,7 @@ impl<D: DB> StorageBackend<D> {
             CacheValue::Create {
                 obj: OnDiskObject {
                     data,
+                    #[cfg(not(feature = "layout-v2"))]
                     ref_count: 0,
                     children,
                 },
@@ -572,6 +580,7 @@ impl<D: DB> StorageBackend<D> {
                 // will be preserved by this function, since they're still
                 // reachable.
                 CacheValue::Create { obj } => {
+                    #[cfg(not(feature = "layout-v2"))]
                     assert_eq!(
                         obj.ref_count, 0,
                         "CacheValue::Create values must have zero ref counts"
@@ -667,43 +676,55 @@ impl<D: DB> StorageBackend<D> {
         I: Iterator<Item = (ArenaHash<D::Hasher>, CacheValue<D::Hasher>)>,
     {
         let mut updates = vec![];
+        #[allow(unused_mut, reason = "feature flags complicate this")]
         for (k, mut v) in writes {
             // Check for reads first, to give better error messages.
             if matches!(v, CacheValue::Read { .. }) {
                 panic!("BUG: unexpected CacheValue::Read!")
             }
-            v = if let CacheValue::Update { delta } = v {
-                let obj = self
-                    .database
-                    .get_node(&k)
-                    .expect("can't update unknown object");
-                CacheValue::ReadAndUpdate {
-                    delta,
-                    obj: obj.apply_delta(delta),
-                }
-            } else {
-                v
-            };
-            // Insert objects for flushed writes into the read cache.
-            //
-            // It might make sense to not recache `CreateAndDelete`
-            // values here, but that's a question to be answered as part
-            // of optimization. For example, one way that
-            // `CreateAndDelete` arises is when the `Arena` unloads an
-            // object into "lazy" form. If the unloaded data gets loaded
-            // again, then it will be better for it to still be in the
-            self.cache_insert_new_key(
-                k.clone(),
-                CacheValue::Read {
-                    obj: v.get_obj().expect("object must be available").clone(),
-                },
-            );
+            #[cfg(not(feature = "layout-v2"))]
+            {
+                v = if let CacheValue::Update { delta } = v {
+                    let obj = self
+                        .database
+                        .get_node(&k)
+                        .expect("can't update unknown object");
+                    CacheValue::ReadAndUpdate {
+                        delta,
+                        obj: obj.apply_delta(delta),
+                    }
+                } else {
+                    v
+                };
+                // Insert objects for flushed writes into the read cache.
+                //
+                // It might make sense to not recache `CreateAndDelete`
+                // values here, but that's a question to be answered as part
+                // of optimization. For example, one way that
+                // `CreateAndDelete` arises is when the `Arena` unloads an
+                // object into "lazy" form. If the unloaded data gets loaded
+                // again, then it will be better for it to still be in the
+                self.cache_insert_new_key(
+                    k.clone(),
+                    CacheValue::Read {
+                        obj: v.get_obj().expect("object must be available").clone(),
+                    },
+                );
+            }
+            #[cfg(feature = "layout-v2")]
+            // As above, but we don't force a read on update, because we don't need accurate ref
+            // counts. We then also don't need to insert Update's into the write cache.
+            if let Some(obj) = v.get_obj().cloned() {
+                self.cache_insert_new_key(k.clone(), CacheValue::Read { obj });
+            }
             // Calculate DB updates corresponding to pending writes.
+            #[allow(unused_variables, reason = "feature complications")]
             match v {
                 CacheValue::Read { .. } => unreachable!("already handled Read above"),
-                CacheValue::ReadAndUpdate { delta, obj } => {
+                CacheValue::ReadAndUpdate { delta, obj: _obj } => {
+                    #[cfg(not(feature = "layout-v2"))]
                     if delta.ref_delta != 0 {
-                        updates.push((k.clone(), Update::InsertNode(obj)));
+                        updates.push((k.clone(), Update::InsertNode(_obj)));
                     }
                     if delta.root_delta != 0 {
                         // Can't use self.get_root_count here, since `v` has
@@ -731,7 +752,21 @@ impl<D: DB> StorageBackend<D> {
                     }
                 }
                 CacheValue::Create { obj } => updates.push((k, Update::InsertNode(obj))),
-                CacheValue::Dummy | CacheValue::Update { .. } => {}
+                CacheValue::Update { delta } => {
+                    #[cfg(feature = "layout-v2")]
+                    if delta.root_delta != 0 {
+                        // Can't use self.get_root_count here, since `v` has
+                        // already been removed from DB.
+                        let db_root_count = self.database.get_root_count(&k) as i32;
+                        let root_count = db_root_count + delta.root_delta;
+                        assert!(
+                            root_count >= 0,
+                            "roots counts can't be negative (for {k:?})!"
+                        );
+                        updates.push((k, Update::SetRootCount(root_count as u32)));
+                    }
+                }
+                CacheValue::Dummy => {}
             }
         }
         self.database.batch_update(updates.into_iter());
@@ -808,6 +843,7 @@ impl<D: DB> StorageBackend<D> {
     // bounded version, assuming we have enough time to calculate the full
     // initial set of `unreachable_keys`, we could just partially process this
     // set, instead of fully processing it as we do now.
+    #[cfg(not(feature = "layout-v2"))]
     pub fn gc(&mut self) {
         // Compute unreachable keys, taking memory into account.
         let db_unreachable_keys = self.database.get_unreachable_keys();
@@ -920,6 +956,7 @@ impl<D: DB> StorageBackend<D> {
                 use Action::*;
                 let action = match tmp {
                     CacheValue::Read { obj } => {
+                        #[cfg(not(feature = "layout-v2"))]
                         let obj = obj.apply_delta(delta);
                         Replace(CacheValue::ReadAndUpdate { obj, delta })
                     }
@@ -935,6 +972,7 @@ impl<D: DB> StorageBackend<D> {
                         obj,
                         delta: old_delta,
                     } => {
+                        #[cfg(not(feature = "layout-v2"))]
                         let obj = obj.apply_delta(delta);
                         if let Some(delta) = delta.combine(old_delta) {
                             Replace(CacheValue::ReadAndUpdate { obj, delta })
@@ -943,6 +981,7 @@ impl<D: DB> StorageBackend<D> {
                         }
                     }
                     CacheValue::Create { obj } => {
+                        #[cfg(not(feature = "layout-v2"))]
                         let obj = obj.apply_delta(delta);
                         Replace(CacheValue::CreateAndUpdate { obj, delta })
                     }
@@ -950,6 +989,7 @@ impl<D: DB> StorageBackend<D> {
                         obj,
                         delta: old_delta,
                     } => {
+                        #[cfg(not(feature = "layout-v2"))]
                         let obj = obj.apply_delta(delta);
                         if let Some(delta) = delta.combine(old_delta) {
                             Replace(CacheValue::CreateAndUpdate { obj, delta })
@@ -961,6 +1001,7 @@ impl<D: DB> StorageBackend<D> {
                         obj,
                         delta: old_delta,
                     } => {
+                        #[cfg(not(feature = "layout-v2"))]
                         let obj = obj.apply_delta(delta);
                         if let Some(delta) = delta.combine(old_delta) {
                             Replace(CacheValue::CreateAndDelete { obj, delta })
@@ -1054,6 +1095,7 @@ impl<D: DB> StorageBackend<D> {
 pub struct OnDiskObject<H: WellBehavedHasher> {
     /// Binary representation of the object
     pub(crate) data: std::vec::Vec<u8>,
+    #[cfg(not(feature = "layout-v2"))]
     /// The number of parent->child references to this object. The object may be
     /// deleted by GC when `ref_count` is zero and the object is not
     /// `persist`ed. Note that the `persist` counts are stored separately -- see
@@ -1067,15 +1109,23 @@ pub struct OnDiskObject<H: WellBehavedHasher> {
 impl<H: WellBehavedHasher> Serializable for OnDiskObject<H> {
     fn serialize(&self, writer: &mut impl std::io::Write) -> std::io::Result<()> {
         self.data.serialize(writer)?;
+        #[cfg(not(feature = "layout-v2"))]
         self.ref_count.serialize(writer)?;
         self.children.serialize(writer)?;
         Ok(())
     }
 
     fn serialized_size(&self) -> usize {
-        self.data.serialized_size()
-            + self.ref_count.serialized_size()
-            + self.children.serialized_size()
+        #[cfg(not(feature = "layout-v2"))]
+        {
+            self.data.serialized_size()
+                + self.ref_count.serialized_size()
+                + self.children.serialized_size()
+        }
+        #[cfg(feature = "layout-v2")]
+        {
+            self.data.serialized_size() + self.children.serialized_size()
+        }
     }
 }
 
@@ -1085,10 +1135,12 @@ impl<H: WellBehavedHasher> Deserializable for OnDiskObject<H> {
         recursion_depth: u32,
     ) -> Result<Self, std::io::Error> {
         let data = Deserializable::deserialize(reader, recursion_depth)?;
+        #[cfg(not(feature = "layout-v2"))]
         let ref_count = Deserializable::deserialize(reader, recursion_depth)?;
         let children = Deserializable::deserialize(reader, recursion_depth)?;
         Ok(OnDiskObject {
             data,
+            #[cfg(not(feature = "layout-v2"))]
             ref_count,
             children,
         })
@@ -1096,6 +1148,7 @@ impl<H: WellBehavedHasher> Deserializable for OnDiskObject<H> {
 }
 
 impl<H: WellBehavedHasher> OnDiskObject<H> {
+    #[cfg(not(feature = "layout-v2"))]
     /// Compute new obj with `delta.ref_delta` applied to `ref_count`.
     ///
     /// This ignores any `delta.root_delta`, since the `OnDiskObject` is not
@@ -1126,9 +1179,16 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
 // compiles, but then usage fails!?
 impl<H: WellBehavedHasher> PartialEq for OnDiskObject<H> {
     fn eq(&self, other: &Self) -> bool {
-        self.data.eq(&other.data)
-            && self.ref_count.eq(&other.ref_count)
-            && self.children.eq(&other.children)
+        #[cfg(not(feature = "layout-v2"))]
+        {
+            self.data.eq(&other.data)
+                && self.ref_count.eq(&other.ref_count)
+                && self.children.eq(&other.children)
+        }
+        #[cfg(feature = "layout-v2")]
+        {
+            self.data.eq(&other.data) && self.children.eq(&other.children)
+        }
     }
 }
 
@@ -1150,6 +1210,7 @@ impl<H: WellBehavedHasher> Distribution<OnDiskObject<H>> for Standard {
         }
         OnDiskObject {
             data: rand_vec(rng, |r| r.r#gen()),
+            #[cfg(not(feature = "layout-v2"))]
             // u64 is too big to fit into i64 (SQLite INTEGER) so we need to slightly adjust it
             ref_count: rng.gen_range(0..=i64::MAX as u64),
             children: rand_vec(rng, |r| ArenaKey::Ref(r.r#gen())),
@@ -1173,10 +1234,12 @@ pub(crate) mod raw_node {
         #[allow(dead_code)]
         pub(crate) data: std::vec::Vec<u8>,
         pub(crate) children: std::vec::Vec<ArenaKey<H>>,
+        #[cfg(not(feature = "layout-v2"))]
         pub(crate) ref_count: u64,
     }
 
     impl<H: WellBehavedHasher> RawNode<H> {
+        #[allow(unused_variables, reason = "feature flags")]
         pub(crate) fn new(
             key: &[u8],
             ref_count: u64,
@@ -1192,6 +1255,7 @@ pub(crate) mod raw_node {
                 key,
                 data,
                 children,
+                #[cfg(not(feature = "layout-v2"))]
                 ref_count,
             }
         }
@@ -1213,6 +1277,7 @@ pub(crate) mod raw_node {
         pub(crate) fn into_obj(self) -> OnDiskObject<H> {
             OnDiskObject {
                 data: self.data,
+                #[cfg(not(feature = "layout-v2"))]
                 ref_count: self.ref_count,
                 children: self.children,
             }
@@ -1322,6 +1387,7 @@ mod tests {
         // Caching and retrieving an object
         storage_backend.cache(key.clone(), bytes.clone(), vec![]);
         assert_eq!(storage_backend.get(&key).unwrap().data, bytes);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.database.size(), 0);
         assert!(storage_backend.peek_from_memory(&key).unwrap().is_pending());
@@ -1331,6 +1397,7 @@ mod tests {
         // Persisting an object, but not yet writing it to db
         storage_backend.persist(&key);
         assert!(storage_backend.peek_from_memory(&key).unwrap().is_pending());
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.get_root_count(&key), 1);
         assert_eq!(storage_backend.database.size(), 0);
@@ -1346,6 +1413,7 @@ mod tests {
         storage_backend.uncache(&key);
         storage_backend.cache(key.clone(), bytes.clone(), vec![]);
         assert_eq!(storage_backend.get(&key).unwrap().data, bytes);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.get_root_count(&key), 1);
         assert!(!storage_backend.peek_from_memory(&key).unwrap().is_pending());
@@ -1353,6 +1421,7 @@ mod tests {
         // Flush cache, go to DB for object
         storage_backend.flush_all_changes_to_db();
         storage_backend.write_cache.clear();
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.get_root_count(&key), 1);
         storage_backend.write_cache.clear();
@@ -1363,7 +1432,9 @@ mod tests {
         // effect on db.
         storage_backend.persist(&key);
         assert_eq!(storage_backend.database.size(), 1);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(
             storage_backend.database.get_node(&key).unwrap().ref_count,
             0
@@ -1375,12 +1446,16 @@ mod tests {
 
         // Second we unpersist a second time, and see that the object goes away.
         storage_backend.unpersist(&key);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.get_root_count(&key), 0);
         storage_backend.flush_all_changes_to_db();
-        storage_backend.gc();
-        assert_eq!(storage_backend.database.size(), 0);
-        assert!(storage_backend.get(&key).is_none());
+        #[cfg(not(feature = "layout-v2"))]
+        {
+            storage_backend.gc();
+            assert_eq!(storage_backend.database.size(), 0);
+            assert!(storage_backend.get(&key).is_none());
+        }
     }
 
     // A dag with labeled nodes. This is in the style of arena stored dags, with
@@ -1503,7 +1578,9 @@ mod tests {
 
         assert_eq!(storage_backend.get(&child_key).unwrap().data, child_bytes);
         assert_eq!(storage_backend.get(&parent_key).unwrap().data, parent_bytes);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&child_key).unwrap().ref_count, 1);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&parent_key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.database.size(), 0);
         assert!(storage_backend.write_cache.peek(&child_key).is_some());
@@ -1511,7 +1588,9 @@ mod tests {
 
         // Persisting a parent object
         storage_backend.persist(&parent_key);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&child_key).unwrap().ref_count, 1);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&parent_key).unwrap().ref_count, 0);
         assert_eq!(storage_backend.get_root_count(&child_key), 0);
         assert_eq!(storage_backend.get_root_count(&parent_key), 1);
@@ -1530,6 +1609,7 @@ mod tests {
         // Caching a duplicate child object, no-op on ref counts and db
         storage_backend.uncache(&child_key);
         storage_backend.cache(child_key.clone(), child_bytes, vec![]);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&child_key).unwrap().ref_count, 1);
         assert!(
             !storage_backend
@@ -1540,20 +1620,26 @@ mod tests {
 
         // Uncache the child object, no-op on ref counts
         storage_backend.uncache(&child_key);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&child_key).unwrap().ref_count, 1);
 
         // Unpersist the root object
         storage_backend.unpersist(&parent_key);
         storage_backend.uncache(&parent_key);
         assert_eq!(storage_backend.database.size(), 2);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&parent_key).unwrap().ref_count, 0);
+        #[cfg(not(feature = "layout-v2"))]
         assert_eq!(storage_backend.get(&child_key).unwrap().ref_count, 1);
         assert_eq!(storage_backend.get_root_count(&parent_key), 0);
         assert_eq!(storage_backend.get_root_count(&child_key), 0);
         storage_backend.flush_all_changes_to_db();
         assert_eq!(storage_backend.database.size(), 2);
-        storage_backend.gc();
-        assert_eq!(storage_backend.database.size(), 0);
+        #[cfg(not(feature = "layout-v2"))]
+        {
+            storage_backend.gc();
+            assert_eq!(storage_backend.database.size(), 0);
+        }
     }
 
     /// Test that reference counts and root counts are calculated correctly,
@@ -1601,6 +1687,7 @@ mod tests {
 
         let mut backend = init_backend();
         for n in nodes {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), 0);
         }
@@ -1610,6 +1697,7 @@ mod tests {
             backend.uncache(&n.key);
         }
         for n in nodes {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(
                 backend
                     .peek_from_memory(&n.key)
@@ -1645,7 +1733,8 @@ mod tests {
         // deleted, while things that are still referenced by `cache`d nodes
         // stick around.
         backend.uncache(&n11.key);
-        for (n, r) in [(&n41, 2), (&n31, 0), (&n33, 0)] {
+        for (n, _r) in [(&n41, 2), (&n31, 0), (&n33, 0)] {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(
                 backend
                     .peek_from_memory(&n.key)
@@ -1653,7 +1742,7 @@ mod tests {
                     .get_obj()
                     .unwrap()
                     .ref_count,
-                r
+                _r
             );
             assert_eq!(backend.get_root_count(&n.key), 0);
         }
@@ -1676,6 +1765,7 @@ mod tests {
 
         let mut backend = init_backend();
         for n in nodes {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), 0);
         }
@@ -1707,6 +1797,7 @@ mod tests {
             (&n22, 0),
             (&n11, 1),
         ] {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), rt);
         }
@@ -1724,6 +1815,7 @@ mod tests {
             (&n22, 0),
             (&n11, 1),
         ] {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), rt);
         }
@@ -1748,6 +1840,7 @@ mod tests {
             assert!(backend.read_cache.peek(&n.key).is_some());
         }
         for n in nodes {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), 0);
         }
@@ -1776,6 +1869,7 @@ mod tests {
         }
         let root_map = backend.get_roots();
         for (i, n) in nodes.iter().enumerate() {
+            #[cfg(not(feature = "layout-v2"))]
             assert_eq!(backend.get(&n.key).unwrap().ref_count, n.ref_count);
             assert_eq!(backend.get_root_count(&n.key), (i + 1) as u32);
             assert_eq!(root_map.get(&n.key).cloned(), Some((i + 1) as u32));
@@ -1843,20 +1937,22 @@ mod tests {
         test(7);
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     #[test]
     fn gc_inmemorydb() {
         test_gc::<InMemoryDB>();
     }
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn gc_sqldb() {
         test_gc::<crate::db::SqlDB>();
     }
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn gc_paritydb() {
         test_gc::<crate::db::ParityDb>();
     }
+    #[cfg(not(feature = "layout-v2"))]
     fn test_gc<D: DB>() {
         use crate::backend::raw_node::RawNode;
         // Arranging the nodes in layers, the variables names here are

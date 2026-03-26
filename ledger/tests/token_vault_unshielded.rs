@@ -282,13 +282,13 @@ async fn test_unshielded_contract_deposit() {
     // Create intent with contract call and unshielded offer
     use midnight_ledger::structure::StandardTransaction;
 
-    let guaranteed_unshielded_offer: Option<UnshieldedOffer<(), InMemoryDB>> = Some(uso);
+    let fallible_unshielded_offer: Option<UnshieldedOffer<(), InMemoryDB>> = Some(uso);
 
     // Create the intent and sign it for UTXO spending
     let intent = Intent::new(
         &mut rng,
-        guaranteed_unshielded_offer,
         None,
+        fallible_unshielded_offer,
         vec![call],
         Vec::new(),
         Vec::new(),
@@ -298,8 +298,8 @@ async fn test_unshielded_contract_deposit() {
     .sign(
         &mut rng,
         1,                          // segment_id
+        &[],                        // No guaranteed signing keys
         &[state.night_key.clone()], // Sign the UTXO spend
-        &[],                        // No fallible signing keys
         &[],                        // No dust registration signing keys
     )
     .unwrap();
@@ -557,15 +557,15 @@ async fn test_unshielded_contract_withdraw() {
     // Create and sign intent (signing required because we're spending a UTXO)
     let deposit_intent = Intent::new(
         &mut rng,
-        Some(deposit_uso),
         None,
+        Some(deposit_uso),
         vec![deposit_call],
         Vec::new(),
         Vec::new(),
         None,
         state.time + base_crypto::time::Duration::from_secs(3600),
     )
-    .sign(&mut rng, 1, &[state.night_key.clone()], &[], &[])
+    .sign(&mut rng, 1, &[], &[state.night_key.clone()], &[])
     .unwrap();
 
     let mut deposit_intents: storage::storage::HashMap<
@@ -745,8 +745,8 @@ async fn test_unshielded_contract_withdraw() {
     // Create intent - no signing needed since no UTXOs are being spent
     let withdraw_intent = Intent::new(
         &mut rng,
-        Some(withdraw_uso),
         None,
+        Some(withdraw_uso),
         vec![withdraw_call],
         Vec::new(),
         Vec::new(),

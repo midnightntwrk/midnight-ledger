@@ -367,7 +367,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     };
 
     const intent = testIntents([call], [], [], state.time);
-    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+    intent.fallibleUnshieldedOffer = UnshieldedOffer.new(
       [utxoSpend], // Input: spend the full UTXO
       [changeOutput], // Output: change back to user
       [] // Signatures added later
@@ -485,7 +485,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
 
     const depositIntent = testIntents([depositCall], [], [], state.time);
     // No outputs - entire UTXO value goes to contract
-    depositIntent.guaranteedUnshieldedOffer = UnshieldedOffer.new([depositUtxoSpend], [], []);
+    depositIntent.fallibleUnshieldedOffer = UnshieldedOffer.new([depositUtxoSpend], [], []);
 
     const depositTx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, depositIntent);
 
@@ -598,7 +598,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     };
 
     const withdrawIntent = testIntents([withdrawCall], [], [], state.time);
-    withdrawIntent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+    withdrawIntent.fallibleUnshieldedOffer = UnshieldedOffer.new(
       [], // No inputs - tokens come from contract
       [withdrawOutput], // Output: new UTXO for user
       []
@@ -672,7 +672,7 @@ describe('Ledger API - TokenVault Unshielded', () => {
     );
 
     const gasA = transcriptsA[0][0]!.gas;
-    const gasB = transcriptsB[0][0]!.gas;
+    const gasB = transcriptsB[0][1]!.gas;
 
     const totalGasA = gasA.computeTime + gasA.readTime + gasA.bytesWritten + gasA.bytesDeleted;
     const totalGasB = gasB.computeTime + gasB.readTime + gasB.bytesWritten + gasB.bytesDeleted;
@@ -777,8 +777,8 @@ describe('Ledger API - TokenVault Unshielded', () => {
       LedgerParameters.initialParameters()
     );
 
-    const gasA = transcriptsA[0][0]!.gas;
-    const gasB = transcriptsB[0][0]!.gas;
+    const gasA = transcriptsA[0][1]!.gas;
+    const gasB = transcriptsB[0][1]!.gas;
 
     const totalGasA = gasA.computeTime + gasA.readTime + gasA.bytesWritten + gasA.bytesDeleted;
     const totalGasB = gasB.computeTime + gasB.readTime + gasB.bytesWritten + gasB.bytesDeleted;

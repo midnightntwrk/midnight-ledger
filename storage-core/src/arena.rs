@@ -1315,23 +1315,26 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// This forces the Sp to be considered a reference when used as a child of
     /// other Sps, and places it into internal caches, and eventually the
     /// database if persisted or a parent is persisted.
-    pub fn into_tracked(&self) -> Self {
+    pub fn into_tracked(&self) -> Self
+    where
+        T: Storable<D>,
+    {
         match &self.child_repr {
             ArenaKey::Direct(dcn) => {
+                let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
+                let value = self.force_as_arc();
+                value
+                    .to_binary_repr(&mut data)
+                    .expect("Storable data should be able to be represented in binary");
                 let child_repr = ArenaKey::Ref(self.root.clone());
-                self.arena.track_locked(
-                    &self.arena.lock_metadata(),
+                self.arena.new_sp_locked(
+                    &mut self.arena.lock_metadata(),
+                    value.as_ref().clone(),
                     self.root.clone(),
-                    (*dcn.data).clone(),
-                    (*dcn.children).clone(),
-                    &child_repr,
-                );
-                Sp {
-                    data: self.data.clone(),
+                    data,
+                    dcn.children.deref().clone(),
                     child_repr,
-                    arena: self.arena.clone(),
-                    root: self.root.clone(),
-                }
+                )
             }
             ArenaKey::Ref(_) => self.clone(),
         }
@@ -1526,21 +1529,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         //
         // We don't *really* want to do this, but it's baked into behaviour now due to the above.
         if let ArenaKey::Direct(..) = self.child_repr {
-            let mut data: std::vec::Vec<u8> = std::vec::Vec::new();
-            let value = self.force_as_arc();
-            value
-                .to_binary_repr(&mut data)
-                .expect("Storable data should be able to be represented in binary");
-            let child_repr = ArenaKey::Ref(self.root.clone());
-            let new_sp = self.arena.new_sp_locked(
-                &mut self.arena.lock_metadata(),
-                value.as_ref().clone(),
-                self.root.clone(),
-                data,
-                self.children(),
-                child_repr,
-            );
-            *self = new_sp;
+            *self = self.into_tracked();
         }
         self.arena.with_backend(|backend| {
             self.child_repr
@@ -1725,7 +1714,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         //
         // node hash -> incoming
         // node hash -> OnDiskObjecct
-        let mut incoming_vertices: HashMap<_, usize> = HashMap::new();
+        let mut incoming_vertices: HashMap<ArenaHash<_>, usize> = HashMap::new();
         let mut disk_objects = HashMap::new();
         let mut frontier = vec![root.clone()];
         while let Some(child) = frontier.pop() {
@@ -1741,12 +1730,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                     .clone(),
                 ArenaKey::Direct(ref d) => OnDiskObject {
                     data: d.data.as_ref().clone(),
+                    #[cfg(not(feature = "layout-v2"))]
                     ref_count: 0,
                     children: d.children.as_ref().clone(),
                 },
             };
             for child in node.children.iter() {
-                *incoming_vertices.entry(child.clone()).or_default() += 1;
+                *incoming_vertices.entry(child.hash().clone()).or_default() += 1;
                 frontier.push(child.clone());
             }
             raw_size_limit = raw_size_limit
@@ -1754,22 +1744,22 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             disk_objects.insert(child.hash().clone(), node);
         }
         // now we can use Kahn's algorithm as specified
-        let mut list_indices = HashMap::new();
+        let mut list_indices: HashMap<ArenaHash<_>, u64> = HashMap::new();
         // Note that only the root should have no incoming edges to start
-        let mut empty_incoming_nodes = vec![root.clone()];
-        while let Some(node) = empty_incoming_nodes.pop() {
-            if list_indices.contains_key(&node) {
+        let mut empty_incoming_nodes = vec![root.hash().clone()];
+        while let Some(node_hash) = empty_incoming_nodes.pop() {
+            if list_indices.contains_key(&node_hash) {
                 continue;
             }
-            let disk = disk_objects.get(node.hash()).expect("node must be present");
-            list_indices.insert(node.clone(), list_indices.len() as u64);
+            let disk = disk_objects.get(&node_hash).expect("node must be present");
+            list_indices.insert(node_hash, list_indices.len() as u64);
             for child in disk.children.iter() {
                 let incoming = incoming_vertices
-                    .get_mut(child)
+                    .get_mut(child.hash())
                     .expect("node must be present");
                 *incoming -= 1;
                 if *incoming == 0 {
-                    empty_incoming_nodes.push(child.clone());
+                    empty_incoming_nodes.push(child.hash().clone());
                 }
             }
         }
@@ -1777,9 +1767,9 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
         let mut list = TopoSortedNodes {
             nodes: vec![TopoSortedNode::default(); len],
         };
-        for (child_node, idx) in list_indices.iter() {
+        for (child_hash, idx) in list_indices.iter() {
             let disk = disk_objects
-                .remove(child_node.hash())
+                .remove(child_hash)
                 .expect("node must be present");
             // We flip the index ordering, as it a) makes deserialization easier, and b) makes leaf
             // nodes have smaller indexes, which is usually more sensible.
@@ -1787,7 +1777,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                 child_indices: disk
                     .children
                     .iter()
-                    .map(|child| len as u64 - 1 - list_indices[child])
+                    .map(|child| len as u64 - 1 - list_indices[child.hash()])
                     .collect(),
                 data: disk.data,
             };
@@ -2769,5 +2759,41 @@ mod tests {
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();
         assert_eq!(sp, other_sp);
+    }
+
+    /// Regression: serialize_to_node_list_bounded panicked when the same content
+    /// hash appeared as both ArenaKey::Direct and ArenaKey::Ref
+    #[test]
+    fn serialize_direct_and_ref_same_hash() {
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct DualLeaf {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = &new_arena();
+
+        let leaf: Sp<u32, DefaultDB> = arena.alloc(42u32);
+        assert!(matches!(leaf.child_repr, ArenaKey::Direct(_)));
+
+        let leaf_tracked = leaf.into_tracked();
+        assert!(matches!(leaf_tracked.child_repr, ArenaKey::Ref(_)));
+        assert_eq!(leaf.child_repr.hash(), leaf_tracked.child_repr.hash());
+        assert_ne!(leaf.child_repr, leaf_tracked.child_repr);
+
+        let root = arena.alloc(DualLeaf {
+            a: leaf,
+            b: leaf_tracked,
+        });
+
+        let nodes = root.serialize_to_node_list();
+        assert_eq!(nodes.nodes.len(), 2, "root + one deduplicated leaf");
+        let root_node = nodes.nodes.last().unwrap();
+        assert_eq!(
+            root_node.child_indices[0], root_node.child_indices[1],
+            "both children deduplicate to the same leaf index"
+        );
     }
 }

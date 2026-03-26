@@ -16,7 +16,7 @@ transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = 
 coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-onchain-runtime = { version = "3.0.0-rc.1", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
+midnight-onchain-runtime = { version = "3.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
