@@ -1458,12 +1458,15 @@ impl<D: DB> LedgerState<D> {
             );
             return Err(BlockLimitExceeded);
         }
-        let fee_prices = self.parameters.fee_prices.update_from_fullness(
+        let mut fee_prices = self.parameters.fee_prices.update_from_fullness(
             detailed_block_fullness,
             overall_block_fullness,
             self.parameters.cost_dimension_min_ratio,
             self.parameters.price_adjustment_a_parameter,
         );
+        if fee_prices.overall_price < self.parameters.min_block_price {
+            fee_prices.overall_price = self.parameters.min_block_price;
+        }
         new_st.parameters = Sp::new(LedgerParameters {
             fee_prices,
             ..(*self.parameters).clone()
