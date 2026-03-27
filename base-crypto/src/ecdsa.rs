@@ -130,7 +130,7 @@ impl Serializable for VerifyingKey {
     }
 
     fn serialized_size(&self) -> usize {
-        // Compressed SEC1
+        // Compressed SEC1.
         33
     }
 }
@@ -148,14 +148,14 @@ impl Deserializable for VerifyingKey {
 }
 
 impl VerifyingKey {
-    /// Verifies if a signature is correct
+    /// Verifies if a signature is correct.
     pub fn verify(&self, msg: &[u8], signature: &Signature) -> bool {
         matches!(Verifier::verify(&self.0, msg, &signature.0), Ok(()))
     }
 }
 
 #[derive(Clone)]
-/// A signing secret key
+/// A signing secret key.
 pub struct SigningKey(ecdsa::SigningKey);
 
 impl Tagged for SigningKey {
@@ -169,22 +169,22 @@ impl Tagged for SigningKey {
 tag_enforcement_test!(SigningKey);
 
 impl SigningKey {
-    /// Samples a new secret key from secure randomness
+    /// Samples a new secret key from secure randomness.
     pub fn sample<R: Rng + CryptoRng>(mut rng: R) -> Self {
         SigningKey(ecdsa::SigningKey::random(&mut rng))
     }
 
-    /// Returns the corresponding verifying public key
+    /// Returns the corresponding verifying public key.
     pub fn verifying_key(&self) -> VerifyingKey {
         VerifyingKey(*self.0.verifying_key())
     }
 
-    /// Signs a message deterministically (RFC 6979); no RNG is required
+    /// Signs a message deterministically (RFC 6979); no RNG is required.
     pub fn sign(&self, msg: &[u8]) -> Signature {
         Signature(Signer::sign(&self.0, msg))
     }
 
-    /// Parse signing key from big endian-encoded bytes
+    /// Parse signing key from big endian-encoded bytes.
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, Box<dyn std::error::Error>> {
         let signing_key = ecdsa::SigningKey::from_slice(bytes)?;
         Ok(SigningKey(signing_key))
@@ -203,8 +203,7 @@ impl Serializable for SigningKey {
     }
 
     fn serialized_size(&self) -> usize {
-        // Key size is 32 (k256::Secp256k1::FieldBytesSize). Accessing this
-        // would require an additional import for the trait.
+        // Key size is 32.
         32
     }
 }
@@ -222,7 +221,7 @@ impl Deserializable for SigningKey {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-/// An ECDSA signature in compact (r || s) encoding
+/// An ECDSA signature.
 pub struct Signature(ecdsa::Signature);
 
 impl Hash for Signature {
@@ -289,7 +288,7 @@ impl Serializable for Signature {
     }
 
     fn serialized_size(&self) -> usize {
-        // Compact encoding: 32-byte r + 32-byte s.
+        // 32-byte r + 32-byte s.
         64
     }
 }
