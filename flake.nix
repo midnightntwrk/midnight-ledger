@@ -275,6 +275,16 @@
             ];
           };
 
+          packages.wasm-all = pkgs.symlinkJoin {
+            name = "wasm-all";
+            paths = [
+              packages.ledger-wasm
+              packages.zkir-wasm
+              packages.zkir-v3-wasm
+              packages.onchain-runtime-wasm
+            ];
+          };
+
           packages.test-artifacts = pkgs.stdenvNoCC.mkDerivation {
             pname = "midnight-ledger-test-artifacts";
             version = ledger-version;
