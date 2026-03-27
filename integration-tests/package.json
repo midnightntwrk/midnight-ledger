@@ -60,7 +60,7 @@
     "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-prettier": "^5.5.4",
     "fetch-retry": "^6.0.0",
-    "lodash": "^4.17.21",
+    "lodash": "^4.17.23",
     "pino": "^9.9.0",
     "pino-pretty": "^13.1.1",
     "prettier": "^3.6.2",
