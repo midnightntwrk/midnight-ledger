@@ -29,7 +29,7 @@ pub mod fab;
 pub mod hash;
 pub mod repr;
 pub mod rng;
-pub mod signatures;
+pub mod schnorr;
 pub mod time;
 
 pub use repr::*;
