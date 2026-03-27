@@ -142,6 +142,47 @@ jobs:
       - name: Build zkir-wasm
         run: nix build .#zkir-wasm
 
+      - name: Add git bin to PATH for Yarn, verify git is installed
+        run: |
+          echo "/usr/bin" >> $GITHUB_PATH
+          which git
+          git --version
+
+      - name: Set up Node.js
+        uses: actions/setup-node@2028fbc5c25fe9cf00d9f06a71cc4710d4507903 # v6.0.0
+        with:
+          node-version: 22
+
+      - name: Run integration tests
+        run: |
+          export MN_AXIOS=true
+          set -o pipefail
+          cd integration-tests
+          yarn
+          yarn lint
+          yarn build
+          yarn test:coverage:prepare
+          nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
+
+      - name: Upload Logs
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: logs-${{ matrix.os }}
+          path: integration-tests/logs/
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # ratchet:actions/upload-artifact@v4
+        if: always()
+        with:
+          name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
+          path: "./integration-tests/reports/ctrf-report.json"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4
+        with:
+          name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
+          path: ./integration-tests/reports/test-report.xml
+
   build-ledger:
     strategy:
       matrix:
