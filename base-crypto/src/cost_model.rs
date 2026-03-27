@@ -457,6 +457,14 @@ impl RunningCost {
     pub fn max_time(&self) -> CostDuration {
         CostDuration::max(self.read_time, self.compute_time)
     }
+
+    /// Checks if one cost is bounded by another
+    pub fn within_bounds(self, bounds: RunningCost) -> bool {
+        self.read_time <= bounds.read_time
+            && self.compute_time <= bounds.compute_time
+            && self.bytes_written <= bounds.bytes_written
+            && self.bytes_deleted <= bounds.bytes_deleted
+    }
 }
 
 impl Distribution<RunningCost> for Standard {
