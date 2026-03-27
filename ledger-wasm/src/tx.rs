@@ -758,13 +758,6 @@ impl Transaction {
         get_dyn_transaction(self.0.clone()).binding_randomness()
     }
 
-    #[wasm_bindgen(setter, js_name = "setGuaranteedOffer")]
-    pub fn set_guaranteed_offer_alias(&mut self, offer: JsValue) -> Result<Transaction, JsError> {
-        let mut tx = self.clone();
-        tx.set_guaranteed_offer(offer)?;
-        Ok(tx)
-    }
-
     #[wasm_bindgen(getter, js_name = "guaranteedOffer")]
     pub fn guaranteed_offer(&self) -> Option<ZswapOffer> {
         get_dyn_transaction(self.0.clone()).guaranteed_offer()
@@ -848,24 +841,33 @@ impl Transaction {
         Ok(())
     }
 
-    #[wasm_bindgen(setter, js_name = "setFallibleOffer")]
-    pub fn set_fallible_offer(
-        &mut self,
-        segment: u16,
-        offer: JsValue,
-    ) -> Result<Transaction, JsError> {
+    #[wasm_bindgen(setter, js_name = "addOffer")]
+    pub fn add_offer(&mut self, segment: JsValue, offer: JsValue) -> Result<Transaction, JsError> {
         let mut tx = self.clone();
+        let segment: SegmentSpecifier = from_value(segment)?;
         let zswap_offer = if offer.is_null() || offer.is_undefined() {
             None
         } else {
             ZswapOffer::try_ref(&offer)?
         };
 
-        let current_fallible_offers = get_dyn_transaction(self.0.clone()).fallible_offer();
+        if matches!(segment, SegmentSpecifier::GuaranteedOnly) {
+            tx.set_guaranteed_offer(offer)?;
+            return Ok(tx);
+        }
 
+        let current_fallible_offers = get_dyn_transaction(self.0.clone()).fallible_offer();
         if current_fallible_offers.is_none() && zswap_offer.is_none() {
             return Ok(tx);
         }
+        let segment = match segment {
+            SegmentSpecifier::First => 1,
+            SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Specific(0) => {
+                return Err(JsError::new("illegal manual specification of segment 0"));
+            }
+            SegmentSpecifier::Specific(seg) => seg,
+        };
 
         let offers = current_fallible_offers.unwrap_or(Map::new());
 
@@ -875,17 +877,17 @@ impl Transaction {
             offers.delete(&JsValue::from(segment));
         }
 
-        tx.set_fallible_offer_map(Some(offers))?;
+        tx.set_fallible_offer(Some(offers))?;
         Ok(tx)
     }
 
     #[wasm_bindgen(getter, js_name = "fallibleOffer")]
-    pub fn fallible_offer_map(&self) -> Option<Map> {
+    pub fn fallible_offer(&self) -> Option<Map> {
         get_dyn_transaction(self.0.clone()).fallible_offer()
     }
 
     #[wasm_bindgen(setter, js_name = "fallibleOffer")]
-    pub fn set_fallible_offer_map(&mut self, offers_map: Option<Map>) -> Result<(), JsError> {
+    pub fn set_fallible_offer(&mut self, offers_map: Option<Map>) -> Result<(), JsError> {
         use TransactionTypes::*;
         use ledger::structure::Transaction::Standard;
 

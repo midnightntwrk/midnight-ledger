@@ -1145,21 +1145,12 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   ): Transaction<S, P, B>;
 
   /**
-   * Sets a provided guaranteed offer.
+   * Adds a provided offer to the segment specified.
    *
    * @throws If called on bound, proven, or proof-erased transactions.
    */
-  setGuaranteedOffer(
-    offer: UnprovenOffer | undefined,
-  ): Transaction<S, P, B>;
-
-  /**
-   * Sets a provided fallible offer to the segment specified.
-   *
-   * @throws If called on bound, proven, or proof-erased transactions.
-   */
-  setFallibleOffer(
-    segment: number,
+  addOffer(
+    segment: SegmentSpecifier,
     offer: UnprovenOffer | undefined,
   ): Transaction<S, P, B>;
 
