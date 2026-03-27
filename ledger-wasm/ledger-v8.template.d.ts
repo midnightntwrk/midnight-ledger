@@ -1147,11 +1147,21 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   /**
    * Adds a provided offer to the segment specified.
    *
-   * @throws If called on bound, proven, or proof-erased transactions.
+   * @throws If called on bound transactions.
    */
   addOffer(
     segment: SegmentSpecifier,
     offer: UnprovenOffer | undefined,
+  ): Transaction<S, P, B>;
+
+  /**
+   * Adds provided intent to the segment specified.
+   *
+   * @throws If called on bound transactions.
+   */
+  addIntent(
+    segment: SegmentSpecifier,
+    intent: Intent<S, P, B> | undefined,
   ): Transaction<S, P, B>;
 
   /**

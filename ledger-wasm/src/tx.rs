@@ -842,17 +842,21 @@ impl Transaction {
     }
 
     #[wasm_bindgen(setter, js_name = "addOffer")]
-    pub fn add_offer(&mut self, segment: JsValue, offer: JsValue) -> Result<Transaction, JsError> {
+    pub fn add_offer(
+        &mut self,
+        segment: JsValue,
+        raw_offer: JsValue,
+    ) -> Result<Transaction, JsError> {
         let mut tx = self.clone();
         let segment: SegmentSpecifier = from_value(segment)?;
-        let zswap_offer = if offer.is_null() || offer.is_undefined() {
+        let zswap_offer = if raw_offer.is_null() || raw_offer.is_undefined() {
             None
         } else {
-            ZswapOffer::try_ref(&offer)?
+            ZswapOffer::try_ref(&raw_offer)?
         };
 
         if matches!(segment, SegmentSpecifier::GuaranteedOnly) {
-            tx.set_guaranteed_offer(offer)?;
+            tx.set_guaranteed_offer(raw_offer)?;
             return Ok(tx);
         }
 
@@ -872,7 +876,7 @@ impl Transaction {
         let offers = current_fallible_offers.unwrap_or(Map::new());
 
         if zswap_offer.is_some() {
-            offers.set(&JsValue::from(segment), &offer);
+            offers.set(&JsValue::from(segment), &raw_offer);
         } else if offers.has(&JsValue::from(segment)) {
             offers.delete(&JsValue::from(segment));
         }
@@ -1032,6 +1036,43 @@ impl Transaction {
             }
             _ => Err(JsError::new("Not a standard transaction."))?,
         }
+    }
+
+    #[wasm_bindgen(setter, js_name = "addIntent")]
+    pub fn add_intent(
+        &mut self,
+        segment: JsValue,
+        raw_intent: JsValue,
+    ) -> Result<Transaction, JsError> {
+        let mut tx = self.clone();
+        let segment: SegmentSpecifier = from_value(segment)?;
+        let intent = if raw_intent.is_null() || raw_intent.is_undefined() {
+            None
+        } else {
+            Intent::try_ref(&raw_intent)?
+        };
+
+        let current_intents = get_dyn_transaction(self.0.clone()).intents();
+        if current_intents.is_none() && intent.is_none() {
+            return Ok(tx);
+        }
+        let segment = match segment {
+            SegmentSpecifier::First => 1,
+            SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Specific(0) => 0,
+            SegmentSpecifier::Specific(seg) => seg,
+        };
+
+        let intents = current_intents.unwrap_or(Map::new());
+
+        if intent.is_some() {
+            intents.set(&JsValue::from(segment), &raw_intent);
+        } else if intents.has(&JsValue::from(segment)) {
+            intents.delete(&JsValue::from(segment));
+        }
+
+        tx.set_intents(Some(intents))?;
+        Ok(tx)
     }
 
     #[wasm_bindgen(getter, js_name = "intents")]
