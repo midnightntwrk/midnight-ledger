@@ -21,7 +21,7 @@ fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 [dependencies]
 coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { version = "3.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { version = "8.0.0", path = "../zswap", package = "midnight-zswap" }
+zswap = { version = "8.0.3", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
@@ -35,8 +35,8 @@ lazy_static = "^1.5.0"
 sha2 = "^0.10.9"
 introspection-derive = "0.1"
 introspection = "0.1"
-derive-where = "^1.5.0"
-anyhow = { version = "^1.0.61" }
+derive-where = "^1.6.1"
+anyhow = { version = "^1.0.102" }
 
 is_sorted = "^0.1.1"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
