@@ -248,6 +248,16 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
         self.db.commit_changes(ops).expect("Failed to commit to db");
     }
 
+    fn run_log_pipeline(&self) {
+        self.db
+            .process_commits()
+            .expect("Failed to process ParityDB commit queue");
+        self.db.flush_logs().expect("Failed to flush ParityDB logs");
+        self.db
+            .enact_logs()
+            .expect("Failed to enact ParityDB logs");
+    }
+
     fn batch_get_nodes<I>(
         &self,
         keys: I,

@@ -10,7 +10,7 @@ default = []
 
 proptest = ["dep:proptest", "dep:proptest-derive", "base-crypto/proptest"]
 sqlite = ["dep:rusqlite", "dep:r2d2_sqlite", "dep:r2d2", "dep:fs2"]
-parity-db = ["dep:parity-db"]
+parity-db = ["dep:parity-db", "parity-db/instrumentation"]
 bench = ["dep:criterion", "dep:pprof"]
 public-internal-structure = []
 state-translation = ["public-internal-structure", "dep:hashbrown"]

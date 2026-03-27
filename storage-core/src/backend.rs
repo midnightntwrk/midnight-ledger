@@ -915,6 +915,11 @@ impl<D: DB> StorageBackend<D> {
         culled.len()
     }
 
+    /// Drive the underlying DB log-processing pipeline, if supported.
+    pub fn run_log_pipeline(&self) {
+        self.database.run_log_pipeline();
+    }
+
     /// Remove all unreachable nodes from memory and the DB.
     ///
     /// Here "unreachable" nodes are nodes with `ref_count == 0` and `root_count
