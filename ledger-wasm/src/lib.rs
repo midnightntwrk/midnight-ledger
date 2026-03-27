@@ -27,7 +27,7 @@ pub mod zswap_state;
 pub mod zswap_wasm;
 
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures;
+use base_crypto::schnorr;
 use coin_structure::{
     coin::{
         PublicKey as CoinPublicKey, ShieldedTokenType, UnshieldedTokenType, UserAddress,
@@ -136,7 +136,7 @@ pub fn coin_commitment(coin: JsValue, coin_public_key: String) -> Result<String,
 
 #[wasm_bindgen(js_name = "addressFromKey")]
 pub fn address_from_key(key: &str) -> Result<String, JsError> {
-    let key: signatures::VerifyingKey = from_value_hex_ser(key)?;
+    let key: schnorr::VerifyingKey = from_value_hex_ser(key)?;
     to_value_hex_ser(&UserAddress::from(key))
 }
 

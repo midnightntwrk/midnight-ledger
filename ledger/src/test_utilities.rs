@@ -35,7 +35,7 @@ use crate::verify::WellFormedStrictness;
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::{Signature, SigningKey};
+use base_crypto::schnorr::{Signature, SigningKey};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,

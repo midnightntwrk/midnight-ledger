@@ -1839,7 +1839,7 @@ mod tests {
     };
 
     use super::*;
-    use base_crypto::signatures::VerifyingKey;
+    use base_crypto::schnorr::VerifyingKey;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;

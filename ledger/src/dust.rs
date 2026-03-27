@@ -25,7 +25,7 @@ use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
-    signatures::VerifyingKey,
+    schnorr::VerifyingKey,
     time::{Duration, Timestamp},
 };
 use base_crypto::{

@@ -13,7 +13,7 @@
 
 use base_crypto::{
     rng::SplittableRng,
-    signatures::{Signature, SigningKey},
+    schnorr::{Signature, SigningKey},
 };
 use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
