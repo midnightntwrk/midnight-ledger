@@ -3,6 +3,8 @@
 ## Unreleased
 
 - fix: removed race condition from `force_as_arc`
+- fix: prevent a panic in `Sp` serialization with a mix of 'promoted' and 'unpromoted' keys.
+- fix: correct `Sp::into_tracked` behaviour
 
 ## Version `1.1.0`
 
