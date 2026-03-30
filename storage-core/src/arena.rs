@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -1641,9 +1641,10 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
             // lock on the `sp_cache` when we attempt to lock the `metadata` in
             // the match body, implicitly, via the call to `from_arena`, since
             // that would violate the lock acquisition ordering.
+            let cache_lock = self.arena.lock_sp_cache();
             let maybe_arc = self
                 .arena
-                .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), &self.root);
+                .read_sp_cache_locked::<T>(&cache_lock, &self.root);
             let arc: Arc<T> = match maybe_arc {
                 Some(arc) => arc,
                 None => {
@@ -1666,7 +1667,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         .expect("result of Sp::from_arena should be initialized");
                     if let ArenaKey::Ref(_) = &self.child_repr {
                         self.arena.write_sp_cache_locked(
-                            &self.arena.lock_sp_cache(),
+                            &cache_lock,
                             self.root.clone(),
                             arc.clone(),
                         );
