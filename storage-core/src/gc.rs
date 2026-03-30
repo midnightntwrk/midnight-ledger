@@ -290,10 +290,7 @@ mod tests {
         assert_eq!(size(), 10 * CHUNK);
         // If we now drop them from in-memory, they *will* be gc'd
         refs.truncate(9 * CHUNK);
-        assert_eq!(
-            arena.with_backend(|b| b.gc(Duration::from_hours(1))),
-            1 * CHUNK
-        );
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), CHUNK);
         assert_eq!(size(), 9 * CHUNK);
         // However, if we *just* drop references from memory, they are still protected due to
         // persistence.
