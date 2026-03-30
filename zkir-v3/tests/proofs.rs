@@ -13,9 +13,9 @@
 
 #[cfg(test)]
 mod proof_tests {
-    use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
     use group::Group;
     use midnight_curves::JubjubSubgroup;
+    use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
     use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
