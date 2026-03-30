@@ -267,7 +267,7 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// the form of `CacheValue` values.
 pub struct StorageBackend<D: DB> {
     /// Persistent backing storage.
-    database: D,
+    pub(crate) database: D,
     /// The size of `read_cache`, and size to which `write_cache` will be
     /// truncated on flush. If zero, then caches are unbounded.
     ///

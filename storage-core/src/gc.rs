@@ -258,3 +258,65 @@ impl<D: DB> GcState<D> {
         cull_set
     }
 }
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_gc() {
+        use crate::db::DB;
+        use std::time::Duration;
+        let arena = crate::arena::Arena::new_from_backend(crate::backend::StorageBackend::new(
+            1,
+            crate::db::InMemoryDB::<crate::DefaultHasher>::default(),
+        ));
+        let size = || arena.with_backend(|b| b.database.size());
+        const CHUNK: usize = 10_000;
+        let mut refs = (0..10 * CHUNK)
+            .map(|i| arena.alloc(i as u64))
+            .collect::<Vec<_>>();
+        refs.iter_mut().for_each(|r| r.persist());
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(size(), 10 * CHUNK);
+        // Because everything's persisted, gc does nothing.
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 0);
+        assert_eq!(size(), 10 * CHUNK);
+        // If we unpersist the last 1000 entries, gc *still* does nothing, because they are still
+        // referenced in memory.
+        refs[9 * CHUNK..10 * CHUNK]
+            .iter_mut()
+            .for_each(|r| r.unpersist());
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 0);
+        assert_eq!(size(), 10 * CHUNK);
+        // If we now drop them from in-memory, they *will* be gc'd
+        refs.truncate(9 * CHUNK);
+        assert_eq!(
+            arena.with_backend(|b| b.gc(Duration::from_hours(1))),
+            1 * CHUNK
+        );
+        assert_eq!(size(), 9 * CHUNK);
+        // However, if we *just* drop references from memory, they are still protected due to
+        // persistence.
+        refs.truncate(8 * CHUNK);
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 0);
+        assert_eq!(size(), 9 * CHUNK);
+        // If we give a small budget for the gc, it will not complete in one run through
+        refs[5 * CHUNK..8 * CHUNK]
+            .iter_mut()
+            .for_each(|r| r.unpersist());
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        refs.truncate(5 * CHUNK);
+        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_millis(25))), 0);
+        assert_eq!(size(), 9 * CHUNK);
+        // But if ran repeatedly, it *will* run through
+        let mut culled = 0;
+        for _ in 0..100 {
+            // Increased budget because of a dilemma: On some optimisation levels having too high a
+            // budget above would *always* immediately complete, while a too low one here would
+            // *never* complete, due to running out of budget in the in-memory mark phase.
+            culled += arena.with_backend(|b| b.gc(Duration::from_millis(100)));
+        }
+        assert_eq!(culled, 3 * CHUNK);
+        assert_eq!(size(), 6 * CHUNK);
+    }
+}
