@@ -578,6 +578,12 @@ export function maxAlignedSize(alignment: Alignment): bigint;
 export function maxField(): bigint;
 
 /**
+ * Returns the maximum representable value in the Jubjub scalar field
+ * (that is, 1 less than the Jubjub scalar field order)
+ */
+export function maxJubjubScalar(): bigint;
+
+/**
  * Converts input, output, and transcript information into a proof preimage
  * suitable to pass to a `ProvingProvider`.
  *

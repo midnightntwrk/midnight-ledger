@@ -1073,7 +1073,9 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::Decode { val_t, .. } => target_types.contains(val_t),
+                I::Decode { val_t, .. }
+                | I::PublicInput { val_t, .. }
+                | I::PrivateInput { val_t, .. } => target_types.contains(val_t),
                 _ => false,
             });
 
@@ -1081,7 +1083,7 @@ impl Relation for IrSource {
         };
 
         let jubjub = self.instructions.iter().any(|op| {
-            involves_types(&[IrType::JubjubPoint]) || {
+            involves_types(&[IrType::JubjubPoint, IrType::JubjubScalar]) || {
                 matches!(
                     op,
                     I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
