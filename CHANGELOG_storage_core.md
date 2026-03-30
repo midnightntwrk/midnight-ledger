@@ -1,5 +1,9 @@
 # `storage-core` Changelog
 
+## Unreleased
+
+- fix: removed race condition from `force_as_arc`
+
 ## Version `1.1.0`
 
 - feat: add layout version 2, which removes reference counting. For now, it disables garbage collection as well.
