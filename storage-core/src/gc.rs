@@ -120,12 +120,11 @@ impl<D: DB> GcState<D> {
     pub(crate) fn run<'a, 'b: 'a>(
         &'b mut self,
         roots: impl Iterator<Item = ArenaHash<D::Hasher>>,
-        bound: Duration,
+        remaining_budget: impl Fn() -> Duration,
         db: &'b mut D,
         cache_read: impl Fn(ArenaHash<D::Hasher>) -> Option<&'a OnDiskObject<D::Hasher>>,
         db_roots: impl for<'c> FnOnce(&'c mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> Vec<ArenaHash<D::Hasher>> {
-        let t0 = Instant::now();
         // First, we need to update our root set. We take the new root set `roots`, and note any
         // additions to add to the grey set. Deletions are not handled, as they may still be on
         // disk.
@@ -181,9 +180,7 @@ impl<D: DB> GcState<D> {
         // Now the grey set is purely on disk. Heuristically, we assume that all references on disk
         // are *also* on disk, just because it simplifies the flow.
         while !self.grey_set.is_empty()
-            && let Some(batch_size) = self
-                .running_bench
-                .read_batch_size(bound.saturating_sub(t0.elapsed()))
+            && let Some(batch_size) = self.running_bench.read_batch_size(remaining_budget())
         {
             let batch_start = Instant::now();
             let batch: Vec<_> = self.grey_set.iter().take(batch_size).cloned().collect();
@@ -217,10 +214,7 @@ impl<D: DB> GcState<D> {
         // Whew. We're now done with the mark phase, and we want to do sweeping. We use the resume
         // handle if we have one, and stop when we run out of budget or the scan completes.
         let mut cull_set = vec![];
-        while let Some(batch_size) = self
-            .running_bench
-            .scan_batch_size(bound.saturating_sub(t0.elapsed()))
-        {
+        while let Some(batch_size) = self.running_bench.scan_batch_size(remaining_budget()) {
             let batch_start = Instant::now();
             let (nodes, handle) = db.scan(self.sweep_resume.clone(), batch_size);
             self.sweep_resume = handle;
@@ -297,21 +291,32 @@ mod tests {
         refs.truncate(8 * CHUNK);
         assert_eq!(arena.with_backend(|b| b.gc(Duration::from_hours(1))), 0);
         assert_eq!(size(), 9 * CHUNK);
-        // If we give a small budget for the gc, it will not complete in one run through
+        // If we give a small budget for the gc, it will not complete in one run through.
+        // We use gc_budgeted with a closure controlling the batch count, avoiding any
+        // real-time dependency. Duration::ZERO prevents all on-disk work (mark and sweep),
+        // while with a cache size of 1 the in-cache mark phase processes almost nothing.
         refs[5 * CHUNK..8 * CHUNK]
             .iter_mut()
             .for_each(|r| r.unpersist());
         arena.with_backend(|b| b.flush_all_changes_to_db());
         refs.truncate(5 * CHUNK);
-        assert_eq!(arena.with_backend(|b| b.gc(Duration::from_millis(25))), 0);
+        assert_eq!(arena.with_backend(|b| b.gc_budgeted(|| Duration::ZERO)), 0);
         assert_eq!(size(), 9 * CHUNK);
-        // But if ran repeatedly, it *will* run through
+        // But if ran repeatedly with a small per-call batch budget, it *will* run through.
+        let batch_counter = std::cell::Cell::new(0usize);
+        let budget = || {
+            let n = batch_counter.get();
+            batch_counter.set(n + 1);
+            if n < 10 {
+                Duration::MAX
+            } else {
+                Duration::ZERO
+            }
+        };
         let mut culled = 0;
         for _ in 0..100 {
-            // Increased budget because of a dilemma: On some optimisation levels having too high a
-            // budget above would *always* immediately complete, while a too low one here would
-            // *never* complete, due to running out of budget in the in-memory mark phase.
-            culled += arena.with_backend(|b| b.gc(Duration::from_millis(100)));
+            batch_counter.set(0);
+            culled += arena.with_backend(|b| b.gc_budgeted(&budget));
         }
         assert_eq!(culled, 3 * CHUNK);
         assert_eq!(size(), 6 * CHUNK);

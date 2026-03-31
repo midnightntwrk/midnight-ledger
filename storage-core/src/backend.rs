@@ -871,9 +871,10 @@ impl<D: DB> StorageBackend<D> {
         bound: std::time::Duration,
         roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
     ) -> usize {
+        let t0 = std::time::Instant::now();
         let culled = self.gc_state.run(
             self.live_inserts.iter().cloned(),
-            bound,
+            || bound.saturating_sub(t0.elapsed()),
             &mut self.database,
             |key| {
                 self.write_cache
@@ -882,6 +883,30 @@ impl<D: DB> StorageBackend<D> {
                     .and_then(|v| v.get_obj())
             },
             roots,
+        );
+        for hash in culled.iter() {
+            self.write_cache.remove(hash);
+            self.read_cache.remove(hash);
+        }
+        culled.len()
+    }
+
+    #[cfg(all(test, feature = "gc-v1"))]
+    pub(crate) fn gc_budgeted(
+        &mut self,
+        remaining_budget: impl Fn() -> std::time::Duration,
+    ) -> usize {
+        let culled = self.gc_state.run(
+            self.live_inserts.iter().cloned(),
+            remaining_budget,
+            &mut self.database,
+            |key| {
+                self.write_cache
+                    .peek(&key)
+                    .or_else(|| self.read_cache.peek(&key))
+                    .and_then(|v| v.get_obj())
+            },
+            |db| db.get_roots().keys().cloned().collect(),
         );
         for hash in culled.iter() {
             self.write_cache.remove(hash);
