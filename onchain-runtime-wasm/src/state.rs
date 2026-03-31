@@ -133,7 +133,7 @@ impl StateBoundedMerkleTree {
             index,
             &ValueReprAlignedValue(leaf),
             (),
-        )))
+        )?))
     }
 
     pub fn rehash(&self) -> StateBoundedMerkleTree {

@@ -216,11 +216,13 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalState, JsError> {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
-        Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
-        }))
+        Ok(ZswapLocalState(
+            (match &offer.0 {
+                ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
+            })?,
+        ))
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]

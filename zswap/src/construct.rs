@@ -393,6 +393,7 @@ impl<D: DB> Transient<ProofPreimage, D> {
     ) -> Result<Self, OfferCreationFailed> {
         let tree = MerkleTree::<(), InMemoryDB>::blank(ZSWAP_TREE_HEIGHT)
             .update_hash(0, output.coin_com.0, ())
+            .map_err(OfferCreationFailed::MerkleTreeError)?
             .rehash();
         let addr = output
             .contract_address
