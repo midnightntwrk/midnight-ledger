@@ -35,7 +35,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::Hash;
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
-use std::ops::Deref;
+use std::ops::{Bound, Deref, RangeBounds, RangeInclusive};
 use storage_core as storage;
 use storage_core::DefaultDB;
 use storage_core::Storable;
@@ -60,6 +60,71 @@ pub struct MerklePath<T> {
 
 /// The domain separator used in leaf commitments.
 pub const LEAF_HASH_DOMAIN_SEP: &[u8] = b"mdn:lh";
+
+fn range_sub(range: (Bound<u64>, Bound<u64>), sub: u64) -> Option<(Bound<u64>, Bound<u64>)> {
+    // For the start, if subtraction were to overflow, the start becomes unbounded
+    let start = match range.0 {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(n) => match n.checked_sub(sub) {
+            Some(m) => Bound::Included(m),
+            None => Bound::Unbounded,
+        },
+        Bound::Excluded(n) => match n.checked_sub(sub) {
+            Some(m) => Bound::Excluded(m),
+            None => Bound::Unbounded,
+        },
+    };
+    // For the end, if subtraction were to overflow, the range is empty
+    // Note that Included/Excluded can be handled the same, it just allows a corner-case where we
+    // return an empty range of Some(..=0) instead of None
+    let end = match range.1 {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(n) => Bound::Included(n.checked_sub(sub)?),
+        Bound::Excluded(n) => Bound::Excluded(n.checked_sub(sub)?),
+    };
+    if range_empty((start, end)) {
+        None
+    } else {
+        Some((start, end))
+    }
+}
+
+fn range_empty(range: (Bound<u64>, Bound<u64>)) -> bool {
+    if let Some((start, end)) = range_force_inclusive(range) {
+        start > end
+    } else {
+        true
+    }
+}
+
+fn range_force_inclusive(range: (Bound<u64>, Bound<u64>)) -> Option<(u64, u64)> {
+    let inclusive_start = match range.0 {
+        Bound::Unbounded => 0,
+        Bound::Included(n) => n,
+        Bound::Excluded(u64::MAX) => return None,
+        Bound::Excluded(n) => n + 1,
+    };
+    let inclusive_end = match range.1 {
+        Bound::Unbounded => u64::MAX,
+        Bound::Included(n) => n,
+        Bound::Excluded(0) => return None,
+        Bound::Excluded(n) => n - 1,
+    };
+    Some((inclusive_start, inclusive_end))
+}
+
+fn overlap(a: (Bound<u64>, Bound<u64>), b: impl RangeBounds<u64>) -> Option<RangeInclusive<u64>> {
+    let b = (b.start_bound().cloned(), b.end_bound().cloned());
+    let a_inclusive = range_force_inclusive(a)?;
+    let b_inclusive = range_force_inclusive(b)?;
+    let start = u64::max(a_inclusive.0, b_inclusive.0);
+    let end = u64::min(a_inclusive.1, b_inclusive.1);
+    if start <= end {
+        Some(start..=end)
+    } else {
+        None
+    }
+}
 
 /// An index into a Merkle tree which could not be resolved, as there is no item
 /// there, or the path was deliberately collapsed.
@@ -582,29 +647,39 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         Ok(())
     }
 
-    fn leaves(&self) -> Vec<LeafOrCollapsed<'_, A>> {
+    fn leaves_in_range(&self, range: (Bound<u64>, Bound<u64>)) -> Vec<LeafOrCollapsed<'_, A>> {
         match self {
-            Leaf { hash, aux } => vec![LeafOrCollapsed::Leaf {
+            Leaf { hash, aux } if range.contains(&0) => vec![LeafOrCollapsed::Leaf {
                 index: 0,
                 hash: *hash,
                 aux,
             }],
-            Stub { .. } => Vec::new(),
-            Collapsed { .. } => vec![LeafOrCollapsed::Collapsed {
-                start: 0,
-                end: (1u64 << self.height()) - 1,
-            }],
+            Stub { .. } | Leaf { .. } => Vec::new(),
+            Collapsed { .. } => {
+                if let Some(range) = overlap(range, 0..(1 << self.height())) {
+                    vec![LeafOrCollapsed::Collapsed {
+                        start: *range.start(),
+                        end: *range.end(),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
             Node { left, right, .. } => left
-                .leaves()
+                .leaves_in_range(range)
                 .into_iter()
                 .chain(
-                    right
-                        .leaves()
+                    range_sub(range, 1 << left.height())
                         .into_iter()
+                        .flat_map(|sub_range| right.leaves_in_range(sub_range).into_iter())
                         .map(|leaf| leaf.upgrade(1 << left.height())),
                 )
                 .collect(),
         }
+    }
+
+    fn leaves(&self) -> Vec<LeafOrCollapsed<'_, A>> {
+        self.leaves_in_range((Bound::Unbounded, Bound::Unbounded))
     }
 
     fn new(height: u8) -> Self {
@@ -1072,12 +1147,43 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
     ///
     /// May panic if the Merkle tree has not been rehashed.
     pub fn find_path_for_leaf<T: BinaryHashRepr>(&self, leaf: T) -> Option<MerklePath<T>> {
-        let hash = leaf_hash(&leaf);
-        for (index, hash2) in self.0.leaves().into_iter().filter_map(|leaf| match leaf {
-            LeafOrCollapsed::Leaf { index, hash, .. } => Some((index, hash)),
-            _ => None,
-        }) {
-            if hash == hash2 {
+        self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, ..)
+    }
+
+    /// Acts as [`find_path_for_leaf`], but limits search to a specified range.
+    pub fn find_path_for_leaf_within_range<T: BinaryHashRepr>(
+        &self,
+        leaf: T,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<T>> {
+        self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, range)
+    }
+
+    /// Acts as [`find_path_for_leaf_within_range`], but takes the leaf to be pre-hashed.
+    pub fn find_path_for_hashed_leaf_within_range(
+        &self,
+        leaf_hash: HashOutput,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<HashOutput>> {
+        self.find_path_for_leaf_inner(leaf_hash, leaf_hash, range)
+    }
+
+    fn find_path_for_leaf_inner<T>(
+        &self,
+        leaf_hash: HashOutput,
+        leaf: T,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<T>> {
+        for (index, hash) in self
+            .0
+            .leaves_in_range((range.start_bound().cloned(), range.end_bound().cloned()))
+            .into_iter()
+            .filter_map(|leaf| match leaf {
+                LeafOrCollapsed::Leaf { index, hash, .. } => Some((index, hash)),
+                _ => None,
+            })
+        {
+            if leaf_hash == hash {
                 return self.path_for_leaf(index, leaf).ok();
             }
         }
@@ -1130,11 +1236,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
     /// Given a leaf at a specific index, produces a [`MerklePath`] for it.
     ///
     /// May panic if the Merkle tree has not been rehashed.
-    pub fn path_for_leaf<T: BinaryHashRepr>(
-        &self,
-        index: u64,
-        leaf: T,
-    ) -> Result<MerklePath<T>, InvalidIndex> {
+    pub fn path_for_leaf<T>(&self, index: u64, leaf: T) -> Result<MerklePath<T>, InvalidIndex> {
         if self.height() == 0 {
             return if index == 0 {
                 Ok(MerklePath {

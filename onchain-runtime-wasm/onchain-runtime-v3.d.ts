@@ -939,7 +939,12 @@ export class StateBoundedMerkleTree {
    * Returns undefined if the leaf is not in the tree.
    * @internal
    */
-  findPathForLeaf(leaf: AlignedValue): AlignedValue | undefined;
+  findPathForLeaf(
+    leaf: AlignedValue,
+    indexStart?: bigint,
+    indexEnd?: bigint,
+    alreadyHashed?: bool,
+  ): AlignedValue | undefined;
 
   /**
    * Internal implementation of the path construction primitive
