@@ -1542,4 +1542,123 @@ mod tests {
             assert_eq!(aux, 10);
         }
     }
+
+    #[test]
+    fn test_find_path_for_leaf_within_range() {
+        let tree = new_mt::<()>(32)
+            .update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.update(5, &Fr::from(20u64), ()))
+            .and_then(|mt| mt.update(10, &Fr::from(30u64), ()))
+            .unwrap()
+            .rehash();
+
+        // Full range finds the leaf
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), ..)
+                .is_some()
+        );
+
+        // Range containing the leaf finds it
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 3..=7)
+                .is_some()
+        );
+
+        // Range excluding the leaf does not find it
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 0..=4)
+                .is_none()
+        );
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 6..=100)
+                .is_none()
+        );
+
+        // Path produced is valid
+        let path = tree
+            .find_path_for_leaf_within_range(Fr::from(30u64), 8..=12)
+            .expect("leaf at index 10 should be in range 8..=12");
+        assert_eq!(path.root(), tree.root().unwrap());
+    }
+
+    #[test]
+    fn test_find_path_for_hashed_leaf_within_range() {
+        let tree = new_mt::<()>(32)
+            .update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.update(5, &Fr::from(20u64), ()))
+            .unwrap()
+            .rehash();
+
+        let hash = leaf_hash(&Fr::from(20u64));
+
+        // Finds by hash
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, ..)
+                .is_some()
+        );
+
+        // Range restriction works
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, 5..=5)
+                .is_some()
+        );
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, 0..=4)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_find_within_range_with_collapsed() {
+        let tree = new_mt::<()>(6)
+            .update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.update(5, &Fr::from(20u64), ()))
+            .and_then(|mt| mt.update(10, &Fr::from(30u64), ()))
+            .unwrap()
+            .collapse(0, 4)
+            .rehash();
+
+        // Leaf in collapsed region is not found
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(10u64), ..)
+                .is_none()
+        );
+
+        // Leaf outside collapsed region is found
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), ..)
+                .is_some()
+        );
+
+        // Range restricted to collapsed region returns nothing
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 0..=4)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_find_within_range_duplicate_leaves() {
+        let val = Fr::from(42u64);
+        let tree = new_mt::<()>(6)
+            .update(2, &val, ())
+            .and_then(|mt| mt.update(5, &val, ()))
+            .and_then(|mt| mt.update(8, &val, ()))
+            .unwrap()
+            .rehash();
+
+        // Restricting range picks the correct duplicate
+        let path = tree
+            .find_path_for_leaf_within_range(val, 4..=6)
+            .expect("should find leaf at index 5");
+        assert_eq!(path.root(), tree.root().unwrap());
+
+        let path = tree
+            .find_path_for_leaf_within_range(val, 7..=10)
+            .expect("should find leaf at index 8");
+        assert_eq!(path.root(), tree.root().unwrap());
+
+        // Empty range finds nothing
+        assert!(tree.find_path_for_leaf_within_range(val, 3..=4).is_none());
+    }
 }
