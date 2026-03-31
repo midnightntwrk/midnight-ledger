@@ -316,7 +316,7 @@ mod tests {
         let mut culled = 0;
         for _ in 0..100 {
             batch_counter.set(0);
-            culled += arena.with_backend(|b| b.gc_budgeted(&budget));
+            culled += arena.with_backend(|b| b.gc_budgeted(budget));
         }
         assert_eq!(culled, 3 * CHUNK);
         assert_eq!(size(), 6 * CHUNK);
