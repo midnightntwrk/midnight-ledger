@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- feat: expose finer-grained control for the wallet in wasm bindings.
+
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:

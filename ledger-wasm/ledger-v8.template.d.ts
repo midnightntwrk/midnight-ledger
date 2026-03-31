@@ -1681,6 +1681,19 @@ export class ZswapLocalState {
   applyCollapsedUpdate(update: MerkleTreeCollapsedUpdate): ZswapLocalState;
 
   /**
+   * Directly inserts a coin owned by this wallet into the state at `this.first_free`.
+   *
+   * This function requires secret keys as coins are indexed by nullifier, and
+   * secret keys are required to compute this.
+   */
+  insertCoin(secretKeys: ZswapSecretKeys, coin: QualifiedCoinInfo): ZswapLocalState;
+
+  /**
+   * Removes a given coin from the tracked coins by its nullifier.
+   */
+  removeCoinByNullifier(nullifier: Nullifier): ZswapLocalState;
+
+  /**
    * Replays observed events against the current local state. These *must* be replayed
    * in the same order as emitted by the chain being followed.
    */

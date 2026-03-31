@@ -235,6 +235,24 @@ impl ZswapLocalState {
         ))
     }
 
+    #[wasm_bindgen(js_name = "insertCoin")]
+    pub fn insert_coin(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        coin: JsValue,
+    ) -> Result<ZswapLocalState, JsError> {
+        Ok(ZswapLocalState(self.0.insert_coin(
+            &secret_keys.try_into()?,
+            value_to_qualified_shielded_coininfo(coin)?,
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "removeCoinByNullifier")]
+    pub fn remove_coin_by_nullifier(&self, nullifier: &str) -> Result<ZswapLocalState, JsError> {
+        let nullifier = from_hex_ser(nullifier)?;
+        Ok(ZswapLocalState(self.0.remove_coin_by_nullifier(nullifier)))
+    }
+
     #[wasm_bindgen(js_name = "applyFailed")]
     pub fn apply_failed(&self, offer: &ZswapOffer) -> ZswapLocalState {
         use ZswapOfferTypes::*;

@@ -83,6 +83,39 @@ impl<D: DB> State<D> {
         })
     }
 
+    pub fn insert_coin(
+        &self,
+        secret_keys: &SecretKeys,
+        qcoin: QualifiedCoinInfo,
+    ) -> Result<Self, InvalidUpdate> {
+        let coin = CoinInfo::from(&qcoin);
+        let nullifier = coin.nullifier(&SenderEvidence::User(Cow::Borrowed(
+            &secret_keys.coin_secret_key,
+        )));
+        Ok(Self {
+            coins: self.coins.insert(nullifier, qcoin),
+            merkle_tree: self
+                .merkle_tree
+                .update_hash(
+                    self.first_free,
+                    coin.commitment(&Recipient::User(secret_keys.coin_public_key()))
+                        .0,
+                    (),
+                )?
+                .rehash(),
+            first_free: self.first_free + 1,
+            ..self.clone()
+        })
+    }
+
+    pub fn remove_coin_by_nullifier(&self, nullifier: Nullifier) -> Self {
+        Self {
+            coins: self.coins.remove(&nullifier),
+            pending_spends: self.pending_spends.remove(&nullifier),
+            ..self.clone()
+        }
+    }
+
     pub fn apply_claim<P: Storable<D>>(
         &self,
         secret_keys: &SecretKeys,
