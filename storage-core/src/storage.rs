@@ -311,8 +311,8 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
         self.db.batch_update(iter)
     }
 
-    fn run_log_pipeline(&self) {
-        self.db.run_log_pipeline()
+    fn flush_log_pipeline(&self) {
+        self.db.flush_log_pipeline()
     }
 
     fn batch_get_nodes<I>(

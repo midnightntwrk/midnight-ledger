@@ -148,10 +148,10 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     where
         I: Iterator<Item = (ArenaHash<Self::Hasher>, Update<Self::Hasher>)>;
 
-    /// Run the DB's internal log processing pipeline, if any.
+    /// Flush the DB's internal log processing pipeline, if any.
     ///
     /// Backends without a background log pipeline can keep this default no-op.
-    fn run_log_pipeline(&self) {}
+    fn flush_log_pipeline(&self) {}
 
     /// Batch get nodes.
     ///

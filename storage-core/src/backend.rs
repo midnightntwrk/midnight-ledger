@@ -915,9 +915,9 @@ impl<D: DB> StorageBackend<D> {
         culled.len()
     }
 
-    /// Drive the underlying DB log-processing pipeline, if supported.
-    pub fn run_log_pipeline(&self) {
-        self.database.run_log_pipeline();
+    /// Flush the underlying DB log-processing pipeline, if supported.
+    pub fn flush_log_pipeline(&self) {
+        self.database.flush_log_pipeline();
     }
 
     /// Remove all unreachable nodes from memory and the DB.
