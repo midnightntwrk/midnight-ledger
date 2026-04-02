@@ -15,7 +15,7 @@ use crate::VecExt;
 use crate::serializable::GLOBAL_TAG;
 use crate::tagged::Tagged;
 use std::borrow::Cow;
-use std::io::Read;
+use std::io::{BufRead, Read};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{collections::HashMap, collections::HashSet, hash::Hash};
@@ -27,6 +27,23 @@ pub const RECURSION_LIMIT: u32 = 250;
 
 // Top-level deserialization function
 pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> std::io::Result<T> {
+    tagged_deserialize_inner(reader, true)
+}
+
+pub fn tagged_deserialize_sequence<T: Deserializable + Tagged>(
+    mut reader: impl BufRead,
+) -> std::io::Result<Vec<T>> {
+    let mut res = vec![];
+    while reader.has_data_left()? {
+        res.push(tagged_deserialize_inner(reader, false)?);
+    }
+    Ok(res)
+}
+
+fn tagged_deserialize_inner<T: Deserializable + Tagged>(
+    mut reader: impl Read,
+    ensure_consumed: bool,
+) -> std::io::Result<T> {
     let tag_expected = format!("{GLOBAL_TAG}{}:", T::tag());
     let mut read_tag = vec![0u8; tag_expected.len()];
     let mut remaining_tag_buf = &mut read_tag[..];
@@ -55,7 +72,7 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
     #[allow(clippy::unbuffered_bytes)] // we can permit a potentally inefficient count here, as in
     let count = reader.bytes().count(); // the happy path it should be 0
 
-    if count == 0 {
+    if count == 0 || !ensure_consumed {
         return Ok(value);
     }
 
