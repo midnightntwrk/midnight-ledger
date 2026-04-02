@@ -26,6 +26,7 @@ use coin_structure::{
     contract::ContractAddress as Address,
 };
 use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
+use ledger::events::{EventDetails, EventSource};
 use ledger::semantics::ZswapLocalStateExt;
 use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
@@ -254,19 +255,52 @@ impl ZswapLocalState {
         offer: &ZswapOffer,
     ) -> Result<ZswapLocalStateWithChanges, JsError> {
         use ZswapOfferTypes::*;
-        let sk_unwrapped = secret_keys.try_into()?;
-        let state = match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
-        }?;
-        let with_changes = WithZswapStateChanges {
-            result: state,
-            // FIXME: This ain't good. But also actually extracting the changes needs to be done
-            // *while* executing, which isn't really supported rn.
-            changes: vec![],
+        let erased = match &offer.0 {
+            ProvenOffer(val) => val.erase_proofs(),
+            UnprovenOffer(val) => val.erase_proofs(),
+            ProofErasedOffer(val) => val.erase_proofs(),
         };
-        Ok(with_changes.into())
+        let inputs = erased
+            .inputs
+            .iter()
+            .map(|i| (*i).clone())
+            .chain(erased.transient.iter().map(|t| t.as_input()));
+        let outputs = erased
+            .outputs
+            .iter()
+            .map(|o| (*o).clone())
+            .chain(erased.transient.iter().map(|t| t.as_output()));
+        let dummy_source = EventSource {
+            transaction_hash: Default::default(),
+            logical_segment: 0,
+            physical_segment: 0,
+        };
+        let details = inputs
+            .map(|i| EventDetails::ZswapInput {
+                nullifier: i.nullifier,
+                contract: i.contract_address,
+            })
+            .chain(outputs.enumerate().map(|(i, o)| EventDetails::ZswapOutput {
+                commitment: o.coin_com,
+                preimage_evidence: match o.ciphertext {
+                    Some(ciph) => {
+                        ledger::events::ZswapPreimageEvidence::Ciphertext(Box::new((*ciph).clone()))
+                    }
+                    None => ledger::events::ZswapPreimageEvidence::None,
+                },
+                contract: o.contract_address,
+                mt_index: i as u64 + self.0.first_free,
+            }));
+        let events = details
+            .map(|content| ledger::events::Event {
+                source: dummy_source.clone(),
+                content,
+            })
+            .collect::<Vec<_>>();
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events.iter())?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]
