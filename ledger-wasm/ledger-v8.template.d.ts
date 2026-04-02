@@ -266,7 +266,6 @@ export type EventDetails =
   } | {
     tag: 'zswapOutput',
     commitment: CoinCommitment,
-    preimageEvidence: ZswapPreimageEvidence,
     contract: ContractAddress | undefined,
     mtIndex: bigint,
   } | {
@@ -289,6 +288,24 @@ export type EventDetails =
   } |
   // Other variants may be added and some events are not yet supported in this API.
   { tag: string };
+
+/**
+ * A path evidencing how to insert an entry into a Merkle tree, even if it is
+ * collapsed.
+ */
+export type TreeInsertionPath<A> = {
+  leafHash: string,
+  annotation: A,
+  path: TreeInsertionPathEntry[],
+};
+
+/**
+ * A single entry in a {@link TreeInsertionPath}.
+ */
+export type TreeInsertionPathEntry = {
+  hash: bigint | undefined,
+  goesLeft: boolean,
+};
 
 /**
  * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
@@ -418,8 +435,8 @@ export class DustGenerationState {
 
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
-  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
-  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
+  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
+  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
   toString(compact?: boolean): string;
@@ -1747,7 +1764,7 @@ export class ZswapLocalState {
    * This function requires secret keys as coins are indexed by nullifier, and
    * secret keys are required to compute this.
    */
-  insertCoin(secretKeys: ZswapSecretKeys, coin: QualifiedCoinInfo): ZswapLocalState;
+  insertCoin(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo): ZswapLocalState;
 
   /**
    * Removes a given coin from the tracked coins by its nullifier.

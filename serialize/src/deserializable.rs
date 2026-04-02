@@ -26,7 +26,7 @@ pub const RECURSION_LIMIT: u32 = 50;
 pub const RECURSION_LIMIT: u32 = 250;
 
 // Top-level deserialization function
-pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> std::io::Result<T> {
+pub fn tagged_deserialize<T: Deserializable + Tagged>(reader: impl Read) -> std::io::Result<T> {
     tagged_deserialize_inner(reader, true)
 }
 
@@ -34,8 +34,8 @@ pub fn tagged_deserialize_sequence<T: Deserializable + Tagged>(
     mut reader: impl BufRead,
 ) -> std::io::Result<Vec<T>> {
     let mut res = vec![];
-    while reader.has_data_left()? {
-        res.push(tagged_deserialize_inner(reader, false)?);
+    while !reader.fill_buf()?.is_empty() {
+        res.push(tagged_deserialize_inner(&mut reader, false)?);
     }
     Ok(res)
 }
