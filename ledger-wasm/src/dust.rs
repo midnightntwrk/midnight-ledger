@@ -12,6 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
+use crate::events::Event;
 use crate::state_changes::DustStateChanges;
 use base_crypto::signatures;
 use base_crypto::signatures::Signature;
@@ -26,11 +27,10 @@ use ledger::dust::{
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
     WithDustStateChanges as LedgerWithDustStateChanges,
 };
-use ledger::events::Event as LedgerEvent;
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
 use rand::rngs::OsRng;
-use serialize::tagged_serialize;
+use serialize::{tagged_deserialize_sequence, tagged_serialize};
 use std::cell::RefCell;
 use std::ops::Deref;
 use std::rc::Rc;
@@ -39,45 +39,6 @@ use storage::db::InMemoryDB;
 use transient_crypto::merkle_tree;
 use wasm_bindgen::JsError;
 use wasm_bindgen::prelude::*;
-
-#[wasm_bindgen]
-#[derive(Debug)]
-pub struct Event(pub(crate) LedgerEvent<InMemoryDB>);
-
-impl From<LedgerEvent<InMemoryDB>> for Event {
-    fn from(inner: LedgerEvent<InMemoryDB>) -> Event {
-        Event(inner)
-    }
-}
-
-#[wasm_bindgen]
-impl Event {
-    #[wasm_bindgen(constructor)]
-    pub fn new() -> Result<Event, JsError> {
-        Err(JsError::new(
-            "Event cannot be constructed directly through the WASM API.",
-        ))
-    }
-
-    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
-        let mut res = Vec::new();
-        tagged_serialize(&self.0, &mut res)?;
-        Ok(Uint8Array::from(&res[..]))
-    }
-
-    pub fn deserialize(raw: Uint8Array) -> Result<Event, JsError> {
-        Ok(Event(from_value_ser(raw, "Event")?))
-    }
-
-    #[wasm_bindgen(js_name = "toString")]
-    pub fn to_string(&self, compact: Option<bool>) -> String {
-        if compact.unwrap_or(false) {
-            format!("{:?}", &self.0)
-        } else {
-            format!("{:#?}", &self.0)
-        }
-    }
-}
 
 #[derive(Clone)]
 pub enum DustSpendTypes {
@@ -1494,6 +1455,18 @@ impl DustLocalState {
         let sk = sk.try_unwrap()?;
         let events = events.iter().map(|event| &event.0);
         let with_changes = self.0.replay_events_with_changes(&sk, events)?;
+        Ok(DustLocalStateWithChanges::from(with_changes))
+    }
+
+    #[wasm_bindgen(js_name = "replayRawEvents")]
+    pub fn replay_raw_events(
+        &self,
+        sk: &DustSecretKey,
+        raw_events: &[u8],
+    ) -> Result<DustLocalStateWithChanges, JsError> {
+        let sk = sk.try_unwrap()?;
+        let events = tagged_deserialize_sequence(raw_events)?;
+        let with_changes = self.0.replay_events_with_changes(&sk, events.iter())?;
         Ok(DustLocalStateWithChanges::from(with_changes))
     }
 

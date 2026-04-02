@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
+use crate::events::Event;
 use crate::state_changes::ZswapStateChanges;
 use crate::tx::{Transaction, get_dyn_transaction};
 use crate::zswap_keys::ZswapSecretKeys;
@@ -31,7 +31,7 @@ use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
-use serialize::tagged_serialize;
+use serialize::{tagged_deserialize_sequence, tagged_serialize};
 use std::ops::Deref;
 use storage::{db::InMemoryDB, storage::Map as SMap};
 use transient_crypto::merkle_tree;
@@ -154,6 +154,15 @@ impl ZswapLocalState {
         Ok(res)
     }
 
+    #[wasm_bindgen(getter = "merkleTreeRoot")]
+    pub fn merkle_tree_root(&self) -> JsValue {
+        self.0
+            .merkle_tree
+            .root()
+            .map(|r| JsValue::from(fr_to_bigint(r.0)))
+            .unwrap_or(JsValue::UNDEFINED)
+    }
+
     // pendingSpends: Map<Uint8Array, [QualifiedShieldedCoinInfo, Date | undefined]>
     #[wasm_bindgen(getter, js_name = "pendingSpends")]
     pub fn pending_spends(&self) -> Result<Map, JsError> {
@@ -209,6 +218,19 @@ impl ZswapLocalState {
         Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
+    #[wasm_bindgen(js_name = "replayRawEvents")]
+    pub fn replay_raw_events(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        raw_events: &[u8],
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        let events = tagged_deserialize_sequence(raw_events)?;
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events.iter())?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
+    }
+
     pub fn apply(
         &self,
         secret_keys: &ZswapSecretKeys,
@@ -223,6 +245,28 @@ impl ZswapLocalState {
                 ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
             })?,
         ))
+    }
+
+    #[wasm_bindgen(js_name = "applyWithChanges")]
+    pub fn apply_with_changes(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        offer: &ZswapOffer,
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        use ZswapOfferTypes::*;
+        let sk_unwrapped = secret_keys.try_into()?;
+        let state = match &offer.0 {
+            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
+        }?;
+        let with_changes = WithZswapStateChanges {
+            result: state,
+            // FIXME: This ain't good. But also actually extracting the changes needs to be done
+            // *while* executing, which isn't really supported rn.
+            changes: vec![],
+        };
+        Ok(with_changes.into())
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]
