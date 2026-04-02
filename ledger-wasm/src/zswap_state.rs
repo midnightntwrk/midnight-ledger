@@ -196,6 +196,39 @@ impl ZswapLocalState {
         ))
     }
 
+    /// Deserializes and replays events from raw bytes in a single WASM call.
+    ///
+    /// All deserialization happens in Rust — no per-event JS↔WASM boundary
+    /// crossings. For 45k events this eliminates ~45k round-trips.
+    ///
+    /// * `raw_events_concat` — all serialized events concatenated
+    /// * `lengths` — byte length of each event (to split the buffer)
+    #[wasm_bindgen(js_name = "replayEventsFromRaw")]
+    pub fn replay_events_from_raw(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        raw_events_concat: &[u8],
+        lengths: &[u32],
+    ) -> Result<ZswapLocalState, JsError> {
+        use serialize::tagged_deserialize;
+        let mut offset = 0usize;
+        let mut events = Vec::with_capacity(lengths.len());
+        for &len in lengths {
+            let end = offset + len as usize;
+            if end > raw_events_concat.len() {
+                return Err(JsError::new("Event length exceeds buffer size"));
+            }
+            let inner = tagged_deserialize(&mut &raw_events_concat[offset..end])
+                .map_err(|e| JsError::new(&format!("Event deserialize failed: {e}")))?;
+            events.push(Event(inner));
+            offset = end;
+        }
+        let event_refs = events.iter().map(|e| &e.0);
+        Ok(ZswapLocalState(
+            self.0.replay_events(&secret_keys.try_into()?, event_refs)?,
+        ))
+    }
+
     #[wasm_bindgen(js_name = "replayEventsWithChanges")]
     pub fn replay_events_with_changes(
         &self,

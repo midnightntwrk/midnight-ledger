@@ -1353,6 +1353,35 @@ impl DustLocalState {
         Ok(DustLocalState(self.0.replay_events(&sk, events)?))
     }
 
+    /// Deserializes and replays dust events from raw bytes in a single WASM call.
+    ///
+    /// All deserialization happens in Rust — no per-event JS↔WASM boundary
+    /// crossings.
+    #[wasm_bindgen(js_name = "replayEventsFromRaw")]
+    pub fn replay_events_from_raw(
+        &self,
+        sk: &DustSecretKey,
+        raw_events_concat: &[u8],
+        lengths: &[u32],
+    ) -> Result<DustLocalState, JsError> {
+        use serialize::tagged_deserialize;
+        let sk = sk.try_unwrap()?;
+        let mut offset = 0usize;
+        let mut events = Vec::with_capacity(lengths.len());
+        for &len in lengths {
+            let end = offset + len as usize;
+            if end > raw_events_concat.len() {
+                return Err(JsError::new("Event length exceeds buffer size"));
+            }
+            let inner = tagged_deserialize(&mut &raw_events_concat[offset..end])
+                .map_err(|e| JsError::new(&format!("Event deserialize failed: {e}")))?;
+            events.push(Event(inner));
+            offset = end;
+        }
+        let event_refs = events.iter().map(|e| &e.0);
+        Ok(DustLocalState(self.0.replay_events(&sk, event_refs)?))
+    }
+
     #[wasm_bindgen(js_name = "replayEventsWithChanges")]
     pub fn replay_events_with_changes(
         &self,
