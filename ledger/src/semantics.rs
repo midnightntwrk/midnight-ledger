@@ -1208,13 +1208,18 @@ impl<D: DB> LedgerState<D> {
     ) -> (Self, TransactionResult<D>) {
         let res = match &tx.inner {
             Transaction::Standard(stx) => {
+                let (mut new_st, result) = self.apply_guaranteed_only(tx, context);
+                let TransactionResult::Success(mut events) = result else {
+                    return (new_st, result);
+                };
+
                 let cloned_stx = stx.clone();
                 let segments = cloned_stx.segments();
                 let mut segment_success = std::collections::BTreeMap::new();
-                let mut events = Vec::new();
+                segment_success.insert(0, Ok(()));
                 let mut total_success = true;
-                let mut new_st = self.clone();
-                for &segment in segments.iter() {
+
+                for &segment in segments.iter().filter(|&&s| s != 0) {
                     match new_st.apply_section(stx, tx.hash, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
@@ -1222,12 +1227,8 @@ impl<D: DB> LedgerState<D> {
                             segment_success.insert(segment, Ok(()));
                         }
                         Err(e) => {
-                            if segment == 0 {
-                                return (self.clone(), TransactionResult::Failure(e));
-                            } else {
-                                segment_success.insert(segment, Err(e));
-                                total_success = false;
-                            }
+                            segment_success.insert(segment, Err(e));
+                            total_success = false;
                         }
                     }
                 }
@@ -1241,16 +1242,7 @@ impl<D: DB> LedgerState<D> {
                     },
                 )
             }
-            Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
-                self,
-                rewards,
-                &context.block_context,
-                EventSource {
-                    transaction_hash: tx.hash,
-                    logical_segment: 0,
-                    physical_segment: 0,
-                },
-            ),
+            Transaction::ClaimRewards(_) => self.apply_guaranteed_only(tx, context),
         };
         debug!(
             "state transition: {:?} => {:?} [transaction {:?}]",
@@ -1264,6 +1256,30 @@ impl<D: DB> LedgerState<D> {
         );
         trace!(?tx, "transaction details");
         res
+    }
+
+    #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
+    pub fn apply_guaranteed_only(
+        &self,
+        tx: &VerifiedTransaction<D>,
+        context: &TransactionContext<D>,
+    ) -> (Self, TransactionResult<D>) {
+        match &tx.inner {
+            Transaction::Standard(stx) => match self.apply_section(stx, tx.hash, 0, context) {
+                Ok((new_st, events)) => (new_st, TransactionResult::Success(events)),
+                Err(e) => (self.clone(), TransactionResult::Failure(e)),
+            },
+            Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
+                self,
+                rewards,
+                &context.block_context,
+                EventSource {
+                    transaction_hash: tx.hash,
+                    logical_segment: 0,
+                    physical_segment: 0,
+                },
+            ),
+        }
     }
 
     fn apply_actions<P: ProofKind<D>>(
