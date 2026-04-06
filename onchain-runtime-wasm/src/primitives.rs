@@ -406,7 +406,11 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
 #[wasm_bindgen(js_name = "jubjubSampleScalar")]
 /// Sample a random JubJub scalar, returned as a native field element.
 pub fn jubjub_sample_scalar() -> Result<JsValue, JsError> {
-    Ok(to_value(&Value::from(OsRng.r#gen::<Fr>()))?)
+    let native = OsRng.r#gen::<Fr>();
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&native.0.to_bytes_le());
+    let embedded = embedded::Scalar::from_bytes_wide(&wide);
+    Ok(to_value(&Value::from(EmbeddedFr(embedded)))?)
 }
 
 #[wasm_bindgen(js_name = "jubjubScalarFromNative")]
