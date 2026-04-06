@@ -1,5 +1,9 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- fix: rehashing serde deserialized `MerkleTree`s
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking midnight-zk changes
