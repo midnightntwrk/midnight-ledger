@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -216,11 +216,13 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalState, JsError> {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
-        Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
-        }))
+        Ok(ZswapLocalState(
+            (match &offer.0 {
+                ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
+            })?,
+        ))
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]

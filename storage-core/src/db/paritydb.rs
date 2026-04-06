@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -133,6 +133,8 @@ impl<H: WellBehavedHasher> DummyArbitrary for ParityDb<H> {}
 
 impl<H: WellBehavedHasher> DB for ParityDb<H> {
     type Hasher = H;
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = Vec<u8>;
 
     /// Note: If the key was recently deleted, this may still return Some(_).
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
@@ -308,6 +310,52 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             count += 1;
         }
         count
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        let mut it = self
+            .db
+            .iter(NODE_COLUMN)
+            .expect("Failed to iterate over db");
+        if let Some(handle) = resume_from {
+            it.seek(&handle).expect("Failed to seek db iterator");
+        }
+        let mut res = Vec::with_capacity(batch_size);
+        for _ in 0..batch_size {
+            if let Some((k, v)) = it.next().expect("Failed db iteration step") {
+                res.push((
+                    bytes_to_arena_key(k),
+                    OnDiskObject::<Self::Hasher>::deserialize(&mut &v[..], 0)
+                        .expect("Failed to deserialize OnDiskObject"),
+                ));
+            } else {
+                // We ran out, return
+                return (res, None);
+            }
+        }
+        let key = res.last().and_then(|(k, _)| {
+            let mut key = k.0.to_vec();
+            let mut i = key.len() - 1;
+            while i > 0 && key[i] == 0xff {
+                key[i] = 0x00;
+                i -= 1;
+            }
+            if i == 0 && key[i] == 0xff {
+                None
+            } else {
+                key[i] += 1;
+                Some(key)
+            }
+        });
+        (res, key)
     }
 }
 

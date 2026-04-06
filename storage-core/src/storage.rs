@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -16,6 +16,8 @@
 use crate::DefaultDB;
 use crate::Storable;
 use crate::arena::{Arena, ArenaHash, Sp};
+#[cfg(feature = "gc-v1")]
+use crate::backend::OnDiskObject;
 use crate::backend::StorageBackend;
 use crate::db::{DB, DummyArbitrary, InMemoryDB};
 use derive_where::derive_where;
@@ -259,6 +261,9 @@ impl<D: Default + DB, T> Default for WrappedDB<D, T> {
 impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
     type Hasher = D::Hasher;
 
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = D::ScanResumeHandle;
+
     fn get_node(
         &self,
         key: &ArenaHash<Self::Hasher>,
@@ -335,6 +340,18 @@ impl<D: DB, T: Sync + Send + 'static> DB for WrappedDB<D, T> {
     {
         self.db
             .bfs_get_nodes(key, cache_get, truncate, max_depth, max_count)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        self.db.scan(resume_from, batch_size)
     }
 }
 

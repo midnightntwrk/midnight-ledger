@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -356,7 +356,7 @@ macro_rules! stval {
         StateValue::Cell(Sp::new($val.into()))
     };
     ({MT($height:expr_2021) {$($key:expr_2021 => $val:expr_2021),*}}) => {
-        StateValue::BoundedMerkleTree(MerkleTree::blank($height)$(.update_hash($key, $val, ()))*.rehash())
+        StateValue::BoundedMerkleTree(MerkleTree::blank($height)$(.update_hash($key, $val, ()).expect("updating hash on `StateValue` should always succeed, as these should not be collapsed"))*.rehash())
     };
     ({$($key:expr_2021 => $val:tt),*}) => {
         StateValue::Map(HashMap::new()$(.insert($key.into(), stval!($val)))*)

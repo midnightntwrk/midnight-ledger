@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -32,6 +32,8 @@ pub use storage::Storage;
 
 mod cache;
 
+#[cfg(feature = "gc-v1")]
+mod gc;
 #[cfg(feature = "test-utilities")]
 pub mod test;
 

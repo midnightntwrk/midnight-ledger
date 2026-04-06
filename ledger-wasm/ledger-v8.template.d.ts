@@ -359,6 +359,15 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class DustStateMerkleTreeCollapsedUpdate {
+  private constructor();
+  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
+  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
+  toString(compact?: boolean): string;
+}
+
 export class DustState {
   constructor();
   serialize(): Uint8Array;
@@ -400,10 +409,27 @@ export class DustLocalState {
   constructor(params: DustParameters);
   walletBalance(time: Date): bigint;
   generationInfo(qdo: QualifiedDustOutput): DustGenerationInfo | undefined;
+  insertGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo, initialNonce?: DustInitialNonce): DustLocalState;
+  removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
+  collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
+  applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  generatingTreeRoot(): bigint | undefined;
+  insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
+  removeCommitment(commitmentIndex: bigint): DustLocalState;
+  collapseCommitmentTree(commitmentIndexStart: bigint, commitmentIndexEnd: bigint): DustLocalState;
+  applyCommitmentCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  commitmentTreeRoot(): bigint | undefined;
   spend(sk: DustSecretKey, utxo: QualifiedDustOutput, vFee: bigint, ctime: Date): [DustLocalState, DustSpend<PreProof>];
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
+  addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
+  findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
+  removeUtxo(nullifier: DustNullifier): DustLocalState;
+  /**
+   * Returns a new UTXO with a reduced value and the sequential nonce
+   */
+  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
@@ -1365,6 +1391,26 @@ export function coinCommitment(coin: ShieldedCoinInfo, coinPublicKey: CoinPublic
  * Calculate nullifier of a coin owned by a user
  */
 export function coinNullifier(coin: ShieldedCoinInfo, coinSecretKey: CoinSecretKey): Nullifier;
+
+/**
+ * Calculate commitment of Dust utxo owned by a user
+ */
+export function dustCommitment(qdo: QualifiedDustOutput): DustCommitment;
+
+/**
+ * Calculate nullifier of Dust utxo owned by a user
+ */
+export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): DustNullifier;
+
+/**
+ * Calculate Dust nonce
+ */
+export function dustNonce(initialNonce: DustInitialNonce, seq: bigint, sk: DustSecretKey): DustNonce;
+
+/**
+ * Calculate Dust initial nonce (a backing night hash)
+ */
+export function dustInitialNonce(outputNo: bigint, intentHash: IntentHash): DustInitialNonce;
 
 /**
  * Parameters used by the Midnight ledger, including transaction fees and
