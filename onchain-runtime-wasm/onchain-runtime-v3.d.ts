@@ -599,6 +599,17 @@ export function proofDataIntoSerializedPreimage(
 export function bigIntModFr(x: bigint): bigint;
 
 /**
+ * Samples a random JubJub scalar, returned as a native field element.
+ */
+export function jubjubSampleScalar(): Value;
+
+/**
+ * Converts a native field element (BLS12-381 scalar) to a JubJub scalar field
+ * element, reducing modulo the JubJub scalar field modulus.
+ */
+export function jubjubScalarFromNative(native: Value): Value;
+
+/**
  * Internal conversion between field-aligned binary values and bigints within
  * the scalar field
  * @internal
