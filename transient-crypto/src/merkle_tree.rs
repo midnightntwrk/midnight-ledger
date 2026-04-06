@@ -459,6 +459,7 @@ impl<'de, A: Deserialize<'de> + Storable<D>, D: DB> Deserialize<'de> for MerkleT
         data.into_iter()
             .try_fold(MerkleTree::blank(height), |mt, (k, (v, a))| {
                 MerkleTree::update_hash(&mt, k, v, a)
+                    .map(|mt| mt.rehash())
                     .map_err(<D2::Error as serde::de::Error>::custom)
             })
     }
