@@ -1257,7 +1257,7 @@ describe('Ledger API - Transaction', () => {
     const offer = Static.unprovenOfferFromOutput(0);
     const segment: SegmentSpecifier = { tag: 'specific', value: 0 };
 
-    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
     expect(() => tx.addOffer(segment, offer)).toThrow('illegal manual specification of segment 0');
   });
 
