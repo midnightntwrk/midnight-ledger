@@ -841,7 +841,7 @@ impl Transaction {
         Ok(())
     }
 
-    #[wasm_bindgen(setter, js_name = "addOffer")]
+    #[wasm_bindgen(js_name = "addOffer")]
     pub fn add_offer(
         &mut self,
         segment: JsValue,
@@ -1038,7 +1038,7 @@ impl Transaction {
         }
     }
 
-    #[wasm_bindgen(setter, js_name = "addIntent")]
+    #[wasm_bindgen(js_name = "addIntent")]
     pub fn add_intent(
         &mut self,
         segment: JsValue,
