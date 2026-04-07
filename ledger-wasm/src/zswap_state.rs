@@ -321,7 +321,7 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalState, JsError> {
         Ok(ZswapLocalState(self.0.insert_coin(
             &secret_keys.try_into()?,
-            value_to_qualified_shielded_coininfo(coin)?,
+            value_to_shielded_coininfo(coin)?,
         )?))
     }
 

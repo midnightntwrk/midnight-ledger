@@ -232,7 +232,7 @@ export class Event {
   static deserialize(raw: Uint8Array): Event;
   toString(compact?: boolean): string;
   readonly source: EventSource;
-  readonly details: EventDetails;
+  readonly content: EventDetails;
 }
 
 /**
@@ -1764,7 +1764,7 @@ export class ZswapLocalState {
    * This function requires secret keys as coins are indexed by nullifier, and
    * secret keys are required to compute this.
    */
-  insertCoin(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo): ZswapLocalState;
+  insertCoin(secretKeys: ZswapSecretKeys, coin: ShieldedCoinInfo): ZswapLocalState;
 
   /**
    * Removes a given coin from the tracked coins by its nullifier.

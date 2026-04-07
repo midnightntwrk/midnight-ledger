@@ -1,3 +1,4 @@
+use crate::conversions::event_details_to_value;
 use crate::conversions::event_source_to_value;
 use js_sys::Uint8Array;
 use ledger::events::Event as LedgerEvent;
@@ -48,5 +49,10 @@ impl Event {
     #[wasm_bindgen(getter = "source")]
     pub fn source(&self) -> Result<JsValue, JsError> {
         event_source_to_value(&self.0.source)
+    }
+
+    #[wasm_bindgen(getter = "content")]
+    pub fn content(&self) -> Result<JsValue, JsError> {
+        event_details_to_value(&self.0.content)
     }
 }

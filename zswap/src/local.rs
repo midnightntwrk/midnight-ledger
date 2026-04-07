@@ -86,9 +86,9 @@ impl<D: DB> State<D> {
     pub fn insert_coin(
         &self,
         secret_keys: &SecretKeys,
-        qcoin: QualifiedCoinInfo,
+        coin: CoinInfo,
     ) -> Result<Self, InvalidUpdate> {
-        let coin = CoinInfo::from(&qcoin);
+        let qcoin = coin.qualify(self.first_free);
         let nullifier = coin.nullifier(&SenderEvidence::User(Cow::Borrowed(
             &secret_keys.coin_secret_key,
         )));
