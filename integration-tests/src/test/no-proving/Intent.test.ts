@@ -800,8 +800,7 @@ describe('Ledger API - Intent', () => {
     expect(tx.intents!.has(1)).toBe(true);
 
     tx = tx.addIntent(segment, undefined);
-    expect(tx.intents).toBeDefined();
-    expect(tx.intents!.has(1)).toBe(false);
+    expect(tx.intents).toBeUndefined();
   });
 
   /**

@@ -1243,8 +1243,7 @@ describe('Ledger API - Transaction', () => {
     expect(tx.fallibleOffer!.has(1)).toBe(true);
 
     tx = tx.addOffer(segment, undefined);
-    expect(tx.fallibleOffer).toBeDefined();
-    expect(tx.fallibleOffer!.has(1)).toBe(false);
+    expect(tx.fallibleOffer).toBeUndefined();
   });
 
   /**
