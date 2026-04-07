@@ -1150,6 +1150,141 @@ describe('Ledger API - Transaction', () => {
     expect(tx2.fallibleOffer!.size).toBe(1);
   });
 
+  /**
+   * Test adding offer to transaction using addOffer with GuaranteedOnly.
+   *
+   * @given A transaction and an unshielded offer
+   * @when Adding offer using GuaranteedOnly specifier
+   * @then Should set the guaranteed offer on the transaction
+   */
+  test('should add offer to transaction using addOffer with GuaranteedOnly', () => {
+    const offer = Static.unprovenOfferFromOutput(0);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer(GUARANTEED_ONLY_SPECIFIER, offer);
+
+    expect(tx.guaranteedOffer).toBeDefined();
+    expect(tx.guaranteedOffer?.toString()).toEqual(offer.toString());
+  });
+
+  /**
+   * Test adding offer to a fallible segment using First specifier.
+   *
+   * @given A transaction and an unshielded offer
+   * @when Adding offer using First specifier
+   * @then Should add offer to fallible segment 1
+   */
+  test('should add offer to transaction using addOffer with First', () => {
+    const offer = Static.unprovenOfferFromOutput(1);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer(FIRST_SEGMENT_SPECIFIER, offer);
+
+    expect(tx.fallibleOffer).toBeDefined();
+    expect(tx.fallibleOffer!.size).toBe(1);
+    expect(tx.fallibleOffer!.has(1)).toBe(true);
+  });
+
+  /**
+   * Test adding offer to a specific fallible segment.
+   *
+   * @given A transaction and an unshielded offer
+   * @when Adding offer using Specific specifier with value 2
+   * @then Should add offer to fallible segment 2
+   */
+  test('should add offer to transaction using addOffer with Specific segment', () => {
+    const offer = Static.unprovenOfferFromOutput(2);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer(SPECIFIC_VALUE_SPECIFIER, offer);
+
+    expect(tx.fallibleOffer).toBeDefined();
+    expect(tx.fallibleOffer!.size).toBe(1);
+    expect(tx.fallibleOffer!.has(2)).toBe(true);
+  });
+
+  /**
+   * Test adding multiple offers to different segments.
+   *
+   * @given A transaction and multiple offers
+   * @when Adding offers to guaranteed and multiple fallible segments
+   * @then Should have offers in all specified segments
+   */
+  test('should add multiple offers to different segments', () => {
+    const offer1 = Static.unprovenOfferFromOutput(0);
+    const offer2 = Static.unprovenOfferFromOutput(1);
+    const offer3 = Static.unprovenOfferFromOutput(10);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer({ tag: 'guaranteedOnly' }, offer1);
+    tx = tx.addOffer({ tag: 'first' }, offer2);
+    tx = tx.addOffer({ tag: 'specific', value: 10 }, offer3);
+
+    expect(tx.guaranteedOffer).toBeDefined();
+    expect(tx.fallibleOffer).toBeDefined();
+    expect(tx.fallibleOffer!.size).toBe(2);
+    expect(tx.fallibleOffer!.has(1)).toBe(true);
+    expect(tx.fallibleOffer!.has(10)).toBe(true);
+  });
+
+  /**
+   * Test removing offer from fallible segment by passing undefined.
+   *
+   * @given A transaction with an offer in fallible segment 1
+   * @when Adding undefined offer to the same segment
+   * @then Should remove the offer from that segment
+   */
+  test('should remove offer from fallible segment when passing undefined', () => {
+    const offer = Static.unprovenOfferFromOutput(1);
+    const segment: SegmentSpecifier = { tag: 'first' };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer(segment, offer);
+    expect(tx.fallibleOffer!.has(1)).toBe(true);
+
+    tx = tx.addOffer(segment, undefined);
+    expect(tx.fallibleOffer).toBeDefined();
+    expect(tx.fallibleOffer!.has(1)).toBe(false);
+  });
+
+  /**
+   * Test error when trying to add offer with segment 0 using Specific specifier.
+   *
+   * @given A transaction and an offer
+   * @when Attempting to add offer with Specific segment value 0
+   * @then Should throw error about illegal specification of segment 0
+   */
+  test('should throw error when adding offer with Specific segment 0', () => {
+    const offer = Static.unprovenOfferFromOutput(0);
+    const segment: SegmentSpecifier = { tag: 'specific', value: 0 };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    expect(() => tx.addOffer(segment, offer)).toThrow('illegal manual specification of segment 0');
+  });
+
+  /**
+   * Test adding offer using Random segment specifier.
+   *
+   * @given A transaction and an offer
+   * @when Adding offer using Random specifier
+   * @then Should add offer to a random fallible segment between 2 and 65535
+   */
+  test('should add offer to random segment using addOffer with Random', () => {
+    const offer = Static.unprovenOfferFromOutput(10);
+    const segment: SegmentSpecifier = { tag: 'random' };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addOffer(segment, offer);
+
+    expect(tx.fallibleOffer).toBeDefined();
+    expect(tx.fallibleOffer!.size).toBe(1);
+
+    // Check that the segment is in valid range [2, 65535)
+    const segments = Array.from(tx.fallibleOffer!.keys());
+    expect(segments[0]).toBeGreaterThanOrEqual(2);
+    expect(segments[0]).toBeLessThan(65535);
+  });
+
   function testSpecificSegment(segment: SegmentSpecifier, expectedSegment?: number) {
     const { state, addr, encodedAddr, op, token, unbalancedStrictness, balancedStrictness } = setup();
 
