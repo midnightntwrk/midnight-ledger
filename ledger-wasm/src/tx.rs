@@ -873,7 +873,7 @@ impl Transaction {
             SegmentSpecifier::Specific(seg) => seg,
         };
 
-        let offers = current_fallible_offers.unwrap_or(Map::new());
+        let offers = current_fallible_offers.unwrap_or_default();
 
         if zswap_offer.is_some() {
             offers.set(&JsValue::from(segment), &raw_offer);
@@ -1063,7 +1063,7 @@ impl Transaction {
             SegmentSpecifier::Specific(seg) => seg,
         };
 
-        let intents = current_intents.unwrap_or(Map::new());
+        let intents = current_intents.unwrap_or_default();
 
         if intent.is_some() {
             intents.set(&JsValue::from(segment), &raw_intent);
