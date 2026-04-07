@@ -1171,7 +1171,7 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   ): Transaction<S, P, B>;
 
   /**
-   * Adds a provided offer to the segment specified.
+   * Adds Zswap offer to the segment specified.
    *
    * @throws If called on bound transactions.
    */
