@@ -89,7 +89,7 @@ pub fn verify(pk: EmbeddedGroupAffine, msg: &[Fr], sig: &SchnorrSignature) -> bo
     lhs == rhs
 }
 
-/// Computes the verfying key from a secret key.
+/// Computes the verifying key from a secret key.
 pub fn vk(sk: EmbeddedFr) -> EmbeddedGroupAffine {
     EmbeddedGroupAffine::generator() * sk
 }
