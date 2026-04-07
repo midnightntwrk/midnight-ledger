@@ -69,10 +69,14 @@ fn tagged_deserialize_inner<T: Deserializable + Tagged>(
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
 
+    if !ensure_consumed {
+        return Ok(value);
+    }
+
     #[allow(clippy::unbuffered_bytes)] // we can permit a potentally inefficient count here, as in
     let count = reader.bytes().count(); // the happy path it should be 0
 
-    if count == 0 || !ensure_consumed {
+    if count == 0 {
         return Ok(value);
     }
 

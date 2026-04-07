@@ -30,7 +30,38 @@ import { TestState } from '@/test/utils/TestState';
 import { LOCAL_TEST_NETWORK_ID, type ShieldedTokenType, Static } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 
-describe('Confirmed bugs', () => {
+describe('Wallet Control - Finer ZswapLocalState control', () => {
+  function setupWithCoin(value: bigint = 10n) {
+    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
+    let ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
+    const coinInfo = Static.shieldedCoinInfo(value);
+    const offer = ZswapOffer.fromOutput(
+      ZswapOutput.new(coinInfo, 0, secretKeys.coinPublicKey, secretKeys.encryptionPublicKey),
+      coinInfo.type,
+      coinInfo.value
+    );
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer);
+    const strictness = new WellFormedStrictness();
+    strictness.enforceBalancing = false;
+    const ctx = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
+    const vtx = tx.wellFormed(ledgerState, strictness, new Date(0));
+    const [newLedger, result] = ledgerState.apply(vtx, ctx);
+    ledgerState = newLedger.postBlockUpdate(new Date(0));
+    return { secretKeys, ledgerState, coinInfo, events: result.events };
+  }
+
+  function serializeEvents(events: Event[]): Uint8Array {
+    const parts = events.map((e) => e.serialize());
+    const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
+    const result = new Uint8Array(totalLength);
+    let currentOffset = 0;
+    parts.forEach((part) => {
+      result.set(part, currentOffset);
+      currentOffset += part.length;
+    });
+    return result;
+  }
+
   test('replayRawEvents drops every event after the first when given concatenated bytes', () => {
     const sk = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
     const ledger = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
@@ -72,39 +103,6 @@ describe('Confirmed bugs', () => {
     expect(raw.state.coins.size).toEqual(2);
     expect(raw.state.firstFree).toEqual(2n);
   });
-});
-
-describe('Wallet Control - Finer ZswapLocalState control', () => {
-  function setupWithCoin(value: bigint = 10n) {
-    const secretKeys = ZswapSecretKeys.fromSeed(new Uint8Array(32).fill(1));
-    let ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
-    const coinInfo = Static.shieldedCoinInfo(value);
-    const offer = ZswapOffer.fromOutput(
-      ZswapOutput.new(coinInfo, 0, secretKeys.coinPublicKey, secretKeys.encryptionPublicKey),
-      coinInfo.type,
-      coinInfo.value
-    );
-    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer);
-    const strictness = new WellFormedStrictness();
-    strictness.enforceBalancing = false;
-    const ctx = new TransactionContext(ledgerState, Static.blockContext(new Date(0)));
-    const vtx = tx.wellFormed(ledgerState, strictness, new Date(0));
-    const [newLedger, result] = ledgerState.apply(vtx, ctx);
-    ledgerState = newLedger.postBlockUpdate(new Date(0));
-    return { secretKeys, ledgerState, coinInfo, events: result.events };
-  }
-
-  function serializeEvents(events: Event[]): Uint8Array {
-    const parts = events.map((e) => e.serialize());
-    const totalLength = parts.reduce((acc, p) => acc + p.length, 0);
-    const result = new Uint8Array(totalLength);
-    let currentOffset = 0;
-    parts.forEach((part) => {
-      result.set(part, currentOffset);
-      currentOffset += part.length;
-    });
-    return result;
-  }
 
   test('merkleTreeRoot - blank tree has a defined bigint root', () => {
     const localState = new ZswapLocalState();
