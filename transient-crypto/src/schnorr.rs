@@ -73,8 +73,10 @@ pub fn sign<R: Rng + CryptoRng>(rng: &mut R, sk: EmbeddedFr, msg: &[Fr]) -> Schn
 
 /// Verifies a Schnorr signature over the Jubjub curve.
 pub fn verify(pk: EmbeddedGroupAffine, msg: &[Fr], sig: &SchnorrSignature) -> bool {
-    // Unwraps cannot fail as the inner curve is an edwards curve, and the
-    // identity is part of the curve (i.e., identity also has coordinates).
+    // A valid public key and announcement must not be the identity element.
+    if pk.is_identity() || sig.announcement.is_identity() {
+        return false;
+    }
     let pk_x = pk.x().unwrap();
     let pk_y = pk.y().unwrap();
 

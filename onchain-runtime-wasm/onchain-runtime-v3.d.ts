@@ -610,6 +610,11 @@ export function jubjubSampleScalar(): Value;
 export function jubjubScalarFromNative(native: Value): Value;
 
 /**
+ * Converts a JubJub scalar field element to a native field element (BLS12-381 scalar).
+ */
+export function nativeFromJubjubScalar(jubjub: Value): Value;
+
+/**
  * Internal conversion between field-aligned binary values and bigints within
  * the scalar field
  * @internal
