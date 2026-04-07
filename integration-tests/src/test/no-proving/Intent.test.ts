@@ -717,7 +717,7 @@ describe('Ledger API - Intent', () => {
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
     expect(tx.intents!.has(0)).toBe(true);
-    expect(tx.intents!.get(0)).toEqual(intent);
+    expect(tx.intents!.get(0)!.toString()).toEqual(intent.toString());
   });
 
   /**
@@ -737,7 +737,7 @@ describe('Ledger API - Intent', () => {
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
     expect(tx.intents!.has(1)).toBe(true);
-    expect(tx.intents!.get(1)).toEqual(intent);
+    expect(tx.intents!.get(1)!.toString()).toEqual(intent.toString());
   });
 
   /**
@@ -757,7 +757,7 @@ describe('Ledger API - Intent', () => {
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
     expect(tx.intents!.has(5)).toBe(true);
-    expect(tx.intents!.get(5)).toEqual(intent);
+    expect(tx.intents!.get(5)!.toString()).toEqual(intent.toString());
   });
 
   /**
