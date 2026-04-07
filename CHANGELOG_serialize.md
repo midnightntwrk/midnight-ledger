@@ -1,5 +1,9 @@
 # `serialize` Changelog
 
+## Version `1.1.0`
+
+- feat: add `tagged_deserialize_sequence`, which deserializes a sequence of tagged values
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation
