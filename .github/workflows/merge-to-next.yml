@@ -5,6 +5,9 @@ on:
   schedule:
     # Every Friday at 08:00 UTC
     - cron: "0 8 * * 5"
+  push:
+    branches:
+      - 'tkerber/fix-weekly-pr'
 
 jobs:
   create-merge-pr:
@@ -27,20 +30,27 @@ jobs:
             echo "has_changes=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create Pull Request
+      - name: Create merge branch and Pull Request
         if: steps.check.outputs.has_changes == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          MERGE_BRANCH="merge/ledger-8-into-ledger-9"
+
           # Check if an open PR already exists
-          existing=$(gh pr list --base ledger-9 --head ledger-8 --state open --json number --jq '.[0].number')
+          existing=$(gh pr list --base ledger-9 --head "$MERGE_BRANCH" --state open --json number --jq '.[0].number')
           if [ -n "$existing" ]; then
             echo "PR #$existing already open, skipping."
             exit 0
           fi
 
+          # Create a branch from ledger-8. The reviewer is responsible for
+          # merging ledger-9 into this branch to satisfy branch protection.
+          git checkout -b "$MERGE_BRANCH" ledger-8
+          git push origin "$MERGE_BRANCH" --force
+
           gh pr create \
             --base ledger-9 \
-            --head ledger-8 \
+            --head "$MERGE_BRANCH" \
             --title "Merge ledger-8 into ledger-9" \
             --body "Automated weekly PR to merge \`ledger-8\` into \`ledger-9\`."
