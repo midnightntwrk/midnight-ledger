@@ -32,6 +32,8 @@ pub use storage::Storage;
 
 mod cache;
 
+#[cfg(feature = "gc-v1")]
+mod gc;
 #[cfg(feature = "test-utilities")]
 pub mod test;
 

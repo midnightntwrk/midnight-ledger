@@ -106,14 +106,32 @@ impl StateBoundedMerkleTree {
 
     // path_for_leaf(leaf: AlignedValue): AlignedValue
     #[wasm_bindgen(js_name = "findPathForLeaf")]
-    pub fn find_path_for_leaf(&self, leaf: JsValue) -> Result<JsValue, JsError> {
+    pub fn find_path_for_leaf(
+        &self,
+        leaf: JsValue,
+        index_start: Option<u64>,
+        index_end: Option<u64>,
+        already_hashed: Option<bool>,
+    ) -> Result<JsValue, JsError> {
         let leaf: AlignedValue = from_value(leaf)?;
-        Ok(self
-            .0
-            .find_path_for_leaf(ValueReprAlignedValue(leaf))
-            .map(|v| to_value(&AlignedValue::from(v)))
-            .transpose()?
-            .unwrap_or(JsValue::UNDEFINED))
+        let bound = |idx| match idx {
+            Some(idx) => std::ops::Bound::Included(idx),
+            None => std::ops::Bound::Unbounded,
+        };
+        let range = (bound(index_start), bound(index_end));
+        let already_hashed = already_hashed.unwrap_or(false);
+        let res = if already_hashed {
+            let leaf_hash = base_crypto::hash::HashOutput::try_from(&*leaf.value)
+                .map_err(|_| JsError::new("failed to decode declared hash as 32-byte hash"))?;
+            self.0
+                .find_path_for_hashed_leaf_within_range(leaf_hash, range)
+                .map(|v| to_value(&AlignedValue::from(v)))
+        } else {
+            self.0
+                .find_path_for_leaf_within_range(ValueReprAlignedValue(leaf), range)
+                .map(|v| to_value(&AlignedValue::from(v)))
+        };
+        Ok(res.transpose()?.unwrap_or(JsValue::UNDEFINED))
     }
 
     // path_for_leaf(index: number, leaf: AlignedValue): AlignedValue
@@ -133,7 +151,7 @@ impl StateBoundedMerkleTree {
             index,
             &ValueReprAlignedValue(leaf),
             (),
-        )))
+        )?))
     }
 
     pub fn rehash(&self) -> StateBoundedMerkleTree {

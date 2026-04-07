@@ -263,6 +263,16 @@
           ];
           packages.proof-server-version = proof-server-version;
 
+          packages.integration-test-deps = pkgs.symlinkJoin {
+            name = "integration-test-deps";
+            paths = [
+              packages.proof-server
+              packages.onchain-runtime-wasm
+              packages.ledger-wasm
+              packages.zkir-wasm
+            ];
+          };
+
           packages.default = pkgs.symlinkJoin {
             name = "ledger-all";
             paths = [

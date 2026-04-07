@@ -740,6 +740,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                     StateValue::Map(m) => StateValue::Map(m.remove(&key)),
                     StateValue::BoundedMerkleTree(t) => StateValue::BoundedMerkleTree(
                         t.update_hash((&*key.value).try_into()?, Default::default(), ())
+                            .map_err(OnchainProgramError::MerkleTreeError)?
                             .rehash(),
                     ),
                     _ => {
@@ -988,7 +989,11 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                                         "attempt to ins cell that doesn't repr hash into bmt: {e}"
                                     ))
                                 })?;
-                                StateValue::BoundedMerkleTree(t.update_hash(idx, hash, ()).rehash())
+                                StateValue::BoundedMerkleTree(
+                                    t.update_hash(idx, hash, ())
+                                        .map_err(OnchainProgramError::MerkleTreeError)?
+                                        .rehash(),
+                                )
                             } else {
                                 return Err(OnchainProgramError::BoundsExceeded);
                             }
