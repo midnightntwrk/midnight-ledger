@@ -19,6 +19,7 @@ use std::convert::Infallible;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use storage::db::DB;
+use transient_crypto::merkle_tree;
 
 #[derive_where(Debug, Clone, PartialEq, Eq)]
 pub enum OnchainProgramError<D: DB> {
@@ -43,6 +44,7 @@ pub enum OnchainProgramError<D: DB> {
     },
     CellBoundExceeded,
     StackOverflow,
+    MerkleTreeError(merkle_tree::InvalidUpdate),
 }
 
 impl<D: DB> From<Infallible> for OnchainProgramError<D> {
@@ -100,6 +102,7 @@ impl<D: DB> Display for OnchainProgramError<D> {
                 f,
                 "exceeded the maximum bound for Impact stack: {MAX_STACK_HEIGHT}"
             ),
+            MerkleTreeError(msg) => write!(f, "merkle tree error: {msg}"),
         }
     }
 }
