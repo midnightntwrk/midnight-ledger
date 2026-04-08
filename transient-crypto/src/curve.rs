@@ -386,6 +386,8 @@ impl EmbeddedFr {
 
     /// Interpret a little-endian byte-string of at most 32 bytes as an [`EmbeddedFr`],
     /// reducing modulo the embedded scalar field order via wide reduction.
+    ///
+    /// Returns `None` if `bytes.len() > FR_BYTES`.
     pub fn from_le_bytes_wide(bytes: &[u8]) -> Option<Self> {
         if bytes.len() > FR_BYTES {
             return None;
