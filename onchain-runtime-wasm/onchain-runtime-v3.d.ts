@@ -599,6 +599,11 @@ export function proofDataIntoSerializedPreimage(
 export function bigIntModFr(x: bigint): bigint;
 
 /**
+ * Returns the largest representable JubJub scalar (i.e. the JubJub scalar field modulus minus one).
+ */
+export function maxJubjubScalar(): bigint;
+
+/**
  * Samples a random JubJub scalar, returned as a native field element.
  */
 export function jubjubSampleScalar(): Value;

@@ -240,6 +240,19 @@ pub fn bigint_mod_fr(x: BigInt) -> Result<BigInt, JsError> {
     value_to_bigint(bigint_to_value(x)?)
 }
 
+#[wasm_bindgen(js_name = "maxJubjubScalar")]
+/// Returns the largest representable JubJub scalar (i.e. the JubJub scalar field modulus minus one).
+pub fn max_jubjub_scalar() -> Result<BigInt, JsError> {
+    // -1 is the largest representable value in the JubJub scalar field
+    let mut bytes = (-EmbeddedFr::from(1u64)).as_le_bytes();
+    bytes.reverse();
+    BigInt::new(&JsString::from(format!(
+        "0x{}",
+        bytes.encode_hex::<String>()
+    )))
+    .map_err(|err| JsError::new(&String::from(err.to_string())))
+}
+
 #[wasm_bindgen(js_name = "valueToBigInt")]
 // function valueToBigInt(x: Value): BigInt
 pub fn value_to_bigint(x: JsValue) -> Result<BigInt, JsError> {
