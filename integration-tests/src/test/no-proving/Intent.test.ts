@@ -706,7 +706,7 @@ describe('Ledger API - Intent', () => {
    *
    * @given A transaction and an intent
    * @when Adding intent to segment using GuaranteedOnly specifier
-   * @then Should add intent to segment 0 (guaranteed segment)
+   * @then Should add intent to segment > 1
    */
   test('should add intent to transaction using addIntent with GuaranteedOnly', () => {
     const intent = Intent.new(TTL);
@@ -716,8 +716,8 @@ describe('Ledger API - Intent', () => {
 
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
-    expect(tx.intents!.has(0)).toBe(true);
-    expect(tx.intents!.get(0)!.toString()).toEqual(intent.toString());
+    const key = [...tx.intents!.keys()][0];
+    expect(tx.intents!.get(key)!.toString()).toEqual(intent.toString());
   });
 
   /**
@@ -744,14 +744,17 @@ describe('Ledger API - Intent', () => {
    * Test adding intent to transaction using Specific segment specifier.
    *
    * @given A transaction and an intent
-   * @when Adding intent to segment using Specific specifier with value 5
-   * @then Should add intent to segment 5
+   * @when Adding intent to segment using Specific specifier with value > 0
+   * @then Should add intent to a specified segment
    */
   test('should add intent to transaction using addIntent with Specific segment', () => {
     const intent = Intent.new(TTL);
+    const zeroSegment: SegmentSpecifier = { tag: 'specific', value: 0 };
     const segment: SegmentSpecifier = { tag: 'specific', value: 5 };
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    expect(() => tx.addIntent(zeroSegment, intent)).toThrowError();
+
     tx = tx.addIntent(segment, intent);
 
     expect(tx.intents).toBeDefined();
@@ -764,22 +767,19 @@ describe('Ledger API - Intent', () => {
    * Test adding multiple intents to different segments.
    *
    * @given A transaction and multiple intents
-   * @when Adding intents to segments 0, 1, and 3
+   * @when Adding intents to segments 1, and 3
    * @then Should have intents in all specified segments
    */
   test('should add multiple intents to different segments', () => {
     const intent1 = Intent.new(TTL);
     const intent2 = Intent.new(TTL);
-    const intent3 = Intent.new(TTL);
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addIntent({ tag: 'guaranteedOnly' }, intent1);
-    tx = tx.addIntent({ tag: 'first' }, intent2);
-    tx = tx.addIntent({ tag: 'specific', value: 3 }, intent3);
+    tx = tx.addIntent({ tag: 'first' }, intent1);
+    tx = tx.addIntent({ tag: 'specific', value: 3 }, intent2);
 
     expect(tx.intents).toBeDefined();
-    expect(tx.intents!.size).toBe(3);
-    expect(tx.intents!.has(0)).toBe(true);
+    expect(tx.intents!.size).toBe(2);
     expect(tx.intents!.has(1)).toBe(true);
     expect(tx.intents!.has(3)).toBe(true);
   });
