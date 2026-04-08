@@ -719,6 +719,11 @@ describe('Ledger API - Intent', () => {
     const deployIntent = intent.addDeploy(contractDeploy);
     expect(() => tx.addIntent(segment, deployIntent)).toThrowError();
 
+    const intentWithOffer = Intent.new(TTL);
+    const fallibleOffer = getNewUnshieldedOffer();
+    intentWithOffer.fallibleUnshieldedOffer = fallibleOffer;
+    expect(() => tx.addIntent(segment, intentWithOffer)).toThrowError();
+
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
     const key = [...tx.intents!.keys()][0];
