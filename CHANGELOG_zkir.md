@@ -1,5 +1,7 @@
 # `zkir` Changelog
 
+- bugfix: make `TestEq`, `ConstrainEq`, and `CondSelect` polymorphic over `Native` and `JubjubPoint` types (previously crashed on `JubjubPoint` inputs)
+
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes
