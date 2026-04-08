@@ -1151,17 +1151,17 @@ describe('Ledger API - Transaction', () => {
   });
 
   /**
-   * Test adding offer to transaction using addOffer with GuaranteedOnly.
+   * Test adding offer to transaction using addZswapOffer with GuaranteedOnly.
    *
    * @given A transaction and an unshielded offer
    * @when Adding offer using GuaranteedOnly specifier
    * @then Should set the guaranteed offer on the transaction
    */
-  test('should add offer to transaction using addOffer with GuaranteedOnly', () => {
+  test('should add offer to transaction using addZswapOffer with GuaranteedOnly', () => {
     const offer = Static.unprovenOfferFromOutput(0);
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer(GUARANTEED_ONLY_SPECIFIER, offer);
+    tx = tx.addZswapOffer(GUARANTEED_ONLY_SPECIFIER, offer);
 
     expect(tx.guaranteedOffer).toBeDefined();
     expect(tx.guaranteedOffer?.toString()).toEqual(offer.toString());
@@ -1174,11 +1174,11 @@ describe('Ledger API - Transaction', () => {
    * @when Adding offer using First specifier
    * @then Should add offer to fallible segment 1
    */
-  test('should add offer to transaction using addOffer with First', () => {
+  test('should add offer to transaction using addZswapOffer with First', () => {
     const offer = Static.unprovenOfferFromOutput(1);
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer(FIRST_SEGMENT_SPECIFIER, offer);
+    tx = tx.addZswapOffer(FIRST_SEGMENT_SPECIFIER, offer);
 
     expect(tx.fallibleOffer).toBeDefined();
     expect(tx.fallibleOffer!.size).toBe(1);
@@ -1192,11 +1192,11 @@ describe('Ledger API - Transaction', () => {
    * @when Adding offer using Specific specifier with value 2
    * @then Should add offer to fallible segment 2
    */
-  test('should add offer to transaction using addOffer with Specific segment', () => {
+  test('should add offer to transaction using addZswapOffer with Specific segment', () => {
     const offer = Static.unprovenOfferFromOutput(2);
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer(SPECIFIC_VALUE_SPECIFIER, offer);
+    tx = tx.addZswapOffer(SPECIFIC_VALUE_SPECIFIER, offer);
 
     expect(tx.fallibleOffer).toBeDefined();
     expect(tx.fallibleOffer!.size).toBe(1);
@@ -1216,9 +1216,9 @@ describe('Ledger API - Transaction', () => {
     const offer3 = Static.unprovenOfferFromOutput(10);
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer({ tag: 'guaranteedOnly' }, offer1);
-    tx = tx.addOffer({ tag: 'first' }, offer2);
-    tx = tx.addOffer({ tag: 'specific', value: 10 }, offer3);
+    tx = tx.addZswapOffer({ tag: 'guaranteedOnly' }, offer1);
+    tx = tx.addZswapOffer({ tag: 'first' }, offer2);
+    tx = tx.addZswapOffer({ tag: 'specific', value: 10 }, offer3);
 
     expect(tx.guaranteedOffer).toBeDefined();
     expect(tx.fallibleOffer).toBeDefined();
@@ -1239,10 +1239,10 @@ describe('Ledger API - Transaction', () => {
     const segment: SegmentSpecifier = { tag: 'first' };
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer(segment, offer);
+    tx = tx.addZswapOffer(segment, offer);
     expect(tx.fallibleOffer!.has(1)).toBe(true);
 
-    tx = tx.addOffer(segment, undefined);
+    tx = tx.addZswapOffer(segment, undefined);
     expect(tx.fallibleOffer).toBeUndefined();
   });
 
@@ -1258,7 +1258,7 @@ describe('Ledger API - Transaction', () => {
     const segment: SegmentSpecifier = { tag: 'specific', value: 0 };
 
     const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    expect(() => tx.addOffer(segment, offer)).toThrow('illegal manual specification of segment 0');
+    expect(() => tx.addZswapOffer(segment, offer)).toThrow('illegal manual specification of segment 0');
   });
 
   /**
@@ -1268,12 +1268,12 @@ describe('Ledger API - Transaction', () => {
    * @when Adding offer using Random specifier
    * @then Should add offer to a random fallible segment between 2 and 65535
    */
-  test('should add offer to random segment using addOffer with Random', () => {
+  test('should add offer to random segment using addZswapOffer with Random', () => {
     const offer = Static.unprovenOfferFromOutput(10);
     const segment: SegmentSpecifier = { tag: 'random' };
 
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    tx = tx.addOffer(segment, offer);
+    tx = tx.addZswapOffer(segment, offer);
 
     expect(tx.fallibleOffer).toBeDefined();
     expect(tx.fallibleOffer!.size).toBe(1);

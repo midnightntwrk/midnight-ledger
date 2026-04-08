@@ -841,8 +841,8 @@ impl Transaction {
         Ok(())
     }
 
-    #[wasm_bindgen(js_name = "addOffer")]
-    pub fn add_offer(
+    #[wasm_bindgen(js_name = "addZswapOffer")]
+    pub fn add_zswap_offer(
         &mut self,
         segment: JsValue,
         raw_offer: JsValue,

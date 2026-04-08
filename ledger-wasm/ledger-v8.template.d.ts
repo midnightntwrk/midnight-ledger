@@ -1253,7 +1253,7 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
    *
    * @throws If called on bound transactions.
    */
-  addOffer(
+  addZswapOffer(
     segment: SegmentSpecifier,
     offer: UnprovenOffer | undefined,
   ): Transaction<S, P, B>;
