@@ -29,8 +29,8 @@ use hex::ToHex;
 use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
 use ledger::construct::SegmentSpecifier;
 use ledger::structure::{
-    BindingKind, ContractAction, PedersenDowngradeable, ProofKind, ProofMarker,
-    ProofPreimageMarker, ProofVersioned, SignatureKind,
+    BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
+    ProofVersioned, SignatureKind,
 };
 use onchain_runtime::state::EntryPointBuf;
 use onchain_runtime_wasm::context::CostModel;
@@ -1062,14 +1062,16 @@ impl Transaction {
             SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
             SegmentSpecifier::GuaranteedOnly => {
                 // verify there are no fallible transcripts, fallible offers, or contract deployments present
-                let tx = get_dyn_transaction(self.0.clone());
-                if tx.has_fallible_transcripts()
-                    || tx.has_fallible_offers()
-                    || tx.has_contract_deployments()
-                {
-                    return Err(JsError::new(
-                        "cannot use guaranteed segment with fallible transactions, offers, or contract deployments",
-                    ));
+                if intent.is_some() {
+                    let intent = intent.as_ref().unwrap();
+                    if intent.has_contract_deployments()
+                        || intent.has_fallible_transcripts()
+                        || intent.has_fallible_offers()
+                    {
+                        return Err(JsError::new(
+                            "cannot use guaranteed segment with fallible transactions, offers, or contract deployments",
+                        ));
+                    }
                 }
                 OsRng.gen_range(2..u16::MAX)
             }
@@ -1212,9 +1214,6 @@ pub(crate) trait Transactionable {
         tblock: &Date,
     ) -> Result<VerifiedTransaction, JsError>;
     fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB>;
-    fn has_fallible_transcripts(&self) -> bool;
-    fn has_fallible_offers(&self) -> bool;
-    fn has_contract_deployments(&self) -> bool;
 }
 
 impl<
@@ -1374,40 +1373,6 @@ where
     }
     fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB> {
         self.erase_proofs().erase_signatures()
-    }
-
-    fn has_fallible_transcripts(&self) -> bool {
-        match &self {
-            ledger::structure::Transaction::Standard(stx) => stx.intents.values().any(|intent| {
-                intent
-                    .actions
-                    .iter()
-                    .any(|action| matches!(&*action, ContractAction::Call(call) if call.fallible_transcript.is_some()))
-            }),
-            ledger::structure::Transaction::ClaimRewards(_) => false,
-        }
-    }
-
-    fn has_fallible_offers(&self) -> bool {
-        match &self {
-            ledger::structure::Transaction::Standard(stx) => stx
-                .intents
-                .values()
-                .any(|intent| intent.fallible_unshielded_offer.is_some()),
-            ledger::structure::Transaction::ClaimRewards(_) => false,
-        }
-    }
-
-    fn has_contract_deployments(&self) -> bool {
-        match &self {
-            ledger::structure::Transaction::Standard(stx) => stx.intents.values().any(|intent| {
-                intent
-                    .actions
-                    .iter()
-                    .any(|action| matches!(*action, ContractAction::Deploy(_)))
-            }),
-            ledger::structure::Transaction::ClaimRewards(_) => false,
-        }
     }
 }
 

@@ -714,6 +714,11 @@ describe('Ledger API - Intent', () => {
     let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
     tx = tx.addIntent(segment, intent);
 
+    // verify we can't add intent with fallible transcripts, fallible offers, or contract deployments present
+    const contractDeploy = new ContractDeploy(new ContractState());
+    const deployIntent = intent.addDeploy(contractDeploy);
+    expect(() => tx.addIntent(segment, deployIntent)).toThrowError();
+
     expect(tx.intents).toBeDefined();
     expect(tx.intents!.size).toBe(1);
     const key = [...tx.intents!.keys()][0];
