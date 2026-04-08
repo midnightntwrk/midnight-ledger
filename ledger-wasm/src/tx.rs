@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
+use crate::events::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
 use crate::transcript::PreTranscript;
