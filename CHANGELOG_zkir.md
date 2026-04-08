@@ -3,6 +3,7 @@
 ## Unreleased
 
 - feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
+- bugfix: make `TestEq`, `ConstrainEq`, and `CondSelect` polymorphic over `Native` and `JubjubPoint` types (previously crashed on `JubjubPoint` inputs)
 
 ## Version `2.1.0`
 
