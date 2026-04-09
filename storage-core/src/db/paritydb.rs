@@ -103,7 +103,7 @@ impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> ParityDb<H, COLUMN_OFFSET> {
 
         let mut options = parity_db::Options::with_columns(path, NUM_COLUMNS);
 
-        Self::set_init_options(&mut options);
+        Self::set_init_options(&mut options, false);
 
         let db = parity_db::Db::open_or_create(&options).unwrap_or_else(|e| {
             panic!(
@@ -128,14 +128,16 @@ impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> ParityDb<H, COLUMN_OFFSET> {
     }
 
     /// Sets parity_db Options for midnight-storage compatibility.
-    pub fn set_init_options(options: &mut parity_db::Options) {
+    pub fn set_init_options(options: &mut parity_db::Options, use_compression: bool) {
         // Add indexes to all columns - we need this to be able to iterate over them
         options.columns[(COLUMN_OFFSET + GC_ROOT_COLUMN) as usize].btree_index = true;
         // NOTE: Hardcoded because the constant is behind a feature flag.
         options.columns[(COLUMN_OFFSET + 2) as usize].btree_index = true;
         options.columns[(COLUMN_OFFSET + NODE_COLUMN) as usize].btree_index = true;
-        options.columns[(COLUMN_OFFSET + NODE_COLUMN) as usize].compression =
-            parity_db::CompressionType::Lz4;
+        if use_compression {
+            options.columns[(COLUMN_OFFSET + NODE_COLUMN) as usize].compression =
+                parity_db::CompressionType::Lz4;
+        }
     }
 }
 
