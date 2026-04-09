@@ -183,11 +183,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&guaranteed)?
         };
-        if guaranteed.is_some()
-            && !matches!(
-                guaranteed.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref guaranteed) = guaranteed
+            && !matches!(guaranteed.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Guaranteed offer must be unproven."));
         }
@@ -197,11 +194,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&fallible)?
         };
-        if fallible.is_some()
-            && !matches!(
-                fallible.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref fallible) = fallible
+            && !matches!(fallible.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Fallible offer must be unproven."));
         }
@@ -211,9 +205,9 @@ impl Transaction {
         } else {
             Intent::try_ref(&intent)?
         };
-        if intent.is_some()
+        if let Some(ref intent) = intent
             && !matches!(
-                intent.as_ref().unwrap().0,
+                intent.0,
                 IntentTypes::UnprovenWithSignaturePreBinding(_)
                     | IntentTypes::UnprovenWithSignatureErasedPreBinding(_)
             )
@@ -255,11 +249,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&guaranteed)?
         };
-        if guaranteed.is_some()
-            && !matches!(
-                guaranteed.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref guaranteed) = guaranteed
+            && !matches!(guaranteed.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Guaranteed offer must be unproven."));
         }
@@ -269,11 +260,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&fallible)?
         };
-        if fallible.is_some()
-            && !matches!(
-                fallible.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref fallible) = fallible
+            && !matches!(fallible.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Fallible offer must be unproven."));
         }
@@ -283,9 +271,9 @@ impl Transaction {
         } else {
             Intent::try_ref(&intent)?
         };
-        if intent.is_some()
+        if let Some(ref intent) = intent
             && !matches!(
-                intent.as_ref().unwrap().0,
+                intent.0,
                 IntentTypes::UnprovenWithSignaturePreBinding(_)
                     | IntentTypes::UnprovenWithSignatureErasedPreBinding(_)
             )
@@ -1062,16 +1050,14 @@ impl Transaction {
             SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
             SegmentSpecifier::GuaranteedOnly => {
                 // verify there are no fallible transcripts, fallible offers, or contract deployments present
-                if intent.is_some() {
-                    let intent = intent.as_ref().unwrap();
-                    if intent.has_contract_deployments()
+                if let Some(ref intent) = intent
+                    && (intent.has_contract_deployments()
                         || intent.has_fallible_transcripts()
-                        || intent.has_fallible_offers()
-                    {
-                        return Err(JsError::new(
-                            "cannot use guaranteed segment with fallible transactions, offers, or contract deployments",
-                        ));
-                    }
+                        || intent.has_fallible_offers())
+                {
+                    return Err(JsError::new(
+                        "cannot use guaranteed segment with fallible transactions, offers, or contract deployments",
+                    ));
                 }
                 OsRng.gen_range(2..u16::MAX)
             }
