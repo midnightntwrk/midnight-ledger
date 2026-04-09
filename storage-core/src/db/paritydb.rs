@@ -31,27 +31,30 @@ use super::{DB, DummyArbitrary, Update};
 // Different value to Substrate: polkadot-sdk/substrate/client/db/src/utils.rs
 // This means the `storage` database must be stored in a different file
 // NOTE: We stay at 3 columns even with layout v2, to reserve a column for future GC purposes
-const NUM_COLUMNS: u8 = 3;
-const NODE_COLUMN: u8 = 0;
-const GC_ROOT_COLUMN: u8 = 1;
+/// Number of columns used for ParityDb instance
+pub const NUM_COLUMNS: u8 = 3;
+/// Column index for storing storage nodes
+pub const NODE_COLUMN: u8 = 0;
+/// Column index for storing reference counts
+pub const GC_ROOT_COLUMN: u8 = 1;
 #[cfg(not(feature = "layout-v2"))]
-// Column to track which nodes have a ref count of zero
-const REF_COUNT_ZERO: u8 = 2;
+/// Column to track which nodes have a ref count of zero
+pub const REF_COUNT_ZERO: u8 = 2;
 
 /// A database back-end using the `ParityDB` library.
-pub struct ParityDb<H: WellBehavedHasher = DefaultHasher> {
+pub struct ParityDb<H: WellBehavedHasher = DefaultHasher, const COLUMN_OFFSET: u8 = 0> {
     db: parity_db::Db,
     _phantom: std::marker::PhantomData<H>,
 }
 
-impl<H: WellBehavedHasher> Default for ParityDb<H> {
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> Default for ParityDb<H, COLUMN_OFFSET> {
     fn default() -> Self {
         let dir = tempfile::TempDir::new().unwrap().keep();
         Self::open(&dir)
     }
 }
 
-impl<H: WellBehavedHasher> Debug for ParityDb<H> {
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> Debug for ParityDb<H, COLUMN_OFFSET> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ParityDb")
             .field("db", &"no-debug".to_string())
@@ -79,7 +82,7 @@ fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaHash<H> 
     ArenaHash(GenericArray::from_iter(key_bytes))
 }
 
-impl<H: WellBehavedHasher> ParityDb<H> {
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> ParityDb<H, COLUMN_OFFSET> {
     /// Open a new `ParityDB` at the given *directory* path.
     ///
     /// The on-disk representation of the database is a collection of files, so
@@ -99,11 +102,9 @@ impl<H: WellBehavedHasher> ParityDb<H> {
         }
 
         let mut options = parity_db::Options::with_columns(path, NUM_COLUMNS);
-        // Add indexes to all columns - we need this to be able to iterate over them
-        options.columns[GC_ROOT_COLUMN as usize].btree_index = true;
-        // NOTE: Hardcoded because the constant is behind a feature flag.
-        options.columns[2].btree_index = true;
-        options.columns[NODE_COLUMN as usize].btree_index = true;
+
+        Self::set_init_options(&mut options);
+
         let db = parity_db::Db::open_or_create(&options).unwrap_or_else(|e| {
             panic!(
                 "parity-db open error: {e}. Note: Check db isn't already open. Path: {}",
@@ -116,11 +117,31 @@ impl<H: WellBehavedHasher> ParityDb<H> {
             _phantom: PhantomData,
         }
     }
+
+    /// Initialize using an existing ParityDB database instance. Database options MUST first be
+    /// set using `set_init_options`.
+    pub fn from_existing_db(db: parity_db::Db) -> Self {
+        Self {
+            db,
+            _phantom: Default::default(),
+        }
+    }
+
+    /// Sets parity_db Options for midnight-storage compatibility.
+    pub fn set_init_options(options: &mut parity_db::Options) {
+        // Add indexes to all columns - we need this to be able to iterate over them
+        options.columns[(COLUMN_OFFSET + GC_ROOT_COLUMN) as usize].btree_index = true;
+        // NOTE: Hardcoded because the constant is behind a feature flag.
+        options.columns[(COLUMN_OFFSET + 2) as usize].btree_index = true;
+        options.columns[(COLUMN_OFFSET + NODE_COLUMN) as usize].btree_index = true;
+        options.columns[(COLUMN_OFFSET + NODE_COLUMN) as usize].compression =
+            parity_db::CompressionType::Lz4;
+    }
 }
 
 #[cfg(feature = "proptest")]
 /// A dummy Arbitrary impl for `ParityDb` to allow for deriving Arbitrary on Sp<T, D>
-impl<H: WellBehavedHasher> Arbitrary for ParityDb<H> {
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> Arbitrary for ParityDb<H, COLUMN_OFFSET> {
     type Parameters = ();
     type Strategy = DummyDBStrategy<Self>;
 
@@ -129,9 +150,9 @@ impl<H: WellBehavedHasher> Arbitrary for ParityDb<H> {
     }
 }
 
-impl<H: WellBehavedHasher> DummyArbitrary for ParityDb<H> {}
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> DummyArbitrary for ParityDb<H, COLUMN_OFFSET> {}
 
-impl<H: WellBehavedHasher> DB for ParityDb<H> {
+impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> DB for ParityDb<H, COLUMN_OFFSET> {
     type Hasher = H;
     #[cfg(feature = "gc-v1")]
     type ScanResumeHandle = Vec<u8>;
@@ -139,7 +160,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     /// Note: If the key was recently deleted, this may still return Some(_).
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>> {
         self.db
-            .get(NODE_COLUMN, &key.0)
+            .get(COLUMN_OFFSET + NODE_COLUMN, &key.0)
             .expect("failed to get from db")
             .map(|bytes| {
                 OnDiskObject::<Self::Hasher>::deserialize(&mut &bytes[..], 0)
@@ -151,7 +172,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     fn get_unreachable_keys(&self) -> Vec<ArenaHash<Self::Hasher>> {
         let mut it = self
             .db
-            .iter(REF_COUNT_ZERO)
+            .iter(COLUMN_OFFSET + REF_COUNT_ZERO)
             .expect("Failed to iterate over db");
 
         let mut keys = Vec::new();
@@ -176,7 +197,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
         )];
         #[cfg(not(feature = "layout-v2"))]
         ops.push((
-            REF_COUNT_ZERO,
+            COLUMN_OFFSET + REF_COUNT_ZERO,
             if object.ref_count == 0 {
                 parity_db::Operation::Set(key.0.to_vec(), vec![])
             } else {
@@ -189,12 +210,12 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     fn delete_node(&mut self, key: &crate::arena::ArenaHash<Self::Hasher>) {
         #[allow(unused_mut, reason = "for feature flags")]
         let mut ops = vec![(
-            NODE_COLUMN,
+            COLUMN_OFFSET + NODE_COLUMN,
             parity_db::Operation::Dereference(key.0.to_vec()),
         )];
         #[cfg(not(feature = "layout-v2"))]
         ops.push((
-            REF_COUNT_ZERO,
+            COLUMN_OFFSET + REF_COUNT_ZERO,
             parity_db::Operation::Dereference(key.0.to_vec()),
         ));
         self.db.commit_changes(ops).expect("Failed to commit to db");
@@ -209,12 +230,12 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
             match update {
                 Update::InsertNode(object) => {
                     ops.push((
-                        NODE_COLUMN,
+                        COLUMN_OFFSET + NODE_COLUMN,
                         parity_db::Operation::Set(key.0.to_vec(), serialize_node(&object)),
                     ));
                     #[cfg(not(feature = "layout-v2"))]
                     ops.push((
-                        REF_COUNT_ZERO,
+                        COLUMN_OFFSET + REF_COUNT_ZERO,
                         if object.ref_count == 0 {
                             parity_db::Operation::Set(key.0.to_vec(), vec![])
                         } else {
@@ -224,7 +245,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                 }
                 Update::SetRootCount(count) => {
                     ops.push((
-                        GC_ROOT_COLUMN,
+                        COLUMN_OFFSET + GC_ROOT_COLUMN,
                         if count == 0 {
                             parity_db::Operation::Dereference(key.0.to_vec())
                         } else {
@@ -234,12 +255,12 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
                 }
                 Update::DeleteNode => {
                     ops.push((
-                        NODE_COLUMN,
+                        COLUMN_OFFSET + NODE_COLUMN,
                         parity_db::Operation::Dereference(key.0.to_vec()),
                     ));
                     #[cfg(not(feature = "layout-v2"))]
                     ops.push((
-                        REF_COUNT_ZERO,
+                        COLUMN_OFFSET + REF_COUNT_ZERO,
                         parity_db::Operation::Dereference(key.0.to_vec()),
                     ));
                 }
@@ -260,7 +281,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
 
     fn get_root_count(&self, key: &crate::arena::ArenaHash<Self::Hasher>) -> u32 {
         self.db
-            .get(GC_ROOT_COLUMN, &key.0)
+            .get(COLUMN_OFFSET + GC_ROOT_COLUMN, &key.0)
             .expect("failed to get from db")
             .map(|bytes| {
                 u32::from_le_bytes(bytes.try_into().expect("gc root count should be 4 bytes"))
@@ -270,7 +291,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
 
     fn set_root_count(&mut self, key: ArenaHash<Self::Hasher>, count: u32) {
         let ops = vec![(
-            GC_ROOT_COLUMN,
+            COLUMN_OFFSET + GC_ROOT_COLUMN,
             if count == 0 {
                 parity_db::Operation::Dereference(key.0.to_vec())
             } else {
@@ -283,7 +304,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     fn get_roots(&self) -> HashMap<ArenaHash<Self::Hasher>, u32> {
         let mut it = self
             .db
-            .iter(GC_ROOT_COLUMN)
+            .iter(COLUMN_OFFSET + GC_ROOT_COLUMN)
             .expect("Failed to iterate over db");
 
         let mut map = HashMap::new();
@@ -298,7 +319,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     fn size(&self) -> usize {
         let mut it = self
             .db
-            .iter(NODE_COLUMN)
+            .iter(COLUMN_OFFSET + NODE_COLUMN)
             .expect("Failed to iterate over db");
 
         let mut count = 0;
@@ -323,7 +344,7 @@ impl<H: WellBehavedHasher> DB for ParityDb<H> {
     ) {
         let mut it = self
             .db
-            .iter(NODE_COLUMN)
+            .iter(COLUMN_OFFSET + NODE_COLUMN)
             .expect("Failed to iterate over db");
         if let Some(handle) = resume_from {
             it.seek(&handle).expect("Failed to seek db iterator");
