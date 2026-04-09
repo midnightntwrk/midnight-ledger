@@ -17,14 +17,24 @@ set -e
 VERSION=$(cat static/version)
 FILES_ZSWAP=$(echo "$MIDNIGHT_PP/zswap/$VERSION"/*.{prover,verifier,bzkir})
 FILES_DUST=$(echo "$MIDNIGHT_PP/dust/$VERSION"/*.{prover,verifier,bzkir})
-FILESTORE="s3://midnight-s3-fileshare-dev-eu-west-1"
-for file in $FILES_ZSWAP; do
-  NAME=$(basename "$file")
-  echo ":: $file -> $FILESTORE/zswap/$VERSION/$NAME"
-  aws s3 cp "$file" "$FILESTORE/zswap/$VERSION/$NAME"
-done
-for file in $FILES_DUST; do
-  NAME=$(basename "$file")
-  echo ":: $file -> $FILESTORE/dust/$VERSION/$NAME"
-  aws s3 cp "$file" "$FILESTORE/dust/$VERSION/$NAME"
+# Old bucket (legacy, to be decommissioned)
+FILESTORE_OLD="s3://midnight-s3-fileshare-dev-eu-west-1"
+# New bucket (behind srs.midnight.network via CloudFront)
+FILESTORE_NEW="s3://stl-euw1-mainnet-srs-download"
+
+FILESTORES=("$FILESTORE_OLD" "$FILESTORE_NEW")
+
+for FILESTORE in "${FILESTORES[@]}"; do
+  echo ""
+  echo "=== Uploading to $FILESTORE ==="
+  for file in $FILES_ZSWAP; do
+    NAME=$(basename "$file")
+    echo ":: $file -> $FILESTORE/zswap/$VERSION/$NAME"
+    aws s3 cp "$file" "$FILESTORE/zswap/$VERSION/$NAME"
+  done
+  for file in $FILES_DUST; do
+    NAME=$(basename "$file")
+    echo ":: $file -> $FILESTORE/dust/$VERSION/$NAME"
+    aws s3 cp "$file" "$FILESTORE/dust/$VERSION/$NAME"
+  done
 done
