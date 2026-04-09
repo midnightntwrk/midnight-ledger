@@ -1,0 +1,31 @@
+name: Test SRS S3 Upload
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  test-s3-access:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::903367786860:role/MidnightLedgerSrsUploadRole
+          aws-region: eu-west-1
+
+      - name: Verify identity
+        run: aws sts get-caller-identity
+
+      - name: List bucket contents
+        run: aws s3 ls s3://stl-euw1-mainnet-srs-download/ --human-readable | head -20
+
+      - name: Test upload and cleanup
+        run: |
+          echo "test-upload-$(date +%s)" > /tmp/test-srs-upload.txt
+          aws s3 cp /tmp/test-srs-upload.txt s3://stl-euw1-mainnet-srs-download/_test-upload-canary
+          aws s3 rm s3://stl-euw1-mainnet-srs-download/_test-upload-canary
+          echo "Upload and cleanup successful"
