@@ -1,7 +1,7 @@
 name: Test SRS S3 Upload
 
 on:
-  workflow_dispatch:
+  push:
 
 permissions:
   id-token: write
