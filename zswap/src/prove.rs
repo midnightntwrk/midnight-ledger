@@ -238,7 +238,7 @@ mod tests {
         let coin = CoinInfo::from(&qcoin);
         let recipient = Recipient::Contract(Default::default());
         let tree = MerkleTree::<(), InMemoryDB>::blank(32)
-            .update_hash(0, coin.commitment(&recipient).0, ())
+            .try_update_hash(0, coin.commitment(&recipient).0, ())
             .expect("updating hash on non-collapsed tree should always succeed")
             .rehash();
 
