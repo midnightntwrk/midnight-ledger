@@ -1249,6 +1249,26 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   ): Transaction<S, P, B>;
 
   /**
+   * Adds Zswap offer to the segment specified.
+   *
+   * @throws If called on bound transactions.
+   */
+  addZswapOffer(
+    segment: SegmentSpecifier,
+    offer: UnprovenOffer | undefined,
+  ): Transaction<S, P, B>;
+
+  /**
+   * Adds provided intent to the segment specified.
+   *
+   * @throws If called on bound transactions.
+   */
+  addIntent(
+    segment: SegmentSpecifier,
+    intent: Intent<S, P, B> | undefined,
+  ): Transaction<S, P, B>;
+
+  /**
    * Erases the proofs contained in this transaction
    */
   eraseProofs(): Transaction<S, NoProof, NoBinding>;
