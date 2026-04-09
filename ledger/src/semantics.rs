@@ -294,7 +294,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     acc.result.merkle_tree =
                         acc.result
                             .merkle_tree
-                            .update_hash(*mt_index, commitment.0, ())?;
+                            .try_update_hash(*mt_index, commitment.0, ())?;
                     acc.result.first_free += 1;
                     let maybe_change = if let Some(ci) = acc.result.pending_outputs.get(commitment)
                     {
@@ -427,7 +427,7 @@ impl<D: DB> LedgerState<D> {
                 coin_coms: self
                     .zswap
                     .coin_coms
-                    .update(self.zswap.first_free, &cm, None)
+                    .try_update(self.zswap.first_free, &cm, None)
                     .map_err(SystemTransactionError::MerkleTreeError)?,
                 coin_coms_set: self.zswap.coin_coms_set.insert(cm, ()),
                 first_free: self.zswap.first_free + 1,
@@ -861,7 +861,7 @@ impl<D: DB> LedgerState<D> {
                             dust_state.generation.generating_tree = dust_state
                                 .generation
                                 .generating_tree
-                                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
                                 .map_err(SystemTransactionError::MerkleTreeError)?
                                 .rehash();
                             event_push(EventDetails::DustGenerationDtimeUpdate {
