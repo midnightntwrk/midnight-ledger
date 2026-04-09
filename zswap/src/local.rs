@@ -96,7 +96,7 @@ impl<D: DB> State<D> {
             coins: self.coins.insert(nullifier, qcoin),
             merkle_tree: self
                 .merkle_tree
-                .update_hash(
+                .try_update_hash(
                     self.first_free,
                     coin.commitment(&Recipient::User(secret_keys.coin_public_key()))
                         .0,
@@ -124,7 +124,7 @@ impl<D: DB> State<D> {
         let mut res = self.clone();
         res.merkle_tree = res
             .merkle_tree
-            .update_hash(
+            .try_update_hash(
                 res.first_free,
                 tx.coin.commitment(&Recipient::User(tx.recipient)).0,
                 (),
@@ -185,7 +185,7 @@ impl<D: DB> State<D> {
         {
             res.merkle_tree = res
                 .merkle_tree
-                .update_hash(res.first_free, coin_com.0, ())?;
+                .try_update_hash(res.first_free, coin_com.0, ())?;
             if let Some(ci) = ciph.as_ref().and_then(|ciph| secret_keys.try_decrypt(ciph)) {
                 info!(coin=?ci, "received coin");
                 let qci = ci.qualify(res.first_free);
@@ -279,7 +279,7 @@ impl<D: DB> State<D> {
         output: Output<ProofPreimage, D>,
     ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
         let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)
-            .update_hash(0, output.coin_com.0, ())
+            .try_update_hash(0, output.coin_com.0, ())
             .map_err(OfferCreationFailed::MerkleTreeError)?
             .rehash();
         let (res, input) = self.spend_from_tree(rng, secret_keys, coin, segment, &tree)?;

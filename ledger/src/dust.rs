@@ -965,7 +965,7 @@ impl<D: DB> DustState<D> {
         state.utxo.commitments = state
             .utxo
             .commitments
-            .update_hash(
+            .try_update_hash(
                 self.utxo.commitments_first_free,
                 spend.new_commitment.into(),
                 (),
@@ -1097,7 +1097,7 @@ impl<D: DB> DustState<D> {
         state.utxo.commitments = state
             .utxo
             .commitments
-            .update_hash(
+            .try_update_hash(
                 state.utxo.commitments_first_free,
                 dust_commitment.into(),
                 (),
@@ -1118,7 +1118,7 @@ impl<D: DB> DustState<D> {
         state.generation.generating_tree = state
             .generation
             .generating_tree
-            .update_hash(
+            .try_update_hash(
                 state.generation.generating_tree_first_free,
                 gen_info.merkle_hash(),
                 gen_info,
@@ -1220,7 +1220,7 @@ impl<D: DB> DustState<D> {
             state.generation.generating_tree = state
                 .generation
                 .generating_tree
-                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
                 .map_err(TransactionInvalid::MerkleTreeError)?
                 .rehash();
             event_push(EventDetails::DustGenerationDtimeUpdate {
@@ -1544,7 +1544,7 @@ impl<D: DB> DustLocalState<D> {
 
         state.generating_tree = state
             .generating_tree
-            .update_hash(generation_index, gen_info.merkle_hash(), gen_info)
+            .try_update_hash(generation_index, gen_info.merkle_hash(), gen_info)
             .map_err(DustLocalStateError::MerkleTreeError)?;
         state.generating_tree_first_free += 1;
         if let Some(initial_nonce) = initial_nonce {
@@ -1627,7 +1627,7 @@ impl<D: DB> DustLocalState<D> {
 
         state.commitment_tree = state
             .commitment_tree
-            .update_hash(commitment_index, qdo.commitment().into(), ())
+            .try_update_hash(commitment_index, qdo.commitment().into(), ())
             .map_err(DustLocalStateError::MerkleTreeError)?;
         state.commitment_tree_first_free += 1;
         if !own_qdo {
@@ -1887,7 +1887,11 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.generating_tree = acc
                             .result
                             .generating_tree
-                            .update_hash(*generation_index, generation.merkle_hash(), *generation)
+                            .try_update_hash(
+                                *generation_index,
+                                generation.merkle_hash(),
+                                *generation,
+                            )
                             .map_err(EventReplayError::MerkleTreeError)?;
                         acc.result.generating_tree_first_free += 1;
                         if output.mt_index != acc.result.commitment_tree_first_free {
@@ -1900,7 +1904,7 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.commitment_tree = acc
                             .result
                             .commitment_tree
-                            .update_hash(output.mt_index, output.commitment().into(), ())
+                            .try_update_hash(output.mt_index, output.commitment().into(), ())
                             .map_err(EventReplayError::MerkleTreeError)?;
                         acc.result.commitment_tree_first_free += 1;
                         let maybe_change = if pk == output.owner {
@@ -1963,7 +1967,7 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.commitment_tree = acc
                             .result
                             .commitment_tree
-                            .update_hash(*commitment_index, (*commitment).into(), ())
+                            .try_update_hash(*commitment_index, (*commitment).into(), ())
                             .map_err(EventReplayError::MerkleTreeError)?;
                         acc.result.commitment_tree_first_free += 1;
                         let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)

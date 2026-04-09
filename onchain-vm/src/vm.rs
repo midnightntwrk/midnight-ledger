@@ -739,7 +739,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                 let container_nxt = match &container.0.value {
                     StateValue::Map(m) => StateValue::Map(m.remove(&key)),
                     StateValue::BoundedMerkleTree(t) => StateValue::BoundedMerkleTree(
-                        t.update_hash((&*key.value).try_into()?, Default::default(), ())
+                        t.try_update_hash((&*key.value).try_into()?, Default::default(), ())
                             .map_err(OnchainProgramError::MerkleTreeError)?
                             .rehash(),
                     ),
@@ -990,7 +990,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                                     ))
                                 })?;
                                 StateValue::BoundedMerkleTree(
-                                    t.update_hash(idx, hash, ())
+                                    t.try_update_hash(idx, hash, ())
                                         .map_err(OnchainProgramError::MerkleTreeError)?
                                         .rehash(),
                                 )

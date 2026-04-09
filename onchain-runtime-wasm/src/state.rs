@@ -147,7 +147,7 @@ impl StateBoundedMerkleTree {
     // update(index: number, leaf: AlignedValue): MerkleTree
     pub fn update(&self, index: u64, leaf: JsValue) -> Result<StateBoundedMerkleTree, JsError> {
         let leaf: AlignedValue = from_value(leaf)?;
-        Ok(StateBoundedMerkleTree(self.0.update(
+        Ok(StateBoundedMerkleTree(self.0.try_update(
             index,
             &ValueReprAlignedValue(leaf),
             (),
