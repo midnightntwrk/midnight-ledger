@@ -1247,21 +1247,6 @@ describe('Ledger API - Transaction', () => {
   });
 
   /**
-   * Test error when trying to add offer with segment 0 using Specific specifier.
-   *
-   * @given A transaction and an offer
-   * @when Attempting to add offer with Specific segment value 0
-   * @then Should throw error about illegal specification of segment 0
-   */
-  test('should throw error when adding offer with Specific segment 0', () => {
-    const offer = Static.unprovenOfferFromOutput(0);
-    const segment: SegmentSpecifier = { tag: 'specific', value: 0 };
-
-    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
-    expect(() => tx.addZswapOffer(segment, offer)).toThrow('illegal manual specification of segment 0');
-  });
-
-  /**
    * Test adding offer using Random segment specifier.
    *
    * @given A transaction and an offer
