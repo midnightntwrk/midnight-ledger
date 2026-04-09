@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # This file is part of midnight-ledger.
-# Copyright (C) Midnight Foundation
+# Copyright (C) 2025 Midnight Foundation
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License");
 # You may not use this file except in compliance with the License.
@@ -13,11 +13,16 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Uploads SRS parameters to the new S3 bucket (srs.midnight.network).
+# Intended to be run from GitHub Actions with OIDC credentials.
+# See: .github/workflows/upload-srs.yml
+
 set -e
 VERSION=$(cat static/version)
 FILES_ZSWAP=$(echo "$MIDNIGHT_PP/zswap/$VERSION"/*.{prover,verifier,bzkir})
 FILES_DUST=$(echo "$MIDNIGHT_PP/dust/$VERSION"/*.{prover,verifier,bzkir})
-FILESTORE="s3://midnight-s3-fileshare-dev-eu-west-1"
+FILESTORE="s3://stl-euw1-mainnet-srs-download"
+
 for file in $FILES_ZSWAP; do
   NAME=$(basename "$file")
   echo ":: $file -> $FILESTORE/zswap/$VERSION/$NAME"
