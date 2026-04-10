@@ -66,10 +66,8 @@ pub fn test_eq_incircuit(
         }
         (JubjubPoint(p), JubjubPoint(q)) => {
             let jub = std_lib.jubjub();
-            let bit_x =
-                std_lib.is_equal(layouter, &jub.x_coordinate(p), &jub.x_coordinate(q))?;
-            let bit_y =
-                std_lib.is_equal(layouter, &jub.y_coordinate(p), &jub.y_coordinate(q))?;
+            let bit_x = std_lib.is_equal(layouter, &jub.x_coordinate(p), &jub.x_coordinate(q))?;
+            let bit_y = std_lib.is_equal(layouter, &jub.y_coordinate(p), &jub.y_coordinate(q))?;
             let nx = std_lib.convert(layouter, &bit_x)?;
             let ny = std_lib.convert(layouter, &bit_y)?;
             Ok(Native(std_lib.mul(layouter, &nx, &ny, None)?))
@@ -123,16 +121,8 @@ pub fn constrain_eq_incircuit(
         (Native(x), Native(y)) => std_lib.assert_equal(layouter, x, y),
         (JubjubPoint(p), JubjubPoint(q)) => {
             let jub = std_lib.jubjub();
-            std_lib.assert_equal(
-                layouter,
-                &jub.x_coordinate(p),
-                &jub.x_coordinate(q),
-            )?;
-            std_lib.assert_equal(
-                layouter,
-                &jub.y_coordinate(p),
-                &jub.y_coordinate(q),
-            )
+            std_lib.assert_equal(layouter, &jub.x_coordinate(p), &jub.x_coordinate(q))?;
+            std_lib.assert_equal(layouter, &jub.y_coordinate(p), &jub.y_coordinate(q))
         }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported constrain_eq: {:?} == {:?}",
@@ -159,8 +149,14 @@ mod tests {
         let [x, y] = core::array::from_fn(|_| Fr(F::random(OsRng)));
         let [p, q] = core::array::from_fn(|_| JubjubSubgroup::random(OsRng));
 
-        assert_eq!(test_eq_offcircuit(&Native(x), &Native(x)).unwrap(), Native(true.into()));
-        assert_eq!(test_eq_offcircuit(&Native(x), &Native(y)).unwrap(), Native(false.into()));
+        assert_eq!(
+            test_eq_offcircuit(&Native(x), &Native(x)).unwrap(),
+            Native(true.into())
+        );
+        assert_eq!(
+            test_eq_offcircuit(&Native(x), &Native(y)).unwrap(),
+            Native(false.into())
+        );
         assert_eq!(
             test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap(),
             Native(true.into())

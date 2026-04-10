@@ -28,11 +28,8 @@ use crate::{
 ///   - `Native`
 ///   - `JubjubPoint`
 ///
-/// # Errors
-///
-/// This function results in an error if `a` and `b` have different types.
-pub fn cond_select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue, anyhow::Error> {
-    Ok(if bit { a.clone() } else { b.clone() })
+pub fn cond_select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> IrValue {
+    if bit { a.clone() } else { b.clone() }
 }
 
 /// Conditionally selects in-circuit between two values.
@@ -57,18 +54,8 @@ pub fn cond_select_incircuit(
         (Native(x), Native(y)) => Ok(Native(std_lib.select(layouter, bit, x, y)?)),
         (JubjubPoint(p), JubjubPoint(q)) => {
             let jub = std_lib.jubjub();
-            let rx = std_lib.select(
-                layouter,
-                bit,
-                &jub.x_coordinate(p),
-                &jub.x_coordinate(q),
-            )?;
-            let ry = std_lib.select(
-                layouter,
-                bit,
-                &jub.y_coordinate(p),
-                &jub.y_coordinate(q),
-            )?;
+            let rx = std_lib.select(layouter, bit, &jub.x_coordinate(p), &jub.x_coordinate(q))?;
+            let ry = std_lib.select(layouter, bit, &jub.y_coordinate(p), &jub.y_coordinate(q))?;
             Ok(JubjubPoint(jub.point_from_coordinates(layouter, &rx, &ry)?))
         }
         _ => Err(plonk::Error::Synthesis(format!(

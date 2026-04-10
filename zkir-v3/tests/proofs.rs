@@ -756,7 +756,12 @@ mod proof_tests {
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), p.x().unwrap(), p.y().unwrap()],
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+            ],
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
@@ -802,7 +807,12 @@ mod proof_tests {
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), q.x().unwrap(), q.y().unwrap()],
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
@@ -846,7 +856,12 @@ mod proof_tests {
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), p.x().unwrap(), p.y().unwrap()],
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+            ],
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
@@ -872,7 +887,12 @@ mod proof_tests {
         let preimage_fail = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), q.x().unwrap(), q.y().unwrap()],
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
             private_transcript: vec![],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
@@ -922,8 +942,10 @@ mod proof_tests {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
-                p.x().unwrap(), p.y().unwrap(),
-                q.x().unwrap(), q.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
                 1.into(),
             ],
             private_transcript: vec![],
@@ -951,8 +973,10 @@ mod proof_tests {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![
-                p.x().unwrap(), p.y().unwrap(),
-                q.x().unwrap(), q.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
                 0.into(),
             ],
             private_transcript: vec![],

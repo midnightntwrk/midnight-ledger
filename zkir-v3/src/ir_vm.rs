@@ -12,11 +12,13 @@
 // limitations under the License.
 
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
-use crate::ir_instructions::cond_select::cond_select_incircuit;
-use crate::ir_instructions::eq::{constrain_eq_incircuit, test_eq_incircuit};
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::cond_select::{cond_select_incircuit, cond_select_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
 use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::eq::{
+    constrain_eq_incircuit, constrain_eq_offcircuit, test_eq_incircuit, test_eq_offcircuit,
+};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -334,21 +336,18 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::ConstrainEq { a, b } => {
-                    if resolve_operand(&memory, a)? != resolve_operand(&memory, b)? {
-                        bail!(
-                            "Failed equality constraint: {:?} != {:?}",
-                            resolve_operand(&memory, a)?,
-                            resolve_operand(&memory, b)?
-                        );
-                    }
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    constrain_eq_offcircuit(&a, &b)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
-                    let (bit_val, a_val, b_val) = (
-                        resolve_operand_bool(&memory, bit)?,
-                        resolve_operand(&memory, a)?,
-                        resolve_operand(&memory, b)?,
+                    let bit_val = resolve_operand_bool(&memory, bit)?;
+                    let a_val = resolve_operand(&memory, a)?;
+                    let b_val = resolve_operand(&memory, b)?;
+                    memory.insert(
+                        output.clone(),
+                        cond_select_offcircuit(bit_val, &a_val, &b_val),
                     );
-                    memory.insert(output.clone(), if bit_val { a_val } else { b_val });
                 }
                 I::Assert { cond } => {
                     if !resolve_operand_bool(&memory, cond)? {
@@ -356,9 +355,9 @@ impl IrSource {
                     }
                 }
                 I::TestEq { a, b, output } => {
-                    let result = IrValue::Native(
-                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into(),
-                    );
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = test_eq_offcircuit(&a, &b)?;
                     memory.insert(output.clone(), result);
                 }
                 I::PublicInput { guard, output } => {
