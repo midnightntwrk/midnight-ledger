@@ -93,7 +93,7 @@ jobs:
       - name: Commit and push changes to a new branch and tag
         env:
           tag_name: ${{ steps.name-sanitizer.outputs.tag_name }}
-        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5
+        uses: EndBug/add-and-commit@290ea2c423ad77ca9c62ae0f5b224379612c0321
         with:
           message: 'hard-fork-test: original tag ${{ github.event.inputs.tag }}'
           new_branch: hard-fork-test/${{ env.tag_name }}
