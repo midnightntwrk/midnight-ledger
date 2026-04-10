@@ -33,4 +33,4 @@ derive-where = "^1.6.1"
 [dev-dependencies]
 midnight-onchain-state = { path = ".", features = ["proptest"] }
 rand = { version = "^0.8.5", features = ["getrandom"] }
-pastey = "0.1.1"
+pastey = "0.2.1"
