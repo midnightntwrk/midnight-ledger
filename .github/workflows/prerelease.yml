@@ -48,15 +48,12 @@ jobs:
         uses: cachix/install-nix-action@51f3067b56fe8ae331890c77d4e454f6d60615ff # v31.10.2
         with:
           extra_nix_config: |
-            netrc-file = ~/.netrc
-            access-tokens = github.com=${{ secrets.GH_PASSWORD }} api.github.com=${{ secrets.GH_PASSWORD }}
             extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
             extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
             accept-flake-config = true
-            post-build-hook = ${{ runner.temp }}/post-build.sh
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io

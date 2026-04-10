@@ -1,6 +1,6 @@
 [package]
 name = "midnight-onchain-runtime"
-version = "3.0.0"
+version = "3.1.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true

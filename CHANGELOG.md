@@ -4,7 +4,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
 - feat: expose event contents to the extent that they are useful to the wallet in wasm bindings.
