@@ -568,7 +568,7 @@ __metadata:
     lodash: "npm:^4.17.23"
     pino: "npm:^9.9.0"
     pino-pretty: "npm:^13.1.1"
-    prettier: "npm:^3.6.2"
+    prettier: "npm:^3.8.1"
     rxjs: "npm:^7.8.2"
     testcontainers: "npm:^11.5.1"
     typescript: "npm:5.9.2"
@@ -4641,12 +4641,12 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prettier@npm:^3.6.2":
-  version: 3.6.2
-  resolution: "prettier@npm:3.6.2"
+"prettier@npm:^3.8.1":
+  version: 3.8.2
+  resolution: "prettier@npm:3.8.2"
   bin:
     prettier: bin/prettier.cjs
-  checksum: 10/1213691706bcef1371d16ef72773c8111106c3533b660b1cc8ec158bd109cdf1462804125f87f981f23c4a3dba053b6efafda30ab0114cc5b4a725606bb9ff26
+  checksum: 10/fd784175bc600c07eb2c44d7ec4ee7133f95f26492adad61b6a15c06f438b858181faf096ab74163d7f49500ad80cff4479c6abb084e161a2e85a9df5974ecd1
   languageName: node
   linkType: hard
 
