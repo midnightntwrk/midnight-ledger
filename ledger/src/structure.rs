@@ -39,7 +39,7 @@ use coin_structure::contract::ContractAddress;
 use derive_where::derive_where;
 use fake::Dummy;
 use introspection_derive::Introspection;
-use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue};
+use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue, Effects};
 use onchain_runtime::state::ChargedState;
 use onchain_runtime::state::ContractOperation;
 use onchain_runtime::state::{ContractMaintenanceAuthority, ContractState, EntryPointBuf};
@@ -1025,14 +1025,14 @@ impl TransactionCostModel {
     pub(crate) fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
     }
-    fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
+    pub(crate) fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
         RunningCost {
             bytes_written: size,
             bytes_deleted: if overwrite { size } else { 0 },
             ..RunningCost::ZERO
         }
     }
-    fn cell_delete(&self, size: u64) -> RunningCost {
+    pub(crate) fn cell_delete(&self, size: u64) -> RunningCost {
         RunningCost {
             bytes_deleted: size,
             ..RunningCost::ZERO
@@ -1046,23 +1046,23 @@ impl TransactionCostModel {
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
     }
-    fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
         let layers = log_size.div_ceil(4);
         self.cell_write(PERSISTENT_HASH_BYTES as u64 * 16, true) * layers as u64
             + self.cell_write(PERSISTENT_HASH_BYTES as u64, overwrite)
     }
-    fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
+    pub(crate) fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
         if guaranteed_present {
             self.map_insert(log_size, true)
         } else {
             self.map_insert(log_size, true) + self.map_index(log_size)
         }
     }
-    fn time_filter_map_lookup(&self) -> RunningCost {
+    pub(crate) fn time_filter_map_lookup(&self) -> RunningCost {
         // TODO: This is a good approximation, but not accurate.
         self.map_index(8) * 2u64
     }
-    fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
+    pub(crate) fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
         // Two map insertions, the 'set' and the 'time_map'.
         self.map_insert(8, overwrite) * 2u64
     }
@@ -1079,11 +1079,19 @@ impl TransactionCostModel {
         let raw_overwrites = self.cell_write((FR_BYTES * 3 + 2) as u64, true) * log_size as u64;
         raw_writes + raw_overwrites
     }
-    fn merkle_tree_insert_unamortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_unamortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         let rehashes = RunningCost::compute(self.runtime_cost_model.transient_hash * log_size);
         rehashes + self.merkle_tree_insert_no_rehash(log_size, overwrite)
     }
-    fn merkle_tree_insert_amortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_amortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         // The amortization turns n writes into a tree of depth d from
         // nd hashes to n log_2 n + d hashes. That means that the hashes we cost *per insert*
         // isn't constant.
@@ -1098,7 +1106,7 @@ impl TransactionCostModel {
     fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
         self.runtime_cost_model.tree_copy(value)
     }
-    fn stack_setup_cost<D: DB>(&self, transcript: &Transcript<D>) -> RunningCost {
+    pub(crate) fn stack_setup_cost_for_effects<D: DB>(&self, eff: &Effects<D>) -> RunningCost {
         // There's an additional cost of processing a transcript coming from initializing effects
         // and context stack variables. This accounts for them.
         // The bulk of this is MPT insertions to build up various sets that sit in these values.
@@ -1106,7 +1114,6 @@ impl TransactionCostModel {
         // they are constant by container, and then reduce that to a running cost using map
         // insert VM operations.
         const EXPECTED_COM_INDICES: usize = 16;
-        let eff = &transcript.effects;
         // (amount, key length)
         let maps = [
             (EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES),
@@ -2073,7 +2080,7 @@ where
                             // VM stack setup / destroy cost
                             // Left out of scope here to avoid going to deep into
                             // stack structure.
-                            *cost += model.stack_setup_cost(transcript);
+                            *cost += model.stack_setup_cost_for_effects(&transcript.effects);
                         }
                     }
                     ContractAction::Deploy(deploy) => {

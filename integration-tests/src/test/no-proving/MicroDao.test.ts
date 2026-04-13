@@ -652,10 +652,14 @@ describe('Ledger API - MicroDao', () => {
         BUY_IN
       );
 
+      const isGuaranteed = transcripts[0][0] !== undefined;
+      const guaranteedOffer = isGuaranteed ? offer : undefined;
+      const fallibleOffer = isGuaranteed ? undefined : offer;
+
       const tx = Transaction.fromParts(
         LOCAL_TEST_NETWORK_ID,
-        undefined,
-        offer,
+        guaranteedOffer,
+        fallibleOffer,
         testIntents([call], [], [], state.time)
       );
       tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
@@ -1219,7 +1223,7 @@ describe('Ledger API - MicroDao', () => {
     const s = state;
     s.zswap = s.zswap.watchFor(s.zswapKeys.coinPublicKey, newCoin);
 
-    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, offer, testIntents([call], [], [], s.time));
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], s.time));
     tx.wellFormed(s.ledger, unbalancedStrictness, s.time);
     const balanced = s.balanceTx(tx.eraseProofs());
     s.assertApply(balanced, balancedStrictness);
