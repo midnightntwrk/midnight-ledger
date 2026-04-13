@@ -29,7 +29,7 @@ sha2 = "^0.10.9"
 flate2 = "^1.1.2"
 k256  = { version = "^0.13.4", features = ["serde"] }
 signature = "^2.2.0"
-reqwest = { version = "^0.12.22", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
+reqwest = { version = "^0.13.0", default-features = false, features = ["rustls-tls-native-roots", "stream"] }
 atomic-write-file = { version = "^0.2.3" }
 futures = { version = "^0.3.31" }
 indicatif = { version = "^0.18.4", optional = true }
