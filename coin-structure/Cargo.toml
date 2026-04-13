@@ -18,7 +18,7 @@ transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = 
 lazy_static = "^1.5.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.9.0", features = ["getrandom"] }
 zeroize = "^1.8.0"
 
 serde = { version = "^1.0.219", features = ["derive", "rc"] }
@@ -29,5 +29,5 @@ proptest-derive = { version = "0.8", optional = true }
 
 [dev-dependencies]
 midnight-coin-structure = { path = ".", features = ["proptest"] }
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.9.0", features = ["getrandom"] }
 pastey = "0.2.1"
