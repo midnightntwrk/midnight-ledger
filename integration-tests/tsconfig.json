@@ -8,7 +8,7 @@
     "composite": true,
     "resolveJsonModule": true,
     "noPropertyAccessFromIndexSignature": false,
-    "ignoreDeprecations": "5.0",
+    "ignoreDeprecations": "6.0",
     "rootDir": "./",
     "outDir": "./dist",
     "esModuleInterop": true,
