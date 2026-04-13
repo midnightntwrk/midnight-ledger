@@ -64,14 +64,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@d2t/vitest-ctrf-json-reporter@npm:^1.2.0":
+"@d2t/vitest-ctrf-json-reporter@npm:1.2.0":
   version: 1.2.0
   resolution: "@d2t/vitest-ctrf-json-reporter@npm:1.2.0"
   checksum: 10/2713cb4c4d99596c0066ff0226eae8f7090936723a36eb26360345d57a5f2035991e2f4e6e4541b27c23dc1f9b0d9b2e84353115c8492193982e864355a89d69
   languageName: node
   linkType: hard
 
-"@dao-xyz/borsh@npm:^5.2.3":
+"@dao-xyz/borsh@npm:5.2.3":
   version: 5.2.3
   resolution: "@dao-xyz/borsh@npm:5.2.3"
   dependencies:
@@ -309,7 +309,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@eslint/compat@npm:^1.3.2":
+"@eslint/compat@npm:1.3.2":
   version: 1.3.2
   resolution: "@eslint/compat@npm:1.3.2"
   peerDependencies:
@@ -538,43 +538,43 @@ __metadata:
   version: 0.0.0-use.local
   resolution: "@midnight/ledger-api-tests@workspace:."
   dependencies:
-    "@d2t/vitest-ctrf-json-reporter": "npm:^1.2.0"
-    "@dao-xyz/borsh": "npm:^5.2.3"
-    "@eslint/compat": "npm:^1.3.2"
+    "@d2t/vitest-ctrf-json-reporter": "npm:1.2.0"
+    "@dao-xyz/borsh": "npm:5.2.3"
+    "@eslint/compat": "npm:1.3.2"
     "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnight-ntwrk/ledger-v8"
     "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnight-ntwrk/zkir-v2"
-    "@tsconfig/node24": "npm:^24.0.0"
-    "@types/eslint": "npm:^9.6.1"
-    "@types/eslint-config-prettier": "npm:^6.11.3"
-    "@types/lodash": "npm:^4.17.20"
-    "@types/node": "npm:^24.3.0"
-    "@typescript-eslint/eslint-plugin": "npm:^8.40.0"
-    "@typescript-eslint/parser": "npm:^8.40.0"
-    "@vitest/coverage-v8": "npm:^3.2.4"
-    "@vitest/ui": "npm:^3.2.4"
-    allure-commandline: "npm:^2.34.1"
-    allure-vitest: "npm:^3.3.3"
-    axios: "npm:^1.15.0"
-    axios-retry: "npm:^4.5.0"
-    cache-ts: "npm:^1.0.0"
-    cross-fetch: "npm:^4.1.0"
-    eslint: "npm:^9.33.0"
-    eslint-config-airbnb-base: "npm:^15.0.0"
-    eslint-config-prettier: "npm:^10.1.8"
-    eslint-import-resolver-typescript: "npm:^4.4.4"
-    eslint-plugin-import: "npm:^2.32.0"
-    eslint-plugin-prettier: "npm:^5.5.4"
-    fetch-retry: "npm:^6.0.0"
-    lodash: "npm:^4.17.23"
-    pino: "npm:^9.9.0"
-    pino-pretty: "npm:^13.1.1"
-    prettier: "npm:^3.6.2"
-    rxjs: "npm:^7.8.2"
-    testcontainers: "npm:^11.5.1"
+    "@tsconfig/node24": "npm:24.0.4"
+    "@types/eslint": "npm:9.6.1"
+    "@types/eslint-config-prettier": "npm:6.11.3"
+    "@types/lodash": "npm:4.17.20"
+    "@types/node": "npm:24.3.0"
+    "@typescript-eslint/eslint-plugin": "npm:8.40.0"
+    "@typescript-eslint/parser": "npm:8.40.0"
+    "@vitest/coverage-v8": "npm:3.2.4"
+    "@vitest/ui": "npm:3.2.4"
+    allure-commandline: "npm:2.34.1"
+    allure-vitest: "npm:3.3.3"
+    axios: "npm:1.15.0"
+    axios-retry: "npm:4.5.0"
+    cache-ts: "npm:1.0.0"
+    cross-fetch: "npm:4.1.0"
+    eslint: "npm:9.33.0"
+    eslint-config-airbnb-base: "npm:15.0.0"
+    eslint-config-prettier: "npm:10.1.8"
+    eslint-import-resolver-typescript: "npm:4.4.4"
+    eslint-plugin-import: "npm:2.32.0"
+    eslint-plugin-prettier: "npm:5.5.4"
+    fetch-retry: "npm:6.0.0"
+    lodash: "npm:4.18.1"
+    pino: "npm:9.9.0"
+    pino-pretty: "npm:13.1.1"
+    prettier: "npm:3.6.2"
+    rxjs: "npm:7.8.2"
+    testcontainers: "npm:11.5.1"
     typescript: "npm:5.9.2"
-    vite-plugin-wasm: "npm:^3.5.0"
-    vitest: "npm:^3.2.4"
-    vitest-ctrf-json-reporter: "npm:^0.0.2"
+    vite-plugin-wasm: "npm:3.5.0"
+    vitest: "npm:3.2.4"
+    vitest-ctrf-json-reporter: "npm:0.0.2"
   languageName: unknown
   linkType: soft
 
@@ -914,7 +914,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tsconfig/node24@npm:^24.0.0":
+"@tsconfig/node24@npm:24.0.4":
   version: 24.0.4
   resolution: "@tsconfig/node24@npm:24.0.4"
   checksum: 10/e3c011e4589d1d3f8774e6587434bf6d5655ca31c848ac1d173de7949e2f2e1c3dd0be5f97869201e46c4a6dda03003659e1c5078efc580ecefce1d706b8b6a1
@@ -967,14 +967,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/eslint-config-prettier@npm:^6.11.3":
+"@types/eslint-config-prettier@npm:6.11.3":
   version: 6.11.3
   resolution: "@types/eslint-config-prettier@npm:6.11.3"
   checksum: 10/b69ad5d7452f614450fcaf78b4055cfb11afb632f1ef292a3229cb5ac9a7041106a85cf634c570fbd3bb9db59c8fee7ca0e32a059e6fcad2477e22d81d5c3ef3
   languageName: node
   linkType: hard
 
-"@types/eslint@npm:^9.6.1":
+"@types/eslint@npm:9.6.1":
   version: 9.6.1
   resolution: "@types/eslint@npm:9.6.1"
   dependencies:
@@ -1005,14 +1005,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@types/lodash@npm:^4.17.20":
+"@types/lodash@npm:4.17.20":
   version: 4.17.20
   resolution: "@types/lodash@npm:4.17.20"
   checksum: 10/8cd8ad3bd78d2e06a93ae8d6c9907981d5673655fec7cb274a4d9a59549aab5bb5b3017361280773b8990ddfccf363e14d1b37c97af8a9fe363de677f9a61524
   languageName: node
   linkType: hard
 
-"@types/node@npm:*, @types/node@npm:>=13.7.0, @types/node@npm:^24.3.0":
+"@types/node@npm:*, @types/node@npm:24.3.0, @types/node@npm:>=13.7.0":
   version: 24.3.0
   resolution: "@types/node@npm:24.3.0"
   dependencies:
@@ -1058,7 +1058,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/eslint-plugin@npm:^8.40.0":
+"@typescript-eslint/eslint-plugin@npm:8.40.0":
   version: 8.40.0
   resolution: "@typescript-eslint/eslint-plugin@npm:8.40.0"
   dependencies:
@@ -1079,7 +1079,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@typescript-eslint/parser@npm:^8.40.0":
+"@typescript-eslint/parser@npm:8.40.0":
   version: 8.40.0
   resolution: "@typescript-eslint/parser@npm:8.40.0"
   dependencies:
@@ -1330,7 +1330,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vitest/coverage-v8@npm:^3.2.4":
+"@vitest/coverage-v8@npm:3.2.4":
   version: 3.2.4
   resolution: "@vitest/coverage-v8@npm:3.2.4"
   dependencies:
@@ -1429,7 +1429,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@vitest/ui@npm:^3.2.4":
+"@vitest/ui@npm:3.2.4":
   version: 3.2.4
   resolution: "@vitest/ui@npm:3.2.4"
   dependencies:
@@ -1510,7 +1510,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"allure-commandline@npm:^2.34.1":
+"allure-commandline@npm:2.34.1":
   version: 2.34.1
   resolution: "allure-commandline@npm:2.34.1"
   bin:
@@ -1533,7 +1533,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"allure-vitest@npm:^3.3.3":
+"allure-vitest@npm:3.3.3":
   version: 3.3.3
   resolution: "allure-vitest@npm:3.3.3"
   dependencies:
@@ -1763,7 +1763,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios-retry@npm:^4.5.0":
+"axios-retry@npm:4.5.0":
   version: 4.5.0
   resolution: "axios-retry@npm:4.5.0"
   dependencies:
@@ -1774,7 +1774,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"axios@npm:^1.15.0":
+"axios@npm:1.15.0":
   version: 1.15.0
   resolution: "axios@npm:1.15.0"
   dependencies:
@@ -1978,7 +1978,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cache-ts@npm:^1.0.0":
+"cache-ts@npm:1.0.0":
   version: 1.0.0
   resolution: "cache-ts@npm:1.0.0"
   checksum: 10/881af2a9ecc20217dca9a3b042a1e7eddc68257b3d09b52d3bd60e2489ff492def53a47a66161cbee56a0994ce3819a994311cda5582820afab5bfe0e434f06e
@@ -2182,7 +2182,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cross-fetch@npm:^4.1.0":
+"cross-fetch@npm:4.1.0":
   version: 4.1.0
   resolution: "cross-fetch@npm:4.1.0"
   dependencies:
@@ -2649,7 +2649,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-config-airbnb-base@npm:^15.0.0":
+"eslint-config-airbnb-base@npm:15.0.0":
   version: 15.0.0
   resolution: "eslint-config-airbnb-base@npm:15.0.0"
   dependencies:
@@ -2664,7 +2664,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-config-prettier@npm:^10.1.8":
+"eslint-config-prettier@npm:10.1.8":
   version: 10.1.8
   resolution: "eslint-config-prettier@npm:10.1.8"
   peerDependencies:
@@ -2701,7 +2701,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-import-resolver-typescript@npm:^4.4.4":
+"eslint-import-resolver-typescript@npm:4.4.4":
   version: 4.4.4
   resolution: "eslint-import-resolver-typescript@npm:4.4.4"
   dependencies:
@@ -2737,7 +2737,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-plugin-import@npm:^2.32.0":
+"eslint-plugin-import@npm:2.32.0":
   version: 2.32.0
   resolution: "eslint-plugin-import@npm:2.32.0"
   dependencies:
@@ -2766,7 +2766,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint-plugin-prettier@npm:^5.5.4":
+"eslint-plugin-prettier@npm:5.5.4":
   version: 5.5.4
   resolution: "eslint-plugin-prettier@npm:5.5.4"
   dependencies:
@@ -2810,7 +2810,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"eslint@npm:^9.33.0":
+"eslint@npm:9.33.0":
   version: 9.33.0
   resolution: "eslint@npm:9.33.0"
   dependencies:
@@ -3030,7 +3030,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"fetch-retry@npm:^6.0.0":
+"fetch-retry@npm:6.0.0":
   version: 6.0.0
   resolution: "fetch-retry@npm:6.0.0"
   checksum: 10/0c8d3082e2d76fff2df75adef6280bc854bc36fd3ef38506674f0216d0d819e2efd14da7477d3f1732415aea1d2cfde7cd3e1aeae46f45f2adbfc5133296e8de
@@ -3955,7 +3955,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"lodash@npm:^4.17.15, lodash@npm:^4.17.23":
+"lodash@npm:4.18.1, lodash@npm:^4.17.15":
   version: 4.18.1
   resolution: "lodash@npm:4.18.1"
   checksum: 10/306fea53dfd39dad1f03d45ba654a2405aebd35797b673077f401edb7df2543623dc44b9effbb98f69b32152295fff725a4cec99c684098947430600c6af0c3f
@@ -4556,7 +4556,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pino-pretty@npm:^13.1.1":
+"pino-pretty@npm:13.1.1":
   version: 13.1.1
   resolution: "pino-pretty@npm:13.1.1"
   dependencies:
@@ -4586,7 +4586,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"pino@npm:^9.9.0":
+"pino@npm:9.9.0":
   version: 9.9.0
   resolution: "pino@npm:9.9.0"
   dependencies:
@@ -4641,7 +4641,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"prettier@npm:^3.6.2":
+"prettier@npm:3.6.2":
   version: 3.6.2
   resolution: "prettier@npm:3.6.2"
   bin:
@@ -5011,7 +5011,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"rxjs@npm:^7.8.2":
+"rxjs@npm:7.8.2":
   version: 7.8.2
   resolution: "rxjs@npm:7.8.2"
   dependencies:
@@ -5607,7 +5607,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"testcontainers@npm:^11.5.1":
+"testcontainers@npm:11.5.1":
   version: 11.5.1
   resolution: "testcontainers@npm:11.5.1"
   dependencies:
@@ -6008,7 +6008,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vite-plugin-wasm@npm:^3.5.0":
+"vite-plugin-wasm@npm:3.5.0":
   version: 3.5.0
   resolution: "vite-plugin-wasm@npm:3.5.0"
   peerDependencies:
@@ -6072,14 +6072,14 @@ __metadata:
   languageName: node
   linkType: hard
 
-"vitest-ctrf-json-reporter@npm:^0.0.2":
+"vitest-ctrf-json-reporter@npm:0.0.2":
   version: 0.0.2
   resolution: "vitest-ctrf-json-reporter@npm:0.0.2"
   checksum: 10/8ef20e0fdfb42db7910a5c6aa0725d7b82e43482044c5fcd1c6654d74fd5f8aede717e75d37a252c00da2b5ce84594a66b3bf176a0a320af9ff7984bcc48abe8
   languageName: node
   linkType: hard
 
-"vitest@npm:^3.2.4":
+"vitest@npm:3.2.4":
   version: 3.2.4
   resolution: "vitest@npm:3.2.4"
   dependencies:
