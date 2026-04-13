@@ -41,7 +41,7 @@ anyhow = { version = "^1.0.102" }
 is_sorted = "^0.1.1"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 itertools = "^0.14.0"
 
 tracing = "^0.1.41"

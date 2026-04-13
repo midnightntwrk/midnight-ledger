@@ -17,7 +17,7 @@ konst = { version = "0.3.16", features = ["cmp"] }
 crypto = { version = "0.5.1", features = ["digest"] }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.4", features = ["getrandom"], optional = true }
+rand = { version = "^0.10.0", features = ["getrandom"], optional = true }
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }

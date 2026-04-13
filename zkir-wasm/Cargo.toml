@@ -16,7 +16,7 @@ transient-crypto = { path = "../transient-crypto", package = "midnight-transient
 zkir = { path = "../zkir", package = "midnight-zkir" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 getrandom = { version = "^0.2.8", features = ["js"] }
 wasm-bindgen = "=0.2.104"
 wasm-bindgen-futures = "^0.4.50"

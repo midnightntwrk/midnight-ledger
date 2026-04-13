@@ -19,7 +19,7 @@ state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-
 storage-core = { version = "1.0.0", path = "../storage-core", package = "midnight-storage-core" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 derive-where = "^1.6.1"
 crypto = { version = "0.5.1", features = ["digest"] }
 parking_lot = "^0.12.4"

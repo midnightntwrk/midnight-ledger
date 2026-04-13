@@ -23,7 +23,7 @@ zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3", optional = true }
 introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 actix-web = { version = "^4.13.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies", "http2"] }
 actix-cors = "^0.7.1"
 futures = "^0.3.31"

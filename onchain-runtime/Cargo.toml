@@ -30,7 +30,7 @@ hex = "^0.4.3"
 konst = "0.3.16"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.5", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 
 fake = { version = "^2.10.0", features = ["derive"] }
 serde = { version = "^1.0.219", features = ["derive"] }
@@ -41,7 +41,7 @@ proptest-derive = { version = "0.8", optional = true }
 
 [dev-dependencies]
 midnight-onchain-runtime = { path = ".", features = ["proptest"] }
-rand = { version = "^0.8.5", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 criterion = "0.5"
 pastey = "0.2.1"
 serde_json = { version = "^1.0", features = ["std"] }

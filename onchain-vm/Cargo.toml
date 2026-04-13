@@ -21,7 +21,7 @@ hex = "^0.4.3"
 konst = "0.3.16"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.5", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 rpds = "^0.13.0"
 
 fake = { version = "^2.10.0", features = ["derive"] }
@@ -34,5 +34,5 @@ derive-where = "^1.6.1"
 
 [dev-dependencies]
 midnight-onchain-vm = { path = ".", features = ["proptest"] }
-rand = { version = "^0.8.5", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 pastey = "0.2.1"

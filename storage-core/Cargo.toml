@@ -36,7 +36,7 @@ serde = { version = "^1.0.219", features = ["derive", "rc"] }
 fake = { version = "^2.10.0", features = ["derive"] }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
-rand = { version = "^0.8.4", features = ["getrandom"] }
+rand = { version = "^0.10.0", features = ["getrandom"] }
 hex = "^0.4.3"
 parking_lot = "^0.12.4"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
