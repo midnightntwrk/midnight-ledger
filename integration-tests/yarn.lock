@@ -543,7 +543,7 @@ __metadata:
     "@eslint/compat": "npm:^1.3.2"
     "@midnight-ntwrk/ledger": "link:../result/lib/node_modules/@midnight-ntwrk/ledger-v8"
     "@midnight-ntwrk/zkir-v2": "link:../result/lib/node_modules/@midnight-ntwrk/zkir-v2"
-    "@tsconfig/node22": "npm:^22.0.2"
+    "@tsconfig/node24": "npm:^24.0.0"
     "@types/eslint": "npm:^9.6.1"
     "@types/eslint-config-prettier": "npm:^6.11.3"
     "@types/lodash": "npm:^4.17.20"
@@ -914,10 +914,10 @@ __metadata:
   languageName: node
   linkType: hard
 
-"@tsconfig/node22@npm:^22.0.2":
-  version: 22.0.2
-  resolution: "@tsconfig/node22@npm:22.0.2"
-  checksum: 10/b9fb6543856cbac8b9b79c234bbefa3415f083e0a46e6f0fbe418fe21c5d086440222e1383258d75ebac951cbe17564a6d146fafc59c889d6302decd1a7880dd
+"@tsconfig/node24@npm:^24.0.0":
+  version: 24.0.4
+  resolution: "@tsconfig/node24@npm:24.0.4"
+  checksum: 10/e3c011e4589d1d3f8774e6587434bf6d5655ca31c848ac1d173de7949e2f2e1c3dd0be5f97869201e46c4a6dda03003659e1c5078efc580ecefce1d706b8b6a1
   languageName: node
   linkType: hard
 
