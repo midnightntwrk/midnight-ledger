@@ -57,7 +57,7 @@ jobs:
             accept-flake-config = true
 
       - name: Cache Nix
-        uses: input-output-hk/actions/attic@latest
+        uses: input-output-hk/actions/attic@dbb6ea6d50ffc37a2d481fd8047aff028bac3223 # latest
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           endpoint: https://attic.ci.iog.io
