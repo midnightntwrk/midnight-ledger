@@ -13,6 +13,6 @@
     "build:markdown-docs": "rimraf ../docs/api/zkir-v2 && npx typedoc --plugin typedoc-plugin-markdown zkir-v2.d.ts --out ../docs/api/zkir-v2"
   },
   "dependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^6.0.0"
   }
 }
