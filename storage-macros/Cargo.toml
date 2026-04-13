@@ -23,7 +23,7 @@ pastey = "0.2.0"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = "~1.6.0"
 derive-where = "^1.5.0"
-proptest-derive = "0.5"
+proptest-derive = "0.8"
 
 [lib]
 proc-macro = true
