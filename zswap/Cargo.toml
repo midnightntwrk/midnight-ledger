@@ -28,14 +28,14 @@ tracing = { version = "^0.1.41" }
 itertools = "^0.14.0"
 zeroize = "^1.8.0"
 
-fake = { version = "^2.10.0", features = ["derive"] }
+fake = { version = "^5.0.0", features = ["derive"] }
 futures = { version = "^0.3.31" }
 serde = { version = "^1.0.219", features = ["derive"] }
 derive-where = "^1.6.1"
 
 [dev-dependencies]
 zkir_v2 = { path = "../zkir", package = "midnight-zkir" }
-fake = { version = "^2.10.0", features = ["derive"] }
+fake = { version = "^5.0.0", features = ["derive"] }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 futures = "^0.3.31"
 criterion = "0.5"

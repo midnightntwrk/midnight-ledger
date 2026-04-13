@@ -1438,9 +1438,9 @@ dependencies = [
 
 [[package]]
 name = "dummy"
-version = "0.8.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1cac124e13ae9aa56acc4241f8c8207501d93afdd8d8e62f0c1f2e12f6508c65"
+checksum = "6d2a69babd8861dbe09217678b4e8ee461869f9af8a57021e16479628dbd83bd"
 dependencies = [
  "darling 0.20.11",
  "proc-macro2",
@@ -1620,13 +1620,14 @@ dependencies = [
 
 [[package]]
 name = "fake"
-version = "2.10.0"
+version = "5.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d391ba4af7f1d93f01fcf7b2f29e2bc9348e109dfdbf4dcbdc51dfa38dab0b6"
+checksum = "ea6be833b323a56361118a747470a45a1bcd5c52a2ec9b1e40c83dafe687e453"
 dependencies = [
  "deunicode",
  "dummy",
- "rand 0.8.5",
+ "either",
+ "rand 0.10.0",
 ]
 
 [[package]]
