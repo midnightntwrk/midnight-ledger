@@ -40,7 +40,7 @@ rand = { version = "^0.8.4", features = ["getrandom"] }
 hex = "^0.4.3"
 parking_lot = "^0.12.4"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
-proptest = { version = "~1.6.0", optional = true }
+proptest = { version = "~1.11.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
 lru = "0.16.0"
 # The "bundled" feature means rusqlite will build its own libsqlite3 instead of
