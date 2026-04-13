@@ -17,7 +17,7 @@ zkir = { path = "../zkir", package = "midnight-zkir" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
-getrandom = { version = "^0.2.8", features = ["js"] }
+getrandom = { version = "^0.4.0", features = ["js"] }
 wasm-bindgen = "=0.2.104"
 wasm-bindgen-futures = "^0.4.50"
 js-sys = "^0.3.61"
