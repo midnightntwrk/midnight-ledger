@@ -1,59 +1,36 @@
 {
-  "description": "See ./README.md",
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": [
-    "config:best-practices",
-    "schedule:weekly",
-    ":disableRateLimiting"
-  ],
-  "dependencyDashboard": true,
-  "semanticCommits": "enabled",
-  "rebaseWhen": "conflicted",
-  "recreateWhen": "never",
-  "enabled": true,
-  "nix": {
-    "enabled": true
-  },
-  "ignoreDeps": [
-    "actions/checkout"
+    "github>midnightntwrk/renovate-config",
   ],
   "packageRules": [
     {
-      "groupName": "arkworks",
-      "matchPackageNames": [
-        "/ark-/"
-      ]
+      "description": "Rust crates: individual PRs (breaking API changes are common)",
+      "matchManagers": ["cargo"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": null,
+      "groupSlug": null
     },
     {
-      "groupName": "napi",
-      "matchPackageNames": [
-        "/napi/"
-      ]
+      "description": "GitHub Actions: group minor+patch together",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "GitHub Actions",
+      "groupSlug": "github-actions"
     },
     {
-      "automerge": true,
-      "extends": [
-        "packages:linters"
-      ]
+      "description": "npm/pnpm: group minor+patch together",
+      "matchManagers": ["npm"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "JS dependencies",
+      "groupSlug": "js-deps"
     },
     {
-      "groupName": "devDependencies (patch)",
-      "matchDepTypes": [
-        "devDependencies"
-      ],
-      "matchUpdateTypes": [
-        "patch"
-      ],
-      "automerge": true
-    },
-    {
-      "groupName": "dependencies (patch)",
-      "matchDepTypes": [
-        "dependencies"
-      ],
-      "matchUpdateTypes": [
-        "patch"
-      ]
+      "description": "Docker: group minor+patch together",
+      "matchManagers": ["dockerfile", "docker-compose"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Docker images",
+      "groupSlug": "docker-images"
     }
   ]
 }
