@@ -5,7 +5,7 @@
   "devDependencies": {
     "rimraf": "6.0.1",
     "lodash": "4.18.1",
-    "typedoc": "0.28.7",
+    "typedoc": "0.28.19",
     "typedoc-plugin-markdown": "4.7.0"
   },
   "type": "module",
@@ -13,6 +13,6 @@
     "build:markdown-docs": "rimraf ../docs/api/zkir-v3 && npx typedoc --plugin typedoc-plugin-markdown zkir-v3.d.ts --out ../docs/api/zkir-v3"
   },
   "dependencies": {
-    "typescript": "^5.3.3"
+    "typescript": "^6.0.0"
   }
 }
