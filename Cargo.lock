@@ -2044,6 +2044,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+dependencies = [
+ "allocator-api2",
+ "equivalent",
+ "foldhash 0.2.0",
+]
+
+[[package]]
 name = "hashlink"
 version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3125,7 +3136,7 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
@@ -3155,7 +3166,7 @@ dependencies = [
  "derive-where",
  "fake",
  "fs2",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "hex",
  "itertools 0.14.0",
  "konst",
