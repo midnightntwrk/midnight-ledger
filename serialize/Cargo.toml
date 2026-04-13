@@ -13,7 +13,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "dep:rand"]
 [dependencies]
 macros = { version = "1.0.0", path = "../serialize-macros", package = "midnight-serialize-macros" }
 lazy_static = "^1.5.0"
-konst = { version = "0.3.16", features = ["cmp"] }
+konst = { version = "0.4.0", features = ["cmp"] }
 crypto = { version = "0.5.1", features = ["digest"] }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
