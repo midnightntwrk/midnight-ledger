@@ -63,7 +63,7 @@ midnight-ledger = { path = ".", features = ["test-utilities", "proptest"] }
 storage = { path = "../storage", package = "midnight-storage", features = ["parity-db"] }
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities", "layout-v2", "gc-v1"] }
 tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }
-criterion = { version = "^0.5.1" }
+criterion = { version = "^0.8.0" }
 pprof = { version = "0.15", features = ["criterion", "flamegraph"] }
 tempfile = "3.20"
 pastey = "0.2.1"

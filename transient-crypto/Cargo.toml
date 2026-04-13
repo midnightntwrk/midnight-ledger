@@ -64,7 +64,7 @@ midnight-transient-crypto = { path = ".", features = ["proptest"] }
 actix-rt = "^2.10.0"
 rand_chacha = "^0.3.1"
 tracing-subscriber = "0.3.19"
-criterion = { version = "^0.5.1" }
+criterion = { version = "^0.8.0" }
 rayon = "^1.10.0"
 
 [[bench]]
