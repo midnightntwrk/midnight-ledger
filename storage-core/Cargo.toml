@@ -51,7 +51,7 @@ lru = "0.16.0"
 # libsqlite3. So, don't update these sqlite deps without also updating PC.
 #
 # https://github.com/midnightntwrk/midnight-ledger-prototype/pull/431
-rusqlite = { version = "0.30.0", features = ["bundled"], optional = true }
+rusqlite = { version = "0.39.0", features = ["bundled"], optional = true }
 r2d2_sqlite = { version = "0.23.0", optional = true }
 # This is a dep of r2d2_sqlite, which will determine the version.
 r2d2 = { version = "0.8.10", optional = true }
