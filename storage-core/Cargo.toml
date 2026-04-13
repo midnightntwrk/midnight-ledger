@@ -26,7 +26,7 @@ base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 parity-db = { version = "0.5.2", optional = true }
 
-archery = "^0.5.0"
+archery = "^1.0.0"
 crypto = { version = "0.5.1", features = ["digest"] }
 sha2 = "0.10.9"
 derive-where = "^1.6.1"
