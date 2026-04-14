@@ -382,12 +382,12 @@ checksum = "1505bd5d3d116872e7271a6d4e16d81d0c8570876c8de68093a09ac269d8aac0"
 
 [[package]]
 name = "atomic-write-file"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aeb1e2c1d58618bea806ccca5bbe65dc4e868be16f69ff118a39049389687548"
+checksum = "84790c55b5704b0d35130bf16a4ce22a8e70eb0ea773522557524d9a4852663d"
 dependencies = [
- "nix 0.29.0",
- "rand 0.8.5",
+ "nix 0.30.1",
+ "rand 0.9.3",
 ]
 
 [[package]]
@@ -2957,6 +2957,7 @@ version = "8.1.0-rc.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "hex",
  "js-sys",
  "midnight-base-crypto",
@@ -3015,6 +3016,7 @@ name = "midnight-onchain-runtime-wasm"
 version = "3.1.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "hex",
  "js-sys",
  "midnight-base-crypto",
@@ -3399,6 +3401,7 @@ name = "midnight-zkir-wasm"
 version = "2.1.0"
 dependencies = [
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "hex",
  "js-sys",
  "midnight-serialize",
@@ -3511,9 +3514,9 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.29.0"
+version = "0.30.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "71e2746dc3a24dd78b3cfcb7be93368c6de9963d30f43a6a73998a9cf4b17b46"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
 dependencies = [
  "bitflags 2.11.0",
  "cfg-if",
