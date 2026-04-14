@@ -49,6 +49,7 @@ use storage::storage::HashSet;
 use storage::storage::Map;
 use transient_crypto::commitment::Pedersen;
 use transient_crypto::commitment::{PedersenRandomness, PureGeneratorPedersen};
+use transient_crypto::merkle_tree::InvalidUpdate;
 use zswap::Offer as ZswapOffer;
 use zswap::keys::SecretKeys;
 use zswap::local::State as ZswapLocalState;
@@ -124,14 +125,14 @@ pub trait ZswapLocalStateExt<D: DB>: Sized {
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
     fn apply_system_tx(&self, secret_keys: &SecretKeys, tx: &SystemTransaction) -> Self;
-    #[must_use]
+    #[must_use = "return value must be used"]
     #[deprecated = "deprecated in favour of `replay_events`"]
     fn apply_tx<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>>(
         &self,
         secret_keys: &SecretKeys,
         tx: &Transaction<S, P, B, D>,
         res: ErasedTransactionResult,
-    ) -> Self;
+    ) -> Result<Self, InvalidUpdate>;
     #[must_use = "return value must be used"]
     fn replay_events<'a>(
         &self,
@@ -189,12 +190,12 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
         secret_keys: &SecretKeys,
         tx: &Transaction<S, P, B, D>,
         res: ErasedTransactionResult,
-    ) -> Self {
-        match (tx, res) {
+    ) -> Result<Self, InvalidUpdate> {
+        Ok(match (tx, res) {
             (_, ErasedTransactionResult::Failure) => self.clone(),
             (Transaction::Standard(stx), ErasedTransactionResult::PartialSuccess(segments, ..)) => {
                 let post_guaranteed = if let Some(gc) = &stx.guaranteed_coins {
-                    self.apply(secret_keys, gc)
+                    self.apply(secret_keys, gc)?
                 } else {
                     self.clone()
                 };
@@ -203,26 +204,26 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     .iter()
                     .filter(|(segment, success)| *segment != 0 && *success)
                     .map(|(segment, _)| segment)
-                    .fold(post_guaranteed, |st, segment| {
+                    .try_fold(post_guaranteed, |st, segment| {
                         if let Some(fc) = stx.fallible_coins.get(segment) {
                             st.apply(secret_keys, &fc)
                         } else {
-                            st
+                            Ok(st)
                         }
-                    })
+                    })?
             }
             (Transaction::Standard(stx), ErasedTransactionResult::Success) => {
                 let post_guaranteed = if let Some(gc) = &stx.guaranteed_coins {
-                    self.apply(secret_keys, gc)
+                    self.apply(secret_keys, gc)?
                 } else {
                     self.clone()
                 };
 
                 stx.fallible_coins
                     .sorted_iter()
-                    .fold(post_guaranteed, |st, sp| {
+                    .try_fold(post_guaranteed, |st, sp| {
                         st.apply(secret_keys, sp.1.deref())
-                    })
+                    })?
             }
             (Transaction::ClaimRewards(_), ErasedTransactionResult::Success) => self.clone(),
             (Transaction::ClaimRewards(rewards), ErasedTransactionResult::PartialSuccess(..)) => {
@@ -234,7 +235,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                 );
                 self.clone()
             }
-        }
+        })
     }
 
     fn replay_events<'a>(
@@ -293,7 +294,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
                     acc.result.merkle_tree =
                         acc.result
                             .merkle_tree
-                            .update_hash(*mt_index, commitment.0, ());
+                            .try_update_hash(*mt_index, commitment.0, ())?;
                     acc.result.first_free += 1;
                     let maybe_change = if let Some(ci) = acc.result.pending_outputs.get(commitment)
                     {
@@ -426,7 +427,8 @@ impl<D: DB> LedgerState<D> {
                 coin_coms: self
                     .zswap
                     .coin_coms
-                    .update(self.zswap.first_free, &cm, None),
+                    .try_update(self.zswap.first_free, &cm, None)
+                    .map_err(SystemTransactionError::MerkleTreeError)?,
                 coin_coms_set: self.zswap.coin_coms_set.insert(cm, ()),
                 first_free: self.zswap.first_free + 1,
                 ..(*self.zswap).clone()
@@ -859,7 +861,8 @@ impl<D: DB> LedgerState<D> {
                             dust_state.generation.generating_tree = dust_state
                                 .generation
                                 .generating_tree
-                                .update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
+                                .map_err(SystemTransactionError::MerkleTreeError)?
                                 .rehash();
                             event_push(EventDetails::DustGenerationDtimeUpdate {
                                 update: dust_state
@@ -1472,7 +1475,7 @@ impl<D: DB> LedgerState<D> {
         new_st.zswap = Sp::new(
             new_st
                 .zswap
-                .post_block_update_with(tblock, self.parameters.global_ttl),
+                .post_block_update(tblock, self.parameters.global_ttl),
         );
         new_st.dust = Sp::new(
             new_st
