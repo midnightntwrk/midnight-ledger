@@ -232,12 +232,7 @@ impl<D: DB> State<D> {
         }
     }
 
-    /// Better to use `post_block_update_with` and provide the retention duration of past roots
-    pub fn post_block_update(&self, tblock: Timestamp) -> Self {
-        self.post_block_update_with(tblock, Duration::from_secs(3600))
-    }
-
-    pub fn post_block_update_with(&self, tblock: Timestamp, retention_duration: Duration) -> Self {
+    pub fn post_block_update(&self, tblock: Timestamp, retention_duration: Duration) -> Self {
         let mut new_st = self.clone();
         new_st.coin_coms = new_st.coin_coms.rehash();
         new_st.past_roots = new_st.past_roots.insert(
@@ -283,7 +278,7 @@ mod tests {
                     .try_apply(&offer, None)
                     .unwrap()
                     .0
-                    .post_block_update(Default::default());
+                    .post_block_update(Default::default(), Duration::from_secs(3600));
             }
             state
         }
@@ -312,7 +307,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        state = new_state.post_block_update(Default::default());
+        state = new_state.post_block_update(Default::default(), Duration::from_secs(3600));
         state = insert_dummy_outputs(&mut rng, state, 25);
         let qcoin = coin.qualify(
             *indices

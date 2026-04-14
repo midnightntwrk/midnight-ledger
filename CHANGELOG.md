@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- breaking: fix Zswap root retention period to match spec - global TTL param instead of hardcoded 1 hour;
+- breaking: adjust Zswap Ledger state API to take retention duration in the `post_block_update` hook
+
 ## 8.0.3
 
 - fix: various fixed to transcript partioning:
