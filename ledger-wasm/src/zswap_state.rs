@@ -490,10 +490,10 @@ impl ZswapChainState {
         let block_timestamp = Timestamp::from_secs(js_date_to_seconds(tblock));
 
         let new_inner = {
-            let duration = i128::try_from(duration_secs)
+            let duration = i128::try_from(retention_duration)
                 .map_err(|_| JsError::new("retention_duration is out of range"))
                 .map(Duration::from_secs)?;
-            self.0.post_block_update_with(block_timestamp, duration)
+            self.0.post_block_update(block_timestamp, duration)
         };
 
         Ok(ZswapChainState(new_inner))
