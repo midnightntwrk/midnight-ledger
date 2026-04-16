@@ -13,12 +13,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Uploads SRS parameters to the new S3 bucket (srs.midnight.network).
+# Intended to be run from GitHub Actions with OIDC credentials.
+# See: .github/workflows/upload-srs.yml
+
 set -e
 VERSION=$(cat static/version)
 MIDNIGHT_PP=$(nix build .#local-params --print-out-paths)
 FILES_ZSWAP=$(echo "$MIDNIGHT_PP/zswap/$VERSION"/*.{prover,verifier,bzkir})
 FILES_DUST=$(echo "$MIDNIGHT_PP/dust/$VERSION"/*.{prover,verifier,bzkir})
-FILESTORE="s3://midnight-s3-fileshare-dev-eu-west-1"
+FILESTORE="s3://stl-euw1-mainnet-srs-download"
+
 for file in $FILES_ZSWAP; do
   NAME=$(basename "$file")
   echo ":: $file -> $FILESTORE/zswap/$VERSION/$NAME"
