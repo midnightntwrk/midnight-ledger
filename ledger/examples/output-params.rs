@@ -15,9 +15,17 @@
 //! transaction with the toolkit. This file serves a practical purpose to update the parameters,
 //! and as a paper-trail for why an update was performed.
 
+use std::path::PathBuf;
+
+use base_crypto::{
+    cost_model::{CostDuration, SyntheticCost},
+    time::Duration,
+};
+use midnight_ledger::structure::{
+    INITIAL_LIMITS, INITIAL_PARAMETERS, INITIAL_TRANSACTION_COST_MODEL, LedgerParameters,
+    TransactionCostModel, TransactionLimits,
+};
 use onchain_vm::cost_model::{CostModel, INITIAL_COST_MODEL};
-use base_crypto::{cost_model::{CostDuration, SyntheticCost}, time::Duration};
-use midnight_ledger::structure::{INITIAL_PARAMETERS, INITIAL_LIMITS, INITIAL_TRANSACTION_COST_MODEL, TransactionCostModel, TransactionLimits, LedgerParameters};
 use serialize::tagged_serialize;
 
 // As output by generate-cost-model on our benchmark machine; ran against ledger-7.0.0-rc.1
@@ -164,7 +172,7 @@ const UPDATED_COST_MODEL: CostModel = CostModel {
 const UPDATED_PARAMS: LedgerParameters = LedgerParameters {
     cost_model: TransactionCostModel {
         runtime_cost_model: UPDATED_COST_MODEL,
-        .. INITIAL_TRANSACTION_COST_MODEL
+        ..INITIAL_TRANSACTION_COST_MODEL
     },
     limits: TransactionLimits {
         block_limits: SyntheticCost {
@@ -174,17 +182,22 @@ const UPDATED_PARAMS: LedgerParameters = LedgerParameters {
             bytes_written: 50_000,
             bytes_churned: 50_000_000,
         },
-        .. INITIAL_LIMITS
+        ..INITIAL_LIMITS
     },
-    global_ttl: Duration::from_hours(168),
-    .. INITIAL_PARAMETERS
+    global_ttl: Duration::from_hours(336),
+    ..INITIAL_PARAMETERS
 };
 
 fn main() {
-    let mut f_binary = std::fs::File::create("params.bin").unwrap();
-    let mut f_json = std::fs::File::create("params.json").unwrap();
-    dbg!(&INITIAL_PARAMETERS);
-    dbg!(&UPDATED_PARAMS);
+    let Some(fname) = std::env::args_os().nth(1) else {
+        eprintln!("provide parameter name to output");
+        return;
+    };
+    let mut path = PathBuf::new();
+    path.push("params");
+    path.push(fname);
+    let f_binary = std::fs::File::create(path.with_added_extension("bin")).unwrap();
+    let mut f_json = std::fs::File::create(path.with_added_extension("json")).unwrap();
     tagged_serialize(&UPDATED_PARAMS, f_binary).unwrap();
     serde_json::to_writer_pretty(&mut f_json, &UPDATED_PARAMS).unwrap();
 }
