@@ -1706,8 +1706,8 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
 
     pub fn segments(&self) -> Vec<u16> {
         let mut segments = once(0)
-            .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+            .chain(self.intents.keys())
+            .chain(self.fallible_coins.keys())
             .collect::<Vec<_>>();
         segments.sort();
         segments.dedup();
@@ -1717,9 +1717,8 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
     pub fn fallible_segments(&self) -> Vec<u16> {
         let mut segments = self
             .intents
-            .iter()
-            .map(|seg_intent| *seg_intent.0)
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+            .keys()
+            .chain(self.fallible_coins.keys())
             .filter(|&s| s != 0)
             .collect::<Vec<_>>();
         segments.sort();
