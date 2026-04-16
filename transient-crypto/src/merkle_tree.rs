@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -35,14 +35,15 @@ use std::fmt::{self, Debug, Display, Formatter};
 use std::hash::Hash;
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
-use std::ops::Deref;
-use storage::DefaultDB;
-use storage::Storable;
-use storage::arena::{ArenaKey, Sp};
-use storage::db::DB;
+use std::ops::{Bound, Deref, RangeBounds, RangeInclusive};
+use storage_core as storage;
+use storage_core::DefaultDB;
+use storage_core::Storable;
+use storage_core::arena::{ArenaKey, Sp};
+use storage_core::db::DB;
 #[cfg(test)]
-use storage::db::InMemoryDB;
-use storage::storable::Loader;
+use storage_core::db::InMemoryDB;
+use storage_core::storable::Loader;
 
 /// A `Storable` wrapper around `HashOutput`
 #[derive(PartialEq, Eq, PartialOrd, Hash, Clone, Debug, Ord, Serializable)]
@@ -60,6 +61,71 @@ pub struct MerklePath<T> {
 /// The domain separator used in leaf commitments.
 pub const LEAF_HASH_DOMAIN_SEP: &[u8] = b"mdn:lh";
 
+fn range_sub(range: (Bound<u64>, Bound<u64>), sub: u64) -> Option<(Bound<u64>, Bound<u64>)> {
+    // For the start, if subtraction were to overflow, the start becomes unbounded
+    let start = match range.0 {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(n) => match n.checked_sub(sub) {
+            Some(m) => Bound::Included(m),
+            None => Bound::Unbounded,
+        },
+        Bound::Excluded(n) => match n.checked_sub(sub) {
+            Some(m) => Bound::Excluded(m),
+            None => Bound::Unbounded,
+        },
+    };
+    // For the end, if subtraction were to overflow, the range is empty
+    // Note that Included/Excluded can be handled the same, it just allows a corner-case where we
+    // return an empty range of Some(..=0) instead of None
+    let end = match range.1 {
+        Bound::Unbounded => Bound::Unbounded,
+        Bound::Included(n) => Bound::Included(n.checked_sub(sub)?),
+        Bound::Excluded(n) => Bound::Excluded(n.checked_sub(sub)?),
+    };
+    if range_empty((start, end)) {
+        None
+    } else {
+        Some((start, end))
+    }
+}
+
+fn range_empty(range: (Bound<u64>, Bound<u64>)) -> bool {
+    if let Some((start, end)) = range_force_inclusive(range) {
+        start > end
+    } else {
+        true
+    }
+}
+
+fn range_force_inclusive(range: (Bound<u64>, Bound<u64>)) -> Option<(u64, u64)> {
+    let inclusive_start = match range.0 {
+        Bound::Unbounded => 0,
+        Bound::Included(n) => n,
+        Bound::Excluded(u64::MAX) => return None,
+        Bound::Excluded(n) => n + 1,
+    };
+    let inclusive_end = match range.1 {
+        Bound::Unbounded => u64::MAX,
+        Bound::Included(n) => n,
+        Bound::Excluded(0) => return None,
+        Bound::Excluded(n) => n - 1,
+    };
+    Some((inclusive_start, inclusive_end))
+}
+
+fn overlap(a: (Bound<u64>, Bound<u64>), b: impl RangeBounds<u64>) -> Option<RangeInclusive<u64>> {
+    let b = (b.start_bound().cloned(), b.end_bound().cloned());
+    let a_inclusive = range_force_inclusive(a)?;
+    let b_inclusive = range_force_inclusive(b)?;
+    let start = u64::max(a_inclusive.0, b_inclusive.0);
+    let end = u64::min(a_inclusive.1, b_inclusive.1);
+    if start <= end {
+        Some(start..=end)
+    } else {
+        None
+    }
+}
+
 /// An index into a Merkle tree which could not be resolved, as there is no item
 /// there, or the path was deliberately collapsed.
 #[derive(Debug, Clone)]
@@ -75,7 +141,7 @@ impl Error for InvalidIndex {}
 
 /// An index into a Merkle tree which could not be resolved, as there is no item
 /// there, or the path was deliberately collapsed.
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum InvalidUpdate {
     /// The given index, for the given tree height, was collapsed, but needed
@@ -390,11 +456,12 @@ impl<'de, A: Deserialize<'de> + Storable<D>, D: DB> Deserialize<'de> for MerkleT
     fn deserialize<D2: Deserializer<'de>>(de: D2) -> Result<Self, D2::Error> {
         let (height, data): (u8, std::collections::HashMap<u64, (HashOutput, A)>) =
             Deserialize::deserialize(de)?;
-        Ok(data
-            .into_iter()
-            .fold(MerkleTree::blank(height), |mt, (k, (v, a))| {
-                MerkleTree::update_hash(&mt, k, v, a)
-            }))
+        data.into_iter()
+            .try_fold(MerkleTree::blank(height), |mt, (k, (v, a))| {
+                MerkleTree::try_update_hash(&mt, k, v, a)
+                    .map_err(<D2::Error as serde::de::Error>::custom)
+            })
+            .map(|mt| mt.rehash())
     }
 }
 
@@ -442,11 +509,16 @@ tag_enforcement_test!(MerkleTreeNode<(), InMemoryDB>);
 impl<Faker, D: DB> fake::Dummy<Faker> for MerkleTree<(), D> {
     fn dummy(_config: &Faker) -> Self {
         // TODO: make random trees!
-        MerkleTree::<(), D>::blank(32)
-            .update(0, &Fr::from(42u64), ())
-            .update(0, &Fr::from(41u64), ())
-            .update(3, &Fr::from(43u64), ())
-            .update(62, &Fr::from(12u64), ())
+        let mut mt = MerkleTree::<(), D>::blank(32);
+        if let Ok(updated) = mt
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(0, &Fr::from(41u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(43u64), ()))
+            .and_then(|mt| mt.try_update(62, &Fr::from(12u64), ()))
+        {
+            mt = updated;
+        }
+        mt
     }
 
     fn dummy_with_rng<R: rand::Rng + ?Sized>(config: &Faker, _rng: &mut R) -> Self {
@@ -576,29 +648,39 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         Ok(())
     }
 
-    fn leaves(&self) -> Vec<LeafOrCollapsed<'_, A>> {
+    fn leaves_in_range(&self, range: (Bound<u64>, Bound<u64>)) -> Vec<LeafOrCollapsed<'_, A>> {
         match self {
-            Leaf { hash, aux } => vec![LeafOrCollapsed::Leaf {
+            Leaf { hash, aux } if range.contains(&0) => vec![LeafOrCollapsed::Leaf {
                 index: 0,
                 hash: *hash,
                 aux,
             }],
-            Stub { .. } => Vec::new(),
-            Collapsed { .. } => vec![LeafOrCollapsed::Collapsed {
-                start: 0,
-                end: (1u64 << self.height()) - 1,
-            }],
+            Stub { .. } | Leaf { .. } => Vec::new(),
+            Collapsed { .. } => {
+                if let Some(range) = overlap(range, 0..(1 << self.height())) {
+                    vec![LeafOrCollapsed::Collapsed {
+                        start: *range.start(),
+                        end: *range.end(),
+                    }]
+                } else {
+                    Vec::new()
+                }
+            }
             Node { left, right, .. } => left
-                .leaves()
+                .leaves_in_range(range)
                 .into_iter()
                 .chain(
-                    right
-                        .leaves()
+                    range_sub(range, 1 << left.height())
                         .into_iter()
+                        .flat_map(|sub_range| right.leaves_in_range(sub_range).into_iter())
                         .map(|leaf| leaf.upgrade(1 << left.height())),
                 )
                 .collect(),
         }
+    }
+
+    fn leaves(&self) -> Vec<LeafOrCollapsed<'_, A>> {
+        self.leaves_in_range((Bound::Unbounded, Bound::Unbounded))
     }
 
     fn new(height: u8) -> Self {
@@ -847,16 +929,29 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
 
     /// Inserts a hash value at a specific index, returning the resulting tree.
     /// `index` *must* be within range of the tree height.
+    #[deprecated = "This version panics rather than throwing errors. Prefer `try_update_hash`."]
     pub fn update_hash(&self, index: u64, new_leaf: HashOutput, new_aux: A) -> Sp<Self, D> {
+        self.try_update_hash(index, new_leaf, new_aux)
+            .expect("attempted update into collapsed tree")
+    }
+
+    /// Inserts a hash value at a specific index, returning the resulting tree.
+    /// `index` *must* be within range of the tree height.
+    pub fn try_update_hash(
+        &self,
+        index: u64,
+        new_leaf: HashOutput,
+        new_aux: A,
+    ) -> Result<Sp<Self, D>, InvalidUpdate> {
         let h = self.height();
         if self.is_collapsed() {
-            panic!("Attempted to insert into collapsed portion of Merkle tree!");
+            return Err(InvalidUpdate::CollapsedIndex(index as u128, h));
         }
         if self.height() == 0 {
-            return Sp::new(Leaf {
+            return Ok(Sp::new(Leaf {
                 hash: new_leaf,
                 aux: new_aux,
-            });
+            }));
         }
         let self2 = if let Stub { height } = self {
             let new = Sp::new(MerkleTreeNode::new(*height - 1));
@@ -880,19 +975,22 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
             // Here `index < cmp` is the same as `index & cmp == 0`, i.e. we're
             // checking if the height `h` bit in the path is set or not.
             let (left, right) = if index < cmp {
-                (left.update_hash(index, new_leaf, new_aux), right.clone())
+                (
+                    left.try_update_hash(index, new_leaf, new_aux)?,
+                    right.clone(),
+                )
             } else {
                 (
                     left.clone(),
-                    right.update_hash(index - cmp, new_leaf, new_aux),
+                    right.try_update_hash(index - cmp, new_leaf, new_aux)?,
                 )
             };
-            Sp::new(Node {
+            Ok(Sp::new(Node {
                 left,
                 right,
                 hash: None,
                 height: *height,
-            })
+            }))
         } else {
             unreachable!()
         }
@@ -931,8 +1029,21 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
 
     /// Inserts a hash value at a specific index, returning the resulting tree.
     /// `index` *must* be within range of the tree height.
+    #[deprecated = "This version panics rather than throwing errors. Prefer `try_update_hash`."]
     pub fn update_hash(&self, index: u64, new_leaf: HashOutput, aux: A) -> Self {
+        #[allow(deprecated)]
         MerkleTree(self.0.update_hash(index, new_leaf, aux))
+    }
+
+    /// Inserts a hash value at a specific index, returning the resulting tree.
+    /// `index` *must* be within range of the tree height.
+    pub fn try_update_hash(
+        &self,
+        index: u64,
+        new_leaf: HashOutput,
+        aux: A,
+    ) -> Result<Self, InvalidUpdate> {
+        Ok(MerkleTree(self.0.try_update_hash(index, new_leaf, aux)?))
     }
 
     /// Inserts a value into a specific index of the tree.
@@ -941,11 +1052,20 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
     ///
     /// May panic if this index was previously in a range passed to
     /// [`collapse`](crate::merkle_tree::MerkleTree::collapse).
-    pub fn update<T: BinaryHashRepr + ?Sized>(&self, index: u64, value: &T, aux: A) -> Self
-    where
-        Self: Sized,
-    {
+    #[deprecated = "This version panics rather than throwing errors. Prefer `try_update_hash`."]
+    pub fn update<T: BinaryHashRepr + ?Sized>(&self, index: u64, value: &T, aux: A) -> Self {
+        #[allow(deprecated)]
         self.update_hash(index, crate::merkle_tree::leaf_hash(value), aux)
+    }
+
+    /// Inserts a value into a specific index of the tree.
+    pub fn try_update<T: BinaryHashRepr + ?Sized>(
+        &self,
+        index: u64,
+        value: &T,
+        aux: A,
+    ) -> Result<Self, InvalidUpdate> {
+        self.try_update_hash(index, crate::merkle_tree::leaf_hash(value), aux)
     }
 
     /// Collapses the tree between `start` and `end` (inclusive) into their
@@ -979,7 +1099,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
         let mut curr_idx = update.start as u128;
         let mut curr = self.clone();
         for (segment, hash) in segments.into_iter().zip(update.hashes.iter()) {
-            curr = curr.partial_insert(curr_idx, segment, *hash)?;
+            curr = curr.partial_insert(curr_idx, segment, *hash)?.clone();
             curr_idx += 1u128 << segment as u128;
         }
         Ok(curr)
@@ -1051,12 +1171,43 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
     ///
     /// May panic if the Merkle tree has not been rehashed.
     pub fn find_path_for_leaf<T: BinaryHashRepr>(&self, leaf: T) -> Option<MerklePath<T>> {
-        let hash = leaf_hash(&leaf);
-        for (index, hash2) in self.0.leaves().into_iter().filter_map(|leaf| match leaf {
-            LeafOrCollapsed::Leaf { index, hash, .. } => Some((index, hash)),
-            _ => None,
-        }) {
-            if hash == hash2 {
+        self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, ..)
+    }
+
+    /// Acts as [`find_path_for_leaf`], but limits search to a specified range.
+    pub fn find_path_for_leaf_within_range<T: BinaryHashRepr>(
+        &self,
+        leaf: T,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<T>> {
+        self.find_path_for_leaf_inner(leaf_hash(&leaf), leaf, range)
+    }
+
+    /// Acts as [`find_path_for_leaf_within_range`], but takes the leaf to be pre-hashed.
+    pub fn find_path_for_hashed_leaf_within_range(
+        &self,
+        leaf_hash: HashOutput,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<HashOutput>> {
+        self.find_path_for_leaf_inner(leaf_hash, leaf_hash, range)
+    }
+
+    fn find_path_for_leaf_inner<T>(
+        &self,
+        leaf_hash: HashOutput,
+        leaf: T,
+        range: impl RangeBounds<u64>,
+    ) -> Option<MerklePath<T>> {
+        for (index, hash) in self
+            .0
+            .leaves_in_range((range.start_bound().cloned(), range.end_bound().cloned()))
+            .into_iter()
+            .filter_map(|leaf| match leaf {
+                LeafOrCollapsed::Leaf { index, hash, .. } => Some((index, hash)),
+                _ => None,
+            })
+        {
+            if leaf_hash == hash {
                 return self.path_for_leaf(index, leaf).ok();
             }
         }
@@ -1109,11 +1260,7 @@ impl<A: Storable<D>, D: DB> MerkleTree<A, D> {
     /// Given a leaf at a specific index, produces a [`MerklePath`] for it.
     ///
     /// May panic if the Merkle tree has not been rehashed.
-    pub fn path_for_leaf<T: BinaryHashRepr>(
-        &self,
-        index: u64,
-        leaf: T,
-    ) -> Result<MerklePath<T>, InvalidIndex> {
+    pub fn path_for_leaf<T>(&self, index: u64, leaf: T) -> Result<MerklePath<T>, InvalidIndex> {
         if self.height() == 0 {
             return if index == 0 {
                 Ok(MerklePath {
@@ -1210,7 +1357,9 @@ where
         let mut mt = MerkleTree::blank(height);
 
         for i in 0..height {
-            mt = mt.update(i.into(), &rng.r#gen::<Fr>(), rng.r#gen());
+            if let Ok(updated) = mt.try_update(i.into(), &rng.r#gen::<Fr>(), rng.r#gen()) {
+                mt = updated;
+            }
         }
 
         mt.rehash()
@@ -1221,7 +1370,7 @@ where
 mod tests {
     use sha2::Sha256;
 
-    use storage::db::InMemoryDB;
+    use storage_core::db::InMemoryDB;
 
     use super::*;
 
@@ -1232,10 +1381,11 @@ mod tests {
     #[test]
     fn test_membership() {
         let tree = new_mt::<()>(32)
-            .update(0, &Fr::from(42u64), ())
-            .update(0, &Fr::from(41u64), ())
-            .update(3, &Fr::from(43u64), ())
-            .update(62, &Fr::from(12u64), ())
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(0, &Fr::from(41u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(43u64), ()))
+            .and_then(|mt| mt.try_update(62, &Fr::from(12u64), ()))
+            .unwrap()
             .rehash();
         assert_eq!(
             tree.path_for_leaf(0, Fr::from(41u64)).unwrap().root(),
@@ -1254,10 +1404,11 @@ mod tests {
     #[test]
     fn test_collapse_good() {
         let tree = new_mt::<()>(32)
-            .update(0, &Fr::from(42u64), ())
-            .update(0, &Fr::from(41u64), ())
-            .update(3, &Fr::from(43u64), ())
-            .update(62, &Fr::from(12u64), ())
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(0, &Fr::from(41u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(43u64), ()))
+            .and_then(|mt| mt.try_update(62, &Fr::from(12u64), ()))
+            .unwrap()
             .collapse(0, 61)
             .rehash();
         assert_eq!(
@@ -1269,45 +1420,53 @@ mod tests {
     #[test]
     fn test_collapse_bad_proof() {
         let tree = new_mt::<()>(32)
-            .update(0, &Fr::from(42u64), ())
-            .update(0, &Fr::from(41u64), ())
-            .update(3, &Fr::from(43u64), ())
-            .update(62, &Fr::from(12u64), ())
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(0, &Fr::from(41u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(43u64), ()))
+            .and_then(|mt| mt.try_update(62, &Fr::from(12u64), ()))
+            .unwrap()
             .collapse(0, 61)
             .rehash();
         assert!(tree.path_for_leaf(3, Fr::from(43u64)).is_err());
     }
 
     #[test]
-    #[should_panic = "Attempted to insert into collapsed portion of Merkle tree!"]
     fn test_collapse_bad_update() {
-        let _tree = new_mt::<()>(32)
-            .update(0, &Fr::from(42u64), ())
-            .update(0, &Fr::from(41u64), ())
-            .update(3, &Fr::from(43u64), ())
-            .update(62, &Fr::from(12u64), ())
+        let tree = new_mt::<()>(32)
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(0, &Fr::from(41u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(43u64), ()))
+            .and_then(|mt| mt.try_update(62, &Fr::from(12u64), ()))
+            .unwrap()
             .collapse(0, 61)
-            .update(61, &Fr::from(0xdeadbeefu64), ());
+            .try_update(61, &Fr::from(0xdeadbeefu64), ());
+        assert_eq!(tree, Err(InvalidUpdate::CollapsedIndex(1, 1)));
     }
 
     #[test]
     fn test_incremental_collapse() {
         let tree = new_mt::<()>(3)
-            .update(0, &Fr::from(42u64), ())
+            .try_update(0, &Fr::from(42u64), ())
+            .unwrap()
             .collapse(0, 0)
-            .update(1, &Fr::from(42u64), ())
+            .try_update(1, &Fr::from(42u64), ())
+            .unwrap()
             .collapse(1, 1)
-            .update(2, &Fr::from(42u64), ())
+            .try_update(2, &Fr::from(42u64), ())
+            .unwrap()
             .collapse(2, 2)
-            .update(3, &Fr::from(42u64), ())
-            .update(4, &Fr::from(42u64), ())
+            .try_update(3, &Fr::from(42u64), ())
+            .unwrap()
+            .try_update(4, &Fr::from(42u64), ())
+            .unwrap()
             .collapse(4, 4);
         let tree2 = new_mt::<()>(3)
-            .update(0, &Fr::from(42u64), ())
-            .update(1, &Fr::from(42u64), ())
-            .update(2, &Fr::from(42u64), ())
-            .update(3, &Fr::from(42u64), ())
-            .update(4, &Fr::from(42u64), ())
+            .try_update(0, &Fr::from(42u64), ())
+            .and_then(|mt| mt.try_update(1, &Fr::from(42u64), ()))
+            .and_then(|mt| mt.try_update(2, &Fr::from(42u64), ()))
+            .and_then(|mt| mt.try_update(3, &Fr::from(42u64), ()))
+            .and_then(|mt| mt.try_update(4, &Fr::from(42u64), ()))
+            .unwrap()
             .collapse(0, 2)
             .collapse(4, 4);
         assert_eq!(tree, tree2);
@@ -1316,14 +1475,18 @@ mod tests {
     #[test]
     fn test_collapsed_update() {
         let t = new_mt::<()>(6)
-            .update(0, &Fr::from(42u64), ())
-            .update(1, &Fr::from(42u64), ());
+            .try_update(0, &Fr::from(42u64), ())
+            .unwrap()
+            .try_update(1, &Fr::from(42u64), ())
+            .unwrap();
         let t2 = (2..=32)
-            .fold(t.clone(), |t, i| t.update(i, &Fr::from(42u64), ()))
+            .fold(t.clone(), |t, i| {
+                t.try_update(i, &Fr::from(42u64), ()).unwrap()
+            })
             .rehash();
         let upd1 = MerkleTreeCollapsedUpdate::new(&t2, 2, 2).unwrap();
         let upd2 = MerkleTreeCollapsedUpdate::new(&t2, 3, 31).unwrap();
-        let t3 = t.update(32, &Fr::from(42u64), ());
+        let t3 = t.try_update(32, &Fr::from(42u64), ()).unwrap();
         let t4 = t3
             .apply_collapsed_update(&upd1)
             .unwrap()
@@ -1336,9 +1499,11 @@ mod tests {
     #[test]
     fn test_insertion_evidence() {
         let t = (0..=32)
-            .fold(new_mt::<()>(6), |t, i| t.update(i, &Fr::from(42u64), ()))
+            .fold(new_mt::<()>(6), |t, i| {
+                t.try_update(i, &Fr::from(42u64), ()).unwrap()
+            })
             .rehash();
-        let t2 = t.update(12, &Fr::from(43u64), ()).rehash();
+        let t2 = t.try_update(12, &Fr::from(43u64), ()).unwrap().rehash();
         let evidence = t2.insertion_evidence(12).unwrap();
         assert_eq!(
             t.update_from_evidence(evidence.clone()).unwrap().rehash(),
@@ -1353,9 +1518,10 @@ mod tests {
             t2.root()
         );
         // test *not* rehashing the tree first
-        let t3 = (33..=64).fold(t.update(12, &Fr::from(43u64), ()).rehash(), |t, i| {
-            t.update(i, &Fr::from(42u64), ())
-        });
+        let t3 = (33..=64).fold(
+            t.try_update(12, &Fr::from(43u64), ()).unwrap().rehash(),
+            |t, i| t.try_update(i, &Fr::from(42u64), ()).unwrap(),
+        );
         let evidence = t3.insertion_evidence(12).unwrap();
         dbg!(&evidence);
         // We should still be able to insert into collapsed `t`!
@@ -1371,7 +1537,10 @@ mod tests {
 
     #[test]
     fn test_singleton_collapsed_update() {
-        let t = new_mt::<()>(6).update(0, &Fr::from(42u64), ()).rehash();
+        let t = new_mt::<()>(6)
+            .try_update(0, &Fr::from(42u64), ())
+            .unwrap()
+            .rehash();
         let upd = MerkleTreeCollapsedUpdate::new(&t, 0, 0).unwrap();
         let t2 = new_mt::<()>(6)
             .apply_collapsed_update(&upd)
@@ -1383,18 +1552,141 @@ mod tests {
     #[test]
     fn test_tiny_trees() {
         let t = new_mt::<()>(1)
-            .update(0, &Fr::from(42u64), ())
-            .update(1, &Fr::from(42u64), ());
+            .try_update(0, &Fr::from(42u64), ())
+            .unwrap()
+            .try_update(1, &Fr::from(42u64), ())
+            .unwrap();
         t.path_for_leaf(0, Fr::from(42u64)).unwrap();
-        let t = new_mt::<()>(0).update(0, &Fr::from(42u64), ());
+        let t = new_mt::<()>(0).try_update(0, &Fr::from(42u64), ()).unwrap();
         t.path_for_leaf(0, Fr::from(42u64)).unwrap();
     }
 
     #[test]
     fn test_aux_data() {
-        let t = new_mt::<u8>(32).update(0, &Fr::from(42u64), 10);
+        let t = new_mt::<u8>(32)
+            .try_update(0, &Fr::from(42u64), 10)
+            .unwrap();
         for (_index, (_hash, aux)) in t.iter_aux() {
             assert_eq!(aux, 10);
         }
+    }
+
+    #[test]
+    fn test_find_path_for_leaf_within_range() {
+        let tree = new_mt::<()>(32)
+            .try_update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.try_update(5, &Fr::from(20u64), ()))
+            .and_then(|mt| mt.try_update(10, &Fr::from(30u64), ()))
+            .unwrap()
+            .rehash();
+
+        // Full range finds the leaf
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), ..)
+                .is_some()
+        );
+
+        // Range containing the leaf finds it
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 3..=7)
+                .is_some()
+        );
+
+        // Range excluding the leaf does not find it
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 0..=4)
+                .is_none()
+        );
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 6..=100)
+                .is_none()
+        );
+
+        // Path produced is valid
+        let path = tree
+            .find_path_for_leaf_within_range(Fr::from(30u64), 8..=12)
+            .expect("leaf at index 10 should be in range 8..=12");
+        assert_eq!(path.root(), tree.root().unwrap());
+    }
+
+    #[test]
+    fn test_find_path_for_hashed_leaf_within_range() {
+        let tree = new_mt::<()>(32)
+            .try_update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.try_update(5, &Fr::from(20u64), ()))
+            .unwrap()
+            .rehash();
+
+        let hash = leaf_hash(&Fr::from(20u64));
+
+        // Finds by hash
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, ..)
+                .is_some()
+        );
+
+        // Range restriction works
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, 5..=5)
+                .is_some()
+        );
+        assert!(
+            tree.find_path_for_hashed_leaf_within_range(hash, 0..=4)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_find_within_range_with_collapsed() {
+        let tree = new_mt::<()>(6)
+            .try_update(0, &Fr::from(10u64), ())
+            .and_then(|mt| mt.try_update(5, &Fr::from(20u64), ()))
+            .and_then(|mt| mt.try_update(10, &Fr::from(30u64), ()))
+            .unwrap()
+            .collapse(0, 4)
+            .rehash();
+
+        // Leaf in collapsed region is not found
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(10u64), ..)
+                .is_none()
+        );
+
+        // Leaf outside collapsed region is found
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), ..)
+                .is_some()
+        );
+
+        // Range restricted to collapsed region returns nothing
+        assert!(
+            tree.find_path_for_leaf_within_range(Fr::from(20u64), 0..=4)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_find_within_range_duplicate_leaves() {
+        let val = Fr::from(42u64);
+        let tree = new_mt::<()>(6)
+            .try_update(2, &val, ())
+            .and_then(|mt| mt.try_update(5, &val, ()))
+            .and_then(|mt| mt.try_update(8, &val, ()))
+            .unwrap()
+            .rehash();
+
+        // Restricting range picks the correct duplicate
+        let path = tree
+            .find_path_for_leaf_within_range(val, 4..=6)
+            .expect("should find leaf at index 5");
+        assert_eq!(path.root(), tree.root().unwrap());
+
+        let path = tree
+            .find_path_for_leaf_within_range(val, 7..=10)
+            .expect("should find leaf at index 8");
+        assert_eq!(path.root(), tree.root().unwrap());
+
+        // Empty range finds nothing
+        assert!(tree.find_path_for_leaf_within_range(val, 3..=4).is_none());
     }
 }

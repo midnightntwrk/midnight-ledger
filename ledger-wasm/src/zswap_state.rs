@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -12,8 +12,9 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
+use crate::events::Event;
 use crate::state_changes::ZswapStateChanges;
+use crate::tx::{Transaction, get_dyn_transaction};
 use crate::zswap_keys::ZswapSecretKeys;
 use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
 use base_crypto::time::Timestamp;
@@ -25,12 +26,14 @@ use coin_structure::{
     contract::ContractAddress as Address,
 };
 use js_sys::{Array, Date, JsString, Map, Set, Uint8Array};
+use ledger::events::{EventDetails, EventSource};
 use ledger::semantics::ZswapLocalStateExt;
 use ledger::zswap::WithZswapStateChanges;
 use onchain_runtime_wasm::from_value_ser;
 use rand::Rng;
 use rand::rngs::OsRng;
-use serialize::tagged_serialize;
+use serialize::{tagged_deserialize_sequence, tagged_serialize};
+use std::ops::Deref;
 use storage::{db::InMemoryDB, storage::Map as SMap};
 use transient_crypto::merkle_tree;
 use wasm_bindgen::prelude::*;
@@ -121,6 +124,7 @@ impl ZswapLocalStateWithChanges {
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct ZswapLocalState(pub(crate) zswap::local::State<InMemoryDB>);
 
 impl Default for ZswapLocalState {
@@ -149,6 +153,15 @@ impl ZswapLocalState {
             res.add(&qualified_shielded_coininfo_to_value(&coin)?);
         }
         Ok(res)
+    }
+
+    #[wasm_bindgen(getter = "merkleTreeRoot")]
+    pub fn merkle_tree_root(&self) -> JsValue {
+        self.0
+            .merkle_tree
+            .root()
+            .map(|r| JsValue::from(fr_to_bigint(r.0)))
+            .unwrap_or(JsValue::UNDEFINED)
     }
 
     // pendingSpends: Map<Uint8Array, [QualifiedShieldedCoinInfo, Date | undefined]>
@@ -206,6 +219,19 @@ impl ZswapLocalState {
         Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
+    #[wasm_bindgen(js_name = "replayRawEvents")]
+    pub fn replay_raw_events(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        raw_events: &[u8],
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        let events = tagged_deserialize_sequence(raw_events)?;
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events.iter())?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
+    }
+
     pub fn apply(
         &self,
         secret_keys: &ZswapSecretKeys,
@@ -213,11 +239,68 @@ impl ZswapLocalState {
     ) -> Result<ZswapLocalState, JsError> {
         use ZswapOfferTypes::*;
         let sk_unwrapped = secret_keys.try_into()?;
-        Ok(ZswapLocalState(match &offer.0 {
-            ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
-            ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
-        }))
+        Ok(ZswapLocalState(
+            (match &offer.0 {
+                ProvenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                UnprovenOffer(val) => self.0.apply(&sk_unwrapped, val),
+                ProofErasedOffer(val) => self.0.apply(&sk_unwrapped, val),
+            })?,
+        ))
+    }
+
+    #[wasm_bindgen(js_name = "applyWithChanges")]
+    pub fn apply_with_changes(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        offer: &ZswapOffer,
+    ) -> Result<ZswapLocalStateWithChanges, JsError> {
+        use ZswapOfferTypes::*;
+        let erased = match &offer.0 {
+            ProvenOffer(val) => val.erase_proofs(),
+            UnprovenOffer(val) => val.erase_proofs(),
+            ProofErasedOffer(val) => val.erase_proofs(),
+        };
+        let inputs = erased
+            .inputs
+            .iter()
+            .map(|i| (*i).clone())
+            .chain(erased.transient.iter().map(|t| t.as_input()));
+        let outputs = erased
+            .outputs
+            .iter()
+            .map(|o| (*o).clone())
+            .chain(erased.transient.iter().map(|t| t.as_output()));
+        let dummy_source = EventSource {
+            transaction_hash: Default::default(),
+            logical_segment: 0,
+            physical_segment: 0,
+        };
+        let details = inputs
+            .map(|i| EventDetails::ZswapInput {
+                nullifier: i.nullifier,
+                contract: i.contract_address,
+            })
+            .chain(outputs.enumerate().map(|(i, o)| EventDetails::ZswapOutput {
+                commitment: o.coin_com,
+                preimage_evidence: match o.ciphertext {
+                    Some(ciph) => {
+                        ledger::events::ZswapPreimageEvidence::Ciphertext(Box::new((*ciph).clone()))
+                    }
+                    None => ledger::events::ZswapPreimageEvidence::None,
+                },
+                contract: o.contract_address,
+                mt_index: i as u64 + self.0.first_free,
+            }));
+        let events = details
+            .map(|content| ledger::events::Event {
+                source: dummy_source.clone(),
+                content,
+            })
+            .collect::<Vec<_>>();
+        let with_changes = self
+            .0
+            .replay_events_with_changes(&secret_keys.try_into()?, events.iter())?;
+        Ok(ZswapLocalStateWithChanges::from(with_changes))
     }
 
     #[wasm_bindgen(js_name = "applyCollapsedUpdate")]
@@ -228,6 +311,49 @@ impl ZswapLocalState {
         Ok(ZswapLocalState(
             self.0.apply_collapsed_update(update.as_ref())?,
         ))
+    }
+
+    #[wasm_bindgen(js_name = "insertCoin")]
+    pub fn insert_coin(
+        &self,
+        secret_keys: &ZswapSecretKeys,
+        coin: JsValue,
+    ) -> Result<ZswapLocalState, JsError> {
+        Ok(ZswapLocalState(self.0.insert_coin(
+            &secret_keys.try_into()?,
+            value_to_shielded_coininfo(coin)?,
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "removeCoinByNullifier")]
+    pub fn remove_coin_by_nullifier(&self, nullifier: &str) -> Result<ZswapLocalState, JsError> {
+        let nullifier = from_hex_ser(nullifier)?;
+        Ok(ZswapLocalState(self.0.remove_coin_by_nullifier(nullifier)))
+    }
+
+    #[wasm_bindgen(js_name = "applyFailed")]
+    pub fn apply_failed(&self, offer: &ZswapOffer) -> ZswapLocalState {
+        use ZswapOfferTypes::*;
+        ZswapLocalState(match &offer.0 {
+            ProvenOffer(val) => self.0.apply_failed(val),
+            UnprovenOffer(val) => self.0.apply_failed(val),
+            ProofErasedOffer(val) => self.0.apply_failed(val),
+        })
+    }
+
+    #[wasm_bindgen(js_name = "revertTransaction")]
+    pub fn revert_transaction(&self, tx: &Transaction) -> ZswapLocalState {
+        let tx = get_dyn_transaction(tx.0.clone()).as_erased();
+        let ledger::structure::Transaction::Standard(tx) = tx else {
+            return self.clone();
+        };
+        ZswapLocalState(
+            tx.guaranteed_coins
+                .iter()
+                .map(|o| o.deref().clone())
+                .chain(tx.fallible_coins.values())
+                .fold(self.0.clone(), |st, offer| st.apply_failed(&offer)),
+        )
     }
 
     #[wasm_bindgen(js_name = "clearPending")]

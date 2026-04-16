@@ -1,5 +1,5 @@
 # This file is part of midnight-ledger.
-# Copyright (C) 2025 Midnight Foundation
+# Copyright (C) Midnight Foundation
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License");
 # You may not use this file except in compliance with the License.
@@ -143,8 +143,7 @@
               }.${if isCrossArm then "aarch64-linux" else system};
 
               checkPhase = ''
-                cargo fmt -- --check
-                cargo check --all-targets --workspace
+                cargo clippy --all-targets --workspace --all -- -Dwarnings -Aclippy::type_complexity -Aclippy::mutable_key_type -Aclippy::too_many_arguments -Aclippy::derived_hash_with_manual_eq -Aclippy::unbuffered_bytes
                 ${if heavy-checks then "cargo test --release --target ${CARGO_BUILD_TARGET}" else ""}
               '';
               cargoBuildFlags = (if build-target != null then "--package ${build-target} " else "") + "--target ${CARGO_BUILD_TARGET}";
@@ -180,6 +179,23 @@
                 CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.aarch64-multiplatform-musl.stdenv.cc}/bin/aarch64-unknown-linux-musl-cc";
                 doCheck = false;
                 buildInputs = [pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc];
+              }
+              else if system == "x86_64-linux"
+              then {
+                # CARGO_BUILD_TARGET is x86_64-unknown-linux-musl even on the
+                # native host, so bind a real musl toolchain — otherwise crates
+                # with C code (e.g. aws-lc-sys) pick up the host's glibc
+                # headers and emit references to symbols like __isoc23_sscanf
+                # that musl doesn't provide.
+                depsBuildBuild = [
+                  pkgs.pkgsCross.musl64.stdenv.cc
+                ];
+                preBuild = ''
+                  export CC=$CC_X86_64_UNKNOWN_LINUX_MUSL
+                '';
+                CC_X86_64_UNKNOWN_LINUX_MUSL = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+                CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+                buildInputs = [pkgs.pkgsCross.musl64.stdenv.cc];
               }
               else {}
             ));
@@ -263,6 +279,16 @@
             rust.complete.cargo
           ];
           packages.proof-server-version = proof-server-version;
+
+          packages.integration-test-deps = pkgs.symlinkJoin {
+            name = "integration-test-deps";
+            paths = [
+              packages.proof-server
+              packages.onchain-runtime-wasm
+              packages.ledger-wasm
+              packages.zkir-wasm
+            ];
+          };
 
           packages.default = pkgs.symlinkJoin {
             name = "ledger-all";
@@ -361,9 +387,9 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v2"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v3"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v7"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v8"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
           packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
@@ -394,7 +420,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir --features binary";
+              cargoBuildFlags = "--package midnight-zkir --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];
@@ -420,7 +446,7 @@
               buildInputs = [
                 packages.public-params
               ];
-              cargoBuildFlags = "--package zkir-v3 --features binary";
+              cargoBuildFlags = "--package midnight-zkir-v3 --features binary";
               nativeBuildInputs = [
                 packages.rust-build-toolchain
               ];
@@ -538,7 +564,6 @@
               cargo-audit
               pkgs.wasm-pack
               pkgs.wasm-bindgen-cli_0_2_104
-              pkgs.cargo-spellcheck
             ];
             buildInputs = [packages.public-params];
 

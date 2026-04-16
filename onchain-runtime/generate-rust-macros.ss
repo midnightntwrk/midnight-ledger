@@ -1,5 +1,5 @@
 ; This file is part of midnight-ledger.
-; Copyright (C) 2025 Midnight Foundation
+; Copyright (C) Midnight Foundation
 ; SPDX-License-Identifier: Apache-2.0
 ; Licensed under the Apache License, Version 2.0 (the "License");
 ; You may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@
     [(_ (state-value 'array (entries ...)))
       (format "StateValue::Array(vec![~{~a~^, ~}].into())" (list (rt-arg entries) ...))]
     [(_ (state-value 'merkle-tree nat ([key value] ...)))
-      (format "StateValue::BoundedMerkleTree(MerkleTree::blank(~a)~{.update(~a)~})"
+      (format "StateValue::BoundedMerkleTree(MerkleTree::blank(~a)~{.try_update(~a).unwrap()~})"
               (rt-arg nat)
               (list (format "~a, ~a.into()" (rt-arg key) (rt-arg value)) ...))]
     [(_ (state-value 'ADT value value_type))

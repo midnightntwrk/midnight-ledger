@@ -57,47 +57,45 @@ static TESTS: LazyLock<HashMap<&str, TestFn>> = {
             ),
             (
                 "arena::stress_tests::array_nesting",
-                no_args(midnight_storage::arena::stress_tests::array_nesting),
+                no_args(midnight_storage::stress_tests::array_nesting),
             ),
             (
                 "arena::stress_tests::drop_deeply_nested_data",
-                no_args(midnight_storage::arena::stress_tests::drop_deeply_nested_data),
+                no_args(midnight_storage::stress_tests::drop_deeply_nested_data),
             ),
             (
                 "arena::stress_tests::serialize_deeply_nested_data",
-                no_args(midnight_storage::arena::stress_tests::serialize_deeply_nested_data),
+                no_args(midnight_storage::stress_tests::serialize_deeply_nested_data),
             ),
             #[cfg(feature = "sqlite")]
             (
                 "arena::stress_tests::thrash_the_cache_variations_sqldb",
-                Box::new(midnight_storage::arena::stress_tests::thrash_the_cache_variations_sqldb),
+                Box::new(midnight_storage::stress_tests::thrash_the_cache_variations_sqldb),
             ),
             #[cfg(feature = "parity-db")]
             (
                 "arena::stress_tests::thrash_the_cache_variations_paritydb",
-                Box::new(
-                    midnight_storage::arena::stress_tests::thrash_the_cache_variations_paritydb,
-                ),
+                Box::new(midnight_storage::stress_tests::thrash_the_cache_variations_paritydb),
             ),
             #[cfg(feature = "sqlite")]
             (
                 "arena::stress_tests::load_large_tree_sqldb",
-                Box::new(midnight_storage::arena::stress_tests::load_large_tree_sqldb),
+                Box::new(midnight_storage::stress_tests::load_large_tree_sqldb),
             ),
             #[cfg(feature = "parity-db")]
             (
                 "arena::stress_tests::load_large_tree_paritydb",
-                Box::new(midnight_storage::arena::stress_tests::load_large_tree_paritydb),
+                Box::new(midnight_storage::stress_tests::load_large_tree_paritydb),
             ),
             #[cfg(feature = "sqlite")]
             (
                 "arena::stress_tests::read_write_map_loop_sqldb",
-                Box::new(midnight_storage::arena::stress_tests::read_write_map_loop::<SqlDB>),
+                Box::new(midnight_storage::stress_tests::read_write_map_loop::<SqlDB>),
             ),
             #[cfg(feature = "parity-db")]
             (
                 "arena::stress_tests::read_write_map_loop_paritydb",
-                Box::new(midnight_storage::arena::stress_tests::read_write_map_loop::<ParityDb>),
+                Box::new(midnight_storage::stress_tests::read_write_map_loop::<ParityDb>),
             ),
         ])
     })

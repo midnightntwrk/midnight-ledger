@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -739,7 +739,8 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                 let container_nxt = match &container.0.value {
                     StateValue::Map(m) => StateValue::Map(m.remove(&key)),
                     StateValue::BoundedMerkleTree(t) => StateValue::BoundedMerkleTree(
-                        t.update_hash((&*key.value).try_into()?, Default::default(), ())
+                        t.try_update_hash((&*key.value).try_into()?, Default::default(), ())
+                            .map_err(OnchainProgramError::MerkleTreeError)?
                             .rehash(),
                     ),
                     _ => {
@@ -988,7 +989,11 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                                         "attempt to ins cell that doesn't repr hash into bmt: {e}"
                                     ))
                                 })?;
-                                StateValue::BoundedMerkleTree(t.update_hash(idx, hash, ()).rehash())
+                                StateValue::BoundedMerkleTree(
+                                    t.try_update_hash(idx, hash, ())
+                                        .map_err(OnchainProgramError::MerkleTreeError)?
+                                        .rehash(),
+                                )
                             } else {
                                 return Err(OnchainProgramError::BoundsExceeded);
                             }

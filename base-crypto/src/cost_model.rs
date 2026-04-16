@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -481,6 +481,28 @@ impl From<RunningCost> for SyntheticCost {
             bytes_written,
             bytes_churned: value.bytes_written - bytes_written,
         }
+    }
+}
+
+// Lossy conversion back to running cost, used in cost estimation heuristics
+impl From<SyntheticCost> for RunningCost {
+    fn from(value: SyntheticCost) -> Self {
+        RunningCost {
+            read_time: value.read_time,
+            compute_time: value.compute_time,
+            bytes_written: value.bytes_written,
+            bytes_deleted: 0,
+        }
+    }
+}
+
+impl std::iter::Sum for RunningCost {
+    fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
+        let mut res = RunningCost::ZERO;
+        for i in iter {
+            res += i;
+        }
+        res
     }
 }
 

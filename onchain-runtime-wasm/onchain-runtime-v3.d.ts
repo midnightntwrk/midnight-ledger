@@ -302,6 +302,10 @@ export type CallContext = {
    * A public address identifying an entity.
    */
   caller?: PublicAddress,
+  /**
+   * The {@link secondsSinceEpoch} of the previous block
+   */
+  lastBlockTime: bigint,
 };
 /**
  * Context information about the block forwarded to {@link CallContext}.
@@ -320,6 +324,10 @@ export type BlockContext = {
    * The hash of the block prior to this transaction, as a hex-encoded string
    */
   parentBlockHash: string,
+  /**
+   * The {@link secondsSinceEpoch} of the previous block
+   */
+  lastBlockTime: bigint,
 };
 /**
  * The contract-external effects of a transcript.
@@ -931,7 +939,12 @@ export class StateBoundedMerkleTree {
    * Returns undefined if the leaf is not in the tree.
    * @internal
    */
-  findPathForLeaf(leaf: AlignedValue): AlignedValue | undefined;
+  findPathForLeaf(
+    leaf: AlignedValue,
+    indexStart?: bigint,
+    indexEnd?: bigint,
+    alreadyHashed?: boolean,
+  ): AlignedValue | undefined;
 
   /**
    * Internal implementation of the path construction primitive

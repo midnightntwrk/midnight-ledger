@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::construct::ContractCallPrototype;
-use crate::dust::DustResolver;
 use crate::dust::{
-    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustSecretKey,
+    DustActions, DustLocalState, DustOutput, DustPublicKey, DustRegistration, DustResolver,
+    DustSecretKey,
 };
 use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProvingError};
 use crate::events::Event;
@@ -45,19 +45,19 @@ use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
-use rand::{CryptoRng, Rng};
+use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
 use serialize::{Serializable, Tagged};
 #[cfg(feature = "proving")]
 use serialize::{tagged_deserialize, tagged_serialize};
-use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::env;
 use std::io;
 use storage::Storable;
-use storage::arena::Sp;
+use storage::arena::{ArenaHash, Sp};
 use storage::db::DB;
-use storage::storage::{HashMap as SHashMap, HashSet};
+use storage::storage::{HashMap, HashSet, default_storage};
 #[cfg(feature = "proving")]
 use transient_crypto::commitment::PureGeneratorPedersen;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness};
@@ -100,6 +100,16 @@ lazy_static! {
     );
 }
 
+#[non_exhaustive]
+#[derive(PartialEq, Eq, Clone)]
+pub enum TestProcessingMode {
+    Regular,
+    /// Disables some processing around UTXO and Dust processing that may, due to tracking local
+    /// state, lead to non-linear transaction processing. Primarily for use during setup of large
+    /// test states, and not 'normal' tests.
+    ForceConstantTime,
+}
+
 #[derive_where(Clone)]
 pub struct TestState<D: DB> {
     pub ledger: LedgerState<D>,
@@ -113,6 +123,11 @@ pub struct TestState<D: DB> {
     pub zswap_keys: SecretKeys,
     pub night_key: SigningKey,
     pub dust_key: DustSecretKey,
+
+    pub mode: TestProcessingMode,
+    pub past_state_window: VecDeque<ArenaHash<D::Hasher>>,
+    pub past_state_window_len: usize,
+    pub debug_print: bool,
 }
 
 impl<D: DB> TestState<D> {
@@ -129,7 +144,36 @@ impl<D: DB> TestState<D> {
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
             night_key: SigningKey::sample(&mut *rng),
             dust_key: DustSecretKey::sample(&mut *rng),
+
+            mode: TestProcessingMode::Regular,
+            past_state_window: VecDeque::new(),
+            past_state_window_len: 20,
+            debug_print: false,
         }
+    }
+
+    pub fn swizzle_to_db(&mut self) {
+        use std::ops::Deref;
+        let mut lstate = Sp::new(self.ledger.clone());
+        let mut zstate = Sp::new(self.zswap.clone());
+        let mut dstate = Sp::new(self.dust.clone());
+        lstate.persist();
+        zstate.persist();
+        dstate.persist();
+        let new_roots = [lstate.hash(), zstate.hash(), dstate.hash()];
+        self.past_state_window.extend(new_roots);
+        lstate.unload();
+        zstate.unload();
+        dstate.unload();
+        self.ledger = lstate.deref().clone();
+        self.zswap = zstate.deref().clone();
+        self.dust = dstate.deref().clone();
+        default_storage::<D>().with_backend(|b| {
+            while self.past_state_window.len() > self.past_state_window_len {
+                b.unpersist(&self.past_state_window.pop_front().unwrap());
+            }
+            b.flush_all_changes_to_db();
+        });
     }
 
     pub fn context(&self) -> TransactionContext<D> {
@@ -217,7 +261,7 @@ impl<D: DB> TestState<D> {
         };
         let mut intent = Intent::empty(rng, self.time);
         intent.guaranteed_unshielded_offer = Some(Sp::new(offer));
-        let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1u16, intent));
+        let tx = Transaction::from_intents("local-test", HashMap::new().insert(1u16, intent));
         let strictness = WellFormedStrictness {
             enforce_balancing: false,
             ..WellFormedStrictness::default()
@@ -256,7 +300,7 @@ impl<D: DB> TestState<D> {
         };
         let tx = Transaction::<(), _, _, D>::new(
             "local-test",
-            SHashMap::new(),
+            HashMap::new(),
             Some(offer),
             HashMap::new(),
         );
@@ -278,7 +322,9 @@ impl<D: DB> TestState<D> {
                 FixedPoint::from_u64_div(1, 2),
             )
             .unwrap();
-        self.dust = self.dust.process_ttls(self.time);
+        if self.mode != TestProcessingMode::ForceConstantTime {
+            self.dust = self.dust.process_ttls(self.time);
+        }
     }
 
     pub fn step(&mut self) {
@@ -299,7 +345,7 @@ impl<D: DB> TestState<D> {
         };
         let mut intent = Intent::empty(rng, self.time);
         intent.dust_actions = Some(Sp::new(actions));
-        let tx = Transaction::from_intents("local-test", SHashMap::new().insert(1, intent));
+        let tx = Transaction::from_intents("local-test", HashMap::new().insert(1, intent));
         let strictness = WellFormedStrictness {
             enforce_balancing: false,
             verify_signatures: false,
@@ -330,6 +376,9 @@ impl<D: DB> TestState<D> {
 
         let res = self.ledger.apply_system_tx(tx, self.time)?;
         let (res, events) = res;
+        // Reapply to test determinism
+        let cmp = self.ledger.apply_system_tx(tx, self.time)?.0;
+        assert_eq!(res.state_hash(), cmp.state_hash());
         self.ledger = res;
         self.zswap = self
             .zswap
@@ -340,14 +389,18 @@ impl<D: DB> TestState<D> {
             .replay_events(&self.dust_key, events.iter())
             .expect("just applied transaction should replay");
         let pk = UserAddress::from(self.night_key.verifying_key());
-        self.utxos = self
+        let utxo_iter = self
             .ledger
             .utxo
             .utxos
             .iter()
             .map(|kv| (*kv.0).clone())
-            .filter(|utxo| utxo.owner == pk)
-            .collect();
+            .filter(|utxo| utxo.owner == pk);
+
+        self.utxos = match self.mode {
+            TestProcessingMode::ForceConstantTime => utxo_iter.take(10).collect(),
+            _ => utxo_iter.collect(),
+        };
         self.step();
         Ok(())
     }
@@ -355,7 +408,7 @@ impl<D: DB> TestState<D> {
     pub fn apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
@@ -366,6 +419,9 @@ impl<D: DB> TestState<D> {
         let context = self.context();
         let vtx = tx.well_formed(&self.ledger, strictness, self.time)?;
         let (new_st, result) = self.ledger.apply(&vtx, &context);
+        // Reapply to test determinism
+        let cmp = self.ledger.apply(&vtx, &context).0;
+        assert_eq!(new_st.state_hash(), cmp.state_hash());
         self.ledger = new_st;
         self.zswap = self
             .zswap
@@ -376,14 +432,18 @@ impl<D: DB> TestState<D> {
             .replay_events(&self.dust_key, result.events())
             .expect("just applied transaction should replay");
         let pk = UserAddress::from(self.night_key.verifying_key());
-        self.utxos = self
+        let utxo_iter = self
             .ledger
             .utxo
             .utxos
             .iter()
             .map(|kv| (*kv.0).clone())
-            .filter(|utxo| utxo.owner == pk)
-            .collect();
+            .filter(|utxo| utxo.owner == pk);
+
+        self.utxos = match self.mode {
+            TestProcessingMode::ForceConstantTime => utxo_iter.take(10).collect(),
+            _ => utxo_iter.collect(),
+        };
         self.step();
         Ok(result)
     }
@@ -391,21 +451,23 @@ impl<D: DB> TestState<D> {
     pub fn assert_apply<
         S: SignatureKind<D>,
         P: ProofKind<D>,
-        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D>,
+        B: PedersenDowngradeable<D> + Serializable + Storable<D> + BindingKind<S, P, D> + Tagged,
     >(
         &mut self,
         tx: &Transaction<S, P, B, D>,
         strictness: WellFormedStrictness,
     ) {
-        dbg!(tx.cost(&self.ledger.parameters, false)).ok();
-        dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
-        dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
-        dbg!(
-            tx.cost(&self.ledger.parameters, false)
-                .ok()
-                .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
-        );
-        dbg!(&tx.erase_proofs());
+        if self.debug_print {
+            dbg!(tx.cost(&self.ledger.parameters, false)).ok();
+            dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
+            dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
+            dbg!(
+                tx.cost(&self.ledger.parameters, false)
+                    .ok()
+                    .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
+            );
+            dbg!(&tx.erase_proofs());
+        }
         let res = self
             .apply(tx, strictness)
             .expect("transaction should be well-formed");
@@ -490,14 +552,14 @@ impl<D: DB> TestState<D> {
                 if seg == 0 {
                     Transaction::<S, ProofPreimageMarker, PedersenRandomness, D>::new(
                         "local-test",
-                        SHashMap::new(),
+                        HashMap::new(),
                         Some(offer),
                         HashMap::new(),
                     )
                 } else {
                     let mut fc = HashMap::new();
-                    fc.insert(seg, offer);
-                    Transaction::new("local-test", SHashMap::new(), None, fc)
+                    fc = fc.insert(seg, offer);
+                    Transaction::new("local-test", HashMap::new(), None, fc)
                 }
             })
             .collect::<Vec<_>>();
@@ -516,12 +578,16 @@ impl<D: DB> TestState<D> {
         {
             dust += last_dust;
             last_dust = dust;
-            eprintln!(
-                "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
-                self.dust.wallet_balance(self.time)
-            );
+            if self.mode != TestProcessingMode::ForceConstantTime && self.debug_print {
+                eprintln!(
+                    "balancing {dust} Dust atomic units / wallet balance: {} Dust atomic units",
+                    self.dust.wallet_balance(self.time)
+                );
+            }
             let mut spends = storage::storage::Array::new();
-            for qdo in old_dust.utxos() {
+            let mut utxos = old_dust.utxos().collect::<Vec<_>>();
+            utxos.shuffle(&mut rng);
+            for qdo in utxos.into_iter() {
                 if dust == 0 {
                     break;
                 }
@@ -532,7 +598,9 @@ impl<D: DB> TestState<D> {
                     &self.ledger.parameters.dust,
                 );
                 let v_fee = u128::min(value, dust);
-                eprintln!("adding utxo of {v_fee} Dust atomic units");
+                if self.debug_print {
+                    eprintln!("adding utxo of {v_fee} Dust atomic units");
+                }
                 dust = dust.saturating_sub(value);
                 let (new_dust, spend) = self
                     .dust
@@ -550,7 +618,7 @@ impl<D: DB> TestState<D> {
                 registrations: vec![].into(),
                 ctime: self.time,
             }));
-            let hm = SHashMap::new().insert(0xFEED, intent);
+            let hm = HashMap::new().insert(0xFEED, intent);
             let tx2_unproven = Transaction::from_intents("local-test", hm);
             let tx2_mock = P::mock_from_unproven(tx2_unproven.clone());
             merged_tx = tx.merge(&tx2_mock)?;
@@ -843,7 +911,7 @@ pub async fn serialize_request_body<S: SignatureKind<D> + Tagged, D: DB>(
         .calls()
         .map(|(_, c)| String::from_utf8_lossy(&c.entry_point).into_owned())
         .collect::<Vec<_>>();
-    let mut keys = HashMap::new();
+    let mut keys = std::collections::HashMap::new();
     for k in circuits_used.into_iter() {
         let k = KeyLocation(std::borrow::Cow::Owned(k));
         let data = resolver
@@ -961,7 +1029,7 @@ pub fn well_formed_tx_builder<
                 "local-test",
                 storage::storage::HashMap::new(),
                 Some(offer),
-                std::collections::HashMap::new(),
+                storage::storage::HashMap::new(),
             ),
             resolver,
         )

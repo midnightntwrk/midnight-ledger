@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v8.1.0-rc.1**](../README.md)
 
 ***
 
@@ -50,6 +50,160 @@ readonly utxos: QualifiedDustOutput[];
 
 ## Methods
 
+### addUtxo()
+
+```ts
+addUtxo(
+   nullifier, 
+   utxo, 
+   pendingUntil?): DustLocalState;
+```
+
+#### Parameters
+
+##### nullifier
+
+`bigint`
+
+##### utxo
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
+
+##### pendingUntil?
+
+`Date`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### applyCommitmentCollapsedUpdate()
+
+```ts
+applyCommitmentCollapsedUpdate(update): DustLocalState;
+```
+
+#### Parameters
+
+##### update
+
+[`DustStateMerkleTreeCollapsedUpdate`](DustStateMerkleTreeCollapsedUpdate.md)
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### applyGenerationCollapsedUpdate()
+
+```ts
+applyGenerationCollapsedUpdate(update): DustLocalState;
+```
+
+#### Parameters
+
+##### update
+
+[`DustStateMerkleTreeCollapsedUpdate`](DustStateMerkleTreeCollapsedUpdate.md)
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### collapseCommitmentTree()
+
+```ts
+collapseCommitmentTree(commitmentIndexStart, commitmentIndexEnd): DustLocalState;
+```
+
+#### Parameters
+
+##### commitmentIndexStart
+
+`bigint`
+
+##### commitmentIndexEnd
+
+`bigint`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### collapseGenerationTree()
+
+```ts
+collapseGenerationTree(generationIndexStart, generationIndexEnd): DustLocalState;
+```
+
+#### Parameters
+
+##### generationIndexStart
+
+`bigint`
+
+##### generationIndexEnd
+
+`bigint`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### commitmentTreeRoot()
+
+```ts
+commitmentTreeRoot(): undefined | bigint;
+```
+
+#### Returns
+
+`undefined` \| `bigint`
+
+***
+
+### findUtxoByNullifier()
+
+```ts
+findUtxoByNullifier(nullifier): 
+  | undefined
+  | QualifiedDustOutput;
+```
+
+#### Parameters
+
+##### nullifier
+
+`bigint`
+
+#### Returns
+
+  \| `undefined`
+  \| [`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
+
+***
+
+### generatingTreeRoot()
+
+```ts
+generatingTreeRoot(): undefined | bigint;
+```
+
+#### Returns
+
+`undefined` \| `bigint`
+
+***
+
 ### generationInfo()
 
 ```ts
@@ -71,6 +225,64 @@ generationInfo(qdo):
 
 ***
 
+### insertCommitment()
+
+```ts
+insertCommitment(
+   commitmentIndex, 
+   qdo, 
+   own_qdo): DustLocalState;
+```
+
+#### Parameters
+
+##### commitmentIndex
+
+`bigint`
+
+##### qdo
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
+
+##### own\_qdo
+
+`boolean`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### insertGenerationInfo()
+
+```ts
+insertGenerationInfo(
+   generationIndex, 
+   generation, 
+   initialNonce?): DustLocalState;
+```
+
+#### Parameters
+
+##### generationIndex
+
+`bigint`
+
+##### generation
+
+[`DustGenerationInfo`](../type-aliases/DustGenerationInfo.md)
+
+##### initialNonce?
+
+`string`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
 ### processTtls()
 
 ```ts
@@ -82,6 +294,64 @@ processTtls(time): DustLocalState;
 ##### time
 
 `Date`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### removeCommitment()
+
+```ts
+removeCommitment(commitmentIndex): DustLocalState;
+```
+
+#### Parameters
+
+##### commitmentIndex
+
+`bigint`
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### removeGenerationInfo()
+
+```ts
+removeGenerationInfo(generationIndex, generation): DustLocalState;
+```
+
+#### Parameters
+
+##### generationIndex
+
+`bigint`
+
+##### generation
+
+[`DustGenerationInfo`](../type-aliases/DustGenerationInfo.md)
+
+#### Returns
+
+`DustLocalState`
+
+***
+
+### removeUtxo()
+
+```ts
+removeUtxo(nullifier): DustLocalState;
+```
+
+#### Parameters
+
+##### nullifier
+
+`bigint`
 
 #### Returns
 
@@ -108,6 +378,52 @@ replayEvents(sk, events): DustLocalState;
 #### Returns
 
 `DustLocalState`
+
+***
+
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(sk, events): DustLocalStateWithChanges;
+```
+
+#### Parameters
+
+##### sk
+
+[`DustSecretKey`](DustSecretKey.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`DustLocalStateWithChanges`](DustLocalStateWithChanges.md)
+
+***
+
+### replayRawEvents()
+
+```ts
+replayRawEvents(sk, rawEvents): DustLocalStateWithChanges;
+```
+
+Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+
+#### Parameters
+
+##### sk
+
+[`DustSecretKey`](DustSecretKey.md)
+
+##### rawEvents
+
+`Uint8Array`
+
+#### Returns
+
+[`DustLocalStateWithChanges`](DustLocalStateWithChanges.md)
 
 ***
 
@@ -154,6 +470,47 @@ spend(
 #### Returns
 
 \[`DustLocalState`, [`DustSpend`](DustSpend.md)\<[`PreProof`](PreProof.md)\>\]
+
+***
+
+### successorUtxo()
+
+```ts
+successorUtxo(
+   qdo, 
+   now, 
+   subtract_fee, 
+   new_commitment_index, 
+   sk): QualifiedDustOutput;
+```
+
+Returns a new UTXO with a reduced value and the sequential nonce
+
+#### Parameters
+
+##### qdo
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
+
+##### now
+
+`Date`
+
+##### subtract\_fee
+
+`bigint`
+
+##### new\_commitment\_index
+
+`bigint`
+
+##### sk
+
+[`DustSecretKey`](DustSecretKey.md)
+
+#### Returns
+
+[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
 
 ***
 

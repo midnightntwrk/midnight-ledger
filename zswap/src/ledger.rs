@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -103,11 +103,14 @@ impl<D: DB> State<D> {
         }
         self.coin_coms_set = self.coin_coms_set.insert(out.coin_com, ());
         let first_free = self.first_free;
-        self.coin_coms = self.coin_coms.update_hash(
-            first_free,
-            out.coin_com.0,
-            out.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
-        );
+        self.coin_coms = self
+            .coin_coms
+            .try_update_hash(
+                first_free,
+                out.coin_com.0,
+                out.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
+            )
+            .map_err(TransactionInvalid::MerkleTreeError)?;
 
         if !Self::on_whitelist(
             whitelist,
@@ -141,11 +144,14 @@ impl<D: DB> State<D> {
 
         self.coin_coms_set = self.coin_coms_set.insert(trans.coin_com, ());
         let first_free = self.first_free;
-        self.coin_coms = self.coin_coms.update_hash(
-            first_free,
-            trans.coin_com.0,
-            trans.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
-        );
+        self.coin_coms = self
+            .coin_coms
+            .try_update_hash(
+                first_free,
+                trans.coin_com.0,
+                trans.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
+            )
+            .map_err(TransactionInvalid::MerkleTreeError)?;
 
         if !Self::on_whitelist(
             whitelist,

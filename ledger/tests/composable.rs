@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -533,12 +533,15 @@ async fn composable() {
         tx.well_formed(&state.ledger, strictness, state.time)
             .unwrap()
     };
-    assert!(matches!(
-        state.ledger.apply(&tx, &state.context()).1,
-        TransactionResult::Failure(TransactionInvalid::Transcript(
-            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-        ))
-    ));
+    match state.ledger.apply(&tx, &state.context()).1 {
+        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
+            res.get(&1),
+            Some(Err(TransactionInvalid::Transcript(
+                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+            )))
+        )),
+        r => panic!("unexpected transaction result: {r:?}"),
+    }
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -591,13 +594,12 @@ async fn composable() {
             &INITIAL_PARAMETERS,
         )
         .unwrap();
-        // Manually move things to the fallible section.
         let call_inner = ContractCallPrototype {
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
-            guaranteed_public_transcript: None,
-            fallible_public_transcript: transcripts[0].0.clone(),
+            guaranteed_public_transcript: transcripts[0].0.clone(),
+            fallible_public_transcript: transcripts[0].1.clone(),
             private_transcript_outputs: vec![],
             input: ().into(),
             output: b"malicious".to_vec().into(),
@@ -605,12 +607,13 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         dbg!(&transcripts);
+        // Manually move things to the guaranteed section.
         let call_outer = ContractCallPrototype {
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
-            guaranteed_public_transcript: transcripts[1].0.clone(),
-            fallible_public_transcript: transcripts[1].1.clone(),
+            guaranteed_public_transcript: transcripts[1].1.clone(),
+            fallible_public_transcript: None,
             private_transcript_outputs: vec![b"malicious".to_vec().into(), cc_rand.into()],
             input: ().into(),
             output: ().into(),
@@ -1070,12 +1073,15 @@ async fn guaranteed_in_fallible() {
         tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0))
             .unwrap()
     };
-    assert!(matches!(
-        ledger_state.ledger.apply(&tx, &ledger_state.context()).1,
-        TransactionResult::Failure(TransactionInvalid::Transcript(
-            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-        ))
-    ));
+    match ledger_state.ledger.apply(&tx, &ledger_state.context()).1 {
+        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
+            res.get(&1),
+            Some(Err(TransactionInvalid::Transcript(
+                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+            )))
+        )),
+        r => panic!("unexpected transaction result: {r:?}"),
+    }
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -1128,13 +1134,12 @@ async fn guaranteed_in_fallible() {
             &INITIAL_PARAMETERS,
         )
         .unwrap();
-        // Manually move things to the fallible section.
         let call_inner = ContractCallPrototype {
             address: addr_inner,
             entry_point: b"get"[..].into(),
             op: get_op.clone(),
             guaranteed_public_transcript: transcripts[0].0.clone(),
-            fallible_public_transcript: None,
+            fallible_public_transcript: transcripts[0].1.clone(),
             private_transcript_outputs: vec![],
             input: ().into(),
             output: b"malicious".to_vec().into(),
@@ -1168,7 +1173,7 @@ async fn guaranteed_in_fallible() {
 
         match tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0)) {
             Err(MalformedTransaction::SequencingCheckFailure(
-                SequencingCheckError::GuaranteedInFallibleContextViolation { .. },
+                SequencingCheckError::FallibleInGuaranteedContextViolation { .. },
             )) => (),
             Err(e) => panic!("{e:?}"),
             Ok(_) => panic!("succeeded unexpectedly"),
@@ -1412,8 +1417,8 @@ async fn composable_funded() {
                     Vec::new(),
                     state.time,
                 ),
-                Some(offer),
-                std::collections::HashMap::new(),
+                None,
+                [(1, offer)].into_iter().collect(),
             );
         dbg!(&pre_tx);
         tx_prove(rng.split(), &pre_tx, &RESOLVER).await.unwrap()

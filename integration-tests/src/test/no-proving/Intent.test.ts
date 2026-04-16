@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -23,10 +23,12 @@ import {
   type PreBinding,
   sampleIntentHash,
   sampleUserAddress,
+  Transaction,
   UnshieldedOffer,
-  VerifierKeyRemove
+  VerifierKeyRemove,
+  type SegmentSpecifier
 } from '@midnight-ntwrk/ledger';
-import { getNewUnshieldedOffer, Random, Static } from '@/test-objects';
+import { getNewUnshieldedOffer, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 
 describe('Ledger API - Intent', () => {
   const TTL = new Date();
@@ -697,6 +699,141 @@ describe('Ledger API - Intent', () => {
     expect(deserialized.guaranteedUnshieldedOffer?.outputs.length).toEqual(2);
     expect(deserialized.fallibleUnshieldedOffer?.inputs.length).toEqual(2);
     expect(deserialized.fallibleUnshieldedOffer?.outputs.length).toEqual(2);
+  });
+
+  /**
+   * Test adding intent to transaction using addIntent method.
+   *
+   * @given A transaction and an intent
+   * @when Adding intent to segment using GuaranteedOnly specifier
+   * @then Should add intent to segment > 1
+   */
+  test('should add intent to transaction using addIntent with GuaranteedOnly', () => {
+    const intent = Intent.new(TTL);
+    const segment: SegmentSpecifier = { tag: 'guaranteedOnly' };
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addIntent(segment, intent);
+
+    // verify we can't add intent with fallible transcripts, fallible offers, or contract deployments present
+    const contractDeploy = new ContractDeploy(new ContractState());
+    const deployIntent = intent.addDeploy(contractDeploy);
+    expect(() => tx.addIntent(segment, deployIntent)).toThrowError();
+
+    const intentWithOffer = Intent.new(TTL);
+    const fallibleOffer = getNewUnshieldedOffer();
+    intentWithOffer.fallibleUnshieldedOffer = fallibleOffer;
+    expect(() => tx.addIntent(segment, intentWithOffer)).toThrowError();
+
+    expect(tx.intents).toBeDefined();
+    expect(tx.intents!.size).toBe(1);
+    const key = [...tx.intents!.keys()][0];
+    expect(tx.intents!.get(key)!.toString()).toEqual(intent.toString());
+  });
+
+  /**
+   * Test adding intent to transaction using First segment specifier.
+   *
+   * @given A transaction and an intent
+   * @when Adding intent to segment using First specifier
+   * @then Should add intent to segment 1
+   */
+  test('should add intent to transaction using addIntent with First', () => {
+    const intent = Intent.new(TTL);
+    const segment: SegmentSpecifier = { tag: 'first' };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addIntent(segment, intent);
+
+    expect(tx.intents).toBeDefined();
+    expect(tx.intents!.size).toBe(1);
+    expect(tx.intents!.has(1)).toBe(true);
+    expect(tx.intents!.get(1)!.toString()).toEqual(intent.toString());
+  });
+
+  /**
+   * Test adding intent to transaction using Specific segment specifier.
+   *
+   * @given A transaction and an intent
+   * @when Adding intent to segment using Specific specifier with value > 0
+   * @then Should add intent to a specified segment
+   */
+  test('should add intent to transaction using addIntent with Specific segment', () => {
+    const intent = Intent.new(TTL);
+    const zeroSegment: SegmentSpecifier = { tag: 'specific', value: 0 };
+    const segment: SegmentSpecifier = { tag: 'specific', value: 5 };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    expect(() => tx.addIntent(zeroSegment, intent)).toThrowError();
+
+    tx = tx.addIntent(segment, intent);
+
+    expect(tx.intents).toBeDefined();
+    expect(tx.intents!.size).toBe(1);
+    expect(tx.intents!.has(5)).toBe(true);
+    expect(tx.intents!.get(5)!.toString()).toEqual(intent.toString());
+  });
+
+  /**
+   * Test adding multiple intents to different segments.
+   *
+   * @given A transaction and multiple intents
+   * @when Adding intents to segments 1, and 3
+   * @then Should have intents in all specified segments
+   */
+  test('should add multiple intents to different segments', () => {
+    const intent1 = Intent.new(TTL);
+    const intent2 = Intent.new(TTL);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addIntent({ tag: 'first' }, intent1);
+    tx = tx.addIntent({ tag: 'specific', value: 3 }, intent2);
+
+    expect(tx.intents).toBeDefined();
+    expect(tx.intents!.size).toBe(2);
+    expect(tx.intents!.has(1)).toBe(true);
+    expect(tx.intents!.has(3)).toBe(true);
+  });
+
+  /**
+   * Test removing intent from a transaction by passing undefined.
+   *
+   * @given A transaction with intent in segment 1
+   * @when Adding undefined intent to the same segment
+   * @then Should remove the intent from that segment
+   */
+  test('should remove intent from transaction when passing undefined', () => {
+    const intent = Intent.new(TTL);
+    const segment: SegmentSpecifier = { tag: 'first' };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addIntent(segment, intent);
+    expect(tx.intents!.has(1)).toBe(true);
+
+    tx = tx.addIntent(segment, undefined);
+    expect(tx.intents).toBeUndefined();
+  });
+
+  /**
+   * Test adding intent using Random segment specifier.
+   *
+   * @given A transaction and an intent
+   * @when Adding intent using Random specifier
+   * @then Should add intent to a random segment between 2 and 65535
+   */
+  test('should add intent to random segment using addIntent with Random', () => {
+    const intent = Intent.new(TTL);
+    const segment: SegmentSpecifier = { tag: 'random' };
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addIntent(segment, intent);
+
+    expect(tx.intents).toBeDefined();
+    expect(tx.intents!.size).toBe(1);
+
+    // Check that the segment is in valid range [2, 65535)
+    const segments = Array.from(tx.intents!.keys());
+    expect(segments[0]).toBeGreaterThanOrEqual(2);
+    expect(segments[0]).toBeLessThan(65535);
   });
 
   /**

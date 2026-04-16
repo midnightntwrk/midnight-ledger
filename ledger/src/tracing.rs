@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -42,7 +42,11 @@ impl From<LogLevel> for LevelFilter {
 
 pub fn init_logger(level: LogLevel) {
     Registry::default()
-        .with(tracing_subscriber::fmt::layer().with_filter(Targets::new().with_default(level)))
+        .with(
+            tracing_subscriber::fmt::layer()
+                .with_writer(std::io::stderr)
+                .with_filter(Targets::new().with_default(level)),
+        )
         .try_init()
         .ok();
     info!("Welcome to ledger v{}!", env!("CARGO_PKG_VERSION"));

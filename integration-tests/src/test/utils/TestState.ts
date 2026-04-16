@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -196,10 +196,12 @@ export class TestState {
   }
 
   context() {
+    const secondsSinceEpoch = BigInt(this.time.getTime() / 1000);
     const block: BlockContext = {
-      secondsSinceEpoch: BigInt(this.time.getTime() / 1000),
+      secondsSinceEpoch,
       secondsSinceEpochErr: 0,
-      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex')
+      parentBlockHash: Buffer.from(new Uint8Array(32)).toString('hex'),
+      lastBlockTime: secondsSinceEpoch > 6n ? secondsSinceEpoch - 6n : 0n
     };
     return new TransactionContext(this.ledger, block);
   }

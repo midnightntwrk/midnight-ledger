@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v8.1.0-rc.1**](../README.md)
 
 ***
 
@@ -73,7 +73,11 @@ If the indices are out-of-bounds for the tree, or `end < start`
 ### findPathForLeaf()
 
 ```ts
-findPathForLeaf(leaf): undefined | AlignedValue;
+findPathForLeaf(
+   leaf, 
+   indexStart?, 
+   indexEnd?, 
+   alreadyHashed?): undefined | AlignedValue;
 ```
 
 **`Internal`**
@@ -86,6 +90,18 @@ Returns undefined if the leaf is not in the tree.
 ##### leaf
 
 [`AlignedValue`](../type-aliases/AlignedValue.md)
+
+##### indexStart?
+
+`bigint`
+
+##### indexEnd?
+
+`bigint`
+
+##### alreadyHashed?
+
+`boolean`
 
 #### Returns
 

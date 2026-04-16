@@ -1,8 +1,8 @@
-[**@midnight/ledger v7.0.0-alpha.1**](README.md)
+[**@midnight/ledger v8.1.0-rc.1**](README.md)
 
 ***
 
-# @midnight/ledger v7.0.0-alpha.1
+# @midnight/ledger v8.1.0-rc.1
 
 ## Classes
 
@@ -22,11 +22,14 @@
 - [DustActions](classes/DustActions.md)
 - [DustGenerationState](classes/DustGenerationState.md)
 - [DustLocalState](classes/DustLocalState.md)
+- [DustLocalStateWithChanges](classes/DustLocalStateWithChanges.md)
 - [DustParameters](classes/DustParameters.md)
 - [DustRegistration](classes/DustRegistration.md)
 - [DustSecretKey](classes/DustSecretKey.md)
 - [DustSpend](classes/DustSpend.md)
 - [DustState](classes/DustState.md)
+- [DustStateChanges](classes/DustStateChanges.md)
+- [DustStateMerkleTreeCollapsedUpdate](classes/DustStateMerkleTreeCollapsedUpdate.md)
 - [DustUtxoState](classes/DustUtxoState.md)
 - [EncryptionSecretKey](classes/EncryptionSecretKey.md)
 - [Event](classes/Event.md)
@@ -67,9 +70,11 @@
 - [ZswapChainState](classes/ZswapChainState.md)
 - [ZswapInput](classes/ZswapInput.md)
 - [ZswapLocalState](classes/ZswapLocalState.md)
+- [ZswapLocalStateWithChanges](classes/ZswapLocalStateWithChanges.md)
 - [ZswapOffer](classes/ZswapOffer.md)
 - [ZswapOutput](classes/ZswapOutput.md)
 - [ZswapSecretKeys](classes/ZswapSecretKeys.md)
+- [ZswapStateChanges](classes/ZswapStateChanges.md)
 - [ZswapTransient](classes/ZswapTransient.md)
 
 ## Type Aliases
@@ -102,6 +107,8 @@
 - [EncodedStateValue](type-aliases/EncodedStateValue.md)
 - [EncPublicKey](type-aliases/EncPublicKey.md)
 - [ErasedTransactionResult](type-aliases/ErasedTransactionResult.md)
+- [EventDetails](type-aliases/EventDetails.md)
+- [EventSource](type-aliases/EventSource.md)
 - [FeePrices](type-aliases/FeePrices.md)
 - [FinalizedTransaction](type-aliases/FinalizedTransaction.md)
 - [Fr](type-aliases/Fr.md)
@@ -135,6 +142,8 @@
 - [TransactionHash](type-aliases/TransactionHash.md)
 - [TransactionId](type-aliases/TransactionId.md)
 - [Transcript](type-aliases/Transcript.md)
+- [TreeInsertionPath](type-aliases/TreeInsertionPath.md)
+- [TreeInsertionPathEntry](type-aliases/TreeInsertionPathEntry.md)
 - [UnprovenInput](type-aliases/UnprovenInput.md)
 - [UnprovenIntent](type-aliases/UnprovenIntent.md)
 - [UnprovenOffer](type-aliases/UnprovenOffer.md)
@@ -170,6 +179,10 @@
 - [degradeToTransient](functions/degradeToTransient.md)
 - [dummyContractAddress](functions/dummyContractAddress.md)
 - [dummyUserAddress](functions/dummyUserAddress.md)
+- [dustCommitment](functions/dustCommitment.md)
+- [dustInitialNonce](functions/dustInitialNonce.md)
+- [dustNonce](functions/dustNonce.md)
+- [dustNullifier](functions/dustNullifier.md)
 - [ecAdd](functions/ecAdd.md)
 - [ecMul](functions/ecMul.md)
 - [ecMulGenerator](functions/ecMulGenerator.md)

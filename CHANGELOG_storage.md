@@ -1,5 +1,13 @@
 # `storage` Changelog
 
+## Version `2.0.1`
+
+- fix: Using `BTreeMap` instead of `HashMap` in `rcmap` in order to have deterministic orderings
+
+## Version `2.0.0`
+
+- breaking: fix: MPT canonicity
+
 ## Version `1.1.0`
 
 - Added state translation functionality to support hardforking
@@ -14,6 +22,7 @@
   - bugfix: Switches to 64-bit unsigned integers for reference counts
   - bugfix: enforce invarient that MPT Node::Extension has a path length of <= 255
     nibbles
+- bugfix: fix non-determinism in `RcMap` processing
 
 ## Version `0.5.0`
 
