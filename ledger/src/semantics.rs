@@ -1213,13 +1213,11 @@ impl<D: DB> LedgerState<D> {
                     return (new_st, result);
                 };
 
-                let cloned_stx = stx.clone();
-                let segments = cloned_stx.segments();
                 let mut segment_success = std::collections::BTreeMap::new();
                 segment_success.insert(0, Ok(()));
                 let mut total_success = true;
 
-                for &segment in segments.iter().filter(|&&s| s != 0) {
+                for segment in stx.fallible_segments() {
                     match new_st.apply_section(stx, tx.hash, segment, context) {
                         Ok(state) => {
                             new_st = state.0;

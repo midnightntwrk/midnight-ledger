@@ -1713,6 +1713,19 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
         segments.dedup();
         segments
     }
+
+    pub fn fallible_segments(&self) -> Vec<u16> {
+        let mut segments = self
+            .intents
+            .iter()
+            .map(|seg_intent| *seg_intent.0)
+            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+            .filter(|&s| s != 0)
+            .collect::<Vec<_>>();
+        segments.sort();
+        segments.dedup();
+        segments
+    }
 }
 
 type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
