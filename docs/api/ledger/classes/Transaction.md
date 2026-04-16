@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v8.1.0-rc.1**](../README.md)
 
 ***
 
@@ -167,6 +167,62 @@ placed in the same section as contract interactions with them.
 #### Throws
 
 If called on bound, proven, or proof-erased transactions.
+
+***
+
+### addIntent()
+
+```ts
+addIntent(segment, intent): Transaction<S, P, B>;
+```
+
+Adds provided intent to the segment specified.
+
+#### Parameters
+
+##### segment
+
+[`SegmentSpecifier`](../type-aliases/SegmentSpecifier.md)
+
+##### intent
+
+`undefined` | [`Intent`](Intent.md)\<`S`, `P`, `B`\>
+
+#### Returns
+
+`Transaction`\<`S`, `P`, `B`\>
+
+#### Throws
+
+If called on bound transactions.
+
+***
+
+### addZswapOffer()
+
+```ts
+addZswapOffer(segment, offer): Transaction<S, P, B>;
+```
+
+Adds Zswap offer to the segment specified.
+
+#### Parameters
+
+##### segment
+
+[`SegmentSpecifier`](../type-aliases/SegmentSpecifier.md)
+
+##### offer
+
+`undefined` | [`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
+
+#### Returns
+
+`Transaction`\<`S`, `P`, `B`\>
+
+#### Throws
+
+If called on bound transactions.
 
 ***
 
@@ -363,7 +419,7 @@ same coins
 ### mockProve()
 
 ```ts
-mockProve(): Transaction<S, Proof, B>;
+mockProve(): Transaction<S, Proof, Binding>;
 ```
 
 Mocks proving, producing a 'proven' transaction that, while it will
@@ -374,7 +430,7 @@ that do not contain unproven contract calls.
 
 #### Returns
 
-`Transaction`\<`S`, [`Proof`](Proof.md), `B`\>
+`Transaction`\<`S`, [`Proof`](Proof.md), [`Binding`](Binding.md)\>
 
 #### Throws
 

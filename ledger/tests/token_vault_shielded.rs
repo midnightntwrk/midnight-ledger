@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -236,7 +236,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
@@ -367,7 +367,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
@@ -534,7 +534,7 @@ async fn test_shielded_full_lifecycle() {
         "local-test",
         test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
         Some(offer),
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
 
     let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();

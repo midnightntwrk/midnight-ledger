@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -120,7 +120,7 @@ pub(crate) mod runner {
         ///   test fails. Note that this preserves the relative ordering /
         ///   interleaving of stdout and stderr.
         pub(crate) fn run_with_args(&self, test_name: &str, args: &[&str]) {
-            let pkg_name = env!("CARGO_PKG_NAME");
+            let pkg_name = "midnight-storage";
             let bin_name = "stress";
 
             println!("{test_name}: building stress-test runner ...");

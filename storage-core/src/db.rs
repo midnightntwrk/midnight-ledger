@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@ mod sql;
 #[cfg(feature = "sqlite")]
 pub use sql::SqlDB;
 #[cfg(feature = "parity-db")]
-mod paritydb;
+/// DB implementation for ParityDb
+pub mod paritydb;
 #[cfg(feature = "parity-db")]
 pub use paritydb::ParityDb;
 
@@ -34,7 +35,7 @@ use proptest::{
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
@@ -122,10 +123,14 @@ pub trait DummyArbitrary {}
 pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// The hasher used in this DB.
     type Hasher: WellBehavedHasher;
+    #[cfg(feature = "gc-v1")]
+    /// A handle to resume a [`scan`] call.
+    type ScanResumeHandle: Debug + Send + Sync + Clone + 'static;
 
     /// Get node in DAG with key `key`.
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
 
+    #[cfg(not(feature = "layout-v2"))]
     /// Get the keys for all the unreachable nodes, i.e. the nodes with
     /// `ref_count == 0`, which aren't marked as GC roots.
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>>;
@@ -275,6 +280,25 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Return the number of nodes in this DB.
     fn size(&self) -> usize;
+
+    #[cfg(feature = "gc-v1")]
+    /// Performs a linear scan over the database, returning all objects found.
+    /// Optionally takes and returns a resume handle, this should survive modifications (both
+    /// insertions and deletions) though it need not return newly inserted objects, nor newly
+    /// deleted objects.
+    ///
+    /// For instance, an implementation may perform an ordered iteration over the keys, and the
+    /// resume handle may be the key to pick up from.
+    ///
+    /// The resume handle need not survive shutdown.
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    );
 }
 
 /// A dubious default implementation of `DB::batch_update`.
@@ -313,7 +337,7 @@ where
 #[derive(Clone, Debug)]
 /// An in-memory database
 pub struct InMemoryDB<H: WellBehavedHasher = DefaultHasher> {
-    nodes: Arc<Mutex<HashMap<ArenaHash<H>, OnDiskObject<H>>>>,
+    nodes: Arc<Mutex<BTreeMap<ArenaHash<H>, OnDiskObject<H>>>>,
     roots: Arc<Mutex<HashMap<ArenaHash<H>, u32>>>,
 }
 
@@ -367,7 +391,7 @@ impl<H: WellBehavedHasher> Arbitrary for InMemoryDB<H> {
 }
 
 impl<H: WellBehavedHasher> InMemoryDB<H> {
-    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, OnDiskObject<H>>> {
+    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, BTreeMap<ArenaHash<H>, OnDiskObject<H>>> {
         self.nodes.lock().expect("db lock poisoned")
     }
 
@@ -379,10 +403,14 @@ impl<H: WellBehavedHasher> InMemoryDB<H> {
 impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
     type Hasher = H;
 
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = ArenaHash<H>;
+
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         self.lock_nodes().get(key).cloned()
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     fn get_unreachable_keys(&self) -> std::vec::Vec<ArenaHash<Self::Hasher>> {
         let nodes_guard = self.lock_nodes();
         let roots_guard = self.lock_roots();
@@ -438,6 +466,29 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         dubious_batch_get_nodes(self, keys)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        let start = match resume_from {
+            Some(handle) => std::ops::Bound::Excluded(handle),
+            None => std::ops::Bound::Unbounded,
+        };
+        let batch = self
+            .lock_nodes()
+            .range((start, std::ops::Bound::Unbounded))
+            .take(batch_size)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<_>>();
+        let handle = batch.last().map(|(k, _)| k.clone());
+        (batch, handle)
     }
 }
 
@@ -852,16 +903,17 @@ mod tests {
         assert_eq!(keys.len(), 5);
     }
 
+    #[cfg(not(feature = "layout-v2"))]
     #[test]
     fn get_unreachable_keys_inmemorydb() {
         test_get_unreachable_keys::<InMemoryDB>();
     }
-    #[cfg(feature = "sqlite")]
+    #[cfg(all(feature = "sqlite", not(feature = "layout-v2")))]
     #[test]
     fn get_unreachable_keys_sqldb() {
         test_get_unreachable_keys::<crate::db::SqlDB>();
     }
-    #[cfg(feature = "parity-db")]
+    #[cfg(all(feature = "parity-db", not(feature = "layout-v2")))]
     #[test]
     fn get_unreachable_keys_paritydb() {
         test_get_unreachable_keys::<crate::db::ParityDb>();
@@ -870,6 +922,7 @@ mod tests {
     /// API.
     ///
     /// This is also called in `crate::db::sql::tests::get_unreachable_keys`.
+    #[cfg(not(feature = "layout-v2"))]
     fn test_get_unreachable_keys<D: DB<Hasher = DefaultHasher>>() {
         let mut db = D::default();
         let n41 = RawNode::new(&[4, 1], 0, vec![]);

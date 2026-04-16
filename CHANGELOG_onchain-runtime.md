@@ -1,5 +1,10 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `3.1.0`
+
+- feat: add more flexibility to `findPathForLeaf`, allowing it to scan index
+  ranges, and find elements by hash instead of by value.
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking transient-crypto changes

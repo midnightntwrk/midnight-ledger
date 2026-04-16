@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use midnight_zkir::IrSource;
 use serialize::{tagged_deserialize, tagged_serialize};
 use std::ffi::OsString;
 use std::fs::File;
@@ -29,7 +30,6 @@ use tracing_subscriber::Registry;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
 use transient_crypto::proofs::Zkir;
-use zkir::IrSource;
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]

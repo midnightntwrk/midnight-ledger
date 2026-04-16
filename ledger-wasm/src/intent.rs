@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -18,7 +18,9 @@ use crate::unshielded::UnshieldedOffer;
 use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use js_sys::{Date, Uint8Array};
-use ledger::structure::{ErasedIntent, Intent as LedgerIntent, ProofMarker, ProofPreimageMarker};
+use ledger::structure::{
+    ContractAction, ErasedIntent, Intent as LedgerIntent, ProofMarker, ProofPreimageMarker,
+};
 use onchain_runtime_wasm::from_value_ser;
 use serialize::tagged_serialize;
 use std::ops::Deref;
@@ -1180,5 +1182,24 @@ impl Intent {
                 JsValue::from(NoBinding(val.binding_commitment))
             }
         })
+    }
+
+    pub fn has_contract_deployments(&self) -> bool {
+        self.0
+            .as_erased()
+            .actions
+            .iter()
+            .any(|action| matches!(*action, ContractAction::Deploy(_)))
+    }
+
+    pub fn has_fallible_transcripts(&self) -> bool {
+        self.0.as_erased()
+            .actions
+            .iter()
+            .any(|action| matches!(&*action, ContractAction::Call(call) if call.fallible_transcript.is_some()))
+    }
+
+    pub fn has_fallible_offers(&self) -> bool {
+        self.0.as_erased().fallible_unshielded_offer.is_some()
     }
 }

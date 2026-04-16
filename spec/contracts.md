@@ -196,6 +196,7 @@ struct CallContext {
     parent_block_hash: Hash<Block>,
     caller: Option<PublicAddress>,
     balance: Map<TokenType, u128>,
+    last_block_time: Timestamp,
 }
 ```
 
@@ -218,6 +219,7 @@ struct BlockContext {
     seconds_since_epoch: Timestamp,
     seconds_since_epoch_err: Duration,
     parent_block_hash: Hash<Block>,
+    last_block_time: Timestamp,
 }
 
 impl ContractCall {
@@ -254,6 +256,7 @@ impl ContractCall {
             parent_block_hash: block.parent_block_hash,
             caller,
             balance: state.balance,
+            last_block_time: block.last_block_time,
         }
     }
 

@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -421,7 +421,8 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
             value_commitment: self.value_commitment_input,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
-                .update_hash(0, self.coin_com.0, ())
+                .try_update_hash(0, self.coin_com.0, ())
+                .expect("updating hash on non-collapsed tree should always succeed")
                 .rehash()
                 .root()
                 .expect("rehashed tree must have root"),

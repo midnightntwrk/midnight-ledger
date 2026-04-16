@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ fn update_tx<R: Rng + CryptoRng, D: DB>(
         "local-test",
         test_intents(rng, Vec::new(), vec![update], Vec::new(), state.time),
         None,
-        std::collections::HashMap::new(),
+        HashMap::new(),
     )
 }
 
@@ -76,7 +76,7 @@ async fn schnorr_validity() {
             "local-test",
             test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
             None,
-            std::collections::HashMap::new(),
+            HashMap::new(),
         );
     state.assert_apply(&deploy_tx, strictness);
 
@@ -102,7 +102,7 @@ async fn schnorr_validity() {
             state.time,
         ),
         None,
-        std::collections::HashMap::new(),
+        HashMap::new(),
     );
     lazy_static! {
         static ref RESOLVER: Resolver = test_resolver("");
@@ -154,7 +154,7 @@ fn maintenance() {
             "local-test",
             test_intents(&mut rng, Vec::new(), Vec::new(), vec![deploy], state.time),
             None,
-            std::collections::HashMap::new(),
+            HashMap::new(),
         );
     state.assert_apply(&deploy_tx, strictness);
 
@@ -189,7 +189,7 @@ fn maintenance() {
                     state.time,
                 ),
                 None,
-                std::collections::HashMap::new(),
+                HashMap::new(),
             );
         assert!(matches!(
             dbg!(tx.well_formed(&state.ledger, strictness, state.time)),

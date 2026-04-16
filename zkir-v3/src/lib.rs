@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -15,6 +15,8 @@
 extern crate tracing;
 
 pub mod ir;
+pub mod ir_instructions;
+pub mod ir_types;
 pub mod ir_vm;
 
 pub use ir::{Identifier, Instruction, IrSource};

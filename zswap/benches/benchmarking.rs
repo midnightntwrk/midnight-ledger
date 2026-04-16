@@ -72,7 +72,7 @@ pub fn zswap_ledger(c: &mut Criterion) {
     });
     let _ = zswap_state.try_apply(&offer, None).unwrap();
     zswap_local_state = zswap_local_state.watch_for(&keys.coin_public_key(), &coin);
-    zswap_local_state = zswap_local_state.apply(&keys, &offer);
+    zswap_local_state = zswap_local_state.apply(&keys, &offer).unwrap();
     let qc = zswap_local_state.coins.iter().next().unwrap().1;
     let (_, input) = zswap_local_state.spend(&mut rng, &keys, &qc, None).unwrap();
     let offer = Offer {
@@ -132,7 +132,9 @@ pub fn zswap_local(c: &mut Criterion) {
 
     c.bench_function("local::application", |b| {
         b.iter(|| {
-            zswap_state = zswap_state.apply(black_box(&keys), black_box(&offer));
+            zswap_state = zswap_state
+                .apply(black_box(&keys), black_box(&offer))
+                .unwrap();
         })
     });
 }

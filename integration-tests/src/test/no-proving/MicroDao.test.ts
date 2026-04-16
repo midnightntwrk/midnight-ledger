@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -126,8 +126,8 @@ describe('Ledger API - MicroDao', () => {
 
     const partSks = [Random.generate32Bytes(), Random.generate32Bytes()];
     const partPks = [
-      persistentCommit([ATOM_BYTES_32], sep, [partSks[0]]),
-      persistentCommit([ATOM_BYTES_32], sep, [partSks[1]])
+      persistentCommit([ATOM_BYTES_32], sep, [Static.trimTrailingZeros(partSks[0])]),
+      persistentCommit([ATOM_BYTES_32], sep, [Static.trimTrailingZeros(partSks[1])])
     ];
     const partNames = ['red', 'blue'];
     const partVotes = [true, false];
@@ -368,7 +368,7 @@ describe('Ledger API - MicroDao', () => {
       setTopicOp,
       transcripts[0][0],
       transcripts[0][1],
-      [{ value: [orgSk], alignment: [ATOM_BYTES_32] }],
+      [{ value: [Static.trimTrailingZeros(orgSk)], alignment: [ATOM_BYTES_32] }],
       {
         value: [Static.encodeFromText('test topic'), encodeCoinPublicKey(state.zswapKeys.coinPublicKey)],
         alignment: [ATOM_COMPRESS, ATOM_BYTES_32]
@@ -635,7 +635,7 @@ describe('Ledger API - MicroDao', () => {
         buyInOp,
         transcripts[0][0],
         transcripts[0][1],
-        [{ value: [sk], alignment: [ATOM_BYTES_32] }],
+        [{ value: [Static.trimTrailingZeros(sk)], alignment: [ATOM_BYTES_32] }],
         {
           value: [
             Static.trimTrailingZeros(encodedCoin.nonce),
@@ -654,8 +654,8 @@ describe('Ledger API - MicroDao', () => {
 
       const tx = Transaction.fromParts(
         LOCAL_TEST_NETWORK_ID,
-        offer,
         undefined,
+        offer,
         testIntents([call], [], [], state.time)
       );
       tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
@@ -713,7 +713,7 @@ describe('Ledger API - MicroDao', () => {
       const nul = persistentCommit(
         [ATOM_BYTES_32],
         [Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0udao:cn\\0')],
-        [sk]
+        [Static.trimTrailingZeros(sk)]
       );
       const cm = persistentCommit(
         [ATOM_BYTES_32],
@@ -722,12 +722,12 @@ describe('Ledger API - MicroDao', () => {
             ? Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0yes\\0\\0\\0\\0\\0')
             : Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0no\\0\\0\\0\\0\\0\\0')
         ],
-        [sk]
+        [Static.trimTrailingZeros(sk)]
       );
 
       const privateTranscriptOutputs: AlignedValue[] = [
         { value: [EMPTY_VALUE], alignment: [ATOM_FIELD] },
-        { value: [sk], alignment: [ATOM_BYTES_32] },
+        { value: [Static.trimTrailingZeros(sk)], alignment: [ATOM_BYTES_32] },
         { value: [ONE_VALUE], alignment: [ATOM_BYTES_1] },
         path!
       ];
@@ -893,7 +893,7 @@ describe('Ledger API - MicroDao', () => {
             ? Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0yes\\0\\0\\0\\0\\0')
             : Static.encodeFromText('\\0\\0\\0\\0\\0\\0\\0\\0no\\0\\0\\0\\0\\0\\0')
         ],
-        [sk]
+        [Static.trimTrailingZeros(sk)]
       );
 
       const contract = state.ledger.index(addr)!;
@@ -1023,7 +1023,7 @@ describe('Ledger API - MicroDao', () => {
       advanceOp,
       transcripts[0][0],
       transcripts[0][1],
-      [{ value: [orgSk], alignment: [ATOM_BYTES_32] }],
+      [{ value: [Static.trimTrailingZeros(orgSk)], alignment: [ATOM_BYTES_32] }],
       { value: [], alignment: [] },
       { value: [], alignment: [] },
       communicationCommitmentRandomness(),
@@ -1219,7 +1219,7 @@ describe('Ledger API - MicroDao', () => {
     const s = state;
     s.zswap = s.zswap.watchFor(s.zswapKeys.coinPublicKey, newCoin);
 
-    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, offer, undefined, testIntents([call], [], [], s.time));
+    const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, offer, testIntents([call], [], [], s.time));
     tx.wellFormed(s.ledger, unbalancedStrictness, s.time);
     const balanced = s.balanceTx(tx.eraseProofs());
     s.assertApply(balanced, balancedStrictness);

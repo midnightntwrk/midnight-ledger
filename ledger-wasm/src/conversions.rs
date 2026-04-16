@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use coin_structure::coin::{Info as ShieldedCoinInfo, QualifiedInfo as QualifiedS
 use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, Date, Function, JsString, Map, Number};
+use ledger::events::{EventDetails, EventSource};
 use ledger::structure::UtxoMeta;
 use ledger::structure::{ClaimKind, SignatureKind};
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use storage::storage::HashMap;
 use transient_crypto::curve::Fr;
+use transient_crypto::merkle_tree::{TreeInsertionPath, TreeInsertionPathEntry};
 use wasm_bindgen::convert::RefFromWasmAbi;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 
@@ -314,6 +316,69 @@ struct PreDustParameters {
     dust_grace_period_seconds: BigInt,
 }
 
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreEventSource {
+    transaction_hash: String,
+    logical_segment: u16,
+    physical_segment: u16,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "tag")]
+struct PreTreeInsertionPath<A> {
+    leaf_hash: String,
+    annotation: A,
+    path: Vec<PreTreeInsertionPathEntry>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "tag")]
+struct PreTreeInsertionPathEntry {
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    hash: JsValue,
+    goes_left: bool,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "tag")]
+enum PreEventDetails {
+    ZswapInput {
+        nullifier: String,
+        contract: Option<String>,
+    },
+    ZswapOutput {
+        commitment: String,
+        contract: Option<String>,
+        mt_index: u64,
+    },
+    DustInitialUtxo {
+        output: PreQualifiedDustOutput,
+        generation: PreDustGenerationInfo,
+        generation_index: u64,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        block_time: Date,
+    },
+    DustGenerationDtimeUpdate {
+        update: PreTreeInsertionPath<PreDustGenerationInfo>,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        block_time: Date,
+    },
+    DustSpendProcessed {
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        commitment: BigInt,
+        commitment_index: u64,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        nullifier: BigInt,
+        v_fee: u128,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        declared_time: Date,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        block_time: Date,
+    },
+    NotYetSupportedEventType,
+}
+
 pub fn value_to_shielded_coininfo(value: JsValue) -> Result<ShieldedCoinInfo, JsError> {
     let pre: PreShieldedCoinInfo = from_value(value)?;
     Ok(ShieldedCoinInfo {
@@ -420,16 +485,23 @@ pub fn value_to_utxo_meta(value: JsValue) -> Result<UtxoMeta, JsError> {
     })
 }
 
+impl TryFrom<&QualifiedDustOutput> for PreQualifiedDustOutput {
+    type Error = JsError;
+    fn try_from(qdo: &QualifiedDustOutput) -> Result<Self, JsError> {
+        Ok(PreQualifiedDustOutput {
+            initial_value: qdo.initial_value,
+            owner: fr_to_bigint(qdo.owner.0),
+            nonce: fr_to_bigint(qdo.nonce),
+            seq: qdo.seq,
+            ctime: seconds_to_js_date(qdo.ctime.to_secs()),
+            backing_night: to_hex_ser(&qdo.backing_night.0)?,
+            mt_index: qdo.mt_index,
+        })
+    }
+}
+
 pub fn qdo_to_value(qdo: &QualifiedDustOutput) -> Result<JsValue, JsError> {
-    Ok(to_value(&PreQualifiedDustOutput {
-        initial_value: qdo.initial_value,
-        owner: fr_to_bigint(qdo.owner.0),
-        nonce: fr_to_bigint(qdo.nonce),
-        seq: qdo.seq,
-        ctime: seconds_to_js_date(qdo.ctime.to_secs()),
-        backing_night: to_hex_ser(&qdo.backing_night.0)?,
-        mt_index: qdo.mt_index,
-    })?)
+    Ok(to_value(&PreQualifiedDustOutput::try_from(qdo)?)?)
 }
 
 pub fn value_to_qdo(value: JsValue) -> Result<QualifiedDustOutput, JsError> {
@@ -445,17 +517,24 @@ pub fn value_to_qdo(value: JsValue) -> Result<QualifiedDustOutput, JsError> {
     })
 }
 
+impl TryFrom<&DustGenerationInfo> for PreDustGenerationInfo {
+    type Error = JsError;
+    fn try_from(gen_info: &DustGenerationInfo) -> Result<Self, Self::Error> {
+        Ok(PreDustGenerationInfo {
+            value: gen_info.value,
+            owner: fr_to_bigint(gen_info.owner.0),
+            nonce: to_hex_ser(&gen_info.nonce.0)?,
+            dtime: if gen_info.dtime == Timestamp::MAX {
+                None
+            } else {
+                Some(seconds_to_js_date(gen_info.dtime.to_secs()))
+            },
+        })
+    }
+}
+
 pub fn dust_gen_info_to_value(gen_info: &DustGenerationInfo) -> Result<JsValue, JsError> {
-    Ok(to_value(&PreDustGenerationInfo {
-        value: gen_info.value,
-        owner: fr_to_bigint(gen_info.owner.0),
-        nonce: to_hex_ser(&gen_info.nonce.0)?,
-        dtime: if gen_info.dtime == Timestamp::MAX {
-            None
-        } else {
-            Some(seconds_to_js_date(gen_info.dtime.to_secs()))
-        },
-    })?)
+    Ok(to_value(&PreDustGenerationInfo::try_from(gen_info)?)?)
 }
 
 pub fn value_to_dust_gen_info(value: JsValue) -> Result<DustGenerationInfo, JsError> {
@@ -479,6 +558,104 @@ pub fn value_to_dust_params(value: JsValue) -> Result<DustParameters, JsError> {
         pre.generation_decay_rate,
         pre.dust_grace_period_seconds,
     )
+}
+
+pub fn event_source_to_value(event_source: &EventSource) -> Result<JsValue, JsError> {
+    Ok(to_value(&PreEventSource {
+        transaction_hash: to_hex_ser(&event_source.transaction_hash)?,
+        logical_segment: event_source.logical_segment,
+        physical_segment: event_source.physical_segment,
+    })?)
+}
+
+pub fn event_details_to_value(
+    event_details: &EventDetails<InMemoryDB>,
+) -> Result<JsValue, JsError> {
+    use EventDetails as L;
+    use PreEventDetails as P;
+    let details = match event_details {
+        L::ZswapInput {
+            nullifier,
+            contract,
+        } => P::ZswapInput {
+            nullifier: to_hex_ser(nullifier)?,
+            contract: contract.as_ref().map(|c| to_hex_ser(&**c)).transpose()?,
+        },
+        L::ZswapOutput {
+            commitment,
+            preimage_evidence: _,
+            contract,
+            mt_index,
+        } => P::ZswapOutput {
+            commitment: to_hex_ser(commitment)?,
+            contract: contract.as_ref().map(|c| to_hex_ser(&**c)).transpose()?,
+            mt_index: *mt_index,
+        },
+        L::DustInitialUtxo {
+            output,
+            generation,
+            generation_index,
+            block_time,
+        } => P::DustInitialUtxo {
+            output: PreQualifiedDustOutput::try_from(output)?,
+            generation: PreDustGenerationInfo::try_from(generation)?,
+            generation_index: *generation_index,
+            block_time: seconds_to_js_date(block_time.to_secs()),
+        },
+        L::DustGenerationDtimeUpdate { update, block_time } => P::DustGenerationDtimeUpdate {
+            update: PreTreeInsertionPath::try_from(update)?,
+            block_time: seconds_to_js_date(block_time.to_secs()),
+        },
+        L::DustSpendProcessed {
+            commitment,
+            commitment_index,
+            nullifier,
+            v_fee,
+            declared_time,
+            block_time,
+        } => P::DustSpendProcessed {
+            commitment: fr_to_bigint(commitment.0),
+            commitment_index: *commitment_index,
+            nullifier: fr_to_bigint(nullifier.0),
+            v_fee: *v_fee,
+            declared_time: seconds_to_js_date(declared_time.to_secs()),
+            block_time: seconds_to_js_date(block_time.to_secs()),
+        },
+        _ => P::NotYetSupportedEventType,
+    };
+    Ok(to_value(&details)?)
+}
+
+impl<
+    A: Serializable + Deserializable + Send + Sync + Clone,
+    B: for<'a> TryFrom<&'a A, Error = JsError>,
+> TryFrom<&TreeInsertionPath<A>> for PreTreeInsertionPath<B>
+{
+    type Error = JsError;
+    fn try_from(value: &TreeInsertionPath<A>) -> Result<Self, Self::Error> {
+        Ok(PreTreeInsertionPath {
+            leaf_hash: to_hex_ser(&value.leaf.0)?,
+            annotation: B::try_from(&value.leaf.1)?,
+            path: value
+                .path
+                .iter()
+                .map(PreTreeInsertionPathEntry::try_from)
+                .collect::<Result<_, JsError>>()?,
+        })
+    }
+}
+
+impl TryFrom<&TreeInsertionPathEntry> for PreTreeInsertionPathEntry {
+    type Error = JsError;
+    fn try_from(value: &TreeInsertionPathEntry) -> Result<Self, Self::Error> {
+        Ok(PreTreeInsertionPathEntry {
+            hash: value
+                .hash
+                .map(|h| JsValue::from(fr_to_bigint(h.0)))
+                .unwrap_or(JsValue::UNDEFINED),
+            goes_left: value.goes_left,
+        })
+    }
 }
 
 pub fn construct_dust_parameters(

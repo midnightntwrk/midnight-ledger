@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -13,11 +13,13 @@
 
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
-use crate::structure::SegIntent;
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MaintenanceUpdate,
-    PROOF_SIZE, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
-    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
+    ContractAction, ContractCall, ContractDeploy, Intent, LedgerParameters, MIN_PROOF_SIZE,
+    MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind, SignaturesValue,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer, UtxoOutput, UtxoSpend,
+};
+use crate::structure::{
+    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
@@ -26,6 +28,7 @@ use base_crypto::fab::AlignedValue;
 use base_crypto::signatures::Signature;
 use base_crypto::signatures::SigningKey;
 use base_crypto::time::Timestamp;
+use coin_structure::coin::TokenType;
 use coin_structure::contract::ContractAddress;
 use itertools::Itertools;
 use onchain_runtime::context::{Effects, QueryContext, QueryResults};
@@ -61,7 +64,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             D,
         >,
     ) -> Self {
-        Self::new(network_id, intents, None, std::collections::HashMap::new())
+        Self::new(network_id, intents, None, storage::storage::HashMap::new())
     }
 }
 
@@ -76,7 +79,7 @@ impl<S: SignatureKind<D>, D: DB>
             D,
         >,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
+        fallible_coins: storage::storage::HashMap<u16, ZswapOffer<ProofPreimage, D>, D>,
     ) -> Self {
         let mut res = StandardTransaction {
             network_id: network_id.into(),
@@ -89,6 +92,7 @@ impl<S: SignatureKind<D>, D: DB>
         res
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_calls<P>(
         &self,
         rng: &mut (impl Rng + CryptoRng),
@@ -207,7 +211,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| !**f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(0));
         let fallible_coins = ZswapOffer::new(
             zswap_inputs
                 .iter()
@@ -227,7 +232,8 @@ impl<S: SignatureKind<D>, D: DB>
                 .filter(|(_, f)| **f)
                 .map(|(t, _)| t.clone())
                 .collect(),
-        );
+        )
+        .map(|o| o.retarget_segment(segment));
         if let Some(offer) = guaranteed_coins {
             res.guaranteed_coins = Some(Sp::new(if let Some(old_offer) = &res.guaranteed_coins {
                 old_offer.merge(&offer).map_err(PartitionFailure::Merge)?
@@ -438,7 +444,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             D,
         >,
         guaranteed_coins: Option<ZswapOffer<ProofPreimage, D>>,
-        fallible_coins: std::collections::HashMap<u16, ZswapOffer<ProofPreimage, D>>,
+        fallible_coins: storage::storage::HashMap<u16, ZswapOffer<ProofPreimage, D>, D>,
     ) -> Self {
         let mut stx = StandardTransaction {
             network_id: network_id.into(),
@@ -739,7 +745,7 @@ impl<D: DB> PreTranscript<D> {
     }
 
     fn guaranteed_budget(&self, params: &LedgerParameters) -> CostDuration {
-        let est_size = PROOF_SIZE
+        let est_size = MIN_PROOF_SIZE
             + Serializable::serialized_size(&(
                 ContractAddress::default(),
                 Effects::<D>::default(),
@@ -786,7 +792,7 @@ impl<D: DB> PreTranscript<D> {
                 None
             } else {
                 Some(Transcript {
-                    gas: res.gas_heuristic(),
+                    gas: res.gas_heuristic(params, false, 0),
                     effects: res.context.effects.clone(),
                     program: prog.into(),
                     version: Some(Sp::new(Transcript::<D>::VERSION)),
@@ -801,12 +807,106 @@ impl<D: DB> PreTranscript<D> {
 }
 
 trait QueryResultsExt {
-    fn gas_heuristic(&self) -> RunningCost;
+    fn gas_heuristic(
+        &self,
+        params: &LedgerParameters,
+        include_external: bool,
+        public_input_count: usize,
+    ) -> RunningCost;
 }
 
+fn test_tx_from_unshielded_offer<D: DB>(
+    offer: UnshieldedOffer<Signature, D>,
+) -> Transaction<Signature, ProofPreimageMarker, PedersenRandomness, D> {
+    use rand::{SeedableRng, rngs::StdRng};
+    let intent = Intent::new(
+        &mut StdRng::seed_from_u64(0x42),
+        Some(offer),
+        None,
+        Vec::new(),
+        Vec::new(),
+        Vec::new(),
+        None,
+        Timestamp::from_secs(0),
+    );
+    Transaction::from_intents("local-test", [(1, intent)].into_iter().collect())
+}
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
-    fn gas_heuristic(&self) -> RunningCost {
-        self.gas_cost * 1.2
+    fn gas_heuristic(
+        &self,
+        params: &LedgerParameters,
+        include_external: bool,
+        public_input_count: usize,
+    ) -> RunningCost {
+        let transcript_gas_cost_with_overhead = self.gas_cost * 1.2;
+        if !include_external {
+            return transcript_gas_cost_with_overhead;
+        }
+        let expected_unshielded_inputs_overhead = self
+            .context
+            .effects
+            .unshielded_inputs
+            .keys()
+            .map(|tt| {
+                let TokenType::Unshielded(tt) = tt else {
+                    unreachable!()
+                };
+                let input = UtxoSpend {
+                    intent_hash: Default::default(),
+                    output_no: 0,
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let output = UtxoOutput {
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let offer = UnshieldedOffer::<_, D> {
+                    inputs: vec![input].into(),
+                    outputs: vec![output].into(),
+                    signatures: Default::default(),
+                };
+                let tx = test_tx_from_unshielded_offer(offer);
+                tx.cost(params, false)
+                    .map(RunningCost::from)
+                    .unwrap_or(RunningCost::ZERO)
+            })
+            .sum();
+        let expected_unshielded_outputs_overhead = self
+            .context
+            .effects
+            .unshielded_outputs
+            .keys()
+            .map(|tt| {
+                let TokenType::Unshielded(tt) = tt else {
+                    unreachable!()
+                };
+                let output = UtxoOutput {
+                    owner: Default::default(),
+                    type_: tt,
+                    value: 1,
+                };
+                let offer = UnshieldedOffer::<_, D> {
+                    inputs: Default::default(),
+                    outputs: vec![output].into(),
+                    signatures: Default::default(),
+                };
+                let tx = test_tx_from_unshielded_offer(offer);
+                tx.cost(params, false)
+                    .map(RunningCost::from)
+                    .unwrap_or(RunningCost::ZERO)
+            })
+            .sum();
+        let proof_verify = params.cost_model.proof_verify(public_input_count)
+            + params.cost_model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + params.cost_model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + params.cost_model.map_index(EXPECTED_OPERATIONS_DEPTH);
+        transcript_gas_cost_with_overhead
+            + expected_unshielded_inputs_overhead
+            + expected_unshielded_outputs_overhead
+            + proof_verify
     }
 }
 
@@ -902,7 +1002,7 @@ pub fn partition_transcripts<D: DB>(
             visited
         })
         .collect::<Vec<_>>();
-    let closure_budgets = closures
+    let mut closure_budgets = closures
         .iter()
         .map(|closure| {
             closure
@@ -911,6 +1011,12 @@ pub fn partition_transcripts<D: DB>(
                 .sum::<CostDuration>()
         })
         .collect::<Vec<_>>();
+    // Allow creep-up to the min time to dismiss, up to 70% usage
+    let spare_min_time_to_dismiss =
+        params.limits.min_time_to_dismiss * 0.7f64 - closure_budgets.iter().copied().sum();
+    for budget in closure_budgets.iter_mut() {
+        *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
+    }
 
     // Step 4: Partition the root nodes:
     //      4a: Split root nodes on `ckpt`s.
@@ -948,10 +1054,15 @@ pub fn partition_transcripts<D: DB>(
                     })
                     .map(|(i, _)| i)
                     .collect::<Vec<_>>();
-                let mut required_budget = partial_res.gas_heuristic().max_time();
+                let public_input_count = calls[root].program.field_size() + 2;
+                let mut required_budget = partial_res
+                    .gas_heuristic(params, true, public_input_count)
+                    .max_time();
                 let mut frontier = claimed_idx.clone();
                 while let Some(next) = frontier.pop() {
-                    required_budget += full_runs[next].gas_heuristic().max_time();
+                    required_budget += full_runs[next]
+                        .gas_heuristic(params, true, public_input_count)
+                        .max_time();
                     frontier.extend(&call_graph[next]);
                 }
                 if required_budget <= closure_budgets[root_n] {

@@ -1,28 +1,29 @@
 [package]
 name = "midnight-storage-macros"
-version = "1.0.0-rc.3"
+version = "1.0.0"
 edition = "2024"
 license.workspace = true
+description = "Provides derive macros for the Midnight ledger's storage system."
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 syn = { version = "^2.0", features = ["full", "extra-traits"] }
-serialize-macros = { path = "../serialize-macros", package = "midnight-serialize-macros" }
+serialize-macros = { version = "1.0.0", path = "../serialize-macros", package = "midnight-serialize-macros" }
 quote = "^1.0"
 proc-macro2 = "1"
 
 [dev-dependencies]
-storage = { path = "../storage", package = "midnight-storage", features = ["proptest"] }
+storage = { path = "../storage-core", package = "midnight-storage-core", features = ["proptest"] }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = "^0.8.0"
-pastey = "0.1.1"
+pastey = "0.2.0"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = "~1.6.0"
 derive-where = "^1.5.0"
-proptest-derive = "0.5"
+proptest-derive = "0.8"
 
 [lib]
 proc-macro = true

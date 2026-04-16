@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -30,10 +30,10 @@ use rand::{CryptoRng, Rng};
 use serde::Serialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::ops::{Add, Neg, Sub};
-use storage::Storable;
-use storage::arena::ArenaKey;
-use storage::db::DB;
-use storage::storable::Loader;
+use storage_core::Storable;
+use storage_core::arena::ArenaKey;
+use storage_core::db::DB;
+use storage_core::storable::Loader;
 
 /// Homomorphic Pedersen commitment.
 /// a) Summed commitments should verify against their summed randomness.

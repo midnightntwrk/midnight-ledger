@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -21,7 +21,9 @@ mod serializable;
 mod tagged;
 mod util;
 
-pub use crate::deserializable::{Deserializable, RECURSION_LIMIT, tagged_deserialize};
+pub use crate::deserializable::{
+    Deserializable, RECURSION_LIMIT, tagged_deserialize, tagged_deserialize_sequence,
+};
 pub use crate::serializable::{GLOBAL_TAG, Serializable, tagged_serialize, tagged_serialized_size};
 pub use crate::tagged::Tagged;
 #[cfg(feature = "proptest")]

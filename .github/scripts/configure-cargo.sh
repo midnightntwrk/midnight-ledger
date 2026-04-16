@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # This file is part of midnight-ledger.
-# Copyright (C) 2025 Midnight Foundation
+# Copyright (C) Midnight Foundation
 # SPDX-License-Identifier: Apache-2.0
 # Licensed under the Apache License, Version 2.0 (the "License");
 # You may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 # limitations under the License.
 
 mkdir -p ./.cargo
+rm -f ./.cargo/config.toml
 echo "[net]" >> ./.cargo/config.toml
 echo "git-fetch-with-cli = true" >> ./.cargo/config.toml
 cat ./.cargo/config.toml

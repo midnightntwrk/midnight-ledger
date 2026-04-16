@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -457,8 +457,8 @@ async fn micro_dao_inner(mode: TestMode) {
                 let tx = Transaction::new(
                     "local-test",
                     test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                    Some(offer),
-                    std::collections::HashMap::new(),
+                    None,
+                    [(1, offer)].into_iter().collect(),
                 );
                 let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
                 tx.well_formed(&state.ledger, unbalanced_strictness, state.time)
@@ -939,8 +939,8 @@ async fn micro_dao_inner(mode: TestMode) {
             let tx = Transaction::new(
                 "local-test",
                 test_intents(&mut rng, vec![call], Vec::new(), Vec::new(), state.time),
-                Some(offer),
-                std::collections::HashMap::new(),
+                None,
+                [(1, offer)].into_iter().collect(),
             );
             let tx = tx_prove_bind(rng.split(), &tx, &RESOLVER).await.unwrap();
             tx.well_formed(&state.ledger, unbalanced_strictness, state.time)

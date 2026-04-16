@@ -1,4 +1,4 @@
-[**@midnight/ledger v7.0.0-alpha.1**](../README.md)
+[**@midnight/ledger v8.1.0-rc.1**](../README.md)
 
 ***
 
@@ -49,6 +49,16 @@ readonly firstFree: bigint;
 
 The first free index in the internal coin commitments Merkle tree.
 This may be used to identify which merkle tree updates are necessary.
+
+***
+
+### merkleTreeRoot
+
+```ts
+readonly merkleTreeRoot: undefined | bigint;
+```
+
+The root of the commitment Merkle tree.
 
 ***
 
@@ -137,6 +147,63 @@ updates *are* included.
 
 ***
 
+### applyFailed()
+
+```ts
+applyFailed<P>(offer): ZswapLocalState;
+```
+
+Locally reverts pending outputs/spends from an offer known to have failed
+or which has been discarded.
+
+#### Type Parameters
+
+##### P
+
+`P` *extends* [`Proofish`](../type-aliases/Proofish.md)
+
+#### Parameters
+
+##### offer
+
+[`ZswapOffer`](ZswapOffer.md)\<`P`\>
+
+#### Returns
+
+`ZswapLocalState`
+
+***
+
+### applyWithChanges()
+
+```ts
+applyWithChanges<P>(secretKeys, offer): ZswapLocalStateWithChanges;
+```
+
+Locally applies an offer to the current state, returning both the updated state and the state changes.
+
+#### Type Parameters
+
+##### P
+
+`P` *extends* [`Proofish`](../type-aliases/Proofish.md)
+
+#### Parameters
+
+##### secretKeys
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### offer
+
+[`ZswapOffer`](ZswapOffer.md)\<`P`\>
+
+#### Returns
+
+[`ZswapLocalStateWithChanges`](ZswapLocalStateWithChanges.md)
+
+***
+
 ### clearPending()
 
 ```ts
@@ -150,11 +217,60 @@ Note that as TTLs are *from a block perspective*, and there is some
 latency between the block and the wallet, the time passed in here should
 not be the current time, but incorporate a latency buffer.
 
+NOTE: This API endpoint is currently non-functional and works as a no-op.
+
 #### Parameters
 
 ##### time
 
 `Date`
+
+#### Returns
+
+`ZswapLocalState`
+
+***
+
+### insertCoin()
+
+```ts
+insertCoin(secretKeys, coin): ZswapLocalState;
+```
+
+Directly inserts a coin owned by this wallet into the state at `this.first_free`.
+
+This function requires secret keys as coins are indexed by nullifier, and
+secret keys are required to compute this.
+
+#### Parameters
+
+##### secretKeys
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### coin
+
+[`ShieldedCoinInfo`](../type-aliases/ShieldedCoinInfo.md)
+
+#### Returns
+
+`ZswapLocalState`
+
+***
+
+### removeCoinByNullifier()
+
+```ts
+removeCoinByNullifier(nullifier): ZswapLocalState;
+```
+
+Removes a given coin from the tracked coins by its nullifier.
+
+#### Parameters
+
+##### nullifier
+
+`string`
 
 #### Returns
 
@@ -180,6 +296,91 @@ in the same order as emitted by the chain being followed.
 ##### events
 
 [`Event`](Event.md)[]
+
+#### Returns
+
+`ZswapLocalState`
+
+***
+
+### replayEventsWithChanges()
+
+```ts
+replayEventsWithChanges(secretKeys, events): ZswapLocalStateWithChanges;
+```
+
+Replays observed events against the current local state, returning both the updated state
+and the state changes. These *must* be replayed in the same order as emitted by the chain being followed.
+
+#### Parameters
+
+##### secretKeys
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### events
+
+[`Event`](Event.md)[]
+
+#### Returns
+
+[`ZswapLocalStateWithChanges`](ZswapLocalStateWithChanges.md)
+
+***
+
+### replayRawEvents()
+
+```ts
+replayRawEvents(sk, rawEvents): ZswapLocalStateWithChanges;
+```
+
+Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+
+#### Parameters
+
+##### sk
+
+[`ZswapSecretKeys`](ZswapSecretKeys.md)
+
+##### rawEvents
+
+`Uint8Array`
+
+#### Returns
+
+[`ZswapLocalStateWithChanges`](ZswapLocalStateWithChanges.md)
+
+***
+
+### revertTransaction()
+
+```ts
+revertTransaction<S, P, B>(transaction): ZswapLocalState;
+```
+
+Locally reverts all pending outputs/spends from a transaction which has been discarded.
+
+Behaves as [applyFailed](#applyfailed) for the entire transaction.
+
+#### Type Parameters
+
+##### S
+
+`S` *extends* [`Signaturish`](../type-aliases/Signaturish.md)
+
+##### P
+
+`P` *extends* [`Proofish`](../type-aliases/Proofish.md)
+
+##### B
+
+`B` *extends* [`Bindingish`](../type-aliases/Bindingish.md)
+
+#### Parameters
+
+##### transaction
+
+[`Transaction`](Transaction.md)\<`S`, `P`, `B`\>
 
 #### Returns
 

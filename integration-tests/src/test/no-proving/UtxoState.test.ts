@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -65,7 +65,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -114,7 +115,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -166,7 +168,8 @@ describe('Ledger API - UtxoState', () => {
     const blockContext = {
       secondsSinceEpoch: Static.blockTime(new Date(0)),
       secondsSinceEpochErr: 0,
-      parentBlockHash: Static.parentBlockHash()
+      parentBlockHash: Static.parentBlockHash(),
+      lastBlockTime: Static.blockTime(new Date(0))
     };
 
     const strictness = new WellFormedStrictness();
@@ -1031,7 +1034,8 @@ describe('Ledger API - UtxoState', () => {
       const blockContext = {
         secondsSinceEpoch: Static.blockTime(new Date(0)),
         secondsSinceEpochErr: 0,
-        parentBlockHash: Static.parentBlockHash()
+        parentBlockHash: Static.parentBlockHash(),
+        lastBlockTime: Static.blockTime(new Date(0))
       };
 
       const strictness = new WellFormedStrictness();

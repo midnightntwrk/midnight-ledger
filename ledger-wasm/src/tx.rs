@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
+use crate::events::Event;
 use crate::intent::{Intent, IntentTypes};
 use crate::state::LedgerState;
 use crate::transcript::PreTranscript;
@@ -40,11 +40,11 @@ use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
-use std::collections::HashMap;
 use std::ops::Deref;
 use storage::Storable;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
+use storage::storage::HashMap;
 use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPedersen};
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage, ProvingProvider};
@@ -183,11 +183,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&guaranteed)?
         };
-        if guaranteed.is_some()
-            && !matches!(
-                guaranteed.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref guaranteed) = guaranteed
+            && !matches!(guaranteed.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Guaranteed offer must be unproven."));
         }
@@ -197,11 +194,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&fallible)?
         };
-        if fallible.is_some()
-            && !matches!(
-                fallible.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref fallible) = fallible
+            && !matches!(fallible.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Fallible offer must be unproven."));
         }
@@ -211,9 +205,9 @@ impl Transaction {
         } else {
             Intent::try_ref(&intent)?
         };
-        if intent.is_some()
+        if let Some(ref intent) = intent
             && !matches!(
-                intent.as_ref().unwrap().0,
+                intent.0,
                 IntentTypes::UnprovenWithSignaturePreBinding(_)
                     | IntentTypes::UnprovenWithSignatureErasedPreBinding(_)
             )
@@ -228,7 +222,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            HashMap::from([(1u16, offer)])
+            [(1u16, offer)].into_iter().collect()
         } else {
             HashMap::new()
         };
@@ -255,11 +249,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&guaranteed)?
         };
-        if guaranteed.is_some()
-            && !matches!(
-                guaranteed.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref guaranteed) = guaranteed
+            && !matches!(guaranteed.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Guaranteed offer must be unproven."));
         }
@@ -269,11 +260,8 @@ impl Transaction {
         } else {
             ZswapOffer::try_ref(&fallible)?
         };
-        if fallible.is_some()
-            && !matches!(
-                fallible.as_ref().unwrap().0,
-                ZswapOfferTypes::UnprovenOffer(_)
-            )
+        if let Some(ref fallible) = fallible
+            && !matches!(fallible.0, ZswapOfferTypes::UnprovenOffer(_))
         {
             return Err(JsError::new("Fallible offer must be unproven."));
         }
@@ -283,9 +271,9 @@ impl Transaction {
         } else {
             Intent::try_ref(&intent)?
         };
-        if intent.is_some()
+        if let Some(ref intent) = intent
             && !matches!(
-                intent.as_ref().unwrap().0,
+                intent.0,
                 IntentTypes::UnprovenWithSignaturePreBinding(_)
                     | IntentTypes::UnprovenWithSignatureErasedPreBinding(_)
             )
@@ -301,7 +289,7 @@ impl Transaction {
 
         let fallible_items = if let Some(fallible) = fallible {
             let offer: zswap::Offer<ProofPreimage, InMemoryDB> = fallible.clone().try_into()?;
-            HashMap::from([(segment_id, offer)])
+            [(segment_id, offer)].into_iter().collect()
         } else {
             HashMap::new()
         };
@@ -841,6 +829,51 @@ impl Transaction {
         Ok(())
     }
 
+    #[wasm_bindgen(js_name = "addZswapOffer")]
+    pub fn add_zswap_offer(
+        &mut self,
+        segment: JsValue,
+        raw_offer: JsValue,
+    ) -> Result<Transaction, JsError> {
+        let mut tx = self.clone();
+        let segment: SegmentSpecifier = from_value(segment)?;
+        let zswap_offer = if raw_offer.is_null() || raw_offer.is_undefined() {
+            None
+        } else {
+            ZswapOffer::try_ref(&raw_offer)?
+        };
+
+        if matches!(
+            segment,
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Specific(0)
+        ) {
+            tx.set_guaranteed_offer(raw_offer)?;
+            return Ok(tx);
+        }
+
+        let current_fallible_offers = get_dyn_transaction(self.0.clone()).fallible_offer();
+        if current_fallible_offers.is_none() && zswap_offer.is_none() {
+            return Ok(tx);
+        }
+        let segment = match segment {
+            SegmentSpecifier::First => 1,
+            SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
+            SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Specific(0) => unreachable!(),
+            SegmentSpecifier::Specific(seg) => seg,
+        };
+
+        let offers = current_fallible_offers.unwrap_or_default();
+
+        if zswap_offer.is_some() {
+            offers.set(&JsValue::from(segment), &raw_offer);
+        } else if offers.has(&JsValue::from(segment)) {
+            offers.delete(&JsValue::from(segment));
+        }
+
+        tx.set_fallible_offer(Some(offers))?;
+        Ok(tx)
+    }
+
     #[wasm_bindgen(getter, js_name = "fallibleOffer")]
     pub fn fallible_offer(&self) -> Option<Map> {
         get_dyn_transaction(self.0.clone()).fallible_offer()
@@ -994,6 +1027,58 @@ impl Transaction {
         }
     }
 
+    #[wasm_bindgen(js_name = "addIntent")]
+    pub fn add_intent(
+        &mut self,
+        segment: JsValue,
+        raw_intent: JsValue,
+    ) -> Result<Transaction, JsError> {
+        let mut tx = self.clone();
+        let segment: SegmentSpecifier = from_value(segment)?;
+        let intent = if raw_intent.is_null() || raw_intent.is_undefined() {
+            None
+        } else {
+            Intent::try_ref(&raw_intent)?
+        };
+
+        let current_intents = get_dyn_transaction(self.0.clone()).intents();
+        if current_intents.is_none() && intent.is_none() {
+            return Ok(tx);
+        }
+        let segment = match segment {
+            SegmentSpecifier::First => 1,
+            SegmentSpecifier::Random => OsRng.gen_range(2..u16::MAX),
+            SegmentSpecifier::GuaranteedOnly => {
+                // verify there are no fallible transcripts, fallible offers, or contract deployments present
+                if let Some(ref intent) = intent
+                    && (intent.has_contract_deployments()
+                        || intent.has_fallible_transcripts()
+                        || intent.has_fallible_offers())
+                {
+                    return Err(JsError::new(
+                        "cannot use guaranteed segment with fallible transactions, offers, or contract deployments",
+                    ));
+                }
+                OsRng.gen_range(2..u16::MAX)
+            }
+            SegmentSpecifier::Specific(0) => {
+                return Err(JsError::new("illegal manual specification of segment 0"));
+            }
+            SegmentSpecifier::Specific(seg) => seg,
+        };
+
+        let intents = current_intents.unwrap_or_default();
+
+        if intent.is_some() {
+            intents.set(&JsValue::from(segment), &raw_intent);
+        } else if intents.has(&JsValue::from(segment)) {
+            intents.delete(&JsValue::from(segment));
+        }
+
+        tx.set_intents(Some(intents))?;
+        Ok(tx)
+    }
+
     #[wasm_bindgen(getter, js_name = "intents")]
     pub fn intents(&self) -> Option<Map> {
         get_dyn_transaction(self.0.clone()).intents()
@@ -1087,7 +1172,7 @@ impl ClaimRewardable for ledger::structure::ClaimRewardsTransaction<(), InMemory
     }
 }
 
-trait Transactionable {
+pub(crate) trait Transactionable {
     fn imbalances(&self, segment: u16, fees: Option<BigInt>) -> Result<Map, JsError>;
     fn cost(
         &self,
@@ -1114,6 +1199,7 @@ trait Transactionable {
         strictness: &WellFormedStrictness,
         tblock: &Date,
     ) -> Result<VerifiedTransaction, JsError>;
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB>;
 }
 
 impl<
@@ -1123,7 +1209,8 @@ impl<
         + Storable<InMemoryDB>
         + serialize::Serializable
         + std::fmt::Debug
-        + PedersenDowngradeable<InMemoryDB>,
+        + PedersenDowngradeable<InMemoryDB>
+        + Tagged,
 > Transactionable for ledger::structure::Transaction<S, P, B, InMemoryDB>
 where
     Self: Tagged,
@@ -1270,9 +1357,12 @@ where
             tblock,
         )?))
     }
+    fn as_erased(&self) -> ledger::structure::Transaction<(), (), NoBinding, InMemoryDB> {
+        self.erase_proofs().erase_signatures()
+    }
 }
 
-fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
+pub(crate) fn get_dyn_transaction(tx: TransactionTypes) -> Box<dyn Transactionable> {
     match tx {
         TransactionTypes::UnprovenWithSignaturePreBinding(val) => Box::new(val),
         TransactionTypes::UnprovenWithSignatureBinding(val) => Box::new(val),

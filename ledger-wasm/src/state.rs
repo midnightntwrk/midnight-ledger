@@ -1,5 +1,5 @@
 // This file is part of midnight-ledger.
-// Copyright (C) 2025 Midnight Foundation
+// Copyright (C) Midnight Foundation
 // SPDX-License-Identifier: Apache-2.0
 // Licensed under the Apache License, Version 2.0 (the "License");
 // You may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
 use crate::dust::{DustState, UtxoMeta};
+use crate::events::Event;
 use crate::onchain_runtime::{ContractState, value_to_token_type};
 use crate::tx::{SystemTransaction, TransactionContext, TransactionResult, VerifiedTransaction};
 use crate::zswap_state::*;
