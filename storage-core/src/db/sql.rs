@@ -674,7 +674,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT COUNT(*) FROM node";
             let mut stmt = tx.prepare(sql).unwrap();
-            let result = stmt.query_row([], |row| row.get(0)).unwrap();
+            let result = stmt.query_row([], |row| row.get::<_, i64>(0)).unwrap() as usize;
             stmt.finalize().unwrap();
             result
         })
