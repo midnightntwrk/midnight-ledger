@@ -2920,6 +2920,7 @@ dependencies = [
  "midnight-ledger",
  "midnight-ledger-static",
  "midnight-onchain-runtime",
+ "midnight-onchain-vm",
  "midnight-serialize",
  "midnight-storage",
  "midnight-storage-core",
