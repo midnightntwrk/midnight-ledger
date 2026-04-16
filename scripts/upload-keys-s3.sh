@@ -15,6 +15,7 @@
 
 set -e
 VERSION=$(cat static/version)
+MIDNIGHT_PP=$(nix build .#local-params --print-out-paths)
 FILES_ZSWAP=$(echo "$MIDNIGHT_PP/zswap/$VERSION"/*.{prover,verifier,bzkir})
 FILES_DUST=$(echo "$MIDNIGHT_PP/dust/$VERSION"/*.{prover,verifier,bzkir})
 FILESTORE="s3://midnight-s3-fileshare-dev-eu-west-1"
