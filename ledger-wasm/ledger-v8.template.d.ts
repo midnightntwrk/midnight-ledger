@@ -231,7 +231,81 @@ export class Event {
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): Event;
   toString(compact?: boolean): string;
+  readonly source: EventSource;
+  readonly content: EventDetails;
 }
+
+/**
+ * Where an event originated from
+ */
+export type EventSource = {
+  /**
+   * The hash of the originating transaction.
+   */
+  transactionHash: TransactionHash,
+  /**
+   * The logical event segment, that is, during which segment's execution the
+   * event was emitted.
+   */
+  logicalSegment: number,
+  /**
+   * The physical event segment, that is, the segment of the transaction this
+   * event's trigger is contained in.
+   */
+  physicalSegment: number,
+};
+
+/**
+ * Details of the event emitted
+ */
+export type EventDetails =
+  {
+    tag: 'zswapInput',
+    nullifier: Nullifier,
+    contract: ContractAddress | undefined,
+  } | {
+    tag: 'zswapOutput',
+    commitment: CoinCommitment,
+    contract: ContractAddress | undefined,
+    mtIndex: bigint,
+  } | {
+    tag: 'dustInitialUtxo',
+    generation: DustGenerationInfo,
+    generationIndex: bigint,
+    blockTime: Date,
+  } | {
+    tag: 'dustGenerationDtimeUpdate',
+    update: TreeInsertionPath<DustGenerationInfo>,
+    blockTime: Date,
+  } | {
+    tag: 'dustSpendProcessed',
+    commitment: DustCommitment,
+    commitmentIndex: bigint,
+    nullifier: DustNullifier,
+    vFee: bigint,
+    declaredTime: Date,
+    blockTime: Date,
+  } |
+  // Other variants may be added and some events are not yet supported in this API.
+  { tag: string };
+
+/**
+ * A path evidencing how to insert an entry into a Merkle tree, even if it is
+ * collapsed.
+ */
+export type TreeInsertionPath<A> = {
+  leafHash: string,
+  annotation: A,
+  path: TreeInsertionPathEntry[],
+};
+
+/**
+ * A single entry in a {@link TreeInsertionPath}.
+ */
+export type TreeInsertionPathEntry = {
+  hash: bigint | undefined,
+  goesLeft: boolean,
+};
 
 /**
  * A secret key for the Dust, used to derive Dust UTxO nonces and prove credentials to spend Dust UTxOs
@@ -361,8 +435,8 @@ export class DustGenerationState {
 
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
-  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint);
-  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint);
+  static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
+  static newFromCommitmentTree(state: DustUtxoState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustStateMerkleTreeCollapsedUpdate;
   toString(compact?: boolean): string;
@@ -423,6 +497,10 @@ export class DustLocalState {
   processTtls(time: Date): DustLocalState;
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
+  /**
+   * Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+   */
+  replayRawEvents(sk: DustSecretKey, rawEvents: Uint8Array): DustLocalStateWithChanges;
   addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
@@ -1171,6 +1249,26 @@ export class Transaction<S extends Signaturish, P extends Proofish, B extends Bi
   ): Transaction<S, P, B>;
 
   /**
+   * Adds Zswap offer to the segment specified.
+   *
+   * @throws If called on bound transactions.
+   */
+  addZswapOffer(
+    segment: SegmentSpecifier,
+    offer: UnprovenOffer | undefined,
+  ): Transaction<S, P, B>;
+
+  /**
+   * Adds provided intent to the segment specified.
+   *
+   * @throws If called on bound transactions.
+   */
+  addIntent(
+    segment: SegmentSpecifier,
+    intent: Intent<S, P, B> | undefined,
+  ): Transaction<S, P, B>;
+
+  /**
    * Erases the proofs contained in this transaction
    */
   eraseProofs(): Transaction<S, NoProof, NoBinding>;
@@ -1681,6 +1779,19 @@ export class ZswapLocalState {
   applyCollapsedUpdate(update: MerkleTreeCollapsedUpdate): ZswapLocalState;
 
   /**
+   * Directly inserts a coin owned by this wallet into the state at `this.first_free`.
+   *
+   * This function requires secret keys as coins are indexed by nullifier, and
+   * secret keys are required to compute this.
+   */
+  insertCoin(secretKeys: ZswapSecretKeys, coin: ShieldedCoinInfo): ZswapLocalState;
+
+  /**
+   * Removes a given coin from the tracked coins by its nullifier.
+   */
+  removeCoinByNullifier(nullifier: Nullifier): ZswapLocalState;
+
+  /**
    * Replays observed events against the current local state. These *must* be replayed
    * in the same order as emitted by the chain being followed.
    */
@@ -1691,9 +1802,17 @@ export class ZswapLocalState {
    */
   replayEventsWithChanges(secretKeys: ZswapSecretKeys, events: Event[]): ZswapLocalStateWithChanges;
   /**
+   * Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+   */
+  replayRawEvents(sk: ZswapSecretKeys, rawEvents: Uint8Array): ZswapLocalStateWithChanges;
+  /**
    * Locally applies an offer to the current state, returning the updated state
    */
   apply<P extends Proofish>(secretKeys: ZswapSecretKeys, offer: ZswapOffer<P>): ZswapLocalState;
+  /**
+   * Locally applies an offer to the current state, returning both the updated state and the state changes.
+   */
+  applyWithChanges<P extends Proofish>(secretKeys: ZswapSecretKeys, offer: ZswapOffer<P>): ZswapLocalStateWithChanges;
   /**
    * Locally reverts pending outputs/spends from an offer known to have failed
    * or which has been discarded.
@@ -1765,6 +1884,10 @@ export class ZswapLocalState {
    * future. Each has an optional TTL attached.
    */
   readonly pendingSpends: Map<Nullifier, [QualifiedShieldedCoinInfo, Date | undefined]>;
+  /**
+   * The root of the commitment Merkle tree.
+   */
+  readonly merkleTreeRoot: bigint | undefined;
 }
 
 /**
