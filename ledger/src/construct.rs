@@ -92,6 +92,7 @@ impl<S: SignatureKind<D>, D: DB>
         res
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn add_calls<P>(
         &self,
         rng: &mut (impl Rng + CryptoRng),

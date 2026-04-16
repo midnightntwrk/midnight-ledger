@@ -17,14 +17,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Setup api.github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
         with:
           machine: api.github.com
           username: ${{ secrets.GH_USERNAME }}
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Setup github.com credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
         with:
           machine: github.com
           username: ${{ secrets.GH_USERNAME }}
@@ -93,7 +93,7 @@ jobs:
       - name: Commit and push changes to a new branch and tag
         env:
           tag_name: ${{ steps.name-sanitizer.outputs.tag_name }}
-        uses: EndBug/add-and-commit@a94899bca583c204427a224a7af87c02f9b325d5
+        uses: EndBug/add-and-commit@290ea2c423ad77ca9c62ae0f5b224379612c0321
         with:
           message: 'hard-fork-test: original tag ${{ github.event.inputs.tag }}'
           new_branch: hard-fork-test/${{ env.tag_name }}

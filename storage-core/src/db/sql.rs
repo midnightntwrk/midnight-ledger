@@ -496,7 +496,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                 .query_row(params![key], |row| {
                     let data = row.get(0)?;
                     #[cfg(not(feature = "layout-v2"))]
-                    let ref_count = row.get(1)?;
+                    let ref_count = row.get::<_, i64>(1)? as u64;
                     #[cfg(not(feature = "layout-v2"))]
                     let children: Children<H> = row.get(2)?;
                     #[cfg(feature = "layout-v2")]
@@ -554,7 +554,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     stmt.query_row(params![key.clone()], |row| {
                         let data = row.get(0)?;
                         #[cfg(not(feature = "layout-v2"))]
-                        let ref_count = row.get(1)?;
+                        let ref_count = row.get::<_, i64>(1)? as u64;
                         #[cfg(not(feature = "layout-v2"))]
                         let children: Children<H> = row.get(2)?;
                         #[cfg(feature = "layout-v2")]
@@ -591,7 +591,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             stmt.execute(params![
                 key,
                 object.data,
-                object.ref_count,
+                object.ref_count as i64,
                 Children(object.children)
             ])
             .unwrap();
@@ -646,7 +646,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         .execute(params![
                             key,
                             object.data,
-                            object.ref_count,
+                            object.ref_count as i64,
                             Children(object.children)
                         ])
                         .unwrap(),
@@ -674,7 +674,9 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT COUNT(*) FROM node";
             let mut stmt = tx.prepare(sql).unwrap();
-            let result = stmt.query_row([], |row| row.get(0)).unwrap();
+            let result = stmt
+                .query_row([], |row| row.get::<_, i64>(0))
+                .unwrap() as usize;
             stmt.finalize().unwrap();
             result
         })
