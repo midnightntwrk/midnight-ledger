@@ -52,7 +52,7 @@ describe('Ledger API - MerkleTreeCollapsedUpdate', () => {
     const unprovenTransaction = Static.unprovenTransactionGuaranteedAndFallibleAndContractCalls();
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
     const state = new ZswapChainState();
-    const stateAfter = state.tryApply(proofErasedTransaction.guaranteedOffer!)[0].postBlockUpdate(new Date());
+    const stateAfter = state.tryApply(proofErasedTransaction.guaranteedOffer!)[0].postBlockUpdate(new Date(), 1000n);
     const mt = new MerkleTreeCollapsedUpdate(stateAfter, 0n, 1n);
     const mt2 = MerkleTreeCollapsedUpdate.deserialize(mt.serialize());
 
