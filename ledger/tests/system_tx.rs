@@ -22,6 +22,7 @@ use midnight_ledger::structure::{
 use midnight_ledger::test_utilities::tx_prove;
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use storage::db::InMemoryDB;

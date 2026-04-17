@@ -21,6 +21,7 @@ use lazy_static::lazy_static;
 use midnight_ledger::structure::{ContractDeploy, ProofPreimageMarker, Transaction};
 use midnight_ledger::test_utilities::{Resolver, TestState, test_intents, test_resolver, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::state::ContractState;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use storage::db::InMemoryDB;
