@@ -1,5 +1,9 @@
 # `transient-crypto` Changelog
 
+## Unreleased
+
+- fix: rehashing serde deserialized `MerkleTree`s
+
 ## Version `2.1.0`
 
 - feat: add new `try_update` and `try_update_hash` Merkle tree insertion variants that do not panic on collapsed trees
