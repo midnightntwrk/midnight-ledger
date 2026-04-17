@@ -1,7 +1,6 @@
 name: Upload SRS Parameters
 
 on:
-  push:
   workflow_dispatch:
     inputs:
       dry-run:
