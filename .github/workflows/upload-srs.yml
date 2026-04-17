@@ -54,6 +54,11 @@ jobs:
           aws-region: eu-west-1
 
       - name: Upload SRS parameters
-        env:
-          DRY_RUN: ${{ inputs.dry-run != false && '--dry-run' || '' }}
-        run: bash scripts/upload-keys-s3.sh $DRY_RUN
+        run: |
+          if [ "${{ inputs.dry-run }}" = "false" ]; then
+            echo "=== LIVE UPLOAD ==="
+            bash scripts/upload-keys-s3.sh
+          else
+            echo "=== DRY RUN (pass dry-run=false to upload for real) ==="
+            bash scripts/upload-keys-s3.sh --dry-run
+          fi
