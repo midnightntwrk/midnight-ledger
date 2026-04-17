@@ -145,6 +145,89 @@ jobs:
       - name: Build zkir-wasm
         run: nix build .#zkir-wasm
 
+  integration-tests:
+    strategy:
+      matrix:
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Configure git rewrite
+        run: |
+          mkdir -p $HOME/.config/git
+          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
+          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Install Nix (2)
+        uses: cachix/install-nix-action@51f3067b56fe8ae331890c77d4e454f6d60615ff # v31.10.2
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable #trya
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Cache Nix
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          endpoint: https://attic.ci.iog.io
+          cache: midnight-public
+          access_token: ${{ secrets.ATTIC_CACHE_TOKEN }}
+
+      - name: Configure cargo
+        run: .github/scripts/configure-cargo.sh
+
+      - name: Cache dependencies
+        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4
+      - name: Build 
+        run: nix build .#integration-test-deps
+
+      - name: Add git bin to PATH for Yarn, verify git is installed
+        run: |
+          echo "/usr/bin" >> $GITHUB_PATH
+          which git
+          git --version
+
+      - name: Set up Node.js
+        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        with:
+          node-version: 22
+
+      - name: Run integration tests
+        run: |
+          export MN_AXIOS=true
+          set -o pipefail
+          cd integration-tests
+          yarn
+          yarn lint
+          yarn build
+          yarn test:coverage:prepare
+          nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
+
+      - name: Upload Logs
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: logs-${{ matrix.os }}
+          path: integration-tests/logs/
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
+          path: "./integration-tests/reports/ctrf-report.json"
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        with:
+          name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
+          path: ./integration-tests/reports/test-report.xml
+
   build-ledger:
     strategy:
       matrix:

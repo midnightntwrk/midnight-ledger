@@ -12,8 +12,8 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use crate::dust::Event;
 use crate::dust::{DustState, UtxoMeta};
+use crate::events::Event;
 use crate::onchain_runtime::{ContractState, value_to_token_type};
 use crate::tx::{SystemTransaction, TransactionContext, TransactionResult, VerifiedTransaction};
 use crate::zswap_state::*;
