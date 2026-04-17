@@ -210,20 +210,20 @@ jobs:
           nix develop .#ci -c yarn test:coverage | tee ./coverage.txt
 
       - name: Upload Logs
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: logs-${{ matrix.os }}
           path: integration-tests/logs/
 
       - name: Upload Test Results
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
           name: "ledger-wasm-test-results-ctrf-${{ matrix.os }}"
           path: "./integration-tests/reports/ctrf-report.json"
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: "ledger-wasm-test-results-junit-${{ matrix.os }}"
           path: ./integration-tests/reports/test-report.xml
@@ -352,7 +352,7 @@ jobs:
           cp test-results-proof-server.json ../target/
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: "proof-server-test-results-${{ matrix.os }}"
           path: target/test-*
