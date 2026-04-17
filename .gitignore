@@ -14,3 +14,4 @@ coverage
 logs
 **/.yarn/install-state.gz
 **/.yarn/cache
+.DS_Store

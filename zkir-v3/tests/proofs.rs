@@ -102,6 +102,7 @@ mod proof_tests {
                     pi_skips: vec![],
                     binding_input: 0.into(),
                     comm_comm: None,
+                    contract_call_comm_rands: vec![],
                 },
             )
             .await;
@@ -810,5 +811,76 @@ mod proof_tests {
             "Error message: {}",
             err
         );
+    }
+
+    /// Proves a circuit with an inactive-guard Impact (guard=0).
+    ///
+    /// The Impact contains a Dup op (opcode 0x30) which would produce a
+    /// non-zero field element if active. With guard=0, the circuit must
+    /// push zeros via select(0, val, 0), and the preprocessor must also
+    /// push zeros to pis. If either side pushes real values instead of
+    /// zeros, the pi_push cross-check fires during synthesis.
+    ///
+    /// The verifier sees a Noop{1} where the Dup would have been.
+    #[actix_rt::test]
+    async fn test_inactive_guard_impact() {
+        use midnight_zkir_v3::{Instruction, Operand, TypedIdentifier, ir_types::IrType};
+        use onchain_vm::ops::Op;
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![TypedIdentifier::new(
+                Identifier("%v_0".to_string()),
+                IrType::Native,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![
+                // Inactive Impact: guard=0, so ops don't execute.
+                // Dup{0} encodes as [0x30] — one non-zero field element.
+                Instruction::Impact {
+                    guard: Operand::Immediate(0.into()),
+                    ops: vec![Op::Dup { n: 0 }],
+                    read_results: vec![],
+                },
+                // Assert that input is 1 (so the circuit has something to do).
+                Instruction::Assert {
+                    cond: Operand::Variable(Identifier("%v_0".to_string())),
+                },
+            ]),
+        };
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // The inactive Impact produces 1 field element (Dup opcode),
+        // which appears as a Noop{1} (one zero) in the transcript.
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: Some((0.into(), 0.into())),
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Verifier PIs: [binding_input, comm_comm, 0 (Noop{1})]
+        vk.verify(
+            &PARAMS_VERIFIER,
+            &proof,
+            [42.into(), 0.into(), 0.into()].into_iter(),
+        )
+        .unwrap();
     }
 }

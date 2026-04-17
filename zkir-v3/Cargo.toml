@@ -13,6 +13,11 @@ required-features = ["binary"]
 
 [features]
 binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
+execute = [
+  "dep:coin-structure",
+  "dep:onchain-runtime",
+  "dep:onchain-runtime-state",
+]
 proptest = [
   "dep:pastey",
   "dep:proptest",
@@ -24,8 +29,15 @@ proptest = [
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+onchain-vm = { version = "3.0.0", path = "../onchain-vm", package = "midnight-onchain-vm" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+
+# Feature-gated — needed only for the execute method (rehearsal interpreter)
+coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure", optional = true }
+onchain-runtime = { version = "3.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", optional = true }
+onchain-runtime-state = { version = "3.0.0", path = "../onchain-state", package = "midnight-onchain-state", optional = true }
 
 midnight-curves = { version = "0.2.0" }
 midnight-proofs = { version = "^0.7.0" }
@@ -60,5 +72,8 @@ proptest = { version = "1.4.0", optional = true }
 proptest-derive = { version = "0.5", optional = true }
 
 [dev-dependencies]
-midnight-zkir-v3 = { path = ".", features = ["proptest"] }
+midnight-zkir-v3 = { path = ".", features = ["proptest", "execute"] }
 actix-rt = "^2.9.0"
+onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+onchain-runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }

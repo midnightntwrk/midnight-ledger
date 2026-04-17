@@ -96,7 +96,7 @@ pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
             _ => None,
         })
         .unwrap_or(vec![]);
-    let (db, invariant) = parse_macro_args(&input);
+    let (db, invariant, no_serializable) = parse_macro_args(&input);
     let db = if let Some(db) = db {
         phantom_generics.push(db.clone());
         db
@@ -140,25 +140,31 @@ pub fn derive_storable(input: proc_macro::TokenStream) -> proc_macro::TokenStrea
 
             #invariant_impl
         }
-
-        impl #impl_generics serialize::Serializable for #name #ty_generics #where_clause {
-            fn serialize(&self, __writer: &mut impl ::std::io::Write) -> ::std::io::Result<()> {
-                <storage::arena::Sp<#name #ty_generics, #db> as serialize::Serializable>::serialize(&storage::arena::Sp::new(self.clone()), __writer)
-            }
-            fn serialized_size(&self) -> usize {
-                <storage::arena::Sp<#name #ty_generics, #db> as serialize::Serializable>::serialized_size(&storage::arena::Sp::new(self.clone()))
-            }
-        }
-
-        impl #impl_generics serialize::Deserializable for #name #ty_generics #where_clause {
-            fn deserialize(__reader: &mut impl ::std::io::Read, recursion_depth: u32) -> ::std::io::Result<Self> {
-                let sp = <storage::arena::Sp<#name #ty_generics, #db> as serialize::Deserializable>::deserialize(__reader, recursion_depth)?;
-                Ok((&*sp).clone())
-            }
-        }
     };
 
-    if let Some(tag) = tag {
+    if !no_serializable {
+        expanded.extend(quote! {
+            impl #impl_generics serialize::Serializable for #name #ty_generics #where_clause {
+                fn serialize(&self, __writer: &mut impl ::std::io::Write) -> ::std::io::Result<()> {
+                    <storage::arena::Sp<#name #ty_generics, #db> as serialize::Serializable>::serialize(&storage::arena::Sp::new(self.clone()), __writer)
+                }
+                fn serialized_size(&self) -> usize {
+                    <storage::arena::Sp<#name #ty_generics, #db> as serialize::Serializable>::serialized_size(&storage::arena::Sp::new(self.clone()))
+                }
+            }
+
+            impl #impl_generics serialize::Deserializable for #name #ty_generics #where_clause {
+                fn deserialize(__reader: &mut impl ::std::io::Read, recursion_depth: u32) -> ::std::io::Result<Self> {
+                    let sp = <storage::arena::Sp<#name #ty_generics, #db> as serialize::Deserializable>::deserialize(__reader, recursion_depth)?;
+                    Ok((&*sp).clone())
+                }
+            }
+        });
+    }
+
+    if let Some(tag) = tag
+        && !no_serializable
+    {
         let tag_generics = tagged_add_trait_bounds(input.generics, &phantom_generics);
         let (tag_impl_generics, tag_ty_generics, tag_where_clause) = tag_generics.split_for_impl();
 
@@ -297,13 +303,28 @@ fn is_base(input: &DeriveInput) -> Option<TokenStream> {
     })
 }
 
-fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>) {
+fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>, bool) {
     use std::collections::HashMap;
-    // Find #[storable(...)] attrs
-    let attrs: Vec<Punctuated<MetaNameValue, Token![,]>> = input
+    // Find #[storable(...)] attrs — supports both key=value and bare identifiers
+    let attrs: Vec<&Attribute> = input
         .attrs
         .iter()
         .filter(|attr| (**attr).path().is_ident("storable"))
+        .collect::<Vec<_>>();
+
+    // Check for bare identifiers like #[storable(no_serializable)]
+    let mut no_serializable = false;
+    for attr in &attrs {
+        if let Meta::List(list) = &attr.meta {
+            let tokens_str = list.tokens.to_string();
+            if tokens_str.contains("no_serializable") {
+                no_serializable = true;
+            }
+        }
+    }
+
+    let kvs_attrs: Vec<Punctuated<MetaNameValue, Token![,]>> = attrs
+        .iter()
         .filter_map(|attr| match &attr.meta {
             Meta::List(list) => list
                 .parse_args_with(Punctuated::parse_separated_nonempty)
@@ -312,7 +333,7 @@ fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>) {
         })
         .collect::<Vec<_>>();
 
-    let kvs = attrs
+    let kvs = kvs_attrs
         .iter()
         .flat_map(|attr| {
             attr.iter()
@@ -324,7 +345,7 @@ fn parse_macro_args(input: &DeriveInput) -> (Option<Ident>, Option<Expr>) {
         Expr::Path(p) => p.path.get_ident().cloned(),
         _ => None,
     });
-    (db, kvs.get("invariant").cloned().cloned())
+    (db, kvs.get("invariant").cloned().cloned(), no_serializable)
 }
 
 #[derive(PartialEq)]

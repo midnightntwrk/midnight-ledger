@@ -11,17 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
-use crate::ir_instructions::assign::assign_incircuit;
-use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
-use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
-use crate::ir_types::{CircuitValue, IrType, IrValue};
+//! ZKIR circuit synthesis — the ZK constraint generation pass.
+//!
+//! [`Relation`] for [`IrSource`] walks the instruction sequence inside the
+//! proving backend, producing constrained witness assignments and public-input
+//! commitments. The [`Preprocessed`] witness (from [`crate::ir_preprocess`])
+//! supplies the concrete values that the circuit constrains.
 
-use super::ir::{Identifier, Instruction as I, IrSource, Operand};
-use anyhow::{anyhow, bail};
+use std::collections::HashMap;
+
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use base_crypto::hash::persistent_hash;
-use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
@@ -32,7 +31,7 @@ use midnight_circuits::instructions::{
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
+use midnight_curves::{JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -40,27 +39,18 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt};
-use std::cmp::Ordering;
-use std::collections::HashMap;
 use transient_crypto::curve::outer;
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED, Fr};
-use transient_crypto::fab::{AlignmentExt, ValueReprAlignedValue};
-use transient_crypto::hash::{hash_to_curve, transient_commit, transient_hash};
-use transient_crypto::proofs::{ProofPreimage, ProvingError};
+use transient_crypto::fab::AlignmentExt;
 use transient_crypto::repr::FieldRepr;
 
-/// The raw data prior to proving. Note that this should *not* be considered part of the public
-/// API, and is subject to change at any time. It may be used in combination with
-/// [`IrSource::prove_unchecked`] to test malicious prover behavior.
-#[derive(Clone, Debug)]
-#[allow(missing_docs)]
-pub struct Preprocessed {
-    pub memory: HashMap<Identifier, IrValue>,
-    pub pis: Vec<outer::Scalar>,
-    pub pi_skips: Vec<Option<usize>>,
-    pub binding_input: outer::Scalar,
-    pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
-}
+use crate::ir::{Identifier, Instruction as I, IrSource, Operand};
+use crate::ir_instructions::add::add_incircuit;
+use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::decode::decode_incircuit;
+use crate::ir_instructions::encode::encode_incircuit;
+use crate::ir_preprocess::Preprocessed;
+use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 fn fab_decode_to_bytes(
     std: &ZkStdLib,
@@ -141,7 +131,7 @@ fn fab_decode_to_bytes_atom(
                 };
             if inputs.len() < expected_size {
                 return Err(Error::Synthesis(
-                    "cannot decode bytes from to little data".into(),
+                    "cannot decode bytes from too little data".into(),
                 ));
             }
             let mut res_vec = Vec::with_bounded_capacity(*length as usize - stray);
@@ -185,445 +175,6 @@ fn assemble_bytes(
         acc = std.add(layouter, &acc, limb)?;
     }
     Ok(acc)
-}
-
-/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
-/// TODO: Remove this function when IrType supports JubjubScalar.
-fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<JubjubFr, anyhow::Error> {
-    let s: Option<JubjubFr> = JubjubFr::from_bytes(&native.to_bytes_le()).into();
-    s.ok_or(anyhow::Error::msg("Error converting Fr to JubjubScalar"))
-}
-
-impl IrSource {
-    /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
-    /// to produce a public input vector, and public input skip information.
-    pub(crate) fn preprocess(
-        &self,
-        preimage: &ProofPreimage,
-    ) -> Result<Preprocessed, ProvingError> {
-        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
-
-        let mut idx = 0;
-        for input_id in self.inputs.iter() {
-            let w = input_id.val_t.encoded_len();
-            if idx + w > preimage.inputs.len() {
-                bail!(
-                    "Not enough raw inputs: ran out at index {} while decoding {:?}",
-                    idx,
-                    input_id.name
-                );
-            }
-            let value = decode_offcircuit(&preimage.inputs[idx..idx + w], &input_id.val_t)?;
-            memory.insert(input_id.name.clone(), value);
-            idx += w;
-        }
-        if idx != preimage.inputs.len() {
-            bail!(
-                "Expected {} raw inputs, received {}",
-                idx,
-                preimage.inputs.len()
-            );
-        }
-
-        let mut pis = vec![preimage.binding_input];
-        if self.do_communications_commitment {
-            pis.push(
-                preimage
-                    .communications_commitment
-                    .ok_or(anyhow!("Expected communications commitment"))?
-                    .0,
-            );
-        }
-        let mut pi_skips = Vec::new();
-        let mut public_transcript_inputs_idx: usize = 0;
-        let mut public_transcript_outputs_idx: usize = 0;
-        let mut private_transcript_outputs_idx: usize = 0;
-        let mut outputs = Vec::new();
-        let idx = |memory: &HashMap<Identifier, IrValue>, id: &Identifier| {
-            let res = memory
-                .get(id)
-                .cloned()
-                .ok_or(anyhow!("variable not found: {:?}", id));
-            trace!(?res, "retrieved from {:?}", id);
-            res
-        };
-        let resolve_operand =
-            |memory: &HashMap<Identifier, IrValue>, operand: &Operand| match operand {
-                Operand::Variable(id) => idx(memory, id),
-                Operand::Immediate(imm) => Ok(IrValue::Native(*imm)),
-            };
-        let resolve_operand_bool = |memory: &HashMap<Identifier, IrValue>, operand: &Operand| {
-            resolve_operand(memory, operand).and_then(|val| {
-                let val: Fr = val.try_into()?;
-                if val == 0.into() {
-                    Ok(false)
-                } else if val == 1.into() {
-                    Ok(true)
-                } else {
-                    bail!("Expected boolean, found: {val:?}");
-                }
-            })
-        };
-
-        let resolve_operand_bits =
-            |memory: &HashMap<Identifier, IrValue>, operand: &Operand, constrain: Option<u32>| {
-                resolve_operand(memory, operand).and_then(|val| {
-                    let val: Fr = val.try_into()?;
-                    let mut bits = val
-                        .0
-                        .to_bytes_le()
-                        .into_iter()
-                        .flat_map(|byte| {
-                            [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]
-                                .into_iter()
-                                .map(move |mask| byte & mask != 0)
-                        })
-                        .collect::<Vec<_>>();
-                    if let Some(n) = constrain {
-                        if n as usize >= FR_BITS {
-                            bail!("Excessive bit bound");
-                        }
-                        if bits[n as usize..].iter().any(|b| *b) {
-                            bail!("Bit bound failed: {val:?} is not {n}-bit");
-                        }
-                        bits.truncate(n as usize);
-                    }
-                    Ok(bits)
-                })
-            };
-
-        fn from_bits<I: DoubleEndedIterator<Item = bool>>(bits: I) -> Fr {
-            bits.rev()
-                .fold(0.into(), |acc, bit| acc * 2.into() + bit.into())
-        }
-        for ins in self.instructions.iter() {
-            trace!(?ins, "preprocess gate");
-            match ins {
-                I::Encode { input, outputs } => {
-                    let val = resolve_operand(&memory, input)?;
-                    let encoded = encode_offcircuit(&val);
-                    if encoded.len() != outputs.len() {
-                        return Err(anyhow::Error::msg(
-                            "Unexpected output length of encode instruction",
-                        ));
-                    }
-                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
-                        memory.insert(out_id.clone(), enc_val);
-                    }
-                }
-                I::Decode {
-                    inputs,
-                    val_t,
-                    output,
-                } => {
-                    let raw_inputs = inputs
-                        .iter()
-                        .map(|inp_id| resolve_operand(&memory, inp_id)?.try_into())
-                        .collect::<Result<Vec<Fr>, _>>()?;
-                    let decoded = decode_offcircuit(&raw_inputs, val_t)?;
-                    memory.insert(output.clone(), decoded);
-                }
-                I::Add { a, b, output } => {
-                    let a = resolve_operand(&memory, a)?;
-                    let b = resolve_operand(&memory, b)?;
-                    let result = add_offcircuit(&a, &b)?;
-                    memory.insert(output.clone(), result);
-                }
-                I::Mul { a, b, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let b: Fr = resolve_operand(&memory, b)?.try_into()?;
-                    let result = IrValue::Native(a * b);
-                    memory.insert(output.clone(), result);
-                }
-                I::Neg { a, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let result = IrValue::Native(-a);
-                    memory.insert(output.clone(), result);
-                }
-                I::Not { a, output } => {
-                    let result = IrValue::Native((!resolve_operand_bool(&memory, a)?).into());
-                    memory.insert(output.clone(), result);
-                }
-                I::ConstrainEq { a, b } => {
-                    if resolve_operand(&memory, a)? != resolve_operand(&memory, b)? {
-                        bail!(
-                            "Failed equality constraint: {:?} != {:?}",
-                            resolve_operand(&memory, a)?,
-                            resolve_operand(&memory, b)?
-                        );
-                    }
-                }
-                I::CondSelect { bit, a, b, output } => {
-                    let (bit_val, a_val, b_val) = (
-                        resolve_operand_bool(&memory, bit)?,
-                        resolve_operand(&memory, a)?,
-                        resolve_operand(&memory, b)?,
-                    );
-                    memory.insert(output.clone(), if bit_val { a_val } else { b_val });
-                }
-                I::Assert { cond } => {
-                    if !resolve_operand_bool(&memory, cond)? {
-                        bail!("Failed direct assertion");
-                    }
-                }
-                I::TestEq { a, b, output } => {
-                    let result = IrValue::Native(
-                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into(),
-                    );
-                    memory.insert(output.clone(), result);
-                }
-                I::PublicInput {
-                    guard,
-                    val_t,
-                    output,
-                } => {
-                    let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
-                            IrValue::default(val_t)
-                        }
-                        _ => {
-                            let w = val_t.encoded_len();
-                            let raw_outputs = &preimage.public_transcript_outputs
-                                [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
-                            public_transcript_outputs_idx += w;
-                            decode_offcircuit(raw_outputs, val_t)?
-                        }
-                    };
-                    memory.insert(output.clone(), val);
-                }
-                I::PrivateInput {
-                    guard,
-                    val_t,
-                    output,
-                } => {
-                    let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
-                            IrValue::default(val_t)
-                        }
-                        _ => {
-                            let w = val_t.encoded_len();
-                            let raw_outputs = &preimage.private_transcript
-                                [private_transcript_outputs_idx
-                                    ..private_transcript_outputs_idx + w];
-                            private_transcript_outputs_idx += w;
-                            decode_offcircuit(raw_outputs, val_t)?
-                        }
-                    };
-                    memory.insert(output.clone(), val);
-                }
-                I::Copy { val, output } => {
-                    let val = resolve_operand(&memory, val)?;
-                    memory.insert(output.clone(), val);
-                }
-                I::ConstrainToBoolean { val } => drop(resolve_operand_bool(&memory, val)?),
-                I::ConstrainBits { val, bits } => {
-                    drop(resolve_operand_bits(&memory, val, Some(*bits))?)
-                }
-                I::DivModPowerOfTwo { val, bits, outputs } => {
-                    if outputs.len() != 2 {
-                        bail!("DivModPowerOfTwo requires exactly 2 outputs");
-                    }
-                    if *bits as usize > FR_BYTES_STORED * 8 {
-                        bail!("Excessive bit count");
-                    }
-                    let val_bits = resolve_operand_bits(&memory, val, None)?;
-                    memory.insert(
-                        outputs[0].clone(),
-                        IrValue::Native(from_bits(val_bits[*bits as usize..].iter().copied())),
-                    );
-                    memory.insert(
-                        outputs[1].clone(),
-                        IrValue::Native(from_bits(val_bits[..*bits as usize].iter().copied())),
-                    );
-                }
-                I::ReconstituteField {
-                    divisor,
-                    modulus,
-                    bits,
-                    output,
-                } => {
-                    if *bits as usize > FR_BYTES_STORED * 8 {
-                        bail!("Excessive bit count");
-                    }
-                    let fr_max = Fr::from(-1);
-                    let max_bits: Vec<bool> = fr_max
-                        .0
-                        .to_bytes_le()
-                        .into_iter()
-                        .flat_map(|byte| {
-                            [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]
-                                .into_iter()
-                                .map(move |mask| byte & mask != 0)
-                        })
-                        .collect();
-                    let modulus_bits = resolve_operand_bits(&memory, modulus, Some(*bits))?;
-                    let divisor_bits =
-                        resolve_operand_bits(&memory, divisor, Some(FR_BITS as u32 - *bits))?;
-                    let cmp = modulus_bits
-                        .iter()
-                        .chain(divisor_bits.iter())
-                        .rev()
-                        .zip(max_bits[..FR_BITS].iter().rev())
-                        .map(|(ab, max)| ab.cmp(max))
-                        .fold(
-                            Ordering::Equal,
-                            |prefix, local| if prefix.is_eq() { local } else { prefix },
-                        );
-                    if cmp.is_gt() {
-                        bail!("Reconstituted element overflows field");
-                    }
-                    let power = (0..*bits).fold(Fr::from(1), |acc, _| Fr::from(2) * acc);
-                    let modulus: Fr = resolve_operand(&memory, modulus)?.try_into()?;
-                    let divisor: Fr = resolve_operand(&memory, divisor)?.try_into()?;
-                    let result = IrValue::Native(power * divisor + modulus);
-                    memory.insert(output.clone(), result);
-                }
-                I::LessThan { a, b, bits, output } => {
-                    let result =
-                        (from_bits(resolve_operand_bits(&memory, a, Some(*bits))?.into_iter())
-                            < from_bits(
-                                resolve_operand_bits(&memory, b, Some(*bits))?.into_iter(),
-                            ))
-                        .into();
-                    memory.insert(output.clone(), IrValue::Native(result));
-                }
-                I::TransientHash { inputs, output } => {
-                    let result = transient_hash(
-                        &inputs
-                            .iter()
-                            .map(|i| resolve_operand(&memory, i))
-                            .map(|r| r.and_then(|v| v.try_into()))
-                            .collect::<Result<Vec<Fr>, _>>()?,
-                    );
-                    memory.insert(output.clone(), IrValue::Native(result));
-                }
-                I::PersistentHash {
-                    alignment,
-                    inputs,
-                    outputs,
-                } => {
-                    if outputs.len() != 2 {
-                        bail!("PersistentHash requires exactly 2 outputs");
-                    }
-                    let inputs = inputs
-                        .iter()
-                        .map(|i| resolve_operand(&memory, i))
-                        .map(|r| r.and_then(|v| v.try_into()))
-                        .collect::<Result<Vec<_>, _>>()?;
-                    let value = alignment.parse_field_repr(&inputs).ok_or_else(|| {
-                        error!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})");
-                        anyhow!("Inputs did not match alignment (inputs: {inputs:?}, alignment: {alignment:?})")
-                    })?;
-                    let mut repr = Vec::new();
-                    ValueReprAlignedValue(value).binary_repr(&mut repr);
-                    trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash = persistent_hash(&repr);
-                    let hash_fields = hash.field_vec();
-                    if hash_fields.len() >= 2 {
-                        memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
-                        memory.insert(outputs[1].clone(), IrValue::Native(hash_fields[1]));
-                    } else {
-                        bail!("PersistentHash did not produce expected output");
-                    }
-                }
-                I::Impact { guard, inputs } => {
-                    let count = inputs.len();
-                    for input in inputs {
-                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
-                        pis.push(x);
-                        public_transcript_inputs_idx += 1;
-                    }
-                    if !resolve_operand_bool(&memory, guard)? {
-                        pi_skips.push(Some(count));
-                        public_transcript_inputs_idx -= count;
-                    } else {
-                        pi_skips.push(None);
-                        for i in 0..count {
-                            let idx = public_transcript_inputs_idx - count + i;
-                            let expected = preimage.public_transcript_inputs.get(idx).copied();
-                            let computed = Some(pis[pis.len() - count + i]);
-                            if expected != computed {
-                                error!(
-                                    ?idx,
-                                    ?expected,
-                                    ?computed,
-                                    ?memory,
-                                    ?pis,
-                                    "Public transcript input mismatch"
-                                );
-                                bail!(
-                                    "Public transcript input mismatch for input {idx}; expected: {expected:?}, computed: {computed:?}"
-                                );
-                            }
-                        }
-                    }
-                }
-                I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
-                I::HashToCurve { inputs, output } => {
-                    let inputs = inputs
-                        .iter()
-                        .map(|var| resolve_operand(&memory, var))
-                        .map(|r| r.and_then(|v| v.try_into()))
-                        .collect::<Result<Vec<Fr>, _>>()?;
-                    let point = hash_to_curve(&inputs);
-                    memory.insert(output.clone(), IrValue::JubjubPoint(point.0));
-                }
-                I::EcMul { a, scalar, output } => {
-                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
-                    memory.insert(output.clone(), c);
-                }
-                I::EcMulGenerator { scalar, output } => {
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let p = JubjubSubgroup::generator() * jubjub_scalar_from_native(s.0)?;
-                    memory.insert(output.clone(), IrValue::JubjubPoint(p));
-                }
-            }
-        }
-        trace!(?outputs, "Finished instructions with output");
-        if preimage.public_transcript_inputs.len() != public_transcript_inputs_idx
-            || preimage.public_transcript_outputs.len() != public_transcript_outputs_idx
-            || preimage.private_transcript.len() != private_transcript_outputs_idx
-        {
-            error!(
-                public_transcript_inputs = ?preimage.public_transcript_inputs,
-                public_transcript_outputs = ?preimage.public_transcript_outputs,
-                private_transcript_outputs = ?preimage.private_transcript,
-                ?public_transcript_inputs_idx,
-                ?public_transcript_outputs_idx,
-                ?private_transcript_outputs_idx,
-                "Transcripts not fully consumed");
-            bail!("Transcripts not fully consumed");
-        }
-        if self.do_communications_commitment {
-            let comm_comm = preimage
-                .communications_commitment
-                .ok_or(anyhow!("Expected communications randomness"))?;
-            let mut comm_comm_inputs: Vec<Fr> = Vec::new();
-            comm_comm_inputs.extend(preimage.inputs.iter());
-            for output in outputs.iter() {
-                comm_comm_inputs.push(output.clone().try_into()?);
-            }
-            if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
-                error!(
-                    ?comm_comm,
-                    ?comm_comm_inputs,
-                    "Communications commitment mismatch"
-                );
-                bail!("Communications commitment mismatch");
-            }
-        }
-        Ok(Preprocessed {
-            memory,
-            pis: pis.into_iter().map(|x| x.0).collect(),
-            pi_skips,
-            binding_input: preimage.binding_input.0,
-            comm_comm: preimage
-                .communications_commitment
-                .map(|(comm, rand)| (comm.0, rand.0)),
-        })
-    }
 }
 
 impl Relation for IrSource {
@@ -736,7 +287,11 @@ impl Relation for IrSource {
         let mut public_inputs = vec![];
         pi_push(binding_input, &mut public_inputs)?;
 
-        if self.do_communications_commitment {
+        // The communications commitment is always the second public input
+        // (the verifier unconditionally includes it in its PI vector).
+        // `do_communications_commitment` controls whether the value is
+        // *constrained* via Poseidon, not whether it appears as a PI.
+        {
             let comm_comm_value = comm_comm_value.map(|c| {
                 c.ok_or_else(|| {
                     error!("Communication commitment not present despite preproc. This is a bug.");
@@ -748,6 +303,38 @@ impl Relation for IrSource {
             let comm_comm = std.assign(layouter, comm_comm_value)?;
             pi_push(comm_comm, &mut public_inputs)?;
         }
+        // Pre-populate unguarded PublicInput output variables so that
+        // Impact read_results can reference them. Impact must precede
+        // PublicInput in instruction order (the executor populates
+        // public_transcript_outputs from Impact's Popeq results), but the
+        // circuit synthesis needs the values when resolving read_results
+        // operands in push_operand_pi!.
+        for ins in self.instructions.iter() {
+            if let I::PublicInput {
+                guard: None,
+                val_t,
+                output,
+            } = ins
+            {
+                let value = witness.as_ref().map_with_result(|preproc| {
+                    preproc
+                        .memory
+                        .get(output)
+                        .cloned()
+                        .ok_or(Error::Synthesis(format!(
+                            "Pre-populate: {:?} not found in witness memory",
+                            output
+                        )))
+                })?;
+                mem_insert(
+                    output.clone(),
+                    assign_incircuit(std, layouter, val_t, &[value])?[0].clone(),
+                    &mut memory,
+                )?;
+            }
+        }
+
+        let mut contract_call_idx: usize = 0;
         for ins in self.instructions.iter() {
             match ins {
                 I::Encode { input, outputs } => {
@@ -808,7 +395,6 @@ impl Relation for IrSource {
                     std.assert_equal(layouter, &a, &b)?;
                 }
                 I::ConstrainToBoolean { val } => {
-                    // Yes, this does insert a constraint.
                     let val_assigned = resolve_operand(std, layouter, &memory, val)?;
                     let x: AssignedNative<_> = val_assigned.try_into()?;
                     let _: AssignedBit<_> = std.convert(layouter, &x)?;
@@ -817,18 +403,201 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard, inputs } => {
-                    let zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
-                    let guard: AssignedBit<_> = {
-                        let guard = resolve_operand(std, layouter, &memory, guard)?;
-                        let guard: AssignedNative<_> = guard.try_into()?;
-                        std.convert(layouter, &guard)?
+                I::Impact {
+                    guard,
+                    ops,
+                    read_results,
+                } => {
+                    // Mirrors zkir_ops_to_field_elements in-circuit.
+                    // Every field element is gated via select(guard, val, zero).
+                    use crate::zkir_mode::ZkirKey;
+                    use onchain_vm::ops::Op;
+
+                    let impact_zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
+                    let impact_guard: AssignedBit<_> = {
+                        let guard_val = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard_native: AssignedNative<_> = guard_val.try_into()?;
+                        std.convert(layouter, &guard_native)?
                     };
-                    for input in inputs {
-                        let val_assigned = resolve_operand(std, layouter, &memory, input)?;
-                        let x: AssignedNative<_> = val_assigned.try_into()?;
-                        let guarded_x = std.select(layouter, &guard, &x, &zero)?;
-                        pi_push(guarded_x, &mut public_inputs)?;
+
+                    // Macros used instead of closures because closures cannot
+                    // use `impl Trait` parameters (needed for Layouter).
+                    macro_rules! push_const_pi {
+                        ($val:expr) => {{
+                            let assigned =
+                                std.assign_fixed(layouter, outer::Scalar::from($val as u64))?;
+                            let guarded =
+                                std.select(layouter, &impact_guard, &assigned, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
+                    }
+
+                    macro_rules! push_operand_pi {
+                        ($operand:expr) => {{
+                            let val = resolve_operand(std, layouter, &memory, $operand)?;
+                            let x: AssignedNative<_> = val.try_into()?;
+                            let guarded = std.select(layouter, &impact_guard, &x, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
+                    }
+
+                    macro_rules! push_alignment_pi {
+                        ($alignment:expr) => {{
+                            let mut fields: Vec<Fr> = Vec::new();
+                            $alignment.field_repr(&mut fields);
+                            for fr_val in &fields {
+                                let assigned = std.assign_fixed(layouter, fr_val.0)?;
+                                let guarded = std.select(
+                                    layouter,
+                                    &impact_guard,
+                                    &assigned,
+                                    &impact_zero,
+                                )?;
+                                pi_push(guarded, &mut public_inputs)?;
+                            }
+                        }};
+                    }
+
+                    let mut popeq_idx: usize = 0;
+
+                    for op in ops {
+                        match op {
+                            // --- Fixed-opcode variants (no payload) ---
+                            Op::Noop { n } => {
+                                for _ in 0..*n {
+                                    push_const_pi!(0);
+                                }
+                            }
+                            Op::Lt => push_const_pi!(0x01),
+                            Op::Eq => push_const_pi!(0x02),
+                            Op::Type => push_const_pi!(0x03),
+                            Op::Size => push_const_pi!(0x04),
+                            Op::New => push_const_pi!(0x05),
+                            Op::And => push_const_pi!(0x06),
+                            Op::Or => push_const_pi!(0x07),
+                            Op::Neg => push_const_pi!(0x08),
+                            Op::Log => push_const_pi!(0x09),
+                            Op::Root => push_const_pi!(0x0a),
+                            Op::Pop => push_const_pi!(0x0b),
+                            Op::Add => push_const_pi!(0x14),
+                            Op::Sub => push_const_pi!(0x15),
+                            Op::Member => push_const_pi!(0x18),
+                            Op::Ckpt => push_const_pi!(0xff),
+
+                            // --- Popeq: opcode + read-result operands ---
+                            Op::Popeq { cached, .. } => {
+                                push_const_pi!((0x0cu8 + *cached as u8));
+                                let rr = read_results.get(popeq_idx).ok_or_else(|| {
+                                    Error::Synthesis(format!(
+                                        "Impact synthesis: more Popeq ops than read_results (#{popeq_idx})"
+                                    ))
+                                })?;
+                                for operand in rr {
+                                    push_operand_pi!(operand);
+                                }
+                                popeq_idx += 1;
+                            }
+
+                            // --- Addi / Subi: opcode + immediate ---
+                            Op::Addi { immediate } => {
+                                push_const_pi!(0x0e);
+                                push_const_pi!(*immediate);
+                            }
+                            Op::Subi { immediate } => {
+                                push_const_pi!(0x0f);
+                                push_const_pi!(*immediate);
+                            }
+
+                            // --- Push: opcode + Cell tag + alignment + resolved operands ---
+                            Op::Push { storage, value } => {
+                                push_const_pi!((0x10u8 + *storage as u8));
+                                push_const_pi!(1u64); // StateValue::Cell tag
+                                push_alignment_pi!(&value.alignment);
+                                for operand in &value.operands {
+                                    push_operand_pi!(operand);
+                                }
+                            }
+
+                            // --- Branch / Jmp: opcode + skip ---
+                            Op::Branch { skip } => {
+                                push_const_pi!(0x12);
+                                push_const_pi!(*skip);
+                            }
+                            Op::Jmp { skip } => {
+                                push_const_pi!(0x13);
+                                push_const_pi!(*skip);
+                            }
+
+                            // --- Concat: opcode + n ---
+                            Op::Concat { cached, n } => {
+                                push_const_pi!((0x16u8 + *cached as u8));
+                                push_const_pi!(*n);
+                            }
+
+                            // --- Rem: single opcode ---
+                            Op::Rem { cached } => {
+                                push_const_pi!((0x19u8 + *cached as u8));
+                            }
+
+                            // --- Dup / Swap: opcode encodes n in lower nibble ---
+                            Op::Dup { n } => push_const_pi!((0x30u8 | *n)),
+                            Op::Swap { n } => push_const_pi!((0x40u8 | *n)),
+
+                            // --- Idx: opcode + key field reprs ---
+                            Op::Idx {
+                                cached,
+                                push_path,
+                                path,
+                            } => {
+                                if !path.is_empty() {
+                                    let base: u8 = match (*cached, *push_path) {
+                                        (false, false) => 0x50,
+                                        (true, false) => 0x60,
+                                        (false, true) => 0x70,
+                                        (true, true) => 0x80,
+                                    };
+                                    let opcode = base | (path.len() as u8 - 1);
+                                    push_const_pi!(opcode);
+                                    for key in path {
+                                        match key {
+                                            ZkirKey::Stack => {
+                                                // Key::Stack encodes as -1.
+                                                let neg_one = std.assign_fixed(
+                                                    layouter,
+                                                    -outer::Scalar::from(1),
+                                                )?;
+                                                let guarded = std.select(
+                                                    layouter,
+                                                    &impact_guard,
+                                                    &neg_one,
+                                                    &impact_zero,
+                                                )?;
+                                                pi_push(guarded, &mut public_inputs)?;
+                                            }
+                                            ZkirKey::Value { alignment, operands } => {
+                                                push_alignment_pi!(alignment);
+                                                for operand in operands {
+                                                    push_operand_pi!(operand);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // --- Ins: opcode encodes cached + n ---
+                            Op::Ins { cached, n } => {
+                                let base: u8 = if *cached { 0xa0 } else { 0x90 };
+                                push_const_pi!((base | *n));
+                            }
+
+                            _ => {
+                                return Err(Error::Synthesis(
+                                    "unsupported Op variant in structured Impact circuit synthesis"
+                                        .into(),
+                                ));
+                            }
+                        }
                     }
                 }
                 I::Output { val } => {
@@ -933,6 +702,12 @@ impl Relation for IrSource {
                     val_t,
                     output,
                 } => {
+                    // Skip if already pre-populated (unguarded PublicInput
+                    // outputs are pre-assigned before the instruction loop
+                    // so Impact read_results can reference them).
+                    if memory.contains_key(output) {
+                        continue;
+                    }
                     let value = witness.as_ref().map_with_result(|preproc| {
                         preproc
                             .memory
@@ -1036,6 +811,107 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::ContractCall {
+                    contract_ref,
+                    expected_type: _,
+                    entry_point,
+                    args,
+                    outputs,
+                } => {
+                    // ── 1. Assign callee output values from witness ──
+                    for out_id in outputs {
+                        let value =
+                            witness.as_ref().map_with_result(|preproc| {
+                                preproc.memory.get(out_id).cloned().ok_or(Error::Synthesis(
+                                    format!(
+                                        "ContractCall output {:?} not found in witness memory",
+                                        out_id
+                                    ),
+                                ))
+                            })?;
+                        mem_insert(
+                            out_id.clone(),
+                            // TODO: Eventually shouldn't assign everything &IrType::Native - use actual type of output.
+                            assign_incircuit(std, layouter, &IrType::Native, &[value])?[0].clone(),
+                            &mut memory,
+                        )?;
+                    }
+
+                    // ── 2. Resolve contract_ref to constrained addr ──
+                    let (addr_hi_op, addr_lo_op) = contract_ref;
+                    let addr_hi: AssignedNative<_> =
+                        resolve_operand(std, layouter, &memory, addr_hi_op)?.try_into()?;
+                    let addr_lo: AssignedNative<_> =
+                        resolve_operand(std, layouter, &memory, addr_lo_op)?.try_into()?;
+
+                    // ── 3. Compute ep_hash as a circuit constant ──
+                    let ep_hash = crate::ir_preprocess::compute_ep_hash(entry_point);
+                    let ep_hash_fields = ep_hash.field_vec();
+                    let ep_hash_hi = std.assign_fixed(layouter, ep_hash_fields[0].0)?;
+                    let ep_hash_lo = std.assign_fixed(layouter, ep_hash_fields[1].0)?;
+
+                    // ── 4. Compute comm_comm via in-circuit Poseidon ──
+                    // comm_comm = Poseidon(comm_rand, args..., outputs...)
+                    let comm_rand_val = witness.as_ref().map_with_result(|preproc| {
+                        preproc
+                            .contract_call_comm_rands
+                            .get(contract_call_idx)
+                            .map(|fr| fr.0)
+                            .ok_or(Error::Synthesis(format!(
+                                "ContractCall comm_rand[{}] out of range (len={})",
+                                contract_call_idx,
+                                preproc.contract_call_comm_rands.len()
+                            )))
+                    })?;
+                    let comm_rand = std.assign(layouter, comm_rand_val)?;
+                    contract_call_idx += 1;
+
+                    let mut poseidon_preimage = vec![comm_rand];
+                    for arg in args {
+                        let val: AssignedNative<_> =
+                            resolve_operand(std, layouter, &memory, arg)?.try_into()?;
+                        poseidon_preimage.push(val);
+                    }
+                    for out_id in outputs {
+                        let val: AssignedNative<_> = idx(&memory, out_id)?.clone().try_into()?;
+                        poseidon_preimage.push(val);
+                    }
+                    let comm_comm = std.poseidon(layouter, &poseidon_preimage)?;
+
+                    // ── 5. Build claim PIs: constants from witness, variable ──
+                    // positions constrained to in-circuit values.
+                    let claim_count = crate::ir_preprocess::claim_ops_field_count();
+                    let mut claim_pis: Vec<AssignedNative<_>> = Vec::with_capacity(claim_count);
+                    for i in 0..claim_count {
+                        let pi_idx = public_inputs.len() + i;
+                        let val = witness.as_ref().map_with_result(|preproc| {
+                            preproc.pis.get(pi_idx).copied().ok_or(Error::Synthesis(
+                                format!(
+                                    "ContractCall claim ops: pis[{}] out of range (pis.len()={})",
+                                    pi_idx,
+                                    preproc.pis.len()
+                                ),
+                            ))
+                        })?;
+                        claim_pis.push(std.assign(layouter, val)?);
+                    }
+
+                    // Constrain the variable positions to match in-circuit values.
+                    use crate::ir_preprocess::{
+                        CLAIM_ADDR_HI_OFFSET, CLAIM_ADDR_LO_OFFSET,
+                        CLAIM_EP_HASH_HI_OFFSET, CLAIM_EP_HASH_LO_OFFSET,
+                        CLAIM_COMM_COMM_OFFSET,
+                    };
+                    std.assert_equal(layouter, &claim_pis[CLAIM_ADDR_HI_OFFSET], &addr_hi)?;
+                    std.assert_equal(layouter, &claim_pis[CLAIM_ADDR_LO_OFFSET], &addr_lo)?;
+                    std.assert_equal(layouter, &claim_pis[CLAIM_EP_HASH_HI_OFFSET], &ep_hash_hi)?;
+                    std.assert_equal(layouter, &claim_pis[CLAIM_EP_HASH_LO_OFFSET], &ep_hash_lo)?;
+                    std.assert_equal(layouter, &claim_pis[CLAIM_COMM_COMM_OFFSET], &comm_comm)?;
+
+                    for assigned in claim_pis {
+                        pi_push(assigned, &mut public_inputs)?;
+                    }
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1088,14 +964,10 @@ impl Relation for IrSource {
             types_in_inputs || types_in_instructions
         };
 
-        let jubjub = self.instructions.iter().any(|op| {
-            involves_types(&[IrType::JubjubPoint]) || {
-                matches!(
-                    op,
-                    I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
-                )
-            }
-        });
+        let jubjub = involves_types(&[IrType::JubjubPoint])
+            || self.instructions.iter().any(|op| {
+                matches!(op, I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. })
+            });
         let hash_to_curve = self
             .instructions
             .iter()
@@ -1104,7 +976,7 @@ impl Relation for IrSource {
             || self
                 .instructions
                 .iter()
-                .any(|op| matches!(op, I::TransientHash { .. }));
+                .any(|op| matches!(op, I::TransientHash { .. } | I::ContractCall { .. }));
         let sha2_256 = self
             .instructions
             .iter()

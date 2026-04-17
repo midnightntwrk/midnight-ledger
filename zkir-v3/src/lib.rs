@@ -15,9 +15,19 @@
 extern crate tracing;
 
 pub mod ir;
+pub mod ir_circuit;
+pub(crate) mod ir_eval;
+#[cfg(feature = "execute")]
+pub mod ir_execute;
 pub mod ir_instructions;
+pub mod ir_preprocess;
 pub mod ir_types;
-pub mod ir_vm;
+pub mod zkir_mode;
 
-pub use ir::{Identifier, Instruction, IrSource};
-pub use ir_vm::Preprocessed;
+pub use ir::{
+    CircuitSignature, ContractTypeDescriptor, Identifier, Instruction, IrSource, Operand,
+    TypedIdentifier,
+};
+pub use ir_preprocess::Preprocessed;
+pub use ir_types::IrType;
+pub use zkir_mode::{ZkirKey, ZkirOp, ZkirPushValue};
