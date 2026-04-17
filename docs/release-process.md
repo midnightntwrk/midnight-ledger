@@ -34,6 +34,7 @@ Pre-releases should generally *not* be pushed to crates.io. Further, because mos
 In practice, this means two things: a crate `foo` pre-released at `1.2.3-rc.1` will:
 - Have a declared crate version of `1.2.3`, so that the patch will resolve for `^1.0.0` ranges.
 - Be released as a *tag* `foo-1.2.3-rc.1`, which can then be pulled in as a cargo patch.
+- *Not* be pushed to crates.io, as such a release practically won't be used, and will cause confusion.
 
 This looks like this in practice:
 
