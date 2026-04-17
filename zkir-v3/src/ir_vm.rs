@@ -20,7 +20,7 @@ use crate::ir_types::{CircuitValue, IrType, IrValue};
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use base_crypto::hash::persistent_hash;
+use base_crypto::hash::{HashOutput, persistent_hash};
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::RangeCheckInstructions;
@@ -41,6 +41,7 @@ use midnight_proofs::{
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
 use serialize::{Deserializable, Serializable, VecExt};
+use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use transient_crypto::curve::outer;
@@ -495,6 +496,11 @@ impl IrSource {
                     alignment,
                     inputs,
                     outputs,
+                }
+                | I::Keccak256 {
+                    alignment,
+                    inputs,
+                    outputs,
                 } => {
                     if outputs.len() != 2 {
                         bail!("PersistentHash requires exactly 2 outputs");
@@ -511,7 +517,11 @@ impl IrSource {
                     let mut repr = Vec::new();
                     ValueReprAlignedValue(value).binary_repr(&mut repr);
                     trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash = persistent_hash(&repr);
+                    let hash = match ins {
+                        I::PersistentHash { .. } => persistent_hash(&repr),
+                        I::Keccak256 { .. } => HashOutput(Keccak256::digest(&repr).into()),
+                        _ => unreachable!(),
+                    };
                     let hash_fields = hash.field_vec();
                     if hash_fields.len() >= 2 {
                         memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
@@ -843,6 +853,11 @@ impl Relation for IrSource {
                     alignment,
                     inputs,
                     outputs,
+                }
+                | I::Keccak256 {
+                    alignment,
+                    inputs,
+                    outputs,
                 } => {
                     if outputs.len() != 2 {
                         return Err(Error::Synthesis(
@@ -857,7 +872,11 @@ impl Relation for IrSource {
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = std.sha2_256(layouter, &bytes)?;
+                    let res_bytes = match ins {
+                        I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?,
+                        I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?,
+                        _ => unreachable!(),
+                    };
                     mem_insert(
                         outputs[0].clone(),
                         CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
@@ -1103,12 +1122,16 @@ impl Relation for IrSource {
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
+        let keccak_256 = self
+            .instructions
+            .iter()
+            .any(|op| matches!(op, I::Keccak256 { .. }));
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
             sha2_256,
             sha2_512: false,
-            keccak_256: false,
+            keccak_256,
             sha3_256: false,
             blake2b: false,
             nr_pow2range_cols: 1,

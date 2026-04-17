@@ -482,6 +482,18 @@ pub enum Instruction {
         /// The output variable names
         outputs: Vec<Identifier>,
     },
+    /// Evaluates the Keccak-256 hash function on a sequence of items with
+    /// a given alignment.
+    ///
+    /// Outputs 2 elements for binary format.
+    Keccak256 {
+        /// The alignment of the inputs being passed
+        alignment: Alignment,
+        /// The inputs to hash
+        inputs: Vec<Operand>,
+        /// The output variable names
+        outputs: Vec<Identifier>,
+    },
     /// Tests if `a` and `b` are equal.
     ///
     /// One boolean output, `a == b`
