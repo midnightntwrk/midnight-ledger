@@ -265,7 +265,7 @@ impl<
     ) {
         #[allow(unused_mut, reason = "for feature flags")]
         let mut ops = vec![(
-            NODE_COLUMN,
+            COLUMN_OFFSET + NODE_COLUMN,
             parity_db::Operation::Set(key.0.to_vec(), serialize_node(&object)),
         )];
         #[cfg(not(feature = "layout-v2"))]
