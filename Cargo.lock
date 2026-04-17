@@ -3368,6 +3368,7 @@ dependencies = [
  "midnight-zk-stdlib",
  "midnight-zkir-v3",
  "num-bigint",
+ "num-traits",
  "pastey",
  "proptest",
  "proptest-derive",

@@ -180,6 +180,18 @@ pub fn max_field() -> Result<BigInt, JsError> {
     .map_err(|err| JsError::new(&String::from(err.to_string())))
 }
 
+#[wasm_bindgen(js_name = "maxJubjubScalar")]
+pub fn max_jubjub_scalar() -> Result<BigInt, JsError> {
+    // -1 is the largest representable value in the Jubjub scalar field
+    let mut bytes = (-curve::EmbeddedFr::from(1u64)).as_le_bytes();
+    bytes.reverse();
+    BigInt::new(&JsString::from(format!(
+        "0x{}",
+        bytes.encode_hex::<String>()
+    )))
+    .map_err(|err| JsError::new(&String::from(err.to_string())))
+}
+
 #[wasm_bindgen(js_name = "proofDataIntoSerializedPreimage")]
 pub fn proof_data_into_serialized_preimage(
     input: JsValue,
