@@ -1,0 +1,71 @@
+name: Upload SRS Parameters
+
+on:
+  push:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-params:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure git rewrite
+        run: |
+          mkdir -p $HOME/.config/git
+          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
+          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
+          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
+
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
+
+      - name: Install Nix
+        uses: cachix/install-nix-action@51f3067b56fe8ae331890c77d4e454f6d60615ff # v31.10.2
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          extra_nix_config: |
+            extra-trusted-public-keys = hydra.iohk.io:f/Ea+s+dFdN+3Y/G+FDgSq+a5NEWhJGzdjvKNGv0/EQ=
+            extra-substituters = https://cache.iog.io file://${{ runner.temp }}/nix-binary-cache
+            accept-flake-config = true
+
+      - name: Cache Nix
+        uses: input-output-hk/actions/attic@6d5d62ad59441a3c869a0e8abee4e1bf8b440c2f
+        with:
+          nix_path: nixpkgs=channel:nixos-unstable
+          endpoint: https://attic.ci.iog.io
+          cache: midnight-public
+
+      - name: Build local-params
+        run: |
+          MIDNIGHT_PP=$(nix build .#local-params --print-out-paths)
+          echo "MIDNIGHT_PP=$MIDNIGHT_PP" >> "$GITHUB_ENV"
+          VERSION=$(cat static/version)
+          echo "Built local-params at $MIDNIGHT_PP for version $VERSION"
+          ls -lh "$MIDNIGHT_PP/zswap/$VERSION/" || echo "No zswap files found"
+          ls -lh "$MIDNIGHT_PP/dust/$VERSION/" || echo "No dust files found"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::903367786860:role/MidnightLedgerSrsUploadRole
+          aws-region: eu-west-1
+
+      - name: Verify S3 access
+        run: aws s3 ls s3://stl-euw1-mainnet-srs-download/ | head -5
+
+      - name: Dry run - show what would be uploaded
+        run: |
+          VERSION=$(cat static/version)
+          echo "=== Would upload from $MIDNIGHT_PP ==="
+          for file in $MIDNIGHT_PP/zswap/$VERSION/*.{prover,verifier,bzkir}; do
+            [ -f "$file" ] && echo "  zswap/$VERSION/$(basename "$file")"
+          done
+          for file in $MIDNIGHT_PP/dust/$VERSION/*.{prover,verifier,bzkir}; do
+            [ -f "$file" ] && echo "  dust/$VERSION/$(basename "$file")"
+          done
