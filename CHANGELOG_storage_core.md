@@ -7,6 +7,8 @@
 - fix: removed race condition from `force_as_arc`
 - fix: prevent a panic in `Sp` serialization with a mix of 'promoted' and 'unpromoted' keys.
 - fix: correct `Sp::into_tracked` behaviour
+- feat: allow shared parity_db backend through generic Dere
+- fix: remove pending Update from memory before cache_insert_new_key in get()
 
 ## Version `1.1.0`
 
