@@ -1,7 +1,12 @@
 name: Upload SRS Parameters
 
 on:
-  push:
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: "Dry run - build and list files without uploading"
+        type: boolean
+        default: true
 
 permissions:
   id-token: write
@@ -11,7 +16,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build-params:
+  upload-srs:
     runs-on: ubuntu-latest
     steps:
       - name: Configure git rewrite
@@ -41,31 +46,13 @@ jobs:
           endpoint: https://attic.ci.iog.io
           cache: midnight-public
 
-      - name: Build local-params
-        run: |
-          MIDNIGHT_PP=$(nix build .#local-params --print-out-paths)
-          echo "MIDNIGHT_PP=$MIDNIGHT_PP" >> "$GITHUB_ENV"
-          VERSION=$(cat static/version)
-          echo "Built local-params at $MIDNIGHT_PP for version $VERSION"
-          ls -lh "$MIDNIGHT_PP/zswap/$VERSION/" || echo "No zswap files found"
-          ls -lh "$MIDNIGHT_PP/dust/$VERSION/" || echo "No dust files found"
-
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: arn:aws:iam::903367786860:role/MidnightLedgerSrsUploadRole
           aws-region: eu-west-1
 
-      - name: Verify S3 access
-        run: aws s3 ls s3://stl-euw1-mainnet-srs-download/ | head -5
-
-      - name: Dry run - show what would be uploaded
-        run: |
-          VERSION=$(cat static/version)
-          echo "=== Would upload from $MIDNIGHT_PP ==="
-          for file in $MIDNIGHT_PP/zswap/$VERSION/*.{prover,verifier,bzkir}; do
-            [ -f "$file" ] && echo "  zswap/$VERSION/$(basename "$file")"
-          done
-          for file in $MIDNIGHT_PP/dust/$VERSION/*.{prover,verifier,bzkir}; do
-            [ -f "$file" ] && echo "  dust/$VERSION/$(basename "$file")"
-          done
+      - name: Upload SRS parameters
+        env:
+          DRY_RUN: ${{ inputs.dry-run != false && '--dry-run' || '' }}
+        run: bash scripts/upload-keys-s3.sh $DRY_RUN
