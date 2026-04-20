@@ -896,10 +896,7 @@ describe('Ledger API - DustLocalState', () => {
     const strictness = new WellFormedStrictness();
     strictness.enforceBalancing = false;
 
-    const result = state.apply(tx, strictness);
-
-    expect(result.type).not.toEqual('success');
-    expect(result.error).toContain('divide by zero');
+    expect(() => tx.wellFormed(state.ledger, strictness, state.time)).toThrow('zero-value utxo output not permitted');
   });
 
   /**
