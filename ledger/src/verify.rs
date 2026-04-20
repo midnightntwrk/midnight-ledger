@@ -448,6 +448,10 @@ impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
             return Err(MalformedTransaction::OutputsNotSorted(outs));
         }
 
+        if let Some(o) = outs.iter().find(|o| o.value == 0) {
+            return Err(MalformedTransaction::ZeroValueUtxo(o.clone()));
+        }
+
         if !no_duplicates(&ins) {
             return Err(MalformedTransaction::DuplicateInputs(ins));
         }
