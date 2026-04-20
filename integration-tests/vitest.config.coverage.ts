@@ -9,7 +9,10 @@ export default defineConfig({
   resolve: {
     alias: {
       ...config.resolve?.alias,
-      '@midnight-ntwrk/ledger': path.resolve(__dirname, 'lib-sources/@midnight-ntwrk/ledger-v9/midnight_ledger_wasm_v9.js')
+      '@midnight-ntwrk/ledger': path.resolve(
+        __dirname,
+        'lib-sources/@midnight-ntwrk/ledger-v9/midnight_ledger_wasm_v9.js'
+      )
     }
   },
   test: {
