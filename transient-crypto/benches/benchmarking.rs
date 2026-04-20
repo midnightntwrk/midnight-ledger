@@ -13,7 +13,8 @@
 //! Running all crypto benches takes ~2.5 minutes in `--quick` mode and ~25
 //! minutes in normal mode on @ntc2's machine.
 
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
+use std::hint::black_box;
 use midnight_circuits::instructions::{AssignmentInstructions, PublicInputInstructions};
 use midnight_circuits::types::AssignedNative;
 use midnight_transient_crypto::commitment::PureGeneratorPedersen;
