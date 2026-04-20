@@ -1291,6 +1291,7 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<D: DB> {
     pub(crate) inner: Transaction<(), (), Pedersen, D>,
     pub(crate) hash: TransactionHash,
+    pub(crate) fees: u128,
 }
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
