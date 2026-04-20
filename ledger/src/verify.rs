@@ -609,8 +609,9 @@ where
                     stx.pedersen_check()
                 })?;
 
-                ref_state.param_check(false, |params| {
-                    let fees = match self.fees(params, true) {
+                let mut fees = 0;
+                ref_state.param_check(true, |params| {
+                    fees = match self.fees(params, true) {
                         Ok(fees) => fees,
                         Err(e) => {
                             if strictness.enforce_balancing {
@@ -639,6 +640,7 @@ where
                 Ok(VerifiedTransaction {
                     inner: self.erase_proofs().erase_signatures(),
                     hash: self.transaction_hash(),
+                    fees,
                 })
             }
             Transaction::ClaimRewards(mtx) => {
@@ -652,6 +654,7 @@ where
                 Ok(VerifiedTransaction {
                     inner: self.erase_proofs().erase_signatures(),
                     hash: self.transaction_hash(),
+                    fees: 0,
                 })
             }
         }
