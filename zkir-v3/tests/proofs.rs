@@ -63,9 +63,14 @@ mod proof_tests {
 
     impl ParamsProverProvider for TestParams {
         async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-            const DIR: &str = env!("MIDNIGHT_PP");
+            let dir = std::env::var("MIDNIGHT_PP").map_err(|_| {
+                std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "MIDNIGHT_PP must be set to load proving parameters",
+                )
+            })?;
             ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_midnight_2p{k}"
+                "{dir}/bls_midnight_2p{k}"
             ))?))
         }
     }
