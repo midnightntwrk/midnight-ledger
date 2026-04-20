@@ -2175,7 +2175,11 @@ mod tests {
             .apply_system_tx(
                 &SystemTransaction::DistributeNight(
                     ClaimKind::CardanoBridge,
-                    vec![OutputInstructionUnshielded { amount, target_address, nonce }],
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
                 ),
                 Timestamp::from_secs(1),
             )
@@ -2189,8 +2193,22 @@ mod tests {
             INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
             amount,
         );
-        assert_eq!(new_state.bridge_receiving.get(&target_address).copied().unwrap_or(0), amount - expected_fee);
-        assert_eq!(new_state.treasury.get(&TokenType::Unshielded(NIGHT)).copied().unwrap_or(0), expected_fee);
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            amount - expected_fee
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            expected_fee
+        );
         assert_eq!(new_state.locked_pool, 0);
     }
 
@@ -2214,7 +2232,11 @@ mod tests {
             .apply_system_tx(
                 &SystemTransaction::DistributeNight(
                     ClaimKind::CardanoBridge,
-                    vec![OutputInstructionUnshielded { amount, target_address, nonce }],
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
                 ),
                 Timestamp::from_secs(1),
             )
@@ -2225,8 +2247,22 @@ mod tests {
             .expect("invariant should hold after sub-minimum bridge transfer");
 
         // Sub-minimum: entire amount goes to treasury as fee, nothing to bridge_receiving
-        assert_eq!(new_state.bridge_receiving.get(&target_address).copied().unwrap_or(0), 0);
-        assert_eq!(new_state.treasury.get(&TokenType::Unshielded(NIGHT)).copied().unwrap_or(0), amount);
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            amount
+        );
         assert_eq!(new_state.locked_pool, 0);
     }
 }
