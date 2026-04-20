@@ -20,6 +20,7 @@ use midnight_ledger::structure::{ClaimKind, Transaction};
 use midnight_ledger::test_utilities::well_formed_tx_builder;
 use midnight_ledger::test_utilities::{TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::BlockContext;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
