@@ -14,7 +14,7 @@
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, Intent, Segments,
+    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent,
     LedgerParameters, MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned,
     SignatureKind, SignaturesValue, SingleUpdate, StandardTransaction, Transaction,
     UnshieldedOffer, UtxoOutput, UtxoSpend,
@@ -128,7 +128,7 @@ impl<S: SignatureKind<D>, D: DB>
                 return Err(PartitionFailure::GuaranteedOnlyUnsatisfied);
             }
             SegmentSpecifier::GuaranteedOnly | SegmentSpecifier::Random => rng.r#gen(),
-            SegmentSpecifier::Specific(Segments::GUARANTEED) => {
+            SegmentSpecifier::Specific(GUARANTEED_SEGMENT) => {
                 return Err(PartitionFailure::IllegalSegmentZero);
             }
             SegmentSpecifier::Specific(seg) => seg,
@@ -215,7 +215,7 @@ impl<S: SignatureKind<D>, D: DB>
                 .map(|(t, _)| t.clone())
                 .collect(),
         )
-        .map(|o| o.retarget_segment(Segments::GUARANTEED));
+        .map(|o| o.retarget_segment(GUARANTEED_SEGMENT));
         let fallible_coins = ZswapOffer::new(
             zswap_inputs
                 .iter()
@@ -454,7 +454,7 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
             intents,
             guaranteed_coins: guaranteed_coins.map(|x| {
                 Sp::new(
-                    x.retarget_segment(Segments::GUARANTEED),
+                    x.retarget_segment(GUARANTEED_SEGMENT),
                 )
             }),
             fallible_coins: fallible_coins

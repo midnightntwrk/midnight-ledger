@@ -1555,13 +1555,8 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
 /// Logical segment index used in standard transactions and ledger application order.
 pub type Segment = u16;
 
-/// Namespace for [`Segment`] constants.
-pub struct Segments;
-
-impl Segments {
-    /// Segment id for the guaranteed phase (fees, guaranteed coins, guaranteed transcripts).
-    pub const GUARANTEED: Segment = 0;
-}
+/// Segment id for the guaranteed phase (fees, guaranteed coins, guaranteed transcripts).
+pub const GUARANTEED_SEGMENT: Segment = 0;
 
 #[derive(Storable)]
 #[storable(db = D)]
@@ -1716,7 +1711,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
     }
 
     pub fn segments(&self) -> Vec<Segment> {
-        let mut segments = once(Segments::GUARANTEED)
+        let mut segments = once(GUARANTEED_SEGMENT)
             .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
             .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
             .collect::<Vec<_>>();
@@ -2114,12 +2109,7 @@ where
                 let offers = stx
                     .guaranteed_coins
                     .iter()
-                    .map(|o| {
-                        (
-                            Segments::GUARANTEED,
-                            (**o).clone(),
-                        )
-                    })
+                    .map(|o| (GUARANTEED_SEGMENT, (**o).clone()))
                     .chain(
                         stx.fallible_coins
                             .iter()
@@ -2146,7 +2136,7 @@ where
                     // Merkle tree insertion
                     offer_cost +=
                         model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false) * outputs;
-                    if segment == Segments::GUARANTEED {
+                    if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
                         f_cost += offer_cost;
