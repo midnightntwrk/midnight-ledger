@@ -102,8 +102,8 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           VAR_NAME=$(echo "LEDGER_VERSION")
           VERSION=${!VAR_NAME}
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
-          TAG_NAME="ledger-${VERSION}"
+          EPOCH_VERSION=$(grep '^name =' ledger/Cargo.toml | awk -F '"' '{print $2}' | grep -- -v | awk -F -v '{print $2}')
+          TAG_NAME="ledger-v${EPOCH_VERSION}-${VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
@@ -126,8 +126,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-v"${SHORT_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger-v"${SHORT_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
+            npm publish midnight-ledger-v"${EPOCH_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
+            npm dist-tag add @midnight-ntwrk/ledger-v"${EPOCH_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
             cd ../..
 
             # Create and push the new tag
