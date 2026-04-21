@@ -16,6 +16,7 @@ transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = 
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
+zkir = { version = "2.1.0", path  = "../zkir", package = "midnight-zkir" }
 
 hex = "^0.4.3"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
