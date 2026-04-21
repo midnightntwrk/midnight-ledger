@@ -71,6 +71,10 @@ rayon = "^1.10.0"
 name = "benchmarking"
 harness = false
 
+[[bench]]
+name = "merkle_deserialize"
+harness = false
+
 [[example]]
 name = "calibrate"
 path = "examples/calibrate.rs"
