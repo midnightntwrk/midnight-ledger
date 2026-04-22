@@ -35,7 +35,7 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
     match (x, y) {
         (Native(a), Native(b)) => Ok(Native(*a + *b)),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(JubjubPoint(p + q)),
-        _ => Err(anyhow::anyhow!(
+        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => Err(anyhow::anyhow!(
             "Unsupported addition: {:?} + {:?}",
             x.get_type(),
             y.get_type()
@@ -67,11 +67,13 @@ pub fn add_incircuit(
             let r = std_lib.jubjub().add(layouter, p, q)?;
             Ok(JubjubPoint(r))
         }
-        _ => Err(plonk::Error::Synthesis(format!(
-            "Unsupported addition: {:?} + {:?}",
-            x.get_type(),
-            y.get_type()
-        ))),
+        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => {
+            Err(plonk::Error::Synthesis(format!(
+                "Unsupported addition: {:?} + {:?}",
+                x.get_type(),
+                y.get_type()
+            )))
+        }
     }
 }
 
