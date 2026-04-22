@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use midnight_circuits::instructions::{ControlFlowInstructions, EccInstructions};
+use midnight_circuits::instructions::ControlFlowInstructions;
 use midnight_circuits::types::AssignedBit;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
@@ -28,8 +28,18 @@ use crate::{
 ///   - `Native`
 ///   - `JubjubPoint`
 ///
-pub fn cond_select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> IrValue {
-    if bit { a.clone() } else { b.clone() }
+/// # Errors
+///
+/// Returns an error if `a` and `b` do not have the same type.
+pub fn select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> Result<IrValue, anyhow::Error> {
+    if a.get_type() != b.get_type() {
+        return Err(anyhow::anyhow!(
+            "Unsupported cond_select: {:?} ? {:?}",
+            a.get_type(),
+            b.get_type()
+        ));
+    }
+    Ok(if bit { a.clone() } else { b.clone() })
 }
 
 /// Conditionally selects in-circuit between two values.
@@ -42,7 +52,7 @@ pub fn cond_select_offcircuit(bit: bool, a: &IrValue, b: &IrValue) -> IrValue {
 /// # Errors
 ///
 /// This function results in an error if the input types are not supported.
-pub fn cond_select_incircuit(
+pub fn select_incircuit(
     std_lib: &ZkStdLib,
     layouter: &mut impl Layouter<F>,
     bit: &AssignedBit<F>,
@@ -53,15 +63,14 @@ pub fn cond_select_incircuit(
     match (a, b) {
         (Native(x), Native(y)) => Ok(Native(std_lib.select(layouter, bit, x, y)?)),
         (JubjubPoint(p), JubjubPoint(q)) => {
-            let jub = std_lib.jubjub();
-            let rx = std_lib.select(layouter, bit, &jub.x_coordinate(p), &jub.x_coordinate(q))?;
-            let ry = std_lib.select(layouter, bit, &jub.y_coordinate(p), &jub.y_coordinate(q))?;
-            Ok(JubjubPoint(jub.point_from_coordinates(layouter, &rx, &ry)?))
+            Ok(JubjubPoint(std_lib.jubjub().select(layouter, bit, p, q)?))
         }
-        _ => Err(plonk::Error::Synthesis(format!(
-            "Unsupported cond_select: {:?} ? {:?}",
-            a.get_type(),
-            b.get_type()
-        ))),
+        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => {
+            Err(plonk::Error::Synthesis(format!(
+                "Unsupported cond_select: {:?} ? {:?}",
+                a.get_type(),
+                b.get_type()
+            )))
+        }
     }
 }
