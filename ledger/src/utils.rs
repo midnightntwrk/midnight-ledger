@@ -62,7 +62,7 @@ impl<K: Ord + Serializable + Storable<D>, V: Storable<D>, D: DB> SortedIter for 
         Self: 'a;
     fn sorted_iter(&self) -> impl Iterator<Item = Self::Item<'_>> {
         let mut items = self.iter().map(|sp| (*sp).clone()).collect::<Vec<_>>();
-        items.sort_by(|a, b| (*a.0).cmp(&*b.0));
+        items.sort_by_key(|a| a.0.clone());
         items.into_iter()
     }
 }
@@ -76,7 +76,7 @@ impl<K: Ord + Serializable + Storable<D>, V: Storable<D>, D: DB> KeySortedIter
         Self: 'a;
     fn sorted_values_by_key(&self) -> impl Iterator<Item = Self::Item<'_>> {
         let mut items = self.iter().map(|sp| (*sp).clone()).collect::<Vec<_>>();
-        items.sort_by(|a, b| (*a.0).cmp(&*b.0));
+        items.sort_by_key(|a| a.0.clone());
         items.into_iter().map(|(_, v)| v)
     }
 }
