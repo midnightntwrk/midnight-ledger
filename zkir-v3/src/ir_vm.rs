@@ -367,7 +367,7 @@ impl IrSource {
                     let a = resolve_operand(&memory, a)?;
                     let b = resolve_operand(&memory, b)?;
                     let result = test_eq_offcircuit(&a, &b)?;
-                    memory.insert(output.clone(), result);
+                    memory.insert(output.clone(), IrValue::Native(result.into()));
                 }
                 I::PublicInput { guard, output } => {
                     let val = match guard {
