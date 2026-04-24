@@ -274,7 +274,7 @@ impl FeePrices {
     //
     // It should be no less than the average value of the dimension in
     // `block_sum`.
-    fn update(self, block_sum: NormalizedCost, overall_fullness: FixedPoint) -> Self {
+    fn update(self, block_sum: NormalizedCost, overall_fullness: FixedPoint, params: LedgerParameters) -> Self {
         let mut updated = FeePrices {
             overall_price: self.overall_price * normalized_scaling_curve(overall_fullness),
             read_time: self.read_time * normalized_scaling_curve(block_sum.read_time),
@@ -295,6 +295,9 @@ impl FeePrices {
             // Normalize dimension average to 1, making these all factors to
             // the overall price.
             *dimension = *dimension / dim_average
+        }
+        if updated.overall_price < params.min_block_price {
+            updated.overall_proce = params.min_block_price;
         }
         updated
     }
@@ -524,6 +527,7 @@ struct LedgerLimits {
 struct LedgerParameters {
     limits: LedgerLimits,
     cost_model: CostModel,
+    min_block_price: FixedPoint,
     // ...
 }
 

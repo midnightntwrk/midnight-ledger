@@ -15,6 +15,7 @@
 
 {
   name,
+  crate-name,
   package-name,
   path,
   prefix ? "midnight",
@@ -45,7 +46,7 @@ let
       cargoLock.lockFile = "${src}/Cargo.lock";
       cargoLock.allowBuiltinFetchGit = true;
       buildType = if debug then "debug" else "wasm";
-      cargoBuildFlags = "--package ${prefix}-${name}" + (if features != []
+      cargoBuildFlags = "--package ${crate-name}" + (if features != []
           then " --features ${(builtins.concatStringsSep "," features)}"
           else "");
       nativeBuildInputs = [
@@ -57,15 +58,15 @@ let
         cp target/wasm32-unknown-unknown/${if debug then "debug" else "wasm"}/*.wasm $out/
       '';
     } // extraVariables);
-  name-var = builtins.replaceStrings ["-"] ["_"] name;
+  name-var = builtins.replaceStrings ["-"] ["_"] crate-name;
 in pkgs.stdenvNoCC.mkDerivation {
   inherit name version src;
   buildPhase = ''
     # We take the bundler bindings as the base for an ESM module
     # But make some tweaks to make it more portable.
-    wasm-bindgen ${raw-wasm}/${prefix}_${name-var}.wasm --out-dir pkg --target bundler --omit-default-module-path --weak-refs --reference-types --no-typescript ${if debug then "--debug --keep-debug" else ""}
+    wasm-bindgen ${raw-wasm}/${name-var}.wasm --out-dir pkg --target bundler --omit-default-module-path --weak-refs --reference-types --no-typescript ${if debug then "--debug --keep-debug" else ""}
     # Optimize for size
-    wasm-opt pkg/${prefix}_${name-var}_bg.wasm -Os --enable-reference-types -o pkg/${prefix}_${name-var}_bg.wasm
+    wasm-opt pkg/${name-var}_bg.wasm -Os --enable-reference-types -o pkg/${name-var}_bg.wasm
     # We copy the hand-crafted .d.ts
     if [ -e "${path}/assemble-dts.js" ]; then
       pushd ${path}
@@ -80,29 +81,29 @@ in pkgs.stdenvNoCC.mkDerivation {
         "version": "${version}",
         "type": "module",
         "files": [
-          "${prefix}_${name-var}.js",
-          "${prefix}_${name-var}_fs.js",
-          "${prefix}_${name-var}_bg.js",
-          "${prefix}_${name-var}_bg.wasm",
+          "${name-var}.js",
+          "${name-var}_fs.js",
+          "${name-var}_bg.js",
+          "${name-var}_bg.wasm",
           "${package-name}.d.ts",
           "snippets"
         ],
         "sideEffects": [
-          "./${prefix}_${name-var}.js",
-          "./${prefix}_${name-var}_fs.js",
+          "./${name-var}.js",
+          "./${name-var}_fs.js",
           "./snippets/*"
         ],
         "imports": {
           "#self": {
-            "browser": "./${prefix}_${name-var}.js",
-            "node": "./${prefix}_${name-var}_fs.js"
+            "browser": "./${name-var}.js",
+            "node": "./${name-var}_fs.js"
           }
         },
         "types": "./${package-name}.d.ts",
         "exports": {
           "types": "./${package-name}.d.ts",
-          "browser": "./${prefix}_${name-var}.js",
-          "node": "./${prefix}_${name-var}_fs.js"
+          "browser": "./${name-var}.js",
+          "node": "./${name-var}_fs.js"
         },
         "repository": {
           "type": "git",
@@ -119,23 +120,23 @@ in pkgs.stdenvNoCC.mkDerivation {
       echo "imports['./$snippet'] = $import;"
     done)
     # Create the _fs.js node entry point.
-    cat <<-EOF > pkg/${prefix}_${name-var}_fs.js
-      export * from "./${prefix}_${name-var}_bg.js";
-      import * as exports from "./${prefix}_${name-var}_bg.js";
-      import { __wbg_set_wasm } from "./${prefix}_${name-var}_bg.js";
+    cat <<-EOF > pkg/${name-var}_fs.js
+      export * from "./${name-var}_bg.js";
+      import * as exports from "./${name-var}_bg.js";
+      import { __wbg_set_wasm } from "./${name-var}_bg.js";
       import { readFileSync } from 'fs';
       import { join, dirname } from 'path';
       import { fileURLToPath } from 'url';
       
       let imports = {};
-      imports['./${prefix}_${name-var}_bg.js'] = exports;
+      imports['./${name-var}_bg.js'] = exports;
     EOF
-    echo "$snippet_imports" >> pkg/${prefix}_${name-var}_fs.js
-    cat <<-EOF >> pkg/${prefix}_${name-var}_fs.js
+    echo "$snippet_imports" >> pkg/${name-var}_fs.js
+    cat <<-EOF >> pkg/${name-var}_fs.js
       
       const __filename = fileURLToPath(import.meta.url);
       const __dirname = dirname(__filename);
-      const wasmPath = join(__dirname, '${prefix}_${name-var}_bg.wasm');
+      const wasmPath = join(__dirname, '${name-var}_bg.wasm');
       const bytes = readFileSync(wasmPath);
       
       const wasmModule = new WebAssembly.Module(bytes);

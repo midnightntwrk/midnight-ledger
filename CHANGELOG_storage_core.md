@@ -1,7 +1,10 @@
 # `storage-core` Changelog
 
-## Unreleased
+## Version `1.2.0`
 
+- feat: add incremental garbage collector, running in a time-bounded way. This requires databases to support a new scan operation.
+- feat: allow parityDB to use existing instance
+- fix: removed race condition from `force_as_arc`
 - fix: prevent a panic in `Sp` serialization with a mix of 'promoted' and 'unpromoted' keys.
 - fix: correct `Sp::into_tracked` behaviour
 

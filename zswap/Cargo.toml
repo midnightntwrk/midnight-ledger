@@ -1,8 +1,8 @@
 [package]
 name = "midnight-zswap"
 edition = "2024"
+version = "9.0.0"
 license.workspace = true
-version.workspace = true
 repository.workspace = true
 description = "Implementation of the Zswap shielded token atomic swap mechanism."
 
@@ -45,7 +45,7 @@ rayon = "^1.10.0"
 serde = { version = "^1.0.219", features = ["derive"] }
 serde_json = "^1.0.140"
 hex = "^0.4.3"
-pastey = "0.1.1"
+pastey = "0.2.1"
 
 [[bench]]
 name = "benchmarking"

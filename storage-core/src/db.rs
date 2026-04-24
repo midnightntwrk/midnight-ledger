@@ -18,7 +18,8 @@ mod sql;
 #[cfg(feature = "sqlite")]
 pub use sql::SqlDB;
 #[cfg(feature = "parity-db")]
-mod paritydb;
+/// DB implementation for ParityDb
+pub mod paritydb;
 #[cfg(feature = "parity-db")]
 pub use paritydb::ParityDb;
 
@@ -34,7 +35,7 @@ use proptest::{
     strategy::{NewTree, ValueTree},
     test_runner::TestRunner,
 };
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
@@ -122,6 +123,9 @@ pub trait DummyArbitrary {}
 pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
     /// The hasher used in this DB.
     type Hasher: WellBehavedHasher;
+    #[cfg(feature = "gc-v1")]
+    /// A handle to resume a [`scan`] call.
+    type ScanResumeHandle: Debug + Send + Sync + Clone + 'static;
 
     /// Get node in DAG with key `key`.
     fn get_node(&self, key: &ArenaHash<Self::Hasher>) -> Option<OnDiskObject<Self::Hasher>>;
@@ -276,6 +280,25 @@ pub trait DB: Default + Sync + Send + Debug + DummyArbitrary + 'static {
 
     /// Return the number of nodes in this DB.
     fn size(&self) -> usize;
+
+    #[cfg(feature = "gc-v1")]
+    /// Performs a linear scan over the database, returning all objects found.
+    /// Optionally takes and returns a resume handle, this should survive modifications (both
+    /// insertions and deletions) though it need not return newly inserted objects, nor newly
+    /// deleted objects.
+    ///
+    /// For instance, an implementation may perform an ordered iteration over the keys, and the
+    /// resume handle may be the key to pick up from.
+    ///
+    /// The resume handle need not survive shutdown.
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    );
 }
 
 /// A dubious default implementation of `DB::batch_update`.
@@ -314,7 +337,7 @@ where
 #[derive(Clone, Debug)]
 /// An in-memory database
 pub struct InMemoryDB<H: WellBehavedHasher = DefaultHasher> {
-    nodes: Arc<Mutex<HashMap<ArenaHash<H>, OnDiskObject<H>>>>,
+    nodes: Arc<Mutex<BTreeMap<ArenaHash<H>, OnDiskObject<H>>>>,
     roots: Arc<Mutex<HashMap<ArenaHash<H>, u32>>>,
 }
 
@@ -368,7 +391,7 @@ impl<H: WellBehavedHasher> Arbitrary for InMemoryDB<H> {
 }
 
 impl<H: WellBehavedHasher> InMemoryDB<H> {
-    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, HashMap<ArenaHash<H>, OnDiskObject<H>>> {
+    fn lock_nodes(&self) -> std::sync::MutexGuard<'_, BTreeMap<ArenaHash<H>, OnDiskObject<H>>> {
         self.nodes.lock().expect("db lock poisoned")
     }
 
@@ -379,6 +402,9 @@ impl<H: WellBehavedHasher> InMemoryDB<H> {
 
 impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
     type Hasher = H;
+
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = ArenaHash<H>;
 
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         self.lock_nodes().get(key).cloned()
@@ -440,6 +466,29 @@ impl<H: WellBehavedHasher> DB for InMemoryDB<H> {
         I: Iterator<Item = ArenaHash<Self::Hasher>>,
     {
         dubious_batch_get_nodes(self, keys)
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        let start = match resume_from {
+            Some(handle) => std::ops::Bound::Excluded(handle),
+            None => std::ops::Bound::Unbounded,
+        };
+        let batch = self
+            .lock_nodes()
+            .range((start, std::ops::Bound::Unbounded))
+            .take(batch_size)
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect::<Vec<_>>();
+        let handle = batch.last().map(|(k, _)| k.clone());
+        (batch, handle)
     }
 }
 

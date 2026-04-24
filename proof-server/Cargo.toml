@@ -2,7 +2,7 @@
 name = "midnight-proof-server"
 edition = "2024"
 license.workspace = true
-version.workspace = true
+version = "9.0.0"
 publish = false
 
 [features]
@@ -10,7 +10,7 @@ default = []
 experimental = ["dep:zkir-v3"]
 
 [dependencies]
-ledger = { path = "../ledger", package = "midnight-ledger", default-features = false, features = ["proving"] }
+ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features = false, features = ["proving"] }
 zswap = { path = "../zswap", package = "midnight-zswap" }
 base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
@@ -24,10 +24,10 @@ introspection = "0.1.0"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
-actix-web = { version = "^4.11.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies", "http2"] }
+actix-web = { version = "^4.13.0", default-features = false, features = ["macros", "compress-brotli", "compress-gzip", "cookies", "http2"] }
 actix-cors = "^0.7.1"
 futures = "^0.3.31"
-futures-util = "0.3.31"
+futures-util = "0.3.32"
 clap = { version = "^4.5.40", features = ["derive", "env"] }
 tracing = "^0.1.41"
 tracing-subscriber = "^0.3.19"
@@ -42,7 +42,7 @@ time = { version = "0.3.47", features = ["serde-human-readable"] }
 serde = "1.0.219"
 
 [dev-dependencies]
-ledger = { path = "../ledger", package = "midnight-ledger", features = ["test-utilities", "proving"] }
+ledger = { path = "../ledger", package = "midnight-ledger-v9", features = ["test-utilities", "proving"] }
 coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
@@ -51,5 +51,5 @@ log = "^0.4.28"
 function_name = "^0.3.0"
 tokio = { version = "^1.46.1", features = ["full"] }
 rustls = "0.23.28"
-reqwest = { version = "^0.12.22", default-features = false, features = ["json", "rustls-tls-native-roots"] }
+reqwest = { version = "^0.13.0", default-features = false, features = ["json", "rustls"] }
 serde_json = "1.0.140"
