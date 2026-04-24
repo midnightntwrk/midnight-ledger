@@ -9,6 +9,7 @@
 - fix: correct `Sp::into_tracked` behaviour
 - feat: allow shared parity_db backend through generic Dere
 - fix: remove pending Update from memory before cache_insert_new_key in get()
+- fix: Respect lock ordering in `force_as_arc`
 
 ## Version `1.1.0`
 
