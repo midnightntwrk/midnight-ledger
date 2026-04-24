@@ -30,23 +30,21 @@ use crate::{
 /// This function results in an error if the inputs are not equal or the types
 /// are not supported.
 pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::Error> {
-    use IrValue::*;
-    match (a, b) {
-        (Native(_), Native(_)) | (JubjubPoint(_), JubjubPoint(_)) => {
-            if a == b {
-                Ok(())
-            } else {
-                Err(anyhow::anyhow!(
-                    "Equality constraint failed: {a:?} != {b:?}"
-                ))
-            }
-        }
-        _ => Err(anyhow::anyhow!(
+    if a.get_type() != b.get_type() {
+        return Err(anyhow::anyhow!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
             b.get_type()
-        )),
+        ));
     }
+
+    if a != b {
+        return Err(anyhow::anyhow!(
+            "Equality constraint failed: {a:?} != {b:?}"
+        ));
+    }
+
+    Ok(())
 }
 
 /// Constrains in-circuit the given inputs to be equal.
