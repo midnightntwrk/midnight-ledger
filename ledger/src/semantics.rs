@@ -464,6 +464,7 @@ impl<D: DB> LedgerState<D> {
             .copied()
             .unwrap_or(0);
         let unclaimed_rewards = self.unclaimed_block_rewards.ann().value;
+        let bridge_receiving = self.bridge_receiving.ann().value;
         let contract_value = self.contract.ann().value;
 
         // Ensure the total supply of NIGHT is conserved.
@@ -473,6 +474,7 @@ impl<D: DB> LedgerState<D> {
             + self.block_reward_pool
             + treasury_night
             + unclaimed_rewards
+            + bridge_receiving
             + contract_value;
 
         if total_night != MAX_SUPPLY {
@@ -932,6 +934,7 @@ impl<D: DB> LedgerState<D> {
         &self,
         tx: &StandardTransaction<S, P, B, D>,
         transaction_hash: TransactionHash,
+        fees: u128,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
@@ -1013,9 +1016,7 @@ impl<D: DB> LedgerState<D> {
                 //
                 // NOTE: The `unwrap_or` is safe here, as fees have already been
                 // checked during well-formedness.
-                let mut fees_remaining = Transaction::Standard(tx.clone())
-                    .fees(&self.parameters, true)
-                    .unwrap_or(0);
+                let mut fees_remaining = fees;
                 // apply spends first, to make sure registration outputs get the maximum dust they can.
                 let intents = tx.intents.sorted_iter().collect::<Vec<_>>();
                 for (phys_seg, time, dust_spend) in intents.iter().flat_map(|(phys_seg, i)| {
@@ -1215,7 +1216,7 @@ impl<D: DB> LedgerState<D> {
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, tx.hash, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, tx.fees, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
@@ -1472,7 +1473,11 @@ impl<D: DB> LedgerState<D> {
             ..(*self.parameters).clone()
         });
         new_st.replay_protection = Sp::new(new_st.replay_protection.post_block_update(tblock));
-        new_st.zswap = Sp::new(new_st.zswap.post_block_update(tblock));
+        new_st.zswap = Sp::new(
+            new_st
+                .zswap
+                .post_block_update(tblock, self.parameters.global_ttl),
+        );
         new_st.dust = Sp::new(
             new_st
                 .dust
@@ -2147,5 +2152,116 @@ mod tests {
 
         assert!(!state.utxos.contains_key(&a));
         assert!(state.utxos.contains_key(&b));
+    }
+
+    #[test]
+    fn bridge_transfer_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(rng.r#gen::<VerifyingKey>());
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = 10_000_000_000;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after bridge transfer");
+
+        let expected_fee = basis_points_of(
+            INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
+            amount,
+        );
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            amount - expected_fee
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            expected_fee
+        );
+        assert_eq!(new_state.locked_pool, 0);
+    }
+
+    #[test]
+    fn bridge_transfer_sub_minimum_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(rng.r#gen::<VerifyingKey>());
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = INITIAL_PARAMETERS.c_to_m_bridge_min_amount - 1;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("sub-minimum bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after sub-minimum bridge transfer");
+
+        // Sub-minimum: entire amount goes to treasury as fee, nothing to bridge_receiving
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            amount
+        );
+        assert_eq!(new_state.locked_pool, 0);
     }
 }

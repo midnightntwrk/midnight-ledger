@@ -1291,6 +1291,7 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<D: DB> {
     pub(crate) inner: Transaction<(), (), Pedersen, D>,
     pub(crate) hash: TransactionHash,
+    pub(crate) fees: u128,
 }
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
@@ -2970,14 +2971,14 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v13]"]
+#[tag = "ledger-state[v14]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
     #[storable(child)]
     pub parameters: Sp<LedgerParameters, D>,
     pub locked_pool: u128,
-    pub bridge_receiving: Map<UserAddress, u128, D>,
+    pub bridge_receiving: Map<UserAddress, u128, D, NightAnn>,
     pub reserve_pool: u128,
     pub block_reward_pool: u128,
     pub unclaimed_block_rewards: Map<UserAddress, u128, D, NightAnn>,

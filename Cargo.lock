@@ -2901,8 +2901,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger"
-version = "8.1.0-rc.1"
+name = "midnight-ledger-static"
+version = "9.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+]
+
+[[package]]
+name = "midnight-ledger-v9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2917,8 +2925,8 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
  "midnight-ledger-static",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-vm",
  "midnight-serialize",
@@ -2945,16 +2953,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger-static"
-version = "9.0.0"
-dependencies = [
- "proc-macro2",
- "quote 1.0.45",
-]
-
-[[package]]
-name = "midnight-ledger-wasm"
-version = "8.1.0-rc.1"
+name = "midnight-ledger-wasm-v9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -2963,7 +2963,7 @@ dependencies = [
  "js-sys",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-runtime-wasm",
  "midnight-serialize",
@@ -3080,7 +3080,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.1.0-rc.1"
+version = "9.0.0"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3096,7 +3096,7 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
@@ -3386,6 +3386,7 @@ name = "midnight-zkir-v3-wasm"
 version = "3.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
+ "getrandom 0.3.4",
  "hex",
  "js-sys",
  "midnight-serialize",
@@ -3424,7 +3425,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.1.0-rc.1"
+version = "9.0.0"
 dependencies = [
  "criterion",
  "derive-where",
