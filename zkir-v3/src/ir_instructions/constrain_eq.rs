@@ -39,7 +39,7 @@ pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::E
             a,
             b
         )),
-        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => Err(anyhow::anyhow!(
+        _ => Err(anyhow::anyhow!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
             b.get_type()
@@ -65,13 +65,11 @@ pub fn constrain_eq_incircuit(
     match (a, b) {
         (Native(x), Native(y)) => std_lib.assert_equal(layouter, x, y),
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().assert_equal(layouter, p, q),
-        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => {
-            Err(plonk::Error::Synthesis(format!(
-                "Unsupported constrain_eq: {:?} == {:?}",
-                a.get_type(),
-                b.get_type()
-            )))
-        }
+        _ => Err(plonk::Error::Synthesis(format!(
+            "Unsupported constrain_eq: {:?} == {:?}",
+            a.get_type(),
+            b.get_type()
+        ))),
     }
 }
 

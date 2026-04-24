@@ -34,7 +34,7 @@ pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<IrValue, anyhow::E
     match (a, b) {
         (Native(x), Native(y)) => Ok(IrValue::Native((x == y).into())),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(IrValue::Native((p == q).into())),
-        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => Err(anyhow::anyhow!(
+        _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
             b.get_type()
@@ -60,13 +60,11 @@ pub fn test_eq_incircuit(
     match (a, b) {
         (Native(x), Native(y)) => std_lib.is_equal(layouter, x, y),
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().is_equal(layouter, p, q),
-        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => {
-            Err(plonk::Error::Synthesis(format!(
-                "Unsupported test_eq: {:?} == {:?}",
-                a.get_type(),
-                b.get_type()
-            )))
-        }
+        _ => Err(plonk::Error::Synthesis(format!(
+            "Unsupported test_eq: {:?} == {:?}",
+            a.get_type(),
+            b.get_type()
+        ))),
     }
 }
 
