@@ -29,11 +29,11 @@ use crate::{
 /// # Errors
 ///
 /// This function results in an error if the input types are not supported.
-pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<IrValue, anyhow::Error> {
+pub fn test_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<bool, anyhow::Error> {
     use IrValue::*;
     match (a, b) {
-        (Native(x), Native(y)) => Ok(IrValue::Native((x == y).into())),
-        (JubjubPoint(p), JubjubPoint(q)) => Ok(IrValue::Native((p == q).into())),
+        (Native(x), Native(y)) => Ok(x == y),
+        (JubjubPoint(p), JubjubPoint(q)) => Ok(p == q),
         _ => Err(anyhow::anyhow!(
             "Unsupported test_eq: {:?} == {:?}",
             a.get_type(),
@@ -83,14 +83,8 @@ mod tests {
         use IrValue::*;
         let x = Fr(F::random(OsRng));
         let p = JubjubSubgroup::random(OsRng);
-        assert_eq!(
-            test_eq_offcircuit(&Native(x), &Native(x)).unwrap(),
-            Native(true.into())
-        );
-        assert_eq!(
-            test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap(),
-            Native(true.into())
-        );
+        assert!(test_eq_offcircuit(&Native(x), &Native(x)).unwrap());
+        assert!(test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap());
         assert!(test_eq_offcircuit(&Native(x), &JubjubPoint(p)).is_err());
     }
 }
