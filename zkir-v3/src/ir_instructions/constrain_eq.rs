@@ -32,13 +32,15 @@ use crate::{
 pub fn constrain_eq_offcircuit(a: &IrValue, b: &IrValue) -> Result<(), anyhow::Error> {
     use IrValue::*;
     match (a, b) {
-        (Native(x), Native(y)) if x == y => Ok(()),
-        (JubjubPoint(p), JubjubPoint(q)) if p == q => Ok(()),
-        (Native(_), Native(_)) | (JubjubPoint(_), JubjubPoint(_)) => Err(anyhow::anyhow!(
-            "Equality constraint failed: {:?} != {:?}",
-            a,
-            b
-        )),
+        (Native(_), Native(_)) | (JubjubPoint(_), JubjubPoint(_)) => {
+            if a == b {
+                Ok(())
+            } else {
+                Err(anyhow::anyhow!(
+                    "Equality constraint failed: {a:?} != {b:?}"
+                ))
+            }
+        }
         _ => Err(anyhow::anyhow!(
             "Unsupported constrain_eq: {:?} == {:?}",
             a.get_type(),
