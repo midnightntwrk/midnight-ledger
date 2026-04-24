@@ -1546,12 +1546,12 @@ impl DustLocalState {
 
     #[wasm_bindgen(getter, js_name = "commitmentTreeFirstFree")]
     pub fn commitment_tree_first_free(&self) -> u64 {
-        self.0.commitment_tree_first_free()
+        self.0.commitment_tree_first_free
     }
 
     #[wasm_bindgen(getter, js_name = "generatingTreeFirstFree")]
     pub fn generating_tree_first_free(&self) -> u64 {
-        self.0.generating_tree_first_free()
+        self.0.generating_tree_first_free
     }
 
     #[wasm_bindgen(getter)]

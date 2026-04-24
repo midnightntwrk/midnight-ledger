@@ -35,7 +35,6 @@ use base_crypto::{
 use coin_structure::coin::{NIGHT, UserAddress};
 use derive_where::derive_where;
 use futures::future::join_all;
-use getset::CopyGetters;
 #[cfg(feature = "proof-verifying")]
 use lazy_static::lazy_static;
 use onchain_runtime::{
@@ -1341,17 +1340,15 @@ impl Display for DustSpendError {
 
 impl Error for DustSpendError {}
 
-#[derive(Debug, CopyGetters, Storable)]
+#[derive(Debug, Storable)]
 #[derive_where(Clone)]
 #[storable(db = D)]
 #[tag = "dust-local-state[v1]"]
 pub struct DustLocalState<D: DB> {
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
-    #[getset(get_copy = "pub")]
-    generating_tree_first_free: u64,
+    pub generating_tree_first_free: u64,
     pub commitment_tree: MerkleTree<(), D>,
-    #[getset(get_copy = "pub")]
-    commitment_tree_first_free: u64,
+    pub commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     pub sync_time: Timestamp,
