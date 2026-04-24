@@ -65,12 +65,10 @@ pub fn select_incircuit(
         (JubjubPoint(p), JubjubPoint(q)) => {
             Ok(JubjubPoint(std_lib.jubjub().select(layouter, bit, p, q)?))
         }
-        (Native(_), JubjubPoint(_)) | (JubjubPoint(_), Native(_)) => {
-            Err(plonk::Error::Synthesis(format!(
-                "Unsupported cond_select: {:?} ? {:?}",
-                a.get_type(),
-                b.get_type()
-            )))
-        }
+        _ => Err(plonk::Error::Synthesis(format!(
+            "Unsupported cond_select: {:?} ? {:?}",
+            a.get_type(),
+            b.get_type()
+        ))),
     }
 }
