@@ -2172,8 +2172,8 @@ where
         let mut validation_cost = self.validation_cost(&params.cost_model);
         validation_cost.compute_time =
             validation_cost.compute_time / params.cost_model.parallelism_factor;
-        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
-        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let (_guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
+        let cost_to_dismiss = application_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
             params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
             params.limits.min_time_to_dismiss,
@@ -2185,7 +2185,7 @@ where
                 size: self.est_size() as u64,
             });
         }
-        Ok(validation_cost + application_cost)
+        Ok(validation_cost + application_cost + application_cost)
     }
 }
 
