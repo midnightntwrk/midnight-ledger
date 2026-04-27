@@ -29,9 +29,9 @@ use crate::{
 };
 use crate::{Storable, WellBehavedHasher};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
-#[allow(deprecated)]
-use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
+#[allow(deprecated)]
+use digest::{Digest, OutputSizeUser, common::array::Array};
 use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
 use rand::Rng;
@@ -121,9 +121,7 @@ impl<T: Tagged, H: WellBehavedHasher> Tagged for TypedArenaKey<T, H> {
     }
 }
 
-// newtype is a hack to get the allow lint to work.
-#[allow(deprecated)]
-type HashArray<H> = GenericArray<u8, <H as OutputSizeUser>::OutputSize>;
+type HashArray<H> = Array<u8, <H as OutputSizeUser>::OutputSize>;
 
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
@@ -161,7 +159,7 @@ impl<D: DB> Storable<D> for ArenaHash<D::Hasher> {
         Self: Sized,
     {
         #[allow(deprecated)]
-        let mut array = GenericArray::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
+        let mut array = Array::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
         reader.read_exact(&mut array)?;
         Ok(Self(array))
     }
@@ -184,11 +182,10 @@ impl<D: Digest> Hash for ArenaHash<D> {
     where
         Self: Sized,
     {
-        #[allow(deprecated)]
-        GenericArray::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
+        Array::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
             data.iter()
                 .map(|k| k.0.clone())
-                .collect::<std::vec::Vec<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>>()
+                .collect::<std::vec::Vec<Array<u8, <D as OutputSizeUser>::OutputSize>>>()
                 .as_slice(),
             state,
         )
@@ -217,14 +214,14 @@ impl<H: Digest> Deserializable for ArenaHash<H> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
         #[allow(deprecated)]
-        Ok(ArenaHash(GenericArray::clone_from_slice(&res)))
+        Ok(ArenaHash(Array::clone_from_slice(&res)))
     }
 }
 
 impl<H: Digest> Distribution<ArenaHash<H>> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaHash<H> {
         #[allow(deprecated)]
-        let mut bytes = GenericArray::default();
+        let mut bytes = Array::default();
         rng.fill_bytes(&mut bytes);
         ArenaHash(bytes)
     }
@@ -256,7 +253,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaHash<H> {
                     return Err(E::invalid_length(v.len(), &self));
                 }
                 #[allow(deprecated)]
-                Ok(ArenaHash(GenericArray::clone_from_slice(v)))
+                Ok(ArenaHash(Array::clone_from_slice(v)))
             }
 
             fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
@@ -277,7 +274,7 @@ impl<H: Digest> ArenaHash<H> {
     /// unspecified values will be filled in with zeros.
     pub(crate) fn _from_bytes(bs: &[u8]) -> Self {
         #[allow(deprecated)]
-        let mut bytes = GenericArray::default();
+        let mut bytes = Array::default();
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;
         }
