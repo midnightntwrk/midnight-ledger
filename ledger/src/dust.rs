@@ -1355,9 +1355,9 @@ impl Error for DustSpendError {}
 #[tag = "dust-local-state[v1]"]
 pub struct DustLocalState<D: DB> {
     pub generating_tree: MerkleTree<DustGenerationInfo, D>,
-    generating_tree_first_free: u64,
+    pub generating_tree_first_free: u64,
     pub commitment_tree: MerkleTree<(), D>,
-    commitment_tree_first_free: u64,
+    pub commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
     dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     pub sync_time: Timestamp,
