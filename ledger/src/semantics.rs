@@ -121,6 +121,74 @@ pub enum ErasedTransactionResult {
     Failure,
 }
 
+/// The result of applying a transaction's guaranteed segment (segment 0).
+///
+/// Derefs to the post-guaranteed `LedgerState`, and can be consumed via
+/// [`apply_fallible`](GuaranteedApplyResult::apply_fallible) to execute the
+/// remaining fallible segments. Dropping this value without calling
+/// `apply_fallible` is the cheap validation path — deferred events are never
+/// materialized.
+pub struct GuaranteedApplyResult<D: DB> {
+    state: LedgerState<D>,
+    tx: VerifiedTransaction<D>,
+    deferred_events: Vec<DeferredEvent<D>>,
+}
+
+impl<D: DB> Deref for GuaranteedApplyResult<D> {
+    type Target = LedgerState<D>;
+    fn deref(&self) -> &LedgerState<D> {
+        &self.state
+    }
+}
+
+impl<D: DB> GuaranteedApplyResult<D> {
+    /// Materialize deferred events and execute the remaining fallible segments.
+    pub fn apply_fallible(
+        self,
+        context: &TransactionContext<D>,
+    ) -> (LedgerState<D>, TransactionResult<D>) {
+        let mut events: Vec<Event<D>> = self.deferred_events.into_iter().map(|f| f()).collect();
+        let mut new_st = self.state.clone();
+
+        let Transaction::Standard(stx) = &self.tx.inner else {
+            return (new_st, TransactionResult::Success(events));
+        };
+
+        let mut segment_success = std::collections::BTreeMap::new();
+        segment_success.insert(0, Ok(()));
+        let mut total_success = true;
+
+        for segment in stx.fallible_segments() {
+            match new_st.apply_section(stx, self.tx.hash, segment, context) {
+                Ok((state, deferred)) => {
+                    new_st = state;
+                    events.extend(deferred.into_iter().map(|f| f()));
+                    segment_success.insert(segment, Ok(()));
+                }
+                Err(e) => {
+                    segment_success.insert(segment, Err(e));
+                    total_success = false;
+                }
+            }
+        }
+
+        debug!(
+            "state transition: {:?} => {:?} [transaction {:?}; fallible]",
+            self.state.state_hash(),
+            new_st.state_hash(),
+            self.tx.hash,
+        );
+        (
+            new_st,
+            if total_success {
+                TransactionResult::Success(events)
+            } else {
+                TransactionResult::PartialSuccess(segment_success, events)
+            },
+        )
+    }
+}
+
 pub trait ZswapLocalStateExt<D: DB>: Sized {
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
@@ -337,7 +405,8 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
     }
 }
 
-type ApplySectionResult<D> = (LedgerState<D>, Vec<Event<D>>);
+type DeferredEvent<D> = Box<dyn FnOnce() -> Event<D>>;
+type ApplySectionResult<D> = (LedgerState<D>, Vec<DeferredEvent<D>>);
 
 pub type MaybeEvents<D> = (LedgerState<D>, Vec<Event<D>>);
 
@@ -816,10 +885,10 @@ impl<D: DB> LedgerState<D> {
                 let mut state = self.clone();
                 let mut dust_state = (*self.dust).clone();
                 let mut events = vec![];
-                let mut event_push = |content| {
+                let mut event_push = |content_fn: Box<dyn FnOnce() -> EventDetails<D>>| {
                     events.push(Event {
                         source: tx.event_source(),
-                        content,
+                        content: content_fn(),
                     })
                 };
                 for action in actions.iter() {
@@ -864,14 +933,14 @@ impl<D: DB> LedgerState<D> {
                                 .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
                                 .map_err(SystemTransactionError::MerkleTreeError)?
                                 .rehash();
-                            event_push(EventDetails::DustGenerationDtimeUpdate {
-                                update: dust_state
-                                    .generation
-                                    .generating_tree
-                                    .insertion_evidence(*idx)
+                            let tree_snapshot = dust_state.generation.generating_tree.clone();
+                            let idx = *idx;
+                            event_push(Box::new(move || EventDetails::DustGenerationDtimeUpdate {
+                                update: tree_snapshot
+                                    .insertion_evidence(idx)
                                     .expect("must be able to produce evidence for updated path"),
                                 block_time: tblock,
-                            });
+                            }));
                         }
                     }
                 }
@@ -935,7 +1004,7 @@ impl<D: DB> LedgerState<D> {
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
-        let mut events: Vec<Event<D>> = vec![];
+        let mut events: Vec<DeferredEvent<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
         if segment == 0 {
             // Apply replay protection
@@ -954,7 +1023,7 @@ impl<D: DB> LedgerState<D> {
                     &mut com_indices,
                     transaction_hash,
                     segment,
-                    |event| events.push(event),
+                    |event| events.push(Box::new(move || event)),
                 )?;
             }
 
@@ -973,20 +1042,22 @@ impl<D: DB> LedgerState<D> {
                 if let Some(offer) = &intent.guaranteed_unshielded_offer {
                     state.utxo = Sp::new(state.utxo.apply_offer(offer, &erased, segment, context)?);
                     {
+                        let source = EventSource {
+                            transaction_hash,
+                            logical_segment: segment,
+                            physical_segment: *phys_seg,
+                        };
                         state.dust = Sp::new(state.dust.apply_offer(
                             offer,
                             &erased,
                             segment,
                             context,
-                            |content| {
-                                events.push(Event {
-                                    source: EventSource {
-                                        transaction_hash,
-                                        logical_segment: segment,
-                                        physical_segment: *phys_seg,
-                                    },
-                                    content,
-                                })
+                            |content_fn| {
+                                let source = source.clone();
+                                events.push(Box::new(move || Event {
+                                    source,
+                                    content: content_fn(),
+                                }))
                             },
                         )?);
                     }
@@ -1005,7 +1076,11 @@ impl<D: DB> LedgerState<D> {
                     },
                 )?;
                 state = res.0;
-                events.extend(res.1);
+                events.extend(
+                    res.1
+                        .into_iter()
+                        .map(|e| Box::new(move || e) as DeferredEvent<D>),
+                );
             }
             {
                 // process fees and dust actions first. This is not in the segment part of
@@ -1023,20 +1098,22 @@ impl<D: DB> LedgerState<D> {
                         da.spends.iter_deref().map(move |s| (phys_seg, da.ctime, s))
                     })
                 }) {
+                    let source = EventSource {
+                        transaction_hash,
+                        physical_segment: **phys_seg,
+                        logical_segment: segment,
+                    };
                     state.dust = Sp::new(state.dust.apply_spend(
                         dust_spend,
                         time,
                         context,
                         &state.parameters.dust,
-                        |content| {
-                            events.push(Event {
-                                source: EventSource {
-                                    transaction_hash,
-                                    physical_segment: **phys_seg,
-                                    logical_segment: segment,
-                                },
-                                content,
-                            })
+                        |content_fn| {
+                            let source = source.clone();
+                            events.push(Box::new(move || Event {
+                                source,
+                                content: content_fn(),
+                            }))
                         },
                     )?);
                     fees_remaining = fees_remaining.saturating_sub(dust_spend.v_fee);
@@ -1046,6 +1123,11 @@ impl<D: DB> LedgerState<D> {
                     let erased = intent.erase_proofs().erase_signatures();
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
+                            let source = EventSource {
+                                transaction_hash,
+                                physical_segment: *phys_seg,
+                                logical_segment: segment,
+                            };
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
                                 &context.ref_state.utxo,
                                 fees_remaining,
@@ -1054,15 +1136,12 @@ impl<D: DB> LedgerState<D> {
                                 &state.parameters.dust,
                                 da.ctime,
                                 context,
-                                |content| {
-                                    events.push(Event {
-                                        source: EventSource {
-                                            transaction_hash,
-                                            physical_segment: *phys_seg,
-                                            logical_segment: segment,
-                                        },
-                                        content,
-                                    })
+                                |content_fn| {
+                                    let source = source.clone();
+                                    events.push(Box::new(move || Event {
+                                        source,
+                                        content: content_fn(),
+                                    }))
                                 },
                             )?;
                             state.dust = Sp::new(new_dust);
@@ -1085,7 +1164,7 @@ impl<D: DB> LedgerState<D> {
                     &mut com_indices,
                     transaction_hash,
                     segment,
-                    |event| events.push(event),
+                    |event| events.push(Box::new(move || event)),
                 )?;
             }
 
@@ -1094,20 +1173,22 @@ impl<D: DB> LedgerState<D> {
                 if let Some(offer) = &intent.fallible_unshielded_offer {
                     state.utxo = Sp::new(state.utxo.apply_offer(offer, &erased, segment, context)?);
                     {
+                        let source = EventSource {
+                            transaction_hash,
+                            logical_segment: 0,
+                            physical_segment: segment,
+                        };
                         state.dust = Sp::new(state.dust.apply_offer(
                             offer,
                             &erased,
                             segment,
                             context,
-                            |content| {
-                                events.push(Event {
-                                    source: EventSource {
-                                        transaction_hash,
-                                        logical_segment: 0,
-                                        physical_segment: segment,
-                                    },
-                                    content,
-                                })
+                            |content_fn| {
+                                let source = source.clone();
+                                events.push(Box::new(move || Event {
+                                    source,
+                                    content: content_fn(),
+                                }))
                             },
                         )?);
                     }
@@ -1126,7 +1207,11 @@ impl<D: DB> LedgerState<D> {
                     },
                 )?;
                 state = res.0;
-                events.extend(res.1);
+                events.extend(
+                    res.1
+                        .into_iter()
+                        .map(|e| Box::new(move || e) as DeferredEvent<D>),
+                );
             }
         }
 
@@ -1206,48 +1291,13 @@ impl<D: DB> LedgerState<D> {
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        let res = match &tx.inner {
-            Transaction::Standard(stx) => {
-                let (mut new_st, result) = self.apply_guaranteed_only(tx, context);
-                let TransactionResult::Success(mut events) = result else {
-                    return (new_st, result);
-                };
-
-                let mut segment_success = std::collections::BTreeMap::new();
-                segment_success.insert(0, Ok(()));
-                let mut total_success = true;
-
-                for segment in stx.fallible_segments() {
-                    match new_st.apply_section(stx, tx.hash, segment, context) {
-                        Ok(state) => {
-                            new_st = state.0;
-                            events.extend(state.1);
-                            segment_success.insert(segment, Ok(()));
-                        }
-                        Err(e) => {
-                            segment_success.insert(segment, Err(e));
-                            total_success = false;
-                        }
-                    }
-                }
-
-                (
-                    new_st,
-                    if total_success {
-                        TransactionResult::Success(events)
-                    } else {
-                        TransactionResult::PartialSuccess(segment_success, events)
-                    },
-                )
-            }
-            Transaction::ClaimRewards(_) => self.apply_guaranteed_only(tx, context),
+        let res = {
+            let guaranteed = match self.apply_guaranteed_only(tx.clone(), context) {
+                Ok(g) => g,
+                Err(e) => return (self.clone(), TransactionResult::Failure(e)),
+            };
+            guaranteed.apply_fallible(context)
         };
-        debug!(
-            "state transition: {:?} => {:?} [transaction {:?}]",
-            self.state_hash(),
-            res.0.state_hash(),
-            tx.hash,
-        );
         debug!(
             "transaction result: {:?}",
             ErasedTransactionResult::from(&res.1)
@@ -1259,15 +1309,33 @@ impl<D: DB> LedgerState<D> {
     #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
     pub fn apply_guaranteed_only(
         &self,
-        tx: &VerifiedTransaction<D>,
+        tx: VerifiedTransaction<D>,
         context: &TransactionContext<D>,
-    ) -> (Self, TransactionResult<D>) {
-        match &tx.inner {
-            Transaction::Standard(stx) => match self.apply_section(stx, tx.hash, 0, context) {
-                Ok((new_st, events)) => (new_st, TransactionResult::Success(events)),
-                Err(e) => (self.clone(), TransactionResult::Failure(e)),
-            },
-            Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
+    ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
+        let is_standard = matches!(tx.inner, Transaction::Standard(_));
+        if is_standard {
+            let stx = match &tx.inner {
+                Transaction::Standard(stx) => stx,
+                _ => unreachable!(),
+            };
+            let (state, deferred_events) = self.apply_section(stx, tx.hash, 0, context)?;
+            debug!(
+                "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
+                self.state_hash(),
+                state.state_hash(),
+                tx.hash,
+            );
+            Ok(GuaranteedApplyResult {
+                state,
+                tx,
+                deferred_events,
+            })
+        } else {
+            let rewards = match &tx.inner {
+                Transaction::ClaimRewards(r) => r,
+                _ => unreachable!(),
+            };
+            let (state, result) = claim_unshielded::<D>(
                 self,
                 rewards,
                 &context.block_context,
@@ -1276,7 +1344,27 @@ impl<D: DB> LedgerState<D> {
                     logical_segment: 0,
                     physical_segment: 0,
                 },
-            ),
+            );
+            debug!(
+                "state transition: {:?} => {:?} [transaction {:?}]",
+                self.state_hash(),
+                state.state_hash(),
+                tx.hash,
+            );
+            match result {
+                TransactionResult::Success(events) => Ok(GuaranteedApplyResult {
+                    state,
+                    tx,
+                    deferred_events: events
+                        .into_iter()
+                        .map(|e| Box::new(move || e) as DeferredEvent<D>)
+                        .collect(),
+                }),
+                TransactionResult::Failure(e) => Err(e),
+                TransactionResult::PartialSuccess(..) => {
+                    unreachable!("claim_unshielded never returns PartialSuccess")
+                }
+            }
         }
     }
 
@@ -1627,10 +1715,10 @@ fn claim_unshielded<D: DB>(
     };
     let mut events = vec![];
     if let Some(dust_addr) = state.dust.generation.address_delegation.get(&address) {
-        let mut event_push = |content| {
+        let mut event_push = |content_fn: Box<dyn FnOnce() -> EventDetails<D>>| {
             events.push(Event {
                 source: event_source.clone(),
-                content,
+                content: content_fn(),
             })
         };
         let new_dust = match state.dust.fresh_dust_output(
