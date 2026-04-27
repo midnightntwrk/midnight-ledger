@@ -1337,8 +1337,8 @@ impl<D: DB> LedgerState<D> {
                     &context.block_context,
                     EventSource {
                         transaction_hash: tx.hash,
-                        logical_segment: 0,
-                        physical_segment: 0,
+                        logical_segment: GUARANTEED_SEGMENT,
+                        physical_segment: GUARANTEED_SEGMENT,
                     },
                 );
                 debug!(
