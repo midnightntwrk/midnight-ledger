@@ -20,10 +20,11 @@ use crate::events::{Event, EventDetails, EventSource, ZswapPreimageEvidence};
 use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
-    ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, Intent, IntentHash,
-    LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded, PedersenDowngradeable,
-    ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
-    SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
+    ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, GUARANTEED_SEGMENT, Intent,
+    IntentHash, LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded,
+    PedersenDowngradeable, ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate,
+    StandardTransaction, SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState,
+    VerifiedTransaction,
 };
 use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
@@ -202,7 +203,9 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
 
                 segments
                     .iter()
-                    .filter(|(segment, success)| *segment != 0 && *success)
+                    .filter(|(segment, success)| {
+                        *segment != GUARANTEED_SEGMENT && *success
+                    })
                     .map(|(segment, _)| segment)
                     .try_fold(post_guaranteed, |st, segment| {
                         if let Some(fc) = stx.fallible_coins.get(segment) {
@@ -937,7 +940,7 @@ impl<D: DB> LedgerState<D> {
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
         let mut events: Vec<Event<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
-        if segment == 0 {
+        if segment == GUARANTEED_SEGMENT {
             // Apply replay protection
             state.replay_protection = Sp::new(
                 state
@@ -1103,7 +1106,7 @@ impl<D: DB> LedgerState<D> {
                                 events.push(Event {
                                     source: EventSource {
                                         transaction_hash,
-                                        logical_segment: 0,
+                                        logical_segment: GUARANTEED_SEGMENT,
                                         physical_segment: segment,
                                     },
                                     content,
@@ -1121,7 +1124,7 @@ impl<D: DB> LedgerState<D> {
                     &com_indices,
                     EventSource {
                         transaction_hash,
-                        logical_segment: 0,
+                        logical_segment: GUARANTEED_SEGMENT,
                         physical_segment: segment,
                     },
                 )?;
@@ -1222,7 +1225,7 @@ impl<D: DB> LedgerState<D> {
                             segment_success.insert(segment, Ok(()));
                         }
                         Err(e) => {
-                            if segment == 0 {
+                            if segment == GUARANTEED_SEGMENT {
                                 return (self.clone(), TransactionResult::Failure(e));
                             } else {
                                 segment_success.insert(segment, Err(e));
@@ -1247,8 +1250,8 @@ impl<D: DB> LedgerState<D> {
                 &context.block_context,
                 EventSource {
                     transaction_hash: tx.hash,
-                    logical_segment: 0,
-                    physical_segment: 0,
+                    logical_segment: GUARANTEED_SEGMENT,
+                    physical_segment: GUARANTEED_SEGMENT,
                 },
             ),
         };
@@ -1828,8 +1831,8 @@ impl SystemTransaction {
     fn event_source(&self) -> EventSource {
         EventSource {
             transaction_hash: self.transaction_hash(),
-            logical_segment: 0,
-            physical_segment: 0,
+            logical_segment: GUARANTEED_SEGMENT,
+            physical_segment: GUARANTEED_SEGMENT,
         }
     }
 }

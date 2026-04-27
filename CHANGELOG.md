@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
