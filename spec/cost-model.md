@@ -206,6 +206,9 @@ As some dimensions may be consistently less than 50% full other dimensions
 dominating demand, we do not wish these to become effectively free. To prevent
 this, we impose a lower bound on price adjustment, where any dimension's price
 must be at least a fixed fraction of the most expensive dimension's price.
+Futhermore, to prevent an exponential race to zero for fees overall on sparse
+environments, we impose a small, but non-trivial price floor on the overall
+price, governed by a parameter.
 
 Churn is priced 'the same' as storage cost at a relative level, but with much
 higher block capacity, meaning that in relative terms, is a fraction of the
