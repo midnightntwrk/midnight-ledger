@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- fix: correctly exclude the identity point during coin ciphertext decryption
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
