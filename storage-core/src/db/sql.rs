@@ -60,8 +60,7 @@ use crate::{
     backend::OnDiskObject,
     db::DummyArbitrary,
 };
-#[allow(deprecated)]
-use crypto::digest::generic_array::GenericArray;
+use digest::common::array::Array;
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 use r2d2::Pool;
@@ -452,9 +451,7 @@ impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
 impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         #[allow(deprecated)]
-        Ok(ArenaHash(
-            GenericArray::from_slice(value.as_bytes()?).clone(),
-        ))
+        Ok(ArenaHash(Array::from_slice(value.as_bytes()?).clone()))
     }
 }
 

@@ -32,7 +32,7 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
@@ -93,7 +93,7 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
@@ -145,7 +145,7 @@ jobs:
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Docker login to GHCR
-        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ntwrk-bot
