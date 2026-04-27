@@ -934,6 +934,7 @@ impl<D: DB> LedgerState<D> {
         &self,
         tx: &StandardTransaction<S, P, B, D>,
         transaction_hash: TransactionHash,
+        fees: u128,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
@@ -1015,9 +1016,7 @@ impl<D: DB> LedgerState<D> {
                 //
                 // NOTE: The `unwrap_or` is safe here, as fees have already been
                 // checked during well-formedness.
-                let mut fees_remaining = Transaction::Standard(tx.clone())
-                    .fees(&self.parameters, true)
-                    .unwrap_or(0);
+                let mut fees_remaining = fees;
                 // apply spends first, to make sure registration outputs get the maximum dust they can.
                 let intents = tx.intents.sorted_iter().collect::<Vec<_>>();
                 for (phys_seg, time, dust_spend) in intents.iter().flat_map(|(phys_seg, i)| {
@@ -1217,7 +1216,7 @@ impl<D: DB> LedgerState<D> {
                 let mut total_success = true;
                 let mut new_st = self.clone();
                 for &segment in segments.iter() {
-                    match new_st.apply_section(stx, tx.hash, segment, context) {
+                    match new_st.apply_section(stx, tx.hash, tx.fees, segment, context) {
                         Ok(state) => {
                             new_st = state.0;
                             events.extend(state.1);
