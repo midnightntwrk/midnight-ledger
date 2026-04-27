@@ -715,6 +715,21 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         leaf: (HashOutput, A),
         path: &[TreeInsertionPathEntry],
     ) -> Result<Self, InvalidUpdate> {
+        if let Collapsed { height, .. } = self {
+            let hash = if path.is_empty() {
+                degrade_to_transient(leaf.0)
+            } else {
+                path.last()
+                    .expect("non-empty")
+                    .hash
+                    .ok_or(InvalidUpdate::BadUpdatePath)?
+                    .0
+            };
+            return Ok(Collapsed {
+                hash,
+                height: *height,
+            });
+        }
         if path.is_empty() {
             return Ok(Leaf {
                 hash: leaf.0,
@@ -723,10 +738,6 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         }
         let entry = path.last().expect("non-empty");
         Ok(match self {
-            Collapsed { height, .. } => Collapsed {
-                hash: entry.hash.ok_or(InvalidUpdate::BadUpdatePath)?.0,
-                height: *height,
-            },
             Node {
                 left,
                 right,
@@ -753,7 +764,9 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
                     }
                 }
             }
-            Stub { .. } | Leaf { .. } => return Err(InvalidUpdate::BadUpdatePath),
+            Stub { .. } | Leaf { .. } | Collapsed { .. } => {
+                return Err(InvalidUpdate::BadUpdatePath);
+            }
         })
     }
 
