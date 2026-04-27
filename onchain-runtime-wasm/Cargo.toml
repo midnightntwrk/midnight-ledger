@@ -21,7 +21,7 @@ coin-structure = { path = "../coin-structure", package = "midnight-coin-structur
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom_2 = { package = "getrandom", version = "^0.2.16", features = ["js"] }
 getrandom_3 = { package = "getrandom", version = "^0.3.4", features = ["wasm_js"] }
-wasm-bindgen = "=0.2.104"
+wasm-bindgen = "=0.2.118"
 serde = "^1.0.219"
 serde_bytes = "^0.11.17"
 serde-wasm-bindgen = "^0.6.5"
