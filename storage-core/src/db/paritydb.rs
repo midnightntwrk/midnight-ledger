@@ -11,16 +11,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crypto::digest::OutputSizeUser;
+use digest::OutputSizeUser;
 use std::{collections::HashMap, fmt::Debug, marker::PhantomData, ops::Deref, sync::Arc};
 
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 use serialize::{Deserializable, Serializable};
 
-use parity_db;
 #[allow(deprecated)]
-use sha2::digest::generic_array::GenericArray;
+use digest::common::array::Array;
+use parity_db;
 
 use crate::{DefaultHasher, WellBehavedHasher, arena::ArenaHash, backend::OnDiskObject};
 
@@ -160,7 +160,7 @@ fn bytes_to_arena_key<H: WellBehavedHasher>(key_bytes: Vec<u8>) -> ArenaHash<H> 
     }
 
     #[allow(deprecated)]
-    ArenaHash(GenericArray::from_iter(key_bytes))
+    ArenaHash(Array::from_iter(key_bytes))
 }
 
 impl<H: WellBehavedHasher, const COLUMN_OFFSET: u8> ParityDb<H, OwnedDb, COLUMN_OFFSET> {

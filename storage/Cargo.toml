@@ -21,7 +21,8 @@ base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 derive-where = "^1.6.1"
-crypto = { version = "0.5.1", features = ["digest"] }
+digest = "^0.11.2"
+crypto = "0.5.1"
 parking_lot = "^0.12.4"
 sha2 = "0.11.0"
 serde = { version = "^1.0.219", features = ["derive", "rc"] }

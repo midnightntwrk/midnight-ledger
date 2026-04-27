@@ -1476,6 +1476,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "digest-io"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2de63d600bc7fab91180bc17385f29b342468dc8ef2af09dceba450a293de3da"
+dependencies = [
+ "digest 0.11.2",
+]
+
+[[package]]
 name = "displaydoc"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2956,6 +2965,7 @@ dependencies = [
  "anyhow",
  "criterion",
  "derive-where",
+ "digest-io",
  "fake",
  "futures",
  "hex",
@@ -3220,6 +3230,7 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
+ "digest 0.11.2",
  "hashbrown 0.16.1",
  "midnight-base-crypto",
  "midnight-onchain-state",
@@ -3248,6 +3259,7 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
+ "digest 0.11.2",
  "fake",
  "fs2",
  "hashbrown 0.16.1",

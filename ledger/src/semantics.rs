@@ -203,9 +203,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
 
                 segments
                     .iter()
-                    .filter(|(segment, success)| {
-                        *segment != GUARANTEED_SEGMENT && *success
-                    })
+                    .filter(|(segment, success)| *segment != GUARANTEED_SEGMENT && *success)
                     .map(|(segment, _)| segment)
                     .try_fold(post_guaranteed, |st, segment| {
                         if let Some(fc) = stx.fallible_coins.get(segment) {

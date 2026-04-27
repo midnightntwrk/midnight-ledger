@@ -27,7 +27,8 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 parity-db = { version = "0.5.2", optional = true }
 
 archery = "^1.2.2"
-crypto = { version = "0.5.1", features = ["digest"] }
+digest = "^0.11.2"
+crypto = "0.5.1"
 sha2 = "0.11.0"
 derive-where = "^1.6.1"
 macros = { version = "1.0.0", path = "../storage-macros", package = "midnight-storage-macros" }
