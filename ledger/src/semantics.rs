@@ -1312,57 +1312,51 @@ impl<D: DB> LedgerState<D> {
         tx: VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
-        let is_standard = matches!(tx.inner, Transaction::Standard(_));
-        if is_standard {
-            let stx = match &tx.inner {
-                Transaction::Standard(stx) => stx,
-                _ => unreachable!(),
-            };
-            let (state, deferred_events) = self.apply_section(stx, tx.hash, 0, context)?;
-            debug!(
-                "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
-                self.state_hash(),
-                state.state_hash(),
-                tx.hash,
-            );
-            Ok(GuaranteedApplyResult {
-                state,
-                tx,
-                deferred_events,
-            })
-        } else {
-            let rewards = match &tx.inner {
-                Transaction::ClaimRewards(r) => r,
-                _ => unreachable!(),
-            };
-            let (state, result) = claim_unshielded::<D>(
-                self,
-                rewards,
-                &context.block_context,
-                EventSource {
-                    transaction_hash: tx.hash,
-                    logical_segment: 0,
-                    physical_segment: 0,
-                },
-            );
-            debug!(
-                "state transition: {:?} => {:?} [transaction {:?}]",
-                self.state_hash(),
-                state.state_hash(),
-                tx.hash,
-            );
-            match result {
-                TransactionResult::Success(events) => Ok(GuaranteedApplyResult {
+        match &tx.inner {
+            Transaction::Standard(stx) => {
+                let (state, deferred_events) = self.apply_section(stx, tx.hash, 0, context)?;
+                debug!(
+                    "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
+                    self.state_hash(),
+                    state.state_hash(),
+                    tx.hash,
+                );
+                Ok(GuaranteedApplyResult {
                     state,
                     tx,
-                    deferred_events: events
-                        .into_iter()
-                        .map(|e| Box::new(move || e) as DeferredEvent<D>)
-                        .collect(),
-                }),
-                TransactionResult::Failure(e) => Err(e),
-                TransactionResult::PartialSuccess(..) => {
-                    unreachable!("claim_unshielded never returns PartialSuccess")
+                    deferred_events,
+                })
+            }
+            Transaction::ClaimRewards(rewards) => {
+                let (state, result) = claim_unshielded::<D>(
+                    self,
+                    rewards,
+                    &context.block_context,
+                    EventSource {
+                        transaction_hash: tx.hash,
+                        logical_segment: 0,
+                        physical_segment: 0,
+                    },
+                );
+                debug!(
+                    "state transition: {:?} => {:?} [transaction {:?}]",
+                    self.state_hash(),
+                    state.state_hash(),
+                    tx.hash,
+                );
+                match result {
+                    TransactionResult::Success(events) => Ok(GuaranteedApplyResult {
+                        state,
+                        tx,
+                        deferred_events: events
+                            .into_iter()
+                            .map(|e| Box::new(move || e) as DeferredEvent<D>)
+                            .collect(),
+                    }),
+                    TransactionResult::Failure(e) => Err(e),
+                    TransactionResult::PartialSuccess(..) => {
+                        unreachable!("claim_unshielded never returns PartialSuccess")
+                    }
                 }
             }
         }
