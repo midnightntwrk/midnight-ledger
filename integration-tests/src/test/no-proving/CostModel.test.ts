@@ -175,12 +175,23 @@ describe('Ledger API - CostModel', () => {
     const state = TestState.new();
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, { offerKind: 'guaranteed' });
     const balanced = state.balanceTx(tx.eraseProofs());
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
@@ -217,6 +228,17 @@ describe('Ledger API - CostModel', () => {
     for (let i = 0; i < ITERATIONS; i++) state.rewardsUnshielded(randomUnshieldedToken, REWARDS_AMOUNT);
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, {
       offerKind: 'guaranteed',
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
@@ -225,7 +247,7 @@ describe('Ledger API - CostModel', () => {
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
@@ -240,6 +262,17 @@ describe('Ledger API - CostModel', () => {
     for (let i = 0; i < ITERATIONS; i++) state.rewardsUnshielded(randomUnshieldedToken, REWARDS_AMOUNT);
     state.giveFeeToken(ITERATIONS, REWARDS_AMOUNT);
 
+    const spike: NormalizedCost = LedgerParameters.initialParameters().normalizeFullness({
+      readTime: 0n,
+      computeTime: 800_000_000_000n,
+      blockUsage: 0n,
+      bytesWritten: 0n,
+      bytesChurned: 0n
+    });
+    state.fastForward(TEN_SECS, spike);
+
+    const initialPrice = state.ledger.parameters.feePrices.overallPrice;
+
     const tx = mergedUnshieldedTxFromUtxos(state, {
       offerKind: 'fallible',
       filter: (u) => u.type !== DEFAULT_TOKEN_TYPE
@@ -248,7 +281,7 @@ describe('Ledger API - CostModel', () => {
     state.assertApplyTxFullness(balanced, new WellFormedStrictness());
 
     const { feePrices } = state.ledger.parameters;
-    expect(feePrices.overallPrice).toBeLessThan(INITIAL_FIXED_PRICE);
+    expect(feePrices.overallPrice).toBeLessThan(initialPrice);
   });
 
   /**
