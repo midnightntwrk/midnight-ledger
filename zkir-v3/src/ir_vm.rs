@@ -27,7 +27,7 @@ use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, ZeroInstructions,
+    EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
@@ -1097,7 +1097,7 @@ impl Relation for IrSource {
             keccak_256: false,
             sha3_256: false,
             blake2b: false,
-            nr_pow2range_cols: 1,
+            nr_pow2range_cols: 4,
             secp256k1: false,
             bls12_381: false,
             base64: false,
