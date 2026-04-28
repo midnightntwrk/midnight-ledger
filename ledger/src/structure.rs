@@ -2199,17 +2199,17 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D
     Transaction<S, P, B, D>
 {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 }
 
 impl SystemTransaction {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 
     pub fn cost(&self, params: &LedgerParameters) -> SyntheticCost {
@@ -2516,9 +2516,9 @@ impl<D: DB> Debug for ContractDeploy<D> {
 
 impl<D: DB> ContractDeploy<D> {
     pub fn address(&self) -> ContractAddress {
-        let mut writer = Sha256::new();
+        let mut writer = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut writer).expect("In-memory serialization should succeed");
-        ContractAddress(HashOutput(writer.finalize().into()))
+        ContractAddress(HashOutput(writer.0.finalize().into()))
     }
 }
 
