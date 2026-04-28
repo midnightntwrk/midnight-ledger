@@ -32,7 +32,7 @@ midnight-proofs = { version = "^0.7.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
 anyhow = { version = "^1.0.102" }
-lru = "0.16.0"
+lru = "0.17.0"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
@@ -40,7 +40,7 @@ rand = { version = "^0.8.4", features = ["getrandom"] }
 lazy_static = "^1.5.0"
 tracing = { version = "^0.1.41" }
 const-hex = "^1.14.1"
-sha2 = "^0.10.9"
+sha2 = "^0.11.0"
 flate2 = "^1.1.2"
 k256 = "^0.13.4"
 signature = "^2.2.0"
