@@ -20,6 +20,7 @@ pub enum Error {
 pub type Result<T> = std::result::Result<T, Error>;
 
 mod params;
+mod zkir_example;
 
 #[derive(Debug, Clone)]
 pub struct BenchOpts {
