@@ -1712,8 +1712,20 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
 
     pub fn segments(&self) -> Vec<Segment> {
         let mut segments = once(GUARANTEED_SEGMENT)
-            .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+            .chain(self.intents.keys())
+            .chain(self.fallible_coins.keys())
+            .collect::<Vec<_>>();
+        segments.sort();
+        segments.dedup();
+        segments
+    }
+
+    pub fn fallible_segments(&self) -> Vec<Segment> {
+        let mut segments = self
+            .intents
+            .keys()
+            .chain(self.fallible_coins.keys())
+            .filter(|&s| s != GUARANTEED_SEGMENT)
             .collect::<Vec<_>>();
         segments.sort();
         segments.dedup();
