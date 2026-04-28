@@ -2074,8 +2074,6 @@ version = "0.16.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "841d1cc9bed7f9236f321df977030373f4a4163ae1a7dbfe1a51a2c1a51d9100"
 dependencies = [
- "allocator-api2",
- "equivalent",
  "foldhash 0.2.0",
 ]
 
@@ -3218,7 +3216,7 @@ dependencies = [
  "crypto",
  "derive-where",
  "digest 0.11.2",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
@@ -3249,7 +3247,7 @@ dependencies = [
  "digest 0.11.2",
  "fake",
  "fs2",
- "hashbrown 0.16.1",
+ "hashbrown 0.17.0",
  "hex",
  "itertools 0.14.0",
  "konst",
