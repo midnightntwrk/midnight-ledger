@@ -44,13 +44,15 @@ because each iteration includes keygen + prove (no setup phase).
 
 ## What still needs a human
 
-- ❌ Live UI smoke-test: `dx serve --platform desktop` requires
-  dioxus-cli **0.6.x** on PATH — `cargo install dioxus-cli --version "^0.6"`.
-  The 0.7.x CLI panics on this workspace via a `krates` cargo-metadata bug
-  ("resolved a dependency for a dependency not specified by the crate").
-  As a workaround you can run the desktop UI directly via
-  `cargo run -p dioxus-bench` once dioxus-cli@0.6 is installed; the binary
-  builds clean today.
+- ❌ Live UI smoke-test via `dx serve --platform desktop`: blocked.
+  Both dioxus-cli 0.7.6 and 0.6.3 panic in `krates 0.17.5` while parsing
+  this workspace's `cargo metadata` ("resolved a dependency for a
+  dependency not specified by the crate" — `midnight-storage-core` shows
+  up as a dev-dep edge `krates` can't reconcile). Workaround: run the
+  binary directly with `cargo run -p dioxus-bench`. The binary builds
+  clean today; only `dx`'s graph walker chokes. Fixing dx requires
+  either a krates upgrade in dioxus-cli or trimming a stray dev-dep
+  edge in the workspace; neither is in scope for iteration-1.
 - ❌ Dust-spend proving (`prove_dust_spend`): deferred. Building a valid
   `ProofPreimage` for a Dust spend requires reproducing the wallet
   state-machine (DustState, secret keys, UTXOs, kernel transcript). The
