@@ -32,7 +32,7 @@ use transient_crypto::proofs::{
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable, Hash, Eq, PartialOrd, Ord)]
 #[tag = "ir-source[v2]"]
 pub struct IrSource {
     /// The number of inputs, the initial elements in the memory
@@ -108,7 +108,7 @@ fn field_deser<'a, D: serde::Deserializer<'a>>(deserializer: D) -> Result<Fr, D:
 
 /// An individual ZK IR instruction
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable, Hash, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "snake_case", tag = "op")]
 #[tag = "ir-instruction[v2]"]
 pub enum Instruction {

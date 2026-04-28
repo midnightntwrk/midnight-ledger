@@ -15,6 +15,7 @@ use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
+use zkir::IrSource;
 use base_crypto::signatures::VerifyingKey;
 use coin_structure::coin::TokenType;
 use derive_where::derive_where;
@@ -864,16 +865,17 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v4]"]
+#[tag = "contract-operation[v5]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
+    ir: Option<IrSource>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>) -> Self {
-        ContractOperation { v2: vk }
+    pub fn new(vk: Option<VerifierKey>, ir: Option<IrSource>) -> Self {
+        ContractOperation { v2: vk, ir }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
@@ -896,9 +898,10 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
+                ir: None,
             }
         } else {
-            ContractOperation { v2: None }
+            ContractOperation { v2: None, ir: None }
         }
     }
 }
@@ -938,7 +941,7 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None }
+        ContractOperation { v2: None, ir: None }
     }
 }
 

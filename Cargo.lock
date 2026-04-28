@@ -3046,6 +3046,7 @@ dependencies = [
  "midnight-serialize",
  "midnight-storage",
  "midnight-transient-crypto",
+ "midnight-zkir",
  "pastey",
  "proptest",
  "proptest-derive",

@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- feat: `ContractOperation` includes ir field
+
 ## Version `3.1.0`
 
 - feat: add more flexibility to `findPathForLeaf`, allowing it to scan index
