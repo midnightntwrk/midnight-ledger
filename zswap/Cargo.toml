@@ -38,7 +38,7 @@ zkir_v2 = { path = "../zkir", package = "midnight-zkir" }
 fake = { version = "^2.10.0", features = ["derive"] }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 futures = "^0.3.31"
-criterion = "0.5"
+criterion = "0.8"
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 tracing-subscriber = "^0.3.19"
 rayon = "^1.10.0"

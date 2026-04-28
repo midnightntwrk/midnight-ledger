@@ -42,7 +42,7 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-onchain-runtime = { path = ".", features = ["proptest"] }
 rand = { version = "^0.8.5", features = ["getrandom"] }
-criterion = "0.5"
+criterion = "0.8"
 pastey = "0.2.1"
 serde_json = { version = "^1.0", features = ["std"] }
 itertools = "0.14"
