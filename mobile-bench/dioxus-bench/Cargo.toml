@@ -5,23 +5,35 @@ edition = "2024"
 license.workspace = true
 publish = false
 
+# Library target for both Android (cdylib loaded by WryActivity as
+# `libdioxusmain.so`) and desktop (rlib consumed by the bin below).
+[lib]
+name = "dioxusmain"
+crate-type = ["cdylib", "rlib"]
+
 [features]
 default = []
 proof-server-http = ["prover-core/proof-server-http"]
 
 [dependencies]
 prover-core = { path = "../prover-core" }
-dioxus = { version = "0.6", features = ["desktop"] }
 tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
+# Dioxus launcher is mutually exclusive per target: `mobile` on Android
+# (Wry-based, integrates with Java MainActivity lifecycle), `desktop`
+# everywhere else (Tao-owned window). Enabling both unions the features and
+# selects the desktop launcher on Android — `dioxus::launch` then blocks the
+# JNI thread, so `Activity.onCreate` never returns and the WebView never
+# attaches (input channel stays NO_INPUT_CHANNEL, splash hangs forever).
 [target.'cfg(target_os = "android")'.dependencies]
 dioxus = { version = "0.6", features = ["mobile"] }
 ndk-context = "0.1"
 jni = "0.21"
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
+dioxus = { version = "0.6", features = ["desktop"] }
 dirs = "5"
