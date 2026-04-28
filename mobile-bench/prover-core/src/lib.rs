@@ -19,6 +19,8 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+mod params;
+
 #[derive(Debug, Clone)]
 pub struct BenchOpts {
     pub verify_after: bool,
@@ -43,12 +45,15 @@ pub struct ProofRun {
 
 pub struct ProverCore {
     cache_dir: PathBuf,
+    #[allow(dead_code)] // wired into proving in later tasks
+    pub(crate) params: params::ParamsCache,
 }
 
 impl ProverCore {
     pub async fn new(cache_dir: PathBuf) -> Result<Self> {
         std::fs::create_dir_all(&cache_dir)?;
-        Ok(Self { cache_dir })
+        let params = params::ParamsCache::new(cache_dir.clone())?;
+        Ok(Self { cache_dir, params })
     }
 
     /// Returns the on-disk directory used for cached KZG params and circuit
