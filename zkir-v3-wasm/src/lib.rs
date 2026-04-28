@@ -27,6 +27,8 @@ use transient_crypto::{
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
+pub mod execute;
+
 struct JsKeyProvider(JsValue);
 
 fn try_to_string(jsv: JsValue) -> String {
@@ -119,7 +121,7 @@ impl Resolver for JsKeyProvider {
     }
 }
 
-fn fr_from_bigint(bigint: BigInt) -> Result<Fr, JsError> {
+pub(crate) fn fr_from_bigint(bigint: BigInt) -> Result<Fr, JsError> {
     let hex_str = String::from(
         bigint
             .to_string(16)
@@ -224,7 +226,7 @@ pub fn json_ir_to_binary(json: &str) -> Result<Uint8Array, JsError> {
 }
 
 #[wasm_bindgen]
-struct Zkir(zkir_v3::IrSource);
+pub struct Zkir(pub(crate) zkir_v3::IrSource);
 
 #[wasm_bindgen]
 impl Zkir {

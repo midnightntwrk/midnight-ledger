@@ -80,19 +80,30 @@ impl FieldRepr for Key {
     }
 }
 
+/// ImpactVM operation.
+///
+/// `Op` is generic over three dimensions:
+///   - `M: ResultMode<D>` — controls the read-result type in `Popeq` (e.g., `AlignedValue` for
+///     verification, `()` for gathering).
+///   - `V` — the value type carried by `Push` (defaults to `StateValue<D>` for on-chain use).
+///   - `K` — the key-path type carried by `Idx` (defaults to `Array<Key, D>` for on-chain use).
+///
+/// Existing runtime consumers use `Op<M, D>` (with V and K defaulted) and require no changes.
+/// The ZKIR interpreter uses non-default V and K to carry symbolic operand references.
 #[non_exhaustive]
-#[derive_where(Clone, Eq, PartialEq; M)]
-#[derive(Serialize, Deserialize, Storable)]
+#[derive_where(Clone, Eq, PartialEq; M, V, K)]
+#[derive(Serialize, Deserialize, Storable, Serializable)]
 #[serde(bound(
-    serialize = "M::ReadResult : Serialize",
-    deserialize = "M::ReadResult : Deserialize<'de>"
+    serialize = "M::ReadResult: Serialize, V: Serialize, K: Serialize",
+    deserialize = "M::ReadResult: Deserialize<'de>, V: Deserialize<'de>, K: Deserialize<'de>"
 ))]
 #[serde(rename_all = "lowercase", expecting = "operation")]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[storable(db = D)]
+#[storable(no_serializable)]
 #[tag = "impact-op[v1]"]
-#[phantom(M)]
-pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
+#[phantom(M, D)]
+pub enum Op<M: ResultMode<D>, D: DB = DefaultDB, V = StateValue<D>, K = Array<Key, D>> {
     Noop {
         #[cfg_attr(
             feature = "proptest",
@@ -129,9 +140,10 @@ pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
         )]
         immediate: u32,
     },
+    #[cfg_attr(feature = "proptest", proptest(skip))]
     Push {
         storage: bool,
-        value: StateValue<D>,
+        value: V,
     },
     Branch {
         #[cfg_attr(
@@ -175,17 +187,12 @@ pub enum Op<M: ResultMode<D>, D: DB = DefaultDB> {
         )]
         n: u8,
     },
+    #[cfg_attr(feature = "proptest", proptest(skip))]
     Idx {
         cached: bool,
         #[serde(rename = "pushPath")]
         push_path: bool,
-        #[cfg_attr(
-            feature = "proptest",
-            proptest(
-                strategy = "proptest::collection::vec(Key::arbitrary(), 1..2).prop_map_into()"
-            )
-        )]
-        path: Array<Key, D>,
+        path: K,
     },
     Ins {
         cached: bool,
@@ -265,7 +272,7 @@ macro_rules! ops {
     [$($tts:tt)*] => { ops_int!($($tts)*).collect::<Vec<_>>() };
 }
 
-impl<M: ResultMode<D>, D: DB> Debug for Op<M, D> {
+impl<M: ResultMode<D>, D: DB, V: Debug, K: Debug> Debug for Op<M, D, V, K> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         use Op::*;
         match self {
@@ -322,17 +329,7 @@ impl<M: ResultMode<D>, D: DB> Debug for Op<M, D> {
                 if *cached {
                     write!(f, "c")?;
                 }
-                write!(f, " [")?;
-                let mut is_first = true;
-                for key in path.iter() {
-                    if is_first {
-                        is_first = false;
-                    } else {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{key:?}")?;
-                }
-                write!(f, "]")
+                write!(f, " {path:?}")
             }
             Ins { cached: false, n } => write!(f, "ins {n}"),
             Ins { cached: true, n } => write!(f, "insc {n}"),
@@ -341,11 +338,27 @@ impl<M: ResultMode<D>, D: DB> Debug for Op<M, D> {
     }
 }
 
-impl<M: ResultMode<D>, D: DB> Op<M, D> {
+impl<M: ResultMode<D>, D: DB, V, K> Op<M, D, V, K> {
+    /// Translate the read-result type while preserving the value and key-path types.
+    ///
+    /// This is the original translate API. All existing call sites continue to work unchanged.
     pub fn translate<M2: ResultMode<D>, F: FnOnce(M::ReadResult) -> M2::ReadResult>(
         self,
         f: F,
-    ) -> Op<M2, D> {
+    ) -> Op<M2, D, V, K> {
+        self.translate_full(|v| v, |k| k, f)
+    }
+
+    /// Translate all three parameterized positions: value, key-path, and read-result.
+    ///
+    /// Use this for cross-representation conversions, e.g., converting ZKIR symbolic
+    /// operands to runtime values.
+    pub fn translate_full<M2: ResultMode<D2>, D2: DB, V2, K2>(
+        self,
+        fv: impl FnOnce(V) -> V2,
+        fk: impl FnOnce(K) -> K2,
+        fr: impl FnOnce(M::ReadResult) -> M2::ReadResult,
+    ) -> Op<M2, D2, V2, K2> {
         match self {
             Op::Noop { n } => Op::Noop { n },
             Op::Lt => Op::Lt,
@@ -361,11 +374,14 @@ impl<M: ResultMode<D>, D: DB> Op<M, D> {
             Op::Pop => Op::Pop,
             Op::Popeq { cached, result } => Op::Popeq {
                 cached,
-                result: f(result),
+                result: fr(result),
             },
             Op::Addi { immediate } => Op::Addi { immediate },
             Op::Subi { immediate } => Op::Subi { immediate },
-            Op::Push { storage, value } => Op::Push { storage, value },
+            Op::Push { storage, value } => Op::Push {
+                storage,
+                value: fv(value),
+            },
             Op::Branch { skip } => Op::Branch { skip },
             Op::Jmp { skip } => Op::Jmp { skip },
             Op::Add => Op::Add,
@@ -382,7 +398,7 @@ impl<M: ResultMode<D>, D: DB> Op<M, D> {
             } => Op::Idx {
                 cached,
                 push_path,
-                path,
+                path: fk(path),
             },
             Op::Ins { cached, n } => Op::Ins { cached, n },
             Op::Ckpt => Op::Ckpt,

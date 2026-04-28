@@ -10,8 +10,18 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
-zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3" }
+zkir-v3 = { path = "../zkir-v3", package = "midnight-zkir-v3", features = ["execute"] }
 serialize = { path = "../serialize", package = "midnight-serialize" }
+
+# Needed for the `execute` API: cross-crate wasm-bindgen wrappers and the
+# native types that flow through them.
+onchain-runtime-wasm = { path = "../onchain-runtime-wasm", package = "midnight-onchain-runtime-wasm" }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+onchain-runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
+storage = { path = "../storage", package = "midnight-storage" }
 
 rand = { version = "^0.8.4", features = ["getrandom"] }
 getrandom = { version = "^0.2.8", features = ["js"] }
@@ -19,7 +29,9 @@ wasm-bindgen = "=0.2.104"
 wasm-bindgen-futures = "^0.4.50"
 js-sys = "^0.3.61"
 hex = "^0.4.3"
+serde = { version = "^1.0", features = ["derive"] }
 serde_json = "^1.0.0"
+serde-wasm-bindgen = "0.6"
 
 [package.metadata.wasm-pack.profile.dev]
 wasm-opt = ['-O', '--enable-reference-types', '-g']

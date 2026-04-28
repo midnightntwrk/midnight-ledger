@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use midnight_circuits::types::{AssignedNative, AssignedNativePoint, InnerValue};
 use midnight_curves::{JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{circuit::Value, plonk::Error};
@@ -43,6 +44,19 @@ impl IrType {
         match self {
             IrType::Native => 1,
             IrType::JubjubPoint => 2,
+        }
+    }
+
+    /// FAB alignment of a value of this type. The number of `Field` atoms
+    /// equals [`encoded_len`](Self::encoded_len) for the current variants;
+    /// future non-Field-atom variants would shift this.
+    pub fn alignment(&self) -> Alignment {
+        match self {
+            IrType::Native => Alignment::singleton(AlignmentAtom::Field),
+            IrType::JubjubPoint => Alignment(vec![
+                AlignmentSegment::Atom(AlignmentAtom::Field),
+                AlignmentSegment::Atom(AlignmentAtom::Field),
+            ]),
         }
     }
 }

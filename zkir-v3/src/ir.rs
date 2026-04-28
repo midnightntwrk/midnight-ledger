@@ -29,6 +29,7 @@ use transient_crypto::proofs::{
 };
 
 use crate::ir_types::IrType;
+use crate::zkir_mode::ZkirOp;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -95,11 +96,18 @@ pub struct TypedIdentifier {
     pub(crate) val_t: IrType,
 }
 
+impl TypedIdentifier {
+    /// Create a new typed identifier.
+    pub fn new(name: Identifier, val_t: IrType) -> Self {
+        TypedIdentifier { name, val_t }
+    }
+}
+
 tag_enforcement_test!(TypedIdentifier);
 
 /// An operand that can be either a variable reference or an immediate value
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
     /// A reference to a variable in circuit memory
     Variable(Identifier),
@@ -274,6 +282,32 @@ impl Tagged for Operand {
 }
 tag_enforcement_test!(Operand);
 
+/// Placeholder for the enriched ZKIR type system.
+///
+/// For the initial implementation, conformance checking is bypassed —
+/// the test constructs contracts that are known to conform. This will
+/// be replaced by the full enriched type system once it is designed.
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[tag = "contract-type-descriptor[v1]"]
+pub struct ContractTypeDescriptor {
+    /// Circuit signatures that the contract must expose.
+    pub circuits: Vec<CircuitSignature>,
+}
+
+/// Describes the signature of a single circuit entry point for type conformance.
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
+#[tag = "circuit-signature[v1]"]
+pub struct CircuitSignature {
+    /// The name of the circuit entry point.
+    pub name: String,
+    /// Parameter types
+    pub inputs: Vec<IrType>,
+    /// Return value types
+    pub outputs: Vec<IrType>,
+}
+
 /// An individual ZK IR instruction
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
@@ -377,20 +411,20 @@ pub enum Instruction {
     /// No outputs, but adds the inputs as public inputs and activity information to
     /// [`IrSource::prove`] and [`IrSource::check`].
     ///
-    /// In-circuit, if `guard` is `false`, instead of adding the `inputs` as public inputs,
-    /// it will add `n` zeros as public inputs (where `n` is the number of `inputs`).
-    /// This is enforced with in-circuit constraints.
-    ///
-    /// NB: Currently, we require that all `inputs` be of type `Native`.
-    /// A runtime error will be raised otherwise.
+    /// Each `ZkirOp` carries symbolic operand references resolved at execution/proving time.
+    /// `read_results` provides operands for each Popeq's result in occurrence order.
+    /// If `guard` is false, zeros are emitted as public inputs instead.
+    #[cfg_attr(feature = "proptest", proptest(skip))]
     Impact {
-        /// The boolean condition under which the public inputs are active
+        /// The boolean condition under which the operations are active.
         guard: Operand,
-        /// The sequence of values to declare as public inputs
-        inputs: Vec<Operand>,
+        /// Structured ImpactVM operations using ZKIR-mode symbolic operands.
+        ops: Vec<ZkirOp>,
+        /// Operand references for each Popeq's read result, in Popeq-occurrence order.
+        /// Each inner Vec<Operand> resolves to the field elements encoding one read result.
+        read_results: Vec<Vec<Operand>>,
     },
     /// Multiplies an elliptic curve point by a scalar.
-    /// curve point.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -585,6 +619,25 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Cross-contract call to another deployed contract's circuit.
+    ///
+    /// `contract_ref` resolves to the callee's address (two field elements).
+    /// `expected_type` is a placeholder for future conformance checking.
+    ContractCall {
+        /// Operand pair resolving to the callee's contract address.
+        /// A ContractAddress (32 bytes) requires two field elements in field representation:
+        /// `(Fr(byte31), Fr(bytes0..31))`.
+        contract_ref: (Operand, Operand),
+        /// The expected contract type for conformance checking.
+        /// (Deferred to the enriched ZKIR type system; for now, a placeholder.)
+        expected_type: ContractTypeDescriptor,
+        /// The name of the circuit to invoke on the callee.
+        entry_point: String,
+        /// Arguments for the circuit being invoked.
+        args: Vec<Operand>,
+        /// Identifiers that receive the callee's return values.
+        outputs: Vec<Identifier>,
+    },
 }
 tag_enforcement_test!(Instruction);
 
@@ -655,7 +708,7 @@ impl IrSource {
         rng: R,
         params: &impl ParamsProverProvider,
         pk: ProverKey<IrSource>,
-        preproc: super::ir_vm::Preprocessed,
+        preproc: super::ir_preprocess::Preprocessed,
     ) -> Result<Proof> {
         use midnight_zk_stdlib::prove;
 

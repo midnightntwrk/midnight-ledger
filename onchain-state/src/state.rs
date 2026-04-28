@@ -864,16 +864,38 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v4]"]
+#[tag = "contract-operation[v5]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
+    /// Serialized ZKIR (`IrSource`), stored as opaque bytes.
+    ///
+    /// Storing as `Vec<u8>` avoids a circular crate dependency:
+    /// `IrSource` is defined in `zkir-v3`, which depends on `onchain-vm`,
+    /// which depends on this crate (`onchain-state`). The consumer (typically
+    /// the `ledger` crate) is responsible for deserializing via
+    /// `Deserializable::deserialize`.
+    ///
+    /// Contracts deployed before this field was added will have `zkir: None`
+    /// and cannot be called dynamically via `ContractCall`.
+    pub zkir: Option<Vec<u8>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
+    /// Create a new `ContractOperation` with a verifier key and no ZKIR.
+    ///
+    /// This preserves backward compatibility with existing call sites.
     pub fn new(vk: Option<VerifierKey>) -> Self {
-        ContractOperation { v2: vk }
+        ContractOperation { v2: vk, zkir: None }
+    }
+
+    /// Create a new `ContractOperation` with both a verifier key and serialized ZKIR.
+    pub fn new_with_zkir(vk: Option<VerifierKey>, zkir: Vec<u8>) -> Self {
+        ContractOperation {
+            v2: vk,
+            zkir: Some(zkir),
+        }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
@@ -882,6 +904,11 @@ impl ContractOperation {
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
         &mut self.v2
+    }
+
+    /// Returns the serialized ZKIR bytes, if present.
+    pub fn zkir_bytes(&self) -> Option<&[u8]> {
+        self.zkir.as_deref()
     }
 }
 
@@ -896,15 +923,20 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
+                zkir: None,
             }
         } else {
-            ContractOperation { v2: None }
+            ContractOperation {
+                v2: None,
+                zkir: None,
+            }
         }
     }
 }
 
 impl FieldRepr for ContractOperation {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
+        // Encode verifier key presence.
         match self.v2 {
             Some(ref vk) => {
                 writer.write(&[0x01.into()]);
@@ -915,30 +947,47 @@ impl FieldRepr for ContractOperation {
             }
             None => writer.write(&[0x00.into()]),
         }
+        // Encode ZKIR presence and content.
+        match self.zkir {
+            Some(ref zkir_bytes) => {
+                writer.write(&[0x01.into()]);
+                (zkir_bytes.len() as u32).field_repr(writer);
+                zkir_bytes.as_slice().field_repr(writer);
+            }
+            None => writer.write(&[0x00.into()]),
+        }
     }
 
     fn field_size(&self) -> usize {
-        match self.v2 {
+        let vk_size = match self.v2 {
             Some(ref vk) => {
                 let mut bytes: Vec<u8> = Vec::new();
                 <VerifierKey as Serializable>::serialize(vk, &mut bytes)
                     .expect("VerifierKey is serializable");
-                1 + bytes.into_iter().fold(0, |acc, b| acc + b.field_size())
+                1 + bytes.field_size()
             }
             None => 1,
-        }
+        };
+        let zkir_size = match self.zkir {
+            Some(ref zkir_bytes) => 1 + 1 + zkir_bytes.as_slice().field_size(),
+            None => 1,
+        };
+        vk_size + zkir_size
     }
 }
 
 impl Debug for ContractOperation {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        write!(formatter, "<verifier key>")
+        write!(formatter, "<verifier key, zkir={}>", self.zkir.is_some())
     }
 }
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None }
+        ContractOperation {
+            v2: None,
+            zkir: None,
+        }
     }
 }
 

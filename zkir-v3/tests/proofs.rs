@@ -102,6 +102,7 @@ mod proof_tests {
                     pi_skips: vec![],
                     binding_input: 0.into(),
                     comm_comm: None,
+                    contract_call_comm_rands: vec![],
                 },
             )
             .await;
@@ -217,12 +218,19 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: The impact instruction here doesn't correspond to real Impact VM bytecode.
-    // Real impact instructions contain encoded opcodes (0x10 for push, 0x30 for dup, etc.).
-    // We're keeping this simplified form for historical reasons - it still exercises the
-    // prover's public input handling even if it's not a semantically valid Impact program.
+    /// Hashes three inputs and binds the result to the public-input stream
+    /// via a structured `Impact { Push }` block. The Push materializes a
+    /// Field-aligned `Cell` whose operand is `%v_3` (the hash output); the
+    /// circuit pushes the canonical `[opcode, Cell-tag, alignment, value]`
+    /// Fr sequence to the verifier's PI list.
     #[actix_rt::test]
     async fn test_hash_proof() {
+        use transient_crypto::curve::Fr;
+
+        // Hashes %v_0..%v_2 into %v_3, then binds %v_3 to the public-input
+        // stream via a structured `Impact { Push }` whose operand is the
+        // variable `%v_3`. See `test_immediate_with_public_inputs` for the
+        // serde shapes of `Alignment` / `AlignmentSegment` / `AlignmentAtom`.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
@@ -233,11 +241,48 @@ mod proof_tests {
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
-               { "op": "impact", "guard": "0x01", "inputs": ["%v_3"] }
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_3"]
+                               }
+                           }
+                       }
+                   ],
+                   "read_results": []
+               }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
         let x = transient_hash(&[1.into(), 2.into(), 3.into()]);
+
+        // Field-element contribution of the Impact's `Push` of a
+        // `Cell([Field], %v_3)`:
+        //   0x10 — opcode: `Push { storage: false }`
+        //   0x01 — `StateValue::Cell` tag
+        //   0x01 — alignment: 1 segment
+        //   -2   — alignment atom: `Field` tag
+        //   x    — value (= %v_3, resolved at proof time)
+        // See `zkir_mode.rs` and `onchain-vm/src/ops.rs::impl FieldRepr for Op`
+        // for the canonical encoding; cross-encoder agreement is pinned by
+        // `zkir_mode::tests::push_runtime_matches_zkir`.
+        let impact_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            x,
+        ];
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let mut pk_data = Vec::new();
@@ -248,12 +293,13 @@ mod proof_tests {
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
+
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![x],
+            public_transcript_inputs: impact_pis.clone(),
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -269,7 +315,10 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), x].into_iter())
+
+        let mut verifier_pis = vec![Fr::from(42u64)];
+        verifier_pis.extend(impact_pis);
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
             .unwrap();
     }
 
@@ -606,10 +655,21 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: Same as test_hash_proof - the impact instruction here is not real Impact VM
-    // bytecode, just a simplified test case kept for historical reasons.
+    /// Drives a circuit that bit-constrains its inputs, performs a
+    /// cond_select asserting the picked value is `1`, and then binds the
+    /// constant `0x30` (= 48) to the public-input stream via a structured
+    /// `Impact { Push }` block whose operand is the immediate.
     #[actix_rt::test]
     async fn test_immediate_with_public_inputs() {
+        use transient_crypto::curve::Fr;
+
+        // The Impact contains a single `Push` of a `Cell` whose alignment
+        // is one `Field` atom and whose operand is the immediate `0x30`.
+        // The serialized shape of the nested `Alignment` /
+        // `AlignmentSegment` / `AlignmentAtom` types is:
+        //   Alignment        — `#[serde(transparent)]` → `[..segments..]`
+        //   AlignmentSegment — `#[serde(tag,content)]` → `{"tag":"atom","value":{..atom..}}`
+        //   AlignmentAtom    — `#[serde(tag)]`         → `{"tag":"field"}`
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
@@ -622,10 +682,46 @@ mod proof_tests {
                { "op": "constrain_bits", "val": "%v_1", "bits": 248 },
                { "op": "cond_select", "bit": "%v_0", "a": "0x00", "b": "0x01", "output": "%v_2" },
                { "op": "assert", "cond": "%v_2" },
-               { "op": "impact", "guard": "0x01", "inputs": ["0x30"] }
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["0x30"]
+                               }
+                           }
+                       }
+                   ],
+                   "read_results": []
+               }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        // Field-element contribution of the Impact's `Push` of a
+        // `Cell([Field], 0x30)`:
+        //   0x10 — opcode: `Push { storage: false }`
+        //   0x01 — `StateValue::Cell` tag
+        //   0x01 — alignment: 1 segment
+        //   -2   — alignment atom: `Field` tag
+        //   0x30 — value (the immediate)
+        // See `zkir_mode.rs` and `onchain-vm/src/ops.rs::impl FieldRepr for Op`
+        // for the canonical encoding; cross-encoder agreement is pinned by
+        // `zkir_mode::tests::push_runtime_matches_zkir`.
+        let impact_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            Fr::from(0x30u64),
+        ];
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
 
@@ -634,7 +730,7 @@ mod proof_tests {
             communications_commitment: None,
             inputs: vec![0.into(), 42.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![48.into()],
+            public_transcript_inputs: impact_pis.clone(),
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -650,7 +746,10 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [48.into(), 48.into()].into_iter())
+
+        let mut verifier_pis = vec![Fr::from(48u64)];
+        verifier_pis.extend(impact_pis);
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
             .unwrap();
     }
 
@@ -810,5 +909,72 @@ mod proof_tests {
             "Error message: {}",
             err
         );
+    }
+
+    /// Proves a circuit with an inactive-guard Impact (guard=0).
+    ///
+    /// The Impact contains a Dup op (opcode 0x30) which would produce a
+    /// non-zero field element if active. With guard=0, the circuit must
+    /// push zeros via select(0, val, 0), and the preprocessor must also
+    /// push zeros to pis. If either side pushes real values instead of
+    /// zeros, the pi_push cross-check fires during synthesis.
+    ///
+    /// The verifier sees a Noop{1} where the Dup would have been.
+    #[actix_rt::test]
+    async fn test_inactive_guard_impact() {
+        use midnight_zkir_v3::{Instruction, Operand, TypedIdentifier, ir_types::IrType};
+        use onchain_vm::ops::Op;
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![TypedIdentifier::new(
+                Identifier("%v_0".to_string()),
+                IrType::Native,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![
+                // Inactive Impact: guard=0, so ops don't execute.
+                // Dup{0} encodes as [0x30] — one non-zero field element.
+                Instruction::Impact {
+                    guard: Operand::Immediate(0.into()),
+                    ops: vec![Op::Dup { n: 0 }],
+                    read_results: vec![],
+                },
+                // Assert that input is 1 (so the circuit has something to do).
+                Instruction::Assert {
+                    cond: Operand::Variable(Identifier("%v_0".to_string())),
+                },
+            ]),
+        };
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // The inactive Impact produces 1 field element (Dup opcode),
+        // which appears as a Noop{1} (one zero) in the transcript.
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // Verifier PIs: [binding_input, 0 (Noop{1})]
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), 0.into()].into_iter())
+            .unwrap();
     }
 }
