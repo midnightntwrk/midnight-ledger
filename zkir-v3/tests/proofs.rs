@@ -13,8 +13,10 @@
 
 #[cfg(test)]
 mod proof_tests {
+    use group::Group;
+    use midnight_curves::JubjubSubgroup;
     use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
-    use rand::SeedableRng;
+    use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
@@ -324,14 +326,12 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0_x", "type": "Scalar<BLS12-381>" },
-              { "name": "%p0_y", "type": "Scalar<BLS12-381>" },
+              { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<BLS12-381>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
                { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" }
@@ -730,6 +730,220 @@ mod proof_tests {
             .unwrap();
         vk2.verify(&PARAMS_VERIFIER, &proof2, [88.into()].into_iter())
             .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_ops() {
+        // Exercises test_eq (asserted), constrain_eq, and cond_select on JubjubPoint
+        // in a single circuit so every op is actively tested without dead values.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
+               { "op": "assert", "cond": "%v0" },
+               { "op": "constrain_eq", "a": "%p0", "b": "%p1" },
+               { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // p0 == p1 == generator, bit == 1
+        let p = EmbeddedGroupAffine::generator();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+                1.into(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_test_eq_unequal() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
+               { "op": "not", "a": "%v0", "output": "%v1" },
+               { "op": "assert", "cond": "%v1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_constrain_eq_fails_on_unequal() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_eq", "a": "%p0", "b": "%p1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // Different points: constrain_eq should fail
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+        let preimage_fail = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage_fail
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "constrain_eq on different JubjubPoints should fail"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_cond_select_fails_when_bit_zero() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+
+        // bit=0 selects p1 (!=p0), constrain_eq(p2, p0) should fail
+        let preimage_fail = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+                0.into(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage_fail
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "cond_select with bit=0 should select p1, failing constrain_eq against p0"
+        );
     }
 
     #[test]

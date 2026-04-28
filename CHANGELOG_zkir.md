@@ -1,5 +1,7 @@
 # `zkir` Changelog
 
+- feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
+
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes
