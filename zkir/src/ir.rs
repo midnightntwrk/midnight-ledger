@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
@@ -33,8 +33,10 @@ use transient_crypto::proofs::{
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v2]"]
+#[tag = "ir-source[v2-generic]"]
 pub struct IrSource {
+    /// The minor version of this IR.
+    pub version: IrMinorVersion,
     /// The number of inputs, the initial elements in the memory
     pub num_inputs: u32,
     /// Whether or not this IR should compile a communications commitment
@@ -44,6 +46,53 @@ pub struct IrSource {
 }
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
+
+#[derive(Serializable, Clone)]
+#[tag = "ir-source[v2]"]
+pub(crate) struct OldIrSource {
+    pub(crate) num_inputs: u32,
+    pub(crate) do_communications_commitment: bool,
+    pub(crate) instructions: Arc<Vec<Instruction>>,
+}
+
+impl From<OldIrSource> for IrSource {
+    fn from(value: OldIrSource) -> Self {
+        IrSource {
+            version: IrMinorVersion::V0,
+            num_inputs: value.num_inputs,
+            do_communications_commitment: value.do_communications_commitment,
+            instructions: value.instructions,
+        }
+    }
+}
+
+impl From<IrSource> for OldIrSource {
+    fn from(value: IrSource) -> Self {
+        OldIrSource {
+            num_inputs: value.num_inputs,
+            do_communications_commitment: value.do_communications_commitment,
+            instructions: value.instructions,
+        }
+    }
+}
+
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(
+    Clone, Debug, PartialEq, serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Serializable,
+)]
+#[tag = "ir-minor-version[v2]"]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum IrMinorVersion {
+    V0,
+    V1,
+}
+
+impl Default for IrMinorVersion {
+    fn default() -> Self {
+        IrMinorVersion::V1
+    }
+}
 
 impl Zkir for IrSource {
     fn check(
@@ -74,6 +123,32 @@ impl Zkir for IrSource {
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
+        Self::load_from_tagged(reader)
+    }
+
+    fn load_prover_key_from_tagged(mut reader: impl Read + Seek) -> io::Result<ProverKey<Self>> {
+        let pos = reader.stream_position()?;
+        // We try to first deserialize as the generic version. If this with an 'expected
+        // header tag' error, we rewind, and try again with the old tag.
+        match serialize::tagged_deserialize::<ProverKey<IrSource>>(&mut reader) {
+            Ok(v) => return Ok(v),
+            Err(e) if !e.to_string().contains("expected header tag") => return Err(e),
+            _ => {}
+        }
+        reader.seek(io::SeekFrom::Start(pos))?;
+        #[derive(Serializable)]
+        #[tag = "prover-key[v7](ir-source[v2])"]
+        struct FakeProverKey(Vec<u8>);
+        let FakeProverKey(data) = serialize::tagged_deserialize::<FakeProverKey>(reader)?;
+        let mut header = Vec::new();
+        Serializable::serialize(&(data.len() as u32), &mut header)?;
+        let mut header_cursor = &header[..];
+        let mut data_cursor = &data[..];
+        let mut reader = Read::chain(&mut header_cursor, &mut data_cursor);
+        Deserializable::deserialize(&mut reader, 0)
     }
 }
 
@@ -386,11 +461,28 @@ impl IrSource {
         }
     }
 
+    /// Attempts to load from a tagged source, which may be *either* of
+    /// - `ir-source[v2-generic]`
+    /// - `ir-source[v2]`
+    /// This is due to a need for a backwards-compatible format change.
+    pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
+        let pos = reader.stream_position()?;
+        // We try to first deserialize as the generic version. If this with an 'expected
+        // header tag' error, we rewind, and try again with the old tag.
+        match serialize::tagged_deserialize::<IrSource>(&mut reader) {
+            Ok(v) => return Ok(v),
+            Err(e) if !e.to_string().contains("expected header tag") => return Err(e),
+            _ => {}
+        }
+        reader.seek(io::SeekFrom::Start(pos))?;
+        serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
+    }
+
     /// Attempts to parse an arbitrary input as IR.
     pub fn load<R: Read>(reader: R) -> io::Result<Self> {
         let value: serde_json::Value = serde_json::from_reader(reader)?;
-        match &value {
-            serde_json::Value::Object(obj) => {
+        match value {
+            serde_json::Value::Object(mut obj) => {
                 let ver = serde_json::from_value(
                     obj.get("version")
                         .ok_or(io::Error::new(
@@ -400,7 +492,16 @@ impl IrSource {
                         .clone(),
                 )?;
                 match ver {
-                    SerdeVersion { major: 2, minor: 0 } => Ok(serde_json::from_value(value)?),
+                    SerdeVersion {
+                        major: 2,
+                        minor: 0..=1,
+                    } => {
+                        obj.insert(
+                            "version".into(),
+                            serde_json::Value::Number(ver.minor.into()),
+                        );
+                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                    }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Unhandled version: {major}.{minor}"),

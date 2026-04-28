@@ -16,7 +16,6 @@ extern crate tracing;
 
 use base_crypto::rng::SplittableRng;
 use rand::{CryptoRng, Rng};
-use serialize::tagged_deserialize;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProvingProvider, Resolver,
@@ -57,7 +56,7 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
                     preimage.key_location.0
                 )
             })?;
-        let ir: IrSource = tagged_deserialize(&mut &proving_data.ir_source[..])?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
         preimage.check(&ir)
     }
     async fn prove(

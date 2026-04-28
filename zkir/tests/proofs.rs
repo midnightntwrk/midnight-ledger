@@ -422,6 +422,7 @@ mod proof_tests {
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        dbg!(&ir);
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let mut pk_data = Vec::new();

@@ -37,7 +37,6 @@ use serialize::{
 };
 #[cfg(feature = "proptest")]
 use serialize::{NoStrategy, simple_arbitrary};
-use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
 use std::io::{self, Read};
@@ -46,6 +45,7 @@ use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 use std::{any::Any, cmp::Ordering};
 use std::{borrow::Cow, num::NonZeroUsize};
+use std::{fmt::Debug, io::Seek};
 use storage_core::Storable;
 use storage_core::arena::ArenaKey;
 use storage_core::db::DB;
@@ -149,7 +149,7 @@ impl<T: Zkir> From<MidnightPK<T>> for ProverKey<T> {
 
 /// An intermediate representation for Midnight's circuits.
 #[allow(async_fn_in_trait)]
-pub trait Zkir: Relation + Tagged + Deserializable + Any + Send + Sync + Debug {
+pub trait Zkir: Relation + Any + Send + Sync + Debug {
     /// Check that a proof preimage satisfies the circuit
     ///
     /// Returns which outputs were skipped in the proof preimage, and how many
@@ -206,6 +206,14 @@ pub trait Zkir: Relation + Tagged + Deserializable + Any + Send + Sync + Debug {
 
         Ok((ProverKey::from(pk), VerifierKey::from(vk)))
     }
+
+    /// Loads IR from a tagged serialization. Separated from `Deserializable` to allow for
+    /// backwards-compatible deserialization of old variants.
+    fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self>;
+
+    /// Loads a prover key from a tagged serialization. Separated from `Deserializable` to allow
+    /// for backwards-compatible deserialization of old variants.
+    fn load_prover_key_from_tagged(reader: impl Read + Seek) -> io::Result<ProverKey<Self>>;
 }
 
 impl<T: Zkir> PartialEq for ProverKey<T> {
@@ -237,7 +245,7 @@ pub(crate) enum InnerProverKey<T: Zkir> {
     Initialized(Arc<MidnightPK<T>>),
 }
 
-impl<T: Zkir> Tagged for ProverKey<T> {
+impl<T: Zkir + Tagged> Tagged for ProverKey<T> {
     fn tag() -> Cow<'static, str> {
         Cow::Owned(format!("prover-key[v7]({})", T::tag()))
     }
@@ -744,9 +752,10 @@ impl ProofPreimage {
                 "failed to find proving key for '{}'",
                 &self.key_location.0
             )))?;
-        let ir = tagged_deserialize::<Z>(&mut &proof_data.ir_source[..])?;
+        let ir = Z::load_ir_from_tagged(io::Cursor::new(&proof_data.ir_source[..]))?;
         let verifier_key = tagged_deserialize::<VerifierKey>(&mut &proof_data.verifier_key[..])?;
-        let prover_key = tagged_deserialize::<ProverKey<Z>>(&mut &proof_data.prover_key[..])?;
+        let prover_key =
+            Z::load_prover_key_from_tagged(io::Cursor::new(&proof_data.prover_key[..]))?;
         let (proof, pis, pi_skips) = ir.prove(rng, params, prover_key, self).await?;
         debug!("proof created; verifying to make sure");
         let k = verifier_key.force_init()?.k();

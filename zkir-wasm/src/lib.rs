@@ -167,7 +167,7 @@ pub async fn check(ser_preimage: Uint8Array, provider: JsValue) -> Result<Vec<Js
             &preimage.key_location.0
         )));
     };
-    let ir: IrSource = tagged_deserialize(&mut &data.ir_source[..])?;
+    let ir = IrSource::load_from_tagged(std::io::Cursor::new(&data.ir_source[..]))?;
     let res = preimage
         .check(&ir)
         .map_err(|e| JsError::new(&e.to_string()))?;
@@ -244,7 +244,7 @@ impl Zkir {
 
     #[wasm_bindgen]
     pub fn deserialize(bytes: Uint8Array) -> Result<Self, JsError> {
-        let ir: IrSource = tagged_deserialize(&mut &bytes.to_vec()[..])?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&bytes.to_vec()[..]))?;
         Ok(Self(ir))
     }
 

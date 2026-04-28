@@ -3331,6 +3331,7 @@ dependencies = [
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
  "midnight-zkir",
+ "num-bigint",
  "pastey",
  "proptest",
  "proptest-derive",
@@ -3339,6 +3340,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "serde_repr",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -3376,6 +3378,7 @@ dependencies = [
  "serde",
  "serde_bytes",
  "serde_json",
+ "serde_repr",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -4765,6 +4768,17 @@ dependencies = [
  "serde",
  "serde_core",
  "zmij",
+]
+
+[[package]]
+name = "serde_repr"
+version = "0.1.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "175ee3e80ae9982737ca543e96133087cbd9a485eecc3bc4de9c1a37b47ea59c"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
