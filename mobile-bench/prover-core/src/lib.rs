@@ -22,6 +22,14 @@ pub type Result<T> = std::result::Result<T, Error>;
 mod params;
 mod zkir_example;
 
+#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+mod http;
+#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+mod server;
+
+#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+pub use server::{LocalServer, spawn_local_server};
+
 #[derive(Debug, Clone)]
 pub struct BenchOpts {
     pub verify_after: bool,

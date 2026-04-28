@@ -4078,6 +4078,7 @@ dependencies = [
 name = "prover-core"
 version = "0.1.0"
 dependencies = [
+ "actix-web",
  "anyhow",
  "criterion",
  "futures",
