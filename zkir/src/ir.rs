@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
-use std::io::{self, Read, Seek};
+use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
@@ -78,20 +78,22 @@ impl From<IrSource> for OldIrSource {
 
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(
-    Clone, Debug, PartialEq, serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Serializable,
+    Copy,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
+    Serializable,
 )]
 #[tag = "ir-minor-version[v2]"]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum IrMinorVersion {
     V0,
+    #[default]
     V1,
-}
-
-impl Default for IrMinorVersion {
-    fn default() -> Self {
-        IrMinorVersion::V1
-    }
 }
 
 impl Zkir for IrSource {
@@ -141,8 +143,8 @@ impl Zkir for IrSource {
         reader.seek(io::SeekFrom::Start(pos))?;
         #[derive(Serializable)]
         #[tag = "prover-key[v7](ir-source[v2])"]
-        struct FakeProverKey(Vec<u8>);
-        let FakeProverKey(data) = serialize::tagged_deserialize::<FakeProverKey>(reader)?;
+        struct FacadeProverKey(Vec<u8>);
+        let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
         let mut header = Vec::new();
         Serializable::serialize(&(data.len() as u32), &mut header)?;
         let mut header_cursor = &header[..];
@@ -464,6 +466,7 @@ impl IrSource {
     /// Attempts to load from a tagged source, which may be *either* of
     /// - `ir-source[v2-generic]`
     /// - `ir-source[v2]`
+    ///
     /// This is due to a need for a backwards-compatible format change.
     pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
         let pos = reader.stream_position()?;
@@ -476,6 +479,15 @@ impl IrSource {
         }
         reader.seek(io::SeekFrom::Start(pos))?;
         serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
+    }
+
+    /// Writes out with tag, preserving v0's old tag structure.
+    pub fn serialize_to_tagged<W: Write>(&self, writer: W) -> io::Result<()> {
+        if self.version == IrMinorVersion::V0 {
+            serialize::tagged_serialize(&OldIrSource::from(self.clone()), writer)
+        } else {
+            serialize::tagged_serialize(self, writer)
+        }
     }
 
     /// Attempts to parse an arbitrary input as IR.

@@ -24,7 +24,7 @@ use transient_crypto::proofs::{
 mod ir;
 mod ir_vm;
 
-pub use ir::{Instruction, IrSource};
+pub use ir::{Instruction, IrMinorVersion, IrSource};
 pub use ir_vm::Preprocessed;
 
 /// Implements `ProvingProvider` locally

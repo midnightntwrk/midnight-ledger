@@ -33,7 +33,7 @@ use crate::ir_types::IrType;
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3]"]
+#[tag = "ir-source[v3-generic]"]
 pub struct IrSource {
     /// The minor version of this IR.
     pub version: IrMinorVersion,
@@ -49,12 +49,19 @@ tag_enforcement_test!(ProverKey<IrSource>);
 
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(
-    Clone, Debug, PartialEq, serde_repr::Serialize_repr, serde_repr::Deserialize_repr, Serializable,
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
+    Serializable,
 )]
 #[tag = "ir-minor-version[v3]"]
 #[repr(u8)]
 #[non_exhaustive]
 pub enum IrMinorVersion {
+    #[default]
     V0,
 }
 
@@ -614,8 +621,8 @@ impl IrSource {
     /// Attempts to parse an arbitrary input as IR.
     pub fn load<R: Read>(reader: R) -> io::Result<Self> {
         let value: serde_json::Value = serde_json::from_reader(reader)?;
-        match &value {
-            serde_json::Value::Object(obj) => {
+        match value {
+            serde_json::Value::Object(mut obj) => {
                 let ver = serde_json::from_value(
                     obj.get("version")
                         .ok_or(io::Error::new(
@@ -625,7 +632,16 @@ impl IrSource {
                         .clone(),
                 )?;
                 match ver {
-                    SerdeVersion { major: 3, minor: 0 } => Ok(serde_json::from_value(value)?),
+                    SerdeVersion {
+                        major: 3,
+                        minor: 0..=0,
+                    } => {
+                        obj.insert(
+                            "version".into(),
+                            serde_json::Value::Number(ver.minor.into()),
+                        );
+                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                    }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Unhandled version: {major}.{minor}"),
