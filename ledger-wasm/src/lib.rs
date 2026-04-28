@@ -29,7 +29,7 @@ pub mod zswap_wasm;
 
 use crate::dust::DustSecretKey;
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures;
+use base_crypto::schnorr;
 use coin_structure::{
     coin::{
         PublicKey as CoinPublicKey, ShieldedTokenType, UnshieldedTokenType, UserAddress,
@@ -181,7 +181,7 @@ pub fn dust_initial_nonce(output_no: u64, intent_hash: String) -> Result<String,
 
 #[wasm_bindgen(js_name = "addressFromKey")]
 pub fn address_from_key(key: &str) -> Result<String, JsError> {
-    let key: signatures::VerifyingKey = from_value_hex_ser(key)?;
+    let key: schnorr::VerifyingKey = from_value_hex_ser(key)?;
     to_value_hex_ser(&UserAddress::from(key))
 }
 

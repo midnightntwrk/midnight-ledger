@@ -18,7 +18,7 @@
 use base_crypto::fab::{AlignedValue, Value};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure::contract::ContractAddress;

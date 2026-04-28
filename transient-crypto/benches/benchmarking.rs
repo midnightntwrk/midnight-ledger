@@ -294,7 +294,7 @@ pub fn signature_verification(c: &mut Criterion) {
         group.bench_function(json.to_string(), |b| {
             let mut msg = vec![0u8; size];
             OsRng.fill_bytes(&mut msg);
-            let sk = base_crypto::signatures::SigningKey::sample(OsRng);
+            let sk = base_crypto::schnorr::SigningKey::sample(OsRng);
             let vk = sk.verifying_key();
             let sig = sk.sign(&mut OsRng, &msg);
             b.iter(|| vk.verify(black_box(&msg), black_box(&sig)))

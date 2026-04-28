@@ -14,8 +14,8 @@
 use crate::conversions::*;
 use crate::events::Event;
 use crate::state_changes::DustStateChanges;
-use base_crypto::signatures;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr;
+use base_crypto::schnorr::Signature;
 use base_crypto::time::{Duration, Timestamp};
 use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
@@ -236,7 +236,7 @@ impl DustRegistration {
     ) -> Result<DustRegistration, JsError> {
         let allow_fee_payment = u128::try_from(allow_fee_payment)
             .map_err(|_| JsError::new("allow_fee_payment is out of range"))?;
-        let night_key: signatures::VerifyingKey = from_value_hex_ser(night_key)?;
+        let night_key: schnorr::VerifyingKey = from_value_hex_ser(night_key)?;
         let dust_address = dust_address
             .map(bigint_to_fr)
             .transpose()?
@@ -332,7 +332,7 @@ impl DustRegistration {
 
     #[wasm_bindgen(setter, js_name = "nightKey")]
     pub fn set_night_key(&mut self, night_key: &str) -> Result<(), JsError> {
-        let night_key: signatures::VerifyingKey = from_value_hex_ser(night_key)?;
+        let night_key: schnorr::VerifyingKey = from_value_hex_ser(night_key)?;
         match &mut self.0 {
             DustRegistrationTypes::Signature(val) => val.night_key = night_key,
             DustRegistrationTypes::SignatureErased(val) => val.night_key = night_key,

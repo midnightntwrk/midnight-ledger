@@ -18,7 +18,7 @@ use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value
 use base_crypto::fab::{AlignedValue, Alignment, Value};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
-use base_crypto::{hash, signatures};
+use base_crypto::{hash, schnorr};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
 use hex::{FromHex, ToHex};
@@ -64,33 +64,33 @@ pub fn communication_commitment(
 
 #[wasm_bindgen(js_name = "sampleSigningKey")]
 pub fn sample_signing_key() -> Result<String, JsError> {
-    to_value_hex_ser(&signatures::SigningKey::sample(OsRng))
+    to_value_hex_ser(&schnorr::SigningKey::sample(OsRng))
 }
 
 #[wasm_bindgen(js_name = "signingKeyFromBip340")]
 pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<String, JsError> {
     to_value_hex_ser(
-        &signatures::SigningKey::from_bytes(&bytes.to_vec())
+        &schnorr::SigningKey::from_bytes(&bytes.to_vec())
             .map_err(|err| JsError::new(&err.to_string()))?,
     )
 }
 
 #[wasm_bindgen(js_name = "signData")]
 pub fn sign_data(key: &str, data: Uint8Array) -> Result<String, JsError> {
-    let key: signatures::SigningKey = from_value_hex_ser(key)?;
+    let key: schnorr::SigningKey = from_value_hex_ser(key)?;
     to_value_hex_ser(&key.sign(&mut OsRng, &data.to_vec()))
 }
 
 #[wasm_bindgen(js_name = "signatureVerifyingKey")]
 pub fn signature_verifying_key(key: &str) -> Result<String, JsError> {
-    let key: signatures::SigningKey = from_value_hex_ser(key)?;
+    let key: schnorr::SigningKey = from_value_hex_ser(key)?;
     to_value_hex_ser(&key.verifying_key())
 }
 
 #[wasm_bindgen(js_name = "verifySignature")]
 pub fn verify_signature(key: &str, data: Uint8Array, signature: &str) -> Result<bool, JsError> {
-    let key: signatures::VerifyingKey = from_value_hex_ser(key)?;
-    let signature: signatures::Signature = from_value_hex_ser(signature)?;
+    let key: schnorr::VerifyingKey = from_value_hex_ser(key)?;
+    let signature: schnorr::Signature = from_value_hex_ser(signature)?;
     Ok(key.verify(&data.to_vec(), &signature))
 }
 

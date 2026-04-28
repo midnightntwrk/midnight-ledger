@@ -16,7 +16,7 @@ use base_crypto::fab::AlignedValue;
 use base_crypto::time::{Duration, Timestamp};
 use base_crypto::{
     rng::SplittableRng,
-    signatures::{Signature, SigningKey},
+    schnorr::{Signature, SigningKey},
 };
 use coin_structure::coin::TokenType;
 use lazy_static::lazy_static;

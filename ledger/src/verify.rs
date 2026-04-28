@@ -28,7 +28,7 @@ use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures::VerifyingKey;
+use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::PublicAddress;
 use coin_structure::coin::{Commitment, Nullifier, TokenType};

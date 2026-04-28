@@ -19,7 +19,7 @@ use actix_web::web::{self, Bytes, BytesMut, Data, Payload};
 use actix_web::{Error, HttpResponse, HttpResponseBuilder, Responder, get, post};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::data_provider::{FetchMode, OutputMode};
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use futures_util::stream::StreamExt;
 use hex::ToHex;
 use introspection::Introspection;
