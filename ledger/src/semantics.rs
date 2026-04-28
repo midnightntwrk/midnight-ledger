@@ -586,7 +586,7 @@ impl<D: DB> LedgerState<D> {
                                 let fee = basis_points_of(
                                     state.parameters.cardano_to_midnight_bridge_fee_basis_points,
                                     *amount,
-                                );
+                                )?;
                                 (fee, amount - fee)
                             };
 
@@ -1488,17 +1488,16 @@ impl<D: DB> LedgerState<D> {
     }
 }
 
-const fn basis_points_of(points: u32, val: u128) -> u128 {
-    assert!(
-        points <= 10_000,
-        "cardano_to_midnight_bridge_fee_basis_points must not exceed 10_000"
-    );
+const fn basis_points_of(points: u32, val: u128) -> Result<u128, SystemTransactionError> {
+    if points <= 10_000 {
+        return Err(SystemTransactionError::InvalidBasisPoints(points));
+    }
 
     // `val` should never be high enough to overflow but let's do it safely regardless
     let quotient = val / 10_000;
     let remainder = val % 10_000;
 
-    quotient * points as u128 + (remainder * points as u128) / 10_000
+    Ok(quotient * points as u128 + (remainder * points as u128) / 10_000)
 }
 
 fn claim_unshielded<D: DB>(
