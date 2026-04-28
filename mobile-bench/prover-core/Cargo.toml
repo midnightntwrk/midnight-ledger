@@ -54,3 +54,9 @@ tracing-subscriber = "0.3"
 name = "proofs"
 harness = false
 required-features = ["bench"]
+
+# bench-runner: small standalone binary runnable on Android (adb push) and
+# desktop. Prints a single JSON line per run with prove/verify latency.
+[[bin]]
+name = "bench-runner"
+path = "src/bin/bench_runner.rs"
