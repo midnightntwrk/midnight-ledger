@@ -27,6 +27,7 @@ members = [
     "static",
     "storage-core",
     "mobile-bench/prover-core",
+    "mobile-bench/dioxus-bench",
 ]
 default-members = [
     "zswap",

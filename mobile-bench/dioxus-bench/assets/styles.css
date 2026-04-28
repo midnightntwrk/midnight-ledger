@@ -1,0 +1,7 @@
+body { font-family: -apple-system, sans-serif; padding: 20px; }
+h1 { font-size: 1.4rem; }
+.row { margin: 12px 0; display: flex; gap: 8px; align-items: center; }
+.status { margin: 16px 0; font-family: ui-monospace, monospace; }
+.result { border: 1px solid #ddd; border-radius: 6px; padding: 12px; margin-top: 12px; }
+.result div { font-family: ui-monospace, monospace; }
+button[disabled] { opacity: 0.5; }

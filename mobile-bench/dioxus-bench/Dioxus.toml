@@ -1,0 +1,8 @@
+[application]
+name = "dioxus-bench"
+default_platform = "desktop"
+asset_dir = "assets"
+
+[application.android]
+package = "io.iohk.midnight.bench"
+label = "Midnight Proof Bench"
