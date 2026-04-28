@@ -27,8 +27,9 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 parity-db = { version = "0.5.2", optional = true }
 
 archery = "^1.2.2"
-crypto = { version = "0.5.1", features = ["digest"] }
-sha2 = "0.10.9"
+digest = "^0.11.2"
+crypto = "0.5.1"
+sha2 = "0.11.0"
 derive-where = "^1.6.1"
 macros = { version = "1.0.0", path = "../storage-macros", package = "midnight-storage-macros" }
 
@@ -42,7 +43,7 @@ parking_lot = "^0.12.4"
 # proptest 1.7.0+ rely on rand 0.9.0, which we are not yet updating to.
 proptest = { version = "~1.6.0", optional = true }
 proptest-derive = { version = "0.8", optional = true }
-lru = "0.16.0"
+lru = "0.17.0"
 # The "bundled" feature means rusqlite will build its own libsqlite3 instead of
 # using OS provided version. The latest version of rusqlite, 0.32.1, is not
 # compatible with our rustc version.
@@ -58,13 +59,13 @@ r2d2 = { version = "0.8.10", optional = true }
 konst = "0.4.3"
 fs2 = { version = "0.4.3", optional = true }
 tempfile = "3.20"
-hashbrown = { version = "^0.16.0", optional = true }
+hashbrown = { version = "^0.17.0", optional = true }
 
 # Dev dependencies required here otherwise `cargo doc` fails
 criterion = { version = "^0.5.1", optional = true }
 itertools = "^0.14.0"
 pprof = { version = "0.15", optional = true, features = ["criterion", "flamegraph"] }
-sysinfo = "0.34.2"
+sysinfo = "0.38.4"
 
 [dev-dependencies]
 storage-core = { path = ".", package = "midnight-storage-core", features = ["test-utilities", "gc-v1"] }

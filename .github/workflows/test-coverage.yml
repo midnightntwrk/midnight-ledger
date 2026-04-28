@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 #v5.0.0
 
       - name: Install Nix
-        uses: cachix/install-nix-action@51f3067b56fe8ae331890c77d4e454f6d60615ff # v31.10.2
+        uses: cachix/install-nix-action@ab739621df7a23f52766f9ccc97f38da6b7af14f # v31.10.5
         with:
           nix_path: nixpkgs=channel:nixos-unstable
           extra_nix_config: |
@@ -72,14 +72,14 @@ jobs:
           grcov . --binary-path ./target/debug/deps/ -s . -t lcov --ignore-not-existing --ignore '../*' --ignore "/*" --ignore "*tests*" -o target/coverage/tests.lcov
 
       - name: Upload test report artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: success() || failure()
         with:
           name: Coverage Report
           path: target/coverage/html
 
       - name: Upload lcov test report artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: success() || failure()
         with:
           name: Lcov Coverage Report
