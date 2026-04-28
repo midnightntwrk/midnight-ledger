@@ -13,14 +13,13 @@
 
 use std::borrow::Cow;
 
-use crate::state::from_maybe_string;
-use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 use base_crypto::fab::{AlignedValue, Alignment, Value};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
 use base_crypto::{hash, signatures};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
+
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, JsString, Uint8Array};
 use onchain_runtime::ops::Op;
@@ -28,14 +27,18 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::EntryPointBuf;
 use rand::Rng;
 use rand::rngs::OsRng;
+
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
 use transient_crypto;
-use transient_crypto::curve;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{self, EmbeddedFr, Fr, embedded, outer};
 use transient_crypto::fab::{AlignedValueExt, AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::repr::FieldRepr;
+
 use wasm_bindgen::prelude::*;
+
+use crate::state::from_maybe_string;
+use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 
 #[wasm_bindgen(js_name = "entryPointHash")]
 pub fn entry_point_hash(entry_point: JsValue) -> Result<String, JsError> {
@@ -237,6 +240,19 @@ pub fn bigint_mod_fr(x: BigInt) -> Result<BigInt, JsError> {
     value_to_bigint(bigint_to_value(x)?)
 }
 
+#[wasm_bindgen(js_name = "maxJubjubScalar")]
+/// Returns the largest representable JubJub scalar (i.e. the JubJub scalar field modulus minus one).
+pub fn max_jubjub_scalar() -> Result<BigInt, JsError> {
+    // -1 is the largest representable value in the JubJub scalar field
+    let mut bytes = (-EmbeddedFr::from(1u64)).as_le_bytes();
+    bytes.reverse();
+    BigInt::new(&JsString::from(format!(
+        "0x{}",
+        bytes.encode_hex::<String>()
+    )))
+    .map_err(|err| JsError::new(&String::from(err.to_string())))
+}
+
 #[wasm_bindgen(js_name = "valueToBigInt")]
 // function valueToBigInt(x: Value): BigInt
 pub fn value_to_bigint(x: JsValue) -> Result<BigInt, JsError> {
@@ -398,4 +414,36 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     let val: Value = from_value(val)?;
     let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&*val)?;
     Ok(to_value(&Value::from(res))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubSampleScalar")]
+/// Sample a random JubJub scalar, returned as a native field element.
+pub fn jubjub_sample_scalar() -> Result<JsValue, JsError> {
+    let native = OsRng.r#gen::<Fr>();
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&native.0.to_bytes_le());
+    let embedded = embedded::Scalar::from_bytes_wide(&wide);
+    Ok(to_value(&Value::from(EmbeddedFr(embedded)))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubScalarFromNative")]
+/// Converts a native field element (BLS12-381 scalar) to a JubJub scalar field element,
+/// reducing modulo the JubJub scalar field modulus.
+pub fn jubjub_scalar_from_native(native: JsValue) -> Result<JsValue, JsError> {
+    let val: Value = from_value(native)?;
+    let fr = curve::Fr::try_from(&*val)?;
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&fr.0.to_bytes_le());
+    let embedded = embedded::Scalar::from_bytes_wide(&wide);
+    Ok(to_value(&Value::from(EmbeddedFr(embedded)))?)
+}
+
+#[wasm_bindgen(js_name = "nativeFromJubjubScalar")]
+/// Converts a JubJub scalar field element to a native field element (BLS12-381 scalar).
+pub fn native_from_jubjub_scalar(jubjub: JsValue) -> Result<JsValue, JsError> {
+    let val: Value = from_value(jubjub)?;
+    let embedded = curve::EmbeddedFr::try_from(&*val)?;
+    let native = outer::Scalar::from_bytes_le(&embedded.0.to_bytes())
+        .expect("Jubjub scalar always fits as a native field element");
+    Ok(to_value(&Value::from(Fr(native)))?)
 }
