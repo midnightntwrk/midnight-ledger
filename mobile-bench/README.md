@@ -11,11 +11,41 @@ Layout:
 - `prover-core/` — embeddable Rust crate that wraps Midnight's proving
   primitives. Used by both the dioxus-bench app and `cargo test` /
   `cargo bench`.
+- `dioxus-bench/` — Dioxus 0.6 desktop+Android UI calling into prover-core.
 - `fixtures/` — vendored zkir test artifacts (kept for future use; the
   iteration-1 zkir example uses an inline raw-IR string instead, see
   `prover-core/src/zkir_example.rs`).
 - `scripts/setup-android-toolchain.sh` — one-shot macOS toolchain installer
   for desktop + Android (emulator and device) builds.
+- `RESULTS.md` — captured latency numbers per surface.
+
+## Tests and benches
+
+```bash
+# Library path
+MIDNIGHT_PP="$HOME/.cache/midnight/zk-params" \
+  cargo test -p prover-core --test library_path
+
+# HTTP path (desktop only — spawns midnight-proof-server in-process)
+MIDNIGHT_PP="$HOME/.cache/midnight/zk-params" \
+  cargo test -p prover-core --features proof-server-http --test http_path
+
+# Criterion bench
+MIDNIGHT_PP="$HOME/.cache/midnight/zk-params" \
+  cargo bench -p prover-core --features bench --bench proofs
+```
+
+## Run the desktop UI
+
+The Dioxus app uses the 0.6 series; install the matching CLI:
+
+```bash
+cargo install dioxus-cli --version "^0.6"
+cd mobile-bench/dioxus-bench
+dx serve --platform desktop
+```
+
+(The 0.7.x dx panics on this workspace's cargo metadata; pin 0.6.)
 
 ## Cross-compile notes
 
