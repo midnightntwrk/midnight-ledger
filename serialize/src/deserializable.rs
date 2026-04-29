@@ -69,11 +69,7 @@ pub fn peek_tag(reader: &mut (impl Read + Seek)) -> std::io::Result<String> {
         .enumerate()
         .filter(|(_, b)| **b == b':')
         .nth(1)
-        .ok_or_else(|| {
-            err(format!(
-                "tagged data does not begin with a colon-separated tag"
-            ))
-        })?
+        .ok_or_else(|| err("tagged data does not begin with a colon-separated tag".to_string()))?
         .0;
     let raw_tag = &buf[GLOBAL_TAG.len()..second_colon];
     String::from_utf8(raw_tag.to_owned())
