@@ -250,7 +250,7 @@ impl Zkir {
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut buf = Vec::new();
-        tagged_serialize(&self.0, &mut buf)?;
+        self.0.serialize_to_tagged(&mut buf)?;
         Ok(buf[..].into())
     }
 }

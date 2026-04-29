@@ -38,7 +38,7 @@ use midnight_proofs::{
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
-use serialize::{Deserializable, Serializable, VecExt};
+use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use transient_crypto::curve::outer;
@@ -1105,10 +1105,13 @@ impl Relation for IrSource {
     }
 
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        Serializable::serialize(&self, writer)
+        let mut raw = Vec::new();
+        tagged_serialize(&self, &mut raw)?;
+        raw.serialize(writer)
     }
 
     fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Deserializable::deserialize(reader, 0)
+        let raw: Vec<u8> = Deserializable::deserialize(reader, 0)?;
+        tagged_deserialize(&mut &raw[..])
     }
 }
