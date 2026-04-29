@@ -433,6 +433,13 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class DustGenerationTreeInsertionPath {
+  constructor();
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): DustGenerationTreeInsertionPath;
+  toString(compact?: boolean): string;
+}
+
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
   static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
@@ -487,6 +494,7 @@ export class DustLocalState {
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
   applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  updateGenerationTreeFromEvidence(evidence: DustGenerationTreeInsertionPath): DustLocalState;
   generatingTreeRoot(): bigint | undefined;
   insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
   removeCommitment(commitmentIndex: bigint): DustLocalState;
