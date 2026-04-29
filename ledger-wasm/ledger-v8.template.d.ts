@@ -434,7 +434,7 @@ export class DustGenerationState {
 }
 
 export class DustGenerationTreeInsertionPath {
-  constructor();
+  constructor(state: DustGenerationState, index: bigint);
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustGenerationTreeInsertionPath;
   toString(compact?: boolean): string;

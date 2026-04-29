@@ -1650,10 +1650,16 @@ pub struct DustGenerationTreeInsertionPath(
 #[wasm_bindgen]
 impl DustGenerationTreeInsertionPath {
     #[wasm_bindgen(constructor)]
-    pub fn new() -> Result<DustGenerationTreeInsertionPath, JsError> {
-        Err(JsError::new(
-            "DustGenerationTreeInsertionPath cannot be constructed directly through the WASM API.",
-        ))
+    pub fn new(
+        state: &DustGenerationState,
+        index: u64,
+    ) -> Result<DustGenerationTreeInsertionPath, JsError> {
+        state
+            .0
+            .generating_tree
+            .insertion_evidence(index)
+            .map(DustGenerationTreeInsertionPath)
+            .map_err(|_| JsError::new("invalid index into sparse merkle tree"))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
