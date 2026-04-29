@@ -610,7 +610,7 @@ impl Relation for IrSource {
                     // The negation is to ensure the bit bound. This may be
                     // excessive, but user input could violate it otherwise.
                     let result =
-                        std.select(layouter, &bit, idx(&memory, *b)?, idx(&memory, *a)?)?;
+                        std.select(layouter, &bit, idx(&memory, *a)?, idx(&memory, *b)?)?;
                     mem_push(result, &mut memory)?;
                 }
                 I::CondSelect { bit, a, b } => {
@@ -732,18 +732,23 @@ impl Relation for IrSource {
                 } if self.version == IrMinorVersion::V0 => {
                     let divisor_bits = std.assigned_to_le_bits(
                         layouter,
-                        idx(&memory, *divisor)?,
-                        Some(FR_BITS - *bits as usize),
-                        true,
+                        &divisor,
+                        &(BigUint::from(1u32) << (FR_BITS as u32 - *bits)),
                     )?;
-                    let modulus_bits = std.assigned_to_le_bits(
+                    std.assert_lower_than_fixed(
                         layouter,
-                        idx(&memory, *modulus)?,
-                        Some(*bits as usize),
-                        true,
+                        &modulus,
+                        &(BigUint::from(1u32) << *bits),
                     )?;
-                    let reconstituted = std
-                        .assigned_from_le_bits(layouter, &[modulus_bits, divisor_bits].concat())?;
+
+                    let reconstituted = std.linear_combination(
+                        layouter,
+                        &[
+                            (outer::Scalar::from(1), modulus),
+                            (outer::Scalar::from(2).pow([*bits as u64]), divisor),
+                        ],
+                        outer::Scalar::from(0),
+                    )?;
                     mem_push(reconstituted, &mut memory)?;
                 }
                 I::ReconstituteField {
