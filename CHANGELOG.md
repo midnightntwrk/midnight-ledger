@@ -6,6 +6,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased
 
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
 - fix: fix potential panic in bridge fee processing
 - fix: address non-associativity of Dust event processing.

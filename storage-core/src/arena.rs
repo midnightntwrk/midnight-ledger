@@ -910,7 +910,7 @@ impl<D: DB> Arena<D> {
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
-            key_to_child_repr,
+            key_to_child_repr: Rc::new(key_to_child_repr),
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -1082,7 +1082,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
-    key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
+    key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
 }
 
 #[cfg(test)]
@@ -1097,7 +1097,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             all,
             recursion_depth: 0,
             visited: Rc::new(RefCell::new(HashSet::new())),
-            key_to_child_repr,
+            key_to_child_repr: Rc::new(key_to_child_repr),
         }
     }
 }
