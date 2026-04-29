@@ -17,12 +17,11 @@
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use midnight_zkir::{IrMinorVersion, IrSource};
+use midnight_zkir::IrSource;
 use serialize::tagged_serialize;
-use serialize::{Deserializable, Serializable, Tagged};
 use std::ffi::OsString;
 use std::fs::File;
-use std::io::{self, BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tracing::info;
@@ -30,7 +29,7 @@ use tracing::level_filters::LevelFilter;
 use tracing_subscriber::Registry;
 use tracing_subscriber::filter::Targets;
 use tracing_subscriber::prelude::*;
-use transient_crypto::proofs::{ProverKey, Zkir};
+use transient_crypto::proofs::Zkir;
 
 #[derive(Parser)]
 #[clap(version, about, long_about = None)]
