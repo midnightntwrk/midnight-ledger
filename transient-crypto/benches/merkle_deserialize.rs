@@ -34,7 +34,7 @@ use storage_core::db::InMemoryDB;
 fn build_tree(n: u64) -> MerkleTree<(), InMemoryDB> {
     (0..n)
         .fold(MerkleTree::<(), InMemoryDB>::blank(32), |mt, i| {
-            mt.update(i, &Fr::from(i), ())
+            mt.try_update(i, &Fr::from(i), ()).unwrap()
         })
         .rehash()
 }
