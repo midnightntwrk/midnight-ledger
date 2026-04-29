@@ -610,7 +610,7 @@ impl Relation for IrSource {
                     // The negation is to ensure the bit bound. This may be
                     // excessive, but user input could violate it otherwise.
                     let result =
-                        std.select(layouter, &bit, idx(&memory, *a)?, idx(&memory, *b)?)?;
+                        std.select(layouter, &bit, idx(&memory, *b)?, idx(&memory, *a)?)?;
                     mem_push(result, &mut memory)?;
                 }
                 I::CondSelect { bit, a, b } => {

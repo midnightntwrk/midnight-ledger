@@ -146,9 +146,9 @@ impl Zkir for IrSource {
         let tag = peek_tag(&mut reader)?;
         let expected_tag_new = <ProverKey<IrSource>>::tag();
         let expected_tag_old = FacadeProverKey::tag();
-        if &tag == &expected_tag_new {
+        if tag == expected_tag_new {
             serialize::tagged_deserialize(&mut reader)
-        } else if &tag == &expected_tag_old {
+        } else if tag == expected_tag_old {
             let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
             let mut header = Vec::new();
             Serializable::serialize(&(data.len() as u32), &mut header)?;
@@ -485,9 +485,9 @@ impl IrSource {
         let tag = peek_tag(&mut reader)?;
         let expected_tag_new = IrSource::tag();
         let expected_tag_old = OldIrSource::tag();
-        if &tag == &expected_tag_new {
+        if tag == expected_tag_new {
             serialize::tagged_deserialize(&mut reader)
-        } else if &tag == &expected_tag_old {
+        } else if tag == expected_tag_old {
             serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
         } else {
             Err(io::Error::new(
