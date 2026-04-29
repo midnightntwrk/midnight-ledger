@@ -22,7 +22,9 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use serialize::{
+    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_serialize,
+};
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
@@ -66,12 +68,17 @@ impl From<OldIrSource> for IrSource {
     }
 }
 
-impl From<IrSource> for OldIrSource {
-    fn from(value: IrSource) -> Self {
-        OldIrSource {
-            num_inputs: value.num_inputs,
-            do_communications_commitment: value.do_communications_commitment,
-            instructions: value.instructions,
+impl TryFrom<&IrSource> for OldIrSource {
+    type Error = ();
+    fn try_from(value: &IrSource) -> Result<Self, ()> {
+        if value.version == IrMinorVersion::V0 {
+            Ok(OldIrSource {
+                num_inputs: value.num_inputs,
+                do_communications_commitment: value.do_communications_commitment,
+                instructions: value.instructions.clone(),
+            })
+        } else {
+            Err(())
         }
     }
 }
@@ -95,6 +102,10 @@ pub enum IrMinorVersion {
     #[default]
     V1,
 }
+
+#[derive(Serializable)]
+#[tag = "prover-key[v7](ir-source[v2])"]
+struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
     fn check(
@@ -132,25 +143,27 @@ impl Zkir for IrSource {
     }
 
     fn load_prover_key_from_tagged(mut reader: impl Read + Seek) -> io::Result<ProverKey<Self>> {
-        let pos = reader.stream_position()?;
-        // We try to first deserialize as the generic version. If this with an 'expected
-        // header tag' error, we rewind, and try again with the old tag.
-        match serialize::tagged_deserialize::<ProverKey<IrSource>>(&mut reader) {
-            Ok(v) => return Ok(v),
-            Err(e) if !e.to_string().contains("expected header tag") => return Err(e),
-            _ => {}
+        let tag = peek_tag(&mut reader)?;
+        let expected_tag_new = <ProverKey<IrSource>>::tag();
+        let expected_tag_old = FacadeProverKey::tag();
+        if &tag == &expected_tag_new {
+            serialize::tagged_deserialize(&mut reader)
+        } else if &tag == &expected_tag_old {
+            let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
+            let mut header = Vec::new();
+            Serializable::serialize(&(data.len() as u32), &mut header)?;
+            let mut header_cursor = &header[..];
+            let mut data_cursor = &data[..];
+            let mut reader = Read::chain(&mut header_cursor, &mut data_cursor);
+            Deserializable::deserialize(&mut reader, 0)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected one of '{expected_tag_new}' or '{expected_tag_old}', got '{tag}'."
+                ),
+            ))
         }
-        reader.seek(io::SeekFrom::Start(pos))?;
-        #[derive(Serializable)]
-        #[tag = "prover-key[v7](ir-source[v2])"]
-        struct FacadeProverKey(Vec<u8>);
-        let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
-        let mut header = Vec::new();
-        Serializable::serialize(&(data.len() as u32), &mut header)?;
-        let mut header_cursor = &header[..];
-        let mut data_cursor = &data[..];
-        let mut reader = Read::chain(&mut header_cursor, &mut data_cursor);
-        Deserializable::deserialize(&mut reader, 0)
     }
 }
 
@@ -469,24 +482,47 @@ impl IrSource {
     ///
     /// This is due to a need for a backwards-compatible format change.
     pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
-        let pos = reader.stream_position()?;
-        // We try to first deserialize as the generic version. If this with an 'expected
-        // header tag' error, we rewind, and try again with the old tag.
-        match serialize::tagged_deserialize::<IrSource>(&mut reader) {
-            Ok(v) => return Ok(v),
-            Err(e) if !e.to_string().contains("expected header tag") => return Err(e),
-            _ => {}
+        let tag = peek_tag(&mut reader)?;
+        let expected_tag_new = IrSource::tag();
+        let expected_tag_old = OldIrSource::tag();
+        if &tag == &expected_tag_new {
+            serialize::tagged_deserialize(&mut reader)
+        } else if &tag == &expected_tag_old {
+            serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected one of '{expected_tag_new}' or '{expected_tag_old}', got '{tag}'."
+                ),
+            ))
         }
-        reader.seek(io::SeekFrom::Start(pos))?;
-        serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
     }
 
     /// Writes out with tag, preserving v0's old tag structure.
     pub fn serialize_to_tagged<W: Write>(&self, writer: W) -> io::Result<()> {
-        if self.version == IrMinorVersion::V0 {
-            serialize::tagged_serialize(&OldIrSource::from(self.clone()), writer)
+        if let Ok(old_ir) = OldIrSource::try_from(self) {
+            serialize::tagged_serialize(&old_ir, writer)
         } else {
             serialize::tagged_serialize(self, writer)
+        }
+    }
+
+    /// Writes out a prover key with tag, preserving v0's old tag structure.
+    pub fn serialize_prover_key_to_tagged<W: Write>(
+        version: IrMinorVersion,
+        pk: &ProverKey<Self>,
+        writer: W,
+    ) -> io::Result<()> {
+        match version {
+            IrMinorVersion::V0 => {
+                let mut raw = Vec::new();
+                Serializable::serialize(pk, &mut raw)?;
+                let container = <Vec<u8> as Deserializable>::deserialize(&mut &raw[..], 0)?;
+                let facade = FacadeProverKey(container);
+                tagged_serialize(&facade, writer)
+            }
+            IrMinorVersion::V1 => tagged_serialize(pk, writer),
         }
     }
 

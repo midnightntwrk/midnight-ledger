@@ -127,27 +127,6 @@ fn extract_files_from_dir(dir: impl AsRef<Path>) -> anyhow::Result<Vec<OsString>
     Ok(files)
 }
 
-fn pk_serialize(
-    version: IrMinorVersion,
-    pk: &ProverKey<IrSource>,
-    writer: impl Write,
-) -> io::Result<()> {
-    match version {
-        IrMinorVersion::V0 => {
-            #[derive(Serializable)]
-            #[tag = "prover-key[v7](ir-source[v2])"]
-            struct FacadeProverKey(Vec<u8>);
-            let mut raw = Vec::new();
-            Serializable::serialize(pk, &mut raw)?;
-            let container = <Vec<u8>>::deserialize(&mut &raw[..], 0)?;
-            let facade = FacadeProverKey(container);
-            tagged_serialize(&facade, writer)
-        }
-        IrMinorVersion::V1 => tagged_serialize(pk, writer),
-        _ => unreachable!(),
-    }
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::init();
@@ -245,7 +224,7 @@ async fn main() -> anyhow::Result<()> {
                     BufWriter::new(File::create(key_dir.join(file).with_extension("verifier"))?);
                 pb.enable_steady_tick(Duration::from_millis(100));
                 let (pk, vk) = ir.keygen(&pp).await?;
-                pk_serialize(ir.version, &pk, &mut pk_file)?;
+                IrSource::serialize_prover_key_to_tagged(ir.version, &pk, &mut pk_file)?;
                 tagged_serialize(&vk, &mut vk_file)?;
                 pb.finish();
                 overall.set_message(format!("{n}/{}", data.len()));
@@ -286,7 +265,7 @@ async fn main() -> anyhow::Result<()> {
             pb.set_message(format!("Compiling circuit {ir_file:?} (k={k})"));
             pb.enable_steady_tick(Duration::from_millis(100));
             let (pk, vk) = ir.keygen(&pp).await?;
-            pk_serialize(ir.version, &pk, &mut pk_file)?;
+            IrSource::serialize_prover_key_to_tagged(ir.version, &pk, &mut pk_file)?;
             tagged_serialize(&vk, &mut vk_file)?;
             pb.finish();
         }

@@ -886,8 +886,8 @@ impl Relation for IrSource {
     }
 
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        if self.version == IrMinorVersion::V0 {
-            Serializable::serialize(&OldIrSource::from(self.clone()), writer)
+        if let Ok(old_ir) = OldIrSource::try_from(self) {
+            Serializable::serialize(&old_ir, writer)
         } else {
             // 0xff is a magic byte indicating non-v0 versions. These are tagged, and in a vec
             // container. This byte is *not* representable in v0, as it is illegal for a SCALE
