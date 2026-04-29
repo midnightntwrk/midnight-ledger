@@ -15,7 +15,6 @@ use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
-use zkir::IrSource;
 use base_crypto::signatures::VerifyingKey;
 use coin_structure::coin::TokenType;
 use derive_where::derive_where;
@@ -869,12 +868,12 @@ impl<D: DB> Default for ContractState<D> {
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
-    ir: Option<IrSource>,
+    ir: Option<Sp<Array<u8>>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>, ir: Option<IrSource>) -> Self {
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<Array<u8>>>) -> Self {
         ContractOperation { v2: vk, ir }
     }
 
