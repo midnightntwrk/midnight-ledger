@@ -42,7 +42,7 @@ async fn zero_contract_deploy_balance() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let mut contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -85,7 +85,7 @@ async fn non_zero_contract_deploy_balance() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let expected_balance = HashMap::new()
         .insert(
             TokenType::Shielded(ShieldedTokenType(HashOutput([0; PERSISTENT_HASH_BYTES]))),

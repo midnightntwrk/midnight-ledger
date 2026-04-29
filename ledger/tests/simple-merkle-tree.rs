@@ -61,8 +61,8 @@ async fn simple_merkle_tree() {
 
     // Part 1: Deploy
     let root = MerkleTree::<()>::blank(10).root();
-    let store_op = ContractOperation::new(verifier_key(&RESOLVER, "store").await);
-    let check_op = ContractOperation::new(verifier_key(&RESOLVER, "check").await);
+    let store_op = ContractOperation::new(verifier_key(&RESOLVER, "store").await, None);
+    let check_op = ContractOperation::new(verifier_key(&RESOLVER, "check").await, None);
     let contract = ContractState::new(
         stval!([[{MT(10) {}}, (0u64), {root => null}]]),
         HashMap::new()

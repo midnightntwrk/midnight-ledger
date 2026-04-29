@@ -144,7 +144,7 @@ fn maintenance() {
         StateValue::Null,
         HashMap::new().insert(
             b"foo"[..].to_owned().into(),
-            ContractOperation::new(Some(fake_vk.clone())),
+            ContractOperation::new(Some(fake_vk.clone()), None),
         ),
         authority.clone(),
     );
