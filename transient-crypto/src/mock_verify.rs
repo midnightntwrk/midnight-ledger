@@ -35,7 +35,7 @@ use midnight_zk_stdlib::Relation;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serialize::{Deserializable, Serializable, Tagged, tagged_serialize};
+use serialize::{Deserializable, Serializable, Tagged, tagged_deserialize, tagged_serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::fs;
@@ -376,6 +376,14 @@ impl Zkir for TestIr {
             preimage.public_transcript_inputs.clone(),
             vec![],
         ))
+    }
+    fn load_ir_from_tagged(reader: impl std::io::Read + std::io::Seek) -> std::io::Result<Self> {
+        tagged_deserialize(reader)
+    }
+    fn load_prover_key_from_tagged(
+        reader: impl std::io::Read + std::io::Seek,
+    ) -> std::io::Result<ProverKey<Self>> {
+        tagged_deserialize(reader)
     }
 }
 
