@@ -10,36 +10,33 @@ use zkir::IrSource;
 use crate::resolver::{ExampleResolver, make_preimage};
 use crate::{BenchOpts, Error, ProofRun, ProverCore, Result};
 
-pub(crate) const LABEL: &str = "zkir-minimal-assert";
+pub(crate) const LABEL: &str = "zkir-hash-to-curve";
 
-/// A trivial 1-input "assert(cond == 0)" circuit. Mirrors `test_minimal_proof`
-/// in zkir/tests/proofs.rs — exercises the full halo2-kzg prove/verify pipeline
-/// with the smallest possible circuit so we can validate it end-to-end on
-/// every target (desktop, Android emulator, S24 Ultra) without depending on
-/// captured contract preimages.
-const MINIMAL_IR_JSON: &str = r#"{
+/// 3-input hash-to-curve circuit. Mirrors `test_htc_proof` in
+/// zkir/tests/proofs.rs:162 — exercises the in-circuit hash + curve
+/// mapping primitive used by Pedersen commits and signature checks.
+const HTC_IR_JSON: &str = r#"{
     "version": { "major": 2, "minor": 0 },
-    "num_inputs": 1,
+    "num_inputs": 3,
     "do_communications_commitment": false,
     "instructions": [
-        { "op": "assert", "cond": 0 }
+        { "op": "hash_to_curve", "inputs": [0, 1, 2] }
     ]
 }"#;
 
-/// Single binding input the verifier checks. Arbitrary; matches what
-/// `prove_zkir_example` and `prove_via_http` both use so the verify call is
-/// reproducible.
-pub(crate) const BINDING_INPUT_RAW: u64 = 42;
+const BINDING_INPUT_RAW: u64 = 42;
 
-pub(crate) fn minimal_preimage() -> ProofPreimage {
-    make_preimage(vec![Fr::from(1u64)], Fr::from(BINDING_INPUT_RAW), "minimal")
+fn htc_preimage() -> ProofPreimage {
+    make_preimage(
+        vec![Fr::from(1u64), Fr::from(2u64), Fr::from(3u64)],
+        Fr::from(BINDING_INPUT_RAW),
+        "builtin",
+    )
 }
 
 impl ProverCore {
-    /// Loads the minimal IR and runs keygen. Both library and HTTP paths use
-    /// this so the same circuit is exercised regardless of transport.
-    pub(crate) async fn keygen_minimal(&self) -> Result<ExampleResolver> {
-        let ir = IrSource::load(MINIMAL_IR_JSON.as_bytes())
+    async fn keygen_htc(&self) -> Result<ExampleResolver> {
+        let ir = IrSource::load(HTC_IR_JSON.as_bytes())
             .map_err(|e| Error::Anyhow(anyhow::anyhow!("load ir: {e}")))?;
         let (pk, vk) = ir
             .keygen(&self.params.zswap.0)
@@ -48,13 +45,13 @@ impl ProverCore {
         Ok(ExampleResolver { pk, vk, ir })
     }
 
-    pub async fn prove_zkir_example(&self, opts: BenchOpts) -> Result<ProofRun> {
+    pub async fn prove_htc_example(&self, opts: BenchOpts) -> Result<ProofRun> {
         let seed = opts.seed.unwrap_or(0x42);
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
 
-        let resolver = self.keygen_minimal().await?;
+        let resolver = self.keygen_htc().await?;
         let k = resolver.ir.k();
-        let preimage = minimal_preimage();
+        let preimage = htc_preimage();
         let binding_input = preimage.binding_input;
 
         let started = Instant::now();
@@ -73,8 +70,6 @@ impl ProverCore {
 
         let (verified, verify_elapsed) = if opts.verify_after {
             let v_started = Instant::now();
-            // PARAMS_VERIFIER is embedded for k <= 14; binding_input is the
-            // single public input.
             let ok = resolver
                 .vk
                 .verify(&PARAMS_VERIFIER, &proof, std::iter::once(binding_input))

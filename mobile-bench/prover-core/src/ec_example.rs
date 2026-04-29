@@ -3,43 +3,47 @@ use std::time::Instant;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use serialize::tagged_serialize;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
 use transient_crypto::proofs::{PARAMS_VERIFIER, ProofPreimage, Zkir};
 use zkir::IrSource;
 
 use crate::resolver::{ExampleResolver, make_preimage};
 use crate::{BenchOpts, Error, ProofRun, ProverCore, Result};
 
-pub(crate) const LABEL: &str = "zkir-minimal-assert";
+pub(crate) const LABEL: &str = "zkir-ec-mul-add";
 
-/// A trivial 1-input "assert(cond == 0)" circuit. Mirrors `test_minimal_proof`
-/// in zkir/tests/proofs.rs — exercises the full halo2-kzg prove/verify pipeline
-/// with the smallest possible circuit so we can validate it end-to-end on
-/// every target (desktop, Android emulator, S24 Ultra) without depending on
-/// captured contract preimages.
-const MINIMAL_IR_JSON: &str = r#"{
+/// 4-input curve circuit: ec_mul + ec_mul_generator + ec_add. Mirrors
+/// `test_ec_proof` in zkir/tests/proofs.rs:352. Witness layout produced by
+/// the IR is `[a_x, a_y, scalar, scalar_g, mul_x, mul_y, gen_x, gen_y]` —
+/// indices 4..8 are the outputs of the first two ops, which `ec_add` then
+/// consumes.
+const EC_IR_JSON: &str = r#"{
     "version": { "major": 2, "minor": 0 },
-    "num_inputs": 1,
+    "num_inputs": 4,
     "do_communications_commitment": false,
     "instructions": [
-        { "op": "assert", "cond": 0 }
+        { "op": "ec_mul", "a_x": 0, "a_y": 1, "scalar": 2 },
+        { "op": "ec_mul_generator", "scalar": 3 },
+        { "op": "ec_add", "a_x": 4, "a_y": 5, "b_x": 6, "b_y": 7 }
     ]
 }"#;
 
-/// Single binding input the verifier checks. Arbitrary; matches what
-/// `prove_zkir_example` and `prove_via_http` both use so the verify call is
-/// reproducible.
-pub(crate) const BINDING_INPUT_RAW: u64 = 42;
+const BINDING_INPUT_RAW: u64 = 42;
 
-pub(crate) fn minimal_preimage() -> ProofPreimage {
-    make_preimage(vec![Fr::from(1u64)], Fr::from(BINDING_INPUT_RAW), "minimal")
+fn ec_preimage() -> ProofPreimage {
+    let g = EmbeddedGroupAffine::generator();
+    let inputs = vec![
+        g.x().expect("generator has x"),
+        g.y().expect("generator has y"),
+        Fr::from(42u64),
+        Fr::from(63u64),
+    ];
+    make_preimage(inputs, Fr::from(BINDING_INPUT_RAW), "builtin")
 }
 
 impl ProverCore {
-    /// Loads the minimal IR and runs keygen. Both library and HTTP paths use
-    /// this so the same circuit is exercised regardless of transport.
-    pub(crate) async fn keygen_minimal(&self) -> Result<ExampleResolver> {
-        let ir = IrSource::load(MINIMAL_IR_JSON.as_bytes())
+    async fn keygen_ec(&self) -> Result<ExampleResolver> {
+        let ir = IrSource::load(EC_IR_JSON.as_bytes())
             .map_err(|e| Error::Anyhow(anyhow::anyhow!("load ir: {e}")))?;
         let (pk, vk) = ir
             .keygen(&self.params.zswap.0)
@@ -48,13 +52,13 @@ impl ProverCore {
         Ok(ExampleResolver { pk, vk, ir })
     }
 
-    pub async fn prove_zkir_example(&self, opts: BenchOpts) -> Result<ProofRun> {
+    pub async fn prove_ec_example(&self, opts: BenchOpts) -> Result<ProofRun> {
         let seed = opts.seed.unwrap_or(0x42);
         let mut rng = ChaCha20Rng::seed_from_u64(seed);
 
-        let resolver = self.keygen_minimal().await?;
+        let resolver = self.keygen_ec().await?;
         let k = resolver.ir.k();
-        let preimage = minimal_preimage();
+        let preimage = ec_preimage();
         let binding_input = preimage.binding_input;
 
         let started = Instant::now();
@@ -73,8 +77,6 @@ impl ProverCore {
 
         let (verified, verify_elapsed) = if opts.verify_after {
             let v_started = Instant::now();
-            // PARAMS_VERIFIER is embedded for k <= 14; binding_input is the
-            // single public input.
             let ok = resolver
                 .vk
                 .verify(&PARAMS_VERIFIER, &proof, std::iter::once(binding_input))

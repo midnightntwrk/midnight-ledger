@@ -1,3 +1,101 @@
+# mobile-bench iteration-2 results
+
+Captured 2026-04-28 on Apple Silicon (M2 Max). Android emulator + S24 Ultra
+runs still pending — capture commands at the bottom of this section.
+
+## Circuits added this iteration
+
+Iteration-2 lifts two more `TestResolver`-based proofs from
+`zkir/tests/proofs.rs` into `prover-core` so we can characterise hash and
+curve workloads on mobile silicon (in addition to iter-1's bare assert):
+
+| Surface              | Source test                              | Inputs | Workload                       |
+|----------------------|------------------------------------------|-------:|--------------------------------|
+| `zkir-hash-to-curve` | `test_htc_proof` (proofs.rs:162)         |      3 | `hash_to_curve`                |
+| `zkir-ec-mul-add`    | `test_ec_proof` (proofs.rs:352)          |      4 | `ec_mul` + `ec_mul_generator` + `ec_add` |
+
+Both are exposed as `ProverCore::prove_htc_example` /
+`ProverCore::prove_ec_example`, share the same `ExampleResolver` plumbing
+as iter-1's `prove_zkir_example`, and have buttons in the dioxus UI plus
+a `bench-runner all` subcommand.
+
+## Latency snapshot (macOS M2 Max, release)
+
+`bench-runner all` — load IR + keygen + prove + verify, single-shot,
+fresh cache.
+
+| Surface              | k  | Prove (ms) | Verify (ms) | Proof bytes |
+|----------------------|---:|-----------:|------------:|------------:|
+| `zkir-minimal-assert`|  4 |         24 |          12 |        2549 |
+| `zkir-hash-to-curve` |  9 |        107 |           2 |        3317 |
+| `zkir-ec-mul-add`    | 11 |        317 |           2 |        3173 |
+
+Observations:
+- Hash-to-curve at k=9 is **~4.5× slower** than the bare `assert` — the
+  expected cost of a single in-circuit hash + curve mapping.
+- The ec circuit at k=11 is **~13× slower** than the bare assert — three
+  curve ops bumped k by two more rows (16× more advice) plus the curve
+  arithmetic itself.
+- Verify time is dominated by the constant-cost halo2-kzg pairing, not
+  circuit complexity, so it stays ≤ 12 ms across all three.
+- Proof bytes grow modestly with k (2549 → 3173–3317 B).
+
+## Android emulator (TBD)
+
+Reuses `bench-runner` cross-compiled to `aarch64-linux-android` from
+iter-1. From the workspace root:
+
+```bash
+# 1. Cross-compile (first time, ~2 min).
+ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/27.0.12077973 \
+  cargo ndk -t arm64-v8a build -p prover-core --bin bench-runner --release
+
+# 2. Push and run (params already on /data/local/tmp/midnight-pp from
+#    iter-1; ec needs bls_midnight_2p11 which is already pushed). The
+#    `all` subcommand captures one JSON line per surface.
+ADB=~/Library/Android/sdk/platform-tools/adb
+$ADB push target/aarch64-linux-android/release/bench-runner /data/local/tmp/
+$ADB shell 'MIDNIGHT_PP=/data/local/tmp/midnight-pp \
+  BENCH_CACHE_DIR=/data/local/tmp/bench-cache-iter2 \
+  /data/local/tmp/bench-runner all'
+```
+
+Expected on Pixel_Fold_API_35 (arm64-v8a translated on Apple Silicon):
+~3–4× the macOS-release numbers, matching iter-1's ratio. Confirm by
+filling in:
+
+| Surface              | k  | Prove (ms) | Verify (ms) |
+|----------------------|---:|-----------:|------------:|
+| `zkir-hash-to-curve` |  9 |        TBD |         TBD |
+| `zkir-ec-mul-add`    | 11 |        TBD |         TBD |
+
+> ⚠ **Do not screenshot the emulator** — the iteration-1 tooling captures
+> latency entirely via `adb shell` stdout (one JSON line per run). No UI
+> introspection is needed.
+
+## What's been validated end-to-end (delta vs. iter-1)
+
+- ✅ `prove_htc_example`: load IR (`hash_to_curve`, k=9) → keygen → prove
+  → verify with binding input. `verified=true` on macOS release.
+- ✅ `prove_ec_example`: load IR (`ec_mul` + `ec_mul_generator` + `ec_add`,
+  k=11) → keygen → prove → verify. `verified=true` on macOS release.
+- ✅ Shared `ExampleResolver` extracted from `zkir_example` so all three
+  surfaces use one resolver shape — cuts ~30 lines of duplication.
+- ✅ `bench-runner` accepts `zkir|htc|ec|all` arg; `all` prints one JSON
+  line per surface for direct table ingestion.
+- ✅ Dioxus desktop UI exposes the two new buttons; busy state shared
+  across all three so a long ec run doesn't allow a concurrent click.
+
+## What still needs a human (carryover from iter-1)
+
+- ❌ Samsung S24 Ultra numbers (htc + ec) — same `bench-runner all` path.
+- ❌ Dioxus APK on emulator (`dx` blocked by `krates 0.17.5`; cargo-apk
+  path still WIP).
+- ❌ Real-circuit workloads (Dust spend, zswap output) — deferred to a
+  later iteration as previously discussed (#2 + #4 from the survey).
+
+---
+
 # mobile-bench iteration-1 results
 
 Captured 2026-04-28 on Apple Silicon (M2 Max). Real-device numbers

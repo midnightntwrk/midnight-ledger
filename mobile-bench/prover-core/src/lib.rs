@@ -19,7 +19,10 @@ pub enum Error {
 
 pub type Result<T> = std::result::Result<T, Error>;
 
+mod ec_example;
+mod htc_example;
 mod params;
+mod resolver;
 mod zkir_example;
 
 #[cfg(all(feature = "proof-server-http", not(target_os = "android")))]

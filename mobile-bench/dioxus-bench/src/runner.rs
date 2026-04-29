@@ -31,6 +31,20 @@ impl Runner {
             .await
             .map_err(|e| e.to_string())
     }
+
+    pub async fn run_htc(&self) -> Result<ProofRun, String> {
+        self.inner
+            .prove_htc_example(BenchOpts::default())
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn run_ec(&self) -> Result<ProofRun, String> {
+        self.inner
+            .prove_ec_example(BenchOpts::default())
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 pub fn fmt_duration(d: Duration) -> String {
