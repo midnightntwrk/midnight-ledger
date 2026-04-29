@@ -585,11 +585,8 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(
-                                x,
-                                GUARANTEED_SEGMENT,
-                            )
-                            .map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, GUARANTEED_SEGMENT)
+                                .map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {

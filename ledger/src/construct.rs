@@ -14,10 +14,10 @@
 use crate::dust::DustActions;
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent,
-    LedgerParameters, MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned,
-    SignatureKind, SignaturesValue, SingleUpdate, StandardTransaction, Transaction,
-    UnshieldedOffer, UtxoOutput, UtxoSpend,
+    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
+    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind,
+    SignaturesValue, SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer, UtxoOutput,
+    UtxoSpend,
 };
 use crate::structure::{
     EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
@@ -452,11 +452,8 @@ impl<S: SignatureKind<D>, D: DB> Transaction<S, ProofPreimageMarker, PedersenRan
         let mut stx = StandardTransaction {
             network_id: network_id.into(),
             intents,
-            guaranteed_coins: guaranteed_coins.map(|x| {
-                Sp::new(
-                    x.retarget_segment(GUARANTEED_SEGMENT),
-                )
-            }),
+            guaranteed_coins: guaranteed_coins
+                .map(|x| Sp::new(x.retarget_segment(GUARANTEED_SEGMENT))),
             fallible_coins: fallible_coins
                 .into_iter()
                 .map(|(seg, offer)| (seg, offer.retarget_segment(seg)))
