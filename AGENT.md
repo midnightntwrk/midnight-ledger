@@ -44,6 +44,7 @@ work. None of it is on `ledger-8`; live on
 | `mobile-bench/dioxus-wallet/` | Dioxus 0.6 wallet UI. Phone-sized window (390 × 844) on desktop so we can iterate without an emulator. Loads a hardcoded demo seed on first paint. |
 | `mobile-bench/fixtures/` | Vendored zkir test artefacts. Iter-2 still uses inline raw-IR strings; fixtures held for later. |
 | `mobile-bench/scripts/setup-android-toolchain.sh` | One-shot macOS toolchain installer. |
+| `mobile-bench/scripts/standalone.yml` + `standalone-up.sh` / `standalone-down.sh` | Local Midnight stack (node + indexer + proof-server) on fixed loopback ports for `Undeployed` testing. Pulls `midnightntwrk/midnight-node:0.22.3`, `indexer-standalone:4.0.0`, `proof-server:8.0.3` images. |
 | `mobile-bench/RESULTS.md` | Captured proof-bench latency numbers (iter-1 + iter-2). |
 | `mobile-bench/DEPLOY_TO_DEVICE.md` | APK / `bench-runner` deployment to a real phone. |
 | `mobile-bench/WALLET_PLAN.md` | Full wallet implementation plan: dep strategy, iterations 1–4, open questions, reference index. |
@@ -294,6 +295,130 @@ Files needed for iter-2 surfaces: `bls_midnight_2p4` (zkir minimal),
 [mobile-bench/dioxus-bench/src/platform/android.rs](mobile-bench/dioxus-bench/src/platform/android.rs)
 defaults `MIDNIGHT_PP` to `/data/local/tmp/midnight-pp` if unset.
 
+### Compact contract state encoding
+
+Compact contracts (e.g. `did.compact`) emit on-chain state as a
+nested `StateValue` tree, **not** a single SCALE blob. The
+`midnight-indexer` returns the state hex via
+`Query.contractAction(address).state`; we decode with
+`tagged_deserialize::<onchain_state::ContractState<DefaultDB>>`,
+then walk into `state.data.state` (a `StateValue`).
+
+For DID specifically, root is a 2-element `StateValue::Array`:
+
+- `root[0]` (constants): `[contractVersion, controllerPublicKey]`
+- `root[1]` (mutable): 15 fields in declaration order — `id`,
+  `alsoKnownAs` (Map), `version`, `created`, `updated`,
+  `deactivated`, `active`, `operationCount`, `verificationMethods`
+  (Map), 5 relation Maps, `services` (Map).
+
+Field paths were extracted from
+`midnight-did-contract/dist/managed/did/contract/index.js`'s ledger
+accessors — every getter has a `path: [{ tag: 'value', value:
+toValue(I) }, { tag: 'value', value: toValue(J) }]` pattern, and `(I,
+J)` are exactly the field-tree indices. **Trust those over the
+`.d.ts` field declaration order — they're the canonical layout.**
+
+`AlignedValue` payload conventions:
+
+- **`CompactTypeOpaqueString`** — single atom, raw UTF-8 (no length
+  prefix; the atom boundary is the length).
+- **`CompactTypeBoolean`** — single atom, 1 byte (0 / 1).
+- **`CompactTypeEnum(max, bytes)`** — single atom, `bytes` long, big-
+  endian tag. `did.compact`: `KeyType` (max=3, 1B), `CurveType` (max=2,
+  1B), `VerificationMethodType` (max=1, 1B), `Relation` (max=5, 1B).
+- **`CompactTypeBytes(N)`** — single atom, exactly N raw bytes.
+- **`CompactTypeUnsignedInteger(MAX, bytes)`** — single atom, `bytes`
+  long, big-endian, right-aligned in a fixed-width buffer.
+- **Struct types** (e.g. `Service`, `VerificationMethod`,
+  `PublicKeyJwk`) — concatenation of their fields' atoms in
+  declaration order. e.g. `Service` AlignedValue = 3 atoms (id, typ,
+  serviceEndpoint, all strings); `VerificationMethod` = 6 atoms
+  (id-string, typ-1B-enum, kty-1B-enum, crv-1B-enum, x-32B-field,
+  y-32B-field).
+- **`Map<K, V>`** in a state slot — `StateValue::Map` whose keys are
+  `AlignedValue` and values are `StateValue`. For sets the value is
+  `StateValue::Null`. For struct values it's `StateValue::Cell(av)`
+  carrying the struct's concatenated atoms.
+
+The decoder lives in
+[`mobile-bench/wallet-core/src/did/contract.rs`](mobile-bench/wallet-core/src/did/contract.rs).
+It re-implements the `_descriptor_X.fromValue(value)` pattern by
+reading atoms in order — no Compact runtime needed.
+
+**To access `ChargedState.state`** you need
+`onchain-state` with the `public-internal-structure` feature on
+(the field is `pub(crate)` otherwise). Set in
+`mobile-bench/wallet-core/Cargo.toml`.
+
+### Pivot: Rust-native DID port instead of TS-in-WebView
+
+We previously built a complete pipeline to load `midnight-did`'s TS
+package inside the Dioxus WebView via a Wry custom protocol
+(`mn-pkg://`), import maps, and a fetch-based wbindgen wrapper. It
+worked end-to-end (proven: `await import("@midnight-ntwrk/midnight-
+did-contract")` instantiated WebAssembly natively, dynamic imports
+via the protocol succeeded). Decision (2026-04-30): **retire the
+in-WebView TS approach**, port midnight-did to Rust directly. See
+[`mobile-bench/DID_PLAN.md`](mobile-bench/DID_PLAN.md) for rationale.
+
+The TS pipeline is **kept behind the `js-bridge` cargo feature**
+(default off) for forward compatibility — flip on to load any
+unported upstream TS package directly. All the JS pipeline machinery
+(esbuild bundle, vendor.mjs, mn-pkg:// protocol, bridge.rs JSON-RPC,
+head injection of import map + module bundle) compiles only when
+the feature is on.
+
+**Land-mines we hit on the TS side** (now mostly irrelevant unless
+`--features js-bridge` is on):
+
+- Native WebAssembly ESM Integration is **not enabled in WKWebView**
+  even on macOS 14.4+. The default wbindgen entry
+  `import * as wasm from "./xxx.wasm"` silently produces an
+  uninstantiated module → `(void 0) is not a function` at first call.
+  Fix in `web/vendor.mjs`: rewrite each `_wasm.js` entry at vendor
+  time with a manual `fetch + WebAssembly.instantiateStreaming`
+  wrapper that mirrors the upstream Node loader (`*_fs.js`).
+- `<script type="module">` rendered into the DOM via Dioxus rsx
+  doesn't execute (HTML spec: dynamically-inserted module scripts
+  don't run). Inject the bundle via `Config::with_custom_head`
+  instead.
+- esbuild `loader: { ".wasm": "file" }` returns a URL string, not a
+  module — does NOT trigger native WASM instantiation. Either the
+  wbindgen rewrite above, or mark the package `external` and serve
+  via `mn-pkg://`.
+- Some upstream packages are CJS (e.g. `object-inspect`); browsers
+  can't import CJS natively. `web/vendor.mjs` esbuild-converts those
+  to ESM at vendor time.
+- `web/build.mjs` needs `nodeModulesPolyfillPlugin` for `path` /
+  `crypto` / `assert` / `util` / `events` / `stream` / `buffer`
+  (and empty stubs for `fs` / `os`).
+
+### Local Midnight stack (`Undeployed` network)
+
+`mobile-bench/scripts/standalone-up.sh` brings up node + indexer +
+proof-server on fixed loopback ports
+(`127.0.0.1:9944` / `:8088` / `:6300`). Pinned images come from the
+`midnight-did` standalone compose:
+
+- `midnightntwrk/midnight-node:0.22.3` (`CFG_PRESET=dev`, dev preset
+  has prefunded W0–W3 wallets we can faucet from once Phase 3 lands)
+- `midnightntwrk/indexer-standalone:4.0.0` (env-file
+  `mobile-bench/scripts/standalone.env.example` — dev-only secret +
+  passwords)
+- `midnightntwrk/proof-server:8.0.3`
+
+Caveat: the proof-server image **does not ship `curl`**, so the
+upstream healthcheck `curl -f http://localhost:6300/version`
+permanently reports unhealthy. We override with a `/proc/net/tcp`
+listening-port check that grep's for `:18A4 ` (= 0x18A4 = 6300 in
+hex). Without that override `docker compose up --wait` hangs forever
+on `--wait`.
+
+The wallet's `Undeployed` config is already pointed at these URLs
+(`wallet-core::network::Network::Undeployed`); switch the dropdown
+to Undeployed in the UI and `Connect` works against the local stack.
+
 ### **Never screenshot mobile emulators**
 
 Hard rule from a prior incident — also stored in
@@ -478,3 +603,59 @@ Open / deferred:
   surfaces — hardware needed.
 - **Subxt + midnight-node-metadata** for typed extrinsic
   submission — required for iter-2 send.
+
+### DID iter — types, codec, full resolver, standalone stack (2026-04-30)
+
+Same branch (`mobile-bench/iteration-2`). Shipped:
+
+- `wallet_core::did` module with full DID Core type set
+  (`DidDocument`, `VerificationMethod`, `Service`, `PublicKeyJwk`,
+  `KeyType`, `CurveType`); `DidId` parser/codec for
+  `did:midnight:<network>:<64-hex>` with `testnet → preprod`
+  alias; serde end-to-end. 13 unit tests on the codec path.
+- `Wallet::resolve_did(did_str)` chain: parse → indexer
+  `contractAction(address)` GraphQL query → tagged_deserialize
+  `ContractState` → walk the `StateValue` tree → port of
+  `midnight-did-domain/LedgerToDomain` → fully populated
+  `DidDocument`. Both Phase 2b (scalar fields) and Phase 2c (Map
+  walks for VMs / services / 5 relations / alsoKnownAs) landed.
+- Field paths (constants[2] + mutable[15]) were extracted from
+  the upstream `index.js` accessors — see "Compact contract state
+  encoding" above for the canonical layout reference.
+- `js-bridge` cargo feature gates the WebView TS pipeline (default
+  off after the architectural pivot — see "Pivot: Rust-native DID
+  port" above).
+- Dark-theme UI gained a `ResolveDidPanel` in the Advanced
+  disclosure (input + Resolve button + JSON or error result).
+- Comprehensive UX master at
+  [`mobile-bench/UX_DESIGN.md`](mobile-bench/UX_DESIGN.md):
+  sitemap (Wallet · Identity · Activity · Settings tabs), 13
+  screens with layout sketches, cross-cutting interaction patterns
+  (hold-to-confirm, status pill, action sheets, empty/loading/error
+  recipes), component library extending MOBILE_WALLET.md.
+  **Update this in the same commit as any user-visible change.**
+- DID plan at [`mobile-bench/DID_PLAN.md`](mobile-bench/DID_PLAN.md)
+  (4 phases: types/codec → resolve → create → all circuits) — Phase
+  1 + 2 done.
+- Local Midnight stack via
+  [`mobile-bench/scripts/standalone-up.sh`](mobile-bench/scripts/standalone-up.sh)
+  for Undeployed-network testing. Verified end-to-end: probe + chain
+  tip + node status all green.
+- 29 `wallet-core` unit tests pass.
+
+Open / deferred:
+
+- **Phase 3 — `Wallet::create_did` write path**: vendor contract
+  artifacts (PKM + IR + Compact source) into
+  `mobile-bench/wallet-core/contracts/midnight-did/`; derive
+  controller signing key from BIP32 NightExternal role; build
+  initial state input; prove via `prover-core::ProverCore`; submit
+  via `subxt + midnight-node-metadata` (still need to add as git
+  dep). **Gated on the wallet's unshielded sync** for fee
+  balancing — option B (assume single available DUST UTXO and
+  surface a clear error otherwise) is the agreed path so Phase 3
+  can make visible progress before Phase B sync lands.
+- **Phase 4 — remaining DID circuits** (addVerificationMethod,
+  removeVerificationMethod, services, also-known-as, deactivate,
+  relations) — mechanical once Phase 3's deploy flow works; each
+  is the same input-encoding + prove + submit recipe.

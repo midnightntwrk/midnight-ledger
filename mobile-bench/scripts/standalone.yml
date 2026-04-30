@@ -1,0 +1,66 @@
+# Local Midnight stack — node + indexer + proof-server.
+#
+# Lifted from `~/iohk/midnight-did/api/standalone-latest.yml`, with
+# fixed host ports so the wallet's `Undeployed` network config
+# (mobile-bench/wallet-core/src/network.rs) connects directly:
+#
+#   indexer-http  → http://127.0.0.1:8088/api/v4/graphql
+#   indexer-ws    → ws://127.0.0.1:8088/api/v4/graphql/ws
+#   node-ws       → ws://127.0.0.1:9944
+#   proof-server  → http://127.0.0.1:6300
+#
+# Run via `mobile-bench/scripts/standalone-up.sh` (or
+# `docker compose -f mobile-bench/scripts/standalone.yml up -d`).
+
+services:
+  proof-server:
+    container_name: 'midnight-wallet-proof-server'
+    image: '${PROOF_SERVER_IMAGE:-midnightntwrk/proof-server:8.0.3}'
+    command: ['midnight-proof-server -v']
+    ports:
+      - '127.0.0.1:6300:6300'
+    environment:
+      RUST_BACKTRACE: 'full'
+    # The image doesn't ship curl, so the upstream healthcheck
+    # always fails. Probe the listening socket via /proc instead —
+    # works on the slim Debian base the image uses.
+    healthcheck:
+      test: ['CMD-SHELL', "grep -q ':18A4 ' /proc/net/tcp || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+
+  indexer:
+    container_name: 'midnight-wallet-indexer'
+    image: 'midnightntwrk/indexer-standalone:4.0.0'
+    env_file: standalone.env.example
+    ports:
+      - '127.0.0.1:8088:8088'
+    environment:
+      RUST_LOG: 'indexer=info,chain_indexer=info,indexer_api=info,wallet_indexer=info,indexer_common=info,fastrace_opentelemetry=off,info'
+      APP__APPLICATION__NETWORK_ID: 'undeployed'
+    healthcheck:
+      test: ['CMD-SHELL', 'cat /var/run/indexer-standalone/running']
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    depends_on:
+      node:
+        condition: service_healthy
+
+  node:
+    image: 'midnightntwrk/midnight-node:0.22.3'
+    container_name: 'midnight-wallet-node'
+    ports:
+      - '127.0.0.1:9944:9944'
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:9944/health']
+      interval: 2s
+      timeout: 5s
+      retries: 20
+      start_period: 20s
+    environment:
+      CFG_PRESET: 'dev'
+      SIDECHAIN_BLOCK_BENEFICIARY: '04bcf7ad3be7a5c790460be82a713af570f22e0f801f6659ab8e84a52be6969e'
