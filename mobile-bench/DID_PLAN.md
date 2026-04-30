@@ -197,16 +197,20 @@ Remaining work for an end-to-end deploy:
    `ContractCalls` struct.
 2. **SCALE-encode** that payload into the bytes the
    `send_mn_transaction` extrinsic wants.
-3. **Sign the substrate tx envelope.** This is the load-bearing
-   blocker: substrate expects `MultiSignature` (sr25519/ecdsa/
-   ed25519) on the envelope, but our wallet's keys are BIP340
-   schnorr. midnight-did-api's `signTransactionIntents` does a
-   manual hop — the Midnight node must accept a custom signature
-   variant. **Next step**: read the metadata's
-   `extrinsic.signature` type to confirm what it accepts. If it
-   genuinely requires sr25519, we'll need a substrate-side wallet
-   identity that's *separate* from the BIP340 controller key — TS
-   counter-cli derives both from the seed.
+3. ~~**Sign the substrate tx envelope.**~~ **Resolved**:
+   `MODE=offline cargo run -p wallet-core --example probe_metadata`
+   shows the chain uses stock `sp_runtime::MultiSignature` with
+   `Ed25519 | Sr25519 | Ecdsa` variants — no Midnight-custom
+   scheme. **Plan**: sign the envelope with **ECDSA over the same
+   secp256k1 private key** the wallet derives for the BIP340
+   schnorr controller key. BIP340-schnorr and ECDSA both use the
+   secp256k1 curve, so a single 32-byte secret scalar can produce
+   either signature; we wrap the ECDSA output as
+   `MultiSignature::Ecdsa(...)`. Implementation cost: ~1 day —
+   write a custom `subxt::tx::Signer<MidnightConfig>` impl that
+   takes the wallet's `SigningKey`, exposes the ECDSA verifying
+   key as the substrate `AccountId`, and produces ECDSA signatures
+   on the envelope payload.
 4. **Submit + watch.** `client.tx().midnight().send_mn_transaction
    (bytes).sign_and_submit_then_watch_default(&signer)`, await
    finalisation, decode the contract address from the deploy event.

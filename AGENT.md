@@ -310,12 +310,32 @@ Probed the running node via `subxt::OnlineClient` +
   Other call on this pallet is `set_tx_size_weight` (admin).
 - `spec_version = 22000` matches the `node-0.22.3` tag.
 
-Next-session blocker: the substrate tx envelope expects
-`MultiSignature` (sr25519/ecdsa/ed25519). Our wallet's keys are
-BIP340 schnorr. midnight-did-api's `signTransactionIntents` does
-a manual hop — verify what the metadata's `extrinsic.signature`
-actually accepts before assuming sr25519, since the chain may
-expose a custom `SignatureScheme` variant.
+Substrate tx envelope uses stock `sp_runtime::MultiSignature`
+with `Ed25519 | Sr25519 | Ecdsa` variants — no Midnight-custom
+scheme. Resolved via `MODE=offline cargo run -p wallet-core
+--example probe_metadata` (decodes the bundled
+`midnight_metadata_0.22.0.scale` directly; no live node needed).
+
+Plan: **sign the envelope with ECDSA over the same secp256k1
+private key the wallet derives for BIP340 schnorr.** Both
+signature schemes use secp256k1 so the 32-byte secret scalar is
+shared. Wrap the ECDSA output as `MultiSignature::Ecdsa(...)`.
+
+Funding model in standalone (`Undeployed`) mode:
+1. NIGHT is auto-credited at chain genesis to the address derived
+   from `GENESIS_MINT_WALLET_SEED = 0000…0001`. We use that seed
+   on Undeployed via `wallet_core::UNDEPLOYED_GENESIS_SEED_HEX`.
+2. DUST is **not** auto-credited. After NIGHT is visible the
+   wallet must call `registerNightUtxosForDustGeneration` to
+   start dust generation; that itself costs a tx + DUST for the
+   fee — the standalone setup expects this *after* NIGHT sync
+   surfaces the prefunded UTXOs.
+3. Both balances are invisible until the wallet **syncs** — the
+   prefunded UTXOs are on-chain but the wallet only sees them
+   after subscribing to indexer's `unshieldedTransactions(address)`
+   + `dustLedgerEvents` and replaying the events. Phase B of
+   `WALLET_PLAN.md` ports this from
+   `midnight-wallet/packages/{unshielded,dust}-wallet/src/v1/Sync.ts`.
 
 ### Compact contract state encoding
 
