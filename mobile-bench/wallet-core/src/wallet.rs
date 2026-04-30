@@ -109,6 +109,68 @@ impl Wallet {
             .map_err(|e| WalletError::Address(e.to_string()))
     }
 
+    /// Derive the controller signing key for DID operations.
+    ///
+    /// Mirrors `midnight-did-api`'s
+    /// `HDWallet.fromSeed(seed).selectAccount(0).selectRole(Roles.NightExternal).deriveKeyAt(0)`.
+    /// The 32-byte child secret seeds a BIP340 schnorr signing key
+    /// whose verifying key (after SHA-256) becomes the
+    /// `controllerPublicKey` in the on-chain DID state.
+    pub fn did_controller_signing_key(
+        &self,
+    ) -> Result<base_crypto::signatures::SigningKey, WalletError> {
+        let child = crate::hd::derive_child_priv(
+            &self.seed_bytes,
+            0,
+            crate::hd::Role::NightExternal,
+            0,
+        )
+        .map_err(|e| WalletError::Address(e.to_string()))?;
+        base_crypto::signatures::SigningKey::from_bytes(&child)
+            .map_err(|e| WalletError::Address(format!("signing key: {e}")))
+    }
+
+    /// 32-byte SHA-256(BIP340 verifying key) — the value the
+    /// `did.compact` contract stores as `controllerPublicKey`.
+    /// Same construction as `coin_structure::coin::UserAddress`'s
+    /// in-workspace conversion.
+    pub fn did_controller_public_key(&self) -> Result<[u8; 32], WalletError> {
+        let sk = self.did_controller_signing_key()?;
+        let vk = sk.verifying_key();
+        let user_addr = coin_structure::coin::UserAddress::from(vk);
+        Ok(user_addr.0.0)
+    }
+
+    /// **Phase 3 stub** — returns
+    /// [`crate::DidError::WriteNotImplemented`] today. Logs the
+    /// derived `controllerPublicKey` so we can verify the key
+    /// derivation visually before the deploy path lands.
+    ///
+    /// When fully wired, `create_did` will:
+    /// 1. Derive the controller signing key
+    ///    (`did_controller_signing_key`).
+    /// 2. Build the constructor input with that
+    ///    `controllerPublicKey`.
+    /// 3. Submit the deploy extrinsic via `subxt` +
+    ///    `midnight-node-metadata` (git dep, to be added).
+    /// 4. Watch the indexer for the new contract's first
+    ///    `ContractDeploy` action; return its address as a
+    ///    [`crate::DidId`].
+    /// 5. Optionally call `addVerificationMethod` to write the
+    ///    initial VM (artifacts vendored at
+    ///    `contracts/midnight-did/addVerificationMethod.*`).
+    pub async fn create_did(&self) -> Result<crate::DidId, crate::DidError> {
+        let pk = self
+            .did_controller_public_key()
+            .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
+        tracing::info!(
+            controller_pk_hex = %hex::encode(pk),
+            network = ?self.network,
+            "create_did stub — would deploy DID contract with this controller"
+        );
+        Err(crate::DidError::WriteNotImplemented)
+    }
+
     /// Resolve a Midnight DID to a [`crate::DidDocument`] by querying
     /// the indexer for the contract's current state and decoding it.
     ///

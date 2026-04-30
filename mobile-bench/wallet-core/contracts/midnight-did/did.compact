@@ -1,0 +1,350 @@
+// This file is part of midnightntwrk/midnight-did.
+// Copyright (C) 2025 Midnight Foundation
+// SPDX-License-Identifier: Apache-2.0
+// Licensed under the Apache License, Version 2.0 (the "License");
+// You may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+// http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+pragma language_version >= 0.20;
+
+import CompactStandardLibrary;
+import "../../jubjub-schnorr/src/schnorr" prefix Schnorr_;
+
+// Ledger state - Full DID Document
+export ledger contractVersion: Uint<32>;
+export ledger controllerPublicKey: Bytes<32>;
+export ledger id: ContractAddress;
+export ledger alsoKnownAs: Set<Opaque<"string">>;
+export ledger version: Counter;
+export ledger created: Uint<64>;
+export ledger updated: Uint<64>;
+export ledger deactivated: Boolean;
+export ledger active: Boolean;
+export ledger operationCount: Counter;
+export ledger verificationMethods: Map<Opaque<"string">, VerificationMethod>;
+export ledger authenticationRelation: Set<Opaque<"string">>;
+export ledger assertionMethodRelation: Set<Opaque<"string">>;
+export ledger keyAgreementRelation: Set<Opaque<"string">>;
+export ledger capabilityInvocationRelation: Set<Opaque<"string">>;
+export ledger capabilityDelegationRelation: Set<Opaque<"string">>;
+export ledger services: Map<Opaque<"string">, Service>;
+
+// Witnesses
+witness localSecretKey(): Bytes<32>;
+witness currentTimestamp(): Uint<64>;
+
+// Enums and Structs
+export enum VerificationMethodType {
+  Undefined,
+  JsonWebKey
+}
+
+export enum VerificationMethodRelation {
+  Undefined,
+  Authentication,
+  AssertionMethod,
+  KeyAgreement,
+  CapabilityInvocation,
+  CapabilityDelegation
+}
+
+export enum KeyType {
+  EC, RSA, oct, OKP
+}
+
+export enum CurveType {
+  Ed25519, Jubjub, P256
+}
+
+export struct PublicKeyJwk {
+  kty: KeyType,
+  crv: CurveType,
+  x: Field,
+  y: Field,
+}
+
+export struct VerificationMethod {
+  id: Opaque<"string">,
+  typ: VerificationMethodType,
+  publicKeyJwk: PublicKeyJwk
+};
+
+export struct Service {
+  id: Opaque<"string">,
+  typ: Opaque<"string">,
+  serviceEndpoint: Opaque<"string">,
+}
+
+export struct JubjubSignature {
+  r: JubjubPoint,
+  s: Field,
+}
+
+export pure circuit jubjubSignatureDigestChallenge(
+  ann_x: Field,
+  ann_y: Field,
+  pk_x: Field,
+  pk_y: Field,
+  digest: Vector<4, Field>
+): Field {
+  return Schnorr_schnorrChallengeDigest(ann_x, ann_y, pk_x, pk_y, digest);
+}
+
+// Constructor
+constructor() {
+  contractVersion = 1;
+  id = kernel.self();
+  active = true;
+  deactivated = false;
+  controllerPublicKey = disclose(publicKey(localSecretKey()));
+
+  const timestamp = disclose(currentTimestamp());
+  created = timestamp;
+  updated = timestamp;
+}
+
+export circuit publicKey(sk: Bytes<32>): Bytes<32> {
+  return persistentHash<Vector<2, Bytes<32>>>([pad(32, "did:controller:pk"), sk]);
+}
+
+export circuit verifyJubjubSignature(
+  pk: JubjubPoint,
+  signature: JubjubSignature,
+  challenge: Field
+): Boolean {
+  // Low-level primitive only.
+  // Prefer verifyJubjubDigestSignature(...) so the contract owns the transcript
+  // and challenge reduction semantics via the shared JubJub Schnorr module.
+  const leftSide: JubjubPoint = ecMulGenerator(signature.s);
+  const cPk: JubjubPoint = ecMul(pk, challenge);
+  const rightSide: JubjubPoint = ecAdd(signature.r, cPk);
+  assert(leftSide == rightSide, "Jubjub signature verification failed");
+  return leftSide == rightSide;
+}
+
+export circuit verifyJubjubDigestSignature(
+  pk: JubjubPoint,
+  signature: JubjubSignature,
+  digest: Vector<4, Field>
+): [] {
+  // Preferred protocol entrypoint for DID-facing JubJub signatures.
+  const schnorrSignature: Schnorr_SchnorrSignature = Schnorr_SchnorrSignature {
+    announcement: signature.r,
+    response: signature.s,
+  };
+  Schnorr_schnorrVerifyDigest(digest, schnorrSignature, pk);
+}
+
+export circuit addAlsoKnownAs(value: Opaque<"string">): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+  const alias = disclose(value);
+  assert(!alsoKnownAs.member(alias), "alsoKnownAs value already exists");
+  alsoKnownAs.insert(alias);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+
+export circuit removeAlsoKnownAs(value: Opaque<"string">): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+  const alias = disclose(value);
+  assert(alsoKnownAs.member(alias), "alsoKnownAs value does not exist");
+  alsoKnownAs.remove(alias);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit addVerificationMethod(verificationMethod: VerificationMethod): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+
+  const disclosedVerificationMethod = disclose(verificationMethod);
+  assert(disclosedVerificationMethod.typ == VerificationMethodType.JsonWebKey, "Only JsonWebKey verification methods are supported");
+  if (disclosedVerificationMethod.publicKeyJwk.kty == KeyType.OKP) {
+    assert(disclosedVerificationMethod.publicKeyJwk.crv == CurveType.Ed25519, "OKP keys must use Ed25519");
+  } else if (disclosedVerificationMethod.publicKeyJwk.kty == KeyType.EC) {
+    assert(disclosedVerificationMethod.publicKeyJwk.crv == CurveType.Jubjub || disclosedVerificationMethod.publicKeyJwk.crv == CurveType.P256, "EC keys must use Jubjub or P-256");
+  } else {
+    assert(false, "Only OKP (Ed25519) and EC (Jubjub/P-256) keys are supported");
+  }
+  assert(!verificationMethods.member(disclosedVerificationMethod.id), "Verification method already exists");
+
+  verificationMethods.insert(disclosedVerificationMethod.id, disclosedVerificationMethod);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit updateVerificationMethod(verificationMethod: VerificationMethod): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+
+  const disclosedVerificationMethod = disclose(verificationMethod);
+  assert(disclosedVerificationMethod.typ == VerificationMethodType.JsonWebKey, "Only JsonWebKey verification methods are supported");
+  if (disclosedVerificationMethod.publicKeyJwk.kty == KeyType.OKP) {
+    assert(disclosedVerificationMethod.publicKeyJwk.crv == CurveType.Ed25519, "OKP keys must use Ed25519");
+  } else if (disclosedVerificationMethod.publicKeyJwk.kty == KeyType.EC) {
+    assert(disclosedVerificationMethod.publicKeyJwk.crv == CurveType.Jubjub || disclosedVerificationMethod.publicKeyJwk.crv == CurveType.P256, "EC keys must use Jubjub or P-256");
+  } else {
+    assert(false, "Only OKP (Ed25519) and EC (Jubjub/P-256) keys are supported");
+  }
+  assert(verificationMethods.member(disclosedVerificationMethod.id), "Verification method does not exist");
+
+  verificationMethods.remove(disclosedVerificationMethod.id);
+  verificationMethods.insert(disclosedVerificationMethod.id, disclosedVerificationMethod);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit removeVerificationMethod(id: Opaque<"string">): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+
+  const disclosedId = disclose(id);
+  assert(verificationMethods.member(disclosedId), "Verification method does not exist");
+  assert(!authenticationRelation.member(disclosedId), "Verification method still referenced in authenticationRelation");
+  assert(!assertionMethodRelation.member(disclosedId), "Verification method still referenced in assertionMethodRelation");
+  assert(!keyAgreementRelation.member(disclosedId), "Verification method still referenced in keyAgreementRelation");
+  assert(!capabilityInvocationRelation.member(disclosedId), "Verification method still referenced in capabilityInvocationRelation");
+  assert(!capabilityDelegationRelation.member(disclosedId), "Verification method still referenced in capabilityDelegationRelation");
+
+  // PLAN B: Only remove the verification method itself
+  // Relations should be removed separately by the caller (API layer)
+  // This allows wallet to sync between each relation removal
+  verificationMethods.remove(disclosedId);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit addVerificationMethodRelation(
+  relation: VerificationMethodRelation,
+  methodId: Opaque<"string">
+): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+
+  const disclosedRelation = disclose(relation);
+  const disclosedMethodId = disclose(methodId);
+  assert(verificationMethods.member(disclosedMethodId), "Verification method does not exist");
+  assert(disclosedRelation != VerificationMethodRelation.Undefined, "Verification relation must be defined");
+  if (disclosedRelation == VerificationMethodRelation.Authentication) {
+    assert(!authenticationRelation.member(disclosedMethodId), "Verification method relation already exists");
+    authenticationRelation.insert(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.AssertionMethod) {
+    assert(!assertionMethodRelation.member(disclosedMethodId), "Verification method relation already exists");
+    assertionMethodRelation.insert(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.KeyAgreement) {
+    assert(!keyAgreementRelation.member(disclosedMethodId), "Verification method relation already exists");
+    keyAgreementRelation.insert(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.CapabilityInvocation) {
+    assert(!capabilityInvocationRelation.member(disclosedMethodId), "Verification method relation already exists");
+    capabilityInvocationRelation.insert(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.CapabilityDelegation) {
+    assert(!capabilityDelegationRelation.member(disclosedMethodId), "Verification method relation already exists");
+    capabilityDelegationRelation.insert(disclosedMethodId);
+  }
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit removeVerificationMethodRelation(
+  relation: VerificationMethodRelation,
+  methodId: Opaque<"string">
+): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+
+  const disclosedRelation = disclose(relation);
+  const disclosedMethodId = disclose(methodId);
+  assert(verificationMethods.member(disclosedMethodId), "Verification method does not exist");
+  assert(disclosedRelation != VerificationMethodRelation.Undefined, "Verification relation must be defined");
+  if (disclosedRelation == VerificationMethodRelation.Authentication) {
+    assert(authenticationRelation.member(disclosedMethodId), "Verification method relation does not exist");
+    authenticationRelation.remove(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.AssertionMethod) {
+    assert(assertionMethodRelation.member(disclosedMethodId), "Verification method relation does not exist");
+    assertionMethodRelation.remove(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.KeyAgreement) {
+    assert(keyAgreementRelation.member(disclosedMethodId), "Verification method relation does not exist");
+    keyAgreementRelation.remove(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.CapabilityInvocation) {
+    assert(capabilityInvocationRelation.member(disclosedMethodId), "Verification method relation does not exist");
+    capabilityInvocationRelation.remove(disclosedMethodId);
+  } else if (disclosedRelation == VerificationMethodRelation.CapabilityDelegation) {
+    assert(capabilityDelegationRelation.member(disclosedMethodId), "Verification method relation does not exist");
+    capabilityDelegationRelation.remove(disclosedMethodId);
+  }
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit addService(service: Service): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+  const disclosedService = disclose(service);
+  assert(!services.member(disclosedService.id), "Service with a given id already exists");
+  services.insert(disclosedService.id, disclosedService);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit updateService(service: Service): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+  const disclosedService = disclose(service);
+  assert(services.member(disclosedService.id), "Service with a given id does not exist");
+  services.remove(disclosedService.id);
+  services.insert(disclosedService.id, disclosedService);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit removeService(id: Opaque<"string">): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "Contract is not active");
+  const disclosedId = disclose(id);
+  assert(services.member(disclosedId), "Service with a given id does not exist");
+  services.remove(disclosedId);
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}
+
+export circuit deactivate(): [] {
+  assert(publicKey(localSecretKey()) == controllerPublicKey, "DID controller is allowed to update the DID only");
+  assert(active, "DID is already inactive");
+  active = false;
+  deactivated = true;
+
+  operationCount.increment(1);
+  version.increment(1);
+  updated = disclose(currentTimestamp());
+}

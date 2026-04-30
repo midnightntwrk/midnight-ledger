@@ -18,6 +18,7 @@
 //! 3. **create** — first write circuit, contract deploy.
 //! 4. **all circuits** — addVerificationMethod / removeService / …
 
+pub(crate) mod artifacts;
 pub(crate) mod contract;
 mod error;
 mod id;

@@ -270,6 +270,61 @@ pub fn App() -> Element {
                 }
 
                 ResolveDidPanel { network: *network.read() }
+                CreateDidPanel { network: *network.read() }
+            }
+        }
+    }
+}
+
+#[component]
+fn CreateDidPanel(network: Network) -> Element {
+    let mut result = use_signal::<Option<Result<String, String>>>(|| None);
+    let mut pending = use_signal(|| false);
+
+    let create = move |_| {
+        if *pending.read() {
+            return;
+        }
+        pending.set(true);
+        result.set(None);
+        spawn(async move {
+            let r = match Wallet::from_seed_hex(wallet_core::DEMO_SEED_HEX, network) {
+                Ok(w) => match w.create_did().await {
+                    Ok(id) => Ok(id.to_did_string()),
+                    Err(e) => {
+                        // Surface the controller pubkey alongside the
+                        // error so the panel doubles as a diagnostic
+                        // for the key-derivation half (which DOES work
+                        // today; only the deploy/submit half is stubbed).
+                        let pk = w
+                            .did_controller_public_key()
+                            .map(|b| hex::encode(b))
+                            .unwrap_or_else(|e| format!("(err: {e})"));
+                        Err(format!(
+                            "{e}\n\ncontrollerPublicKey would be: {pk}"
+                        ))
+                    }
+                },
+                Err(e) => Err(e.to_string()),
+            };
+            result.set(Some(r));
+            pending.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "row", "Create DID" }
+        div { class: "row",
+            button {
+                disabled: *pending.read(),
+                onclick: create,
+                {if *pending.read() { "Creating…" } else { "Create DID (Phase 3 stub)" }}
+            }
+        }
+        if let Some(res) = result.read().as_ref() {
+            match res {
+                Ok(did) => rsx! { div { class: "seed-blob", "{did}" } },
+                Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
             }
         }
     }
