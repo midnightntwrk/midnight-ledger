@@ -274,7 +274,7 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_persistent_hash_proof() {
+    async fn test_std_hashes_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
@@ -282,7 +282,8 @@ mod proof_tests {
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] }
+               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] },
+               { "op": "keccak256", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_3", "%v_4"] }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
