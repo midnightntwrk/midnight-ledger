@@ -1,0 +1,9 @@
+query ChainTip {
+  block {
+    hash
+    height
+    protocolVersion
+    timestamp
+    author
+  }
+}
