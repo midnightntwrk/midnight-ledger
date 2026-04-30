@@ -314,8 +314,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the input type:
     ///
-    ///  - Native:      1 output
-    ///  - JubjubPoint: 2 outputs (x and y coordinates)
+    ///  - Native:       1 output
+    ///  - JubjubPoint:  2 outputs (x and y coordinates)
+    ///  - JubjubScalar: 1 output
     Encode {
         /// The value to encode
         input: Operand,
@@ -328,8 +329,9 @@ pub enum Instruction {
     /// is not the exact number of raw Fr elements required to represent a
     /// value of the given type:
     ///
-    ///  - Native:      1 input
-    ///  - JubjubPoint: 2 inputs (x and y coordinates)
+    ///  - Native:       1 input
+    ///  - JubjubPoint:  2 inputs (x and y coordinates)
+    ///  - JubjubScalar: 1 input
     ///
     /// It will also result in an error if the operands are not of type
     /// `Native`.
@@ -404,6 +406,13 @@ pub enum Instruction {
     ///
     /// No outputs, but adds the inputs as public inputs and activity information to
     /// [`IrSource::prove`] and [`IrSource::check`].
+    ///
+    /// In-circuit, if `guard` is `false`, instead of adding the `inputs` as public inputs,
+    /// it will add `n` zeros as public inputs (where `n` is the number of `inputs`).
+    /// This is enforced with in-circuit constraints.
+    ///
+    /// NB: Currently, we require that all `inputs` be of type `Native`.
+    /// A runtime error will be raised otherwise.
     Impact {
         /// The boolean condition under which the public inputs are active
         guard: Operand,
@@ -411,7 +420,10 @@ pub enum Instruction {
         inputs: Vec<Operand>,
     },
     /// Multiplies an elliptic curve point by a scalar.
-    /// curve point.
+    ///
+    /// This operation will result in an error if the operand given as `a`
+    /// is not of type `JubjubPoint`, or if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMul {
@@ -423,6 +435,9 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Multiplies the group generator by a scalar.
+    ///
+    /// This operation will result in an error if the operand given as `scalar`
+    /// is not of type `JubjubScalar`.
     ///
     /// Outputs 1 element, the product
     EcMulGenerator {
@@ -488,6 +503,18 @@ pub enum Instruction {
     ///
     /// Outputs 2 elements for binary format
     PersistentHash {
+        /// The alignment of the inputs being passed
+        alignment: Alignment,
+        /// The inputs to hash
+        inputs: Vec<Operand>,
+        /// The output variable names
+        outputs: Vec<Identifier>,
+    },
+    /// Evaluates the Keccak-256 hash function on a sequence of items with
+    /// a given alignment.
+    ///
+    /// Outputs 2 elements for binary format.
+    Keccak256 {
         /// The alignment of the inputs being passed
         alignment: Alignment,
         /// The inputs to hash
@@ -561,25 +588,48 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a public input from the public transcript outputs.
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the public transcript outputs.
+    /// Outputs one element, the next public transcript output, or a default value
+    /// if the `guard` fails.
     ///
-    /// Outputs one element, the next public transcript output, or `0` if the
-    /// guard fails
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PrivateInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the public transcript outputs in this case).
     PublicInput {
         /// An optional condition for retrieving the next public transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
     },
-    /// Retrieves a private input from the private transcript outputs.
+
+    /// Off-circuit (preprocessing):
+    /// Retrieves an input from the private transcript outputs.
+    /// Outputs one element, the next private transcript output, or a default value
+    /// if the `guard` fails.
     ///
-    /// Outputs one element, the next private transcript output, or `0` if the
-    /// guard fails
+    /// In-circuit:
+    /// Allows the prover to witness a free value, only constrained to respect
+    /// the type `val_t`. The `guard` DOES NOT participate in in-circuit constraints.
+    ///
+    /// NB: This instruction is essentially identical to `PublicInput` except that
+    /// the `preprocessing` pass will consume the value from a different source
+    /// (the private transcript outputs in this case).
     PrivateInput {
         /// An optional condition for retrieving the next private transcript
         /// output
         guard: Option<Operand>,
+        /// The type of this input
+        #[serde(rename = "type")]
+        val_t: IrType,
         /// The output variable name
         output: Identifier,
     },
