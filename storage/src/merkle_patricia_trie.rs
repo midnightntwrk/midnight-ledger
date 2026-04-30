@@ -1252,21 +1252,16 @@ impl<T: Storable<D>, D: DB, A: Storable<D> + Annotation<T>> Node<T, D, A> {
                 }
             }
             Node::Extension {
-                ann: an,
                 compressed_path,
                 child,
                 ..
             } => {
+                if path.len() < compressed_path.len() {
+                    return (sp.clone(), None);
+                }
                 for i in 0..compressed_path.len() {
                     if compressed_path[i] != path[i] {
-                        return (
-                            sp.arena.alloc(Node::Extension {
-                                ann: an.clone(),
-                                compressed_path: compressed_path.clone(),
-                                child: child.clone(),
-                            }),
-                            None,
-                        );
+                        return (sp.clone(), None);
                     }
                 }
 
@@ -1546,6 +1541,18 @@ mod tests {
         assert_eq!(mpt.size(), 1);
         assert_eq!(mpt.lookup(&([1, 3, 3])), Some(&102));
         assert_eq!(mpt.lookup(&([1, 2, 3])), None);
+    }
+
+    #[test]
+    fn remove_path_shorter_than_extension() {
+        let mut mpt = MerklePatriciaTrie::<u64>::new();
+        // Insert with a path long enough to create an Extension node.
+        mpt = mpt.insert(&[1, 2, 3], 100);
+        // Removing with a path shorter than the Extension's compressed_path
+        // should return the trie unchanged, not panic.
+        mpt = mpt.remove(&[1]);
+        assert_eq!(mpt.lookup(&[1, 2, 3]), Some(&100));
+        assert_eq!(mpt.size(), 1);
     }
 
     #[test]

@@ -105,7 +105,7 @@ impl<D: DB> State<D> {
         let first_free = self.first_free;
         self.coin_coms = self
             .coin_coms
-            .update_hash(
+            .try_update_hash(
                 first_free,
                 out.coin_com.0,
                 out.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
@@ -146,7 +146,7 @@ impl<D: DB> State<D> {
         let first_free = self.first_free;
         self.coin_coms = self
             .coin_coms
-            .update_hash(
+            .try_update_hash(
                 first_free,
                 trans.coin_com.0,
                 trans.contract_address.as_ref().map(|x| Sp::new(*x.deref())),

@@ -66,7 +66,7 @@ pub struct MidnightDataProvider {
 
 lazy_static! {
     /// The default base URL to use for the Midnight data provider.
-    pub static ref BASE_URL: Url = Url::parse(&std::env::var("MIDNIGHT_PARAM_SOURCE").unwrap_or("https://midnight-s3-fileshare-dev-eu-west-1.s3.eu-west-1.amazonaws.com/".to_owned())).expect("$MIDNIGHT_PARAM_SOURCE should be a valid URL");
+    pub static ref BASE_URL: Url = Url::parse(&std::env::var("MIDNIGHT_PARAM_SOURCE").unwrap_or("https://srs.midnight.network/".to_owned())).expect("$MIDNIGHT_PARAM_SOURCE should be a valid URL");
 }
 
 /// Parse a 256-bit hex hash at const time.
@@ -368,18 +368,12 @@ impl MidnightDataProvider {
         if let OutputMode::Cli(pb) = &self.output_mode {
             pb.println(format!("Missing {desc}. Attempting to download from the host {} - this is not a trusted service, the data will be verified.", self.base_url))?;
         }
-        let mut url = self.base_url.clone();
-        url.path_segments_mut()
-            .map_err(|()| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "Base URL '{}' for proving data provider invalid",
-                        &self.base_url
-                    ),
-                )
-            })?
-            .push(name);
+        let url = self.base_url.join(name).map_err(|e| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("URL parse error: {e}",),
+            )
+        })?;
         for i in 0..RETRIES {
             let retry_msg = if i == RETRIES - 1 {
                 "Giving up."
@@ -389,7 +383,15 @@ impl MidnightDataProvider {
             f.seek(io::SeekFrom::Start(0))?;
             f.set_len(0)?;
             let mut hasher = Sha256::new();
-            let res = match reqwest::Client::new().get(url.clone()).send().await {
+            let cli = reqwest::ClientBuilder::new()
+                .user_agent("Midnight Data Provider")
+                .build()
+                .map_err(|e| {
+                    std::io::Error::other(format!(
+                        "error constructing midnight data provider fetcher: {e}"
+                    ))
+                })?;
+            let res = match cli.get(url.clone()).send().await {
                 Ok(res) => res,
                 Err(e) => {
                     #[cfg(feature = "cli")]

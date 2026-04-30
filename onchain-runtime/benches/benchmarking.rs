@@ -217,7 +217,7 @@ fn gen_bmts(log_sizes: &[usize]) -> Vec<StateValueMerkleTree> {
         for path in 0u64..(1 << height) {
             // Also use the path as the value to hash.
             bmt = bmt
-                .update(path, &path, ())
+                .try_update(path, &path, ())
                 .expect("updating hash on non-collapsed tree should always succeed");
         }
         bmt = bmt.rehash();
@@ -448,7 +448,7 @@ impl BenchWithArgs {
                     let bmt = if present == 0 {
                         bmt.clone()
                     } else {
-                        bmt.update(raw_key, &raw_key, ()).unwrap()
+                        bmt.try_update(raw_key, &raw_key, ()).unwrap()
                     };
                     let container = mk_vm_val(StateValue::BoundedMerkleTree(bmt));
                     let container_log_size = container.log_size();

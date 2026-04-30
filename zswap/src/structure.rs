@@ -421,7 +421,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
             value_commitment: self.value_commitment_input,
             contract_address: self.contract_address.clone(),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
-                .update_hash(0, self.coin_com.0, ())
+                .try_update_hash(0, self.coin_com.0, ())
                 .expect("updating hash on non-collapsed tree should always succeed")
                 .rehash()
                 .root()

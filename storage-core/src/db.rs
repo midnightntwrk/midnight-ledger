@@ -18,7 +18,8 @@ mod sql;
 #[cfg(feature = "sqlite")]
 pub use sql::SqlDB;
 #[cfg(feature = "parity-db")]
-mod paritydb;
+/// DB implementation for ParityDb
+pub mod paritydb;
 #[cfg(feature = "parity-db")]
 pub use paritydb::ParityDb;
 

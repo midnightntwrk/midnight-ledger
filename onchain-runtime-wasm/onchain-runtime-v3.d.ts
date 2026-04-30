@@ -964,7 +964,7 @@ export class StateBoundedMerkleTree {
     leaf: AlignedValue,
     indexStart?: bigint,
     indexEnd?: bigint,
-    alreadyHashed?: bool,
+    alreadyHashed?: boolean,
   ): AlignedValue | undefined;
 
   /**
