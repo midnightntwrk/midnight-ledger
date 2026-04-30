@@ -1,84 +1,138 @@
 # AGENT.md — context for Claude / agent sessions
 
 Project-level notes carried across Claude sessions. Captures the *why*
-behind in-progress branches, decisions taken, and pitfalls discovered. Read
-this first; CLAUDE.md (if present) covers global conventions, AGENT.md
-covers what's specific to this repo right now.
+behind in-progress branches, decisions taken, and pitfalls
+discovered. Read this first; CLAUDE.md (if present) covers global
+conventions, AGENT.md covers what's specific to this repo right now.
 
-> **Maintenance rule.** Update this file at the end of every iteration —
-> add a new section under *Iteration log* with date, what shipped, what
-> moved, and any non-obvious knowledge. Don't summarise commits (git log
-> is authoritative); capture only knowledge that is **not derivable from
-> code or git history**.
+> **Maintenance rule.** Update this file at the end of every
+> iteration — add a new section under *Iteration log* with date,
+> what shipped, what moved, and any non-obvious knowledge. Don't
+> summarise commits (`git log` is authoritative); capture only
+> knowledge that is **not derivable from code or git history**.
 
 ## Repo layout (high level)
 
-`midnight-ledger` is the core ledger crate workspace for Midnight. The
-top-level Cargo workspace has ~25 crates: cryptography (`base-crypto`,
-`transient-crypto`), zk circuits (`zkir`, `zkir-v3`, `zkir-precompiles`),
-storage (`storage`, `storage-core`), VM (`onchain-vm`, `onchain-runtime`),
-ledger types (`ledger`, `coin-structure`, `zswap`), wasm bindings
-(`*-wasm`), proof server (`proof-server`).
+`midnight-ledger` is the core ledger crate workspace for Midnight.
+The top-level Cargo workspace has ~25 crates: cryptography
+(`base-crypto`, `transient-crypto`), ZK circuits (`zkir`, `zkir-v3`,
+`zkir-precompiles`), storage (`storage`, `storage-core`), VM
+(`onchain-vm`, `onchain-runtime`), ledger types (`ledger`,
+`coin-structure`, `zswap`), wasm bindings (`*-wasm`), proof server
+(`proof-server`).
 
-Self-dev-deps are intentional: many crates list themselves under
-`[dev-dependencies]` with extra features (proptest/test-utilities) so
-`cargo test -p X` automatically activates the test harness. **Do not
-remove this pattern** — it is a deliberate choice and removing it would
-force every contributor to remember `--features` flags.
+**Self-dev-deps are intentional.** Many crates list themselves under
+`[dev-dependencies]` with extra features
+(proptest/test-utilities) so `cargo test -p X` automatically
+activates the test harness. **Do not remove this pattern** — it's a
+deliberate choice; removing it would force every contributor to
+remember `--features` flags. (This is also what panics
+`dioxus-cli`'s bundled `krates 0.17.5` — see the dx workaround
+below.)
 
-## Active work — `mobile-bench/iteration-1`
+### `mobile-bench/` subtree
 
-Branch: `mobile-bench/iteration-1` (worktree at
-`.claude/worktrees/loving-feistel-6c3348`).
+Everything under `mobile-bench/` is the agent-driven mobile + wallet
+work. None of it is on `ledger-8`; live on
+`mobile-bench/iteration-{1,2}` and successor branches.
 
-Goal: measure Midnight ZK proof latency on mobile devices (Android
-emulator + Samsung S24 Ultra) and desktop, end-to-end.
+| Path | Purpose |
+|---|---|
+| `mobile-bench/prover-core/` | Embeddable Rust prover wrapping Midnight primitives. Consumed by tests, criterion benches, the dioxus UI, and the headless `bench-runner`. HTTP path lives behind feature `proof-server-http`. |
+| `mobile-bench/dioxus-bench/` | Dioxus 0.6 UI for **proof benchmarking**. Three buttons (`zkir-minimal-assert`, `zkir-hash-to-curve`, `zkir-ec-mul-add`). Cross-platform (`cdylib` on Android, `bin` on desktop). |
+| `mobile-bench/wallet-core/` | Pure-Rust wallet primitives: `Network`, `Wallet`, BIP32 HD, bech32m address, indexer GraphQL client, node JSON-RPC client, connectivity probe. No UI. |
+| `mobile-bench/dioxus-wallet/` | Dioxus 0.6 wallet UI. Phone-sized window (390 × 844) on desktop so we can iterate without an emulator. Loads a hardcoded demo seed on first paint. |
+| `mobile-bench/fixtures/` | Vendored zkir test artefacts. Iter-2 still uses inline raw-IR strings; fixtures held for later. |
+| `mobile-bench/scripts/setup-android-toolchain.sh` | One-shot macOS toolchain installer. |
+| `mobile-bench/RESULTS.md` | Captured proof-bench latency numbers (iter-1 + iter-2). |
+| `mobile-bench/DEPLOY_TO_DEVICE.md` | APK / `bench-runner` deployment to a real phone. |
+| `mobile-bench/WALLET_PLAN.md` | Full wallet implementation plan: dep strategy, iterations 1–4, open questions, reference index. |
+| `mobile-bench/MOBILE_WALLET.md` | Mobile-focused use cases + dark theme spec + implementation phases. |
+| `mobile-bench/DID_PLAN.md` | Rust-native Midnight DID API plan; replaces the abandoned in-WebView TS approach. |
+| `mobile-bench/UX_DESIGN.md` | UX master: sitemap + nav + screen catalog + cross-cutting patterns + component library. **Update in the same commit as any user-visible change.** |
+| `mobile-bench/WALLET_RESULTS.md` | Live wallet outcomes per step (preprod chain tip, node status, etc.). |
 
-Crates added under `mobile-bench/`:
+## Active work
 
-- `prover-core/` — embeddable Rust crate wrapping Midnight's proving
-  primitives; consumed by tests, benches, the dioxus UI, and the headless
-  bench-runner. HTTP path lives behind feature `proof-server-http`.
-- `dioxus-bench/` — Dioxus 0.6 desktop + Android UI calling into
-  prover-core. On Android compiles as `cdylib` named `dioxusmain` loaded
-  by `WryActivity` (Java side under `android/`).
-- `fixtures/` — vendored zkir test artefacts (kept for future iterations;
-  iter-1 uses an inline raw-IR string `zkir-minimal-assert`).
-- `scripts/setup-android-toolchain.sh` — one-shot macOS toolchain
-  installer.
-- `RESULTS.md` — captured latency numbers per surface.
-- `DEPLOY_TO_DEVICE.md` — instructions for putting the APK or
-  bench-runner on a physical phone.
+**Branch:** `mobile-bench/iteration-2`
+**Worktree:** `.claude/worktrees/thirsty-lovelace-092f50/`
+**Current focus:** wallet UI (mobile dark theme, full bech32m address
+display, Connect → probe + chain_tip + system_health). Phase B —
+real WS sync drivers — is the next step.
 
-## Key technical findings (iteration-1)
+The iter-2 branch contains both the proof-bench iter-2 work
+(hash-to-curve + ec proofs) and the wallet scaffolding through
+Phase A. The wallet doesn't have its own branch yet.
 
-These are non-obvious lessons that cost real time to discover.
+## Decision log — upstream repos as deps, not reinvent
+
+A 2026-04-29 survey of `midnightntwrk/{midnight-zk, midnight-node,
+midnight-indexer, midnight-wallet}` confirmed:
+
+- **midnight-zk** is pure circuits/proofs (`midnight-{curves,
+  proofs, circuits, zk-stdlib}`). Already pulled transitively via
+  `transient-crypto` / `zkir`. **No wallet-shaped helpers** (no
+  BIP39, bech32, address encoders). Skip as a direct dep.
+- **midnight-indexer** ships the canonical schema at
+  `indexer-api/graphql/schema-v4.graphql`, a wallet-shaped query set
+  at `indexer-tests/e2e.graphql`, and a reference
+  `graphql-transport-ws` client at
+  `indexer-tests/src/graphql_ws_client.rs`. **No published client
+  crate** (workspace `publish = false`) but the schema is the
+  redistributable artifact and the maintainers themselves use
+  `graphql_client = 0.16` codegen — so do we.
+- **midnight-node** is a Substrate/FRAME node. Workspace
+  `publish = false`, but `midnight-node-metadata` purpose-builds for
+  off-node consumers: bundles SCALE metadata blobs through
+  `subxt::subxt!`. Custom RPC modules
+  (`pallet-midnight-rpc`, `pallet-system-parameters-rpc`,
+  `pallet-sidechain-rpc`, `pallet-session-validator-management-rpc`)
+  define `jsonrpsee` server traits whose **request/response structs
+  we can reuse client-side**.
+- **midnight-wallet** is a Yarn 4 + Turbo monorepo with 15 packages.
+  The wallet *facade* itself is RxJS/Effect glue we don't port. The
+  load-bearing pieces we **do** port to Rust:
+  - `packages/hd/src/HDWallet.ts` → `wallet_core::hd` (over `bip32`)
+  - `packages/address-format/src/index.ts` → `wallet_core::address`
+    (over `bech32` Bech32m variant)
+  - `packages/abstractions/src/SyncProgress.ts` → Rust struct
+  - `packages/{dust,unshielded,shielded}-wallet/src/v1/Sync.ts` →
+    Rust sync drivers (Phase B onwards)
+- **example-counter** `counter-cli/src/cli.ts` is the iter-1
+  functional bar — every wallet operation that CLI does, our Rust
+  wallet does too on the same endpoints with the same observable
+  behavior.
+
+## Key technical findings
+
+These cost real time to discover. Each is a cross-session pitfall.
 
 ### dioxus-cli `dx` is unusable on this workspace
 
-`dx serve` and `dx build` from dioxus-cli 0.6.3 *and* 0.7.6 panic on this
-workspace's cargo metadata. Root cause: both ship `krates 0.17.5`, which
-panics on the self-path-deps pattern (10+ crates list themselves as
-`dev-dependencies`). dioxus main is also still on 0.17.5, so a CLI
-upgrade alone won't fix it.
+`dx serve` and `dx build` from dioxus-cli 0.6.3 *and* 0.7.6 panic on
+this workspace's cargo metadata. Root cause: both ship `krates
+0.17.5`, which panics on the self-path-deps pattern (10+ crates list
+themselves as `dev-dependencies`). dioxus main is also still on
+0.17.5, so a CLI upgrade alone won't fix it.
 
 **Workaround.** Use plain `cargo` everywhere:
-
-- Desktop UI: `cargo run -p dioxus-bench`
+- Desktop UI: `cargo run -p dioxus-bench` / `cargo run -p dioxus-wallet`
 - Android cross-compile: `cargo ndk -t arm64-v8a build --release -p dioxus-bench --lib`
-- APK packaging: hand-rolled Gradle scaffold under `mobile-bench/dioxus-bench/android/`
-  (copied from dioxus-cli 0.6.3's bundled template, `.hbs` rendered manually).
+- APK packaging: hand-rolled Gradle scaffold under
+  `mobile-bench/dioxus-bench/android/` (copied from dioxus-cli
+  0.6.3's bundled template, `.hbs` rendered manually).
 
 ### Dioxus feature gating must be **mutually exclusive** per target
 
 Cargo unions features across `[dependencies]` and
 `[target.'cfg(...)'.dependencies]`. If both `dioxus/desktop` and
 `dioxus/mobile` are active on Android, `dioxus::launch` selects the
-desktop launcher → blocks the JNI thread inside `Activity.onCreate` →
-WebView never attaches → splash screen forever (logcat:
-`InputDispatcher: NO_INPUT_CHANNEL`).
+desktop launcher → blocks the JNI thread inside `Activity.onCreate`
+→ WebView never attaches → splash screen forever
+(`InputDispatcher: NO_INPUT_CHANNEL`).
 
-**Correct pattern** (in [mobile-bench/dioxus-bench/Cargo.toml](mobile-bench/dioxus-bench/Cargo.toml)):
+**Correct pattern** (used in both `dioxus-bench` and `dioxus-wallet`
+Cargo.toml):
 
 ```toml
 [target.'cfg(target_os = "android")'.dependencies]
@@ -90,32 +144,144 @@ dioxus = { version = "0.6", features = ["desktop"] }
 
 Never put a top-level `dioxus = { features = ["..."] }` line.
 
+### Dioxus 0.6 desktop window sizing — for mobile iteration without an emulator
+
+`dioxus-wallet` opens at **390 × 844** (iPhone 14 / Pixel 7a
+envelope) so we can iterate on the mobile layout without an
+emulator. Pattern:
+
+```rust
+use dioxus::desktop::{Config, LogicalSize, WindowBuilder};
+let cfg = Config::new().with_window(
+    WindowBuilder::new()
+        .with_title("Midnight Wallet")
+        .with_inner_size(LogicalSize::new(390.0, 844.0)),
+);
+dioxus::LaunchBuilder::desktop().with_cfg(cfg).launch(app::App);
+```
+
+The Android branch still uses the plain `dioxus::launch` shim — the
+WindowBuilder API is desktop-only.
+
+### Dioxus 0.6 manganis asset pipeline can drop CSS in release
+
+`asset!("/assets/styles.css")` works in dev for `dioxus-bench` but
+silently doesn't reach the WebView in release for `dioxus-wallet`.
+**Fix**: inline the stylesheet via `include_str!`:
+
+```rust
+const STYLES: &str = include_str!("../assets/styles.css");
+rsx! { style { "{STYLES}" } /* ... */ }
+```
+
+Compile-time inlined, no build-time bundler dance, works on every
+target.
+
+### `color-scheme: dark` is required for native dark form controls
+
+Without `color-scheme: dark` on `:root`, the WebView renders native
+scrollbars + `<select>` chevrons in light mode regardless of the
+custom CSS. Set it on `:root` together with the `--bg` token in
+`mobile-bench/dioxus-wallet/assets/styles.css`.
+
+### rustls 0.23 multi-provider crash
+
+`reqwest`, `tokio-tungstenite`, `jsonrpsee`, and `dioxus-desktop`
+each pull rustls-with-different-providers transitively. rustls 0.23
+**panics at TLS-handshake time** if multiple providers are linked
+but none is marked default ("Could not automatically determine the
+process-level CryptoProvider").
+
+**Fix**: install `ring` once on first network use. See
+`mobile-bench/wallet-core/src/crypto.rs::ensure_default_crypto_provider`,
+called from `probe_connectivity`, `IndexerClient::new`, and
+`NodeClient::connect`. Idempotent via `std::sync::Once`.
+
+### Indexer WS requires the GraphQL subprotocol header
+
+`wss://indexer.<env>.midnight.network/api/v4/graphql/ws` rejects
+bare WebSocket upgrades with HTTP 400. The required header is:
+
+```
+Sec-WebSocket-Protocol: graphql-transport-ws
+```
+
+Set per-endpoint in
+`mobile-bench/wallet-core/src/probe.rs::probe_ws` (subprotocol arg).
+Plain WS endpoints like `wss://rpc.<env>.midnight.network` accept a
+bare upgrade — set `subprotocol: None` for those.
+
+### `bip32::Error` does not implement `std::error::Error`
+
+`bip32 = "0.5"` is `no_std`-friendly so its `Error` enum doesn't
+impl `std::error::Error`. `#[from]` in thiserror chokes. Wrap at the
+boundary as a String:
+
+```rust
+#[derive(Debug, thiserror::Error)]
+pub enum HdError {
+    #[error("bip32: {0}")]
+    Bip32(String),
+}
+impl From<bip32::Error> for HdError {
+    fn from(e: bip32::Error) -> Self { HdError::Bip32(e.to_string()) }
+}
+```
+
+### Unshielded address derivation pipeline
+
+End-to-end: `seed (32 B) → BIP32 m/44'/2400'/0'/0/0 → secp256k1
+secret → BIP340 schnorr verifying-key (32-byte x-only) → SHA-256(pk)
+→ bech32m(HRP, 32-byte payload)`.
+
+HRP per network — note the literal network string, **not**
+`mn_addr_test...`:
+
+| Network | HRP |
+|---|---|
+| Mainnet    | `mn_addr` |
+| PreProd    | `mn_addr_preprod` |
+| Preview    | `mn_addr_preview` |
+| QANet      | `mn_addr_qanet` |
+| DevNet     | `mn_addr_devnet` |
+| Undeployed | `mn_addr_undeployed` |
+
+The trailing `1` you see in `mn_addr_preprod1...` is the bech32
+separator, not part of the HRP.
+
+`base_crypto::signatures::SigningKey::from_bytes` +
+`coin_structure::coin::UserAddress::from(VerifyingKey)` already
+implement the schnorr-pubkey + SHA-256 pipeline — **don't reach for
+k256 directly**, leverage the workspace.
+
 ### Android cross-compile of the proving stack
 
 The full proving stack — `midnight-zk-stdlib`, `transient-crypto`,
 `ledger`, `zswap`, `zkir`, `zkir-v3`, `prover-core` — cross-compiles
-cleanly to `aarch64-linux-android` with **NDK r27** (`27.0.12077973`) and
-`cargo-ndk`. No CMake patches, no C bindgen tweaks. NDK r26 was not
-tested.
+cleanly to `aarch64-linux-android` with **NDK r27**
+(`27.0.12077973`) and `cargo-ndk`. No CMake patches, no C bindgen
+tweaks. NDK r26 was not tested.
 
-Use `ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/27.0.12077973` for
-all commands.
+```
+ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/27.0.12077973 \
+  cargo ndk -t arm64-v8a build --release ...
+```
 
 ### Android entry point glue
 
-`libdioxusmain.so` exports both:
-
-- `Java_dev_dioxus_main_WryActivity_*` JNI symbols (auto-generated by
-  dioxus-mobile's macros — confirm with `nm -D ... | grep Java_`).
-- A `pub extern "C" fn main` shim that dioxus-mobile's `JNI_OnLoad` looks
-  up via `dlsym(RTLD_DEFAULT, "main")` to bootstrap the Tao event loop.
+`libdioxusmain.so` (or `libdioxuswalletmain.so`) exports both:
+- `Java_dev_dioxus_main_WryActivity_*` JNI symbols (auto-generated
+  by dioxus-mobile's macros — confirm with `nm -D ... | grep Java_`).
+- A `pub extern "C" fn main` shim that dioxus-mobile's
+  `JNI_OnLoad` looks up via `dlsym(RTLD_DEFAULT, "main")` to
+  bootstrap the Tao event loop.
 
 Both must be present. See
 [mobile-bench/dioxus-bench/src/lib.rs](mobile-bench/dioxus-bench/src/lib.rs).
 
 ### Parameter cache on device
 
-`prover-core` reads SRS params from `MIDNIGHT_PP` env var. On Android
+`prover-core` reads SRS params from `MIDNIGHT_PP`. On Android
 without network, pre-push files to a world-readable location:
 
 ```bash
@@ -123,73 +289,192 @@ adb shell mkdir -p /data/local/tmp/midnight-pp
 adb push ~/.cache/midnight/zk-params/bls_midnight_2pN /data/local/tmp/midnight-pp/
 ```
 
+Files needed for iter-2 surfaces: `bls_midnight_2p4` (zkir minimal),
+`bls_midnight_2p9` (htc), `bls_midnight_2p11` (ec).
 [mobile-bench/dioxus-bench/src/platform/android.rs](mobile-bench/dioxus-bench/src/platform/android.rs)
 defaults `MIDNIGHT_PP` to `/data/local/tmp/midnight-pp` if unset.
+
+### **Never screenshot mobile emulators**
+
+Hard rule from a prior incident — also stored in
+`~/.claude/projects/-Users-ysh-iohk-midnight-ledger/memory/`. Any
+`adb exec-out screencap`, `xcrun simctl io ... screenshot`, or
+MCP browser/preview screenshot tool pointed at an emulator hangs
+Claude Code and prevents recovery. Capture mobile state via text
+only (`adb logcat`, `bench-runner` stdout, criterion JSON, `adb
+pull`). If the user needs a screenshot, ask them to capture it
+themselves.
 
 ## How to resume / build / run
 
 ```bash
-cd .claude/worktrees/loving-feistel-6c3348   # the iteration-1 worktree
+# Always start at the worktree root
+cd .claude/worktrees/thirsty-lovelace-092f50
 
-# Desktop UI (no Android needed)
-cargo run -p dioxus-bench
+# ── Proof bench (mobile-bench/iteration-2 surfaces)
+cargo run -p dioxus-bench --release      # 3-button UI
+cargo run -p prover-core --bin bench-runner --release -- all
+                                         # JSON line per surface (zkir|htc|ec|all)
 
-# Headless desktop run
-MIDNIGHT_PP=$HOME/.cache/midnight/zk-params \
-  cargo run -p prover-core --bin bench-runner --release
+# ── Wallet UI (Phase A — connect-but-no-sync)
+cargo run -p dioxus-wallet --release     # opens at 390x844
 
-# Android emulator UI — see mobile-bench/RESULTS.md "Reproducing the numbers"
-# Real phone deployment — see mobile-bench/DEPLOY_TO_DEVICE.md
+# ── Wallet sanity tests
+cargo test -p wallet-core --lib          # unit tests, no network
+cargo test -p wallet-core --features network-tests --test preprod_probe \
+  -- --nocapture                         # live preprod probe + chain tip + system_health
+
+# ── Address derivation example
+cargo run -p wallet-core --example show_addr
+# Prints the demo wallet's bech32m address per network. The PreProd
+# value is what to faucet to test the wallet against real funds:
+#   mn_addr_preprod1ahhcw7swj7rnmcju6ldwgs0ghwxxwaakfz0sq7vdcmqj4827g68suryn3a
+
+# ── Android emulator (proof bench)
+~/Library/Android/sdk/platform-tools/adb push \
+  target/aarch64-linux-android/release/bench-runner /data/local/tmp/
+~/Library/Android/sdk/platform-tools/adb shell '
+  MIDNIGHT_PP=/data/local/tmp/midnight-pp \
+  BENCH_CACHE_DIR=/data/local/tmp/bench-cache \
+  /data/local/tmp/bench-runner all'
 ```
 
-For full repro instructions (commands, env vars, expected output) read
-[mobile-bench/RESULTS.md](mobile-bench/RESULTS.md). For pushing onto a
-physical phone read
+For full repro of bench numbers see
+[mobile-bench/RESULTS.md](mobile-bench/RESULTS.md). For wallet
+outcomes per step see
+[mobile-bench/WALLET_RESULTS.md](mobile-bench/WALLET_RESULTS.md).
+For physical-phone deployment see
 [mobile-bench/DEPLOY_TO_DEVICE.md](mobile-bench/DEPLOY_TO_DEVICE.md).
 
 ## Iteration log
 
-### Iteration 1 — desktop + emulator E2E (2026-04-28)
+### Iteration 1 — proof bench desktop + emulator E2E (2026-04-28)
 
-Shipped:
+Branch: `mobile-bench/iteration-1`. Shipped:
 
-- `prover-core` library + HTTP path + bench-runner binary, all signed
-  commits on branch `mobile-bench/iteration-1`.
+- `prover-core` library + HTTP path + `bench-runner` binary (signed
+  commits).
 - Cross-compile recipe + emulator latency numbers in
-  [mobile-bench/RESULTS.md](mobile-bench/RESULTS.md): macOS M2 Max release
-  prove ≈ 25 ms / verify ≈ 9 ms; Pixel Fold API 35 (arm64-v8a emulator on
-  M2 Max) prove 82–106 ms / verify 38–58 ms.
-- Dioxus desktop window (`cargo run -p dioxus-bench`).
-- **Dioxus Android APK working** — Gradle scaffold under
-  `mobile-bench/dioxus-bench/android/`, fixed the
-  desktop-vs-mobile feature unification bug, APK launches the WebView,
-  *Run zkir example* button triggers a verifying proof on emulator.
-- [mobile-bench/DEPLOY_TO_DEVICE.md](mobile-bench/DEPLOY_TO_DEVICE.md) for
-  Samsung S24 Ultra deployment.
+  [mobile-bench/RESULTS.md](mobile-bench/RESULTS.md): macOS M2 Max
+  release prove ≈ 25 ms / verify ≈ 9 ms; Pixel Fold API 35
+  emulator (arm64-v8a translated on M2 Max) prove 82–106 ms / verify
+  38–58 ms.
+- Dioxus desktop window. Dioxus Android APK working — Gradle
+  scaffold under `mobile-bench/dioxus-bench/android/`,
+  desktop-vs-mobile feature unification fixed, APK launches the
+  WebView.
+- [mobile-bench/DEPLOY_TO_DEVICE.md](mobile-bench/DEPLOY_TO_DEVICE.md)
+  for Samsung S24 Ultra deployment.
+
+### Iteration 2 — hash-to-curve + ec proofs (2026-04-28)
+
+Branch: `mobile-bench/iteration-2` (off iter-1). Shipped:
+
+- New proof surfaces: `zkir-hash-to-curve` (k=9) and
+  `zkir-ec-mul-add` (k=11), lifted from
+  [zkir/tests/proofs.rs](zkir/tests/proofs.rs) (`test_htc_proof`,
+  `test_ec_proof`).
+- Shared `ExampleResolver` extracted from `zkir_example`.
+- `bench-runner` accepts `zkir|htc|ec|all`.
+- Dioxus desktop UI exposes three buttons sharing a busy-state
+  guard.
+- macOS M2 Max release numbers: zkir k=4 24 ms / htc k=9 107 ms /
+  ec k=11 317 ms (all verify=true).
+- Library tests in
+  [mobile-bench/prover-core/tests/library_path.rs](mobile-bench/prover-core/tests/library_path.rs)
+  exercise all three surfaces.
+- Android emulator + S24 Ultra capture deferred but documented
+  (text-only via `adb shell`).
+
+### Wallet iter-1 step-1 — wallet-core + dioxus-wallet skeleton (2026-04-28)
+
+Same branch (`mobile-bench/iteration-2`). Shipped:
+
+- `mobile-bench/wallet-core/` crate: `Network` enum (all 6 envs
+  URLs verbatim from gsd-wallet's `environments.ts`), `Wallet`
+  (random / deterministic / from-hex / chacha-seed / **demo from
+  hardcoded `DEMO_SEED_HEX`**), `probe_connectivity` (parallel HTTP
+  `__typename` GraphQL probe + WS upgrade probes with 5 s budget).
+- `mobile-bench/dioxus-wallet/` crate: Dioxus 0.6 UI with a
+  network dropdown, "Generate random wallet" / "Reload demo
+  wallet", "Connect" CTA, probe results card.
+- 5 `wallet-core` unit tests + 1 live preprod probe (gated on
+  `--features network-tests`).
+
+### Wallet iter-1 step-2 — real indexer + node queries (2026-04-29)
+
+Same branch. Shipped:
+
+- Vendored `schema-v4.graphql` + `e2e.graphql` from
+  midnightntwrk/midnight-indexer (sha-pinned at the commit time of
+  capture).
+- `wallet_core::indexer::IndexerClient` with `chain_tip` query via
+  `graphql_client = 0.16` codegen (matches indexer-tests' own
+  toolchain).
+- `wallet_core::node::NodeClient` over `jsonrpsee = 0.24` raw
+  JSON-RPC: `system_health`, `chain_getFinalizedHead`. **Phase-1**
+  of node RPC; switches to `subxt` + `midnight-node-metadata` git
+  dep when typed extrinsics land.
+- Connect screen wires probe → chain_tip + node status in parallel,
+  renders a Chain state card with indexer tip + node peers +
+  finalized head.
+- Live preprod numbers: indexer tip ≈ 557 902, node finalized head
+  `0xe4092ff…`, 8 peers.
+- Discovered the **graphql-transport-ws subprotocol** requirement
+  (above) and the **rustls multi-provider** crash (above).
+
+### Wallet iter-1 step-3 — Phase A mobile UI + dark theme (2026-04-29)
+
+Same branch. Shipped:
+
+- Surveyed `midnightntwrk/{midnight-zk, midnight-node,
+  midnight-indexer, midnight-wallet}` + `example-counter` +
+  `1am.xyz` to pin the dep strategy. Resolved the address-format
+  open question (bech32m + per-network HRP) and the sync-algorithm
+  open question (ports of midnight-wallet's per-asset Sync.ts).
+- Updated [mobile-bench/WALLET_PLAN.md](mobile-bench/WALLET_PLAN.md)
+  + new [mobile-bench/MOBILE_WALLET.md](mobile-bench/MOBILE_WALLET.md)
+  capturing the four use cases, dark theme spec, and four
+  implementation phases.
+- `wallet_core::hd` over `bip32 = "0.5"` — BIP32 derivation along
+  `m/44'/2400'/<account>'/<role>/<index>` with role enum
+  `NightExternal=0 / NightInternal=1 / Dust=2 / Zswap=3 /
+  Metadata=4`.
+- `wallet_core::address::unshielded_bech32m` over `bech32 = "0.11"`
+  — bech32m HRP per network. Reuses
+  `base_crypto::signatures::{SigningKey, VerifyingKey}` +
+  `coin_structure::coin::UserAddress::from(VerifyingKey)` (in-
+  workspace types do the schnorr → SHA-256 work already).
+- `Wallet::unshielded_address(network)` — what the user pastes
+  into a faucet to top the wallet up.
+- Mobile dark-theme UI: phone-sized desktop window (390 × 844),
+  dark palette refined against 1am.xyz (near-black `#0a0b0d`,
+  5-step surface scale, deep blue-violet `#7c8cff` accent), full
+  bech32m address visible (no truncation; user requested), `arboard`
+  clipboard wired for desktop, status sub-line as
+  dot+UPPERCASE label, primary CTA with cubic-bezier press-bounce.
+- 14 `wallet-core` unit tests pass; all 3 live preprod tests
+  (probe / chain tip / node status) green.
 
 Open / deferred:
 
-- **Samsung S24 Ultra real-device latency** — needs phone over USB.
-  Reuses the same APK and the same `bench-runner` binary; no rebuild.
-- **Dust-spend proving** (`prove_dust_spend`) — deferred; building a
-  valid `ProofPreimage` for a Dust spend requires reproducing the wallet
-  state-machine (DustState, secret keys, UTXOs, kernel transcript).
-- **Release-signed APK** for distribution outside dev machines (debug
-  keystore is fine for benchmarking).
-
-### Iteration 2 — more complex proof check (planned)
-
-Goal: replace `zkir-minimal-assert` (k=4, 1 input, trivial constraint)
-with a proof that exercises a meaningful workload — multiple inputs, real
-witness data, a larger `k`. Candidates to evaluate:
-
-- One of the vendored `mobile-bench/fixtures/` zkir circuits
-  (fallible/count) — needs a real `communications_commitment` derived
-  from contract simulation.
-- A zkir-v3 example (richer constraint set).
-- A small Zswap output proof.
-
-Add a second button to the Dioxus UI for the new circuit so both
-`zkir-minimal-assert` and the iter-2 circuit can be benched side by side.
-Capture numbers in [mobile-bench/RESULTS.md](mobile-bench/RESULTS.md) and
-**update this file's iteration log when done**.
+- **Phase B — sync drivers**: lift
+  `indexer-tests/src/graphql_ws_client.rs` from
+  midnight-indexer; port `unshielded` + `dust` Sync.ts folds;
+  `Wallet::start_sync(network) -> SyncHandle` over `tokio::spawn` +
+  `watch` channels.
+- **Phase C — UC-4 balances**: NIGHT + Dust formatters (stars →
+  decimal NIGHT; specks → decimal DUST), DUST regen progress bar,
+  Advanced disclosure with seed / shielded address / session id.
+- **Phase D — Android polish**: Gradle scaffold for
+  `dioxus-wallet`, Android `ClipboardManager` JNI hop, safe-area
+  insets verification.
+- **Address derivation parity check**: confirm
+  `mn_addr_preprod1ahhcw7swj7rnmcju6ldwgs0ghwxxwaakfz0sq7vdcmqj4827g68suryn3a`
+  is recognised by an actual midnight-wallet TS client (e.g.
+  paste into gsd-wallet's send form) before we trust user funds
+  faucet'd against it.
+- **Real-device latency** (S24 Ultra) for proof bench iter-1/iter-2
+  surfaces — hardware needed.
+- **Subxt + midnight-node-metadata** for typed extrinsic
+  submission — required for iter-2 send.
