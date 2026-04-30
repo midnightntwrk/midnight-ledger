@@ -1,0 +1,31 @@
+{
+  "name": "midnight-wallet-web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser bundle: midnight-did + transitive deps, loaded into the dioxus-wallet WebView. Output goes into ../assets/web/ as Dioxus assets.",
+  "scripts": {
+    "vendor": "node ./vendor.mjs",
+    "prebuild": "node ./vendor.mjs",
+    "build": "node ./build.mjs",
+    "watch": "node ./build.mjs --watch"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-did": "file:/Users/ysh/iohk/midnight-did/did",
+    "@midnight-ntwrk/midnight-did-api": "file:/Users/ysh/iohk/midnight-did/api",
+    "@midnight-ntwrk/midnight-did-domain": "file:/Users/ysh/iohk/midnight-did/domain",
+    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/contract"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "esbuild-plugins-node-modules-polyfill": "^1.7.0",
+    "isomorphic-ws": "^5.0.0",
+    "buffer": "^6.0.3",
+    "stream-browserify": "^3.0.0",
+    "events": "^3.3.0",
+    "crypto-browserify": "^3.12.0",
+    "path-browserify": "^1.0.1",
+    "assert": "^2.1.0",
+    "util": "^0.12.5"
+  }
+}
