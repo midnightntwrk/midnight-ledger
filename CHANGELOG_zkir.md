@@ -1,5 +1,9 @@
 # `zkir` Changelog
 
+## Unreleased
+
+- feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
+
 ## Version `2.1.0`
 
 - breaking: pull in breaking proof system changes

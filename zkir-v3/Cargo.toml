@@ -37,6 +37,7 @@ const-hex = "^1.14.0"
 serde = { version = "^1.0.0", features = ["derive", "rc"] }
 serde_bytes = { version = "^0.11.0" }
 serde_json = { version = "^1.0.0" }
+serde_repr = "^0.1.0"
 anyhow = "^1.0.102"
 hex = "^0.4.3"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
