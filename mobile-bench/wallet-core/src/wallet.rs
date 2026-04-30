@@ -131,6 +131,33 @@ impl Wallet {
             .map_err(|e| WalletError::Address(e.to_string()))
     }
 
+    /// 32-byte raw seed. Returned by-copy to keep callers honest
+    /// about it being secret material. `cfg(test)` because it's
+    /// only referenced from in-crate tests today; remove the gate
+    /// when external callers need it.
+    #[cfg(test)]
+    pub(crate) fn seed_bytes(&self) -> [u8; 32] {
+        self.seed_bytes
+    }
+
+    /// Substrate tx-envelope signer. Derives the same secp256k1
+    /// secret scalar the DID controller uses (BIP32 path
+    /// `m/44'/2400'/0'/0/0`, role `NightExternal`) and exposes it
+    /// as an ECDSA-capable signer for `MultiSignature::Ecdsa(_)`.
+    /// One key, two signature schemes — see
+    /// `wallet_core::node::signer` module-doc.
+    pub fn midnight_signer(&self) -> Result<crate::MidnightSigner, WalletError> {
+        let secret = crate::hd::derive_child_priv(
+            &self.seed_bytes,
+            0,
+            crate::hd::Role::NightExternal,
+            0,
+        )
+        .map_err(|e| WalletError::Address(e.to_string()))?;
+        crate::MidnightSigner::from_secret_bytes(&secret)
+            .map_err(|e| WalletError::Address(e.to_string()))
+    }
+
     /// Derive the controller signing key for DID operations.
     ///
     /// Mirrors `midnight-did-api`'s

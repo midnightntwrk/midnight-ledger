@@ -55,6 +55,14 @@ midnight-node-metadata = { git = "https://github.com/midnightntwrk/midnight-node
 parity-scale-codec = { version = "3", features = ["derive"] }
 scale-info = { version = "2", features = ["derive"] }
 
+# Same secp256k1 secret scalar that backs the wallet's BIP340
+# schnorr controller key (via base-crypto::signatures) is reused
+# for ECDSA on the substrate tx envelope. k256 already lives in the
+# tree via base-crypto; this entry just lights up the `ecdsa`
+# feature for our consumers.
+k256 = { version = "0.13", features = ["ecdsa"] }
+blake2 = "0.10"
+
 # rustls 0.23 panics at runtime if multiple crypto providers are
 # linked but none is selected as default. dioxus-desktop and our HTTP
 # stack each pull in different providers, so we install `ring`
