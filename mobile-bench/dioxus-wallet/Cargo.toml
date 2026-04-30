@@ -1,0 +1,55 @@
+[package]
+name = "dioxus-wallet"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+# Library target so an Android cdylib build can drop in alongside the
+# desktop binary the same way `dioxus-bench` does.
+[lib]
+name = "dioxuswalletmain"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Gates the WebView-side JS pipeline:
+#   * mobile-bench/dioxus-wallet/web/ esbuild bundle + vendored
+#     mn-pkg:// asset tree
+#   * src/protocol.rs custom-protocol handler
+#   * head injection of import map + module bundle
+#   * the embedded HTTP proof-server (from prover-core)
+#
+# Off by default — the mainline DID work happens in Rust
+# (see DID_PLAN.md). Flip on if you ever need to load an unported
+# upstream TS package directly inside the WebView.
+js-bridge = ["prover-core/proof-server-http"]
+
+[dependencies]
+wallet-core = { path = "../wallet-core" }
+tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+hex = "0.4"
+
+# Same per-target dioxus split as `dioxus-bench`. See its Cargo.toml for
+# the rationale (`mobile` and `desktop` are mutually exclusive — Android
+# splash hangs forever otherwise).
+[target.'cfg(target_os = "android")'.dependencies]
+dioxus = { version = "0.6", features = ["mobile"] }
+ndk-context = "0.1"
+jni = "0.21"
+
+[target.'cfg(not(target_os = "android"))'.dependencies]
+dioxus = { version = "0.6", features = ["desktop"] }
+dirs = "5"
+# Cross-platform clipboard for desktop (macOS / Linux / Windows).
+# Android uses ClipboardManager via JNI, which we wire up in Phase D.
+arboard = "3"
+# Local proof-server (in-process). The Rust DID code calls into it
+# directly via prover-core's library API; we keep the HTTP server
+# behind the `js-bridge` feature so it only spins up when the JS
+# pipeline is enabled.
+prover-core = { path = "../prover-core", default-features = false }

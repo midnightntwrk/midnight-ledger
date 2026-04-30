@@ -1,0 +1,8 @@
+[application]
+name = "dioxus-wallet"
+default_platform = "desktop"
+asset_dir = "assets"
+
+[application.android]
+package = "io.iohk.midnight.wallet"
+label = "Midnight Wallet"

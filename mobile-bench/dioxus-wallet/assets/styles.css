@@ -1,0 +1,335 @@
+/* Midnight Wallet — minimalistic dark theme.
+ * Spec: mobile-bench/MOBILE_WALLET.md "Dark theme" section.
+ * Phone-first; responsive cap at 560 px on desktop. */
+
+:root {
+  /* Tells the WebView to use dark-mode native scrollbars + form
+   * default rendering, so the system controls don't flash white. */
+  color-scheme: dark;
+
+  --bg:           #0a0b0d;
+  --surface:      #13161b;
+  --surface-2:    #1a1d24;
+  --surface-3:    #1d2939;
+  --surface-4:    #252b37;
+  --border:       #373a41;
+  --border-faint: #252a35;
+  --text:         #e6edf3;
+  --text-soft:    #cecfd2;
+  --text-muted:   #a4a7ae;
+  --text-faint:   #717680;
+  --accent:       #7c8cff;
+  --accent-soft:  #2a3052;
+  --success:      #5fb27c;
+  --warn:         #d8a94f;
+  --error:        #e57373;
+  --mono-tint:    #a3acc4;
+
+  --radius-card: 12px;
+  --radius-pill: 999px;
+  --radius-cta:  16px;
+  --gutter:      16px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family:
+    -apple-system, BlinkMacSystemFont,
+    "Inter", "Segoe UI", Roboto, sans-serif;
+  font-size: 15px;
+  font-feature-settings: "tnum" on, "lnum" on;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  padding: var(--gutter);
+  min-height: 100vh;
+}
+
+@media (min-width: 560px) {
+  body {
+    max-width: 560px;
+    margin: 0 auto;
+    padding: 32px;
+  }
+}
+
+.mono {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  color: var(--mono-tint);
+  font-feature-settings: "tnum" on, "lnum" on;
+}
+
+/* ─────────────── Header ─────────────── */
+.header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+.header h1 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+.header .menu-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 18px;
+  padding: 4px 8px;
+}
+.header .menu-btn:hover { color: var(--text); }
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 20px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+  flex-shrink: 0;
+}
+.dot.success { background: var(--success); }
+.dot.warn    { background: var(--warn); }
+.dot.error   { background: var(--error); }
+.dot.muted   { background: var(--text-faint); }
+
+/* ─────────────── Cards ─────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-card);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.card-header {
+  padding: 12px 16px 8px;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+/* ─────────────── Address block ───────────────
+ * Full address is shown verbatim so the user can long-press / drag-
+ * select it on any platform. The Copy button is still the canonical
+ * "give me the string" affordance. */
+.address-block {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 0 16px 16px;
+  padding: 10px 8px 10px 12px;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.address-block .text {
+  flex: 1;
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  color: var(--mono-tint);
+  font-size: 12px;
+  line-height: 1.45;
+  word-break: break-all;
+  user-select: text;
+  -webkit-user-select: text;
+}
+.copy-btn {
+  flex-shrink: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.copy-btn:hover { background: var(--surface-4); color: var(--text); }
+.copy-btn.copied { color: var(--success); }
+
+/* ─────────────── Balance rows ─────────────── */
+.balance-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-top: 1px solid var(--border-faint);
+}
+.balance-row:first-child { border-top: none; }
+.balance-row .label {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.balance-row .value {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 17px;
+  font-weight: 500;
+  color: var(--text-soft);
+  font-variant-numeric: tabular-nums;
+}
+.balance-row .unit {
+  color: var(--text-faint);
+  font-size: 12px;
+  margin-left: 4px;
+}
+.balance-row .hint {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  margin-top: 4px;
+}
+
+/* DUST regen progress bar */
+.dust-progress {
+  height: 4px;
+  margin: 0 16px 14px;
+  background: var(--surface-3);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.dust-progress > .fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 600ms ease;
+}
+
+/* ─────────────── Primary CTA ─────────────── */
+.cta {
+  display: block;
+  width: 100%;
+  height: 48px;
+  border: none;
+  border-radius: var(--radius-cta);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-top: 4px;
+  transition: transform 400ms cubic-bezier(.34, 1.56, .64, 1),
+              background 120ms ease,
+              color 120ms ease;
+}
+.cta:active { transform: scale(.97); }
+.cta:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.cta:disabled {
+  background: var(--surface-4);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* ─────────────── Network select ─────────────── */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+.row .label {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 32px 8px 12px;
+  font: inherit;
+  cursor: pointer;
+  background-image:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='none' stroke='%23a4a7ae' stroke-width='1.5' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+select:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* ─────────────── Disclosure ─────────────── */
+details {
+  margin-top: 8px;
+  border-top: 1px solid var(--border-faint);
+  padding-top: 12px;
+}
+details > summary {
+  list-style: none;
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before {
+  content: "›";
+  display: inline-block;
+  transition: transform 200ms ease;
+  color: var(--text-faint);
+}
+details[open] > summary::before { transform: rotate(90deg); }
+details .panel { margin-top: 12px; }
+details .panel .seed-blob {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--mono-tint);
+  word-break: break-all;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+details .panel .row {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0;
+}
+
+/* ─────────────── Probe rows (legacy step-1) ─────────────── */
+.probe {
+  display: grid;
+  grid-template-columns: 110px 1fr 64px;
+  gap: 8px;
+  margin: 6px 16px;
+  align-items: baseline;
+  font-size: 12px;
+}
+.probe .ok      { color: var(--success); font-weight: 500; }
+.probe .bad     { color: var(--error);   font-weight: 500; }
+.probe .url     { color: var(--text-faint); font-size: 11px; }
+.probe .latency { color: var(--text-muted); text-align: right; font-variant-numeric: tabular-nums; }
+.probe .detail  {
+  grid-column: 1 / 4;
+  color: var(--error);
+  font-size: 11px;
+  padding-left: 110px;
+}
