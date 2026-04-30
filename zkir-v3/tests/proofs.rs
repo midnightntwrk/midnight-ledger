@@ -328,15 +328,17 @@ mod proof_tests {
            "inputs": [
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1", "type": "Scalar<BLS12-381>" }
+              { "name": "%s1", "type": "Scalar<Jubjub>" }
            ],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
+               { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%s0"], "output": "%s0d" },
+               { "op": "encode", "input": "%s0d", "outputs": ["%s0e"] },
+               { "op": "ec_mul", "a": "%p0", "scalar": "%s0d", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
                { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" },
                { "op": "private_input", "type": "Point<Jubjub>", "guard": null, "output": "%p4" },
-               { "op": "ec_mul", "a": "%p4", "scalar": "%s0", "output": "%p5" }
+               { "op": "ec_mul", "a": "%p4", "scalar": "%s0d", "output": "%p5" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -363,7 +365,7 @@ mod proof_tests {
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), 42.into(), 63.into()],
+            inputs: vec![p.x().unwrap(), p.y().unwrap(), (-1).into(), 63.into()],
             private_transcript: vec![q.x().unwrap(), q.y().unwrap()],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],

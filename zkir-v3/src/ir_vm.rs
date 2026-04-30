@@ -29,7 +29,8 @@ use midnight_circuits::instructions::{
     EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
-    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
+    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
+    InnerValue,
 };
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
@@ -184,13 +185,6 @@ fn assemble_bytes(
         acc = std.add(layouter, &acc, limb)?;
     }
     Ok(acc)
-}
-
-/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
-/// TODO: Remove this function when IrType supports JubjubScalar.
-fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<JubjubFr, anyhow::Error> {
-    let s: Option<JubjubFr> = JubjubFr::from_bytes(&native.to_bytes_le()).into();
-    s.ok_or(anyhow::Error::msg("Error converting Fr to JubjubScalar"))
 }
 
 impl IrSource {
@@ -569,13 +563,13 @@ impl IrSource {
                 }
                 I::EcMul { a, scalar, output } => {
                     let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
+                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let c = IrValue::JubjubPoint(a * s);
                     memory.insert(output.clone(), c);
                 }
                 I::EcMulGenerator { scalar, output } => {
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let p = JubjubSubgroup::generator() * jubjub_scalar_from_native(s.0)?;
+                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let p = JubjubSubgroup::generator() * s;
                     memory.insert(output.clone(), IrValue::JubjubPoint(p));
                 }
             }
@@ -1006,8 +1000,7 @@ impl Relation for IrSource {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
                     let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
-                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
-                    let scalar = std.jubjub().convert(layouter, &scalar)?;
+                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
@@ -1016,8 +1009,7 @@ impl Relation for IrSource {
                         .jubjub()
                         .assign_fixed(layouter, JubjubSubgroup::generator())?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
-                    let scalar = std.jubjub().convert(layouter, &scalar)?;
+                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
@@ -1080,7 +1072,9 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::Decode { val_t, .. } => target_types.contains(val_t),
+                I::Decode { val_t, .. }
+                | I::PublicInput { val_t, .. }
+                | I::PrivateInput { val_t, .. } => target_types.contains(val_t),
                 _ => false,
             });
 
@@ -1088,7 +1082,7 @@ impl Relation for IrSource {
         };
 
         let jubjub = self.instructions.iter().any(|op| {
-            involves_types(&[IrType::JubjubPoint]) || {
+            involves_types(&[IrType::JubjubPoint, IrType::JubjubScalar]) || {
                 matches!(
                     op,
                     I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
