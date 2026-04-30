@@ -23,11 +23,10 @@ use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::{HashOutput, persistent_hash};
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
-use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, ZeroInstructions,
+    EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
@@ -40,7 +39,7 @@ use midnight_proofs::{
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
-use serialize::{Deserializable, Serializable, VecExt};
+use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
 use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
@@ -302,7 +301,7 @@ impl IrSource {
                             "Unexpected output length of encode instruction",
                         ));
                     }
-                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                    for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         memory.insert(out_id.clone(), enc_val);
                     }
                 }
@@ -665,7 +664,7 @@ impl Relation for IrSource {
 
         let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
 
-        for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
+        for (id, value) in self.inputs.iter().zip(input_values) {
             let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
             memory.insert(id.name.clone(), assigned);
         }
@@ -762,7 +761,7 @@ impl Relation for IrSource {
                             "Unexpected output length of encode instruction".into(),
                         ));
                     }
-                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                    for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         mem_insert(out_id.clone(), enc_val, &mut memory)?;
                     }
                 }
@@ -1134,7 +1133,7 @@ impl Relation for IrSource {
             keccak_256,
             sha3_256: false,
             blake2b: false,
-            nr_pow2range_cols: 1,
+            nr_pow2range_cols: 4,
             secp256k1: false,
             bls12_381: false,
             base64: false,
@@ -1143,10 +1142,13 @@ impl Relation for IrSource {
     }
 
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        Serializable::serialize(&self, writer)
+        let mut raw = Vec::new();
+        tagged_serialize(&self, &mut raw)?;
+        raw.serialize(writer)
     }
 
     fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Deserializable::deserialize(reader, 0)
+        let raw: Vec<u8> = Deserializable::deserialize(reader, 0)?;
+        tagged_deserialize(&mut &raw[..])
     }
 }
