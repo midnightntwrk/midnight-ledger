@@ -164,6 +164,57 @@ impl Wallet {
       `wallet-core/queries/`.
 - [ ] Wire `Wallet::resolve_did` to actually fetch + decode + map.
 
+### Phase 3 progress notes (2026-04-30)
+
+Foundations landed (commit `ffefa83d`):
+- `wallet-core/contracts/midnight-did/` vendored
+  `addVerificationMethod.{prover,verifier,zkir,bzkir}` + `did.compact`.
+- `wallet_core::did::artifacts` exposes them via `include_bytes!`.
+- `Wallet::did_controller_signing_key()` (BIP340 schnorr) +
+  `did_controller_public_key()` (32-byte SHA-256(pk)).
+- `Wallet::create_did()` stub returning `WriteNotImplemented`,
+  logs the derived controllerPublicKey hex.
+
+Subxt + metadata deps landed (this commit):
+- `subxt = "0.44.0"`, `subxt-signer = "0.44.0"`,
+  `midnight-node-metadata = { git = "...", tag = "node-0.22.3" }`,
+  plus `parity-scale-codec` + `scale-info`.
+- Probed the live standalone node via
+  `cargo run -p wallet-core --example probe_metadata`. Surfaced:
+  - 28 pallets total.
+  - **Deploy path: `Midnight.send_mn_transaction(<bytes>)`** (1
+    field, presumably SCALE-encoded `LedgerTransaction`).
+    Other Midnight call: `set_tx_size_weight` (admin).
+  - spec_version `22000` matches the node tag.
+
+Remaining work for an end-to-end deploy:
+1. **Build the `LedgerTransaction` payload**: a `ContractDeploy`
+   carrying contract address (computed from initial state +
+   nonce), serialized initial state bytes, verifier-keys map
+   (`addVerificationMethod` etc.), and maintenance authority. The
+   `ledger` crate in this workspace has the types — port the
+   midnight-did-api `deployContract` flow that builds the
+   `ContractCalls` struct.
+2. **SCALE-encode** that payload into the bytes the
+   `send_mn_transaction` extrinsic wants.
+3. **Sign the substrate tx envelope.** This is the load-bearing
+   blocker: substrate expects `MultiSignature` (sr25519/ecdsa/
+   ed25519) on the envelope, but our wallet's keys are BIP340
+   schnorr. midnight-did-api's `signTransactionIntents` does a
+   manual hop — the Midnight node must accept a custom signature
+   variant. **Next step**: read the metadata's
+   `extrinsic.signature` type to confirm what it accepts. If it
+   genuinely requires sr25519, we'll need a substrate-side wallet
+   identity that's *separate* from the BIP340 controller key — TS
+   counter-cli derives both from the seed.
+4. **Submit + watch.** `client.tx().midnight().send_mn_transaction
+   (bytes).sign_and_submit_then_watch_default(&signer)`, await
+   finalisation, decode the contract address from the deploy event.
+5. **Fee balancing.** Per the agreed plan, ship against a single-
+   DUST-UTXO assumption; surface a clear error if the wallet has
+   none. Real balancing comes when the wallet's unshielded sync
+   lands.
+
 ### Phase 3 — first write circuit, contract deploy (multi-day)
 
 - [ ] `wallet-core::did::contract::compile` — single function that

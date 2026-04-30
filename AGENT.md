@@ -295,6 +295,28 @@ Files needed for iter-2 surfaces: `bls_midnight_2p4` (zkir minimal),
 [mobile-bench/dioxus-bench/src/platform/android.rs](mobile-bench/dioxus-bench/src/platform/android.rs)
 defaults `MIDNIGHT_PP` to `/data/local/tmp/midnight-pp` if unset.
 
+### Midnight node — extrinsic deploy path
+
+Probed the running node via `subxt::OnlineClient` +
+`midnight-node-metadata` (tag `node-0.22.3`,
+`subxt = "0.44.0"`). Findings now cached in
+`mobile-bench/wallet-core/examples/probe_metadata.rs`:
+
+- 28 pallets exposed.
+- **Contract deploy goes through `Midnight.send_mn_transaction`
+  (1 SCALE-bytes field).** That's the single entry point for
+  deploys / circuit calls / extrinsic-style updates — the bytes
+  are a SCALE-encoded `LedgerTransaction` from the `ledger` crate.
+  Other call on this pallet is `set_tx_size_weight` (admin).
+- `spec_version = 22000` matches the `node-0.22.3` tag.
+
+Next-session blocker: the substrate tx envelope expects
+`MultiSignature` (sr25519/ecdsa/ed25519). Our wallet's keys are
+BIP340 schnorr. midnight-did-api's `signTransactionIntents` does
+a manual hop — verify what the metadata's `extrinsic.signature`
+actually accepts before assuming sr25519, since the chain may
+expose a custom `SignatureScheme` variant.
+
 ### Compact contract state encoding
 
 Compact contracts (e.g. `did.compact`) emit on-chain state as a

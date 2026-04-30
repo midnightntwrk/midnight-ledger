@@ -44,6 +44,17 @@ graphql_client = "0.16"
 # Phase-2 swaps to `subxt + midnight-node-metadata` for extrinsics.
 jsonrpsee = { version = "0.24", default-features = false, features = ["ws-client"] }
 
+# Substrate-typed RPC + extrinsic submission. Pinned to `subxt
+# 0.44.0` to match `midnightntwrk/midnight-node`'s workspace
+# version at `node-0.22.3` (the tag matching our local
+# standalone). Bumping to subxt 0.50 means jumping to the
+# `node-1.0.0-*` tag family.
+subxt = "0.44"
+subxt-signer = "0.44"
+midnight-node-metadata = { git = "https://github.com/midnightntwrk/midnight-node.git", tag = "node-0.22.3" }
+parity-scale-codec = { version = "3", features = ["derive"] }
+scale-info = { version = "2", features = ["derive"] }
+
 # rustls 0.23 panics at runtime if multiple crypto providers are
 # linked but none is selected as default. dioxus-desktop and our HTTP
 # stack each pull in different providers, so we install `ring`
