@@ -219,6 +219,130 @@ Remaining work for an end-to-end deploy:
    none. Real balancing comes when the wallet's unshielded sync
    lands.
 
+### Phase 3 deploy architecture — load-bearing details (added 2026-04-30)
+
+After reading `did.compact` and the workspace's `ledger` crate, the
+real shape of "submit a DID deploy from Rust" is clearer:
+
+**Constructor body** (`did.compact:102-112`):
+
+```compact
+constructor() {
+  contractVersion = 1;
+  id = kernel.self();              // computed by runtime, not us
+  active = true;
+  deactivated = false;
+  controllerPublicKey = disclose(publicKey(localSecretKey()));
+  const timestamp = disclose(currentTimestamp());
+  created = timestamp;
+  updated = timestamp;
+}
+
+publicKey(sk) = persistentHash(["did:controller:pk"+pad32, sk]);
+```
+
+So **`controllerPublicKey` is not a curve-derived public key**. It's
+`SHA-256("did:controller:pk" zero-padded to 32 || sk_bytes)`. The
+chain stores this commitment; the wallet replays it at deploy time
+via the `localSecretKey()` witness. `Wallet::did_controller_public_key`
+now produces the correct value.
+
+**`ContractState` shape** (`onchain-state/src/state.rs:728`):
+
+```rust
+pub struct ContractState<D: DB> {
+    pub data: ChargedState<D>,                          // the StateValue tree
+    pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
+    pub maintenance_authority: ContractMaintenanceAuthority,
+    pub balance: HashMap<TokenType, u128, D>,
+}
+```
+
+The `data` is the StateValue tree (root = 2-element array of
+constants + mutable). `operations` maps each circuit's entry-point
+name to its verifier-key bytes (from
+`contracts/midnight-did/<name>.verifier`). `maintenance_authority`
+holds the public key allowed to update the contract's circuit set.
+`balance` is empty at deploy time.
+
+**The deploy payload** (`ledger/src/structure.rs:2504`):
+
+```rust
+pub struct ContractDeploy<D: DB> {
+    pub initial_state: ContractState<D>,
+    pub nonce: HashOutput,                              // for address salting
+}
+
+impl ContractDeploy {
+    pub fn address(&self) -> ContractAddress {
+        ContractAddress(SHA-256(tagged_serialize(self)))
+    }
+}
+```
+
+The address is deterministic from `(initial_state, nonce)`. Pick a
+random 32-byte nonce, serialize the deploy, hash → address. **The
+state's `id` field starts as `ContractAddress::default()` (zeroes),
+because the contract's `kernel.self()` resolves it at runtime —
+the wallet doesn't pre-compute it.**
+
+**Wrapping into a transaction** is the real work. Going from
+`ContractDeploy` to a SCALE-encoded `Midnight.send_mn_transaction`
+payload requires:
+
+1. Wrap in `ContractAction::Deploy`.
+2. Wrap in an `Intent { actions: [...], ... }`.
+3. Wrap in a `Transaction::Standard(StandardTransaction { ... })`.
+4. Add `binding_randomness: PedersenRandomness` (random Pedersen
+   commitment opening).
+5. **Balance fees** — needs an unshielded NIGHT UTXO (from genesis
+   on Undeployed) + a DUST UTXO. This is where Phase B sync is the
+   real prerequisite; without sync the wallet doesn't see its own
+   UTXOs.
+6. **Prove** the transaction via `prover_core::ProverCore`. The
+   constructor doesn't have a prover key (no ZK proving needed for
+   pure Compact constructors), but `Intent`s have other proof
+   obligations (zswap, dust spends).
+7. SCALE-encode + submit via `subxt`'s typed
+   `Midnight.send_mn_transaction(bytes)`.
+
+**Test-utilities shortcut** (`ledger/src/test_utilities.rs`):
+
+```rust
+test_intents(&mut rng, vec![], vec![], vec![deploy], state.time)
+    -> HashMap<Segment, Intent<...>>
+tx_prove(rng, &Transaction::from_intents("local-test", intents), &resolver)
+    -> Transaction<S, P, ...>
+```
+
+These bypass fee balancing (`enforce_balancing = false`). For *real*
+submission against a node we can't use them — the chain enforces
+balance. For a smoke "construct + sign + locally well-formed-check"
+flow we can.
+
+**Recommended next slice**:
+
+1. Fix `did_controller_public_key` ✓ (this commit).
+2. Build the initial `ContractState` manually in Rust:
+   - Construct the StateValue tree per `did.compact`'s layout
+     (constants[contractVersion=1, controllerPublicKey],
+     mutable[id=zero, alsoKnownAs=Map::empty(), version=0,
+     created=now_ms, updated=now_ms, deactivated=false, active=true,
+     operationCount=0, verificationMethods=Map::empty(), 5 relation
+     maps empty, services=Map::empty()]).
+   - Build the `operations` table from the 11 vendored verifier
+     keys (load `<name>.verifier` bytes per circuit).
+   - Pick a random 32-byte nonce.
+   - Construct `ContractDeploy { initial_state, nonce }`.
+   - Compute `deploy.address()` → `DidId`.
+3. Surface the would-be `DidId` from `Wallet::create_did` as a
+   "preview address" (not yet submitted). Document the next slice
+   (transaction wrapping + submission).
+4. Build the actual `Transaction` + submit. Gated on either:
+   - `test-utilities` feature path (skips balancing — won't work
+     against real node), or
+   - Fee balancing (needs Phase B sync to see DUST/NIGHT UTXOs).
+
 ### Phase 3 — first write circuit, contract deploy (multi-day)
 
 - [ ] `wallet-core::did::contract::compile` — single function that

@@ -179,15 +179,46 @@ impl Wallet {
             .map_err(|e| WalletError::Address(format!("signing key: {e}")))
     }
 
-    /// 32-byte SHA-256(BIP340 verifying key) — the value the
-    /// `did.compact` contract stores as `controllerPublicKey`.
-    /// Same construction as `coin_structure::coin::UserAddress`'s
-    /// in-workspace conversion.
+    /// 32-byte commitment that the on-chain DID contract stores as
+    /// `controllerPublicKey`. **Not** a curve-derived public key —
+    /// the `publicKey` circuit in `did.compact` defines it as:
+    ///
+    /// ```compact
+    /// publicKey(sk) = persistentHash(["did:controller:pk" + pad32, sk]);
+    /// ```
+    ///
+    /// i.e. `SHA-256("did:controller:pk" + 14 zero bytes || sk)`.
+    /// This is a domain-separated commitment to the secret key,
+    /// used by the contract to authorize the controller without
+    /// revealing the key. The wallet computes the same value off-
+    /// chain so it can pre-compute the deploy address before
+    /// sending the deploy intent.
     pub fn did_controller_public_key(&self) -> Result<[u8; 32], WalletError> {
-        let sk = self.did_controller_signing_key()?;
-        let vk = sk.verifying_key();
-        let user_addr = coin_structure::coin::UserAddress::from(vk);
-        Ok(user_addr.0.0)
+        use sha2::{Digest, Sha256};
+        // The same secret scalar used for BIP340 schnorr signing
+        // (BIP32 path m/44'/2400'/0'/0/0). The contract's
+        // `localSecretKey()` witness must return these same bytes
+        // at deploy time.
+        let secret = crate::hd::derive_child_priv(
+            &self.seed_bytes,
+            0,
+            crate::hd::Role::NightExternal,
+            0,
+        )
+        .map_err(|e| WalletError::Address(e.to_string()))?;
+
+        // Compact's `pad(32, "did:controller:pk")` = the ASCII
+        // bytes followed by NULs out to 32 bytes (left-justified
+        // pad — confirmed against `did.compact` Vector<2, Bytes<32>>
+        // serialization).
+        let mut domain = [0u8; 32];
+        let tag = b"did:controller:pk";
+        domain[..tag.len()].copy_from_slice(tag);
+
+        let mut hasher = Sha256::new();
+        hasher.update(domain);
+        hasher.update(secret);
+        Ok(hasher.finalize().into())
     }
 
     /// **Phase 3 stub** — returns
