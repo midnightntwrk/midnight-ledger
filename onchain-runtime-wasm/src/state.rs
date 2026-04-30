@@ -289,7 +289,7 @@ impl StateValue {
     pub fn as_cell(&self) -> Result<JsValue, JsError> {
         match &self.0 {
             state::StateValue::Cell(v) => Ok(to_value(v)?),
-            _ => Ok(JsValue::NULL),
+            _ => Ok(JsValue::UNDEFINED),
         }
     }
 

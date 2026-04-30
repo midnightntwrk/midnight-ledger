@@ -20,7 +20,7 @@ use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
-use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
+use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test, tagged_deserialize};
 use std::io::{self, Read};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
@@ -33,8 +33,10 @@ use crate::ir_types::IrType;
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3]"]
+#[tag = "ir-source[v3-generic]"]
 pub struct IrSource {
+    /// The minor version of this IR.
+    pub version: IrMinorVersion,
     /// The list of input identifiers for this circuit
     pub inputs: Vec<TypedIdentifier>,
     /// Whether this IR should compile a communications commitment
@@ -44,6 +46,24 @@ pub struct IrSource {
 }
 tag_enforcement_test!(IrSource);
 tag_enforcement_test!(ProverKey<IrSource>);
+
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    serde_repr::Serialize_repr,
+    serde_repr::Deserialize_repr,
+    Serializable,
+)]
+#[tag = "ir-minor-version[v3]"]
+#[repr(u8)]
+#[non_exhaustive]
+pub enum IrMinorVersion {
+    #[default]
+    V0,
+}
 
 impl Zkir for IrSource {
     fn check(
@@ -74,6 +94,14 @@ impl Zkir for IrSource {
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + io::Seek) -> io::Result<Self> {
+        tagged_deserialize(reader)
+    }
+
+    fn load_prover_key_from_tagged(reader: impl Read + io::Seek) -> io::Result<ProverKey<Self>> {
+        tagged_deserialize(reader)
     }
 }
 
@@ -631,8 +659,8 @@ impl IrSource {
     /// Attempts to parse an arbitrary input as IR.
     pub fn load<R: Read>(reader: R) -> io::Result<Self> {
         let value: serde_json::Value = serde_json::from_reader(reader)?;
-        match &value {
-            serde_json::Value::Object(obj) => {
+        match value {
+            serde_json::Value::Object(mut obj) => {
                 let ver = serde_json::from_value(
                     obj.get("version")
                         .ok_or(io::Error::new(
@@ -642,7 +670,16 @@ impl IrSource {
                         .clone(),
                 )?;
                 match ver {
-                    SerdeVersion { major: 3, minor: 0 } => Ok(serde_json::from_value(value)?),
+                    SerdeVersion {
+                        major: 3,
+                        minor: 0..=0,
+                    } => {
+                        obj.insert(
+                            "version".into(),
+                            serde_json::Value::Number(ver.minor.into()),
+                        );
+                        Ok(serde_json::from_value(serde_json::Value::Object(obj))?)
+                    }
                     SerdeVersion { major, minor } => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         format!("Unhandled version: {major}.{minor}"),

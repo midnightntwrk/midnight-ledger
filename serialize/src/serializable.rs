@@ -64,7 +64,7 @@ impl<K: Serializable + Ord, V: Serializable> Serializable for HashMap<K, V> {
     fn serialize(&self, writer: &mut impl Write) -> std::io::Result<()> {
         (self.len() as u32).serialize(writer)?;
         let mut kvs = self.iter().collect::<Vec<_>>();
-        kvs.sort_by(|(k1, _), (k2, _)| k1.cmp(k2));
+        kvs.sort_by_key(|(k1, _)| *k1);
         for (k, v) in kvs.into_iter() {
             k.serialize(writer)?;
             v.serialize(writer)?;
