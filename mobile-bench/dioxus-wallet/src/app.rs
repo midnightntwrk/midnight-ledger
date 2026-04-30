@@ -219,10 +219,21 @@ pub fn App() -> Element {
                         network.set(n);
                         chain.set(ChainSnapshot::default());
                         phase.set(SyncPhase::Idle);
+                        // Demo wallets are network-aware: PreProd
+                        // / mainnet / etc. share DEMO_SEED_HEX, but
+                        // Undeployed uses UNDEPLOYED_GENESIS_SEED_HEX
+                        // (the prefunded standalone genesis). If the
+                        // user has either of those loaded, refresh
+                        // to the right one for the new network. A
+                        // user-generated random wallet stays put.
                         let was_demo = wallet
                             .read()
                             .as_ref()
-                            .map(|w| w.seed_hex == wallet_core::DEMO_SEED_HEX)
+                            .map(|w| {
+                                w.seed_hex == wallet_core::DEMO_SEED_HEX
+                                    || w.seed_hex
+                                        == wallet_core::UNDEPLOYED_GENESIS_SEED_HEX
+                            })
                             .unwrap_or(false);
                         if was_demo {
                             wallet.set(Some(WalletInfo::from_wallet(&Wallet::demo(n))));
@@ -288,7 +299,7 @@ fn CreateDidPanel(network: Network) -> Element {
         pending.set(true);
         result.set(None);
         spawn(async move {
-            let r = match Wallet::from_seed_hex(wallet_core::DEMO_SEED_HEX, network) {
+            let r = match Ok::<_, wallet_core::WalletError>(Wallet::demo(network)) {
                 Ok(w) => match w.create_did().await {
                     Ok(id) => Ok(id.to_did_string()),
                     Err(e) => {
@@ -348,7 +359,7 @@ fn ResolveDidPanel(network: Network) -> Element {
         pending.set(true);
         result.set(None);
         spawn(async move {
-            let r = match Wallet::from_seed_hex(wallet_core::DEMO_SEED_HEX, network) {
+            let r = match Ok::<_, wallet_core::WalletError>(Wallet::demo(network)) {
                 Ok(w) => match w.resolve_did(&did_str).await {
                     Ok(doc) => match serde_json::to_string_pretty(&doc) {
                         Ok(s) => Ok(s),

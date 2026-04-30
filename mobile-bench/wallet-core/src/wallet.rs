@@ -5,14 +5,26 @@ use zswap::keys::{Seed, SecretKeys};
 
 use crate::network::Network;
 
-/// Stable hardcoded seed used by [`Wallet::demo`] so the dev UI shows
-/// the *same* coin/encryption public keys across launches. **Not a
-/// real wallet**: the bytes are publicly committed, so anything funded
-/// against these keys is everyone's money. Replaced with the
-/// gsd-wallet-style W0–W3 genesis seeds when localnet quick-start
-/// lands in iter-2.
+/// Stable hardcoded seed used by [`Wallet::demo`] for non-Undeployed
+/// networks so the dev UI shows the *same* coin/encryption public
+/// keys across launches. **Not a real wallet**: the bytes are
+/// publicly committed, so anything funded against these keys is
+/// everyone's money. The gsd-wallet-style W0–W3 genesis seeds for
+/// other localnet flavours land in iter-2.
 pub const DEMO_SEED_HEX: &str =
     "88b9e1f2a2bf22ec7e739e6d43abc16f593ebdc1460568cb16a7730700bda13c";
+
+/// Pre-funded genesis seed for the standalone (`Undeployed`) Midnight
+/// stack. Mirrors `GENESIS_MINT_WALLET_SEED` from
+/// `midnightntwrk/example-counter/counter-cli/src/cli.ts` and the
+/// upstream identity-examples standalone environments. The dev
+/// chainspec (`CFG_PRESET=dev`) mints both NIGHT and DUST to this
+/// wallet at genesis, so [`Wallet::demo`] auto-loads it whenever the
+/// active network is [`crate::Network::Undeployed`] — that's the
+/// only way to drive `Wallet::create_did` etc. against the local
+/// stack without a manual top-up.
+pub const UNDEPLOYED_GENESIS_SEED_HEX: &str =
+    "0000000000000000000000000000000000000000000000000000000000000001";
 
 #[derive(Debug, thiserror::Error)]
 pub enum WalletError {
@@ -42,11 +54,21 @@ impl Wallet {
         Self { network, keys, seed_bytes: seed }
     }
 
-    /// Demo wallet — hex seed lives in [`DEMO_SEED_HEX`]. Stable
-    /// across launches so the dev UI shows the same public keys.
+    /// Demo wallet — uses [`UNDEPLOYED_GENESIS_SEED_HEX`] when the
+    /// network is [`Network::Undeployed`] (so the wallet starts with
+    /// real NIGHT + DUST balances on the local standalone stack),
+    /// and the public-knowledge [`DEMO_SEED_HEX`] for every other
+    /// network (where there's no funding implication). Both are
+    /// stable across launches so the dev UI shows the same public
+    /// keys.
     pub fn demo(network: Network) -> Self {
-        Self::from_seed_hex(DEMO_SEED_HEX, network)
-            .expect("DEMO_SEED_HEX is a 32-byte hex literal")
+        let seed = if network == Network::Undeployed {
+            UNDEPLOYED_GENESIS_SEED_HEX
+        } else {
+            DEMO_SEED_HEX
+        };
+        Self::from_seed_hex(seed, network)
+            .expect("seed constants are 32-byte hex literals")
     }
 
     /// Generate a fresh wallet from `OsRng`. Seed is also returned via
@@ -258,5 +280,18 @@ mod tests {
             w1.coin_public_key_hex().unwrap(),
             w2.coin_public_key_hex().unwrap()
         );
+    }
+
+    #[test]
+    fn undeployed_demo_uses_genesis_seed() {
+        let w = Wallet::demo(Network::Undeployed);
+        assert_eq!(w.seed_hex(), UNDEPLOYED_GENESIS_SEED_HEX);
+    }
+
+    #[test]
+    fn demo_seed_differs_per_network_class() {
+        let pre = Wallet::demo(Network::PreProd);
+        let und = Wallet::demo(Network::Undeployed);
+        assert_ne!(pre.seed_hex(), und.seed_hex());
     }
 }

@@ -31,4 +31,4 @@ pub use indexer::{ChainTipInfo, ContractStateInfo, IndexerClient, IndexerError};
 pub use network::{Network, NetworkConfig};
 pub use node::{NodeClient, NodeError, NodeHealth, NodeStatus};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
-pub use wallet::{DEMO_SEED_HEX, Wallet, WalletError};
+pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError};
