@@ -1,0 +1,15 @@
+query ContractState($address: HexEncoded!) {
+  contractAction(address: $address) {
+    __typename
+    address
+    state
+    transaction {
+      __typename
+      id
+      hash
+      block {
+        height
+      }
+    }
+  }
+}
