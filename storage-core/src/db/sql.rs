@@ -60,8 +60,7 @@ use crate::{
     backend::OnDiskObject,
     db::DummyArbitrary,
 };
-#[allow(deprecated)]
-use crypto::digest::generic_array::GenericArray;
+use digest::common::array::Array;
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 use r2d2::Pool;
@@ -452,9 +451,7 @@ impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
 impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         #[allow(deprecated)]
-        Ok(ArenaHash(
-            GenericArray::from_slice(value.as_bytes()?).clone(),
-        ))
+        Ok(ArenaHash(Array::from_slice(value.as_bytes()?).clone()))
     }
 }
 
@@ -674,9 +671,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT COUNT(*) FROM node";
             let mut stmt = tx.prepare(sql).unwrap();
-            let result = stmt
-                .query_row([], |row| row.get::<_, i64>(0))
-                .unwrap() as usize;
+            let result = stmt.query_row([], |row| row.get::<_, i64>(0)).unwrap() as usize;
             stmt.finalize().unwrap();
             result
         })
