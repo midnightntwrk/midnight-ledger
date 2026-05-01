@@ -19,9 +19,10 @@ use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
 use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
-    DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
-    DustLocalState as LedgerDustLocalState, DustNullifier as LedgerDustNullifier,
-    DustOutput as LedgerDustOutput, DustParameters as LedgerDustParameters, DustPublicKey,
+    DustActions as LedgerDustActions, DustGenerationInfo as LedgerDustGenerationInfo,
+    DustGenerationState as LedgerDustGenerationState, DustLocalState as LedgerDustLocalState,
+    DustNullifier as LedgerDustNullifier, DustOutput as LedgerDustOutput,
+    DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
@@ -1337,6 +1338,20 @@ impl DustLocalState {
         ))
     }
 
+    #[wasm_bindgen(js_name = "updateGenerationTreeFromEvidence")]
+    pub fn update_generation_tree_from_evidence(
+        &self,
+        insertion: &DustGenerationTreeInsertionPath,
+    ) -> Result<DustLocalState, JsError> {
+        let mut state = self.0.clone();
+        state.generating_tree = state
+            .generating_tree
+            .update_from_evidence(insertion.0.clone())
+            .map_err(|_| JsError::new("Unable to update generation tree from evidence"))?
+            .rehash();
+        Ok(DustLocalState(state))
+    }
+
     #[wasm_bindgen(js_name = "generatingTreeRoot")]
     pub fn generating_tree_root(&self) -> Result<JsValue, JsError> {
         Ok(self
@@ -1544,6 +1559,16 @@ impl DustLocalState {
         }
     }
 
+    #[wasm_bindgen(getter, js_name = "commitmentTreeFirstFree")]
+    pub fn commitment_tree_first_free(&self) -> u64 {
+        self.0.commitment_tree_first_free
+    }
+
+    #[wasm_bindgen(getter, js_name = "generatingTreeFirstFree")]
+    pub fn generating_tree_first_free(&self) -> u64 {
+        self.0.generating_tree_first_free
+    }
+
     #[wasm_bindgen(getter)]
     pub fn utxos(&self) -> Result<Vec<JsValue>, JsError> {
         self.0
@@ -1615,6 +1640,49 @@ pub fn updated_value(
 #[wasm_bindgen(js_name = "sampleDustSecretKey")]
 pub fn sample_dust_secret_key() -> DustSecretKey {
     DustSecretKey::wrap(LedgerDustSecretKey::sample(&mut OsRng))
+}
+
+#[wasm_bindgen]
+pub struct DustGenerationTreeInsertionPath(
+    pub(crate) merkle_tree::TreeInsertionPath<LedgerDustGenerationInfo>,
+);
+
+#[wasm_bindgen]
+impl DustGenerationTreeInsertionPath {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        state: &DustGenerationState,
+        index: u64,
+    ) -> Result<DustGenerationTreeInsertionPath, JsError> {
+        state
+            .0
+            .generating_tree
+            .insertion_evidence(index)
+            .map(DustGenerationTreeInsertionPath)
+            .map_err(|_| JsError::new("invalid index into sparse merkle tree"))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        tagged_serialize(&self.0, &mut res)?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<DustGenerationTreeInsertionPath, JsError> {
+        Ok(DustGenerationTreeInsertionPath(from_value_ser(
+            raw,
+            "DustGenerationTreeInsertionPath",
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
 }
 
 #[wasm_bindgen]

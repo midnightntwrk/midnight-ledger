@@ -20,9 +20,9 @@ use crate::error::{
 use crate::primitive::MultiSet;
 use crate::structure::{
     BindingKind, ClaimRewardsTransaction, ContractAction, ContractCall, ContractDeploy,
-    ErasedIntent, FEE_TOKEN, Intent, LedgerParameters, LedgerState, MaintenanceUpdate,
-    PedersenDowngradeable, ProofKind, SingleUpdate, StandardTransaction, Transaction,
-    UnshieldedOffer,
+    ErasedIntent, FEE_TOKEN, GUARANTEED_SEGMENT, Intent, LedgerParameters, LedgerState,
+    MaintenanceUpdate, PedersenDowngradeable, ProofKind, SingleUpdate, StandardTransaction,
+    Transaction, UnshieldedOffer,
 };
 use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
@@ -493,7 +493,7 @@ impl<
     where
         UnshieldedOffer<S, D>: Clone,
     {
-        if segment_id == SEGMENT_GUARANTEED {
+        if segment_id == GUARANTEED_SEGMENT {
             return Err(MalformedTransaction::IntentAtGuaranteedSegmentId);
         }
 
@@ -529,8 +529,6 @@ impl<
         Ok(())
     }
 }
-
-const SEGMENT_GUARANTEED: u16 = 0;
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
     fn well_formed(&self) -> Result<(), MalformedTransaction<D>> {
@@ -591,11 +589,12 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(x, 0).map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, GUARANTEED_SEGMENT)
+                                .map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {
-                        if *seg_x_offer.0 == 0 {
+                        if *seg_x_offer.0 == GUARANTEED_SEGMENT {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
                         P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
@@ -625,7 +624,7 @@ where
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
-                    if *segment_intent.0 == 0 {
+                    if *segment_intent.0 == GUARANTEED_SEGMENT {
                         return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                     }
                     segment_intent.1.well_formed(

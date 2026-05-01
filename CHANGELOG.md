@@ -4,11 +4,19 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## Unreleased (9.0)
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
   ledger parameters.
 - fix: correctly exclude the identity point during coin ciphertext decryption
+
+## Unreleased (8.2)
+
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
+- feat: proof-server support for ZKIR 2.1
+- fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
+- fix: fix potential panic in bridge fee processing
+- fix: address non-associativity of Dust event processing.
 
 ## 8.1.0
 

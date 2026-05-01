@@ -1526,7 +1526,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Transaction<S,
 where
     Transaction<S, P, B, D>: Serializable,
 {
-    pub fn segments(&self) -> Vec<u16> {
+    pub fn segments(&self) -> Vec<Segment> {
         match self {
             Self::Standard(stx) => stx.segments(),
             Self::ClaimRewards(_) => Vec::new(),
@@ -1556,15 +1556,21 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
     }
 }
 
+/// Logical segment index used in standard transactions and ledger application order.
+pub type Segment = u16;
+
+/// Segment id for the guaranteed phase (fees, guaranteed coins, guaranteed transcripts).
+pub const GUARANTEED_SEGMENT: Segment = 0;
+
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
 #[tag = "standard-transaction[v9]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
-    pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
+    pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
     pub guaranteed_coins: Option<Sp<ZswapOffer<P::LatestProof, D>, D>>,
-    pub fallible_coins: HashMap<u16, ZswapOffer<P::LatestProof, D>, D>,
+    pub fallible_coins: HashMap<Segment, ZswapOffer<P::LatestProof, D>, D>,
     pub binding_randomness: PedersenRandomness,
 }
 tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
@@ -1572,7 +1578,7 @@ tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
 impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: Storable<D>, D: DB>
     StandardTransaction<S, P, B, D>
 {
-    pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
+    pub fn actions(&self) -> impl Iterator<Item = (Segment, ContractAction<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1583,7 +1589,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn deploys(&self) -> impl Iterator<Item = (u16, ContractDeploy<D>)> {
+    pub fn deploys(&self) -> impl Iterator<Item = (Segment, ContractDeploy<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1598,7 +1604,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn updates(&self) -> impl Iterator<Item = (u16, MaintenanceUpdate<D>)> {
+    pub fn updates(&self) -> impl Iterator<Item = (Segment, MaintenanceUpdate<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1613,7 +1619,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn calls(&self) -> impl Iterator<Item = (u16, ContractCall<P, D>)> {
+    pub fn calls(&self) -> impl Iterator<Item = (Segment, ContractCall<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1630,7 +1636,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn intents(&'_ self) -> impl Iterator<Item = (u16, Intent<S, P, B, D>)> {
+    pub fn intents(&'_ self) -> impl Iterator<Item = (Segment, Intent<S, P, B, D>)> {
         self.intents.clone().into_iter()
     }
 
@@ -1708,10 +1714,22 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             .flat_map(|offer| Vec::from(&offer.1.transient).into_iter())
     }
 
-    pub fn segments(&self) -> Vec<u16> {
-        let mut segments = once(0)
-            .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+    pub fn segments(&self) -> Vec<Segment> {
+        let mut segments = once(GUARANTEED_SEGMENT)
+            .chain(self.intents.keys())
+            .chain(self.fallible_coins.keys())
+            .collect::<Vec<_>>();
+        segments.sort();
+        segments.dedup();
+        segments
+    }
+
+    pub fn fallible_segments(&self) -> Vec<Segment> {
+        let mut segments = self
+            .intents
+            .keys()
+            .chain(self.fallible_coins.keys())
+            .filter(|&s| s != GUARANTEED_SEGMENT)
             .collect::<Vec<_>>();
         segments.sort();
         segments.dedup();
@@ -2107,7 +2125,7 @@ where
                 let offers = stx
                     .guaranteed_coins
                     .iter()
-                    .map(|o| (0, (**o).clone()))
+                    .map(|o| (GUARANTEED_SEGMENT, (**o).clone()))
                     .chain(
                         stx.fallible_coins
                             .iter()
@@ -2134,7 +2152,7 @@ where
                     // Merkle tree insertion
                     offer_cost +=
                         model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false) * outputs;
-                    if segment == 0 {
+                    if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
                         f_cost += offer_cost;
@@ -2197,17 +2215,17 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D
     Transaction<S, P, B, D>
 {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 }
 
 impl SystemTransaction {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 
     pub fn cost(&self, params: &LedgerParameters) -> SyntheticCost {
@@ -2514,9 +2532,9 @@ impl<D: DB> Debug for ContractDeploy<D> {
 
 impl<D: DB> ContractDeploy<D> {
     pub fn address(&self) -> ContractAddress {
-        let mut writer = Sha256::new();
+        let mut writer = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut writer).expect("In-memory serialization should succeed");
-        ContractAddress(HashOutput(writer.finalize().into()))
+        ContractAddress(HashOutput(writer.0.finalize().into()))
     }
 }
 
