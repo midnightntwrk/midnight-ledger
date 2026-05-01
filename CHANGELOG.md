@@ -6,6 +6,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 ## Unreleased (9.0)
 
+- feat: add explicit price floor, denominated in full blocks, and governed by
+  ledger parameters.
 - fix: correctly exclude the identity point during coin ciphertext decryption
 
 ## Unreleased (8.2)
