@@ -1857,13 +1857,6 @@ export class ZswapLocalState {
   spend(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, ttl?: Date): [ZswapLocalState, UnprovenInput];
 
   /**
-   * Initiates a new spend of a new-yet-received output, outputting the
-   * corresponding {@link ZswapTransient}, and the updated state marking
-   * this coin as in-flight.
-   */
-  spendFromOutput(secretKeys: ZswapSecretKeys, coin: QualifiedShieldedCoinInfo, segment: number | undefined, output: UnprovenOutput, ttl?: Date): [ZswapLocalState, UnprovenTransient];
-
-  /**
    * Adds a coin to the list of coins that are expected to be received
    *
    * This should be used if an output is creating a coin for this wallet, which
@@ -1999,9 +1992,9 @@ export class ZswapTransient<P extends Proofish> {
    */
   readonly commitment: CoinCommitment;
   /**
-   * The contract address creating the transient, if applicable
+   * The contract address creating the transient
    */
-  readonly contractAddress: ContractAddress | undefined;
+  readonly contractAddress: ContractAddress;
   /**
    * The nullifier of the transient
    */

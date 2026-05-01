@@ -1316,7 +1316,8 @@ impl<D: DB> LedgerState<D> {
     ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
         match &tx.inner {
             Transaction::Standard(stx) => {
-                let (state, deferred_events) = self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
+                let (state, deferred_events) =
+                    self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
                 debug!(
                     "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
                     self.state_hash(),
@@ -2290,7 +2291,8 @@ mod tests {
         let expected_fee = basis_points_of(
             INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
             amount,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(
             new_state
                 .bridge_receiving

@@ -376,14 +376,14 @@ impl<P: Storable<D>, D: DB> Debug for Output<P, D> {
 
 #[derive(Storable, Serialize)]
 #[derive_where(PartialOrd, Ord, PartialEq, Eq, Clone; P)]
-#[tag = "zswap-transient[v2]"]
+#[tag = "zswap-transient[v3]"]
 #[storable(db = D)]
 pub struct Transient<P: Storable<D>, D: DB> {
     pub nullifier: Nullifier,
     pub coin_com: Commitment,
     pub value_commitment_input: Pedersen,
     pub value_commitment_output: Pedersen,
-    pub contract_address: Option<Sp<ContractAddress, D>>,
+    pub contract_address: Sp<ContractAddress, D>,
     pub ciphertext: Option<Sp<CoinCiphertext, D>>,
     pub proof_input: Arc<P>,
     pub proof_output: Arc<P>,
@@ -419,7 +419,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
         Input {
             nullifier: self.nullifier,
             value_commitment: self.value_commitment_input,
-            contract_address: self.contract_address.clone(),
+            contract_address: Some(self.contract_address.clone()),
             merkle_tree_root: MerkleTree::<_>::blank(ZSWAP_TREE_HEIGHT)
                 .try_update_hash(0, self.coin_com.0, ())
                 .expect("updating hash on non-collapsed tree should always succeed")
@@ -434,7 +434,7 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
         Output {
             coin_com: self.coin_com,
             value_commitment: self.value_commitment_output,
-            contract_address: self.contract_address.clone(),
+            contract_address: Some(self.contract_address.clone()),
             ciphertext: self.ciphertext.clone(),
             proof: self.proof_output.clone(),
         }
@@ -443,20 +443,11 @@ impl<P: Clone + Storable<D>, D: DB> Transient<P, D> {
 
 impl<P: Storable<D>, D: DB> Debug for Transient<P, D> {
     fn fmt(&self, formatter: &mut Formatter) -> fmt::Result {
-        match self.contract_address.clone() {
-            Some(addr) => {
-                write!(
-                    formatter,
-                    "<shielded transient coin {:?} {:?} for: {:?}>",
-                    self.coin_com, self.nullifier, addr
-                )
-            }
-            None => write!(
-                formatter,
-                "<shielded transient coin {:?} {:?}>",
-                self.coin_com, self.nullifier
-            ),
-        }
+        write!(
+            formatter,
+            "<shielded transient coin {:?} {:?} for: {:?}>",
+            self.coin_com, self.nullifier, self.contract_address
+        )
     }
 }
 
@@ -471,7 +462,7 @@ tag_enforcement_test!(Delta);
 
 #[derive(Storable)]
 #[derive_where(PartialEq, Eq, PartialOrd, Ord, Clone; P)]
-#[tag = "zswap-offer[v5]"]
+#[tag = "zswap-offer[v6]"]
 #[storable(db = D)]
 /// A Zswap offer consists of a potentially unbalanced set of Zswap
 /// inputs/outputs.

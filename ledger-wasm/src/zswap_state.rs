@@ -16,7 +16,7 @@ use crate::events::Event;
 use crate::state_changes::ZswapStateChanges;
 use crate::tx::{Transaction, get_dyn_transaction};
 use crate::zswap_keys::ZswapSecretKeys;
-use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes, ZswapOutput, ZswapTransient};
+use crate::zswap_wasm::{ZswapInput, ZswapOffer, ZswapOfferTypes};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::{
     coin::{
@@ -379,31 +379,6 @@ impl ZswapLocalState {
         let res = Array::new();
         res.push(&succ);
         res.push(&inp);
-        Ok(res.into())
-    }
-
-    #[wasm_bindgen(js_name = "spendFromOutput")]
-    pub fn spend_from_output(
-        &self,
-        secret_keys: &ZswapSecretKeys,
-        coin: JsValue,
-        segment: Option<u16>,
-        output: &ZswapOutput,
-        _ttl: Option<Date>,
-    ) -> Result<JsValue, JsError> {
-        let coin: QualifiedCoinInfo = value_to_qualified_shielded_coininfo(coin)?;
-        let (succ, tra) = self.0.spend_from_output(
-            &mut OsRng,
-            &secret_keys.try_into()?,
-            &coin,
-            segment,
-            output.clone().try_into()?,
-        )?;
-        let succ = JsValue::from(ZswapLocalState(succ));
-        let tra = JsValue::from(ZswapTransient::from(tra));
-        let res = Array::new();
-        res.push(&succ);
-        res.push(&tra);
         Ok(res.into())
     }
 

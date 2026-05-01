@@ -135,10 +135,7 @@ impl<D: DB> State<D> {
 
         if self.nullifiers.contains_key(&trans.nullifier) {
             return Err(TransactionInvalid::NullifierAlreadyPresent(trans.nullifier));
-        } else if Self::on_whitelist(
-            whitelist,
-            &trans.contract_address.as_ref().map(|x| *x.deref()),
-        ) {
+        } else if Self::on_whitelist(whitelist, &Some(*trans.contract_address)) {
             self.nullifiers = self.nullifiers.insert(trans.nullifier, ());
         }
 
@@ -149,14 +146,11 @@ impl<D: DB> State<D> {
             .try_update_hash(
                 first_free,
                 trans.coin_com.0,
-                trans.contract_address.as_ref().map(|x| Sp::new(*x.deref())),
+                Some(trans.contract_address.clone()),
             )
             .map_err(TransactionInvalid::MerkleTreeError)?;
 
-        if !Self::on_whitelist(
-            whitelist,
-            &trans.contract_address.as_ref().map(|x| *x.deref()),
-        ) {
+        if !Self::on_whitelist(whitelist, &Some(*trans.contract_address)) {
             self.coin_coms = self.coin_coms.collapse(first_free, first_free);
         }
 

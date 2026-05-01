@@ -156,15 +156,13 @@ impl ZswapTransient {
     }
 
     #[wasm_bindgen(getter, js_name = "contractAddress")]
-    pub fn contract_address(&self) -> Result<Option<String>, JsError> {
+    pub fn contract_address(&self) -> Result<String, JsError> {
         use ZswapTransientTypes::*;
-        match &self.0 {
-            ProvenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
-            UnprovenTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
-            ProofErasedTransient(val) => val.contract_address.clone().map(|x| *x.deref()),
-        }
-        .map(|v| to_hex_ser(&v))
-        .transpose()
+        to_hex_ser(&match &self.0 {
+            ProvenTransient(val) => *val.contract_address,
+            UnprovenTransient(val) => *val.contract_address,
+            ProofErasedTransient(val) => *val.contract_address,
+        })
     }
 
     #[wasm_bindgen(getter)]

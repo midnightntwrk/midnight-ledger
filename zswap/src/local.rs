@@ -269,33 +269,6 @@ impl<D: DB> State<D> {
         Ok((res, inp))
     }
 
-    #[instrument(skip(self, rng))]
-    pub fn spend_from_output<R: Rng + CryptoRng + ?Sized>(
-        &self,
-        rng: &mut R,
-        secret_keys: &SecretKeys,
-        coin: &QualifiedCoinInfo,
-        segment: Option<u16>,
-        output: Output<ProofPreimage, D>,
-    ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
-        let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)
-            .try_update_hash(0, output.coin_com.0, ())
-            .map_err(OfferCreationFailed::MerkleTreeError)?
-            .rehash();
-        let (res, input) = self.spend_from_tree(rng, secret_keys, coin, segment, &tree)?;
-        let io = Transient {
-            nullifier: input.nullifier,
-            coin_com: output.coin_com,
-            value_commitment_input: input.value_commitment,
-            value_commitment_output: output.value_commitment,
-            contract_address: output.contract_address,
-            ciphertext: output.ciphertext,
-            proof_input: input.proof,
-            proof_output: output.proof,
-        };
-        Ok((res, io))
-    }
-
     #[instrument(skip(rng))]
     pub fn authorize_claim<R: Rng + CryptoRng + ?Sized>(
         &self,
