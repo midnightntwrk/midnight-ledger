@@ -2666,7 +2666,7 @@ version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb26cec98cce3a3d96cbb7bced3c4b16e3d13f27ec56dbd62cbc8f39cfb9d653"
 dependencies = [
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -2953,8 +2953,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger"
-version = "8.1.0-rc.1"
+name = "midnight-ledger-static"
+version = "9.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+]
+
+[[package]]
+name = "midnight-ledger-v9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "criterion",
@@ -2970,8 +2978,8 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
  "midnight-ledger-static",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-vm",
  "midnight-serialize",
@@ -2998,16 +3006,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "midnight-ledger-static"
-version = "9.0.0"
-dependencies = [
- "proc-macro2",
- "quote 1.0.45",
-]
-
-[[package]]
-name = "midnight-ledger-wasm"
-version = "8.1.0-rc.1"
+name = "midnight-ledger-wasm-v9"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3016,7 +3016,7 @@ dependencies = [
  "js-sys",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-runtime-wasm",
  "midnight-serialize",
@@ -3133,7 +3133,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "8.1.0-rc.1"
+version = "9.0.0"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3149,7 +3149,7 @@ dependencies = [
  "log",
  "midnight-base-crypto",
  "midnight-coin-structure",
- "midnight-ledger",
+ "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-serialize",
  "midnight-storage",
@@ -3485,7 +3485,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "8.1.0-rc.1"
+version = "9.0.0"
 dependencies = [
  "criterion",
  "derive-where",
@@ -4944,7 +4944,7 @@ version = "0.10.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "75872d278a8f37ef87fa0ddbda7802605cb18344497949862c0d4dcb291eba60"
 dependencies = [
- "digest",
+ "digest 0.10.7",
  "keccak",
 ]
 

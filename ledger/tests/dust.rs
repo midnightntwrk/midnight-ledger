@@ -27,6 +27,7 @@ use midnight_ledger::{
     test_utilities::{Resolver, TestState, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
 };
+use midnight_ledger_v9 as midnight_ledger;
 use rand::{Rng, SeedableRng, rngs::StdRng};
 use std::collections::VecDeque;
 use storage::{arena::Sp, db::InMemoryDB};
