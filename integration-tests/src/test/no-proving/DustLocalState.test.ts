@@ -14,6 +14,7 @@
 import {
   addressFromKey,
   DustActions,
+  DustGenerationTreeInsertionPath,
   DustLocalState,
   type DustPublicKey,
   DustRegistration,
@@ -1095,6 +1096,46 @@ describe('Ledger API - DustLocalState', () => {
     expect(stateWithUpdate.generationInfo(qdo)).toBeUndefined();
 
     assertSerializationSuccess(stateWithUpdate);
+  });
+
+  /**
+   * Test updateGenerationTreeFromEvidence
+   *
+   * @given A DustGenerationState with an entry and a DustLocalState with that entry collapsed
+   * @when Calling new DustGenerationTreeInsertionPath() to obtain the insertion path and updateGenerationTreeFromEvidence
+   * @then Should update the tree and produce the same root as the full local state
+   */
+  test('should update generation tree from evidence and maintain correct tree root', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const localState = state.dust;
+    const generationState = state.ledger.dust.generation;
+
+    const qdo = localState.utxos[0];
+    const generationInfo = localState.generationInfo(qdo)!;
+    expect(generationInfo).toBeDefined();
+
+    // Obtain insertion path from the server's generation state for entry at index 0
+    const insertionPath = new DustGenerationTreeInsertionPath(generationState, 0n);
+    expect(insertionPath).toBeDefined();
+
+    // Verify serialize/deserialize round-trip
+    assertSerializationSuccess(insertionPath);
+
+    // Build a new local state with a collapsed generation entry at index 0
+    // (simulates a client who has the entry collapsed, without retaining the full leaf data)
+    const newLocalState = new DustLocalState(initialParameters);
+    const collapsedState = newLocalState.insertGenerationInfo(0n, generationInfo);
+    expect(collapsedState.toString()).toMatch(/0..=0: <collapsed>/);
+
+    // Apply the update evidence to the collapsed local state
+    const updatedState = collapsedState.updateGenerationTreeFromEvidence(insertionPath);
+    expect(updatedState).toBeDefined();
+
+    // The tree root should match the full local state's root
+    const expectedRoot = localState.generatingTreeRoot();
+    expect(updatedState.generatingTreeRoot()).toEqual(expectedRoot);
+
+    assertSerializationSuccess(updatedState);
   });
 
   /**
