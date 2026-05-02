@@ -273,6 +273,51 @@ mod tests {
     }
 
     #[test]
+    fn nontrivial_timestamp_round_trips_through_decoder() {
+        // Regression for the LE/BE bug in cell_u128 +
+        // cell_bytes32_padded + decode_timestamp_ms. Earlier these
+        // were BE on read, but the workspace's
+        // `From<u128> for ValueAtom` is LE — values 0/1 happened to
+        // be endian-ambiguous, hiding the issue.
+        //
+        // Pick a realistic 13-digit ms timestamp (mid-2024) whose
+        // bytes differ in every position; that catches both
+        // endianness mistakes and pad-direction mistakes.
+        let pk = [0xabu8; 32];
+        let ts: u64 = 1_719_791_440_123;
+        let state = compose_initial_state(pk, ts);
+
+        let mut buf = Vec::new();
+        serialize::tagged_serialize(&state, &mut buf)
+            .expect("tagged_serialize");
+        let hex = hex::encode(&buf);
+        let decoded = crate::did::contract::decode_did_ledger_state(&hex)
+            .expect("decode");
+
+        // The cell_bytes32_padded path stores LE-padded bytes — the
+        // value's bytes occupy the low end. Verify directly so this
+        // assertion is independent of the sanity ceiling in
+        // decode_timestamp_ms.
+        assert_eq!(
+            &decoded.created_raw[..8],
+            &ts.to_le_bytes(),
+            "created low 8 bytes (LE)"
+        );
+        assert!(
+            decoded.created_raw[8..].iter().all(|b| *b == 0),
+            "created high bytes zero"
+        );
+
+        // End-to-end: decode_timestamp_ms should yield the same
+        // SystemTime we put in.
+        let want = std::time::UNIX_EPOCH + std::time::Duration::from_millis(ts);
+        let got_created = crate::did::contract::decode_timestamp_ms(&decoded.created_raw);
+        let got_updated = crate::did::contract::decode_timestamp_ms(&decoded.updated_raw);
+        assert_eq!(got_created, Some(want), "created round-trip");
+        assert_eq!(got_updated, Some(want), "updated round-trip");
+    }
+
+    #[test]
     fn preview_did_id_round_trips_through_codec() {
         let mut rng = ChaCha20Rng::seed_from_u64(0xdeadbeef);
         let id = preview_did_id(&mut rng, Network::PreProd, [0x77u8; 32], 0)

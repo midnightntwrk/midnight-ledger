@@ -242,9 +242,12 @@ fn cell_bool(
     }
 }
 
-/// Decode a Compact `bigint` cell as a u128. Compact represents
-/// `bigint` as a 32-byte big-endian field element; if the value
-/// exceeds u128 range we lossily truncate to the low 16 bytes —
+/// Decode a Compact `Uint`/`Counter`/`bigint` cell as a u128.
+/// Compact stores integers as little-endian, normalised
+/// `ValueAtom`s (trailing high zeros stripped); see
+/// `From<u128> for ValueAtom` and `TryFrom<&ValueAtom> for u128`
+/// in `base-crypto/src/fab/conversions.rs`. If the wire value is
+/// wider than 16 bytes we lossily truncate to the low bytes —
 /// callers that need the full 256-bit range should use
 /// `cell_bytes32`.
 fn cell_u128(
@@ -253,15 +256,10 @@ fn cell_u128(
     field: &str,
 ) -> Result<u128, DidError> {
     let bytes = aligned_first_atom(cell_aligned(arr, idx, field)?, field)?;
-    if bytes.is_empty() {
-        return Ok(0);
-    }
-    // Big-endian, right-aligned in a 16-byte buffer.
     let mut buf = [0u8; 16];
     let take = bytes.len().min(16);
-    let src_start = bytes.len() - take;
-    buf[16 - take..].copy_from_slice(&bytes[src_start..]);
-    Ok(u128::from_be_bytes(buf))
+    buf[..take].copy_from_slice(&bytes[..take]);
+    Ok(u128::from_le_bytes(buf))
 }
 
 fn cell_bytes32(
@@ -285,8 +283,11 @@ fn cell_bytes32(
     Ok(out)
 }
 
-/// Like `cell_bytes32` but pads short values (timestamps usually fit
-/// in 8 bytes) up to 32 bytes via leading zeros.
+/// Like `cell_bytes32` but rejects oversize atoms instead of
+/// truncating. Useful when callers want to read the field as a
+/// little-endian unsigned integer up to 256 bits — short atoms get
+/// the high bytes zero-padded so the LE decode (`from_le_bytes`)
+/// returns the original value.
 fn cell_bytes32_padded(
     arr: &storage::storage::Array<StateValue<DefaultDB>, DefaultDB>,
     idx: usize,
@@ -300,7 +301,7 @@ fn cell_bytes32_padded(
         )));
     }
     let mut out = [0u8; CONTRACT_ADDRESS_LEN];
-    out[CONTRACT_ADDRESS_LEN - bytes.len()..].copy_from_slice(&bytes);
+    out[..bytes.len()].copy_from_slice(bytes);
     Ok(out)
 }
 
@@ -534,14 +535,20 @@ fn state_value_kind(v: &StateValue<DefaultDB>) -> &'static str {
     }
 }
 
-fn decode_timestamp_ms(raw: &[u8; 32]) -> Option<std::time::SystemTime> {
-    // Take the right-aligned u64 (low 8 bytes). Reject a value
-    // outside ~1970..2300 so genuine garbage doesn't surface as a
-    // bogus date.
-    let lo: [u8; 8] = raw[24..32].try_into().ok()?;
-    let ms = u64::from_be_bytes(lo);
+pub(crate) fn decode_timestamp_ms(raw: &[u8; 32]) -> Option<std::time::SystemTime> {
+    // `cell_bytes32_padded` returns the LE-padded form: the value's
+    // bytes occupy the low end of the buffer with zeros padded into
+    // the high end. The Compact constructor stores the timestamp in
+    // a `Uint<64>` slot, so we read the low 8 bytes as a LE u64.
+    // Reject a value outside ~1970..2286 so genuine garbage doesn't
+    // surface as a bogus date.
+    let lo: [u8; 8] = raw[..8].try_into().ok()?;
+    let ms = u64::from_le_bytes(lo);
     if ms == 0 || ms > 10_000_000_000_000 {
-        // 0 = unset; > year 2286 = almost certainly garbage
+        return None;
+    }
+    // Anything in raw[8..] would be a value wider than u64.
+    if raw[8..].iter().any(|b| *b != 0) {
         return None;
     }
     Some(UNIX_EPOCH + Duration::from_millis(ms))
@@ -572,10 +579,12 @@ mod tests {
 
     #[test]
     fn timestamp_2026_decodes() {
-        // 2026-04-30 00:00 UTC = 1777737600000 ms
+        // 2026-04-30 00:00 UTC = 1777737600000 ms.
+        // `cell_bytes32_padded` produces the LE-padded form: ms
+        // bytes at the low end, high bytes zero.
         let ms = 1_777_737_600_000_u64;
         let mut raw = [0u8; 32];
-        raw[24..32].copy_from_slice(&ms.to_be_bytes());
+        raw[..8].copy_from_slice(&ms.to_le_bytes());
         let ts = decode_timestamp_ms(&raw).unwrap();
         let ts_ms = ts
             .duration_since(UNIX_EPOCH)
