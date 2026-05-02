@@ -221,32 +221,46 @@ impl Wallet {
         Ok(hasher.finalize().into())
     }
 
-    /// **Phase 3 stub** — returns
-    /// [`crate::DidError::WriteNotImplemented`] today. Logs the
-    /// derived `controllerPublicKey` so we can verify the key
-    /// derivation visually before the deploy path lands.
+    /// Compose what the new DID's id *would be* if we deployed
+    /// right now, without actually submitting anything. The full
+    /// `ContractDeploy` payload is assembled from the wallet's
+    /// controller commitment + a current-time `created`/`updated`
+    /// stamp + a freshly-sampled 32-byte nonce; the resulting
+    /// `deploy.address()` is wrapped as a [`crate::DidId`] on the
+    /// wallet's network.
     ///
-    /// When fully wired, `create_did` will:
-    /// 1. Derive the controller signing key
-    ///    (`did_controller_signing_key`).
-    /// 2. Build the constructor input with that
-    ///    `controllerPublicKey`.
-    /// 3. Submit the deploy extrinsic via `subxt` +
-    ///    `midnight-node-metadata` (git dep, to be added).
-    /// 4. Watch the indexer for the new contract's first
-    ///    `ContractDeploy` action; return its address as a
-    ///    [`crate::DidId`].
-    /// 5. Optionally call `addVerificationMethod` to write the
-    ///    initial VM (artifacts vendored at
-    ///    `contracts/midnight-did/addVerificationMethod.*`).
-    pub async fn create_did(&self) -> Result<crate::DidId, crate::DidError> {
+    /// Useful before submission to (a) verify our state composition
+    /// is bit-for-bit what the chain would accept, and (b) show the
+    /// would-be DID in the UI so the user knows what address they
+    /// would control.
+    pub fn create_did_preview(&self) -> Result<crate::DidId, crate::DidError> {
         let pk = self
             .did_controller_public_key()
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0);
+        let mut rng = rand::thread_rng();
+        crate::did::deploy::preview_did_id(&mut rng, self.network, pk, now_ms)
+    }
+
+    /// **Phase 3 stub** — returns
+    /// [`crate::DidError::WriteNotImplemented`]. The deploy payload
+    /// is fully composed (see [`Self::create_did_preview`]); the
+    /// missing pieces are the substrate `Transaction` envelope
+    /// wrapping, fee balancing (gated on Phase B unshielded sync),
+    /// and submit-and-watch via the typed
+    /// `Midnight.send_mn_transaction` call. Documented in
+    /// `mobile-bench/DID_PLAN.md`.
+    pub async fn create_did(&self) -> Result<crate::DidId, crate::DidError> {
+        // Surface the would-be id in the error path so the UI
+        // shows something useful.
+        let preview = self.create_did_preview()?;
         tracing::info!(
-            controller_pk_hex = %hex::encode(pk),
+            preview_did = %preview,
             network = ?self.network,
-            "create_did stub — would deploy DID contract with this controller"
+            "create_did stub — would deploy DID contract"
         );
         Err(crate::DidError::WriteNotImplemented)
     }

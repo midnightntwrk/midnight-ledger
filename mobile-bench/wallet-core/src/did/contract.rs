@@ -229,13 +229,16 @@ fn cell_bool(
     field: &str,
 ) -> Result<bool, DidError> {
     let bytes = aligned_first_atom(cell_aligned(arr, idx, field)?, field)?;
+    // ValueAtoms are normalised: trailing zeros are stripped, so
+    // `false` (which encodes as `[0]`) becomes the empty atom on the
+    // wire. Treat that as `false`. See `From<bool> for ValueAtom` in
+    // `base-crypto/src/fab/conversions.rs`.
     match bytes.first() {
-        Some(0) => Ok(false),
+        None | Some(0) => Ok(false),
         Some(1) => Ok(true),
         Some(b) => Err(DidError::DecodeState(format!(
             "{field}: expected 0/1 bool, got {b}"
         ))),
-        None => Err(DidError::DecodeState(format!("{field}: empty atom"))),
     }
 }
 
@@ -267,12 +270,18 @@ fn cell_bytes32(
     field: &str,
 ) -> Result<[u8; CONTRACT_ADDRESS_LEN], DidError> {
     let bytes = aligned_first_atom(cell_aligned(arr, idx, field)?, field)?;
-    let out: [u8; CONTRACT_ADDRESS_LEN] = bytes.try_into().map_err(|_| {
-        DidError::DecodeState(format!(
-            "{field}: expected 32 bytes, got {}",
+    // ValueAtoms are stored in normal form (trailing zeros stripped),
+    // so a `Bytes<32>` cell whose tail is zero comes back shorter.
+    // The alignment guarantees the original length is ≤ 32; pad the
+    // tail with zeros to recover the wide form.
+    if bytes.len() > CONTRACT_ADDRESS_LEN {
+        return Err(DidError::DecodeState(format!(
+            "{field}: value exceeds 32 bytes ({})",
             bytes.len()
-        ))
-    })?;
+        )));
+    }
+    let mut out = [0u8; CONTRACT_ADDRESS_LEN];
+    out[..bytes.len()].copy_from_slice(bytes);
     Ok(out)
 }
 

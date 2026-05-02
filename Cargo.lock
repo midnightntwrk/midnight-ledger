@@ -10410,6 +10410,7 @@ dependencies = [
  "k256",
  "midnight-base-crypto",
  "midnight-coin-structure",
+ "midnight-ledger",
  "midnight-node-metadata",
  "midnight-onchain-state",
  "midnight-serialize",

@@ -299,26 +299,31 @@ fn CreateDidPanel(network: Network) -> Element {
         pending.set(true);
         result.set(None);
         spawn(async move {
-            let r = match Ok::<_, wallet_core::WalletError>(Wallet::demo(network)) {
-                Ok(w) => match w.create_did().await {
-                    Ok(id) => Ok(id.to_did_string()),
-                    Err(e) => {
-                        // Surface the controller pubkey alongside the
-                        // error so the panel doubles as a diagnostic
-                        // for the key-derivation half (which DOES work
-                        // today; only the deploy/submit half is stubbed).
-                        let pk = w
-                            .did_controller_public_key()
-                            .map(|b| hex::encode(b))
-                            .unwrap_or_else(|e| format!("(err: {e})"));
-                        Err(format!(
-                            "{e}\n\ncontrollerPublicKey would be: {pk}"
-                        ))
-                    }
-                },
-                Err(e) => Err(e.to_string()),
+            let w = Wallet::demo(network);
+
+            // Phase 3 deploy preview: composes the post-constructor
+            // ContractState in-Rust and reports the deterministic
+            // ContractDeploy address. No network IO.
+            let preview_did = w
+                .create_did_preview()
+                .map(|id| id.to_did_string())
+                .unwrap_or_else(|e| format!("(preview err: {e})"));
+            let pk = w
+                .did_controller_public_key()
+                .map(|b| hex::encode(b))
+                .unwrap_or_else(|e| format!("(err: {e})"));
+
+            // Submission half is still stubbed — call it so the UI
+            // surfaces the actual error from `create_did` below the
+            // preview block.
+            let submit_status = match w.create_did().await {
+                Ok(id) => format!("submitted: {}", id.to_did_string()),
+                Err(e) => format!("submit: {e}"),
             };
-            result.set(Some(r));
+
+            result.set(Some(Ok(format!(
+                "preview did: {preview_did}\n\ncontrollerPublicKey: {pk}\n\n{submit_status}"
+            ))));
             pending.set(false);
         });
     };

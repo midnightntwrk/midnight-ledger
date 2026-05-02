@@ -19,6 +19,7 @@ base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
 coin-structure = { path = "../../coin-structure", package = "midnight-coin-structure" }
 onchain-state = { path = "../../onchain-state", package = "midnight-onchain-state", features = ["public-internal-structure"] }
 storage = { path = "../../storage", package = "midnight-storage" }
+ledger = { path = "../../ledger", package = "midnight-ledger", default-features = false }
 
 # Address + HD derivation. Mirrors midnight-wallet/packages/{hd,
 # address-format}: BIP32 secp256k1 (matches @scure/bip32 used

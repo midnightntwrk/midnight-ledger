@@ -20,6 +20,7 @@
 
 pub(crate) mod artifacts;
 pub(crate) mod contract;
+pub(crate) mod deploy;
 mod error;
 mod id;
 mod types;
