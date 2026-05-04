@@ -281,7 +281,7 @@ fn build_outer_call_ir() -> IrSource {
                 expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
-                outputs: vec![id("%call_result")],
+                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
             },
             // Output the call result
             ]),
@@ -340,7 +340,7 @@ fn build_chained_caller(callee_addr_hi: &str, callee_addr_lo: &str, entry_point:
                 ),
                 entry_point: entry_point.to_string(),
                 args: vec![var(callee_addr_hi), var(callee_addr_lo)], // pass address through
-                outputs: vec![id("%result")],
+                outputs: vec![TypedIdentifier::new(id("%result"), IrType::Native)],
             },
             ]),
     }
@@ -559,7 +559,7 @@ async fn test_witness_limitation_in_cross_contract_call() {
                 expected_type: descriptor_for("run", vec![], vec![IrType::Native]),
                 entry_point: "run".to_string(),
                 args: vec![],
-                outputs: vec![id("%out")],
+                outputs: vec![TypedIdentifier::new(id("%out"), IrType::Native)],
             },
             ]),
     };
@@ -896,7 +896,7 @@ async fn test_execute_two_level_call_chain() {
                 ),
                 entry_point: "passthrough".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![id("%from_inner")],
+                outputs: vec![TypedIdentifier::new(id("%from_inner"), IrType::Native)],
             },
             ]),
     };
@@ -922,7 +922,7 @@ async fn test_execute_two_level_call_chain() {
                 ),
                 entry_point: "relay".to_string(),
                 args: vec![var("%inner_addr_hi"), var("%inner_addr_lo"), var("%val")],
-                outputs: vec![id("%result")],
+                outputs: vec![TypedIdentifier::new(id("%result"), IrType::Native)],
             },
             ]),
     };
@@ -1171,7 +1171,7 @@ async fn test_nontrivial_result_from_call_parameter() {
                 ),
                 entry_point: "double".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![id("%doubled")],
+                outputs: vec![TypedIdentifier::new(id("%doubled"), IrType::Native)],
             },
             // %result = %doubled + %val  (= 2*val + val = 3*val)
             Instruction::Add {
@@ -1312,7 +1312,7 @@ async fn test_call_contract_from_ledger_state() {
                 ),
                 entry_point: "increment".to_string(),
                 args: vec![var("%caller_val")],
-                outputs: vec![id("%call_result")],
+                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
             },
             Instruction::Mul {
                 a: var("%call_result"),

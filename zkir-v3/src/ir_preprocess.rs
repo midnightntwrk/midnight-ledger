@@ -332,25 +332,36 @@ impl IrSource {
                     outputs: call_outputs,
                 } => {
                     // ── 1. Consume callee output values from private_transcript ──
-                    // Equivalent to PrivateInput for each output (IrType::Native,
-                    // 1 Fr each), matching the Compact pattern where tmpDoCall()
-                    // provides callee outputs as private witnesses.
-                    let n = call_outputs.len();
-                    if private_transcript_outputs_idx + n > preimage.private_transcript.len() {
+                    // Each `TypedIdentifier` consumes `val_t.encoded_len()`
+                    // Frs from `private_transcript` and is reconstructed as a
+                    // typed value via `decode_offcircuit`. The witness
+                    // provider serializes typed callee outputs in declaration
+                    // order with their `encode_offcircuit` flat-Fr layout, so
+                    // this `decode_offcircuit` is the exact inverse.
+                    let total_fr_count: usize = call_outputs
+                        .iter()
+                        .map(|t| t.val_t.encoded_len())
+                        .sum();
+                    if private_transcript_outputs_idx + total_fr_count
+                        > preimage.private_transcript.len()
+                    {
                         bail!(
                             "ContractCall: not enough private_transcript for callee outputs: \
                              need {} more but only {} remain",
-                            n,
+                            total_fr_count,
                             preimage.private_transcript.len() - private_transcript_outputs_idx
                         );
                     }
-                    for (out_id, &out_val) in call_outputs.iter().zip(
-                        &preimage.private_transcript
-                            [private_transcript_outputs_idx..private_transcript_outputs_idx + n],
-                    ) {
-                        memory.insert(out_id.clone(), IrValue::Native(out_val));
+                    for typed_out_id in call_outputs.iter() {
+                        let w = typed_out_id.val_t.encoded_len();
+                        let frs = &preimage.private_transcript[
+                            private_transcript_outputs_idx
+                                ..private_transcript_outputs_idx + w
+                        ];
+                        let value = decode_offcircuit(frs, &typed_out_id.val_t)?;
+                        memory.insert(typed_out_id.name.clone(), value);
+                        private_transcript_outputs_idx += w;
                     }
-                    private_transcript_outputs_idx += n;
 
                     // ── 2. Resolve instruction parameters ──
                     let (addr_hi_op, addr_lo_op) = contract_ref;
@@ -380,15 +391,33 @@ impl IrSource {
                     for arg in args.iter() {
                         io_fields.push(eval_operand_fr(&memory, arg)?);
                     }
-                    for out_id in call_outputs.iter() {
-                        let val: Fr = memory
-                            .get(out_id)
+                    // Flatten each typed output back into Frs via
+                    // `encode_offcircuit`. This re-walks the typed values in
+                    // declaration order producing the same Fr stream that the
+                    // callee's own preprocess used to compute its comm-comm.
+                    for typed_out_id in call_outputs.iter() {
+                        let value = memory
+                            .get(&typed_out_id.name)
                             .cloned()
                             .ok_or_else(|| {
-                                anyhow!("ContractCall output {:?} not in memory", out_id)
-                            })?
-                            .try_into()?;
-                        io_fields.push(val);
+                                anyhow!(
+                                    "ContractCall output {:?} not in memory",
+                                    typed_out_id.name
+                                )
+                            })?;
+                        if value.get_type() != typed_out_id.val_t {
+                            bail!(
+                                "ContractCall output {:?} has runtime type {:?} but \
+                                 instruction declares {:?}",
+                                typed_out_id.name,
+                                value.get_type(),
+                                typed_out_id.val_t,
+                            );
+                        }
+                        for ir_val in encode_offcircuit(&value) {
+                            let fr: Fr = ir_val.try_into()?;
+                            io_fields.push(fr);
+                        }
                     }
                     let comm_comm = transient_commit(&io_fields, comm_rand);
 

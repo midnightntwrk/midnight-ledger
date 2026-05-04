@@ -278,7 +278,7 @@ pub fn build_outer_call_ir() -> IrSource {
                 expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
-                outputs: vec![id("%call_result")],
+                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
             },
             ]),
     }
@@ -371,7 +371,7 @@ pub fn build_outer_call_add_ir() -> IrSource {
                 ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![id("%from_inner")],
+                outputs: vec![TypedIdentifier::new(id("%from_inner"), IrType::Native)],
             },
             // %result = %from_inner + %val = (val + state_val) + val
             Instruction::Add {
@@ -433,7 +433,7 @@ pub fn build_outer_call_from_state_ir() -> IrSource {
                 ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%caller_val")],
-                outputs: vec![id("%call_result")],
+                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
             },
             // %final = %call_result + %caller_val = (V + S) + V
             Instruction::Add {

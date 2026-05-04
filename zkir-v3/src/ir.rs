@@ -621,21 +621,28 @@ pub enum Instruction {
     /// Cross-contract call to another deployed contract's circuit.
     ///
     /// `contract_ref` resolves to the callee's address (two field elements).
-    /// `expected_type` is a placeholder for future conformance checking.
+    /// `expected_type` carries the call's declared shape; conformance is
+    /// validated at the executor against the actual callee `IrSource` (see
+    /// [`IrSource::check_conformance`]).
     ContractCall {
         /// Operand pair resolving to the callee's contract address.
         /// A ContractAddress (32 bytes) requires two field elements in field representation:
         /// `(Fr(byte31), Fr(bytes0..31))`.
         contract_ref: (Operand, Operand),
-        /// The expected contract type for conformance checking.
-        /// (Deferred to the enriched ZKIR type system; for now, a placeholder.)
+        /// The expected contract type for conformance checking. Validated at
+        /// dispatch time against `callee_ir.type_signature()`.
         expected_type: ContractTypeDescriptor,
         /// The name of the circuit to invoke on the callee.
         entry_point: String,
         /// Arguments for the circuit being invoked.
         args: Vec<Operand>,
-        /// Identifiers that receive the callee's return values.
-        outputs: Vec<Identifier>,
+        /// Typed identifiers that receive the callee's return values. Each
+        /// `TypedIdentifier`'s `val_t` is the *logical* type of one return
+        /// value (e.g., `Point<Jubjub>` consumes 2 Frs from the callee's
+        /// flat-Fr output stream and is stored as `IrValue::JubjubPoint`).
+        /// The conformance check enforces that this list matches the
+        /// callee's declared `outputs: Vec<TypedIdentifier>` element-wise.
+        outputs: Vec<TypedIdentifier>,
     },
 }
 tag_enforcement_test!(Instruction);
