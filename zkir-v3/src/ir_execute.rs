@@ -48,6 +48,7 @@ use crate::ir_eval::{
     eval_computational_instruction, eval_operand, eval_operand_bool, eval_operand_fr,
 };
 use crate::ir_instructions::decode::decode_offcircuit;
+use crate::ir_instructions::encode::encode_offcircuit;
 use crate::ir_types::IrValue;
 use crate::zkir_mode::{ZkirKey, ZkirOp, ZkirPushValue};
 
@@ -647,23 +648,6 @@ impl IrSource {
                         }
                     }
                 }
-                I::Output { val } => {
-                    let value = eval_operand(&memory, val).map_err(|e| {
-                        ExecutionError::InstructionError {
-                            instruction_index: ip,
-                            message: format!("{e:#}"),
-                        }
-                    })?;
-                    let fr_val: Fr =
-                        value
-                            .clone()
-                            .try_into()
-                            .map_err(|e| ExecutionError::InstructionError {
-                                instruction_index: ip,
-                                message: format!("output value not native: {e}"),
-                            })?;
-                    outputs.push(fr_val);
-                }
                 I::PublicInput {
                     guard,
                     val_t,
@@ -918,6 +902,42 @@ impl IrSource {
                         message: format!("unhandled instruction in execute: {ins:?}"),
                     });
                 }
+            }
+        }
+
+        // Materialize declared outputs from memory at end of execution.
+        // Each declared output must be bound in memory, must have a type
+        // matching the signature, and contributes its flat-Fr encoding to
+        // the call's output stream in declaration order.
+        for typed_id in self.outputs.iter() {
+            let value = memory.get(&typed_id.name).cloned().ok_or_else(|| {
+                ExecutionError::InstructionError {
+                    instruction_index: usize::MAX,
+                    message: format!(
+                        "declared output {:?} not bound in memory at end of execution",
+                        typed_id.name
+                    ),
+                }
+            })?;
+            if value.get_type() != typed_id.val_t {
+                return Err(ExecutionError::InstructionError {
+                    instruction_index: usize::MAX,
+                    message: format!(
+                        "declared output {:?} has runtime type {:?} but signature declares {:?}",
+                        typed_id.name,
+                        value.get_type(),
+                        typed_id.val_t
+                    ),
+                });
+            }
+            for ir_val in encode_offcircuit(&value) {
+                let fr: Fr = ir_val.try_into().map_err(|e| {
+                    ExecutionError::InstructionError {
+                        instruction_index: usize::MAX,
+                        message: format!("encoded output not native: {e}"),
+                    }
+                })?;
+                outputs.push(fr);
             }
         }
 

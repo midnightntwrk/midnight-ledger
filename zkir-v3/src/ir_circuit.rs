@@ -596,10 +596,6 @@ impl Relation for IrSource {
                         }
                     }
                 }
-                I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, val)?;
-                    outputs.push(val);
-                }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
@@ -908,6 +904,32 @@ impl Relation for IrSource {
                         pi_push(assigned, &mut public_inputs)?;
                     }
                 }
+            }
+        }
+        // Materialize declared outputs from in-circuit memory at end of
+        // synthesis. Each declared output must be present in memory, must
+        // have a type matching the signature, and contributes its
+        // in-circuit flat-Fr encoding to the comm-comm preimage.
+        for typed_id in self.outputs.iter() {
+            let value = memory
+                .get(&typed_id.name)
+                .cloned()
+                .ok_or_else(|| {
+                    Error::Synthesis(format!(
+                        "declared output {:?} not bound in memory at end of synthesis",
+                        typed_id.name
+                    ))
+                })?;
+            if value.get_type() != typed_id.val_t {
+                return Err(Error::Synthesis(format!(
+                    "declared output {:?} has runtime type {:?} but signature declares {:?}",
+                    typed_id.name,
+                    value.get_type(),
+                    typed_id.val_t
+                )));
+            }
+            for cv in encode_incircuit(std, layouter, &value)? {
+                outputs.push(cv);
             }
         }
         if self.do_communications_commitment {

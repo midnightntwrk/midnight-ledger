@@ -230,6 +230,9 @@ fn build_inner_get_ir() -> IrSource {
 
     IrSource {
         inputs: vec![],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%read_val".to_string()), IrType::Native),
+        ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             // Impact block: execute the ledger read
@@ -246,10 +249,7 @@ fn build_inner_get_ir() -> IrSource {
                 output: id("%read_val"),
             },
             // Output the read value
-            Instruction::Output {
-                val: var("%read_val"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -276,10 +276,7 @@ fn build_outer_call_ir() -> IrSource {
                 outputs: vec![id("%call_result")],
             },
             // Output the call result
-            Instruction::Output {
-                val: var("%call_result"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -290,6 +287,9 @@ fn build_outer_call_ir() -> IrSource {
 fn build_contract_with_private_input() -> IrSource {
     IrSource {
         inputs: vec![],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%secret".to_string()), IrType::Native),
+        ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
             Instruction::PrivateInput {
@@ -297,10 +297,7 @@ fn build_contract_with_private_input() -> IrSource {
                 val_t: IrType::Native,
                 output: id("%secret"),
             },
-            Instruction::Output {
-                val: var("%secret"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -308,8 +305,11 @@ fn build_contract_with_private_input() -> IrSource {
 fn build_passthrough_ir() -> IrSource {
     IrSource {
         inputs: vec![TypedIdentifier::new(id("%in"), IrType::Native)],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%in".to_string()), IrType::Native),
+        ],
         do_communications_commitment: false,
-        instructions: Arc::new(vec![Instruction::Output { val: var("%in") }]),
+        instructions: Arc::new(vec![]),
     }
 }
 
@@ -330,10 +330,7 @@ fn build_chained_caller(callee_addr_hi: &str, callee_addr_lo: &str, entry_point:
                 args: vec![var(callee_addr_hi), var(callee_addr_lo)], // pass address through
                 outputs: vec![id("%result")],
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -552,8 +549,7 @@ async fn test_witness_limitation_in_cross_contract_call() {
                 args: vec![],
                 outputs: vec![id("%out")],
             },
-            Instruction::Output { val: var("%out") },
-        ]),
+            ]),
     };
     let caller_addr = make_address(31);
 
@@ -800,6 +796,11 @@ async fn test_execute_arithmetic_instructions() {
             TypedIdentifier::new(id("%a"), IrType::Native),
             TypedIdentifier::new(id("%b"), IrType::Native),
         ],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%sum".to_string()), IrType::Native),
+            TypedIdentifier::new(Identifier("%prod".to_string()), IrType::Native),
+            TypedIdentifier::new(Identifier("%neg_a".to_string()), IrType::Native),
+        ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
             // %sum = %a + %b
@@ -820,10 +821,7 @@ async fn test_execute_arithmetic_instructions() {
                 output: id("%neg_a"),
             },
             // Output all three
-            Instruction::Output { val: var("%sum") },
-            Instruction::Output { val: var("%prod") },
-            Instruction::Output { val: var("%neg_a") },
-        ]),
+            ]),
     };
     let addr = make_address(90);
     let provider = TestZkirProvider::<D>::new();
@@ -884,10 +882,7 @@ async fn test_execute_two_level_call_chain() {
                 args: vec![var("%val")],
                 outputs: vec![id("%from_inner")],
             },
-            Instruction::Output {
-                val: var("%from_inner"),
-            },
-        ]),
+            ]),
     };
     let middle_addr = make_address(101);
 
@@ -909,10 +904,7 @@ async fn test_execute_two_level_call_chain() {
                 args: vec![var("%inner_addr_hi"), var("%inner_addr_lo"), var("%val")],
                 outputs: vec![id("%result")],
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     };
     let outer_addr = make_address(102);
 
@@ -1125,6 +1117,9 @@ async fn test_nontrivial_result_from_call_parameter() {
     // Inner: takes one input, outputs input * 2
     let inner_ir = IrSource {
         inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%doubled".to_string()), IrType::Native),
+        ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             // %doubled = %x + %x
@@ -1133,10 +1128,7 @@ async fn test_nontrivial_result_from_call_parameter() {
                 b: var("%x"),
                 output: id("%doubled"),
             },
-            Instruction::Output {
-                val: var("%doubled"),
-            },
-        ]),
+            ]),
     };
     let inner_addr = make_address(0xC01);
 
@@ -1163,10 +1155,7 @@ async fn test_nontrivial_result_from_call_parameter() {
                 b: var("%val"),
                 output: id("%result"),
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     };
     let outer_addr = make_address(0xC02);
 
@@ -1236,6 +1225,9 @@ async fn test_call_contract_from_ledger_state() {
     // Inner contract B: "increment" — takes one input, returns input + 1
     let inner_ir = IrSource {
         inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%result".to_string()), IrType::Native),
+        ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             Instruction::Add {
@@ -1243,10 +1235,7 @@ async fn test_call_contract_from_ledger_state() {
                 b: imm(1),
                 output: id("%result"),
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     };
     let inner_addr = make_address(0xD01);
 
@@ -1302,8 +1291,7 @@ async fn test_call_contract_from_ledger_state() {
                 b: imm(10),
                 output: id("%final"),
             },
-            Instruction::Output { val: var("%final") },
-        ]),
+            ]),
     };
     let outer_addr = make_address(0xD02);
 
@@ -1380,6 +1368,9 @@ async fn test_guarded_public_input_before_unguarded() {
 
     let ir = IrSource {
         inputs: vec![TypedIdentifier::new(id("%cond"), IrType::Native)],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%unguarded".to_string()), IrType::Native),
+        ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
             Instruction::PublicInput {
@@ -1392,10 +1383,7 @@ async fn test_guarded_public_input_before_unguarded() {
                 val_t: IrType::Native,
                 output: id("%unguarded"),
             },
-            Instruction::Output {
-                val: var("%unguarded"),
-            },
-        ]),
+            ]),
     };
 
     let preimage = ProofPreimage {
@@ -1438,8 +1426,7 @@ async fn test_execute_jubjub_point_input() {
                 input: var("%p"),
                 outputs: vec![id("%x"), id("%y")],
             },
-            Instruction::Output { val: var("%x") },
-        ]),
+            ]),
     };
 
     let addr = make_address(0xF0);

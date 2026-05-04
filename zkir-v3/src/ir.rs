@@ -38,6 +38,13 @@ use crate::zkir_mode::ZkirOp;
 pub struct IrSource {
     /// The list of input identifiers for this circuit
     pub inputs: Vec<TypedIdentifier>,
+    /// The list of output identifiers for this circuit. At end of execution
+    /// each [`TypedIdentifier`] is satisfied by reading its name from circuit
+    /// memory (which must hold an `IrValue` of the declared `val_t`),
+    /// encoding via `encode_offcircuit` to `val_t.encoded_len()` field
+    /// elements, and pushing those elements to the call's flat output
+    /// stream in declaration order.
+    pub outputs: Vec<TypedIdentifier>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -478,14 +485,6 @@ pub enum Instruction {
         bits: u32,
         /// The output variable name
         output: Identifier,
-    },
-    /// Outputs `val` from the circuit, including it in the communications
-    /// commitment.
-    ///
-    /// No outputs (at the level of the IR VM), despite the name
-    Output {
-        /// The variable or immediate to output
-        val: Operand,
     },
     /// Calls a circuit-friendly hash function on a sequence of items.
     ///

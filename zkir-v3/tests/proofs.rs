@@ -79,6 +79,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -119,6 +120,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -177,6 +179,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%p_0" }
@@ -238,6 +241,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
@@ -329,6 +333,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] }
@@ -379,6 +384,7 @@ mod proof_tests {
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
@@ -441,6 +447,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
@@ -499,6 +506,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -528,6 +536,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
@@ -573,6 +582,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
@@ -619,6 +629,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
@@ -676,6 +687,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
@@ -760,6 +772,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
@@ -800,6 +813,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
@@ -842,6 +856,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "v_0" }
@@ -873,6 +888,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
@@ -896,6 +912,7 @@ mod proof_tests {
            "inputs": [
               { "name": "foo", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "foo" }
@@ -931,6 +948,7 @@ mod proof_tests {
                 Identifier("%v_0".to_string()),
                 IrType::Native,
             )],
+            outputs: vec![],
             do_communications_commitment: false,
             instructions: Arc::new(vec![
                 // Inactive Impact: guard=0, so ops don't execute.

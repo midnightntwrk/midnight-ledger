@@ -33,6 +33,7 @@ use crate::ir_eval::{
     eval_computational_instruction, eval_operand, eval_operand_bool, eval_operand_fr,
 };
 use crate::ir_instructions::decode::decode_offcircuit;
+use crate::ir_instructions::encode::encode_offcircuit;
 use crate::ir_types::IrValue;
 use crate::zkir_mode::zkir_ops_to_field_elements_with_sizes;
 
@@ -323,7 +324,6 @@ impl IrSource {
                         public_transcript_inputs_idx += count;
                     }
                 }
-                I::Output { val } => outputs.push(eval_operand(&memory, val)?),
                 I::ContractCall {
                     contract_ref,
                     expected_type: _,
@@ -438,6 +438,29 @@ impl IrSource {
                     public_transcript_inputs_idx += claim_field_count;
                 }
                 _ => bail!("unhandled instruction in preprocess: {ins:?}"),
+            }
+        }
+        // Materialize declared outputs from memory at end of execution.
+        // Each declared output must be bound in memory, must have a type
+        // matching the signature, and contributes its flat-Fr encoding to
+        // the comm-comm input.
+        for typed_id in self.outputs.iter() {
+            let value = memory.get(&typed_id.name).cloned().ok_or_else(|| {
+                anyhow!(
+                    "declared output {:?} not bound in memory at end of execution",
+                    typed_id.name
+                )
+            })?;
+            if value.get_type() != typed_id.val_t {
+                bail!(
+                    "declared output {:?} has runtime type {:?} but signature declares {:?}",
+                    typed_id.name,
+                    value.get_type(),
+                    typed_id.val_t
+                );
+            }
+            for ir_val in encode_offcircuit(&value) {
+                outputs.push(ir_val);
             }
         }
         trace!(?outputs, "Finished instructions with output");

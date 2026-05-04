@@ -235,6 +235,9 @@ pub fn build_inner_get_ir() -> IrSource {
 
     IrSource {
         inputs: vec![],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%read_val".to_string()), IrType::Native),
+        ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             Instruction::Impact {
@@ -247,10 +250,7 @@ pub fn build_inner_get_ir() -> IrSource {
                 val_t: IrType::Native,
                 output: id("%read_val"),
             },
-            Instruction::Output {
-                val: var("%read_val"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -271,10 +271,7 @@ pub fn build_outer_call_ir() -> IrSource {
                 args: vec![],
                 outputs: vec![id("%call_result")],
             },
-            Instruction::Output {
-                val: var("%call_result"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -302,6 +299,9 @@ pub fn build_inner_add_state_ir() -> IrSource {
 
     IrSource {
         inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        outputs: vec![
+            TypedIdentifier::new(Identifier("%result".to_string()), IrType::Native),
+        ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             // Impact runs first (executor needs it before PublicInput since
@@ -334,10 +334,7 @@ pub fn build_inner_add_state_ir() -> IrSource {
                 b: var("%state_val"),
                 output: id("%result"),
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -369,10 +366,7 @@ pub fn build_outer_call_add_ir() -> IrSource {
                 b: var("%val"),
                 output: id("%result"),
             },
-            Instruction::Output {
-                val: var("%result"),
-            },
-        ]),
+            ]),
     }
 }
 
@@ -430,8 +424,7 @@ pub fn build_outer_call_from_state_ir() -> IrSource {
                 b: var("%caller_val"),
                 output: id("%final"),
             },
-            Instruction::Output { val: var("%final") },
-        ]),
+            ]),
     }
 }
 
