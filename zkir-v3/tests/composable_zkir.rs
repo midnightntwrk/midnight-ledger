@@ -107,13 +107,21 @@ fn ep(name: &str) -> EntryPointBuf {
     EntryPointBuf(name.as_bytes().to_vec())
 }
 
-/// A trivial `ContractTypeDescriptor` for tests (conformance checking is stubbed).
-fn stub_type_descriptor() -> ContractTypeDescriptor {
+/// Build a single-entry-point `ContractTypeDescriptor` for tests. The
+/// callee's actual typed signature is now validated against this
+/// descriptor at runtime (see `IrSource::check_conformance`), so each
+/// call site must declare the entry point name and the input/output
+/// types that match its corresponding callee `IrSource`.
+fn descriptor_for(
+    name: &str,
+    inputs: Vec<IrType>,
+    outputs: Vec<IrType>,
+) -> ContractTypeDescriptor {
     ContractTypeDescriptor {
         circuits: vec![CircuitSignature {
-            name: "test".to_string(),
-            inputs: vec![],
-            outputs: vec![IrType::Native],
+            name: name.to_string(),
+            inputs,
+            outputs,
         }],
     }
 }
@@ -270,7 +278,7 @@ fn build_outer_call_ir() -> IrSource {
             // ContractCall to inner's "get" entry point
             Instruction::ContractCall {
                 contract_ref: (var("%inner_addr_hi"), var("%inner_addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
                 outputs: vec![id("%call_result")],
@@ -325,7 +333,11 @@ fn build_chained_caller(callee_addr_hi: &str, callee_addr_lo: &str, entry_point:
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var(callee_addr_hi), var(callee_addr_lo)),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    entry_point,
+                    vec![IrType::Native, IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: entry_point.to_string(),
                 args: vec![var(callee_addr_hi), var(callee_addr_lo)], // pass address through
                 outputs: vec![id("%result")],
@@ -544,7 +556,7 @@ async fn test_witness_limitation_in_cross_contract_call() {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%addr_hi"), var("%addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for("run", vec![], vec![IrType::Native]),
                 entry_point: "run".to_string(),
                 args: vec![],
                 outputs: vec![id("%out")],
@@ -877,7 +889,11 @@ async fn test_execute_two_level_call_chain() {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%inner_addr_hi"), var("%inner_addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "passthrough",
+                    vec![IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "passthrough".to_string(),
                 args: vec![var("%val")],
                 outputs: vec![id("%from_inner")],
@@ -899,7 +915,11 @@ async fn test_execute_two_level_call_chain() {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%middle_addr_hi"), var("%middle_addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "relay",
+                    vec![IrType::Native, IrType::Native, IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "relay".to_string(),
                 args: vec![var("%inner_addr_hi"), var("%inner_addr_lo"), var("%val")],
                 outputs: vec![id("%result")],
@@ -1144,7 +1164,11 @@ async fn test_nontrivial_result_from_call_parameter() {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%inner_hi"), var("%inner_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "double",
+                    vec![IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "double".to_string(),
                 args: vec![var("%val")],
                 outputs: vec![id("%doubled")],
@@ -1281,7 +1305,11 @@ async fn test_call_contract_from_ledger_state() {
             },
             Instruction::ContractCall {
                 contract_ref: (var("%addr_hi"), var("%addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "increment",
+                    vec![IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "increment".to_string(),
                 args: vec![var("%caller_val")],
                 outputs: vec![id("%call_result")],

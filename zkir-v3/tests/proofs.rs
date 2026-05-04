@@ -995,4 +995,176 @@ mod proof_tests {
         vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), 0.into()].into_iter())
             .unwrap();
     }
+
+    // ─── ContractCall conformance helpers (typed-outputs follow-on) ────────
+
+    /// `IrSource::type_signature` projects per-position `val_t` from the
+    /// inputs and outputs vecs. Verifies non-trivial mixed-typed cases.
+    #[test]
+    fn test_type_signature_projects_typed_identifiers() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![
+                TypedIdentifier::new(Identifier("%a".into()), IrType::Native),
+                TypedIdentifier::new(Identifier("%b".into()), IrType::JubjubPoint),
+            ],
+            outputs: vec![
+                TypedIdentifier::new(Identifier("%c".into()), IrType::JubjubScalar),
+                TypedIdentifier::new(Identifier("%d".into()), IrType::Native),
+            ],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let (inputs, outputs) = ir.type_signature();
+        assert_eq!(inputs, vec![IrType::Native, IrType::JubjubPoint]);
+        assert_eq!(outputs, vec![IrType::JubjubScalar, IrType::Native]);
+
+        // Round-trips into a CircuitSignature shape (name supplied externally).
+        let sig = CircuitSignature {
+            name: "foo".into(),
+            inputs: inputs.clone(),
+            outputs: outputs.clone(),
+        };
+        ir.check_conformance(&sig).unwrap();
+    }
+
+    /// `check_conformance` accepts an exact match.
+    #[test]
+    fn test_check_conformance_accepts_exact_match() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![TypedIdentifier::new(Identifier("%x".into()), IrType::Native)],
+            outputs: vec![TypedIdentifier::new(
+                Identifier("%y".into()),
+                IrType::Native,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let sig = CircuitSignature {
+            name: "any".into(),
+            inputs: vec![IrType::Native],
+            outputs: vec![IrType::Native],
+        };
+        assert!(ir.check_conformance(&sig).is_ok());
+    }
+
+    /// `check_conformance` rejects an input arity mismatch.
+    #[test]
+    fn test_check_conformance_rejects_input_arity_mismatch() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![TypedIdentifier::new(Identifier("%x".into()), IrType::Native)],
+            outputs: vec![],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let sig = CircuitSignature {
+            name: "any".into(),
+            inputs: vec![IrType::Native, IrType::Native], // descriptor expects 2
+            outputs: vec![],
+        };
+        let err = ir.check_conformance(&sig).expect_err("must reject");
+        let msg = err.to_string();
+        assert!(msg.contains("input arity mismatch"), "msg: {msg}");
+    }
+
+    /// `check_conformance` rejects an input type mismatch at a specific position.
+    #[test]
+    fn test_check_conformance_rejects_input_type_mismatch() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![
+                TypedIdentifier::new(Identifier("%x".into()), IrType::Native),
+                TypedIdentifier::new(Identifier("%y".into()), IrType::JubjubPoint),
+            ],
+            outputs: vec![],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let sig = CircuitSignature {
+            name: "any".into(),
+            inputs: vec![IrType::Native, IrType::Native], // descriptor wants Native, callee says JubjubPoint
+            outputs: vec![],
+        };
+        let err = ir.check_conformance(&sig).expect_err("must reject");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("input #1 type mismatch") && msg.contains("JubjubPoint"),
+            "msg: {msg}"
+        );
+    }
+
+    /// `check_conformance` rejects an output arity mismatch.
+    #[test]
+    fn test_check_conformance_rejects_output_arity_mismatch() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![],
+            outputs: vec![TypedIdentifier::new(
+                Identifier("%a".into()),
+                IrType::Native,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let sig = CircuitSignature {
+            name: "any".into(),
+            inputs: vec![],
+            outputs: vec![], // descriptor expects 0
+        };
+        let err = ir.check_conformance(&sig).expect_err("must reject");
+        let msg = err.to_string();
+        assert!(msg.contains("output arity mismatch"), "msg: {msg}");
+    }
+
+    /// `check_conformance` rejects an output type mismatch at a specific position.
+    #[test]
+    fn test_check_conformance_rejects_output_type_mismatch() {
+        use midnight_zkir_v3::{
+            CircuitSignature, Identifier, IrSource, TypedIdentifier, ir_types::IrType,
+        };
+        use std::sync::Arc;
+
+        let ir = IrSource {
+            inputs: vec![],
+            outputs: vec![TypedIdentifier::new(
+                Identifier("%a".into()),
+                IrType::JubjubPoint,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![]),
+        };
+        let sig = CircuitSignature {
+            name: "any".into(),
+            inputs: vec![],
+            outputs: vec![IrType::Native], // descriptor wants Native, callee says JubjubPoint
+        };
+        let err = ir.check_conformance(&sig).expect_err("must reject");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("output #0 type mismatch") && msg.contains("JubjubPoint"),
+            "msg: {msg}"
+        );
+    }
 }

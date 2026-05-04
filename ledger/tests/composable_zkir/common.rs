@@ -92,12 +92,21 @@ pub fn make_address(seed: u64) -> coin_structure::contract::ContractAddress {
     coin_structure::contract::ContractAddress(HashOutput(bytes))
 }
 
-pub fn stub_type_descriptor() -> ContractTypeDescriptor {
+/// Build a single-entry-point `ContractTypeDescriptor` for tests. The
+/// callee's actual typed signature is now validated against this
+/// descriptor at runtime (see `IrSource::check_conformance`), so each
+/// call site must declare the entry point name and the input/output
+/// types that match its corresponding callee `IrSource`.
+pub fn descriptor_for(
+    name: &str,
+    inputs: Vec<IrType>,
+    outputs: Vec<IrType>,
+) -> ContractTypeDescriptor {
     ContractTypeDescriptor {
         circuits: vec![CircuitSignature {
-            name: "test".to_string(),
-            inputs: vec![],
-            outputs: vec![IrType::Native],
+            name: name.to_string(),
+            inputs,
+            outputs,
         }],
     }
 }
@@ -266,7 +275,7 @@ pub fn build_outer_call_ir() -> IrSource {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%inner_addr_hi"), var("%inner_addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
                 outputs: vec![id("%call_result")],
@@ -355,7 +364,11 @@ pub fn build_outer_call_add_ir() -> IrSource {
         instructions: Arc::new(vec![
             Instruction::ContractCall {
                 contract_ref: (var("%inner_hi"), var("%inner_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "add_state",
+                    vec![IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%val")],
                 outputs: vec![id("%from_inner")],
@@ -413,7 +426,11 @@ pub fn build_outer_call_from_state_ir() -> IrSource {
             },
             Instruction::ContractCall {
                 contract_ref: (var("%addr_hi"), var("%addr_lo")),
-                expected_type: stub_type_descriptor(),
+                expected_type: descriptor_for(
+                    "add_state",
+                    vec![IrType::Native],
+                    vec![IrType::Native],
+                ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%caller_val")],
                 outputs: vec![id("%call_result")],

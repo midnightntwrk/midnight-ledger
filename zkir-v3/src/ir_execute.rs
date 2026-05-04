@@ -751,7 +751,7 @@ impl IrSource {
 
                 I::ContractCall {
                     contract_ref,
-                    expected_type: _, // TODO: conformance checking
+                    expected_type,
                     entry_point: callee_ep,
                     args,
                     outputs: call_outputs,
@@ -805,6 +805,47 @@ impl IrSource {
                         .fetch_contract(callee_address, entry_point_bytes)
                         .await?;
                     let ep_buf = EntryPointBuf(entry_point_bytes.to_vec());
+
+                    // Type conformance: validate that the actual callee IR's
+                    // typed signature matches the descriptor that the calling
+                    // contract committed to in this `ContractCall`. The
+                    // descriptor lists every entry point the contract may
+                    // expose, keyed by name; we look up the one we're calling
+                    // and compare its declared input/output types to the
+                    // callee's `inputs`/`outputs` typed-identifier vecs.
+                    //
+                    // This check is the structural foundation of the typed-
+                    // outputs work: without it the descriptor on the
+                    // `ContractCall` instruction was advisory only and a
+                    // mismatched callee could be dispatched without complaint.
+                    let entry_point_str = std::str::from_utf8(entry_point_bytes)
+                        .map_err(|_| ExecutionError::InstructionError {
+                            instruction_index: ip,
+                            message: format!(
+                                "ContractCall entry_point at {:?} is not valid UTF-8",
+                                callee_address
+                            ),
+                        })?;
+                    let expected_sig = expected_type
+                        .circuits
+                        .iter()
+                        .find(|sig| sig.name == entry_point_str)
+                        .ok_or_else(|| ExecutionError::InstructionError {
+                            instruction_index: ip,
+                            message: format!(
+                                "ContractCall conformance: descriptor does not declare \
+                                 entry point {entry_point_str:?} for {callee_address:?}",
+                            ),
+                        })?;
+                    callee_ir.check_conformance(expected_sig).map_err(|e| {
+                        ExecutionError::InstructionError {
+                            instruction_index: ip,
+                            message: format!(
+                                "ContractCall conformance failed for {entry_point_str:?} \
+                                 at {callee_address:?}: {e}"
+                            ),
+                        }
+                    })?;
 
                     let child_context = ExecutionContext {
                         ledger_state: callee_state,

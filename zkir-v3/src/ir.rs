@@ -722,6 +722,71 @@ impl IrSource {
 
         Ok(Proof(proof))
     }
+
+    /// Returns this circuit's typed signature as `(input types, output types)`,
+    /// projecting the per-position [`TypedIdentifier::val_t`] of `self.inputs`
+    /// and `self.outputs`. Used by [`Self::check_conformance`] and as the
+    /// canonical source of truth for what a `ContractCall` is allowed to
+    /// invoke at this entry point.
+    pub fn type_signature(&self) -> (Vec<IrType>, Vec<IrType>) {
+        let inputs = self.inputs.iter().map(|t| t.val_t.clone()).collect();
+        let outputs = self.outputs.iter().map(|t| t.val_t.clone()).collect();
+        (inputs, outputs)
+    }
+
+    /// Validates that this circuit's typed signature matches the
+    /// `expected` [`CircuitSignature`]. The `name` field of `expected` is
+    /// not consulted — callers are expected to have already selected the
+    /// right signature for the entry point being invoked. Returns an error
+    /// describing the first mismatch (in input or output positions) if the
+    /// shapes disagree.
+    pub fn check_conformance(
+        &self,
+        expected: &CircuitSignature,
+    ) -> Result<()> {
+        let (actual_inputs, actual_outputs) = self.type_signature();
+        if actual_inputs.len() != expected.inputs.len() {
+            return Err(anyhow::anyhow!(
+                "ContractCall conformance: input arity mismatch for {:?}: \
+                 callee declares {} inputs, descriptor expects {}",
+                expected.name,
+                actual_inputs.len(),
+                expected.inputs.len(),
+            ));
+        }
+        for (i, (actual, expected_t)) in
+            actual_inputs.iter().zip(expected.inputs.iter()).enumerate()
+        {
+            if actual != expected_t {
+                return Err(anyhow::anyhow!(
+                    "ContractCall conformance: input #{i} type mismatch for {:?}: \
+                     callee declares {actual:?}, descriptor expects {expected_t:?}",
+                    expected.name,
+                ));
+            }
+        }
+        if actual_outputs.len() != expected.outputs.len() {
+            return Err(anyhow::anyhow!(
+                "ContractCall conformance: output arity mismatch for {:?}: \
+                 callee declares {} outputs, descriptor expects {}",
+                expected.name,
+                actual_outputs.len(),
+                expected.outputs.len(),
+            ));
+        }
+        for (i, (actual, expected_t)) in
+            actual_outputs.iter().zip(expected.outputs.iter()).enumerate()
+        {
+            if actual != expected_t {
+                return Err(anyhow::anyhow!(
+                    "ContractCall conformance: output #{i} type mismatch for {:?}: \
+                     callee declares {actual:?}, descriptor expects {expected_t:?}",
+                    expected.name,
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 #[cfg(feature = "proptest")]
