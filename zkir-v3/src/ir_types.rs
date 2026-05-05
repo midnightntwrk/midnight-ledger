@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use midnight_circuits::types::{
     AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
 };
@@ -105,6 +106,18 @@ impl IrType {
                  read byte_len explicitly. See IrSource::preprocess for the \
                  canonical pattern."
             ),
+        }
+    }
+
+    /// FAB alignment of a value of this type.
+    pub fn alignment(&self) -> Alignment {
+        match self {
+            IrType::Native => Alignment::singleton(AlignmentAtom::Field),
+            IrType::JubjubPoint => Alignment(vec![
+                AlignmentSegment::Atom(AlignmentAtom::Field),
+                AlignmentSegment::Atom(AlignmentAtom::Field),
+            ]),
+            IrType::JubjubScalar => Alignment::singleton(AlignmentAtom::Field),
         }
     }
 }

@@ -21,6 +21,7 @@ use crate::ir_instructions::encode::{
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
+use crate::zkir_mode::{ZkirKey, ZkirOp, zkir_ops_to_field_elements_with_sizes};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -618,25 +619,36 @@ impl IrSource {
                         bail!("PersistentHash did not produce expected output");
                     }
                 }
-                I::Impact { guard, inputs } => {
-                    let count = inputs.len();
-                    for input in inputs {
-                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
-                        pis.push(x);
-                        public_transcript_inputs_idx += 1;
-                    }
+                I::Impact { guard, ops } => {
+                    // prove.rs needs one pi_skips entry per op
+                    let (field_elements, per_op_sizes) =
+                        zkir_ops_to_field_elements_with_sizes(ops.clone(), &memory)?;
+                    let count = field_elements.len();
                     if !resolve_operand_bool(&memory, guard)? {
-                        pi_skips.push(Some(count));
-                        public_transcript_inputs_idx -= count;
+                        // guard=false: emit zeros (matches in-circuit
+                        // select(guard, val, 0) = 0) and mark all slots skipped
+                        for _ in 0..count {
+                            pis.push(Fr::from(0u64));
+                        }
+                        for &op_size in &per_op_sizes {
+                            pi_skips.push(Some(op_size));
+                        }
                     } else {
-                        pi_skips.push(None);
+                        for x in &field_elements {
+                            pis.push(*x);
+                        }
+                        for _ in 0..per_op_sizes.len() {
+                            pi_skips.push(None);
+                        }
                         for i in 0..count {
-                            let idx = public_transcript_inputs_idx - count + i;
-                            let expected = preimage.public_transcript_inputs.get(idx).copied();
+                            let expected = preimage
+                                .public_transcript_inputs
+                                .get(public_transcript_inputs_idx + i)
+                                .copied();
                             let computed = Some(pis[pis.len() - count + i]);
                             if expected != computed {
                                 error!(
-                                    ?idx,
+                                    idx = public_transcript_inputs_idx + i,
                                     ?expected,
                                     ?computed,
                                     ?memory,
@@ -644,10 +656,12 @@ impl IrSource {
                                     "Public transcript input mismatch"
                                 );
                                 bail!(
-                                    "Public transcript input mismatch for input {idx}; expected: {expected:?}, computed: {computed:?}"
+                                    "Public transcript input mismatch for input {}; expected: {expected:?}, computed: {computed:?}",
+                                    public_transcript_inputs_idx + i
                                 );
                             }
                         }
+                        public_transcript_inputs_idx += count;
                     }
                 }
                 I::HashToCurve { inputs, output } => {
@@ -933,18 +947,168 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard, inputs } => {
-                    let zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
-                    let guard: AssignedBit<_> = {
-                        let guard = resolve_operand(std, layouter, &memory, guard)?;
-                        let guard: AssignedNative<_> = guard.try_into()?;
-                        std.convert(layouter, &guard)?
+                I::Impact { guard, ops } => {
+                    // In-circuit mirror of zkir_ops_to_field_elements; each Fr
+                    // is gated by select(guard, val, 0).
+                    let impact_zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
+                    let impact_guard: AssignedBit<_> = {
+                        let guard_val = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard_native: AssignedNative<_> = guard_val.try_into()?;
+                        std.convert(layouter, &guard_native)?
                     };
-                    for input in inputs {
-                        let val_assigned = resolve_operand(std, layouter, &memory, input)?;
-                        let x: AssignedNative<_> = val_assigned.try_into()?;
-                        let guarded_x = std.select(layouter, &guard, &x, &zero)?;
-                        pi_push(guarded_x, &mut public_inputs)?;
+
+                    macro_rules! push_const_pi {
+                        ($val:expr) => {{
+                            let assigned =
+                                std.assign_fixed(layouter, outer::Scalar::from($val as u64))?;
+                            let guarded =
+                                std.select(layouter, &impact_guard, &assigned, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
+                    }
+
+                    macro_rules! push_operand_pi {
+                        ($operand:expr) => {{
+                            let val = resolve_operand(std, layouter, &memory, $operand)?;
+                            let x: AssignedNative<_> = val.try_into()?;
+                            let guarded = std.select(layouter, &impact_guard, &x, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
+                    }
+
+                    macro_rules! push_alignment_pi {
+                        ($alignment:expr) => {{
+                            let mut fields: Vec<Fr> = Vec::new();
+                            $alignment.field_repr(&mut fields);
+                            for fr_val in &fields {
+                                let assigned = std.assign_fixed(layouter, fr_val.0)?;
+                                let guarded =
+                                    std.select(layouter, &impact_guard, &assigned, &impact_zero)?;
+                                pi_push(guarded, &mut public_inputs)?;
+                            }
+                        }};
+                    }
+
+                    for op in ops {
+                        match op {
+                            ZkirOp::Noop { n } => {
+                                for _ in 0..*n {
+                                    push_const_pi!(0);
+                                }
+                            }
+                            ZkirOp::Lt => push_const_pi!(0x01),
+                            ZkirOp::Eq => push_const_pi!(0x02),
+                            ZkirOp::Type => push_const_pi!(0x03),
+                            ZkirOp::Size => push_const_pi!(0x04),
+                            ZkirOp::New => push_const_pi!(0x05),
+                            ZkirOp::And => push_const_pi!(0x06),
+                            ZkirOp::Or => push_const_pi!(0x07),
+                            ZkirOp::Neg => push_const_pi!(0x08),
+                            ZkirOp::Log => push_const_pi!(0x09),
+                            ZkirOp::Root => push_const_pi!(0x0a),
+                            ZkirOp::Pop => push_const_pi!(0x0b),
+                            ZkirOp::Add => push_const_pi!(0x14),
+                            ZkirOp::Sub => push_const_pi!(0x15),
+                            ZkirOp::Member => push_const_pi!(0x18),
+                            ZkirOp::Ckpt => push_const_pi!(0xff),
+
+                            ZkirOp::Popeq { cached, result } => {
+                                push_const_pi!((0x0cu8 + *cached as u8));
+                                push_alignment_pi!(&result.alignment);
+                                for operand in &result.operands {
+                                    push_operand_pi!(operand);
+                                }
+                            }
+
+                            ZkirOp::Addi { immediate } => {
+                                push_const_pi!(0x0e);
+                                push_const_pi!(*immediate);
+                            }
+                            ZkirOp::Subi { immediate } => {
+                                push_const_pi!(0x0f);
+                                push_const_pi!(*immediate);
+                            }
+
+                            // opcode | 1 (Cell tag) | alignment | value operands
+                            ZkirOp::Push { storage, value } => {
+                                push_const_pi!((0x10u8 + *storage as u8));
+                                push_const_pi!(1u64);
+                                push_alignment_pi!(&value.alignment);
+                                for operand in &value.operands {
+                                    push_operand_pi!(operand);
+                                }
+                            }
+
+                            ZkirOp::Branch { skip } => {
+                                push_const_pi!(0x12);
+                                push_const_pi!(*skip);
+                            }
+                            ZkirOp::Jmp { skip } => {
+                                push_const_pi!(0x13);
+                                push_const_pi!(*skip);
+                            }
+
+                            ZkirOp::Concat { cached, n } => {
+                                push_const_pi!((0x16u8 + *cached as u8));
+                                push_const_pi!(*n);
+                            }
+
+                            ZkirOp::Rem { cached } => {
+                                push_const_pi!((0x19u8 + *cached as u8));
+                            }
+
+                            ZkirOp::Dup { n } => push_const_pi!((0x30u8 | *n)),
+                            ZkirOp::Swap { n } => push_const_pi!((0x40u8 | *n)),
+
+                            ZkirOp::Idx {
+                                cached,
+                                push_path,
+                                path,
+                            } => {
+                                if !path.is_empty() {
+                                    let base: u8 = match (*cached, *push_path) {
+                                        (false, false) => 0x50,
+                                        (true, false) => 0x60,
+                                        (false, true) => 0x70,
+                                        (true, true) => 0x80,
+                                    };
+                                    let opcode = base | (path.len() as u8 - 1);
+                                    push_const_pi!(opcode);
+                                    for key in path {
+                                        match key {
+                                            ZkirKey::Stack => {
+                                                // Stack -> -1
+                                                let neg_one = std.assign_fixed(
+                                                    layouter,
+                                                    -outer::Scalar::from(1),
+                                                )?;
+                                                let guarded = std.select(
+                                                    layouter,
+                                                    &impact_guard,
+                                                    &neg_one,
+                                                    &impact_zero,
+                                                )?;
+                                                pi_push(guarded, &mut public_inputs)?;
+                                            }
+                                            ZkirKey::Value {
+                                                alignment,
+                                                operands,
+                                            } => {
+                                                push_alignment_pi!(alignment);
+                                                for operand in operands {
+                                                    push_operand_pi!(operand);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ZkirOp::Ins { cached, n } => {
+                                let base: u8 = if *cached { 0xa0 } else { 0x90 };
+                                push_const_pi!((base | *n));
+                            }
+                        }
                     }
                 }
                 I::TransientHash { inputs, output } => {

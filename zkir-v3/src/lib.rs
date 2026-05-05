@@ -18,7 +18,10 @@ pub mod ir;
 pub mod ir_instructions;
 pub mod ir_types;
 pub mod ir_vm;
+pub mod zkir_mode;
 
-pub use ir::{Identifier, Instruction, IrSource};
+pub use ir::{Identifier, Instruction, IrSource, Operand, TypedIdentifier};
+pub use ir_types::IrType;
 pub use ir_types::{IrType, IrValue};
 pub use ir_vm::Preprocessed;
+pub use zkir_mode::{ZkirKey, ZkirOp, ZkirPushValue, ZkirReadResult};
