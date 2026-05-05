@@ -855,9 +855,7 @@ impl IrSource {
                         });
                     }
                     let mut input_frs: Vec<Fr> = Vec::new();
-                    for (i, (arg, val_t)) in
-                        args.iter().zip(expected_sig.inputs.iter()).enumerate()
-                    {
+                    for (i, (arg, val_t)) in args.iter().zip(expected_sig.inputs.iter()).enumerate() {
                         let value = eval_operand(&memory, arg).map_err(|e| {
                             ExecutionError::InstructionError {
                                 instruction_index: ip,

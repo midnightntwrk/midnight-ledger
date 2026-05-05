@@ -537,6 +537,150 @@ async fn test_execute_cross_contract_call() {
     assert!(sub.comm_comm().is_some(), "sub has comm_comm");
 }
 
+/// Verifies that passing a `Point<Jubjub>` value as a `ContractCall` arg
+/// works end-to-end. Pre-typed-outputs the executor used `eval_operand_fr`
+/// which would have failed at `try_into::<Fr>` on an `IrValue::JubjubPoint`
+/// in caller memory. With the typed-args fix, the descriptor's
+/// `inputs: [Point<Jubjub>]` drives `eval_operand` (typed) +
+/// `encode_offcircuit` to flatten the point into the 2 Frs the callee
+/// expects.
+///
+/// Setup:
+///   * Caller takes a Native scalar input. It decodes the scalar to
+///     `JubjubScalar`, runs `ec_mul_generator` to produce a `JubjubPoint`
+///     in memory, and invokes a sub-call passing that point as a single
+///     typed arg.
+///   * Callee takes a `Point<Jubjub>` input and returns it as a
+///     `Point<Jubjub>` output (its `outputs` references the input
+///     identifier directly; the end-of-execution materialization loop
+///     reads it back from memory and encodes via `encode_offcircuit`).
+///
+/// Asserts: execute_tree succeeds; sub-call's flat-Fr output is 2
+/// elements (the encoded JubjubPoint); the round-trip preserves the
+/// caller's computed point — i.e. the caller can decode the sub-call
+/// return into the same x/y Frs it sent.
+#[actix_rt::test]
+async fn test_contract_call_with_jubjub_point_arg() {
+    let mut rng = StdRng::seed_from_u64(0x500);
+
+    // Callee: passthrough of a JubjubPoint. inputs = [%p_in: Point], no
+    // body, outputs = [%p_in: Point] (re-uses the input identifier so
+    // memory's input slot is what the materialization loop reads).
+    let callee_ir = IrSource {
+        inputs: vec![TypedIdentifier::new(id("%p_in"), IrType::JubjubPoint)],
+        outputs: vec![TypedIdentifier::new(id("%p_in"), IrType::JubjubPoint)],
+        do_communications_commitment: false,
+        instructions: Arc::new(vec![]),
+    };
+
+    // Caller: derives a JubjubPoint from a Native scalar input via
+    // decode + ec_mul_generator, then invokes the callee passing the
+    // typed point as a single arg.
+    let caller_ir = IrSource {
+        inputs: vec![
+            TypedIdentifier::new(id("%s_native"), IrType::Native),
+            TypedIdentifier::new(id("%addr_hi"), IrType::Native),
+            TypedIdentifier::new(id("%addr_lo"), IrType::Native),
+        ],
+        outputs: vec![],
+        do_communications_commitment: false,
+        instructions: Arc::new(vec![
+            // Convert Native scalar to JubjubScalar.
+            Instruction::Decode {
+                inputs: vec![var("%s_native")],
+                val_t: IrType::JubjubScalar,
+                output: id("%s_jub"),
+            },
+            // Compute %p = generator * scalar (a JubjubPoint).
+            Instruction::EcMulGenerator {
+                scalar: var("%s_jub"),
+                output: id("%p"),
+            },
+            // Sub-call passing %p as a single typed JubjubPoint arg.
+            // Pre-fix this would have hit the Native-only assumption at
+            // eval_operand_fr; post-fix the executor uses the
+            // descriptor's inputs=[Point<Jubjub>] to drive eval_operand
+            // + encode_offcircuit.
+            Instruction::ContractCall {
+                contract_ref: (var("%addr_hi"), var("%addr_lo")),
+                expected_type: descriptor_for(
+                    "passthrough_point",
+                    vec![IrType::JubjubPoint],
+                    vec![IrType::JubjubPoint],
+                ),
+                entry_point: "passthrough_point".to_string(),
+                args: vec![var("%p")],
+                outputs: vec![id("%returned")],
+            },
+        ]),
+    };
+
+    let callee_addr = make_address(0x501);
+    let caller_addr = make_address(0x502);
+
+    let mut provider = TestZkirProvider::<D>::new();
+    provider.register(
+        callee_addr,
+        HashMap::from([("passthrough_point".to_string(), callee_ir.clone())]),
+        make_null_state(),
+    );
+    provider.register(
+        caller_addr,
+        HashMap::from([("entry".to_string(), caller_ir.clone())]),
+        make_null_state(),
+    );
+
+    let context = ExecutionContext {
+        ledger_state: make_null_state(),
+        address: caller_addr,
+        entry_point: ep("entry"),
+        zkir_provider: Arc::new(provider),
+        witness_provider: None,
+        call_depth: 0,
+        max_call_depth: 8,
+        cost_model: INITIAL_COST_MODEL,
+    };
+
+    let scalar = Fr::from(7u64);
+    let (callee_addr_hi, callee_addr_lo) = addr_to_frs(callee_addr);
+    let caller_input_frs = vec![scalar, callee_addr_hi, callee_addr_lo];
+
+    let calls: ExecutionResult<D> = caller_ir
+        .execute(caller_input_frs, context, &mut rng)
+        .await
+        .expect("execute should succeed (typed JubjubPoint arg should not fail)");
+
+    assert_eq!(calls.len(), 2, "expected caller + sub-call");
+    let root = &calls[0];
+    let sub = &calls[1];
+
+    // The caller declares no outputs, so its flat-Fr output stream is empty.
+    assert!(root.output.is_empty(), "caller declares no typed outputs");
+
+    // The sub-call's typed Point<Jubjub> output flattens to 2 Frs.
+    assert_eq!(
+        sub.output.len(),
+        2,
+        "sub-call's Point<Jubjub> output should be 2 Frs (x, y)"
+    );
+
+    // Sub-call's input was the caller's encoded %p = generator * scalar.
+    // Length-check: the sub-call's input flat-Fr stream is exactly 2 Frs
+    // (the encoded JubjubPoint).
+    assert_eq!(
+        sub.input.len(),
+        2,
+        "sub-call input should be the 2-Fr encoding of the JubjubPoint arg"
+    );
+
+    // Pass-through: callee returns its input unchanged, so the sub-call's
+    // output Frs equal its input Frs.
+    assert_eq!(
+        sub.input, sub.output,
+        "passthrough callee should return its input"
+    );
+}
+
 /// Test 3: Witness limitation — calling a contract with `PrivateInput` as a
 /// callee (via ContractCall) should fail with `WitnessNotAvailable`.
 #[actix_rt::test]
