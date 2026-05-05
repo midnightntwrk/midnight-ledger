@@ -862,47 +862,62 @@ impl IrSource {
                         .execute_tree(input_frs, child_context, rng)
                         .await?;
 
+                    // Per-output types come from the descriptor entry for
+                    // this entry point (already looked up for conformance
+                    // above as `expected_sig`). Each `call_outputs[i]`
+                    // identifier inherits its logical type from
+                    // `expected_sig.outputs[i]`.
+                    if expected_sig.outputs.len() != call_outputs.len() {
+                        return Err(ExecutionError::InstructionError {
+                            instruction_index: ip,
+                            message: format!(
+                                "ContractCall: descriptor declares {} outputs for {entry_point_str:?} \
+                                 but instruction binds {} identifiers",
+                                expected_sig.outputs.len(),
+                                call_outputs.len(),
+                            ),
+                        });
+                    }
+
                     // Length conformance: the callee's flat-Fr output stream
-                    // must contain exactly `sum(encoded_len(call_outputs[i].val_t))`
-                    // elements. The conformance check above already validates
-                    // the per-position types match; this is the corresponding
-                    // total-Fr-count check between caller and callee.
-                    let expected_total: usize = call_outputs
+                    // must contain exactly `sum(encoded_len(...))` elements
+                    // across the descriptor's logical output types.
+                    let expected_total: usize = expected_sig
+                        .outputs
                         .iter()
-                        .map(|t| t.val_t.encoded_len())
+                        .map(|t| t.encoded_len())
                         .sum();
                     if child_tree.output.len() != expected_total {
                         return Err(ExecutionError::InstructionError {
                             instruction_index: ip,
                             message: format!(
                                 "callee returned {} flat-Fr outputs, expected {} \
-                                 (sum of encoded_len over {} typed outputs)",
+                                 (sum of encoded_len over {} descriptor-typed outputs)",
                                 child_tree.output.len(),
                                 expected_total,
-                                call_outputs.len()
+                                expected_sig.outputs.len()
                             ),
                         });
                     }
 
                     // Install callee outputs in caller's memory as typed
-                    // values, decoding each `TypedIdentifier`'s flat-Fr slice
-                    // via `decode_offcircuit`. The slice width per identifier
-                    // is `val_t.encoded_len()` (1 for Native/JubjubScalar, 2
+                    // values, decoding each output's flat-Fr slice via
+                    // `decode_offcircuit`. The slice width per identifier is
+                    // `val_t.encoded_len()` (1 for Native/JubjubScalar, 2
                     // for JubjubPoint).
                     let mut out_idx: usize = 0;
-                    for typed_out_id in call_outputs.iter() {
-                        let w = typed_out_id.val_t.encoded_len();
+                    for (out_id, val_t) in call_outputs.iter().zip(expected_sig.outputs.iter()) {
+                        let w = val_t.encoded_len();
                         let frs = &child_tree.output[out_idx..out_idx + w];
-                        let value = decode_offcircuit(frs, &typed_out_id.val_t).map_err(|e| {
+                        let value = decode_offcircuit(frs, val_t).map_err(|e| {
                             ExecutionError::InstructionError {
                                 instruction_index: ip,
                                 message: format!(
-                                    "ContractCall: failed to decode output {:?} as {:?}: {e:#}",
-                                    typed_out_id.name, typed_out_id.val_t,
+                                    "ContractCall: failed to decode output {out_id:?} as {val_t:?}: {e:#}",
                                 ),
                             }
                         })?;
-                        memory.insert(typed_out_id.name.clone(), value);
+                        memory.insert(out_id.clone(), value);
                         out_idx += w;
                     }
 

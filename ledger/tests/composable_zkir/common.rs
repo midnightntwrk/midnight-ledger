@@ -268,8 +268,8 @@ pub fn build_inner_get_ir() -> IrSource {
 pub fn build_outer_call_ir() -> IrSource {
     IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%inner_addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_addr_lo"), IrType::Native),
+            id("%inner_addr_hi"),
+            id("%inner_addr_lo"),
         ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
@@ -278,7 +278,7 @@ pub fn build_outer_call_ir() -> IrSource {
                 expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
-                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
+                outputs: vec![id("%call_result")],
             },
             ]),
     }
@@ -307,7 +307,7 @@ pub fn build_inner_add_state_ir() -> IrSource {
     ];
 
     IrSource {
-        inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        inputs: vec![id("%x")],
         outputs: vec![
             TypedIdentifier::new(Identifier("%result".to_string()), IrType::Native),
         ],
@@ -356,9 +356,9 @@ pub fn build_inner_add_state_ir() -> IrSource {
 pub fn build_outer_call_add_ir() -> IrSource {
     IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%inner_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_lo"), IrType::Native),
-            TypedIdentifier::new(id("%val"), IrType::Native),
+            id("%inner_hi"),
+            id("%inner_lo"),
+            id("%val"),
         ],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
@@ -371,7 +371,7 @@ pub fn build_outer_call_add_ir() -> IrSource {
                 ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![TypedIdentifier::new(id("%from_inner"), IrType::Native)],
+                outputs: vec![id("%from_inner")],
             },
             // %result = %from_inner + %val = (val + state_val) + val
             Instruction::Add {
@@ -392,7 +392,7 @@ pub fn build_outer_call_add_ir() -> IrSource {
 ///   outer returns (V + S) + V = 2V + S
 pub fn build_outer_call_from_state_ir() -> IrSource {
     IrSource {
-        inputs: vec![TypedIdentifier::new(id("%caller_val"), IrType::Native)],
+        inputs: vec![id("%caller_val")],
         do_communications_commitment: true,
         instructions: Arc::new(vec![
             Instruction::Impact {
@@ -433,7 +433,7 @@ pub fn build_outer_call_from_state_ir() -> IrSource {
                 ),
                 entry_point: "add_state".to_string(),
                 args: vec![var("%caller_val")],
-                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
+                outputs: vec![id("%call_result")],
             },
             // %final = %call_result + %caller_val = (V + S) + V
             Instruction::Add {

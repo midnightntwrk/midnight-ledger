@@ -270,8 +270,8 @@ fn build_inner_get_ir() -> IrSource {
 fn build_outer_call_ir() -> IrSource {
     IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%inner_addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_addr_lo"), IrType::Native),
+            id("%inner_addr_hi"),
+            id("%inner_addr_lo"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -281,7 +281,7 @@ fn build_outer_call_ir() -> IrSource {
                 expected_type: descriptor_for("get", vec![], vec![IrType::Native]),
                 entry_point: "get".to_string(),
                 args: vec![],
-                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
+                outputs: vec![id("%call_result")],
             },
             // Output the call result
             ]),
@@ -312,7 +312,7 @@ fn build_contract_with_private_input() -> IrSource {
 /// Build a simple `IrSource` that just outputs its input (pass-through).
 fn build_passthrough_ir() -> IrSource {
     IrSource {
-        inputs: vec![TypedIdentifier::new(id("%in"), IrType::Native)],
+        inputs: vec![id("%in")],
         outputs: vec![
             TypedIdentifier::new(Identifier("%in".to_string()), IrType::Native),
         ],
@@ -340,7 +340,7 @@ fn build_chained_caller(callee_addr_hi: &str, callee_addr_lo: &str, entry_point:
                 ),
                 entry_point: entry_point.to_string(),
                 args: vec![var(callee_addr_hi), var(callee_addr_lo)], // pass address through
-                outputs: vec![TypedIdentifier::new(id("%result"), IrType::Native)],
+                outputs: vec![id("%result")],
             },
             ]),
     }
@@ -549,8 +549,8 @@ async fn test_witness_limitation_in_cross_contract_call() {
     // The caller contract: calls the callee which has PrivateInput
     let caller_ir = IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%addr_lo"), IrType::Native),
+            id("%addr_hi"),
+            id("%addr_lo"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -559,7 +559,7 @@ async fn test_witness_limitation_in_cross_contract_call() {
                 expected_type: descriptor_for("run", vec![], vec![IrType::Native]),
                 entry_point: "run".to_string(),
                 args: vec![],
-                outputs: vec![TypedIdentifier::new(id("%out"), IrType::Native)],
+                outputs: vec![id("%out")],
             },
             ]),
     };
@@ -805,8 +805,8 @@ async fn test_execute_arithmetic_instructions() {
 
     let ir = IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%a"), IrType::Native),
-            TypedIdentifier::new(id("%b"), IrType::Native),
+            id("%a"),
+            id("%b"),
         ],
         outputs: vec![
             TypedIdentifier::new(Identifier("%sum".to_string()), IrType::Native),
@@ -881,9 +881,9 @@ async fn test_execute_two_level_call_chain() {
     // Middle: calls inner, returns the result
     let middle_ir = IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%inner_addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_addr_lo"), IrType::Native),
-            TypedIdentifier::new(id("%val"), IrType::Native),
+            id("%inner_addr_hi"),
+            id("%inner_addr_lo"),
+            id("%val"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -896,7 +896,7 @@ async fn test_execute_two_level_call_chain() {
                 ),
                 entry_point: "passthrough".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![TypedIdentifier::new(id("%from_inner"), IrType::Native)],
+                outputs: vec![id("%from_inner")],
             },
             ]),
     };
@@ -905,11 +905,11 @@ async fn test_execute_two_level_call_chain() {
     // Outer: calls middle with the inner address and a value
     let outer_ir = IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%middle_addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%middle_addr_lo"), IrType::Native),
-            TypedIdentifier::new(id("%inner_addr_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_addr_lo"), IrType::Native),
-            TypedIdentifier::new(id("%val"), IrType::Native),
+            id("%middle_addr_hi"),
+            id("%middle_addr_lo"),
+            id("%inner_addr_hi"),
+            id("%inner_addr_lo"),
+            id("%val"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -922,7 +922,7 @@ async fn test_execute_two_level_call_chain() {
                 ),
                 entry_point: "relay".to_string(),
                 args: vec![var("%inner_addr_hi"), var("%inner_addr_lo"), var("%val")],
-                outputs: vec![TypedIdentifier::new(id("%result"), IrType::Native)],
+                outputs: vec![id("%result")],
             },
             ]),
     };
@@ -1136,7 +1136,7 @@ async fn test_nontrivial_result_from_call_parameter() {
 
     // Inner: takes one input, outputs input * 2
     let inner_ir = IrSource {
-        inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        inputs: vec![id("%x")],
         outputs: vec![
             TypedIdentifier::new(Identifier("%doubled".to_string()), IrType::Native),
         ],
@@ -1156,9 +1156,9 @@ async fn test_nontrivial_result_from_call_parameter() {
     // then outputs call_result + value (i.e. 2*value + value = 3*value).
     let outer_ir = IrSource {
         inputs: vec![
-            TypedIdentifier::new(id("%inner_hi"), IrType::Native),
-            TypedIdentifier::new(id("%inner_lo"), IrType::Native),
-            TypedIdentifier::new(id("%val"), IrType::Native),
+            id("%inner_hi"),
+            id("%inner_lo"),
+            id("%val"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -1171,7 +1171,7 @@ async fn test_nontrivial_result_from_call_parameter() {
                 ),
                 entry_point: "double".to_string(),
                 args: vec![var("%val")],
-                outputs: vec![TypedIdentifier::new(id("%doubled"), IrType::Native)],
+                outputs: vec![id("%doubled")],
             },
             // %result = %doubled + %val  (= 2*val + val = 3*val)
             Instruction::Add {
@@ -1248,7 +1248,7 @@ async fn test_call_contract_from_ledger_state() {
 
     // Inner contract B: "increment" — takes one input, returns input + 1
     let inner_ir = IrSource {
-        inputs: vec![TypedIdentifier::new(id("%x"), IrType::Native)],
+        inputs: vec![id("%x")],
         outputs: vec![
             TypedIdentifier::new(Identifier("%result".to_string()), IrType::Native),
         ],
@@ -1267,7 +1267,7 @@ async fn test_call_contract_from_ledger_state() {
     let outer_ir = IrSource {
         inputs: vec![
             // A value to pass to the callee
-            TypedIdentifier::new(id("%caller_val"), IrType::Native),
+            id("%caller_val"),
         ],
         do_communications_commitment: false,
         instructions: Arc::new(vec![
@@ -1312,7 +1312,7 @@ async fn test_call_contract_from_ledger_state() {
                 ),
                 entry_point: "increment".to_string(),
                 args: vec![var("%caller_val")],
-                outputs: vec![TypedIdentifier::new(id("%call_result"), IrType::Native)],
+                outputs: vec![id("%call_result")],
             },
             Instruction::Mul {
                 a: var("%call_result"),
@@ -1395,7 +1395,7 @@ async fn test_guarded_public_input_before_unguarded() {
     use transient_crypto::proofs::{KeyLocation, ProofPreimage};
 
     let ir = IrSource {
-        inputs: vec![TypedIdentifier::new(id("%cond"), IrType::Native)],
+        inputs: vec![id("%cond")],
         outputs: vec![
             TypedIdentifier::new(Identifier("%unguarded".to_string()), IrType::Native),
         ],

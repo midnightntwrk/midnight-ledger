@@ -326,21 +326,44 @@ impl IrSource {
                 }
                 I::ContractCall {
                     contract_ref,
-                    expected_type: _,
+                    expected_type,
                     entry_point,
                     args,
                     outputs: call_outputs,
                 } => {
-                    // ── 1. Consume callee output values from private_transcript ──
-                    // Each `TypedIdentifier` consumes `val_t.encoded_len()`
-                    // Frs from `private_transcript` and is reconstructed as a
-                    // typed value via `decode_offcircuit`. The witness
-                    // provider serializes typed callee outputs in declaration
-                    // order with their `encode_offcircuit` flat-Fr layout, so
-                    // this `decode_offcircuit` is the exact inverse.
-                    let total_fr_count: usize = call_outputs
+                    // The descriptor entry for this entry point is the
+                    // source of truth for per-position output types. Each
+                    // `call_outputs[i]` identifier inherits its logical type
+                    // from `sig.outputs[i]`.
+                    let sig = expected_type
+                        .circuits
                         .iter()
-                        .map(|t| t.val_t.encoded_len())
+                        .find(|c| c.name == *entry_point)
+                        .ok_or_else(|| {
+                            anyhow!(
+                                "ContractCall: descriptor does not declare entry point {entry_point:?}"
+                            )
+                        })?;
+                    if sig.outputs.len() != call_outputs.len() {
+                        bail!(
+                            "ContractCall: descriptor declares {} outputs for {entry_point:?} \
+                             but instruction binds {} identifiers",
+                            sig.outputs.len(),
+                            call_outputs.len(),
+                        );
+                    }
+
+                    // ── 1. Consume callee output values from private_transcript ──
+                    // Each identifier consumes `val_t.encoded_len()` Frs and
+                    // is reconstructed as a typed value via
+                    // `decode_offcircuit`. The witness provider serializes
+                    // typed callee outputs in declaration order with their
+                    // `encode_offcircuit` flat-Fr layout, so this
+                    // `decode_offcircuit` is the exact inverse.
+                    let total_fr_count: usize = sig
+                        .outputs
+                        .iter()
+                        .map(|t| t.encoded_len())
                         .sum();
                     if private_transcript_outputs_idx + total_fr_count
                         > preimage.private_transcript.len()
@@ -352,14 +375,14 @@ impl IrSource {
                             preimage.private_transcript.len() - private_transcript_outputs_idx
                         );
                     }
-                    for typed_out_id in call_outputs.iter() {
-                        let w = typed_out_id.val_t.encoded_len();
+                    for (out_id, val_t) in call_outputs.iter().zip(sig.outputs.iter()) {
+                        let w = val_t.encoded_len();
                         let frs = &preimage.private_transcript[
                             private_transcript_outputs_idx
                                 ..private_transcript_outputs_idx + w
                         ];
-                        let value = decode_offcircuit(frs, &typed_out_id.val_t)?;
-                        memory.insert(typed_out_id.name.clone(), value);
+                        let value = decode_offcircuit(frs, val_t)?;
+                        memory.insert(out_id.clone(), value);
                         private_transcript_outputs_idx += w;
                     }
 
@@ -391,27 +414,26 @@ impl IrSource {
                     for arg in args.iter() {
                         io_fields.push(eval_operand_fr(&memory, arg)?);
                     }
-                    // Flatten each typed output back into Frs via
-                    // `encode_offcircuit`. This re-walks the typed values in
-                    // declaration order producing the same Fr stream that the
-                    // callee's own preprocess used to compute its comm-comm.
-                    for typed_out_id in call_outputs.iter() {
+                    // Flatten each output back into Frs via
+                    // `encode_offcircuit`. This re-walks the typed values
+                    // (whose types come from the descriptor entry above) in
+                    // declaration order, producing the same Fr stream that
+                    // the callee's own preprocess used to compute its
+                    // comm-comm.
+                    for (out_id, val_t) in call_outputs.iter().zip(sig.outputs.iter()) {
                         let value = memory
-                            .get(&typed_out_id.name)
+                            .get(out_id)
                             .cloned()
                             .ok_or_else(|| {
-                                anyhow!(
-                                    "ContractCall output {:?} not in memory",
-                                    typed_out_id.name
-                                )
+                                anyhow!("ContractCall output {:?} not in memory", out_id)
                             })?;
-                        if value.get_type() != typed_out_id.val_t {
+                        if value.get_type() != *val_t {
                             bail!(
                                 "ContractCall output {:?} has runtime type {:?} but \
-                                 instruction declares {:?}",
-                                typed_out_id.name,
+                                 descriptor declares {:?}",
+                                out_id,
                                 value.get_type(),
-                                typed_out_id.val_t,
+                                val_t,
                             );
                         }
                         for ir_val in encode_offcircuit(&value) {

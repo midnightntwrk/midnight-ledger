@@ -811,28 +811,44 @@ impl Relation for IrSource {
                     outputs,
                 } => {
                     // ── 1. Assign callee output values from witness ──
-                    // Each typed output is assigned in-circuit using its
-                    // declared `val_t`. The witness memory holds the same
-                    // typed value the off-circuit preprocess decoded from
-                    // the private transcript via `decode_offcircuit`, so
-                    // `assign_incircuit(val_t, ...)` reproduces the same
-                    // typed CircuitValue here.
-                    for typed_out_id in outputs {
+                    // The descriptor entry for this entry point is the source
+                    // of truth for each output's logical type. Each
+                    // `call_outputs[i]` identifier is assigned in-circuit
+                    // using `sig.outputs[i]` as the typing driver. The
+                    // witness memory holds the same typed value the
+                    // off-circuit preprocess decoded from the private
+                    // transcript, so `assign_incircuit(val_t, ...)`
+                    // reproduces the same typed CircuitValue here.
+                    let sig = expected_type
+                        .circuits
+                        .iter()
+                        .find(|c| c.name == *entry_point)
+                        .ok_or_else(|| {
+                            Error::Synthesis(format!(
+                                "ContractCall: descriptor does not declare entry point {entry_point:?}",
+                            ))
+                        })?;
+                    if sig.outputs.len() != outputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "ContractCall: descriptor declares {} outputs for {entry_point:?} \
+                             but instruction binds {} identifiers",
+                            sig.outputs.len(),
+                            outputs.len(),
+                        )));
+                    }
+                    for (out_id, val_t) in outputs.iter().zip(sig.outputs.iter()) {
                         let value =
                             witness.as_ref().map_with_result(|preproc| {
-                                preproc
-                                    .memory
-                                    .get(&typed_out_id.name)
-                                    .cloned()
-                                    .ok_or(Error::Synthesis(format!(
+                                preproc.memory.get(out_id).cloned().ok_or(Error::Synthesis(
+                                    format!(
                                         "ContractCall output {:?} not found in witness memory",
-                                        typed_out_id.name
-                                    )))
+                                        out_id
+                                    ),
+                                ))
                             })?;
                         mem_insert(
-                            typed_out_id.name.clone(),
-                            assign_incircuit(std, layouter, &typed_out_id.val_t, &[value])?[0]
-                                .clone(),
+                            out_id.clone(),
+                            assign_incircuit(std, layouter, val_t, &[value])?[0].clone(),
                             &mut memory,
                         )?;
                     }
@@ -872,12 +888,14 @@ impl Relation for IrSource {
                             resolve_operand(std, layouter, &memory, arg)?.try_into()?;
                         poseidon_preimage.push(val);
                     }
-                    // Flatten each typed output to AssignedNative Frs via
+                    // Flatten each output to AssignedNative Frs via
                     // `encode_incircuit`. Mirrors the off-circuit
                     // `encode_offcircuit` walk in ir_preprocess so both sides
-                    // build identical poseidon preimages.
-                    for typed_out_id in outputs {
-                        let val = idx(&memory, &typed_out_id.name)?.clone();
+                    // build identical poseidon preimages. The typed values
+                    // were assigned above per `sig.outputs[i]`; here we just
+                    // re-read them from in-circuit memory.
+                    for out_id in outputs {
+                        let val = idx(&memory, out_id)?.clone();
                         for cv in encode_incircuit(std, layouter, &val)? {
                             let x: AssignedNative<_> = cv.try_into()?;
                             poseidon_preimage.push(x);

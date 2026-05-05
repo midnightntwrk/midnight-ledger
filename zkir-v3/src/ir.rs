@@ -630,19 +630,25 @@ pub enum Instruction {
         /// `(Fr(byte31), Fr(bytes0..31))`.
         contract_ref: (Operand, Operand),
         /// The expected contract type for conformance checking. Validated at
-        /// dispatch time against `callee_ir.type_signature()`.
+        /// dispatch time against `callee_ir.type_signature()`. The
+        /// `CircuitSignature` matching `entry_point` is also the source of
+        /// truth for the *logical* types of each call output: each return
+        /// value's type drives `decode_offcircuit`/`assign_incircuit`/
+        /// `encode_incircuit` over the per-identifier `outputs` slot below,
+        /// removing any need for typing information on the identifier list.
         expected_type: ContractTypeDescriptor,
         /// The name of the circuit to invoke on the callee.
         entry_point: String,
         /// Arguments for the circuit being invoked.
         args: Vec<Operand>,
-        /// Typed identifiers that receive the callee's return values. Each
-        /// `TypedIdentifier`'s `val_t` is the *logical* type of one return
-        /// value (e.g., `Point<Jubjub>` consumes 2 Frs from the callee's
-        /// flat-Fr output stream and is stored as `IrValue::JubjubPoint`).
-        /// The conformance check enforces that this list matches the
-        /// callee's declared `outputs: Vec<TypedIdentifier>` element-wise.
-        outputs: Vec<TypedIdentifier>,
+        /// Identifiers that receive the callee's return values. The i'th
+        /// identifier binds the i'th *logical* return value, whose type is
+        /// looked up at materialization time from
+        /// `expected_type.circuits[entry_point].outputs[i]`. So a
+        /// `Point<Jubjub>` callee output binds *one* identifier here whose
+        /// memory slot holds the typed `IrValue::JubjubPoint` (decoded from
+        /// 2 Frs in the callee's flat-Fr output stream).
+        outputs: Vec<Identifier>,
     },
 }
 tag_enforcement_test!(Instruction);
