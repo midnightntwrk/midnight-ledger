@@ -514,6 +514,7 @@ impl IrSource {
 }
 
 impl Relation for IrSource {
+    type Error = Error;
     type Instance = Vec<outer::Scalar>;
 
     type Witness = Preprocessed;
@@ -876,6 +877,8 @@ impl Relation for IrSource {
             nr_pow2range_cols,
             secp256k1: false,
             bls12_381: false,
+            curve25519: false, 
+            p256: false,
             base64: false,
             automaton: false,
         }

@@ -664,7 +664,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_zk_stdlib::cost_model(self),
+            model: midnight_zk_stdlib::cost_model(self, None),
         }
     }
 
