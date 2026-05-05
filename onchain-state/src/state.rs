@@ -868,12 +868,12 @@ impl<D: DB> Default for ContractState<D> {
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
-    ir: Option<Sp<Array<u8>>>,
+    ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<Array<u8>>>) -> Self {
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
         ContractOperation { v2: vk, ir }
     }
 
@@ -943,6 +943,17 @@ impl<F> Dummy<F> for ContractOperation {
         ContractOperation { v2: None, ir: None }
     }
 }
+
+idty!(Ir, IrBuf);
+impl Tagged for IrBuf {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        "ir-buf".into()
+    }
+    fn tag_unique_factor() -> String {
+        "vec(u8)".into()
+    }
+}
+tag_enforcement_test!(IrBuf);
 
 #[cfg(test)]
 mod tests {
