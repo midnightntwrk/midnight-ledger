@@ -49,7 +49,7 @@ use crate::ir_instructions::add::add_incircuit;
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::decode::decode_incircuit;
 use crate::ir_instructions::encode::encode_incircuit;
-use crate::ir_preprocess::Preprocessed;
+use crate::ir_preprocess::{claim_ops_field_count, compute_ep_hash, Preprocessed, CLAIM_ADDR_HI_OFFSET, CLAIM_ADDR_LO_OFFSET, CLAIM_COMM_COMM_OFFSET, CLAIM_EP_HASH_HI_OFFSET, CLAIM_EP_HASH_LO_OFFSET};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 fn fab_decode_to_bytes(
@@ -861,14 +861,14 @@ impl Relation for IrSource {
                         resolve_operand(std, layouter, &memory, addr_lo_op)?.try_into()?;
 
                     // ── 3. Compute ep_hash as a circuit constant ──
-                    let ep_hash = crate::ir_preprocess::compute_ep_hash(entry_point);
+                    let ep_hash = compute_ep_hash(entry_point);
                     let ep_hash_fields = ep_hash.field_vec();
                     let ep_hash_hi = std.assign_fixed(layouter, ep_hash_fields[0].0)?;
                     let ep_hash_lo = std.assign_fixed(layouter, ep_hash_fields[1].0)?;
 
                     // ── 4. Compute comm_comm via in-circuit Poseidon ──
                     // comm_comm = Poseidon(comm_rand, args..., outputs...)
-                    let comm_rand_val = witness.as_ref().map_with_result(|preproc| {
+                    let comm_rand_val = witness.as_ref().map_with_result(|preproc|
                         preproc
                             .contract_call_comm_rands
                             .get(contract_call_idx)
@@ -878,22 +878,41 @@ impl Relation for IrSource {
                                 contract_call_idx,
                                 preproc.contract_call_comm_rands.len()
                             )))
-                    })?;
+                    )?;
                     let comm_rand = std.assign(layouter, comm_rand_val)?;
                     contract_call_idx += 1;
 
                     let mut poseidon_preimage = vec![comm_rand];
-                    for arg in args {
-                        let val: AssignedNative<_> =
-                            resolve_operand(std, layouter, &memory, arg)?.try_into()?;
-                        poseidon_preimage.push(val);
+                    // Args side: each arg is one *typed* operand whose
+                    // logical type comes from `sig.inputs[i]`. Resolve to a
+                    // typed `CircuitValue` and flatten via `encode_incircuit`.
+                    // Mirrors the off-circuit `encode_offcircuit` walk so
+                    // both sides build identical Poseidon preimages.
+                    if args.len() != sig.inputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "ContractCall: descriptor declares {} inputs for {entry_point:?} \
+                             but instruction supplies {} args",
+                            sig.inputs.len(),
+                            args.len(),
+                        )));
                     }
-                    // Flatten each output to AssignedNative Frs via
-                    // `encode_incircuit`. Mirrors the off-circuit
-                    // `encode_offcircuit` walk in ir_preprocess so both sides
-                    // build identical poseidon preimages. The typed values
-                    // were assigned above per `sig.outputs[i]`; here we just
-                    // re-read them from in-circuit memory.
+                    for (arg, val_t) in args.iter().zip(sig.inputs.iter()) {
+                        let value = resolve_operand(std, layouter, &memory, arg)?;
+                        if value.get_type() != *val_t {
+                            return Err(Error::Synthesis(format!(
+                                "ContractCall arg has runtime type {:?} but descriptor \
+                                 expects {val_t:?}",
+                                value.get_type(),
+                            )));
+                        }
+                        for cv in encode_incircuit(std, layouter, &value)? {
+                            let x: AssignedNative<_> = cv.try_into()?;
+                            poseidon_preimage.push(x);
+                        }
+                    }
+                    // Outputs side: re-read each typed value from in-circuit
+                    // memory (assigned above per `sig.outputs[i]`) and
+                    // flatten via `encode_incircuit` symmetrically.
                     for out_id in outputs {
                         let val = idx(&memory, out_id)?.clone();
                         for cv in encode_incircuit(std, layouter, &val)? {
@@ -905,7 +924,7 @@ impl Relation for IrSource {
 
                     // ── 5. Build claim PIs: constants from witness, variable ──
                     // positions constrained to in-circuit values.
-                    let claim_count = crate::ir_preprocess::claim_ops_field_count();
+                    let claim_count = claim_ops_field_count();
                     let mut claim_pis: Vec<AssignedNative<_>> = Vec::with_capacity(claim_count);
                     for i in 0..claim_count {
                         let pi_idx = public_inputs.len() + i;
@@ -923,10 +942,6 @@ impl Relation for IrSource {
                     }
 
                     // Constrain the variable positions to match in-circuit values.
-                    use crate::ir_preprocess::{
-                        CLAIM_ADDR_HI_OFFSET, CLAIM_ADDR_LO_OFFSET, CLAIM_COMM_COMM_OFFSET,
-                        CLAIM_EP_HASH_HI_OFFSET, CLAIM_EP_HASH_LO_OFFSET,
-                    };
                     std.assert_equal(layouter, &claim_pis[CLAIM_ADDR_HI_OFFSET], &addr_hi)?;
                     std.assert_equal(layouter, &claim_pis[CLAIM_ADDR_LO_OFFSET], &addr_lo)?;
                     std.assert_equal(layouter, &claim_pis[CLAIM_EP_HASH_HI_OFFSET], &ep_hash_hi)?;

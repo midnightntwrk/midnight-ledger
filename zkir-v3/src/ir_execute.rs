@@ -788,18 +788,6 @@ impl IrSource {
                         })?;
                     let callee_address = ContractAddress(HashOutput(hash_bytes));
 
-                    // Resolve each arg to a single Fr — `ContractCall.args` are
-                    // IR operands, which always evaluate to a Native field
-                    // element.
-                    let input_frs: Vec<Fr> = args
-                        .iter()
-                        .map(|a| eval_operand_fr(&memory, a))
-                        .collect::<Result<Vec<_>, _>>()
-                        .map_err(|e| ExecutionError::InstructionError {
-                            instruction_index: ip,
-                            message: format!("{e:#}"),
-                        })?;
-
                     let entry_point_bytes = callee_ep.as_bytes();
                     let (callee_ir, callee_state) = zkir_provider
                         .fetch_contract(callee_address, entry_point_bytes)
@@ -846,6 +834,60 @@ impl IrSource {
                             ),
                         }
                     })?;
+
+                    // Resolve each arg into a typed `IrValue` and flatten via
+                    // `encode_offcircuit`. The descriptor's `inputs: Vec<IrType>`
+                    // is the source of truth for each arg position's logical
+                    // type, mirroring how outputs are decoded on the return
+                    // path. There's exactly one operand per logical input;
+                    // a `Point<Jubjub>` arg resolves to a single
+                    // `IrValue::JubjubPoint` and contributes 2 Frs to the
+                    // callee's flat-Fr input stream.
+                    if args.len() != expected_sig.inputs.len() {
+                        return Err(ExecutionError::InstructionError {
+                            instruction_index: ip,
+                            message: format!(
+                                "ContractCall: descriptor declares {} inputs for {entry_point_str:?} \
+                                 but instruction supplies {} args",
+                                expected_sig.inputs.len(),
+                                args.len(),
+                            ),
+                        });
+                    }
+                    let mut input_frs: Vec<Fr> = Vec::new();
+                    for (i, (arg, val_t)) in
+                        args.iter().zip(expected_sig.inputs.iter()).enumerate()
+                    {
+                        let value = eval_operand(&memory, arg).map_err(|e| {
+                            ExecutionError::InstructionError {
+                                instruction_index: ip,
+                                message: format!(
+                                    "ContractCall: failed to evaluate arg #{i} ({arg:?}): {e:#}"
+                                ),
+                            }
+                        })?;
+                        if value.get_type() != *val_t {
+                            return Err(ExecutionError::InstructionError {
+                                instruction_index: ip,
+                                message: format!(
+                                    "ContractCall: arg #{i} for {entry_point_str:?} has \
+                                     runtime type {:?} but descriptor expects {val_t:?}",
+                                    value.get_type()
+                                ),
+                            });
+                        }
+                        for ir_val in encode_offcircuit(&value) {
+                            let fr: Fr = ir_val.try_into().map_err(|e| {
+                                ExecutionError::InstructionError {
+                                    instruction_index: ip,
+                                    message: format!(
+                                        "ContractCall: encoded arg #{i} not native: {e}"
+                                    ),
+                                }
+                            })?;
+                            input_frs.push(fr);
+                        }
+                    }
 
                     let child_context = ExecutionContext {
                         ledger_state: callee_state,

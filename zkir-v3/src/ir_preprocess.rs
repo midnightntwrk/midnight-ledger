@@ -410,15 +410,40 @@ impl IrSource {
                     private_transcript_outputs_idx += 1;
                     contract_call_comm_rands_out.push(comm_rand);
 
-                    let mut io_fields: Vec<Fr> = Vec::new();
-                    for arg in args.iter() {
-                        io_fields.push(eval_operand_fr(&memory, arg)?);
+                    // Args side: each arg is one *typed* operand whose
+                    // logical type comes from `sig.inputs[i]`. Resolve to a
+                    // typed `IrValue` and flatten via `encode_offcircuit`.
+                    // The Fr stream this builds is the same one the callee
+                    // sees as its flat-Fr inputs (its own preprocess decodes
+                    // them via `decode_offcircuit` per input typed identifier).
+                    if args.len() != sig.inputs.len() {
+                        bail!(
+                            "ContractCall: descriptor declares {} inputs for {entry_point:?} \
+                             but instruction supplies {} args",
+                            sig.inputs.len(),
+                            args.len(),
+                        );
                     }
-                    // Flatten each output back into Frs via
-                    // `encode_offcircuit`. This re-walks the typed values
-                    // (whose types come from the descriptor entry above) in
-                    // declaration order, producing the same Fr stream that
-                    // the callee's own preprocess used to compute its
+                    let mut io_fields: Vec<Fr> = Vec::new();
+                    for (i, (arg, val_t)) in args.iter().zip(sig.inputs.iter()).enumerate() {
+                        let value = eval_operand(&memory, arg)?;
+                        if value.get_type() != *val_t {
+                            bail!(
+                                "ContractCall: arg #{i} has runtime type {:?} but descriptor \
+                                 expects {val_t:?}",
+                                value.get_type(),
+                            );
+                        }
+                        for ir_val in encode_offcircuit(&value) {
+                            let fr: Fr = ir_val.try_into()?;
+                            io_fields.push(fr);
+                        }
+                    }
+                    // Outputs side: flatten each typed output back into Frs
+                    // via `encode_offcircuit`, re-walking the values in
+                    // declaration order (their types coming from the same
+                    // descriptor entry). This produces the same Fr stream
+                    // that the callee's own preprocess used to compute its
                     // comm-comm.
                     for (out_id, val_t) in call_outputs.iter().zip(sig.outputs.iter()) {
                         let value = memory
