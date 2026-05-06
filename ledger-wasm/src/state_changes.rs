@@ -76,6 +76,15 @@ impl ZswapStateChanges {
         }
         Ok(coins)
     }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.inner)
+        } else {
+            format!("{:#?}", &self.inner)
+        }
+    }
 }
 
 impl From<LedgerZswapStateChanges> for ZswapStateChanges {
@@ -138,6 +147,15 @@ impl DustStateChanges {
             utxos.push(&qdo_to_value(utxo)?);
         }
         Ok(utxos)
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.inner)
+        } else {
+            format!("{:#?}", &self.inner)
+        }
     }
 }
 
