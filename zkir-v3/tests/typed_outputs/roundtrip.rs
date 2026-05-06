@@ -120,6 +120,7 @@ async fn output_opaque_passthrough_from_input() {
            "outputs": ["Opaque"],
            "do_communications_commitment": true,
            "instructions": [
+               { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%v_0"], "output": "%s" },
                { "op": "output", "vals": ["%s"] }
            ]
         }"#,

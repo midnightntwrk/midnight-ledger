@@ -727,7 +727,8 @@ impl IrSource {
                 }
             }
             for value in outputs.iter() {
-                for ir_val in encode_offcircuit_for_commit(value) {
+                for ir_val in encode_offcircuit(value) {
+                    for ir_val in encode_offcircuit_for_commit(value) {
                     comm_comm_inputs.push(ir_val.try_into()?);
                 }
             }
@@ -1196,7 +1197,8 @@ impl Relation for IrSource {
             }
 
             for value in &outputs {
-                // Outputs MUST go through the commit-form encoder so
+                for cv in encode_incircuit(std, layouter, value)? {
+                    // Outputs MUST go through the commit-form encoder so
                 // that an `Opaque` output emits its single cached
                 // `commit` AssignedNative.
                 for cv in encode_incircuit_for_commit(std, layouter, value)? {
