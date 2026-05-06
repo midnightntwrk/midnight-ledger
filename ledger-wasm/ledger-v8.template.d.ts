@@ -459,7 +459,7 @@ export class DustState {
 }
 
 export class DustStateChanges {
-  private constructor();
+  constructor(source: string, receivedUtxos: QualifiedDustOutput[], spentUtxos: QualifiedDustOutput[]);
   /**
    * The source of the state change, as a hex-encoded string
    */
@@ -1727,7 +1727,7 @@ export class ZswapChainState {
 }
 
 export class ZswapStateChanges {
-  private constructor();
+  constructor(source: string, receivedCoins: QualifiedShieldedCoinInfo[], spentCoins: QualifiedShieldedCoinInfo[]);
   /**
    * The source of the state change, as a hex-encoded string
    */
