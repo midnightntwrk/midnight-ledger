@@ -28,7 +28,7 @@ serialize = { version = "1.0.0", path = "../serialize", package = "midnight-seri
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
 midnight-curves = { version = "0.2.0" }
-midnight-proofs = { version = "^0.7.0" }
+midnight-proofs = { version = "^0.8.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
 

@@ -28,7 +28,7 @@ storage-core = { version = "1.0.0", path = "../storage-core", package = "midnigh
 ff = "^0.13.1"
 group = "^0.13.0"
 midnight-curves = { version = "^0.2.0" }
-midnight-proofs = { version = "^0.7.0" }
+midnight-proofs = { version = "^0.8.0" }
 midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
 anyhow = { version = "^1.0.102" }
