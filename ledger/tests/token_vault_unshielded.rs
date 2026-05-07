@@ -77,7 +77,7 @@ use token_vault_common::*;
 /// - Ledger verifies: UnshieldedOffer.inputs >= effects[6].unshielded_inputs
 #[tokio::test]
 async fn test_unshielded_contract_deposit() {
-    use base_crypto::signatures::SigningKey;
+    use base_crypto::schnorr::SigningKey;
 
     //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x43);
@@ -380,7 +380,7 @@ async fn test_unshielded_contract_deposit() {
 /// - Both wrap same HashOutput, extract with: CoinPublicKey(user_address.0)
 #[tokio::test]
 async fn test_unshielded_contract_withdraw() {
-    use base_crypto::signatures::SigningKey;
+    use base_crypto::schnorr::SigningKey;
 
     //midnight_ledger::init_logger(midnight_ledger::LogLevel::Trace);
     let mut rng = StdRng::seed_from_u64(0x44);
