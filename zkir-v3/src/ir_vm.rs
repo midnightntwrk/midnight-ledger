@@ -28,8 +28,8 @@ use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
-    ConversionInstructions, DecompositionInstructions, EccInstructions, PublicInputInstructions,
-    RangeCheckInstructions, ZeroInstructions,
+    ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
+    PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
