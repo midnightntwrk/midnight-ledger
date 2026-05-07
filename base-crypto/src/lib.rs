@@ -32,7 +32,7 @@ pub mod rng;
 pub mod schnorr;
 pub mod time;
 
-#[deprecated = "`signature` has been renamed to `schnorr` due to the addition of new signature schemes. Please prefer `schnorr`."]
-pub use schnorr as signature;
+#[deprecated = "`signatures` has been renamed to `schnorr` due to the addition of new signature schemes. Please prefer `schnorr`."]
+pub use schnorr as signatures;
 
 pub use repr::*;
