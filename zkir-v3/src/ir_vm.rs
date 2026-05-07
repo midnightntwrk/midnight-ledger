@@ -21,7 +21,9 @@ use crate::ir_instructions::encode::{
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
-use crate::zkir_mode::{ZkirKey, ZkirOp, zkir_ops_to_field_elements_with_sizes};
+use crate::zkir_mode::{
+    ZkirKey, ZkirOp, ZkirStateValue, u128_to_fr, zkir_ops_to_field_elements_with_sizes,
+};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -1022,20 +1024,130 @@ impl Relation for IrSource {
 
                             ZkirOp::Addi { immediate } => {
                                 push_const_pi!(0x0e);
-                                push_const_pi!(*immediate);
+                                push_operand_pi!(immediate);
                             }
                             ZkirOp::Subi { immediate } => {
                                 push_const_pi!(0x0f);
-                                push_const_pi!(*immediate);
+                                push_operand_pi!(immediate);
                             }
 
-                            // opcode | 1 (Cell tag) | alignment | value operands
+                            // Push: opcode | recursive ZkirStateValue encoding.
+                            // The recursive walk mirrors encode_state_value
+                            // in zkir_mode.rs. We use an explicit todo
+                            // queue to avoid Rust closure-recursion
+                            // headaches; each `ZkEncTodo` represents one
+                            // unit of work (a constant push, an alignment
+                            // push, an operand push, or "expand this
+                            // ZkirStateValue into its sub-actions").
                             ZkirOp::Push { storage, value } => {
                                 push_const_pi!((0x10u8 + *storage as u8));
-                                push_const_pi!(1u64);
-                                push_alignment_pi!(&value.alignment);
-                                for operand in &value.operands {
-                                    push_operand_pi!(operand);
+
+                                // Action queue: process front-to-back. Map
+                                // and Array variants expand into a flat
+                                // sequence of nested actions when reached,
+                                // preserving declaration order.
+                                enum ZkEncTodo<'a> {
+                                    Const(u64),
+                                    ConstFr(Fr),
+                                    Alignment(&'a Alignment),
+                                    Operand(&'a Operand),
+                                    State(&'a ZkirStateValue),
+                                }
+
+                                use std::collections::VecDeque;
+                                let mut todo: VecDeque<ZkEncTodo> = VecDeque::new();
+                                todo.push_back(ZkEncTodo::State(value));
+
+                                while let Some(item) = todo.pop_front() {
+                                    match item {
+                                        ZkEncTodo::Const(c) => push_const_pi!(c),
+                                        ZkEncTodo::ConstFr(fr) => {
+                                            let assigned = std.assign_fixed(layouter, fr.0)?;
+                                            let guarded = std.select(
+                                                layouter,
+                                                &impact_guard,
+                                                &assigned,
+                                                &impact_zero,
+                                            )?;
+                                            pi_push(guarded, &mut public_inputs)?;
+                                        }
+                                        ZkEncTodo::Alignment(a) => push_alignment_pi!(a),
+                                        ZkEncTodo::Operand(op) => push_operand_pi!(op),
+                                        ZkEncTodo::State(sv) => match sv {
+                                            ZkirStateValue::Null => {
+                                                push_const_pi!(0u64);
+                                            }
+                                            ZkirStateValue::Cell(av) => {
+                                                push_const_pi!(1u64);
+                                                push_alignment_pi!(&av.alignment);
+                                                for op in &av.operands {
+                                                    push_operand_pi!(op);
+                                                }
+                                            }
+                                            ZkirStateValue::Map(entries) => {
+                                                let tag =
+                                                    2u128 | ((entries.len() as u128) << 4);
+                                                let tag_fr = u128_to_fr(tag);
+                                                // Front-load: this tag goes
+                                                // first, then per entry the
+                                                // (alignment, operands,
+                                                // recursed value) actions —
+                                                // all in declaration order.
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::ConstFr(tag_fr));
+                                                for (k, v) in entries {
+                                                    nested.push_back(ZkEncTodo::Alignment(
+                                                        &k.alignment,
+                                                    ));
+                                                    for op in &k.operands {
+                                                        nested.push_back(ZkEncTodo::Operand(
+                                                            op,
+                                                        ));
+                                                    }
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                            ZkirStateValue::Array(entries) => {
+                                                let tag = 3u64
+                                                    | ((entries.len() as u64) << 4);
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::Const(tag));
+                                                for v in entries {
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                            ZkirStateValue::BoundedMerkleTree {
+                                                height,
+                                                entries,
+                                            } => {
+                                                let tag = 4u128
+                                                    | ((*height as u128) << 4)
+                                                    | ((entries.len() as u128) << 12);
+                                                let tag_fr = u128_to_fr(tag);
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::ConstFr(tag_fr));
+                                                for (idx, v) in entries {
+                                                    // u64 idx encodes as
+                                                    // a single Fr atom in
+                                                    // u64.field_repr; for
+                                                    // values < 2^64 a
+                                                    // direct push works.
+                                                    nested
+                                                        .push_back(ZkEncTodo::Const(*idx));
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                        },
+                                    }
                                 }
                             }
 

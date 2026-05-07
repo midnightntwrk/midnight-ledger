@@ -27,13 +27,45 @@ use transient_crypto::repr::FieldRepr;
 use crate::ir::{Identifier, Operand};
 use crate::ir_types::IrValue;
 
-/// Push payload. Operands resolve to Frs at proving time.
+/// Symbolic mirror of `base_crypto::fab::AlignedValue`: an alignment
+/// paired with a list of symbolic operands that resolve, in order, to
+/// the field-element bytes the runtime `AlignedValue::field_repr` would
+/// produce. Operands resolve from circuit memory at proving time and
+/// must already be `IrValue::Native`-typed by then.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Serializable)]
-#[tag = "zkir-push-value[v1]"]
-pub struct ZkirPushValue {
-    pub storage: bool,
+#[tag = "zkir-aligned-value[v1]"]
+pub struct ZkirAlignedValue {
     pub alignment: Alignment,
     pub operands: Vec<Operand>,
+}
+
+/// Symbolic mirror of `runtime_state::state::StateValue`. Recursive in
+/// the Cell / Map / Array / BoundedMerkleTree cases. The byte-stream
+/// produced by `encode_state_value` matches the runtime
+/// `StateValue::field_repr` byte-for-byte; the cross-encoder unit tests
+/// pin the parity per variant.
+///
+/// Externally-tagged JSON shape:
+///   `"null"`
+///   `{"cell": {"alignment": [...], "operands": [...]}}`
+///   `{"map": [[<key>, <value>], ...]}`
+///   `{"array": [<value>, ...]}`
+///   `{"bounded_merkle_tree": {"height": u8, "entries": [[u64, <value>], ...]}}`
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Serializable)]
+#[serde(rename_all = "snake_case")]
+#[tag = "zkir-state-value[v1]"]
+pub enum ZkirStateValue {
+    Null,
+    Cell(ZkirAlignedValue),
+    /// Map entries must be in canonical sort order matching what the
+    /// runtime `StateValue::Map.field_repr` emits (sorted by key).
+    /// The compact compiler is responsible for canonical ordering.
+    Map(Vec<(ZkirAlignedValue, Box<ZkirStateValue>)>),
+    Array(Vec<Box<ZkirStateValue>>),
+    BoundedMerkleTree {
+        height: u8,
+        entries: Vec<(u64, Box<ZkirStateValue>)>,
+    },
 }
 
 /// Idx key: either the stack sentinel or a symbolic value.
@@ -82,15 +114,25 @@ pub enum ZkirOp {
         cached: bool,
         result: ZkirReadResult,
     },
+    /// Symbolic addi: `immediate` resolves to an Fr at proving time. The
+    /// runtime `Op::Addi` carries a u32 literal; here we widen to `Operand`
+    /// so compact-emitted IR can pass a circuit-variable reference whose
+    /// value (e.g. a public-input scalar) is only known at proving time.
+    /// The byte stream the prover emits for an immediate-Fr operand is
+    /// identical to the runtime's `[0x0e, immediate_as_fr]`.
     Addi {
-        immediate: u32,
+        immediate: Operand,
     },
     Subi {
-        immediate: u32,
+        immediate: Operand,
     },
+    /// Symbolic mirror of `Op::Push { storage, value: StateValue<D> }`.
+    /// The byte stream is `[opcode | storage]` followed by the recursive
+    /// `encode_state_value(value)` output, matching the runtime
+    /// `StateValue::field_repr`.
     Push {
         storage: bool,
-        value: ZkirPushValue,
+        value: ZkirStateValue,
     },
     Branch {
         skip: u32,
@@ -144,6 +186,78 @@ fn resolve_operand_fr(
     }
 }
 
+/// Recursive byte-stream encoder for `ZkirStateValue`. Mirrors
+/// `runtime_state::state::StateValue::field_repr` so the prover and
+/// the runtime VM produce identical byte streams. All operand
+/// references inside the value resolve through `memory` to Native Frs.
+///
+/// Tag bytes (low nibble = variant discriminator, upper bits = count):
+///   `0`                                 → Null
+///   `1`                                 → Cell
+///   `2 | (size << 4)`                   → Map
+///   `3 | (len  << 4)`                   → Array
+///   `4 | (height << 4) | (entries << 12)` → BoundedMerkleTree
+///
+/// BoundedMerkleTree support is partial: encoding is implemented to
+/// match `field_repr`, but the entry's `(u64 index, value)` field_repr
+/// shape is reproduced verbatim from runtime, not yet covered by a
+/// cross-encoder unit test. If a contract emits one, validate against
+/// runtime before relying on the bytes.
+fn encode_state_value(
+    memory: &HashMap<Identifier, IrValue>,
+    value: &ZkirStateValue,
+    out: &mut Vec<Fr>,
+) -> anyhow::Result<()> {
+    use transient_crypto::repr::FieldRepr;
+    match value {
+        ZkirStateValue::Null => {
+            out.push(Fr::from(0u64));
+        }
+        ZkirStateValue::Cell(av) => {
+            out.push(Fr::from(1u64));
+            av.alignment.field_repr(out);
+            out.extend(resolve_operands(memory, &av.operands)?);
+        }
+        ZkirStateValue::Map(entries) => {
+            // tag = 2 | (size << 4); runtime uses u128 for headroom.
+            let tag = 2u128 | ((entries.len() as u128) << 4);
+            out.push(u128_to_fr(tag));
+            for (key, val) in entries {
+                key.alignment.field_repr(out);
+                out.extend(resolve_operands(memory, &key.operands)?);
+                encode_state_value(memory, val, out)?;
+            }
+        }
+        ZkirStateValue::Array(entries) => {
+            let tag = 3u64 | ((entries.len() as u64) << 4);
+            out.push(Fr::from(tag));
+            for val in entries {
+                encode_state_value(memory, val, out)?;
+            }
+        }
+        ZkirStateValue::BoundedMerkleTree { height, entries } => {
+            let tag = 4u128
+                | ((*height as u128) << 4)
+                | ((entries.len() as u128) << 12);
+            out.push(u128_to_fr(tag));
+            for (idx, val) in entries {
+                // Tuple (u64, StateValue) field_repr = u64.field_repr + StateValue.field_repr
+                (*idx).field_repr(out);
+                encode_state_value(memory, val, out)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Convert a u128 to Fr by going through little-endian bytes, matching
+/// the runtime's `(u128).into()` path used by `StateValue::field_repr`.
+pub(crate) fn u128_to_fr(x: u128) -> Fr {
+    let mut bytes = [0u8; 32];
+    bytes[..16].copy_from_slice(&x.to_le_bytes());
+    Fr::from_le_bytes(&bytes).expect("u128 fits in Fr")
+}
+
 fn resolve_operands(
     memory: &HashMap<Identifier, IrValue>,
     operands: &[Operand],
@@ -195,20 +309,19 @@ pub fn zkir_ops_to_field_elements_with_sizes(
 
             ZkirOp::Addi { immediate } => {
                 out.push(0x0eu64.into());
-                out.push((immediate as u64).into());
+                out.push(resolve_operand_fr(memory, &immediate)?);
             }
             ZkirOp::Subi { immediate } => {
                 out.push(0x0fu64.into());
-                out.push((immediate as u64).into());
+                out.push(resolve_operand_fr(memory, &immediate)?);
             }
 
-            // Push always resolves to StateValue::Cell(aligned):
-            //   opcode | 1 (Cell tag) | alignment | value operands
+            // Push mirrors the runtime `Op::Push { storage, value }` byte
+            // stream: opcode | recursive StateValue encoding
+            // (see encode_state_value below).
             ZkirOp::Push { storage, value } => {
                 out.push(((0x10u8 + storage as u8) as u64).into());
-                out.push(Fr::from(1u64));
-                value.alignment.field_repr(&mut out);
-                out.extend(resolve_operands(memory, &value.operands)?);
+                encode_state_value(memory, &value, &mut out)?;
             }
 
             ZkirOp::Branch { skip } => {
@@ -401,12 +514,14 @@ mod tests {
             ZkirOp::Sub,
             ZkirOp::Member,
             ZkirOp::Ckpt,
-            ZkirOp::Addi { immediate: 0 },
             ZkirOp::Addi {
-                immediate: 0xdead_beefu32,
+                immediate: Operand::Immediate(Fr::from(0u64)),
+            },
+            ZkirOp::Addi {
+                immediate: Operand::Immediate(Fr::from(0xdead_beefu64)),
             },
             ZkirOp::Subi {
-                immediate: 0x1234_5678u32,
+                immediate: Operand::Immediate(Fr::from(0x1234_5678u64)),
             },
             ZkirOp::Branch { skip: 0 },
             ZkirOp::Branch { skip: 42 },
@@ -469,31 +584,59 @@ mod tests {
             },
         ];
 
-        let zkir_value = ZkirPushValue {
-            storage: false, // overwritten per-op below; storage flag is on the Op itself
+        let zkir_av = ZkirAlignedValue {
             alignment: runtime_av.alignment.clone(),
             operands: vec![Operand::Immediate(value_fr)],
         };
         let zkir: Vec<ZkirOp> = vec![
             ZkirOp::Push {
                 storage: false,
-                value: ZkirPushValue {
-                    storage: false,
-                    ..zkir_value.clone()
-                },
+                value: ZkirStateValue::Cell(zkir_av.clone()),
             },
             ZkirOp::Push {
                 storage: true,
-                value: ZkirPushValue {
-                    storage: true,
-                    ..zkir_value
-                },
+                value: ZkirStateValue::Cell(zkir_av),
             },
         ];
 
         let rt_frs = encode_runtime(&runtime);
         let zk_frs = encode_zkir(zkir);
         assert_eq!(rt_frs, zk_frs, "runtime and ZKIR encoders disagree on Push",);
+    }
+
+    // Push of StateValue::Null (tag = 0): runtime emits opcode|0; ZKIR emits
+    // opcode|0 — no alignment or operands follow. Pins the byte-stream
+    // fidelity of the Null special-case in zkir_ops_to_field_elements_with_sizes.
+    #[test]
+    fn push_null_runtime_matches_zkir() {
+        let runtime: Vec<RtOpV> = vec![
+            RtOp::Push {
+                storage: false,
+                value: StateValue::Null,
+            },
+            RtOp::Push {
+                storage: true,
+                value: StateValue::Null,
+            },
+        ];
+
+        let zkir: Vec<ZkirOp> = vec![
+            ZkirOp::Push {
+                storage: false,
+                value: ZkirStateValue::Null,
+            },
+            ZkirOp::Push {
+                storage: true,
+                value: ZkirStateValue::Null,
+            },
+        ];
+
+        let rt_frs = encode_runtime(&runtime);
+        let zk_frs = encode_zkir(zkir);
+        assert_eq!(
+            rt_frs, zk_frs,
+            "runtime and ZKIR encoders disagree on Push of StateValue::Null",
+        );
     }
 
     // Idx with [Stack, Value, Stack] across all four cached/push_path combos.
@@ -649,11 +792,10 @@ mod tests {
             ZkirOp::Dup { n: 0 },
             ZkirOp::Push {
                 storage: false,
-                value: ZkirPushValue {
-                    storage: false,
+                value: ZkirStateValue::Cell(ZkirAlignedValue {
                     alignment: push_av.alignment.clone(),
                     operands: vec![Operand::Immediate(push_value_fr)],
-                },
+                }),
             },
             ZkirOp::Idx {
                 cached: true,
