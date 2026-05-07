@@ -1365,7 +1365,7 @@ pub struct DustLocalState<D: DB> {
 }
 tag_enforcement_test!(DustLocalState<InMemoryDB>);
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct DustStateChanges {
     pub received_utxos: Vec<QualifiedDustOutput>,
     pub spent_utxos: Vec<QualifiedDustOutput>,
