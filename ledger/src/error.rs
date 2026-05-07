@@ -544,6 +544,15 @@ pub enum MalformedTransaction<D: DB> {
         erased_signatures: Vec<()>,
     },
     ZeroValueUtxo(UtxoOutput),
+    TemporaryNegativeBalance {
+        token_type: TokenType,
+        segment: u16,
+        call: usize,
+    },
+    OutOfOrderTransient {
+        segment: u16,
+        commitment: Commitment,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -1073,6 +1082,21 @@ impl<D: DB> Display for MalformedTransaction<D> {
                     "unshielded offer validation error: zero-value utxo output not permitted: {utxo:?}"
                 )
             }
+            TemporaryNegativeBalance {
+                token_type,
+                segment,
+                call,
+            } => write!(
+                formatter,
+                "token value of token {token_type:?} temporarily became negative during call #{call} in segment {segment}"
+            ),
+            OutOfOrderTransient {
+                segment,
+                commitment,
+            } => write!(
+                formatter,
+                "transient with commitment {commitment:?} spent before creation in segment {segment}"
+            ),
         }
     }
 }

@@ -42,7 +42,7 @@ use onchain_runtime::transcript::Transcript;
 use serialize::{Serializable, Tagged};
 use sha2::Digest;
 use sha2::Sha256;
-use std::collections::{BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Deref;
 use std::ops::Mul;
 use storage::Storable;
@@ -620,7 +620,11 @@ where
                             }
                         }
                     };
-                    stx.balancing_check(strictness, fees)
+                    stx.balancing_check(strictness, fees)?;
+                    if strictness.enforce_balancing {
+                        stx.token_loop_check()?;
+                    }
+                    Ok(())
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
@@ -1374,6 +1378,174 @@ impl<
             });
         };
 
+        Ok(())
+    }
+
+    fn token_loop_check(&self) -> Result<(), MalformedTransaction<D>> {
+        for segment in self.segments() {
+            let mut balances = BTreeMap::<_, u128>::new();
+            // Increment unshielded balances with the inputs in the transaction
+            let unshielded_offers = || {
+                if segment == GUARANTEED_SEGMENT {
+                    Box::new(
+                        self.intents
+                            .values()
+                            .flat_map(|i| i.guaranteed_unshielded_offer.clone().into_iter()),
+                    ) as Box<dyn Iterator<Item = _>>
+                } else {
+                    Box::new(
+                        self.intents
+                            .get(&segment)
+                            .into_iter()
+                            .flat_map(|i| i.fallible_unshielded_offer.clone().into_iter()),
+                    )
+                }
+            };
+            let unshielded_inputs =
+                unshielded_offers().flat_map(|o| o.inputs.iter().collect::<Vec<_>>().into_iter());
+            for input in unshielded_inputs {
+                let entry = balances
+                    .entry(TokenType::Unshielded(input.type_))
+                    .or_default();
+                *entry = entry.saturating_add(input.value);
+            }
+            let shielded_offer = if segment == GUARANTEED_SEGMENT {
+                self.guaranteed_coins.clone()
+            } else {
+                self.fallible_coins.get(&segment)
+            };
+            for delta in shielded_offer.iter().flat_map(|o| o.deltas.iter()) {
+                if delta.value > 0 {
+                    let entry = balances
+                        .entry(TokenType::Shielded(delta.token_type))
+                        .or_default();
+                    *entry = entry.saturating_add_signed(delta.value);
+                }
+            }
+            // Map nullifier -> commitment for transients. Then we can use the commitment as a
+            // unique identifier for the transient.
+            let transient_nul_map = shielded_offer
+                .iter()
+                .flat_map(|o| o.transient.iter().map(|t| (t.nullifier, t.coin_com)))
+                .collect::<BTreeMap<_, _>>();
+            // Process each call in the (logical) segment in order.
+            // We process each call atomically, taking only the net change. This is because we
+            // cannot impose an order on these actions just from the transcript.
+            //
+            // For transients, we gather a set of 'available' transients -- the creation
+            // (commitment) of a transient must precede the deletion (nullifier).
+            let mut available_transients = BTreeSet::new();
+            let transcripts: Box<dyn Iterator<Item = _>> = if segment == GUARANTEED_SEGMENT {
+                Box::new(
+                    self.fallible_segments()
+                        .into_iter()
+                        .flat_map(|phys_seg| self.intents.get(&phys_seg).into_iter())
+                        .flat_map(|i| i.calls_owned())
+                        .flat_map(|c| {
+                            c.guaranteed_transcript
+                                .into_iter()
+                                .map(move |t| (c.address, t))
+                        }),
+                )
+            } else {
+                Box::new(
+                    self.intents
+                        .get(&segment)
+                        .into_iter()
+                        .flat_map(|i| i.calls_owned())
+                        .flat_map(|c| {
+                            c.fallible_transcript
+                                .into_iter()
+                                .map(move |t| (c.address, t))
+                        }),
+                )
+            };
+            for (idx, (addr, transcript)) in transcripts.enumerate() {
+                let mut net_change: BTreeMap<TokenType, i128> = BTreeMap::new();
+                for (ds, val) in transcript.effects.unshielded_mints.sorted_iter() {
+                    let tt = addr.custom_unshielded_token_type(*ds);
+                    *net_change.entry(TokenType::Unshielded(tt)).or_default() += *val as i128;
+                }
+                for (ds, val) in transcript.effects.shielded_mints.sorted_iter() {
+                    let tt = addr.custom_shielded_token_type(*ds);
+                    *net_change.entry(TokenType::Shielded(tt)).or_default() += *val as i128;
+                }
+                for (tt, val) in transcript.effects.unshielded_outputs.sorted_iter() {
+                    *net_change.entry(*tt).or_default() += *val as i128;
+                }
+                for (tt, val) in transcript.effects.unshielded_inputs.sorted_iter() {
+                    *net_change.entry(*tt).or_default() -= *val as i128;
+                }
+                for (tt, delta) in net_change {
+                    let entry = balances.entry(tt).or_default();
+                    if delta >= 0 {
+                        *entry = entry.saturating_add_signed(delta);
+                    } else {
+                        *entry = entry.checked_add_signed(delta).ok_or_else(|| {
+                            MalformedTransaction::TemporaryNegativeBalance {
+                                token_type: tt,
+                                segment,
+                                call: idx,
+                            }
+                        })?;
+                    }
+                }
+                // Newly output commitments are new 'available' for transients
+                available_transients.extend(
+                    transcript
+                        .effects
+                        .claimed_shielded_spends
+                        .iter()
+                        .map(|c| **c),
+                );
+                for spent_trans in transcript
+                    .effects
+                    .claimed_nullifiers
+                    .iter()
+                    .filter_map(|n| transient_nul_map.get(&**n))
+                {
+                    if !available_transients.remove(spent_trans) {
+                        return Err(MalformedTransaction::OutOfOrderTransient {
+                            segment,
+                            commitment: *spent_trans,
+                        });
+                    }
+                }
+            }
+            // Process outputs
+            let unshielded_outputs =
+                unshielded_offers().flat_map(|o| o.outputs.iter().collect::<Vec<_>>().into_iter());
+            for output in unshielded_outputs {
+                let entry = balances
+                    .entry(TokenType::Unshielded(output.type_))
+                    .or_default();
+                *entry = entry.checked_sub(output.value).ok_or_else(|| {
+                    MalformedTransaction::BalanceCheckOverspend {
+                        token_type: TokenType::Unshielded(output.type_),
+                        segment,
+                        overspent_value: i128::try_from(*entry)
+                            .unwrap_or(i128::MAX)
+                            .saturating_sub_unsigned(output.value),
+                    }
+                })?;
+            }
+            for delta in shielded_offer.iter().flat_map(|o| o.deltas.iter()) {
+                if delta.value < 0 {
+                    let entry = balances
+                        .entry(TokenType::Shielded(delta.token_type))
+                        .or_default();
+                    *entry = entry.checked_add_signed(delta.value).ok_or_else(|| {
+                        MalformedTransaction::BalanceCheckOverspend {
+                            token_type: TokenType::Shielded(delta.token_type),
+                            segment,
+                            overspent_value: i128::try_from(*entry)
+                                .unwrap_or(i128::MAX)
+                                .saturating_add(delta.value),
+                        }
+                    })?;
+                }
+            }
+        }
         Ok(())
     }
 
