@@ -459,12 +459,12 @@ export class DustState {
 }
 
 export class DustStateChanges {
-  constructor(source: string, receivedUtxos: QualifiedDustOutput[], spentUtxos: QualifiedDustOutput[]);
+  constructor(source: TransactionHash, receivedUtxos: QualifiedDustOutput[], spentUtxos: QualifiedDustOutput[]);
   toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The UTXOs that were received in this state change
    */
@@ -1728,12 +1728,12 @@ export class ZswapChainState {
 }
 
 export class ZswapStateChanges {
-  constructor(source: string, receivedCoins: QualifiedShieldedCoinInfo[], spentCoins: QualifiedShieldedCoinInfo[]);
+  constructor(source: TransactionHash, receivedCoins: QualifiedShieldedCoinInfo[], spentCoins: QualifiedShieldedCoinInfo[]);
   toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The coins that were received in this state change
    */
