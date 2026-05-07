@@ -212,11 +212,9 @@ impl Deserializable for SigningKey {
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> io::Result<Self> {
         let mut bytes = [0u8; 32];
         reader.read_exact(&mut bytes)?;
-        Ok(SigningKey(
-            ecdsa::SigningKey::from_slice(&bytes).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "Malformed ECDSA signing key")
-            })?,
-        ))
+        Ok(SigningKey(ecdsa::SigningKey::from_slice(&bytes).map_err(
+            |_| io::Error::new(io::ErrorKind::InvalidData, "Malformed ECDSA signing key"),
+        )?))
     }
 }
 
@@ -249,9 +247,9 @@ impl Default for Signature {
         // (1, 1)
         Signature(
             ecdsa::Signature::from_slice(&[
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 1,
             ])
             .expect("static signature should be valid"),
         )
@@ -297,11 +295,9 @@ impl Deserializable for Signature {
     fn deserialize(reader: &mut impl Read, _recursion_depth: u32) -> io::Result<Self> {
         let mut bytes = [0u8; 64];
         reader.read_exact(&mut bytes)?;
-        Ok(Signature(
-            ecdsa::Signature::from_slice(&bytes).map_err(|_| {
-                io::Error::new(io::ErrorKind::InvalidData, "Malformed ECDSA signature")
-            })?,
-        ))
+        Ok(Signature(ecdsa::Signature::from_slice(&bytes).map_err(
+            |_| io::Error::new(io::ErrorKind::InvalidData, "Malformed ECDSA signature"),
+        )?))
     }
 }
 
