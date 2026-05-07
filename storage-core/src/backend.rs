@@ -19,6 +19,8 @@
 //!
 //! See [`StorageBackend`] for a detailed overview and the public API.
 
+#[cfg(feature = "gc-v1")]
+use crate::gc::GcState;
 use crate::{
     WellBehavedHasher,
     arena::{ArenaHash, ArenaKey},
@@ -265,7 +267,7 @@ impl<H: WellBehavedHasher> CacheValue<H> {
 /// the form of `CacheValue` values.
 pub struct StorageBackend<D: DB> {
     /// Persistent backing storage.
-    database: D,
+    pub(crate) database: D,
     /// The size of `read_cache`, and size to which `write_cache` will be
     /// truncated on flush. If zero, then caches are unbounded.
     ///
@@ -289,6 +291,9 @@ pub struct StorageBackend<D: DB> {
     /// Run-time stats to help with performance tuning.
     // Use interior mutability to allow updating stats in "pure" functions.
     stats: RefCell<StorageBackendStats>,
+    /// Intermediate garbage collection state
+    #[cfg(all(feature = "layout-v2", feature = "gc-v1"))]
+    gc_state: GcState<D>,
 }
 
 /// Run-time stats to help with performance tuning.
@@ -330,6 +335,8 @@ impl<D: DB> StorageBackend<D> {
                 get_cache_hits: 0,
                 get_cache_misses: 0,
             }),
+            #[cfg(feature = "gc-v1")]
+            gc_state: Default::default(),
         }
     }
 
@@ -375,10 +382,12 @@ impl<D: DB> StorageBackend<D> {
         if let Some(obj) = self.database.get_node(key) {
             let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(key)
             {
+                let delta = *delta;
+                self.remove_from_memory(key);
                 CacheValue::ReadAndUpdate {
-                    delta: *delta,
+                    delta,
                     #[cfg(not(feature = "layout-v2"))]
-                    obj: obj.apply_delta(*delta),
+                    obj: obj.apply_delta(delta),
                     #[cfg(feature = "layout-v2")]
                     obj,
                 }
@@ -539,17 +548,35 @@ impl<D: DB> StorageBackend<D> {
         // Otherwise, this is a new object, so we need to update the ref counts of all the
         // children, and insert a `Create`.
         self.update_counts(&children, Delta::new_ref_delta(1));
-        self.cache_insert_new_key(
-            key,
+        // With layout-v2 we skip the DB existence check above, so there may
+        // already be a pending `Update` delta for this key (e.g. from a
+        // `persist` call before the node was cached). Merge the pending delta
+        // into the new Create so it isn't lost.
+        #[cfg(feature = "layout-v2")]
+        let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(&key) {
+            let delta = *delta;
+            self.remove_from_memory(&key);
+            CacheValue::CreateAndUpdate {
+                obj: OnDiskObject { data, children },
+                delta,
+            }
+        } else {
             CacheValue::Create {
-                obj: OnDiskObject {
-                    data,
-                    #[cfg(not(feature = "layout-v2"))]
-                    ref_count: 0,
-                    children,
-                },
+                obj: OnDiskObject { data, children },
+            }
+        };
+        #[cfg(not(feature = "layout-v2"))]
+        let cache_value = CacheValue::Create {
+            obj: OnDiskObject {
+                data,
+                ref_count: 0,
+                children,
             },
-        );
+        };
+        self.cache_insert_new_key(key, cache_value);
+    }
+    pub(crate) fn cache_lazy(&mut self, key: ArenaHash<D::Hasher>) {
+        self.live_inserts.insert(key);
     }
 
     /// Mark object for `key` as no longer live, allowing it to fall out of the
@@ -735,6 +762,8 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -742,12 +771,27 @@ impl<D: DB> StorageBackend<D> {
                 | CacheValue::CreateAndDelete { obj, delta } => {
                     updates.push((k.clone(), Update::InsertNode(obj)));
                     if delta.root_delta != 0 {
-                        // This a new object that's not yet in the DB.
-                        assert!(
-                            delta.root_delta > 0,
-                            "root count can't be negative (for {k:?})"
-                        );
-                        let root_count = delta.root_delta as u32;
+                        // With layout-v2, cache() skips the DB existence check,
+                        // so Create variants can occur for nodes already in the
+                        // DB. Read the existing root_count and add the delta.
+                        #[cfg(feature = "layout-v2")]
+                        let root_count = {
+                            let db_root_count = self.database.get_root_count(&k) as i32;
+                            let root_count = db_root_count + delta.root_delta;
+                            assert!(root_count >= 0, "root count can't be negative (for {k:?})");
+                            root_count as u32
+                        };
+                        #[cfg(not(feature = "layout-v2"))]
+                        let root_count = {
+                            // Without layout-v2, Create is genuinely new.
+                            assert!(
+                                delta.root_delta > 0,
+                                "root count can't be negative (for {k:?})"
+                            );
+                            delta.root_delta as u32
+                        };
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count)));
                     }
                 }
@@ -763,6 +807,8 @@ impl<D: DB> StorageBackend<D> {
                             root_count >= 0,
                             "roots counts can't be negative (for {k:?})!"
                         );
+                        #[cfg(feature = "gc-v1")]
+                        self.gc_state.force_rescan();
                         updates.push((k, Update::SetRootCount(root_count as u32)));
                     }
                 }
@@ -803,6 +849,72 @@ impl<D: DB> StorageBackend<D> {
             .into_iter();
         self.write_cache.clear();
         self.flush_to_db(iter);
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Runs an incremental garbage collector. The GC will run with a given time bound, and returns
+    /// the number of items removed from storage.
+    ///
+    /// Note that the bound is approximate; garbage collection will attempt to target this time,
+    /// but may over- or under-shoot. A return value of `0` does *not* mean no progress is being
+    /// made.
+    pub fn gc(&mut self, bound: std::time::Duration) -> usize {
+        self.gc_override_gc_roots(bound, |db| db.get_roots().keys().cloned().collect())
+    }
+
+    #[cfg(feature = "gc-v1")]
+    /// Acts a [`gc`], but forcibly overrides the database roots with a specified root set.
+    ///
+    /// **Warning**: this effectively unpersists any roots not passed in. This is irreversible, and
+    /// should only be done if this is the deliberate goal, for instance because roots that are
+    /// still required are being tracked elsewhere.
+    pub fn gc_override_gc_roots(
+        &mut self,
+        bound: std::time::Duration,
+        roots: impl for<'a> FnOnce(&'a mut D) -> Vec<ArenaHash<D::Hasher>>,
+    ) -> usize {
+        let t0 = std::time::Instant::now();
+        let culled = self.gc_state.run(
+            self.live_inserts.iter().cloned(),
+            || bound.saturating_sub(t0.elapsed()),
+            &mut self.database,
+            |key| {
+                self.write_cache
+                    .peek(&key)
+                    .or_else(|| self.read_cache.peek(&key))
+                    .and_then(|v| v.get_obj())
+            },
+            roots,
+        );
+        for hash in culled.iter() {
+            self.write_cache.remove(hash);
+            self.read_cache.remove(hash);
+        }
+        culled.len()
+    }
+
+    #[cfg(all(test, feature = "gc-v1"))]
+    pub(crate) fn gc_budgeted(
+        &mut self,
+        remaining_budget: impl Fn() -> std::time::Duration,
+    ) -> usize {
+        let culled = self.gc_state.run(
+            self.live_inserts.iter().cloned(),
+            remaining_budget,
+            &mut self.database,
+            |key| {
+                self.write_cache
+                    .peek(&key)
+                    .or_else(|| self.read_cache.peek(&key))
+                    .and_then(|v| v.get_obj())
+            },
+            |db| db.get_roots().keys().cloned().collect(),
+        );
+        for hash in culled.iter() {
+            self.write_cache.remove(hash);
+            self.read_cache.remove(hash);
+        }
+        culled.len()
     }
 
     /// Remove all unreachable nodes from memory and the DB.
@@ -1169,7 +1281,7 @@ impl<H: WellBehavedHasher> OnDiskObject<H> {
     pub fn size(&self) -> usize {
         let data_size = self.data.len();
         let ref_count_size = 4;
-        let bytes_per_arena_key = <H as crypto::digest::OutputSizeUser>::output_size();
+        let bytes_per_arena_key = <H as digest::OutputSizeUser>::output_size();
         let children_refs_size = self.children.len() * bytes_per_arena_key;
         data_size + ref_count_size + children_refs_size
     }
@@ -1288,8 +1400,8 @@ pub(crate) mod raw_node {
 #[cfg(test)]
 mod tests {
     use crate::{self as storage, storable::child_from};
-    use crypto::digest::Digest;
     use derive_where::derive_where;
+    use digest::Digest;
     use raw_node::RawNode;
 
     use crate::{
@@ -2131,5 +2243,52 @@ mod tests {
         let stats = backend.get_stats();
         assert_eq!(stats.get_cache_hits, 3);
         assert_eq!(stats.get_cache_misses, 2);
+    }
+
+    /// Regression test: `get()` must not panic when a `CacheValue::Update`
+    /// delta already sits in memory for the requested key.
+    ///
+    /// The `get()` cache-miss branch reads the object from DB, then checks
+    /// `peek_from_memory` for an existing `Update` and merges into
+    /// `ReadAndUpdate`. Without removing the `Update` entry first, the
+    /// subsequent `cache_insert_new_key` hits the
+    /// `"key must not already be in memory"` debug_assert.
+    #[test]
+    fn get_with_pending_update_in_memory_inmemorydb() {
+        get_with_pending_update_in_memory::<InMemoryDB>();
+    }
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn get_with_pending_update_in_memory_sqldb() {
+        get_with_pending_update_in_memory::<crate::db::SqlDB>();
+    }
+    fn get_with_pending_update_in_memory<D: DB + Default>() {
+        let mut backend = StorageBackend::new(16, D::default());
+        let (key, bytes) = in_database_repr::<D, u32>(42);
+
+        // Put the object into the DB and ensure it is out of both caches.
+        backend.cache(key.clone(), bytes.clone(), vec![]);
+        backend.persist(&key);
+        backend.flush_all_changes_to_db();
+        backend.uncache(&key);
+        backend.unpersist(&key);
+        backend.write_cache.clear();
+        backend.read_cache.clear();
+        backend.flush_all_changes_to_db();
+        assert!(backend.peek_from_memory(&key).is_none());
+        assert!(backend.database.get_node(&key).is_some());
+
+        // Create a pending `Update` entry for the key in memory (no object).
+        backend.persist(&key);
+        assert!(matches!(
+            backend.peek_from_memory(&key),
+            Some(CacheValue::Update { .. })
+        ));
+
+        // `get()` must succeed rather than tripping the
+        // `cache_insert_new_key` precondition.
+        let obj = backend.get(&key).cloned();
+        assert!(obj.is_some());
+        assert_eq!(obj.unwrap().data, bytes);
     }
 }

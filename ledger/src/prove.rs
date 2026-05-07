@@ -477,13 +477,15 @@ mod tests {
         std::fs::remove_dir_all(tmpdir).unwrap();
         if results.iter().any(|res| res.is_err()) {
             println!("resolver fails to resolve the following keys:");
-            for name in files
+            for (name, err) in files
                 .iter()
                 .zip(results.iter())
-                .filter(|(_, res)| res.is_err())
-                .map(|((name, _, _), _)| name)
+                .filter_map(|((name, _, _), res)| match res {
+                    Ok(_) => None,
+                    Err(e) => Some((name, e)),
+                })
             {
-                println!("  '{name}'");
+                println!("  '{name}': {err}");
             }
             panic!();
         }

@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { StateBoundedMerkleTree, valueToBigInt } from '@midnight-ntwrk/ledger';
+import { StateBoundedMerkleTree, leafHash, valueToBigInt } from '@midnight-ntwrk/ledger';
 import { Static } from '@/test-objects';
 
 describe('Ledger API - StateBoundedMerkleTree', () => {
@@ -173,5 +173,88 @@ describe('Ledger API - StateBoundedMerkleTree', () => {
     expect(Array.isArray(root!.value)).toBe(true);
     expect(root!.value.length).toBeGreaterThan(0);
     expect(root!.value[0]).toBeInstanceOf(Uint8Array);
+  });
+
+  /**
+   * Test findPathForLeaf with index range parameters.
+   *
+   * @given A StateBoundedMerkleTree with a leaf at index 0
+   * @when Searching with range that includes/excludes the leaf
+   * @then Should find the leaf only when the range covers its index
+   */
+  test("'findPathForLeaf' should respect index range parameters", () => {
+    let tree = new StateBoundedMerkleTree(3);
+    tree = tree.update(0n, Static.alignedValue);
+
+    // Without range, finds the leaf (same as existing test)
+    expect(tree.findPathForLeaf(Static.alignedValue)).toBeDefined();
+
+    // Unbounded range also finds the leaf
+    expect(tree.findPathForLeaf(Static.alignedValue, undefined, undefined)).toBeDefined();
+
+    // Range covering the leaf finds it
+    const pathInRange = tree.findPathForLeaf(Static.alignedValue, 0n, 3n);
+    expect(pathInRange).toBeDefined();
+    expect(Array.isArray(pathInRange!.value)).toBe(true);
+
+    // Range excluding the leaf does not find it
+    expect(tree.findPathForLeaf(Static.alignedValue, 1n, 3n)).toBeUndefined();
+  });
+
+  /**
+   * Test findPathForLeaf with alreadyHashed=false.
+   *
+   * @given A StateBoundedMerkleTree with a leaf at index 0
+   * @when Searching with alreadyHashed=false (default behaviour)
+   * @then Should find the leaf normally
+   */
+  test("'findPathForLeaf' with alreadyHashed=false behaves like default", () => {
+    let tree = new StateBoundedMerkleTree(3);
+    tree = tree.update(0n, Static.alignedValue);
+
+    const pathDefault = tree.findPathForLeaf(Static.alignedValue);
+    const pathExplicit = tree.findPathForLeaf(Static.alignedValue, undefined, undefined, false);
+
+    expect(pathDefault).toBeDefined();
+    expect(pathExplicit).toBeDefined();
+  });
+
+  /**
+   * Test findPathForLeaf with alreadyHashed=true.
+   *
+   * @given A StateBoundedMerkleTree with a leaf at index 0
+   * @when Searching with the leaf's hash and alreadyHashed=true
+   * @then Should find the leaf and return a valid path
+   */
+  test("'findPathForLeaf' with alreadyHashed=true finds leaf by hash", () => {
+    let tree = new StateBoundedMerkleTree(3);
+    tree = tree.update(0n, Static.alignedValue);
+
+    const hash = leafHash(Static.alignedValue);
+    const path = tree.findPathForLeaf(hash, undefined, undefined, true);
+
+    expect(path).toBeDefined();
+    expect(Array.isArray(path!.value)).toBe(true);
+    expect(Array.isArray(path!.alignment)).toBe(true);
+  });
+
+  /**
+   * Test findPathForLeaf with alreadyHashed=true and index range.
+   *
+   * @given A StateBoundedMerkleTree with a leaf at index 0
+   * @when Searching with hash, alreadyHashed=true, and a restrictive range
+   * @then Should only find the leaf when the range covers its index
+   */
+  test("'findPathForLeaf' with alreadyHashed=true respects range", () => {
+    let tree = new StateBoundedMerkleTree(3);
+    tree = tree.update(0n, Static.alignedValue);
+
+    const hash = leafHash(Static.alignedValue);
+
+    const found = tree.findPathForLeaf(hash, 0n, 3n, true);
+    expect(found).toBeDefined();
+
+    const notFound = tree.findPathForLeaf(hash, 1n, 3n, true);
+    expect(notFound).toBeUndefined();
   });
 });

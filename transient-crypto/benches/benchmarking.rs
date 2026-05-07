@@ -23,7 +23,7 @@ use midnight_zk_stdlib::Relation;
 use rand::RngCore;
 use rand::{Rng, rngs::OsRng};
 use serde_json::json;
-use serialize::tagged_serialize;
+use serialize::{tagged_deserialize, tagged_serialize};
 
 /// Helper function to run benchmarks with multiple data points for zero-parameter operations.
 fn with_json_iter<F>(group_name: &str, c: &mut Criterion, mut benchmark_fn: F)
@@ -152,6 +152,16 @@ pub fn proof_verification(c: &mut Criterion) {
                 preimage.public_transcript_inputs.clone(),
                 vec![],
             ))
+        }
+        fn load_ir_from_tagged(
+            reader: impl std::io::Read + std::io::Seek,
+        ) -> std::io::Result<Self> {
+            tagged_deserialize(reader)
+        }
+        fn load_prover_key_from_tagged(
+            reader: impl std::io::Read + std::io::Seek,
+        ) -> std::io::Result<midnight_transient_crypto::proofs::ProverKey<Self>> {
+            tagged_deserialize(reader)
         }
     }
 

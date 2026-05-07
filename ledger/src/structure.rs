@@ -39,7 +39,7 @@ use coin_structure::contract::ContractAddress;
 use derive_where::derive_where;
 use fake::Dummy;
 use introspection_derive::Introspection;
-use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue};
+use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue, Effects};
 use onchain_runtime::state::ChargedState;
 use onchain_runtime::state::ContractOperation;
 use onchain_runtime::state::{ContractMaintenanceAuthority, ContractState, EntryPointBuf};
@@ -1025,14 +1025,14 @@ impl TransactionCostModel {
     pub(crate) fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
     }
-    fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
+    pub(crate) fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
         RunningCost {
             bytes_written: size,
             bytes_deleted: if overwrite { size } else { 0 },
             ..RunningCost::ZERO
         }
     }
-    fn cell_delete(&self, size: u64) -> RunningCost {
+    pub(crate) fn cell_delete(&self, size: u64) -> RunningCost {
         RunningCost {
             bytes_deleted: size,
             ..RunningCost::ZERO
@@ -1046,23 +1046,23 @@ impl TransactionCostModel {
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
     }
-    fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
         let layers = log_size.div_ceil(4);
         self.cell_write(PERSISTENT_HASH_BYTES as u64 * 16, true) * layers as u64
             + self.cell_write(PERSISTENT_HASH_BYTES as u64, overwrite)
     }
-    fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
+    pub(crate) fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
         if guaranteed_present {
             self.map_insert(log_size, true)
         } else {
             self.map_insert(log_size, true) + self.map_index(log_size)
         }
     }
-    fn time_filter_map_lookup(&self) -> RunningCost {
+    pub(crate) fn time_filter_map_lookup(&self) -> RunningCost {
         // TODO: This is a good approximation, but not accurate.
         self.map_index(8) * 2u64
     }
-    fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
+    pub(crate) fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
         // Two map insertions, the 'set' and the 'time_map'.
         self.map_insert(8, overwrite) * 2u64
     }
@@ -1079,11 +1079,19 @@ impl TransactionCostModel {
         let raw_overwrites = self.cell_write((FR_BYTES * 3 + 2) as u64, true) * log_size as u64;
         raw_writes + raw_overwrites
     }
-    fn merkle_tree_insert_unamortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_unamortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         let rehashes = RunningCost::compute(self.runtime_cost_model.transient_hash * log_size);
         rehashes + self.merkle_tree_insert_no_rehash(log_size, overwrite)
     }
-    fn merkle_tree_insert_amortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_amortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         // The amortization turns n writes into a tree of depth d from
         // nd hashes to n log_2 n + d hashes. That means that the hashes we cost *per insert*
         // isn't constant.
@@ -1098,7 +1106,7 @@ impl TransactionCostModel {
     fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
         self.runtime_cost_model.tree_copy(value)
     }
-    fn stack_setup_cost<D: DB>(&self, transcript: &Transcript<D>) -> RunningCost {
+    pub(crate) fn stack_setup_cost_for_effects<D: DB>(&self, eff: &Effects<D>) -> RunningCost {
         // There's an additional cost of processing a transcript coming from initializing effects
         // and context stack variables. This accounts for them.
         // The bulk of this is MPT insertions to build up various sets that sit in these values.
@@ -1106,7 +1114,6 @@ impl TransactionCostModel {
         // they are constant by container, and then reduce that to a running cost using map
         // insert VM operations.
         const EXPECTED_COM_INDICES: usize = 16;
-        let eff = &transcript.effects;
         // (amount, key length)
         let maps = [
             (EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES),
@@ -1522,7 +1529,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Transaction<S,
 where
     Transaction<S, P, B, D>: Serializable,
 {
-    pub fn segments(&self) -> Vec<u16> {
+    pub fn segments(&self) -> Vec<Segment> {
         match self {
             Self::Standard(stx) => stx.segments(),
             Self::ClaimRewards(_) => Vec::new(),
@@ -1552,15 +1559,21 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
     }
 }
 
+/// Logical segment index used in standard transactions and ledger application order.
+pub type Segment = u16;
+
+/// Segment id for the guaranteed phase (fees, guaranteed coins, guaranteed transcripts).
+pub const GUARANTEED_SEGMENT: Segment = 0;
+
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
 #[tag = "standard-transaction[v9]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
-    pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
+    pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
     pub guaranteed_coins: Option<Sp<ZswapOffer<P::LatestProof, D>, D>>,
-    pub fallible_coins: HashMap<u16, ZswapOffer<P::LatestProof, D>, D>,
+    pub fallible_coins: HashMap<Segment, ZswapOffer<P::LatestProof, D>, D>,
     pub binding_randomness: PedersenRandomness,
 }
 tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
@@ -1568,7 +1581,7 @@ tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
 impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: Storable<D>, D: DB>
     StandardTransaction<S, P, B, D>
 {
-    pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
+    pub fn actions(&self) -> impl Iterator<Item = (Segment, ContractAction<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1579,7 +1592,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn deploys(&self) -> impl Iterator<Item = (u16, ContractDeploy<D>)> {
+    pub fn deploys(&self) -> impl Iterator<Item = (Segment, ContractDeploy<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1594,7 +1607,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn updates(&self) -> impl Iterator<Item = (u16, MaintenanceUpdate<D>)> {
+    pub fn updates(&self) -> impl Iterator<Item = (Segment, MaintenanceUpdate<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1609,7 +1622,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn calls(&self) -> impl Iterator<Item = (u16, ContractCall<P, D>)> {
+    pub fn calls(&self) -> impl Iterator<Item = (Segment, ContractCall<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1626,7 +1639,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn intents(&'_ self) -> impl Iterator<Item = (u16, Intent<S, P, B, D>)> {
+    pub fn intents(&'_ self) -> impl Iterator<Item = (Segment, Intent<S, P, B, D>)> {
         self.intents.clone().into_iter()
     }
 
@@ -1704,10 +1717,22 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             .flat_map(|offer| Vec::from(&offer.1.transient).into_iter())
     }
 
-    pub fn segments(&self) -> Vec<u16> {
-        let mut segments = once(0)
-            .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+    pub fn segments(&self) -> Vec<Segment> {
+        let mut segments = once(GUARANTEED_SEGMENT)
+            .chain(self.intents.keys())
+            .chain(self.fallible_coins.keys())
+            .collect::<Vec<_>>();
+        segments.sort();
+        segments.dedup();
+        segments
+    }
+
+    pub fn fallible_segments(&self) -> Vec<Segment> {
+        let mut segments = self
+            .intents
+            .keys()
+            .chain(self.fallible_coins.keys())
+            .filter(|&s| s != GUARANTEED_SEGMENT)
             .collect::<Vec<_>>();
         segments.sort();
         segments.dedup();
@@ -2055,7 +2080,7 @@ where
                             // VM stack setup / destroy cost
                             // Left out of scope here to avoid going to deep into
                             // stack structure.
-                            *cost += model.stack_setup_cost(transcript);
+                            *cost += model.stack_setup_cost_for_effects(&transcript.effects);
                         }
                     }
                     ContractAction::Deploy(deploy) => {
@@ -2103,7 +2128,7 @@ where
                 let offers = stx
                     .guaranteed_coins
                     .iter()
-                    .map(|o| (0, (**o).clone()))
+                    .map(|o| (GUARANTEED_SEGMENT, (**o).clone()))
                     .chain(
                         stx.fallible_coins
                             .iter()
@@ -2130,7 +2155,7 @@ where
                     // Merkle tree insertion
                     offer_cost +=
                         model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false) * outputs;
-                    if segment == 0 {
+                    if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
                         f_cost += offer_cost;
@@ -2193,17 +2218,17 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D
     Transaction<S, P, B, D>
 {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 }
 
 impl SystemTransaction {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 
     pub fn cost(&self, params: &LedgerParameters) -> SyntheticCost {
@@ -2510,9 +2535,9 @@ impl<D: DB> Debug for ContractDeploy<D> {
 
 impl<D: DB> ContractDeploy<D> {
     pub fn address(&self) -> ContractAddress {
-        let mut writer = Sha256::new();
+        let mut writer = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut writer).expect("In-memory serialization should succeed");
-        ContractAddress(HashOutput(writer.finalize().into()))
+        ContractAddress(HashOutput(writer.0.finalize().into()))
     }
 }
 

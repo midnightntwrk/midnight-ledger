@@ -196,7 +196,7 @@ mod tests {
             use std::fs::File;
             use std::path::PathBuf;
             let file = PathBuf::from("./static").join(ir).with_extension("bzkir");
-            let ir = tagged_deserialize::<IrSource>(&mut File::open(file).unwrap()).unwrap();
+            let ir = IrSource::load_from_tagged(&mut File::open(file).unwrap()).unwrap();
             ir.instructions
                 .iter()
                 .filter_map(|ins| match ins {
@@ -238,7 +238,8 @@ mod tests {
         let coin = CoinInfo::from(&qcoin);
         let recipient = Recipient::Contract(Default::default());
         let tree = MerkleTree::<(), InMemoryDB>::blank(32)
-            .update_hash(0, coin.commitment(&recipient).0, ())
+            .try_update_hash(0, coin.commitment(&recipient).0, ())
+            .expect("updating hash on non-collapsed tree should always succeed")
             .rehash();
 
         let inp =

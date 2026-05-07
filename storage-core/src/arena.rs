@@ -29,9 +29,9 @@ use crate::{
 };
 use crate::{Storable, WellBehavedHasher};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
-#[allow(deprecated)]
-use crypto::digest::{Digest, OutputSizeUser, crypto_common::generic_array::GenericArray};
 use derive_where::derive_where;
+#[allow(deprecated)]
+use digest::{Digest, OutputSizeUser, common::array::Array};
 use hex::ToHex;
 use parking_lot::{ReentrantMutex as SyncMutex, ReentrantMutexGuard as MutexGuard};
 use rand::Rng;
@@ -121,9 +121,7 @@ impl<T: Tagged, H: WellBehavedHasher> Tagged for TypedArenaKey<T, H> {
     }
 }
 
-// newtype is a hack to get the allow lint to work.
-#[allow(deprecated)]
-type HashArray<H> = GenericArray<u8, <H as OutputSizeUser>::OutputSize>;
+type HashArray<H> = Array<u8, <H as OutputSizeUser>::OutputSize>;
 
 /// The key used in the `HashMap` in the Arena. Parameterised on the hash function
 /// being used by the arena.
@@ -161,7 +159,7 @@ impl<D: DB> Storable<D> for ArenaHash<D::Hasher> {
         Self: Sized,
     {
         #[allow(deprecated)]
-        let mut array = GenericArray::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
+        let mut array = Array::<u8, <D::Hasher as OutputSizeUser>::OutputSize>::default();
         reader.read_exact(&mut array)?;
         Ok(Self(array))
     }
@@ -184,11 +182,10 @@ impl<D: Digest> Hash for ArenaHash<D> {
     where
         Self: Sized,
     {
-        #[allow(deprecated)]
-        GenericArray::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
+        Array::<u8, <D as OutputSizeUser>::OutputSize>::hash_slice(
             data.iter()
                 .map(|k| k.0.clone())
-                .collect::<std::vec::Vec<GenericArray<u8, <D as OutputSizeUser>::OutputSize>>>()
+                .collect::<std::vec::Vec<Array<u8, <D as OutputSizeUser>::OutputSize>>>()
                 .as_slice(),
             state,
         )
@@ -217,14 +214,14 @@ impl<H: Digest> Deserializable for ArenaHash<H> {
         let mut res = vec![0u8; <H as Digest>::output_size()];
         reader.read_exact(&mut res[..])?;
         #[allow(deprecated)]
-        Ok(ArenaHash(GenericArray::clone_from_slice(&res)))
+        Ok(ArenaHash(Array::clone_from_slice(&res)))
     }
 }
 
 impl<H: Digest> Distribution<ArenaHash<H>> for Standard {
     fn sample<R: rand::prelude::Rng + ?Sized>(&self, rng: &mut R) -> ArenaHash<H> {
         #[allow(deprecated)]
-        let mut bytes = GenericArray::default();
+        let mut bytes = Array::default();
         rng.fill_bytes(&mut bytes);
         ArenaHash(bytes)
     }
@@ -256,7 +253,7 @@ impl<'de, H: Digest> serde::Deserialize<'de> for ArenaHash<H> {
                     return Err(E::invalid_length(v.len(), &self));
                 }
                 #[allow(deprecated)]
-                Ok(ArenaHash(GenericArray::clone_from_slice(v)))
+                Ok(ArenaHash(Array::clone_from_slice(v)))
             }
 
             fn visit_byte_buf<E: serde::de::Error>(self, v: Vec<u8>) -> Result<Self::Value, E> {
@@ -277,7 +274,7 @@ impl<H: Digest> ArenaHash<H> {
     /// unspecified values will be filled in with zeros.
     pub(crate) fn _from_bytes(bs: &[u8]) -> Self {
         #[allow(deprecated)]
-        let mut bytes = GenericArray::default();
+        let mut bytes = Array::default();
         for (i, b) in bs.iter().enumerate() {
             bytes[i] = *b;
         }
@@ -752,6 +749,20 @@ impl<D: DB> Arena<D> {
         }
     }
 
+    fn track_lazy(
+        &self,
+        metadata: &MutexGuard<'_, RefCell<MetaData<D>>>,
+        key: ArenaHash<D::Hasher>,
+        child_repr: &ArenaKey<D::Hasher>,
+    ) {
+        if !RefCell::borrow(metadata).contains_key(&key) {
+            RefCell::borrow_mut(metadata).insert(key.clone(), Node::new());
+            if let ArenaKey::Ref(_) = child_repr {
+                RefCell::borrow_mut(&self.lock_backend()).cache_lazy(key);
+            }
+        }
+    }
+
     /// Removes an object from the in-memory arena, remaining in back-end
     /// database if persisted or referenced.
     fn remove_locked(
@@ -899,7 +910,7 @@ impl<D: DB> Arena<D> {
                 .collect(),
             recursion_depth: recursive_depth,
             visited: Rc::new(RefCell::new(HashSet::new())),
-            key_to_child_repr,
+            key_to_child_repr: Rc::new(key_to_child_repr),
         }
         .get(&ArenaKey::Ref(key))?;
         if nodes == res.serialize_to_node_list() {
@@ -962,6 +973,10 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
         if self.max_depth == Some(0) {
+            if let ArenaKey::Ref(key) = child {
+                self.arena
+                    .track_lazy(&self.arena.lock_metadata(), key.clone(), child);
+            }
             return Ok(Sp::lazy(
                 self.arena.clone(),
                 child.hash().clone(),
@@ -1067,7 +1082,7 @@ pub(crate) struct IrLoader<'a, D: DB> {
     recursion_depth: u32,
     /// The keys we've already deserialized once.
     visited: Rc<RefCell<HashSet<DynTypedArenaHash<D::Hasher>>>>,
-    key_to_child_repr: HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>,
+    key_to_child_repr: Rc<HashMap<ArenaHash<D::Hasher>, ArenaKey<D::Hasher>>>,
 }
 
 #[cfg(test)]
@@ -1082,7 +1097,7 @@ impl<'a, D: DB> IrLoader<'a, D> {
             all,
             recursion_depth: 0,
             visited: Rc::new(RefCell::new(HashSet::new())),
-            key_to_child_repr,
+            key_to_child_repr: Rc::new(key_to_child_repr),
         }
     }
 }
@@ -1301,9 +1316,6 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
         arc: Arc<T>,
         child_repr: ArenaKey<D::Hasher>,
     ) -> Self {
-        if let ArenaKey::Ref(_) = child_repr {
-            arena.increment_ref(&root);
-        };
         let sp = Sp::lazy(arena.clone(), root.clone(), child_repr);
         let _ = sp.data.set(arc);
         sp
@@ -1343,6 +1355,9 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// Create a new `Sp` with an uninitialized data payload.
     fn lazy(arena: Arena<D>, root: ArenaHash<D::Hasher>, child_repr: ArenaKey<D::Hasher>) -> Self {
         let data = OnceLock::new();
+        if let ArenaKey::Ref(_) = child_repr {
+            arena.increment_ref(&root);
+        };
         Sp {
             data,
             arena,
@@ -1397,9 +1412,7 @@ impl<T: Storable<D>, D: DB> Deref for Sp<T, D> {
 
 impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
     fn clone(&self) -> Self {
-        if let ArenaKey::Ref(_) = self.child_repr
-            && !self.is_lazy()
-        {
+        if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
         Sp {
@@ -1414,9 +1427,7 @@ impl<T: ?Sized, D: DB> Clone for Sp<T, D> {
 impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// Downcasts this dynamically typed pointer to a concrete type, if possible.
     pub fn downcast<T: Any + Send + Sync>(&self) -> Option<Sp<T, D>> {
-        if let ArenaKey::Ref(_) = self.child_repr
-            && !self.is_lazy()
-        {
+        if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get() {
@@ -1441,9 +1452,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
     /// data. There is no way of knowing if this will succeed, as the lazy loading will defer
     /// failure to a context where a failure panics.
     pub fn force_downcast<T: Any + Send + Sync>(&self) -> Sp<T, D> {
-        if let ArenaKey::Ref(_) = self.child_repr
-            && !self.is_lazy()
-        {
+        if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<T>> = match self.data.get().map(|arc| arc.clone().downcast::<T>()) {
@@ -1462,9 +1471,7 @@ impl<D: DB> Sp<dyn Any + Send + Sync, D> {
 impl<T: Any + Send + Sync, D: DB> Sp<T, D> {
     /// Casts this pointer into a dynamically typed `Any` pointer.
     pub fn upcast(&self) -> Sp<dyn Any + Send + Sync, D> {
-        if let ArenaKey::Ref(_) = self.child_repr
-            && !self.is_lazy()
-        {
+        if let ArenaKey::Ref(_) = self.child_repr {
             self.arena.increment_ref(&self.root);
         }
         let data: OnceLock<Arc<dyn Any + Send + Sync>> = match self.data.get() {
@@ -1577,22 +1584,11 @@ impl<T: ?Sized + 'static, D: DB> Sp<T, D> {
     /// dereferencing it after unload may fail, because nothing is keeping the data alive.
     pub fn unload(&mut self) {
         // Return our data to the uninitialized state, dropping the `Arc` in
-        // `data`, if any.
-        let was_lazy = self.data.take().is_none();
+        // `data`, if any. This must happen before `gc_weak_pointer`, so that
+        // the strong count of the Arc is decremented before we check if the
+        // sp_cache entry can be cleaned up.
+        let _ = self.data.take();
         self.gc_weak_pointer();
-        // We only need to do this on refs, because others aren't actually
-        // ref-counted. Additionally, note that if we have a Direct node here,
-        // then the children contained within this Sp will do their own cleanup.
-        if let ArenaKey::Ref(hash) = &self.child_repr
-            && !was_lazy
-        {
-            // It's important that we unload() before calling decrement_ref(),
-            // because unload() is responsible for cleaning up the sp_cache, and
-            // decrement_ref() is responsible for cleaning up the metadata, and the
-            // invariant is that any Arc in the sp_cache must have a corresponding
-            // entry in the metadata.
-            self.arena.decrement_ref(hash);
-        }
     }
 
     /// Remove our weak pointer from the `sp_cache` if it's dangling.
@@ -1637,21 +1633,20 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     fn force_as_arc(&self) -> &Arc<T> {
         // Initialize `OnceLock` if necessary.
         if self.data.get().is_none() {
-            // We store the `maybe_arc` in a separate variable, instead in a
-            // temporary directly in the `match` scrutinee, to avoid holding a
-            // lock on the `sp_cache` when we attempt to lock the `metadata` in
-            // the match body, implicitly, via the call to `from_arena`, since
-            // that would violate the lock acquisition ordering.
+            // Acquire metadata before sp_cache to respect the documented lock
+            // ordering (metadata → sp_cache → backend; see Arena struct).
+            // from_arena and its callees (track_lazy, increment_ref) also
+            // acquire metadata, but that is safe because the locks are
+            // reentrant. Acquiring sp_cache first would invert the ordering
+            // and deadlock against new_sp_locked (which holds metadata, then
+            // acquires sp_cache).
+            let _metadata_lock = self.arena.lock_metadata();
+            let cache_lock = self.arena.lock_sp_cache();
             let maybe_arc = self
                 .arena
-                .read_sp_cache_locked::<T>(&self.arena.lock_sp_cache(), &self.root);
+                .read_sp_cache_locked::<T>(&cache_lock, &self.root);
             let arc: Arc<T> = match maybe_arc {
-                Some(arc) => {
-                    if let ArenaKey::Ref(_) = self.child_repr {
-                        self.arena.increment_ref(&self.root);
-                    }
-                    arc
-                }
+                Some(arc) => arc,
                 None => {
                     let max_depth = Some(1);
                     // All we really want is the inner `Arc` here, but the
@@ -1672,7 +1667,7 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                         .expect("result of Sp::from_arena should be initialized");
                     if let ArenaKey::Ref(_) = &self.child_repr {
                         self.arena.write_sp_cache_locked(
-                            &self.arena.lock_sp_cache(),
+                            &cache_lock,
                             self.root.clone(),
                             arc.clone(),
                         );
@@ -1789,6 +1784,13 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
 impl<T: ?Sized + 'static, D: DB> Drop for Sp<T, D> {
     fn drop(&mut self) {
         self.unload();
+        // Decrement the ref count only when the Sp is truly destroyed.
+        // This must happen after unload(), which is responsible for cleaning
+        // up the sp_cache — the invariant is that any Arc in the sp_cache
+        // must have a corresponding entry in the metadata.
+        if let ArenaKey::Ref(hash) = &self.child_repr {
+            self.arena.decrement_ref(hash);
+        }
     }
 }
 
@@ -2759,6 +2761,88 @@ mod tests {
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();
         assert_eq!(sp, other_sp);
+    }
+
+    /// Regression test: commit bd8a7cff ("fix: hold cache lock for duration of
+    /// force_as_arc") introduced a lock ordering violation that can deadlock.
+    ///
+    /// The documented lock ordering (see Arena struct comment) is:
+    ///   metadata → sp_cache → backend
+    ///
+    /// `new_sp_locked` (called from `into_tracked`, `alloc`) correctly acquires
+    /// metadata first, then sp_cache.
+    ///
+    /// But `force_as_arc` now holds sp_cache for the entire load, and
+    /// `from_arena` (called within) acquires metadata via `track_lazy` and
+    /// `increment_ref`. This creates sp_cache → metadata, violating the
+    /// ordering.
+    ///
+    /// With two threads — one in force_as_arc, one in new_sp_locked — this
+    /// is a classic ABBA deadlock.
+    #[test]
+    fn force_as_arc_lock_ordering_regression() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Parent {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = new_arena();
+
+        // Persist a value with children so it's loadable from the backend.
+        let parent = arena.alloc(Parent {
+            a: arena.alloc(42u32),
+            b: arena.alloc(99u32),
+        });
+        let mut tracked = parent.into_tracked();
+        tracked.persist();
+        let root_key: ArenaKey<_> = ArenaKey::Ref(tracked.root.clone());
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        tracked.unload();
+        drop(tracked);
+
+        let (tx, rx) = mpsc::channel();
+        let tx_a = tx.clone();
+        let tx_b = tx;
+
+        // Thread A: force_as_arc path (sp_cache → metadata).
+        // get_lazy_unversioned creates a lazy Sp; deref triggers force_as_arc,
+        // which holds sp_cache and then acquires metadata via from_arena →
+        // track_lazy / increment_ref.
+        let arena_a = arena.clone();
+        let key_a = root_key.clone();
+        std::thread::spawn(move || {
+            for _ in 0..10_000 {
+                let sp = arena_a
+                    .get_lazy_unversioned::<Parent>(&key_a)
+                    .expect("get_lazy_unversioned");
+                let _ = &*sp; // Deref → force_as_arc
+                drop(sp);
+            }
+            tx_a.send("A").ok();
+        });
+
+        // Thread B: new_sp_locked path (metadata → sp_cache).
+        // into_tracked acquires metadata, then new_sp_locked acquires sp_cache.
+        let arena_b = arena.clone();
+        std::thread::spawn(move || {
+            for i in 0u32..10_000 {
+                let sp = arena_b.alloc(i);
+                let _ = sp.into_tracked();
+            }
+            tx_b.send("B").ok();
+        });
+
+        let timeout = Duration::from_secs(30);
+        rx.recv_timeout(timeout)
+            .expect("DEADLOCK: neither thread completed within 30s — lock ordering violation between force_as_arc (sp_cache → metadata) and new_sp_locked (metadata → sp_cache)");
+        rx.recv_timeout(timeout)
+            .expect("DEADLOCK: only one thread completed — lock ordering violation");
     }
 
     /// Regression: serialize_to_node_list_bounded panicked when the same content

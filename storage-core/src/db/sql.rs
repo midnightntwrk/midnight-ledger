@@ -60,8 +60,7 @@ use crate::{
     backend::OnDiskObject,
     db::DummyArbitrary,
 };
-#[allow(deprecated)]
-use crypto::digest::generic_array::GenericArray;
+use digest::common::array::Array;
 #[cfg(feature = "proptest")]
 use proptest::prelude::*;
 use r2d2::Pool;
@@ -452,9 +451,7 @@ impl<H: WellBehavedHasher> ToSql for ArenaKey<H> {
 impl<H: WellBehavedHasher> FromSql for ArenaHash<H> {
     fn column_result(value: rusqlite::types::ValueRef<'_>) -> rusqlite::types::FromSqlResult<Self> {
         #[allow(deprecated)]
-        Ok(ArenaHash(
-            GenericArray::from_slice(value.as_bytes()?).clone(),
-        ))
+        Ok(ArenaHash(Array::from_slice(value.as_bytes()?).clone()))
     }
 }
 
@@ -481,6 +478,9 @@ impl<H: WellBehavedHasher> FromSql for Children<H> {
 impl<H: WellBehavedHasher> DB for SqlDB<H> {
     type Hasher = H;
 
+    #[cfg(feature = "gc-v1")]
+    type ScanResumeHandle = ArenaHash<H>;
+
     fn get_node(&self, key: &ArenaHash<H>) -> Option<OnDiskObject<H>> {
         let key = key.clone();
         self.with_tx(Deferred, |tx| {
@@ -493,7 +493,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                 .query_row(params![key], |row| {
                     let data = row.get(0)?;
                     #[cfg(not(feature = "layout-v2"))]
-                    let ref_count = row.get(1)?;
+                    let ref_count = row.get::<_, i64>(1)? as u64;
                     #[cfg(not(feature = "layout-v2"))]
                     let children: Children<H> = row.get(2)?;
                     #[cfg(feature = "layout-v2")]
@@ -551,7 +551,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                     stmt.query_row(params![key.clone()], |row| {
                         let data = row.get(0)?;
                         #[cfg(not(feature = "layout-v2"))]
-                        let ref_count = row.get(1)?;
+                        let ref_count = row.get::<_, i64>(1)? as u64;
                         #[cfg(not(feature = "layout-v2"))]
                         let children: Children<H> = row.get(2)?;
                         #[cfg(feature = "layout-v2")]
@@ -588,7 +588,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
             stmt.execute(params![
                 key,
                 object.data,
-                object.ref_count,
+                object.ref_count as i64,
                 Children(object.children)
             ])
             .unwrap();
@@ -643,7 +643,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                         .execute(params![
                             key,
                             object.data,
-                            object.ref_count,
+                            object.ref_count as i64,
                             Children(object.children)
                         ])
                         .unwrap(),
@@ -671,7 +671,7 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
         self.with_tx(Deferred, |tx| {
             let sql = "SELECT COUNT(*) FROM node";
             let mut stmt = tx.prepare(sql).unwrap();
-            let result = stmt.query_row([], |row| row.get(0)).unwrap();
+            let result = stmt.query_row([], |row| row.get::<_, i64>(0)).unwrap() as usize;
             stmt.finalize().unwrap();
             result
         })
@@ -724,6 +724,54 @@ impl<H: WellBehavedHasher> DB for SqlDB<H> {
                 .collect();
             stmt.finalize().unwrap();
             result
+        })
+    }
+
+    #[cfg(feature = "gc-v1")]
+    fn scan(
+        &self,
+        resume_from: Option<Self::ScanResumeHandle>,
+        batch_size: usize,
+    ) -> (
+        Vec<(ArenaHash<Self::Hasher>, OnDiskObject<Self::Hasher>)>,
+        Option<Self::ScanResumeHandle>,
+    ) {
+        self.with_tx(Deferred, |tx| {
+            let parse_row = |row: &rusqlite::Row| {
+                let key: ArenaHash<H> = row.get(0)?;
+                let data = row.get(1)?;
+                let children: Children<H> = row.get(2)?;
+                let children: Vec<ArenaKey<H>> = children.0.into_iter().collect();
+                Ok((key, OnDiskObject { data, children }))
+            };
+            let rows: Vec<_> = if let Some(ref handle) = resume_from {
+                let sql = "SELECT key, data, children FROM node \
+                           WHERE key > (?1) ORDER BY key LIMIT ?2";
+                let mut stmt = tx.prepare(sql).expect("Failed to prepare scan statement");
+                let result = stmt
+                    .query_map(params![handle, batch_size as u32], parse_row)
+                    .expect("Failed to execute scan query")
+                    .map(|r| r.expect("Failed to read scan row"))
+                    .collect();
+                stmt.finalize().expect("Failed to finalize scan statement");
+                result
+            } else {
+                let sql = "SELECT key, data, children FROM node ORDER BY key LIMIT ?1";
+                let mut stmt = tx.prepare(sql).expect("Failed to prepare scan statement");
+                let result = stmt
+                    .query_map(params![batch_size as u32], parse_row)
+                    .expect("Failed to execute scan query")
+                    .map(|r| r.expect("Failed to read scan row"))
+                    .collect();
+                stmt.finalize().expect("Failed to finalize scan statement");
+                result
+            };
+            let handle = if rows.len() == batch_size {
+                rows.last().map(|(k, _)| k.clone())
+            } else {
+                None
+            };
+            (rows, handle)
         })
     }
 }

@@ -32,7 +32,7 @@ use storage::storable::Loader;
 use storage::storage::default_storage;
 use storage::storage::{HashMap, Map};
 use transient_crypto::encryption;
-use transient_crypto::merkle_tree::{self, MerkleTree, MerkleTreeCollapsedUpdate};
+use transient_crypto::merkle_tree::{self, InvalidUpdate, MerkleTree, MerkleTreeCollapsedUpdate};
 use transient_crypto::proofs::ProofPreimage;
 use transient_crypto::repr::FieldRepr;
 
@@ -75,7 +75,7 @@ impl<D: DB> State<D> {
     pub fn apply_collapsed_update(
         &self,
         update: &MerkleTreeCollapsedUpdate,
-    ) -> Result<Self, merkle_tree::InvalidUpdate> {
+    ) -> Result<Self, InvalidUpdate> {
         Ok(Self {
             merkle_tree: self.merkle_tree.apply_collapsed_update(update)?.rehash(),
             first_free: u64::max(self.first_free, update.end + 1),
@@ -83,19 +83,52 @@ impl<D: DB> State<D> {
         })
     }
 
+    pub fn insert_coin(
+        &self,
+        secret_keys: &SecretKeys,
+        coin: CoinInfo,
+    ) -> Result<Self, InvalidUpdate> {
+        let qcoin = coin.qualify(self.first_free);
+        let nullifier = coin.nullifier(&SenderEvidence::User(Cow::Borrowed(
+            &secret_keys.coin_secret_key,
+        )));
+        Ok(Self {
+            coins: self.coins.insert(nullifier, qcoin),
+            merkle_tree: self
+                .merkle_tree
+                .try_update_hash(
+                    self.first_free,
+                    coin.commitment(&Recipient::User(secret_keys.coin_public_key()))
+                        .0,
+                    (),
+                )?
+                .rehash(),
+            first_free: self.first_free + 1,
+            ..self.clone()
+        })
+    }
+
+    pub fn remove_coin_by_nullifier(&self, nullifier: Nullifier) -> Self {
+        Self {
+            coins: self.coins.remove(&nullifier),
+            pending_spends: self.pending_spends.remove(&nullifier),
+            ..self.clone()
+        }
+    }
+
     pub fn apply_claim<P: Storable<D>>(
         &self,
         secret_keys: &SecretKeys,
         tx: &AuthorizedClaim<P>,
-    ) -> Self {
+    ) -> Result<Self, InvalidUpdate> {
         let mut res = self.clone();
         res.merkle_tree = res
             .merkle_tree
-            .update_hash(
+            .try_update_hash(
                 res.first_free,
                 tx.coin.commitment(&Recipient::User(tx.recipient)).0,
                 (),
-            )
+            )?
             .rehash();
         if secret_keys.coin_public_key() == tx.recipient {
             res.coins = self.coins.insert(
@@ -108,7 +141,7 @@ impl<D: DB> State<D> {
             res.merkle_tree.collapse(res.first_free, res.first_free);
         }
         res.first_free += 1;
-        res
+        Ok(res)
     }
 
     #[instrument(skip(self, tx))]
@@ -134,7 +167,11 @@ impl<D: DB> State<D> {
     }
 
     #[instrument(skip(self, tx))]
-    pub fn apply<P: Storable<D>>(&self, secret_keys: &SecretKeys, tx: &Offer<P, D>) -> State<D> {
+    pub fn apply<P: Storable<D>>(
+        &self,
+        secret_keys: &SecretKeys,
+        tx: &Offer<P, D>,
+    ) -> Result<State<D>, InvalidUpdate> {
         let mut res = self.clone();
         for (coin_com, ciph) in tx
             .outputs
@@ -146,7 +183,9 @@ impl<D: DB> State<D> {
                     .map(|io| (&io.coin_com, &io.ciphertext)),
             )
         {
-            res.merkle_tree = res.merkle_tree.update_hash(res.first_free, coin_com.0, ());
+            res.merkle_tree = res
+                .merkle_tree
+                .try_update_hash(res.first_free, coin_com.0, ())?;
             if let Some(ci) = ciph.as_ref().and_then(|ciph| secret_keys.try_decrypt(ciph)) {
                 info!(coin=?ci, "received coin");
                 let qci = ci.qualify(res.first_free);
@@ -193,7 +232,7 @@ impl<D: DB> State<D> {
             }
         }
         res.merkle_tree = res.merkle_tree.rehash();
-        res
+        Ok(res)
     }
 
     #[instrument(skip(self, rng))]
@@ -240,7 +279,8 @@ impl<D: DB> State<D> {
         output: Output<ProofPreimage, D>,
     ) -> Result<(State<D>, Transient<ProofPreimage, D>), OfferCreationFailed> {
         let tree = MerkleTree::blank(ZSWAP_TREE_HEIGHT)
-            .update_hash(0, output.coin_com.0, ())
+            .try_update_hash(0, output.coin_com.0, ())
+            .map_err(OfferCreationFailed::MerkleTreeError)?
             .rehash();
         let (res, input) = self.spend_from_tree(rng, secret_keys, coin, segment, &tree)?;
         let io = Transient {

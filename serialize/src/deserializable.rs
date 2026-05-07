@@ -15,7 +15,7 @@ use crate::VecExt;
 use crate::serializable::GLOBAL_TAG;
 use crate::tagged::Tagged;
 use std::borrow::Cow;
-use std::io::Read;
+use std::io::{self, BufRead, Read, Seek};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use std::{collections::HashMap, collections::HashSet, hash::Hash};
@@ -26,7 +26,66 @@ pub const RECURSION_LIMIT: u32 = 50;
 pub const RECURSION_LIMIT: u32 = 250;
 
 // Top-level deserialization function
-pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> std::io::Result<T> {
+pub fn tagged_deserialize<T: Deserializable + Tagged>(reader: impl Read) -> std::io::Result<T> {
+    tagged_deserialize_inner(reader, true)
+}
+
+pub fn tagged_deserialize_sequence<T: Deserializable + Tagged>(
+    mut reader: impl BufRead,
+) -> std::io::Result<Vec<T>> {
+    let mut res = vec![];
+    while !reader.fill_buf()?.is_empty() {
+        res.push(tagged_deserialize_inner(&mut reader, false)?);
+    }
+    Ok(res)
+}
+
+/// Attempts to identify the tag a stream starts with without consuming it, allowing determining a
+/// stream's type *before* deserializing it.
+pub fn peek_tag(reader: &mut (impl Read + Seek)) -> std::io::Result<String> {
+    let position = reader.stream_position()?;
+    // Note that colons are special-cased -- we should expect two, one for `GLOBAL_TAG`, and one
+    // for the end of the read tag. We read up to a limit of 512 bytes, and then take up to the
+    // second b':', converting to string, returning an error if not possible.
+    const READ_LIMIT: usize = 512;
+    let mut buf = [0u8; READ_LIMIT];
+    let mut offset = 0;
+    while offset < READ_LIMIT {
+        let read = reader.read(&mut buf[offset..])?;
+        if read == 0 {
+            break;
+        }
+        offset += read;
+    }
+    reader.seek(std::io::SeekFrom::Start(position))?;
+    let err = |msg| io::Error::new(io::ErrorKind::InvalidData, msg);
+    if !buf.starts_with(GLOBAL_TAG.as_bytes()) {
+        return Err(err(format!(
+            "tagged data does not begin with '{GLOBAL_TAG}'"
+        )));
+    }
+    let second_colon = buf
+        .iter()
+        .enumerate()
+        .filter(|(_, b)| **b == b':')
+        .nth(1)
+        .ok_or_else(|| err("tagged data does not begin with a colon-separated tag".to_string()))?
+        .0;
+    let raw_tag = &buf[GLOBAL_TAG.len()..second_colon];
+    String::from_utf8(raw_tag.to_owned())
+        .map_err(|e| err(format!("tag not utf-8: {e}")))
+        .map(|s| {
+            s.replace(
+                |c: char| -> bool { !c.is_ascii_alphanumeric() && !":_-()[],".contains(c) },
+                "�",
+            )
+        })
+}
+
+fn tagged_deserialize_inner<T: Deserializable + Tagged>(
+    mut reader: impl Read,
+    ensure_consumed: bool,
+) -> std::io::Result<T> {
     let tag_expected = format!("{GLOBAL_TAG}{}:", T::tag());
     let mut read_tag = vec![0u8; tag_expected.len()];
     let mut remaining_tag_buf = &mut read_tag[..];
@@ -51,6 +110,10 @@ pub fn tagged_deserialize<T: Deserializable + Tagged>(mut reader: impl Read) -> 
         ));
     }
     let value = <T as Deserializable>::deserialize(&mut reader, 0)?;
+
+    if !ensure_consumed {
+        return Ok(value);
+    }
 
     #[allow(clippy::unbuffered_bytes)] // we can permit a potentally inefficient count here, as in
     let count = reader.bytes().count(); // the happy path it should be 0

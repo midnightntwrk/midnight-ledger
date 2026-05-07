@@ -180,6 +180,23 @@
                 doCheck = false;
                 buildInputs = [pkgs.pkgsCross.aarch64-multiplatform.stdenv.cc];
               }
+              else if system == "x86_64-linux"
+              then {
+                # CARGO_BUILD_TARGET is x86_64-unknown-linux-musl even on the
+                # native host, so bind a real musl toolchain — otherwise crates
+                # with C code (e.g. aws-lc-sys) pick up the host's glibc
+                # headers and emit references to symbols like __isoc23_sscanf
+                # that musl doesn't provide.
+                depsBuildBuild = [
+                  pkgs.pkgsCross.musl64.stdenv.cc
+                ];
+                preBuild = ''
+                  export CC=$CC_X86_64_UNKNOWN_LINUX_MUSL
+                '';
+                CC_X86_64_UNKNOWN_LINUX_MUSL = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+                CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER = "${pkgs.pkgsCross.musl64.stdenv.cc}/bin/x86_64-unknown-linux-musl-cc";
+                buildInputs = [pkgs.pkgsCross.musl64.stdenv.cc];
+              }
               else {}
             ));
 
@@ -262,6 +279,16 @@
             rust.complete.cargo
           ];
           packages.proof-server-version = proof-server-version;
+
+          packages.integration-test-deps = pkgs.symlinkJoin {
+            name = "integration-test-deps";
+            paths = [
+              packages.proof-server
+              packages.onchain-runtime-wasm
+              packages.ledger-wasm
+              packages.zkir-wasm
+            ];
+          };
 
           packages.default = pkgs.symlinkJoin {
             name = "ledger-all";
