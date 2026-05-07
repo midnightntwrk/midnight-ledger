@@ -3,6 +3,7 @@
 ## Unreleased
 
 - feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
+- feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
 
 ## Version `2.1.0`
 

@@ -355,6 +355,7 @@ pub enum Instruction {
         cond: Operand,
     },
     /// Conditionally select a value. UB if `bit` is not `0` or `1`.
+    /// Supported on types: `Native`, `JubjubPoint`.
     ///
     /// Outputs one element, identical to `a` or `b`
     CondSelect {
@@ -377,6 +378,7 @@ pub enum Instruction {
         bits: u32,
     },
     /// Constrains two values `a` and `b` to be equal.
+    /// Supported on types: `Native`, `JubjubPoint`.
     ///
     /// No outputs
     ConstrainEq {
@@ -523,6 +525,7 @@ pub enum Instruction {
         outputs: Vec<Identifier>,
     },
     /// Tests if `a` and `b` are equal.
+    /// Supported on types: `Native`, `JubjubPoint`.
     ///
     /// One boolean output, `a == b`
     TestEq {
