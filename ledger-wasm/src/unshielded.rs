@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures::Signature;
+use base_crypto::schnorr::Signature;
 use ledger::structure::UnshieldedOffer as LedgerUnshieldedOffer;
 use storage::db::InMemoryDB;
 use wasm_bindgen::prelude::*;

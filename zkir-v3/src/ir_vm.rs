@@ -13,8 +13,11 @@
 
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
 use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
@@ -26,7 +29,7 @@ use group::Group;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
+    PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
     AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
@@ -339,21 +342,15 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::ConstrainEq { a, b } => {
-                    if resolve_operand(&memory, a)? != resolve_operand(&memory, b)? {
-                        bail!(
-                            "Failed equality constraint: {:?} != {:?}",
-                            resolve_operand(&memory, a)?,
-                            resolve_operand(&memory, b)?
-                        );
-                    }
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    constrain_eq_offcircuit(&a, &b)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
-                    let (bit_val, a_val, b_val) = (
-                        resolve_operand_bool(&memory, bit)?,
-                        resolve_operand(&memory, a)?,
-                        resolve_operand(&memory, b)?,
-                    );
-                    memory.insert(output.clone(), if bit_val { a_val } else { b_val });
+                    let bit_val = resolve_operand_bool(&memory, bit)?;
+                    let a_val = resolve_operand(&memory, a)?;
+                    let b_val = resolve_operand(&memory, b)?;
+                    memory.insert(output.clone(), select_offcircuit(bit_val, &a_val, &b_val)?);
                 }
                 I::Assert { cond } => {
                     if !resolve_operand_bool(&memory, cond)? {
@@ -361,10 +358,10 @@ impl IrSource {
                     }
                 }
                 I::TestEq { a, b, output } => {
-                    let result = IrValue::Native(
-                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into(),
-                    );
-                    memory.insert(output.clone(), result);
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = test_eq_offcircuit(&a, &b)?;
+                    memory.insert(output.clone(), IrValue::Native(result.into()));
                 }
                 I::PublicInput {
                     guard,
@@ -786,11 +783,9 @@ impl Relation for IrSource {
                     let bit_val = resolve_operand(std, layouter, &memory, bit)?;
                     let bit: AssignedNative<_> = bit_val.try_into()?;
                     let bit: AssignedBit<outer::Scalar> = std.convert(layouter, &bit)?;
-                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let result = CircuitValue::Native(std.select(layouter, &bit, &a, &b)?);
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let result = select_incircuit(std, layouter, &bit, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { val, bits } => {
@@ -806,9 +801,7 @@ impl Relation for IrSource {
                 I::ConstrainEq { a, b } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    std.assert_equal(layouter, &a, &b)?;
+                    constrain_eq_incircuit(std, layouter, &a_val, &b_val)?;
                 }
                 I::ConstrainToBoolean { val } => {
                     // Yes, this does insert a constraint.
@@ -890,9 +883,7 @@ impl Relation for IrSource {
                 I::TestEq { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let bit = std.is_equal(layouter, &a, &b)?;
+                    let bit = test_eq_incircuit(std, layouter, &a_val, &b_val)?;
                     let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }

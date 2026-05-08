@@ -14,7 +14,7 @@
 use crate::structure::TransactionHash;
 use coin_structure::coin::QualifiedInfo;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ZswapStateChanges {
     pub received_coins: Vec<QualifiedInfo>,
     pub spent_coins: Vec<QualifiedInfo>,

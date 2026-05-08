@@ -11,25 +11,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::DustActions;
+use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
     MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind,
-    SignaturesValue, SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer, UtxoOutput,
-    UtxoSpend,
+    SignaturesValue, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
+    UnshieldedOffer,
 };
 use crate::structure::{
-    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, SegIntent, VERIFIER_KEY_SIZE,
+    EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
+    FRESH_DUST_COMMITMENT_HASHES, SegIntent, UTXO_SIZE, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::AlignedValue;
-use base_crypto::signatures::Signature;
-use base_crypto::signatures::SigningKey;
+use base_crypto::hash::PERSISTENT_HASH_BYTES;
+use base_crypto::schnorr::Signature;
+use base_crypto::schnorr::SigningKey;
 use base_crypto::time::Timestamp;
-use coin_structure::coin::TokenType;
+use coin_structure::coin::{NIGHT, TokenType};
 use coin_structure::contract::ContractAddress;
 use itertools::Itertools;
 use onchain_runtime::context::{Effects, QueryContext, QueryResults};
@@ -47,7 +49,7 @@ use storage::Storable;
 use storage::arena::Sp;
 use storage::db::DB;
 use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{FR_BYTES, Fr};
 use transient_crypto::fab::{AlignedValueExt, ValueReprAlignedValue};
 use transient_crypto::hash::transient_commit;
 use transient_crypto::proofs::{KeyLocation, ProofPreimage};
@@ -819,22 +821,37 @@ trait QueryResultsExt {
     ) -> RunningCost;
 }
 
-fn test_tx_from_unshielded_offer<D: DB>(
-    offer: UnshieldedOffer<Signature, D>,
-) -> Transaction<Signature, ProofPreimageMarker, PedersenRandomness, D> {
-    use rand::{SeedableRng, rngs::StdRng};
-    let intent = Intent::new(
-        &mut StdRng::seed_from_u64(0x42),
-        Some(offer),
-        None,
-        Vec::new(),
-        Vec::new(),
-        Vec::new(),
-        None,
-        Timestamp::from_secs(0),
-    );
-    Transaction::from_intents("local-test", [(1, intent)].into_iter().collect())
-}
+// gas_heuristic and per_tx_cost_reserve together approximate
+// Transaction::cost() (= validation_cost + application_cost, defined in
+// structure.rs) for use during transcript partitioning, before the final
+// Transaction exists. They must be kept in sync when validation_cost or
+// application_cost change.
+//
+// The costs are split into per-call (in gas_heuristic, summed across calls)
+// and per-transaction (in per_tx_cost_reserve, subtracted from the budget
+// once) to avoid double-counting in multi-call transactions.
+//
+// gas_heuristic covers:
+//   From validation_cost: VK reads (cell_read + map_index for contract and
+//     operations depth, once per unique call), and ContractAction::Call proof
+//     verification (proof_verify + verifier_key_load). Parallelism is applied
+//     to the validation compute_time as in Transaction::cost.
+//   From application_cost: ContractAction::Call state fetch/store (map_index
+//     + map_insert for contract depth and sequence number) and
+//     stack_setup_cost for the call's effects.
+//
+// per_tx_cost_reserve covers:
+//   From validation_cost: baseline_cost, zswap input/output proof
+//     verifications (approximated via claimed_nullifiers/receives counts),
+//     Pedersen binding check + final ec_mul (deltas assumed balanced),
+//     unshielded offer signature verifications, and one heuristic dust spend
+//     proof. Parallelism applied.
+//   From application_cost: baseline_cost, replay protection, unshielded UTXO
+//     membership/removal/insertion, NIGHT-specific dust generation costs
+//     (dtime update, address table, generation tree, night indices,
+//     commitment tree, commitment hash), and one heuristic dust spend's
+//     nullifier + commitment processing.
+
 impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
     fn gas_heuristic(
         &self,
@@ -846,72 +863,135 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
         if !include_external {
             return transcript_gas_cost_with_overhead;
         }
-        let expected_unshielded_inputs_overhead = self
-            .context
+        let model = &params.cost_model;
+
+        let mut validation = RunningCost::ZERO;
+        validation += model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
+        if public_input_count > 0 {
+            validation += model.proof_verify(public_input_count);
+            validation.compute_time += model.runtime_cost_model.verifier_key_load;
+        }
+        validation.compute_time = validation.compute_time / model.parallelism_factor;
+
+        let mut application = RunningCost::ZERO;
+        application += model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + model.map_insert(EXPECTED_CONTRACT_DEPTH, true)
+            + model.map_index(1)
+            + model.map_insert(1, true);
+        application += model.stack_setup_cost_for_effects(&self.context.effects);
+
+        transcript_gas_cost_with_overhead + validation + application
+    }
+}
+
+/// Estimate per-transaction non-contract costs from the union of all calls'
+/// effects. Subtracted from the partition budget in `partition_transcripts`.
+///
+/// Effect sizes are summed across calls: exact for nullifiers/receives
+/// (disjoint), conservative overestimate for token types if calls overlap.
+fn per_tx_cost_reserve<D: DB>(
+    full_runs: &[QueryResults<ResultModeVerify, D>],
+    model: &TransactionCostModel,
+) -> CostDuration {
+    let zswap_inputs: usize = full_runs
+        .iter()
+        .map(|r| r.context.effects.claimed_nullifiers.size())
+        .sum();
+    let zswap_outputs: usize = full_runs
+        .iter()
+        .map(|r| r.context.effects.claimed_shielded_receives.size())
+        .sum();
+    let unshielded_inputs: usize = full_runs
+        .iter()
+        .map(|r| r.context.effects.unshielded_inputs.size())
+        .sum();
+    let unshielded_outputs: usize = full_runs
+        .iter()
+        .map(|r| {
+            r.context.effects.unshielded_outputs.size() + r.context.effects.unshielded_mints.size()
+        })
+        .sum();
+    let has_night_input = full_runs.iter().any(|r| {
+        r.context
             .effects
             .unshielded_inputs
             .keys()
-            .map(|tt| {
-                let TokenType::Unshielded(tt) = tt else {
-                    unreachable!()
-                };
-                let input = UtxoSpend {
-                    intent_hash: Default::default(),
-                    output_no: 0,
-                    owner: Default::default(),
-                    type_: tt,
-                    value: 1,
-                };
-                let output = UtxoOutput {
-                    owner: Default::default(),
-                    type_: tt,
-                    value: 1,
-                };
-                let offer = UnshieldedOffer::<_, D> {
-                    inputs: vec![input].into(),
-                    outputs: vec![output].into(),
-                    signatures: Default::default(),
-                };
-                let tx = test_tx_from_unshielded_offer(offer);
-                tx.cost(params, false)
-                    .map(RunningCost::from)
-                    .unwrap_or(RunningCost::ZERO)
-            })
-            .sum();
-        let expected_unshielded_outputs_overhead = self
-            .context
+            .any(|tt| tt == TokenType::Unshielded(NIGHT))
+    });
+    let has_night_output = full_runs.iter().any(|r| {
+        r.context
             .effects
             .unshielded_outputs
             .keys()
-            .map(|tt| {
-                let TokenType::Unshielded(tt) = tt else {
-                    unreachable!()
-                };
-                let output = UtxoOutput {
-                    owner: Default::default(),
-                    type_: tt,
-                    value: 1,
-                };
-                let offer = UnshieldedOffer::<_, D> {
-                    inputs: Default::default(),
-                    outputs: vec![output].into(),
-                    signatures: Default::default(),
-                };
-                let tx = test_tx_from_unshielded_offer(offer);
-                tx.cost(params, false)
-                    .map(RunningCost::from)
-                    .unwrap_or(RunningCost::ZERO)
-            })
-            .sum();
-        let proof_verify = params.cost_model.proof_verify(public_input_count)
-            + params.cost_model.cell_read(VERIFIER_KEY_SIZE as u64)
-            + params.cost_model.map_index(EXPECTED_CONTRACT_DEPTH)
-            + params.cost_model.map_index(EXPECTED_OPERATIONS_DEPTH);
-        transcript_gas_cost_with_overhead
-            + expected_unshielded_inputs_overhead
-            + expected_unshielded_outputs_overhead
-            + proof_verify
+            .any(|tt| tt == TokenType::Unshielded(NIGHT))
+    });
+    let night_inputs = has_night_input as usize;
+    let night_outputs = has_night_output as usize;
+
+    // === Validation cost (parallelized) ===
+    let mut validation = model.baseline_cost;
+    // Zswap proof verifications
+    validation += model.proof_verify(zswap::INPUT_PIS) * zswap_inputs;
+    validation += model.proof_verify(zswap::OUTPUT_PIS) * zswap_outputs;
+    // Pedersen binding commitment check
+    if zswap_inputs + zswap_outputs > 0 {
+        validation.compute_time += model.runtime_cost_model.pedersen_valid;
+        validation.compute_time += model.runtime_cost_model.ec_mul;
     }
+    // Unshielded offer signature verifications
+    validation.compute_time +=
+        model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
+    // Dust spend proof verification (heuristically assume 1)
+    validation += model.proof_verify(crate::dust::DUST_SPEND_PIS);
+    validation.compute_time = validation.compute_time / model.parallelism_factor;
+
+    // === Application cost ===
+    let mut application = model.baseline_cost;
+    // Replay protection
+    application += model.time_filter_map_lookup() + model.cell_read(PERSISTENT_HASH_BYTES as u64);
+    application +=
+        model.time_filter_map_insert(false) + model.cell_write(PERSISTENT_HASH_BYTES as u64, false);
+    // Unshielded UTXO processing
+    application += (model.map_index(EXPECTED_UTXO_DEPTH)
+        + model.map_remove(EXPECTED_UTXO_DEPTH, true)
+        + model.cell_delete(UTXO_SIZE as u64))
+        * unshielded_inputs;
+    application += (model.map_insert(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(UTXO_SIZE as u64, false))
+        * unshielded_outputs;
+    // NIGHT-specific dust generation costs
+    application += (model.merkle_tree_insert_unamortized(32, false)
+        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+        * night_inputs;
+    application +=
+        (model.map_index(EXPECTED_UTXO_DEPTH) + model.cell_read(FR_BYTES as u64)) * night_outputs;
+    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+    application += (model.merkle_tree_insert_amortized(32, false)
+        + model.cell_write(DUST_GENERATION_INFO_SIZE as u64, false))
+        * night_outputs;
+    application +=
+        (model.map_insert(EXPECTED_UTXO_DEPTH, false) + model.cell_write(8, false)) * night_outputs;
+    application += (model.cell_read(8) + model.cell_write(8, true)) * night_outputs;
+    application += (model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(FR_BYTES as u64, false))
+        * night_outputs;
+    application += RunningCost::compute(
+        model.runtime_cost_model.transient_hash * FRESH_DUST_COMMITMENT_HASHES * night_outputs,
+    );
+    // Dust spend application costs (1 spend)
+    application += model.map_index(32)
+        + model.map_insert(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(FR_BYTES as u64, false)
+        + model.cell_read(8)
+        + model.cell_write(8, true)
+        + model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false)
+        + model.cell_write(FR_BYTES as u64, false)
+        + model.time_filter_map_lookup() * 2u64;
+
+    let total = validation + application;
+    CostDuration::max(total.compute_time, total.read_time)
 }
 
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
@@ -1015,9 +1095,12 @@ pub fn partition_transcripts<D: DB>(
                 .sum::<CostDuration>()
         })
         .collect::<Vec<_>>();
-    // Allow creep-up to the min time to dismiss, up to 70% usage
+    // Reserve budget for per-transaction costs (validation baseline, zswap
+    // proofs, pedersen, replay protection, unshielded UTXO processing, dust).
+    // These don't scale per-call and are not included in the per-call heuristic.
+    let tx_reserve = per_tx_cost_reserve(&full_runs, &params.cost_model);
     let spare_min_time_to_dismiss =
-        params.limits.min_time_to_dismiss * 0.7f64 - closure_budgets.iter().copied().sum();
+        params.limits.min_time_to_dismiss - tx_reserve - closure_budgets.iter().copied().sum();
     for budget in closure_budgets.iter_mut() {
         *budget += spare_min_time_to_dismiss * (1.0 / closures.len() as f64);
     }
