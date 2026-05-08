@@ -32,7 +32,7 @@ use std::fs::File;
 use std::io::BufReader;
 
 use midnight_zkir_v3::IrSource;
-use midnight_zkir_v3::ir_instructions::encode::encode_offcircuit;
+use midnight_zkir_v3::ir_instructions::encode::encode_offcircuit_for_commit;
 use midnight_zkir_v3::ir_types::IrValue;
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -112,19 +112,20 @@ fn make_preimage(
     }
 }
 
-/// Encode each typed expected output via `encode_offcircuit` and flatten into
-/// a single `Vec<Fr>`. This must exactly match what `IrSource::preprocess`
-/// computes inside its commitment branch — i.e. encode every `IrValue` to its
-/// canonical Fr representation, in declaration order.
+/// Encode each typed expected output via `encode_offcircuit_for_commit` and
+/// flatten into a single `Vec<Fr>`. This must exactly match what
+/// `IrSource::preprocess` computes inside its commitment branch — which uses
+/// `encode_offcircuit_for_commit` (the commit-bearing flavour) over the
+/// declared output values.
 fn encode_expected_outputs(expected: &[IrValue]) -> Vec<Fr> {
     let mut out = Vec::new();
     for v in expected {
-        for ir_val in encode_offcircuit(v) {
-            // `encode_offcircuit` always yields `IrValue::Native(_)`; the
-            // `TryFrom<IrValue> for Fr` impl in `ir_types.rs` is the inverse.
+        for ir_val in encode_offcircuit_for_commit(v) {
+            // `encode_offcircuit_for_commit` always yields `IrValue::Native(_)`;
+            // the `TryFrom<IrValue> for Fr` impl in `ir_types.rs` is the inverse.
             let f: Fr = ir_val
                 .try_into()
-                .expect("encode_offcircuit yields Native variants");
+                .expect("encode_offcircuit_for_commit yields Native variants");
             out.push(f);
         }
     }

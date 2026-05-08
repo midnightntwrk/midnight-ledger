@@ -12,11 +12,23 @@
 // limitations under the License.
 
 #![allow(dead_code)]
+use std::borrow::Cow;
+
+use base_crypto::fab::{
+    AlignedValue, Alignment, AlignmentAtom, AlignmentSegment, Value, ValueAtom,
+};
 use hex::FromHex;
 use js_sys::{BigInt, Function, JsString, Promise, Uint8Array};
+use onchain_runtime::ops::Op;
+use onchain_runtime::result_mode::ResultModeVerify;
 use rand::rngs::OsRng;
+use serde_wasm_bindgen::from_value;
 use serialize::{tagged_deserialize, tagged_serialize};
+use storage::db::InMemoryDB;
+use transient_crypto::curve::FR_BYTES_STORED;
+use transient_crypto::fab::AlignedValueExt;
 use transient_crypto::proofs::Zkir as ZkirTrait;
+use transient_crypto::repr::FieldRepr;
 use transient_crypto::{
     curve::Fr,
     proofs::{
@@ -26,6 +38,156 @@ use transient_crypto::{
 };
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
+
+/// Sanity check on a deserialized op vector — round-trip through tagged
+/// serialization to make sure the JS payload is well-formed before we
+/// hash it into the preimage. Same shape as
+/// `onchain_runtime_wasm::ensure_ops_valid`.
+fn ensure_ops_valid<M: onchain_runtime::result_mode::ResultMode<InMemoryDB>>(
+    ops: &[Op<M, InMemoryDB>],
+) -> Result<(), JsError>
+where
+    Op<M, InMemoryDB>: Eq,
+{
+    for op in ops.iter() {
+        let mut ser = Vec::new();
+        tagged_serialize(op, &mut ser)?;
+        let op2: Op<M, InMemoryDB> = tagged_deserialize(&ser[..])?;
+        if op != &op2 {
+            return Err(JsError::new(
+                "Operations didn't survive serialization check",
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Flatten an `AlignedValue` into the **preimage-bearing** form, appending
+/// the resulting Frs to `out`.
+///
+/// This is the shared core used by every callsite that needs Compress
+/// atoms to survive the wasm boundary with their preimage intact:
+///
+///   * `ProofPreimage.inputs` — the circuit input vector. The IR-side
+///     `IrSource::preprocess` slices each declared `IrType::Opaque` input
+///     out of `preimage.inputs` and materializes
+///     `IrValue::Opaque { bytes, commit }` from this layout.
+///
+///   * `ProofPreimage.public_transcript_outputs` — popeq results. Each
+///     `Op::Popeq { result, .. }` writes its `result` AV through this
+///     helper. The IR-side `I::PublicInput` arm slices `IrType::Opaque`
+///     entries out of the resulting Fr stream.
+///
+///   * `ProofPreimage.private_transcript` — witness AVs returned by
+///     witness functions. Same shape, sliced by the IR's
+///     `I::PrivateInput` arm.
+///
+/// For non-`Compress` segments this delegates to the standard
+/// `value_only_field_repr` so the field representation is bit-for-bit
+/// identical to what the existing `onchain-runtime-wasm`
+/// `proofDataIntoSerializedPreimage` produces. The behaviour diverges
+/// only at top-level `AlignmentAtom::Compress` atoms: instead of
+/// emitting the `transient_commit(bytes, byte_len)` (which is what
+/// `value_only_field_repr` does — see
+/// `transient_crypto/src/fab.rs`), we emit `[byte_len_fr,
+/// fr_0, ..., fr_{N-1}]` where the preimage Frs are packed via the
+/// chunk-and-reverse layout `bytes_from_field_repr` inverts (i.e. the
+/// same layout as `IrType::Opaque`'s `encode_offcircuit` arm in
+/// `zkir-v3/src/ir_instructions/encode.rs`).
+///
+/// `AlignmentSegment::Option` is intentionally rejected: the
+/// commit-bearing flatten pads each option to `max(option.field_len())`
+/// so that the total length is fixed regardless of the chosen variant,
+/// but a preimage-bearing flatten over Compress atoms inside an option
+/// would have a data-dependent length, breaking that scheme. Compact's
+/// current emission for `Opaque<...>` types puts the Compress atom at
+/// the top level (no enclosing Option), so this is a real but
+/// non-blocking gap. We fail loudly here rather than silently producing
+/// a length that the IR-side decoder cannot slice.
+fn flatten_av_with_opaque_preimages(
+    av: &AlignedValue,
+    out: &mut Vec<Fr>,
+) -> Result<(), JsError> {
+    let mut atoms: &[ValueAtom] = &av.value.0;
+    for segment in &av.alignment.0 {
+        match segment {
+            AlignmentSegment::Atom(AlignmentAtom::Compress) => {
+                let val_atom = consume_atom(&mut atoms, "Compress")?;
+                let bytes = &val_atom.0;
+                let byte_len_u32 = u32::try_from(bytes.len()).map_err(|_| {
+                    JsError::new(
+                        "flatten_av_with_opaque_preimages: Compress preimage longer \
+                         than u32::MAX bytes — IR-side byte_len decoder cannot \
+                         represent it",
+                    )
+                })?;
+                out.push(Fr::from(u64::from(byte_len_u32)));
+                let packed: Vec<Fr> = bytes
+                    .chunks(FR_BYTES_STORED)
+                    .map(|chunk| {
+                        Fr::from_le_bytes(chunk).ok_or_else(|| {
+                            JsError::new(
+                                "flatten_av_with_opaque_preimages: Compress preimage \
+                                 chunk does not fit into FR_BYTES_STORED bytes",
+                            )
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                out.extend(packed.into_iter().rev());
+            }
+            AlignmentSegment::Atom(other) => {
+                let val_atom = consume_atom(&mut atoms, "Atom(non-Compress)")?;
+                let one_av = AlignedValue {
+                    value: Value(vec![val_atom.clone()]),
+                    alignment: Alignment(vec![AlignmentSegment::Atom(*other)]),
+                };
+                one_av.value_only_field_repr(out);
+            }
+            AlignmentSegment::Option(_) => {
+                return Err(JsError::new(
+                    "flatten_av_with_opaque_preimages: AlignmentSegment::Option is \
+                     not supported. The fixed-length padding scheme used by the \
+                     commit-bearing flatten breaks under variable-length Opaque \
+                     preimages, and Compact's `Opaque<...>` emission does not \
+                     currently nest Compress atoms inside Options. If/when this \
+                     changes, both this flatten and the IR-side input slicer in \
+                     `IrSource::preprocess` need to grow option-aware handling.",
+                ));
+            }
+        }
+    }
+    if !atoms.is_empty() {
+        return Err(JsError::new(
+            "flatten_av_with_opaque_preimages: trailing value atoms not consumed \
+             by alignment — alignment/value mismatch",
+        ));
+    }
+    Ok(())
+}
+
+fn flatten_with_opaque_preimages(av: &AlignedValue) -> Result<Vec<Fr>, JsError> {
+    let mut out = Vec::new();
+    flatten_av_with_opaque_preimages(av, &mut out)?;
+    Ok(out)
+}
+
+fn consume_atom<'a>(
+    atoms: &mut &'a [ValueAtom],
+    context: &'static str,
+) -> Result<&'a ValueAtom, JsError> {
+    let (head, tail) = atoms.split_first().ok_or_else(|| {
+        JsError::new(&format!(
+            "flatten_av_with_opaque_preimages: ran out of value atoms while \
+             processing alignment segment ({context})"
+        ))
+    })?;
+    *atoms = tail;
+    Ok(head)
+}
+
+fn flatten_with_compress_commits(av: &AlignedValue, out: &mut Vec<Fr>) {
+    av.value_only_field_repr(out);
+}
 
 struct JsKeyProvider(JsValue);
 
@@ -221,6 +383,115 @@ impl WrappedProvingProvider {
 #[wasm_bindgen(js_name = "jsonIrToBinary")]
 pub fn json_ir_to_binary(json: &str) -> Result<Uint8Array, JsError> {
     Zkir::from_json(json)?.serialize()
+}
+
+/// ZKIR-v3-flavoured `proofDataIntoSerializedPreimage`.
+///
+/// This is intentionally NOT
+/// `onchain_runtime_wasm::proof_data_into_serialized_preimage` — modifying
+/// that function would change the preimage construction for every
+/// consumer of the on-chain runtime, including ZKIR v2 callers that
+/// require the existing commit-bearing `inputs` shape. The v3 IR side,
+/// in contrast, needs `Compress`-aligned values to survive the wasm
+/// boundary in **preimage-bearing** form so that downstream consumers
+/// of `IrValue::Opaque` (the IR-level preimage carrier) have the
+/// bytes available, not just the commit.
+///
+/// The two shapes coexist by partitioning the preimage:
+///
+///   * `ProofPreimage.inputs` — flattened with
+///     [`flatten_with_opaque_preimages`]. For every top-level
+///     `AlignmentAtom::Compress` atom in `input` we emit `[byte_len,
+///     packed_preimage_frs ...]` (matching `IrType::Opaque`'s
+///     `encode_offcircuit` arm). Non-Compress atoms emit the standard
+///     `value_only_field_repr` Frs, so the layout is identical to the
+///     existing v2 bridge for circuits that don't use Opaque inputs.
+///
+///   * `ProofPreimage.communications_commitment` — built from a
+///     commit-bearing flatten via [`flatten_with_compress_commits`]
+///     (which is exactly `value_only_field_repr`). The IR-side
+///     `IrSource::preprocess` re-derives the same commit-bearing form
+///     by walking declared input types via
+///     `encode_offcircuit_for_commit` (which projects
+///     `IrValue::Opaque { commit, .. }` to its cached `commit` Fr),
+///     keeping the verification byte-for-byte aligned with what's
+///     hashed here.
+///
+/// `ProofPreimage.public_transcript_outputs` and
+/// `ProofPreimage.private_transcript` also use the preimage-bearing
+/// flatten so that Compress-aligned popeq results (i.e. ledger reads of
+/// `Opaque<...>` cells) and witness AVs returning Opaque values survive
+/// the wasm boundary with their preimages intact. The IR-side
+/// `I::PublicInput` and `I::PrivateInput` arms slice variable-width
+/// Opaque entries out of these streams to materialize
+/// `IrValue::Opaque { bytes, commit }` directly, eliminating the need
+/// for a Native-as-Opaque output validator relaxation.
+///
+/// `ProofPreimage.public_transcript_inputs` MUST stay commit-bearing —
+/// it has to match the byte-flat impact stream's resolved-to-Fr values
+/// position-by-position, and operand resolution at impact time produces
+/// exactly one Fr per operand position via `Fr::try_from(IrValue)`
+/// (which returns the cached commit for Opaque). Switching this stream
+/// would break the byte-equality invariant with `op.field_repr`.
+///
+/// `binding_input` carries no per-atom Compress/Opaque distinction and
+/// is unchanged.
+#[wasm_bindgen(js_name = "proofDataIntoSerializedPreimage")]
+pub fn proof_data_into_serialized_preimage(
+    input: JsValue,
+    output: JsValue,
+    public_transcript: JsValue,
+    private_transcript_outputs: JsValue,
+    key_location: Option<String>,
+) -> Result<Uint8Array, JsError> {
+    let input: AlignedValue = from_value(input)?;
+    let output: AlignedValue = from_value(output)?;
+    let public_transcript: Vec<Op<ResultModeVerify, InMemoryDB>> = from_value(public_transcript)?;
+    ensure_ops_valid(&public_transcript)?;
+    let private_transcript_outputs: Vec<AlignedValue> = from_value(private_transcript_outputs)?;
+
+    let mut private_transcript = Vec::new();
+    for entry in private_transcript_outputs.iter() {
+        flatten_av_with_opaque_preimages(entry, &mut private_transcript)?;
+    }
+
+    let mut public_transcript_outputs = Vec::new();
+    for op in public_transcript.iter() {
+        if let Op::Popeq { result, .. } = op {
+            flatten_av_with_opaque_preimages(result, &mut public_transcript_outputs)?;
+        }
+    }
+
+    let mut public_transcript_inputs = Vec::new();
+    for op in public_transcript.iter() {
+        op.field_repr(&mut public_transcript_inputs);
+    }
+
+    let mut comm_comm_preimage = vec![Fr::from(0u64)];
+    flatten_with_compress_commits(&input, &mut comm_comm_preimage);
+    flatten_with_compress_commits(&output, &mut comm_comm_preimage);
+
+    let inputs = flatten_with_opaque_preimages(&input)?;
+
+    let preimage = ProofPreimage {
+        inputs,
+        binding_input: Fr::from(0u64),
+        private_transcript,
+        public_transcript_inputs,
+        public_transcript_outputs,
+        key_location: KeyLocation(
+            key_location
+                .map(Cow::Owned)
+                .unwrap_or(Cow::Borrowed("dummy")),
+        ),
+        communications_commitment: Some((
+            transient_crypto::hash::transient_hash(&comm_comm_preimage),
+            Fr::from(0u64),
+        )),
+    };
+    let mut buf = Vec::new();
+    tagged_serialize(&preimage, &mut buf)?;
+    Ok(buf[..].into())
 }
 
 #[wasm_bindgen]

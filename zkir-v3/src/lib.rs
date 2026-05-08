@@ -20,4 +20,5 @@ pub mod ir_types;
 pub mod ir_vm;
 
 pub use ir::{Identifier, Instruction, IrSource};
+pub use ir_types::{IrType, IrValue};
 pub use ir_vm::Preprocessed;

@@ -15,7 +15,9 @@ use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
-use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::encode::{
+    encode_incircuit, encode_incircuit_for_commit, encode_offcircuit, encode_offcircuit_for_commit,
+};
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
@@ -64,6 +66,64 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
+}
+
+/// Compute the width (in `Fr`s) of a transcript-stream slot for a
+/// declared `IrType`, peeking at the leading `byte_len` Fr for
+/// `IrType::Opaque`.
+///
+/// Used by the `I::PublicInput` and `I::PrivateInput` arms to slice a
+/// `[byte_len, packed_preimage_frs ...]` Opaque entry out of
+/// `preimage.public_transcript_outputs` or `preimage.private_transcript`.
+/// The WASM bridge emits each Compress-aligned popeq result and witness
+/// AV in this layout (see
+/// `zkir-v3-wasm/src/lib.rs:flatten_av_with_opaque_preimages`); the
+/// IR-side decoder handles other types via the standard
+/// fixed-width `IrType::encoded_len()` path.
+fn transcript_slot_width(
+    val_t: &IrType,
+    transcript: &[Fr],
+    idx: usize,
+    transcript_name: &'static str,
+    output: &Identifier,
+) -> Result<usize, anyhow::Error> {
+    match val_t {
+        IrType::Opaque => {
+            if idx >= transcript.len() {
+                bail!(
+                    "Opaque {output:?}: ran out of {transcript_name} at offset {idx} \
+                     (need at least the byte_len Fr)"
+                );
+            }
+            let byte_len = u32::try_from(transcript[idx]).map_err(|_| {
+                anyhow!(
+                    "Opaque {output:?}: byte_len Fr at {transcript_name}[{idx}] out of \
+                     u32 range"
+                )
+            })? as usize;
+            let w = 1 + byte_len.div_ceil(FR_BYTES_STORED);
+            if idx + w > transcript.len() {
+                bail!(
+                    "Opaque {output:?}: {transcript_name} truncated; need {} Frs from \
+                     offset {idx} but only {} are available",
+                    w,
+                    transcript.len() - idx
+                );
+            }
+            Ok(w)
+        }
+        _ => {
+            let w = val_t.encoded_len();
+            if idx + w > transcript.len() {
+                bail!(
+                    "{output:?}: {transcript_name} truncated; need {w} Frs of {val_t:?} \
+                     from offset {idx} but only {} are available",
+                    transcript.len() - idx
+                );
+            }
+            Ok(w)
+        }
+    }
 }
 
 fn fab_decode_to_bytes(
@@ -202,7 +262,27 @@ impl IrSource {
 
         let mut idx = 0;
         for input_id in self.inputs.iter() {
-            let w = input_id.val_t.encoded_len();
+            let w = match &input_id.val_t {
+                IrType::Opaque => {
+                    if idx >= preimage.inputs.len() {
+                        bail!(
+                            "Not enough raw inputs: ran out at index {} while \
+                             decoding Opaque {:?} (need at least the byte_len Fr)",
+                            idx,
+                            input_id.name
+                        );
+                    }
+                    let byte_len = u32::try_from(preimage.inputs[idx]).map_err(|_| {
+                        anyhow!(
+                            "Opaque {:?}: byte_len Fr at offset {} out of u32 range",
+                            input_id.name,
+                            idx
+                        )
+                    })? as usize;
+                    1 + byte_len.div_ceil(FR_BYTES_STORED)
+                }
+                _ => input_id.val_t.encoded_len(),
+            };
             if idx + w > preimage.inputs.len() {
                 bail!(
                     "Not enough raw inputs: ran out at index {} while decoding {:?}",
@@ -373,7 +453,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = transcript_slot_width(
+                                val_t,
+                                &preimage.public_transcript_outputs,
+                                public_transcript_outputs_idx,
+                                "public_transcript_outputs",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.public_transcript_outputs
                                 [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
                             public_transcript_outputs_idx += w;
@@ -392,7 +478,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = transcript_slot_width(
+                                val_t,
+                                &preimage.private_transcript,
+                                private_transcript_outputs_idx,
+                                "private_transcript",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.private_transcript
                                 [private_transcript_outputs_idx
                                     ..private_transcript_outputs_idx + w];
@@ -619,10 +711,23 @@ impl IrSource {
             let comm_comm = preimage
                 .communications_commitment
                 .ok_or(anyhow!("Expected communications randomness"))?;
+            // We must rebuild the comm_comm preimage in commit-bearing
+            // form to match what the JS bridge fed into `transient_hash`
+            // for the commitment.
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
-            comm_comm_inputs.extend(preimage.inputs.iter());
+            for input_id in self.inputs.iter() {
+                let value = memory.get(&input_id.name).ok_or_else(|| {
+                    anyhow!(
+                        "comm_comm: declared input {:?} missing from memory after preprocess",
+                        input_id.name
+                    )
+                })?;
+                for ir_val in encode_offcircuit_for_commit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
+            }
             for value in outputs.iter() {
-                for ir_val in encode_offcircuit(value) {
+                for ir_val in encode_offcircuit_for_commit(value) {
                     comm_comm_inputs.push(ir_val.try_into()?);
                 }
             }
@@ -718,20 +823,13 @@ impl Relation for IrSource {
                           cell: CircuitValue,
                           mem: &mut HashMap<Identifier, CircuitValue>|
          -> Result<(), Error> {
-            // If id exists in the witness memory, make sure the value that
-            // we are inserting is the same.
-            // Miguel: This seems unnecessary to me. I would fail when calling
-            // `mem_insert` with an id that exists in the witness memory.
-            witness.as_ref()
-                .zip(cell.value())
-                .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) && *expected != *v  {
-                        error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
-                        return true;
-                    }
-                    false
-                })?;
-
+            if mem.contains_key(&id) {
+                error!(id = ?id, "Identifier bound twice during synthesize. This is a bug.");
+                return Err(Error::Synthesis(format!(
+                    "Identifier {id:?} bound twice during synthesize; \
+                     each IR variable must be assigned at most once."
+                )));
+            }
             mem.insert(id, cell);
             Ok(())
         };
@@ -1098,7 +1196,10 @@ impl Relation for IrSource {
             }
 
             for value in &outputs {
-                for cv in encode_incircuit(std, layouter, value)? {
+                // Outputs MUST go through the commit-form encoder so
+                // that an `Opaque` output emits its single cached
+                // `commit` AssignedNative.
+                for cv in encode_incircuit_for_commit(std, layouter, value)? {
                     let x: AssignedNative<_> = cv.try_into()?;
                     preimage.push(x);
                 }

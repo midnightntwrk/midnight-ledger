@@ -105,6 +105,31 @@ async fn jubjub_scalar() {
 }
 
 #[actix_rt::test]
+async fn output_opaque_passthrough_from_input() {
+    let preimage_bytes: Vec<u8> = b"hello".to_vec();
+    // Match the canonical input-vector encoding for an Opaque input:
+    // `[byte_len, fr_0, ..., fr_{N-1}]`. For 5 bytes, N = 1.
+    let byte_len: Fr = (preimage_bytes.len() as u64).into();
+    let preimage_fr = Fr::from_le_bytes(&preimage_bytes).expect("fits in Fr");
+    assert_typed_output_roundtrip(
+        r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%s", "type": "Opaque" }
+           ],
+           "outputs": ["Opaque"],
+           "do_communications_commitment": true,
+           "instructions": [
+               { "op": "output", "vals": ["%s"] }
+           ]
+        }"#,
+        vec![byte_len, preimage_fr],
+        vec![IrValue::opaque(preimage_bytes)],
+    )
+    .await;
+}
+
+#[actix_rt::test]
 async fn multi_output_native_pair() {
     // Two Native outputs from the same input. Exercises the per-position
     // arity & type loop in the Output arm.
