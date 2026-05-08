@@ -44,7 +44,7 @@ use conversions::{
 use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
 use ledger::{
     self,
-    dust::InitialNonce,
+    dust::{InitialNonce, DustPublicKey},
     structure::{FEE_TOKEN, IntentHash, ProofPreimageVersioned},
 };
 use rand::Rng;
@@ -159,13 +159,19 @@ pub fn dust_nonce(initial_nonce: String, seq: u64, sk: &DustSecretKey) -> Result
         return Err(JsError::new("seq exceeded u32 max"));
     }
     if seq == 0 {
-        return Err(JsError::new(
-            "for seq=0 we use DustPublicKey instead of DustSecretKey",
-        ));
+        return Err(JsError::new("for seq=0 use dustFirstNonce()"));
     }
     let initial_nonce = InitialNonce(from_hex_ser(&initial_nonce)?);
     let sk = sk.try_unwrap()?;
     let nonce = ledger::dust::dust_nonce(&initial_nonce, seq as u32, &sk);
+    Ok(fr_to_bigint(nonce))
+}
+
+#[wasm_bindgen(js_name = "dustFirstNonce")]
+pub fn dust_first_nonce(backing_night: String, dust_address: BigInt) -> Result<BigInt, JsError> {
+    let initial_nonce = InitialNonce(from_hex_ser(&backing_night)?);
+    let dust_address = DustPublicKey(bigint_to_fr(dust_address)?);
+    let nonce = ledger::dust::dust_first_nonce(&initial_nonce, &dust_address);
     Ok(fr_to_bigint(nonce))
 }
 
