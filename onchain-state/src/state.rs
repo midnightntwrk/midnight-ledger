@@ -15,7 +15,6 @@ use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::{Aligned, AlignedValue, Alignment, AlignmentAtom};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::repr::MemWrite;
-use base_crypto::schnorr::VerifyingKey;
 use coin_structure::coin::TokenType;
 use derive_where::derive_where;
 use fake::Dummy;
@@ -695,14 +694,35 @@ impl Aligned for EntryPointBuf {
     Deserialize,
 )]
 #[storable(base)]
-#[tag = "contract-maintenance-authority[v1]"]
+#[tag = "contract-maintenance-authority[v2]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 pub struct ContractMaintenanceAuthority {
-    pub committee: Vec<VerifyingKey>,
+    pub committee: Vec<ContractMaintenanceVerifyingKey>,
     pub threshold: u32,
     pub counter: u32,
 }
 tag_enforcement_test!(ContractMaintenanceAuthority);
+
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serializable,
+    Storable,
+    Serialize,
+    Deserialize,
+)]
+#[storable(base)]
+#[tag = "contract-maintenance-verifying-key[v1]"]
+#[cfg_attr(feature = "proptest", derive(Arbitrary))]
+pub enum ContractMaintenanceVerifyingKey {
+    Schnorr(base_crypto::schnorr::VerifyingKey),
+    ECDSA(base_crypto::ecdsa::VerifyingKey),
+}
 
 impl ContractMaintenanceAuthority {
     pub fn new() -> Self {
@@ -724,7 +744,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v6]"]
+#[tag = "contract-state[v7]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,

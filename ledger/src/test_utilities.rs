@@ -20,7 +20,6 @@ use crate::error::{MalformedTransaction, SystemTransactionError, TransactionProv
 use crate::events::Event;
 pub use crate::prove::Resolver;
 use crate::semantics::{TransactionContext, TransactionResult};
-use crate::structure::INITIAL_PARAMETERS;
 use crate::structure::{
     BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerState,
     MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
@@ -29,13 +28,13 @@ use crate::structure::{
 };
 #[cfg(feature = "proving")]
 use crate::structure::{INITIAL_LIMITS, SPECKS_PER_DUST};
+use crate::structure::{INITIAL_PARAMETERS, Signature, SigningKey};
 #[cfg(feature = "proving")]
 use crate::structure::{ProofMarker, ProofPreimageVersioned, ProofVersioned};
 use crate::verify::WellFormedStrictness;
 use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::{Signature, SigningKey};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::{
     Info as CoinInfo, NIGHT, ShieldedTokenType, TokenType, UnshieldedTokenType, UserAddress,
@@ -142,7 +141,7 @@ impl<D: DB> TestState<D> {
             time: Timestamp::from_secs(0),
 
             zswap_keys: SecretKeys::from_rng_seed(&mut *rng),
-            night_key: SigningKey::sample(&mut *rng),
+            night_key: SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut *rng)),
             dust_key: DustSecretKey::sample(&mut *rng),
 
             mode: TestProcessingMode::Regular,

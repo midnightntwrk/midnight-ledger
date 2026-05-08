@@ -18,7 +18,6 @@
 use base_crypto::fab::{AlignedValue, Value};
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{Info as CoinInfo, QualifiedInfo as QualifiedCoinInfo};
 use coin_structure::contract::ContractAddress;
@@ -27,6 +26,7 @@ use futures::FutureExt;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
 use midnight_ledger::semantics::{ErasedTransactionResult::Success, ZswapLocalStateExt};
+use midnight_ledger::structure::Signature;
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, LedgerState, ProofPreimageMarker, Transaction,
 };

@@ -18,14 +18,13 @@ use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
     ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend,
-    UtxoState,
+    STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol, TransactionHash,
+    UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
-    schnorr::VerifyingKey,
     time::{Duration, Timestamp},
 };
 use base_crypto::{
@@ -653,9 +652,9 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq, Debug; S)]
 #[storable(db = D)]
-#[tag = "dust-registration[v1]"]
+#[tag = "dust-registration[v2]"]
 pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
-    pub night_key: VerifyingKey,
+    pub night_key: SignatureVerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
     #[allow(clippy::type_complexity)]
@@ -702,7 +701,7 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
 #[derive_where(Debug)]
 #[derive_where(Clone, PartialEq, Eq; S, P)]
 #[storable(db = D)]
-#[tag = "dust-actions[v1]"]
+#[tag = "dust-actions[v2]"]
 pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub spends: storage::storage::Array<DustSpend<P, D>, D>,
     pub registrations: storage::storage::Array<DustRegistration<S, D>, D>,
@@ -1160,7 +1159,7 @@ impl<D: DB> DustState<D> {
         &self,
         utxo_state: &UtxoState<D>,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         params: &DustParameters,
     ) -> u128 {
         let generationless_inputs = parent_intent

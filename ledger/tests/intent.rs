@@ -14,11 +14,8 @@
 #![cfg(feature = "proving")]
 
 use base_crypto::fab::AlignedValue;
+use base_crypto::rng::SplittableRng;
 use base_crypto::time::{Duration, Timestamp};
-use base_crypto::{
-    rng::SplittableRng,
-    schnorr::{Signature, SigningKey},
-};
 use coin_structure::coin::TokenType;
 use lazy_static::lazy_static;
 use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition_transcripts};
@@ -28,8 +25,8 @@ use midnight_ledger::prove::Resolver;
 use midnight_ledger::structure::ContractAction;
 use midnight_ledger::structure::ReplayProtectionState;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Transaction, UnshieldedOffer,
-    UtxoOutput, UtxoSpend,
+    ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Signature, SigningKey, Transaction,
+    UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
 use midnight_ledger::test_utilities::{test_intents, test_resolver, tx_prove, verifier_key};
 use midnight_ledger::verify::WellFormedStrictness;
@@ -602,7 +599,8 @@ async fn balanced_utxos_1_intent() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_g: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner = signing_key_g.verifying_key();
     let type_ = rng.r#gen();
@@ -631,7 +629,8 @@ async fn balanced_utxos_1_intent() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: 200,
@@ -814,7 +813,8 @@ async fn intents_cannot_balance_across_segments() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_g_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner_1 = signing_key_g_1.verifying_key();
     let intent_hash = rng.r#gen();
@@ -842,7 +842,8 @@ async fn intents_cannot_balance_across_segments() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_1 = UtxoSpend {
         value: 0,
@@ -906,7 +907,8 @@ async fn intents_cannot_balance_across_segments() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_f_2: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_2: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_2 = UtxoSpend {
         value: 0,
@@ -1105,7 +1107,8 @@ async fn causality_check_sanity_check() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_g_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner_1 = signing_key_g_1.verifying_key();
     let intent_hash = rng.r#gen();
@@ -1133,7 +1136,8 @@ async fn causality_check_sanity_check() {
         signatures: vec![].into(),
     };
 
-    let signing_key_f_1: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_1: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_1 = UtxoSpend {
         value: 0,
@@ -1212,7 +1216,8 @@ async fn causality_check_sanity_check() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_f_2: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f_2: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend_2 = UtxoSpend {
         value: 0,
@@ -1404,7 +1409,8 @@ async fn imbalanced_utxos_1_intent() {
         key_location: KeyLocation(Cow::Borrowed("count")),
     };
 
-    let signing_key_g: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_g: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let owner = signing_key_g.verifying_key();
     let type_ = rng.r#gen();
@@ -1596,7 +1602,8 @@ async fn imbalanced_utxos_1_intent_fallible() {
 
     let type_ = rng.r#gen();
 
-    let signing_key_f: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key_f: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: 200,
@@ -2113,7 +2120,8 @@ fn assert_success(res: Result<(), MalformedTransaction<InMemoryDB>>) {
 }
 
 fn gen_unshielded_offer(rng: &mut StdRng) -> (SigningKey, UnshieldedOffer<Signature, InMemoryDB>) {
-    let signing_key: SigningKey = SigningKey::sample(rng.clone());
+    let signing_key: SigningKey =
+        SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(rng.clone()));
 
     let spend = UtxoSpend {
         value: rng.r#gen(),
