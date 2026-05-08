@@ -29,6 +29,7 @@ use midnight_ledger::{
     },
     verify::WellFormedStrictness,
 };
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::state::{
     ContractMaintenanceAuthority, ContractOperation, ContractState, EntryPointBuf, StateValue,
 };

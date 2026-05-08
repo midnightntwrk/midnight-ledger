@@ -543,6 +543,7 @@ pub enum MalformedTransaction<D: DB> {
         inputs: Vec<UtxoSpend>,
         erased_signatures: Vec<()>,
     },
+    ZeroValueUtxo(UtxoOutput),
 }
 
 #[derive(Clone, Debug)]
@@ -1064,6 +1065,12 @@ impl<D: DB> Display for MalformedTransaction<D> {
                     "unshielded offer action validation error: mismatch between number of inputs ({}) and signatures ({})",
                     inputs.len(),
                     erased_signatures.len()
+                )
+            }
+            ZeroValueUtxo(utxo) => {
+                write!(
+                    formatter,
+                    "unshielded offer validation error: zero-value utxo output not permitted: {utxo:?}"
                 )
             }
         }
