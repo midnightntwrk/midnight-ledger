@@ -44,7 +44,7 @@ use conversions::{
 use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
 use ledger::{
     self,
-    dust::{InitialNonce, DustPublicKey},
+    dust::{DustPublicKey, InitialNonce},
     structure::{FEE_TOKEN, IntentHash, ProofPreimageVersioned},
 };
 use rand::Rng;
