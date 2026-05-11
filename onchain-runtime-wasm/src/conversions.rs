@@ -24,6 +24,15 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "tag", content = "value")]
+#[serde(rename_all = "kebab-case")]
+pub enum Signatureish {
+    Schnorr(String),
+    #[serde(rename = "ecdsa")]
+    ECDSA(String),
+}
+
+#[derive(Serialize, Deserialize)]
 struct ShieldedCoinInfoEncoded {
     #[serde(with = "serde_bytes")]
     color: Vec<u8>,

@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use base_crypto::fab::{AlignedValue, Alignment, Value};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
-use base_crypto::{hash, schnorr};
+use base_crypto::{ecdsa, hash, schnorr};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
 
@@ -37,6 +37,7 @@ use transient_crypto::repr::FieldRepr;
 
 use wasm_bindgen::prelude::*;
 
+use crate::conversions::Signatureish;
 use crate::state::from_maybe_string;
 use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 
@@ -66,35 +67,74 @@ pub fn communication_commitment(
 }
 
 #[wasm_bindgen(js_name = "sampleSigningKey")]
-pub fn sample_signing_key() -> Result<String, JsError> {
-    to_value_hex_ser(&schnorr::SigningKey::sample(OsRng))
+pub fn sample_signing_key(kind: Option<String>) -> Result<JsValue, JsError> {
+    Ok(match kind.as_ref().map(|s| &**s) {
+        None | Some("schnorr") => to_value(&Signatureish::Schnorr(to_value_hex_ser(
+            &schnorr::SigningKey::sample(OsRng),
+        )?))?,
+        Some("ecdsa") => to_value(&Signatureish::ECDSA(to_value_hex_ser(
+            &ecdsa::SigningKey::sample(OsRng),
+        )?))?,
+        Some(kind) => return Err(JsError::new(&format!("Unknown signature kind: {kind}"))),
+    })
 }
 
 #[wasm_bindgen(js_name = "signingKeyFromBip340")]
-pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<String, JsError> {
-    to_value_hex_ser(
+pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<JsValue, JsError> {
+    Ok(to_value(&Signatureish::Schnorr(to_value_hex_ser(
         &schnorr::SigningKey::from_bytes(&bytes.to_vec())
             .map_err(|err| JsError::new(&err.to_string()))?,
-    )
+    )?))?)
 }
 
 #[wasm_bindgen(js_name = "signData")]
-pub fn sign_data(key: &str, data: Uint8Array) -> Result<String, JsError> {
-    let key: schnorr::SigningKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&key.sign(&mut OsRng, &data.to_vec()))
+pub fn sign_data(key: JsValue, data: Uint8Array) -> Result<JsValue, JsError> {
+    let key: Signatureish = from_value(key)?;
+    let sig = match key {
+        Signatureish::Schnorr(raw) => Signatureish::Schnorr(to_value_hex_ser(
+            &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.sign(&mut OsRng, &data.to_vec()),
+        )?),
+        Signatureish::ECDSA(raw) => Signatureish::ECDSA(to_value_hex_ser(
+            &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.sign(&data.to_vec()),
+        )?),
+    };
+    Ok(to_value(&sig)?)
 }
 
 #[wasm_bindgen(js_name = "signatureVerifyingKey")]
-pub fn signature_verifying_key(key: &str) -> Result<String, JsError> {
-    let key: schnorr::SigningKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&key.verifying_key())
+pub fn signature_verifying_key(sk: JsValue) -> Result<JsValue, JsError> {
+    let sk: Signatureish = from_value(sk)?;
+    let vk = match sk {
+        Signatureish::Schnorr(raw) => Signatureish::Schnorr(to_value_hex_ser(
+            &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.verifying_key(),
+        )?),
+        Signatureish::ECDSA(raw) => Signatureish::Schnorr(to_value_hex_ser(
+            &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.verifying_key(),
+        )?),
+    };
+    Ok(to_value(&vk)?)
 }
 
 #[wasm_bindgen(js_name = "verifySignature")]
-pub fn verify_signature(key: &str, data: Uint8Array, signature: &str) -> Result<bool, JsError> {
-    let key: schnorr::VerifyingKey = from_value_hex_ser(key)?;
-    let signature: schnorr::Signature = from_value_hex_ser(signature)?;
-    Ok(key.verify(&data.to_vec(), &signature))
+pub fn verify_signature(
+    key: JsValue,
+    data: Uint8Array,
+    signature: JsValue,
+) -> Result<bool, JsError> {
+    let key: Signatureish = from_value(key)?;
+    let signature: Signatureish = from_value(signature)?;
+    let data = data.to_vec();
+    Ok(match (key, signature) {
+        (Signatureish::Schnorr(key), Signatureish::Schnorr(sig)) => {
+            from_value_hex_ser::<schnorr::VerifyingKey>(&key)?
+                .verify(&data, &from_value_hex_ser(&sig)?)
+        }
+        (Signatureish::ECDSA(key), Signatureish::ECDSA(sig)) => {
+            from_value_hex_ser::<ecdsa::VerifyingKey>(&key)?
+                .verify(&data, &from_value_hex_ser(&sig)?)
+        }
+        _ => false,
+    })
 }
 
 #[wasm_bindgen(js_name = "rawTokenType")]

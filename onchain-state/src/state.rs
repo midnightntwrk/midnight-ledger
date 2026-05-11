@@ -719,8 +719,11 @@ tag_enforcement_test!(ContractMaintenanceAuthority);
 #[storable(base)]
 #[tag = "contract-maintenance-verifying-key[v1]"]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
+#[serde(tag = "tag", content = "value")]
+#[serde(rename_all = "kebab-case")]
 pub enum ContractMaintenanceVerifyingKey {
     Schnorr(base_crypto::schnorr::VerifyingKey),
+    #[serde(rename = "ecdsa")]
     ECDSA(base_crypto::ecdsa::VerifyingKey),
 }
 
