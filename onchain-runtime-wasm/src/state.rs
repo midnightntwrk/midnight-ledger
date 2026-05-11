@@ -14,7 +14,7 @@
 use std::ops::Deref;
 
 use crate::context::CostModel;
-use crate::conversions::{Signatureish, token_type_to_value, value_to_token_type};
+use crate::conversions::{PreSignature, token_type_to_value, value_to_token_type};
 use crate::{
     ensure_ops_valid, from_value, from_value_hex_ser, from_value_ser, to_value, to_value_hex_ser,
     to_value_ser,
@@ -556,12 +556,12 @@ impl ContractMaintenanceAuthority {
         let committee = committee
             .iter()
             .map(|val| {
-                let pre_vk: Signatureish = from_value(val)?;
+                let pre_vk: PreSignature = from_value(val)?;
                 Ok(match pre_vk {
-                    Signatureish::Schnorr(raw) => {
+                    PreSignature::Schnorr(raw) => {
                         state::ContractMaintenanceVerifyingKey::Schnorr(from_value_hex_ser(&raw)?)
                     }
-                    Signatureish::ECDSA(raw) => {
+                    PreSignature::ECDSA(raw) => {
                         state::ContractMaintenanceVerifyingKey::ECDSA(from_value_hex_ser(&raw)?)
                     }
                 })
@@ -590,10 +590,10 @@ impl ContractMaintenanceAuthority {
         for member in self.0.committee.iter() {
             com_arr.push(&to_value(&match member {
                 state::ContractMaintenanceVerifyingKey::Schnorr(vk) => {
-                    Signatureish::Schnorr(to_value_hex_ser(vk)?)
+                    PreSignature::Schnorr(to_value_hex_ser(vk)?)
                 }
                 state::ContractMaintenanceVerifyingKey::ECDSA(vk) => {
-                    Signatureish::ECDSA(to_value_hex_ser(vk)?)
+                    PreSignature::ECDSA(to_value_hex_ser(vk)?)
                 }
             })?);
         }

@@ -92,6 +92,7 @@ export class SignatureEnabled {
   toString(compact?: boolean): string;
   readonly instance: 'signature';
   private type_: 'signature';
+  readonly value: Signature;
 }
 
 export class SignatureErased {

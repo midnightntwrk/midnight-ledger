@@ -103,12 +103,11 @@ mod common {
 mod test_data {
     use std::sync::{Arc, LazyLock};
 
-    use base_crypto::schnorr::Signature;
     use base_crypto::time::Timestamp;
     use coin_structure::coin;
     use ledger::structure::{
-        ContractDeploy, Intent, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind,
-        Transaction,
+        ContractDeploy, Intent, ProofPreimageMarker, ProofPreimageVersioned, Signature,
+        SignatureKind, Transaction,
     };
     use ledger::test_utilities::{Resolver, test_resolver, verifier_key};
     use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
@@ -301,8 +300,7 @@ mod health_endpoints {
 mod prove_tx_endpoint {
     use super::common::*;
     use super::test_data::*;
-    use base_crypto::schnorr::Signature;
-    use ledger::structure::{ProofMarker, Transaction};
+    use ledger::structure::{ProofMarker, Signature, Transaction};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
     use regex::Regex;

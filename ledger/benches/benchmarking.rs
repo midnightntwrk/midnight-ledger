@@ -2,7 +2,6 @@
 #![allow(unused_imports)]
 #![allow(unused)]
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -12,8 +11,8 @@ use midnight_ledger::prove::Resolver;
 use midnight_ledger::semantics::{TransactionContext, TransactionResult};
 use midnight_ledger::structure::{
     CNightGeneratesDustActionType, CNightGeneratesDustEvent, Intent, LedgerState,
-    OutputInstructionUnshielded, ProofMarker, SystemTransaction, UnshieldedOffer, UtxoOutput,
-    UtxoSpend,
+    OutputInstructionUnshielded, ProofMarker, Signature, SystemTransaction, UnshieldedOffer,
+    UtxoOutput, UtxoSpend,
 };
 use midnight_ledger::structure::{ClaimKind, Transaction};
 #[cfg(feature = "proving")]

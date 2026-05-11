@@ -37,7 +37,7 @@ use transient_crypto::repr::FieldRepr;
 
 use wasm_bindgen::prelude::*;
 
-use crate::conversions::Signatureish;
+use crate::conversions::PreSignature;
 use crate::state::from_maybe_string;
 use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 
@@ -68,11 +68,11 @@ pub fn communication_commitment(
 
 #[wasm_bindgen(js_name = "sampleSigningKey")]
 pub fn sample_signing_key(kind: Option<String>) -> Result<JsValue, JsError> {
-    Ok(match kind.as_ref().map(|s| &**s) {
-        None | Some("schnorr") => to_value(&Signatureish::Schnorr(to_value_hex_ser(
+    Ok(match kind.as_deref() {
+        None | Some("schnorr") => to_value(&PreSignature::Schnorr(to_value_hex_ser(
             &schnorr::SigningKey::sample(OsRng),
         )?))?,
-        Some("ecdsa") => to_value(&Signatureish::ECDSA(to_value_hex_ser(
+        Some("ecdsa") => to_value(&PreSignature::ECDSA(to_value_hex_ser(
             &ecdsa::SigningKey::sample(OsRng),
         )?))?,
         Some(kind) => return Err(JsError::new(&format!("Unknown signature kind: {kind}"))),
@@ -81,7 +81,7 @@ pub fn sample_signing_key(kind: Option<String>) -> Result<JsValue, JsError> {
 
 #[wasm_bindgen(js_name = "signingKeyFromBip340")]
 pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<JsValue, JsError> {
-    Ok(to_value(&Signatureish::Schnorr(to_value_hex_ser(
+    Ok(to_value(&PreSignature::Schnorr(to_value_hex_ser(
         &schnorr::SigningKey::from_bytes(&bytes.to_vec())
             .map_err(|err| JsError::new(&err.to_string()))?,
     )?))?)
@@ -89,12 +89,12 @@ pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<JsValue, JsError> {
 
 #[wasm_bindgen(js_name = "signData")]
 pub fn sign_data(key: JsValue, data: Uint8Array) -> Result<JsValue, JsError> {
-    let key: Signatureish = from_value(key)?;
+    let key: PreSignature = from_value(key)?;
     let sig = match key {
-        Signatureish::Schnorr(raw) => Signatureish::Schnorr(to_value_hex_ser(
+        PreSignature::Schnorr(raw) => PreSignature::Schnorr(to_value_hex_ser(
             &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.sign(&mut OsRng, &data.to_vec()),
         )?),
-        Signatureish::ECDSA(raw) => Signatureish::ECDSA(to_value_hex_ser(
+        PreSignature::ECDSA(raw) => PreSignature::ECDSA(to_value_hex_ser(
             &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.sign(&data.to_vec()),
         )?),
     };
@@ -103,12 +103,12 @@ pub fn sign_data(key: JsValue, data: Uint8Array) -> Result<JsValue, JsError> {
 
 #[wasm_bindgen(js_name = "signatureVerifyingKey")]
 pub fn signature_verifying_key(sk: JsValue) -> Result<JsValue, JsError> {
-    let sk: Signatureish = from_value(sk)?;
+    let sk: PreSignature = from_value(sk)?;
     let vk = match sk {
-        Signatureish::Schnorr(raw) => Signatureish::Schnorr(to_value_hex_ser(
+        PreSignature::Schnorr(raw) => PreSignature::Schnorr(to_value_hex_ser(
             &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.verifying_key(),
         )?),
-        Signatureish::ECDSA(raw) => Signatureish::Schnorr(to_value_hex_ser(
+        PreSignature::ECDSA(raw) => PreSignature::Schnorr(to_value_hex_ser(
             &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.verifying_key(),
         )?),
     };
@@ -121,15 +121,15 @@ pub fn verify_signature(
     data: Uint8Array,
     signature: JsValue,
 ) -> Result<bool, JsError> {
-    let key: Signatureish = from_value(key)?;
-    let signature: Signatureish = from_value(signature)?;
+    let key: PreSignature = from_value(key)?;
+    let signature: PreSignature = from_value(signature)?;
     let data = data.to_vec();
     Ok(match (key, signature) {
-        (Signatureish::Schnorr(key), Signatureish::Schnorr(sig)) => {
+        (PreSignature::Schnorr(key), PreSignature::Schnorr(sig)) => {
             from_value_hex_ser::<schnorr::VerifyingKey>(&key)?
                 .verify(&data, &from_value_hex_ser(&sig)?)
         }
-        (Signatureish::ECDSA(key), Signatureish::ECDSA(sig)) => {
+        (PreSignature::ECDSA(key), PreSignature::ECDSA(sig)) => {
             from_value_hex_ser::<ecdsa::VerifyingKey>(&key)?
                 .verify(&data, &from_value_hex_ser(&sig)?)
         }

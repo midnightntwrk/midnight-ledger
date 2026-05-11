@@ -26,7 +26,7 @@ use wasm_bindgen::prelude::*;
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "tag", content = "value")]
 #[serde(rename_all = "kebab-case")]
-pub enum Signatureish {
+pub enum PreSignature {
     Schnorr(String),
     #[serde(rename = "ecdsa")]
     ECDSA(String),

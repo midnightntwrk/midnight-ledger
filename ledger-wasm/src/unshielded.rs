@@ -12,14 +12,14 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::schnorr::Signature;
-use ledger::structure::UnshieldedOffer as LedgerUnshieldedOffer;
+use ledger::structure::{Signature as LSignature, UnshieldedOffer as LedgerUnshieldedOffer};
+use onchain_runtime_wasm::conversions::PreSignature;
 use storage::db::InMemoryDB;
 use wasm_bindgen::prelude::*;
 
 #[derive(Clone, Debug)]
 pub enum UnshieldedOfferTypes {
-    Signature(LedgerUnshieldedOffer<Signature, InMemoryDB>),
+    Signature(LedgerUnshieldedOffer<LSignature, InMemoryDB>),
     SignatureErased(LedgerUnshieldedOffer<(), InMemoryDB>),
 }
 
@@ -30,8 +30,8 @@ pub struct UnshieldedOffer(pub(crate) UnshieldedOfferTypes);
 
 try_ref_for_exported!(UnshieldedOffer);
 
-impl From<LedgerUnshieldedOffer<Signature, InMemoryDB>> for UnshieldedOffer {
-    fn from(offer: LedgerUnshieldedOffer<Signature, InMemoryDB>) -> UnshieldedOffer {
+impl From<LedgerUnshieldedOffer<LSignature, InMemoryDB>> for UnshieldedOffer {
+    fn from(offer: LedgerUnshieldedOffer<LSignature, InMemoryDB>) -> UnshieldedOffer {
         UnshieldedOffer(UnshieldedOfferTypes::Signature(offer))
     }
 }
@@ -41,11 +41,11 @@ impl From<LedgerUnshieldedOffer<(), InMemoryDB>> for UnshieldedOffer {
     }
 }
 
-impl TryFrom<UnshieldedOffer> for LedgerUnshieldedOffer<Signature, InMemoryDB> {
+impl TryFrom<UnshieldedOffer> for LedgerUnshieldedOffer<LSignature, InMemoryDB> {
     type Error = JsError;
     fn try_from(
         offer: UnshieldedOffer,
-    ) -> Result<LedgerUnshieldedOffer<Signature, InMemoryDB>, Self::Error> {
+    ) -> Result<LedgerUnshieldedOffer<LSignature, InMemoryDB>, Self::Error> {
         match &offer.0 {
             UnshieldedOfferTypes::Signature(val) => Ok(val.clone()),
             _ => Err(JsError::new("Unsupported UnshieldedOffer type provided.")),
@@ -76,7 +76,7 @@ impl UnshieldedOffer {
     pub fn new(
         inputs: Vec<JsValue>,
         outputs: Vec<JsValue>,
-        signatures: Vec<String>,
+        signatures: Vec<JsValue>,
     ) -> Result<UnshieldedOffer, JsError> {
         use UnshieldedOfferTypes::*;
         let mut inputs = inputs
@@ -89,7 +89,12 @@ impl UnshieldedOffer {
             .collect::<Result<Vec<_>, _>>()?;
         let mut signatures = signatures
             .into_iter()
-            .map(|sig| from_hex_ser(&sig))
+            .map(|sig| {
+                Ok::<_, JsError>(match from_value::<PreSignature>(sig)? {
+                    PreSignature::Schnorr(raw) => LSignature::Schnorr(from_hex_ser(&raw)?),
+                    PreSignature::ECDSA(raw) => LSignature::ECDSA(from_hex_ser(&raw)?),
+                })
+            })
             .collect::<Result<Vec<_>, _>>()?;
         if signatures.len() == inputs.len() {
             signatures = {
@@ -117,24 +122,29 @@ impl UnshieldedOffer {
     }
 
     #[wasm_bindgen(js_name = "addSignatures")]
-    pub fn add_signatures(&mut self, signatures: Vec<String>) -> Result<UnshieldedOffer, JsError> {
+    pub fn add_signatures(&mut self, signatures: Vec<JsValue>) -> Result<UnshieldedOffer, JsError> {
         use UnshieldedOfferTypes::*;
+        let parse_sigs = move || {
+            signatures
+                .into_iter()
+                .map(|sig| {
+                    Ok::<_, JsError>(match from_value::<PreSignature>(sig)? {
+                        PreSignature::Schnorr(raw) => LSignature::Schnorr(from_hex_ser(&raw)?),
+                        PreSignature::ECDSA(raw) => LSignature::ECDSA(from_hex_ser(&raw)?),
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()
+        };
 
         Ok(UnshieldedOffer(match &mut self.0 {
             Signature(val) => {
-                let sigs = signatures
-                    .into_iter()
-                    .map(|sig| from_hex_ser(&sig))
-                    .collect::<Result<Vec<_>, _>>()?;
-                val.add_signatures(sigs);
+                val.add_signatures(parse_sigs()?);
                 Signature(val.clone())
             }
             SignatureErased(val) => {
-                let sigs = signatures
-                    .into_iter()
-                    .map(|sig| from_hex_ser(&sig))
-                    .collect::<Result<Vec<_>, _>>()?;
-                val.add_signatures(sigs);
+                // NOTE: The type signature *requires* signatures to be present here, but the rust
+                // code requires these to be blank. So we erase them.
+                val.add_signatures(parse_sigs()?.into_iter().map(|_| ()).collect());
                 SignatureErased(val.clone())
             }
         }))
@@ -200,19 +210,24 @@ impl UnshieldedOffer {
     }
 
     #[wasm_bindgen(getter = signatures)]
-    pub fn signatures(&self) -> Result<Vec<String>, JsError> {
+    pub fn signatures(&self) -> Result<Vec<JsValue>, JsError> {
         use UnshieldedOfferTypes::*;
         match &self.0 {
             Signature(val) => val
                 .signatures
                 .iter_deref()
-                .map(|sig| to_hex_ser(&sig))
+                .map(|sig| {
+                    Ok(to_value(&match sig {
+                        LSignature::Schnorr(sig) => PreSignature::Schnorr(to_hex_ser(&sig)?),
+                        LSignature::ECDSA(sig) => PreSignature::ECDSA(to_hex_ser(&sig)?),
+                    })?)
+                })
                 .collect(),
-            SignatureErased(val) => val
+            SignatureErased(val) => Ok(val
                 .signatures
                 .iter_deref()
-                .map(|sig| to_hex_ser(&sig))
-                .collect(),
+                .map(|()| JsValue::UNDEFINED)
+                .collect()),
         }
     }
 }
