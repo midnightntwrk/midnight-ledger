@@ -683,8 +683,9 @@ describe('Ledger API - functions', () => {
     const verifyingKey = signatureVerifyingKey(signingKey);
 
     expect(verifySignature(verifyingKey, testData, signature)).toBe(true);
-    expect(typeof signingKey).toBe('string');
-    expect(signingKey.length).toBeGreaterThan(0);
+    expect(typeof signingKey.value).toBe('string');
+    expect(signingKey.value.length).toBeGreaterThan(0);
+    expect(signingKey.tag).toEqual('schnorr');
   });
 
   test('signingKeyFromBip340 with different inputs produces different keys', () => {
