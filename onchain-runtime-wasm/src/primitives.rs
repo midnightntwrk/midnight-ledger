@@ -108,7 +108,7 @@ pub fn signature_verifying_key(sk: JsValue) -> Result<JsValue, JsError> {
         PreSignature::Schnorr(raw) => PreSignature::Schnorr(to_value_hex_ser(
             &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.verifying_key(),
         )?),
-        PreSignature::ECDSA(raw) => PreSignature::Schnorr(to_value_hex_ser(
+        PreSignature::ECDSA(raw) => PreSignature::ECDSA(to_value_hex_ser(
             &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.verifying_key(),
         )?),
     };
