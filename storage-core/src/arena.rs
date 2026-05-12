@@ -973,15 +973,19 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
         child: &ArenaKey<<D as DB>::Hasher>,
     ) -> Result<Sp<T, D>, std::io::Error> {
         if self.max_depth == Some(0) {
-            if let ArenaKey::Ref(key) = child {
-                self.arena
-                    .track_lazy(&self.arena.lock_metadata(), key.clone(), child);
-            }
-            return Ok(Sp::lazy(
-                self.arena.clone(),
-                child.hash().clone(),
-                child.clone(),
-            ));
+            let sp = {
+                let metadata_lock = self.arena.lock_metadata();
+                if let ArenaKey::Ref(key) = child {
+                    self.arena
+                        .track_lazy(&metadata_lock, key.clone(), child);
+                }
+                Sp::lazy(
+                    self.arena.clone(),
+                    child.hash().clone(),
+                    child.clone(),
+                )
+            };
+            return Ok(sp);
         }
         #[cfg(feature = "test-utilities")]
         let _tracker = ConstructTracker(std::any::type_name::<T>(), std::time::Instant::now());
