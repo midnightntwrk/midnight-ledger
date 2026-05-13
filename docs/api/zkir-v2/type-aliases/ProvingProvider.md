@@ -8,8 +8,8 @@
 
 ```ts
 type ProvingProvider = {
-  check: Promise<bigint[]>;
-  prove: Promise<Uint8Array<ArrayBuffer>>;
+  check: Promise<(bigint | undefined)[]>;
+  prove: Promise<Uint8Array<ArrayBufferLike>>;
 };
 ```
 
@@ -18,7 +18,7 @@ type ProvingProvider = {
 ### check()
 
 ```ts
-check(serializedPreimage, keyLocation): Promise<bigint[]>;
+check(serializedPreimage, keyLocation): Promise<(bigint | undefined)[]>;
 ```
 
 #### Parameters
@@ -33,7 +33,7 @@ check(serializedPreimage, keyLocation): Promise<bigint[]>;
 
 #### Returns
 
-`Promise`\<`bigint`[]\>
+`Promise`\<(`bigint` \| `undefined`)[]\>
 
 ***
 
@@ -43,7 +43,7 @@ check(serializedPreimage, keyLocation): Promise<bigint[]>;
 prove(
    serializedPreimage, 
    keyLocation, 
-overwriteBindingInput?): Promise<Uint8Array<ArrayBuffer>>;
+overwriteBindingInput?): Promise<Uint8Array<ArrayBufferLike>>;
 ```
 
 #### Parameters
@@ -62,4 +62,4 @@ overwriteBindingInput?): Promise<Uint8Array<ArrayBuffer>>;
 
 #### Returns
 
-`Promise`\<`Uint8Array`\<`ArrayBuffer`\>\>
+`Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
