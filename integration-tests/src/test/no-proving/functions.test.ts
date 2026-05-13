@@ -708,6 +708,15 @@ describe('Ledger API - functions', () => {
     expect(signingKey1).toEqual(signingKey2);
   });
 
+  test('signingKeyFromBip340 is just validation and hex-encoding', () => {
+    const privateKey = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) privateKey[i] = i + 1;
+    const signingKey = signingKeyFromBip340(privateKey);
+
+    const expectedHex = Buffer.from(privateKey).toString('hex');
+    expect(signingKey).toEqual({ tag: 'schnorr', value: expectedHex });
+  });
+
   test('signingKeyFromBip340 with invalid key size should throw', () => {
     const invalidKey = new Uint8Array(31); // Wrong size
 
