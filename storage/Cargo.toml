@@ -11,7 +11,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "bas
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
 stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
-bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
+bench = ["storage-core/bench", "dep:pprof", "dep:criterion", "dep:serde_json"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
 
