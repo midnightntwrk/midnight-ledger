@@ -1517,6 +1517,11 @@ export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): Dust
 export function dustNonce(initialNonce: DustInitialNonce, seq: bigint, sk: DustSecretKey): DustNonce;
 
 /**
+ * Calculate Dust first nonce (when seq=0)
+ */
+export function dustFirstNonce(backingNight: DustInitialNonce, dustAddress: DustPublicKey): DustNonce;
+
+/**
  * Calculate Dust initial nonce (a backing night hash)
  */
 export function dustInitialNonce(outputNo: bigint, intentHash: IntentHash): DustInitialNonce;

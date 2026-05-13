@@ -18,7 +18,7 @@ use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, Ut
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures::VerifyingKey;
+use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{self, Commitment, Nullifier, PublicAddress, TokenType};
 use coin_structure::contract::ContractAddress;

@@ -421,7 +421,7 @@ impl ProvingProvider for MockProver {
 mod tests {
     use base_crypto::{
         data_provider::{self, MidnightDataProvider},
-        signatures::Signature,
+        schnorr::Signature,
     };
     use storage::db::InMemoryDB;
     use zswap::ZSWAP_EXPECTED_FILES;

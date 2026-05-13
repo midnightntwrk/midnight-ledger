@@ -25,7 +25,7 @@ use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
-    signatures::VerifyingKey,
+    schnorr::VerifyingKey,
     time::{Duration, Timestamp},
 };
 use base_crypto::{
@@ -259,6 +259,10 @@ impl Utxo {
 
 pub fn dust_nonce(initial_nonce: &InitialNonce, seq: u32, sk: &DustSecretKey) -> Fr {
     transient_hash((*initial_nonce, seq, sk.0).field_vec().as_ref())
+}
+
+pub fn dust_first_nonce(initial_nonce: &InitialNonce, dust_addr: &DustPublicKey) -> Fr {
+    transient_hash((*initial_nonce, 0u32, *dust_addr).field_vec().as_ref())
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serializable, Storable, FieldRepr)]
@@ -1091,11 +1095,10 @@ impl<D: DB> DustState<D> {
         mut event_push: impl FnMut(Box<dyn FnOnce() -> EventDetails<D>>),
     ) -> Result<Self, DustStateError> {
         let mut state = self.clone();
-        let seq = 0u32;
         let dust_pre_projection = DustPreProjection {
             initial_value,
             owner: dust_addr,
-            nonce: transient_hash((initial_nonce, seq, dust_addr).field_vec().as_ref()),
+            nonce: dust_first_nonce(&initial_nonce, &dust_addr),
             ctime: tnow,
         };
         let dust_commitment = dust_pre_projection.commitment();

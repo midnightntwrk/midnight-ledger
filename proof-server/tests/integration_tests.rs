@@ -103,7 +103,7 @@ mod common {
 mod test_data {
     use std::sync::{Arc, LazyLock};
 
-    use base_crypto::signatures::Signature;
+    use base_crypto::schnorr::Signature;
     use base_crypto::time::Timestamp;
     use coin_structure::coin;
     use ledger::structure::{
@@ -301,7 +301,7 @@ mod health_endpoints {
 mod prove_tx_endpoint {
     use super::common::*;
     use super::test_data::*;
-    use base_crypto::signatures::Signature;
+    use base_crypto::schnorr::Signature;
     use ledger::structure::{ProofMarker, Transaction};
     use rand::rngs::StdRng;
     use rand::{Rng, SeedableRng};
