@@ -12,6 +12,7 @@
 // limitations under the License.
 
 import {
+  Intent,
   sampleIntentHash,
   sampleSigningKey,
   sampleUserAddress,
@@ -23,6 +24,7 @@ import {
   type UtxoSpend
 } from '@midnight-ntwrk/ledger';
 import { getNewUnshieldedOffer, Random } from '@/test-objects';
+import { BindingMarker, ProofMarker, SignatureKindMarker, SignatureMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - UnshieldedOffer', () => {
   /**
@@ -370,5 +372,219 @@ describe('Ledger API - UnshieldedOffer', () => {
     const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature]);
 
     expect(unshieldedOffer.toString()).toMatch(/UnshieldedOffer.*/);
+  });
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test construction of an offer with an ECDSA-keyed UTXO input.
+     *
+     * @given An ecdsa signing key, its verifying key, and an ecdsa signature
+     * @when Building an UnshieldedOffer with the verifying key as owner
+     *   and the ecdsa signature attached
+     * @then The owner and signature should round-trip through their getters
+     *   with the 'ecdsa' tag intact
+     */
+    test('should build an offer whose owner is ECDSA and whose signature is ECDSA', () => {
+      const intentHash = sampleIntentHash();
+      const token = Random.unshieldedTokenType();
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const sig = signData(ecdsaSk, new Uint8Array(32));
+
+      const offer = UnshieldedOffer.new(
+        [
+          {
+            value: 100n,
+            owner: ecdsaVk,
+            type: token.raw,
+            intentHash,
+            outputNo: 0
+          }
+        ],
+        [
+          {
+            value: 100n,
+            owner: sampleUserAddress(),
+            type: token.raw
+          }
+        ],
+        [sig]
+      );
+
+      expect(offer.inputs.at(0)?.owner).toEqual(ecdsaVk);
+      expect(offer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(offer.signatures.at(0)).toEqual(sig);
+      expect(offer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Test that an offer with mixed-kind inputs preserves signature order.
+     *
+     * @given Two UTXO inputs — one Schnorr-owned, one ECDSA-owned — and a
+     *   signature for each in declaration order
+     * @when Building the UnshieldedOffer
+     * @then The signatures and owner tags must appear in the same order via
+     *   the getters
+     */
+    test('should preserve mixed schnorr + ecdsa signatures in declaration order', () => {
+      const intentHash = sampleIntentHash();
+      const token = Random.unshieldedTokenType();
+      const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const schnorrVk = signatureVerifyingKey(schnorrSk);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const schnorrSig = signData(schnorrSk, new Uint8Array(32));
+      const ecdsaSig = signData(ecdsaSk, new Uint8Array(32));
+
+      const offer = UnshieldedOffer.new(
+        [
+          { value: 50n, owner: schnorrVk, type: token.raw, intentHash, outputNo: 0 },
+          { value: 50n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 1 }
+        ],
+        [{ value: 100n, owner: sampleUserAddress(), type: token.raw }],
+        [schnorrSig, ecdsaSig]
+      );
+
+      expect(offer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(offer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(offer.signatures.length).toEqual(2);
+      expect(offer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(offer.signatures.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(offer.signatures.at(0)).toEqual(schnorrSig);
+      expect(offer.signatures.at(1)).toEqual(ecdsaSig);
+    });
+
+    /**
+     * Test that addSignatures appends ECDSA signatures correctly.
+     *
+     * @given A signed offer with one ecdsa signature and a second ecdsa signature
+     * @when Calling addSignatures with the second signature
+     * @then The offer should contain both signatures in append order
+     */
+    test('should round-trip ECDSA signatures through addSignatures on a signed offer', () => {
+      const intentHash = sampleIntentHash();
+      const token = Random.unshieldedTokenType();
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const firstSig = signData(ecdsaSk, new Uint8Array(32).fill(1));
+      const secondSig = signData(ecdsaSk, new Uint8Array(32).fill(2));
+
+      const base = UnshieldedOffer.new(
+        [{ value: 10n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
+        [{ value: 10n, owner: sampleUserAddress(), type: token.raw }],
+        [firstSig]
+      );
+
+      const updated = base.addSignatures([secondSig]);
+
+      expect(updated.signatures.length).toEqual(2);
+      expect(updated.signatures.at(0)).toEqual(firstSig);
+      expect(updated.signatures.at(1)).toEqual(secondSig);
+    });
+
+    /**
+     * Pin the surprising behaviour documented in
+     * ledger-wasm/src/unshielded.rs: the TS signature requires Signature[]
+     * even on a signature-erased offer, but the rust side requires unit, so
+     * the shim silently discards anything you hand it.
+     *
+     * @given An offer with a real ecdsa signature that's been erased, then
+     *   re-given an ecdsa signature via addSignatures
+     * @when Reading back the signatures via the getter
+     * @then The slot should be `undefined` — the signature was discarded
+     */
+    test('addSignatures on signature-erased offer silently erases ECDSA signatures', () => {
+      const intentHash = sampleIntentHash();
+      const token = Random.unshieldedTokenType();
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const ecdsaSig = signData(ecdsaSk, new Uint8Array(32));
+
+      const signed = UnshieldedOffer.new(
+        [{ value: 10n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
+        [{ value: 10n, owner: sampleUserAddress(), type: token.raw }],
+        [ecdsaSig]
+      );
+
+      const erased = signed.eraseSignatures();
+      const reAdded = erased.addSignatures([ecdsaSig]);
+
+      // Getter returns undefined slots for the erased variant.
+      expect(reAdded.signatures.length).toEqual(1);
+      expect(reAdded.signatures.at(0)).toBeUndefined();
+    });
+
+    /**
+     * UnshieldedOffer has no direct serialize() — round-trip it through its
+     * containing Intent, which is the realistic wire scenario.
+     *
+     * @given An Intent carrying an ECDSA-owned, ECDSA-signed UnshieldedOffer
+     * @when Serialising the Intent and deserialising it back
+     * @then The decoded offer's owner and signature must be byte-equal to
+     *   the originals
+     */
+    test('serialization round-trip via Intent preserves ECDSA owner and signature tags', () => {
+      const ttl = new Date(Date.now() + 60 * 60 * 1000);
+      const token = Random.unshieldedTokenType();
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+
+      const intent = Intent.new(ttl);
+      const intentHash = intent.intentHash(0);
+      const sig = signData(ecdsaSk, intent.signatureData(0));
+
+      intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+        [{ value: 100n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
+        [{ value: 100n, owner: sampleUserAddress(), type: token.raw }],
+        [sig]
+      );
+
+      const wire = intent.serialize();
+      const round = Intent.deserialize(SignatureMarker.signature, ProofMarker.preProof, BindingMarker.preBinding, wire);
+      const roundOffer = round.guaranteedUnshieldedOffer!;
+
+      expect(roundOffer.inputs.at(0)?.owner).toEqual(ecdsaVk);
+      expect(roundOffer.signatures.at(0)).toEqual(sig);
+    });
+
+    /**
+     * Same as above but with both signature kinds in a single offer.
+     *
+     * @given An Intent carrying an UnshieldedOffer with one schnorr- and
+     *   one ecdsa-owned UTXO input, signed by the respective keys
+     * @when Serialising the Intent and deserialising it back
+     * @then Owner and signature tags must be preserved in original order
+     */
+    test('serialization round-trip via Intent preserves a mixed schnorr/ecdsa offer', () => {
+      const ttl = new Date(Date.now() + 60 * 60 * 1000);
+      const token = Random.unshieldedTokenType();
+      const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const schnorrVk = signatureVerifyingKey(schnorrSk);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+
+      const intent = Intent.new(ttl);
+      const intentHash = intent.intentHash(0);
+      const schnorrSig = signData(schnorrSk, intent.signatureData(0));
+      const ecdsaSig = signData(ecdsaSk, intent.signatureData(0));
+
+      intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+        [
+          { value: 1n, owner: schnorrVk, type: token.raw, intentHash, outputNo: 0 },
+          { value: 1n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 1 }
+        ],
+        [{ value: 2n, owner: sampleUserAddress(), type: token.raw }],
+        [schnorrSig, ecdsaSig]
+      );
+
+      const wire = intent.serialize();
+      const round = Intent.deserialize(SignatureMarker.signature, ProofMarker.preProof, BindingMarker.preBinding, wire);
+      const roundOffer = round.guaranteedUnshieldedOffer!;
+
+      expect(roundOffer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(roundOffer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(roundOffer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(roundOffer.signatures.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
   });
 });

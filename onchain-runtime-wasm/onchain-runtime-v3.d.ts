@@ -779,7 +779,7 @@ export class ContractMaintenanceAuthority {
 
   serialize(): Uint8Array;
 
-  static deserialize(raw: Uint8Array): ContractState;
+  static deserialize(raw: Uint8Array): ContractMaintenanceAuthority;
 
   toString(compact?: boolean): string;
 }

@@ -12,6 +12,7 @@
 // limitations under the License.
 
 import {
+  addressFromKey,
   type Alignment,
   bigIntModFr,
   coinNullifier,
@@ -30,6 +31,7 @@ import {
   sampleSigningKey,
   signatureVerifyingKey,
   signData,
+  signingKeyFromBip340,
   transientCommit,
   transientHash,
   type Value,
@@ -41,6 +43,8 @@ import {
   ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import { getQualifiedShieldedCoinInfo, Random, Static } from '@/test-objects';
+import { corruptSignature } from '@/test-utils';
+import { SignatureKindMarker } from '@/test/utils/Markers';
 
 describe('Cryptographic Attack Vector Tests', () => {
   describe('Signature Forgery Protection', () => {
@@ -564,6 +568,160 @@ describe('Cryptographic Attack Vector Tests', () => {
           );
         }
       }
+    });
+  });
+
+  describe('ECDSA attack vectors', () => {
+    /**
+     * Both Schnorr and ECDSA produce 64-byte raw signatures. The only thing
+     * distinguishing them on the wire is the `tag` field, so a naive
+     * implementation that ignored `tag` and tried "either decode" could be
+     * tricked into accepting a relabelled signature.
+     *
+     * @given a real ECDSA signature
+     * @when its `tag` is flipped to `'schnorr'` and verified against the
+     *       *real* (ECDSA) verifying key
+     * @then verification must fail (or throw if the bytes are not a valid
+     *       Schnorr signature for the given key)
+     */
+    test('rejects an ECDSA signature relabelled as schnorr', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+      const data = new TextEncoder().encode('label flip');
+      const real = signData(sk, data);
+      const spoofed = { tag: SignatureKindMarker.schnorr, value: real.value };
+      const result = verifySignature(vk, data, spoofed);
+
+      expect(result).toBe(false);
+    });
+
+    /**
+     * @given a Schnorr-signed message
+     * @when verified against an ECDSA verifying key derived independently
+     * @then verification must fail without panicking
+     */
+    test('rejects a schnorr signature verified with an ECDSA key', () => {
+      const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const ecdsaVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const data = new TextEncoder().encode('cross-kind verify');
+      const sig = signData(schnorrSk, data);
+
+      expect(verifySignature(ecdsaVk, data, sig)).toBe(false);
+    });
+
+    /**
+     * Address derivation differs across algorithms: ECDSA prefixes its raw
+     * key bytes with the "mn:ecdsa:" domain separator before hashing, while
+     * Schnorr does not. Two verifying keys randomly sampled from each scheme
+     * must yield distinct addresses — otherwise an attacker could craft a
+     * Schnorr key that addresses the same account as an existing ECDSA key
+     * (or vice-versa) and front-run a claim.
+     *
+     * @given freshly-sampled schnorr and ecdsa verifying keys
+     * @when both are passed through addressFromKey
+     * @then the resulting addresses must differ
+     */
+    test('schnorr and ecdsa verifying keys yield distinct UserAddresses', () => {
+      // Run a handful of trials in case any random sample happens to collide.
+      for (let i = 0; i < 10; i++) {
+        const schnorr = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.schnorr));
+        const ecdsa = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+
+        expect(addressFromKey(schnorr)).not.toEqual(addressFromKey(ecdsa));
+      }
+    });
+
+    /**
+     * @given an ECDSA-signed message and a `corruptSignature` mutation
+     * @when the corruption is applied
+     * @then the `tag` must survive intact and the corrupted signature must
+     *       fail verification — confirming the test util's post-PR fix
+     */
+    test('corruptSignature preserves the ecdsa tag and produces an invalid signature', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+      const data = new TextEncoder().encode('attack');
+      const real = signData(sk, data);
+      const corrupted = corruptSignature(real);
+
+      expect(corrupted.tag).toEqual(SignatureKindMarker.ecdsa);
+
+      const valid = verifySignature(vk, data, corrupted);
+
+      expect(valid).toBe(false);
+    });
+
+    /**
+     * ECDSA's RFC-6979 deterministic nonces mean signing the same message
+     * twice produces identical bytes. That's intentional, not a flaw — but
+     * an attacker should not be able to use that determinism to forge a
+     * signature for a *different* message. This pins that property.
+     *
+     * @given the same ECDSA key used to sign two different messages
+     * @when one signature is held against the other message
+     * @then verification of the cross combination must fail
+     */
+    test('ECDSA determinism is not a cross-message forgery vector', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+      const msgA = new TextEncoder().encode('Transfer 100 to Alice');
+      const msgB = new TextEncoder().encode('Transfer 100 to Bob');
+      const sigA = signData(sk, msgA);
+
+      expect(signData(sk, msgA)).toEqual(sigA);
+      expect(verifySignature(vk, msgB, sigA)).toBe(false);
+    });
+
+    /**
+     * Plain ECDSA is malleable: for any valid `(r, s)`, the pair `(r, n-s)`
+     * is also a valid signature for the same message. If the verifier
+     * accepted the high-s form, an observer could mutate any signed
+     * transaction and produce a second one with a different hash, enabling
+     * replay/double-spend attacks against systems that key off the
+     * transaction hash. Underlying k256 enforces low-s on verify; pin that
+     * here.
+     *
+     * @given a valid ECDSA signature `(r, s)`
+     * @when `s` is replaced with `n - s`
+     * @then verification must reject the mutated signature
+     */
+    test('ECDSA signatures are non-malleable: high-s form is rejected', () => {
+      // secp256k1 group order n
+      const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+      const msg = new TextEncoder().encode('non-malleability');
+      const sig = signData(sk, msg);
+      expect(verifySignature(vk, msg, sig)).toBe(true);
+
+      const rHex = sig.value.slice(0, 64);
+      const sHex = sig.value.slice(64);
+      const sFlipped = N - BigInt('0x' + sHex);
+      const flippedHex = sFlipped.toString(16).padStart(64, '0');
+      const flipped = { tag: SignatureKindMarker.ecdsa, value: rHex + flippedHex };
+
+      const result = verifySignature(vk, msg, flipped);
+      expect(result).toBe(false);
+    });
+
+    /**
+     * signingKeyFromBip340 emits a Schnorr secret key; the BIP-340 spec
+     * requires `1 <= sk < n`. Pin that the implementation rejects the
+     * obvious bad inputs (all-zero, and `n` itself) so a regression here
+     * surfaces as a test failure.
+     */
+    test('signingKeyFromBip340 rejects out-of-range scalars', () => {
+      // Zero scalar.
+      expect(() => signingKeyFromBip340(new Uint8Array(32))).toThrow(/signature/i);
+      // Scalar == n (curve order). Big-endian.
+      const nBytes = new Uint8Array(32);
+      const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
+      let v = N;
+      for (let i = 31; i >= 0; i--) {
+        nBytes[i] = Number(v & 0xffn);
+        v >>= 8n;
+      }
+      expect(() => signingKeyFromBip340(nBytes)).toThrow(/signature/i);
     });
   });
 });
