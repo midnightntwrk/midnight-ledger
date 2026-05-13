@@ -1636,11 +1636,14 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     fn force_as_arc(&self) -> &Arc<T> {
         // Initialize `OnceLock` if necessary.
         if self.data.get().is_none() {
-            // We store the `maybe_arc` in a separate variable, instead in a
-            // temporary directly in the `match` scrutinee, to avoid holding a
-            // lock on the `sp_cache` when we attempt to lock the `metadata` in
-            // the match body, implicitly, via the call to `from_arena`, since
-            // that would violate the lock acquisition ordering.
+            // Acquire metadata before sp_cache to respect the documented lock
+            // ordering (metadata → sp_cache → backend; see Arena struct).
+            // from_arena and its callees (track_lazy, increment_ref) also
+            // acquire metadata, but that is safe because the locks are
+            // reentrant. Acquiring sp_cache first would invert the ordering
+            // and deadlock against new_sp_locked (which holds metadata, then
+            // acquires sp_cache).
+            let _metadata_lock = self.arena.lock_metadata();
             let cache_lock = self.arena.lock_sp_cache();
             let maybe_arc = self
                 .arena
@@ -2761,6 +2764,88 @@ mod tests {
         Sp::serialize(&sp, &mut bytes).unwrap();
         let other_sp = Sp::deserialize(&mut bytes.as_slice(), 0).unwrap();
         assert_eq!(sp, other_sp);
+    }
+
+    /// Regression test: commit bd8a7cff ("fix: hold cache lock for duration of
+    /// force_as_arc") introduced a lock ordering violation that can deadlock.
+    ///
+    /// The documented lock ordering (see Arena struct comment) is:
+    ///   metadata → sp_cache → backend
+    ///
+    /// `new_sp_locked` (called from `into_tracked`, `alloc`) correctly acquires
+    /// metadata first, then sp_cache.
+    ///
+    /// But `force_as_arc` now holds sp_cache for the entire load, and
+    /// `from_arena` (called within) acquires metadata via `track_lazy` and
+    /// `increment_ref`. This creates sp_cache → metadata, violating the
+    /// ordering.
+    ///
+    /// With two threads — one in force_as_arc, one in new_sp_locked — this
+    /// is a classic ABBA deadlock.
+    #[test]
+    fn force_as_arc_lock_ordering_regression() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Parent {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+        }
+
+        let arena = new_arena();
+
+        // Persist a value with children so it's loadable from the backend.
+        let parent = arena.alloc(Parent {
+            a: arena.alloc(42u32),
+            b: arena.alloc(99u32),
+        });
+        let mut tracked = parent.into_tracked();
+        tracked.persist();
+        let root_key: ArenaKey<_> = ArenaKey::Ref(tracked.root.clone());
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+        tracked.unload();
+        drop(tracked);
+
+        let (tx, rx) = mpsc::channel();
+        let tx_a = tx.clone();
+        let tx_b = tx;
+
+        // Thread A: force_as_arc path (sp_cache → metadata).
+        // get_lazy_unversioned creates a lazy Sp; deref triggers force_as_arc,
+        // which holds sp_cache and then acquires metadata via from_arena →
+        // track_lazy / increment_ref.
+        let arena_a = arena.clone();
+        let key_a = root_key.clone();
+        std::thread::spawn(move || {
+            for _ in 0..10_000 {
+                let sp = arena_a
+                    .get_lazy_unversioned::<Parent>(&key_a)
+                    .expect("get_lazy_unversioned");
+                let _ = &*sp; // Deref → force_as_arc
+                drop(sp);
+            }
+            tx_a.send("A").ok();
+        });
+
+        // Thread B: new_sp_locked path (metadata → sp_cache).
+        // into_tracked acquires metadata, then new_sp_locked acquires sp_cache.
+        let arena_b = arena.clone();
+        std::thread::spawn(move || {
+            for i in 0u32..10_000 {
+                let sp = arena_b.alloc(i);
+                let _ = sp.into_tracked();
+            }
+            tx_b.send("B").ok();
+        });
+
+        let timeout = Duration::from_secs(30);
+        rx.recv_timeout(timeout)
+            .expect("DEADLOCK: neither thread completed within 30s — lock ordering violation between force_as_arc (sp_cache → metadata) and new_sp_locked (metadata → sp_cache)");
+        rx.recv_timeout(timeout)
+            .expect("DEADLOCK: only one thread completed — lock ordering violation");
     }
 
     /// Regression: serialize_to_node_list_bounded panicked when the same content

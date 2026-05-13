@@ -382,10 +382,12 @@ impl<D: DB> StorageBackend<D> {
         if let Some(obj) = self.database.get_node(key) {
             let cache_value = if let Some(CacheValue::Update { delta }) = self.peek_from_memory(key)
             {
+                let delta = *delta;
+                self.remove_from_memory(key);
                 CacheValue::ReadAndUpdate {
-                    delta: *delta,
+                    delta,
                     #[cfg(not(feature = "layout-v2"))]
-                    obj: obj.apply_delta(*delta),
+                    obj: obj.apply_delta(delta),
                     #[cfg(feature = "layout-v2")]
                     obj,
                 }
@@ -2241,5 +2243,52 @@ mod tests {
         let stats = backend.get_stats();
         assert_eq!(stats.get_cache_hits, 3);
         assert_eq!(stats.get_cache_misses, 2);
+    }
+
+    /// Regression test: `get()` must not panic when a `CacheValue::Update`
+    /// delta already sits in memory for the requested key.
+    ///
+    /// The `get()` cache-miss branch reads the object from DB, then checks
+    /// `peek_from_memory` for an existing `Update` and merges into
+    /// `ReadAndUpdate`. Without removing the `Update` entry first, the
+    /// subsequent `cache_insert_new_key` hits the
+    /// `"key must not already be in memory"` debug_assert.
+    #[test]
+    fn get_with_pending_update_in_memory_inmemorydb() {
+        get_with_pending_update_in_memory::<InMemoryDB>();
+    }
+    #[cfg(feature = "sqlite")]
+    #[test]
+    fn get_with_pending_update_in_memory_sqldb() {
+        get_with_pending_update_in_memory::<crate::db::SqlDB>();
+    }
+    fn get_with_pending_update_in_memory<D: DB + Default>() {
+        let mut backend = StorageBackend::new(16, D::default());
+        let (key, bytes) = in_database_repr::<D, u32>(42);
+
+        // Put the object into the DB and ensure it is out of both caches.
+        backend.cache(key.clone(), bytes.clone(), vec![]);
+        backend.persist(&key);
+        backend.flush_all_changes_to_db();
+        backend.uncache(&key);
+        backend.unpersist(&key);
+        backend.write_cache.clear();
+        backend.read_cache.clear();
+        backend.flush_all_changes_to_db();
+        assert!(backend.peek_from_memory(&key).is_none());
+        assert!(backend.database.get_node(&key).is_some());
+
+        // Create a pending `Update` entry for the key in memory (no object).
+        backend.persist(&key);
+        assert!(matches!(
+            backend.peek_from_memory(&key),
+            Some(CacheValue::Update { .. })
+        ));
+
+        // `get()` must succeed rather than tripping the
+        // `cache_insert_new_key` precondition.
+        let obj = backend.get(&key).cloned();
+        assert!(obj.is_some());
+        assert_eq!(obj.unwrap().data, bytes);
     }
 }

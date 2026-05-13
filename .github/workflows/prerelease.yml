@@ -15,14 +15,14 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
       - name: Setup GitHub Credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
         with:
           machine: github.com
           username: ${{ secrets.GH_USERNAME }}
           password: ${{ secrets.GH_PASSWORD }}
 
       - name: Setup API Credentials
-        uses: extractions/netrc@f6f1722d05ce2890aa86fd9654565b1214ac53a4 # v2
+        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
         with:
           machine: api.github.com
           username: ${{ secrets.GH_USERNAME }}

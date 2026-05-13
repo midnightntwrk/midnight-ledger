@@ -294,7 +294,7 @@ impl IrSource {
                             "Unexpected output length of encode instruction",
                         ));
                     }
-                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                    for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         memory.insert(out_id.clone(), enc_val);
                     }
                 }
@@ -637,7 +637,7 @@ impl Relation for IrSource {
 
         let mut memory: HashMap<Identifier, CircuitValue> = HashMap::new();
 
-        for (id, value) in self.inputs.iter().zip(input_values.into_iter()) {
+        for (id, value) in self.inputs.iter().zip(input_values) {
             let assigned = assign_incircuit(std, layouter, &id.val_t, &[value])?[0].clone();
             memory.insert(id.name.clone(), assigned);
         }
@@ -734,7 +734,7 @@ impl Relation for IrSource {
                             "Unexpected output length of encode instruction".into(),
                         ));
                     }
-                    for (out_id, enc_val) in outputs.iter().zip(encoded.into_iter()) {
+                    for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         mem_insert(out_id.clone(), enc_val, &mut memory)?;
                     }
                 }
