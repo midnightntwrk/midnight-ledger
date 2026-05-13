@@ -20,7 +20,8 @@ use coin_structure::coin::{
 use coin_structure::contract::ContractAddress;
 use coin_structure::transfer::Recipient;
 use derive_where::derive_where;
-use onchain_runtime::state::{ContractState, EntryPointBuf, StateValue};
+use onchain_runtime::ops::VersionedLogItem;
+use onchain_runtime::state::{ContractState, EntryPointBuf};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 #[cfg(test)]
 use storage::db::InMemoryDB;
@@ -36,7 +37,7 @@ use zswap::{CoinCiphertext, keys::SecretKeys as ZswapSecretKeys};
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event[v10]"]
+#[tag = "event[v11]"]
 pub struct Event<D: DB> {
     pub source: EventSource,
     pub content: EventDetails<D>,
@@ -82,7 +83,7 @@ impl ZswapPreimageEvidence {
 #[derive_where(PartialEq, Eq, Clone, Debug)]
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "event-details[v10]"]
+#[tag = "event-details[v11]"]
 #[non_exhaustive]
 pub enum EventDetails<D: DB> {
     ZswapInput {
@@ -102,7 +103,7 @@ pub enum EventDetails<D: DB> {
     ContractLog {
         address: ContractAddress,
         entry_point: EntryPointBuf,
-        logged_item: StateValue<D>,
+        logged_item: VersionedLogItem<D>,
     },
     ParamChange(Sp<LedgerParameters, D>),
     DustInitialUtxo {
