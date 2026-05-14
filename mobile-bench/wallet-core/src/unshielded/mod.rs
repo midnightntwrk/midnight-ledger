@@ -116,7 +116,7 @@ impl UtxoSet {
             .values()
             .filter(|u| &u.token_type == token)
             .collect();
-        candidates.sort_by(|a, b| b.value.cmp(&a.value));
+        candidates.sort_by_key(|u| std::cmp::Reverse(u.value));
 
         let mut picked = Vec::new();
         let mut sum: u128 = 0;
