@@ -20,7 +20,6 @@ use super::UnshieldedError;
 /// Subscribe over a fresh graphql-transport-ws WebSocket. Returns
 /// an async stream of `next.payload.data` JSON values, ending when
 /// the server sends `complete`/`error` or when the WS drops.
-#[allow(dead_code)] // Used by snapshot driver in Task 4.
 pub(super) async fn subscribe(
     ws_url: &str,
     query: &str,
@@ -89,7 +88,6 @@ pub(super) async fn subscribe(
     Ok(into_data_stream(ws))
 }
 
-#[allow(dead_code)] // Used by snapshot driver in Task 4.
 fn into_data_stream(
     ws: tokio_tungstenite::WebSocketStream<
         tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -138,7 +136,7 @@ fn into_data_stream(
                             break;
                         }
                     }
-                    Some("pong") | Some("connection_ack") => continue,
+                    Some("pong") => continue,
                     other => {
                         let _ = ws.close(Some(CloseFrame {
                             code: CloseCode::Normal,
@@ -158,7 +156,6 @@ fn into_data_stream(
 
 /// Returns `Ok(Some(v))` for parsed text frames, `Ok(None)` for
 /// non-text we ignore (binary, pong, close), or `Err` on bad JSON.
-#[allow(dead_code)] // Used by snapshot driver in Task 4.
 pub(super) fn parse_text_frame(m: &Message) -> Result<Option<Value>, UnshieldedError> {
     match m {
         Message::Text(s) => {
@@ -167,11 +164,12 @@ pub(super) fn parse_text_frame(m: &Message) -> Result<Option<Value>, UnshieldedE
             Ok(Some(v))
         }
         Message::Binary(_) | Message::Pong(_) | Message::Ping(_) | Message::Frame(_) => Ok(None),
+        // Close: delegate to the next ws.next() returning None to end
+        // the stream — tungstenite drives the close handshake.
         Message::Close(_) => Ok(None),
     }
 }
 
-#[allow(dead_code)] // Used by snapshot driver in Task 4.
 pub(super) fn frame_type(v: &Value) -> Option<&str> {
     v.get("type").and_then(Value::as_str)
 }

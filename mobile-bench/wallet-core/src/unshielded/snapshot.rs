@@ -2,21 +2,20 @@
 //! replay create/spend events into a `UtxoSet`, terminate on the
 //! first `UnshieldedTransactionsProgress` event.
 
-use serde_json::Value;
+use futures::{Stream, StreamExt};
+use serde_json::{Value, json};
 
-use super::{TokenType, UnshieldedError, UnshieldedUtxo, UtxoId};
+use super::{TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet, transport};
 
 /// The subscription document, embedded at compile time. We don't
 /// run graphql_client codegen for subscriptions — the WS protocol
 /// is hand-rolled (`transport.rs`), and the response shape is
 /// narrow enough to decode by walking serde_json::Value.
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 pub(super) const UNSHIELDED_TRANSACTIONS_QUERY: &str = include_str!(
     "../../queries/midnight-indexer/unshielded_transactions.subscription.graphql"
 );
 
 /// One decoded element of the subscription stream.
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Event {
     Transaction {
@@ -32,7 +31,6 @@ pub(super) enum Event {
 }
 
 /// Decode one `next.payload.data.unshieldedTransactions` JSON value.
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
     let obj = data
         .get("unshieldedTransactions")
@@ -76,7 +74,56 @@ pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
     }
 }
 
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
+/// Fold an event stream into a `UtxoSet`, stopping on the first
+/// `Progress` event. Returns `StreamClosedEarly` if the stream
+/// ends before a `Progress` event arrives.
+///
+/// Pulled out so the folding/termination logic can be unit-tested
+/// against a hand-built `Stream<Event>` without a live WS.
+#[allow(dead_code)] // Used by `snapshot()` and tests; `snapshot()` is wired into Wallet in Task 5.
+pub(super) async fn fold_events<S>(stream: S) -> Result<UtxoSet, UnshieldedError>
+where
+    S: Stream<Item = Result<Event, UnshieldedError>>,
+{
+    let mut set = UtxoSet::new();
+    futures::pin_mut!(stream);
+    while let Some(item) = stream.next().await {
+        match item? {
+            Event::Transaction { created, spent } => {
+                for u in created {
+                    set.insert(u);
+                }
+                for id in spent {
+                    set.remove(&id);
+                }
+            }
+            Event::Progress { .. } => return Ok(set),
+        }
+    }
+    Err(UnshieldedError::StreamClosedEarly)
+}
+
+/// Open a fresh graphql-transport-ws subscription against the
+/// indexer, replay UTXO events into a `UtxoSet`, terminate on
+/// the first `Progress` event. Closes the WS on return.
+#[allow(dead_code)] // Wired into `Wallet::sync_unshielded()` in Task 5.
+pub(super) async fn snapshot(
+    ws_url: &str,
+    address: &str,
+) -> Result<UtxoSet, UnshieldedError> {
+    let stream = transport::subscribe(
+        ws_url,
+        UNSHIELDED_TRANSACTIONS_QUERY,
+        json!({ "address": address, "transactionId": 0 }),
+    )
+    .await?;
+
+    // Adapt the raw JSON stream into an `Event` stream so we can
+    // reuse `fold_events`.
+    let events = stream.map(|item| item.and_then(|v| decode_event(&v)));
+    fold_events(events).await
+}
+
 fn decode_utxo(v: &Value) -> Result<UnshieldedUtxo, UnshieldedError> {
     let owner = v
         .get("owner")
@@ -124,7 +171,6 @@ fn decode_utxo(v: &Value) -> Result<UnshieldedUtxo, UnshieldedError> {
     })
 }
 
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 fn decode_utxo_id(v: &Value) -> Result<UtxoId, UnshieldedError> {
     let intent_hash = decode_hash32("spent.intentHash", v.get("intentHash"))?;
     let output_index = v
@@ -142,7 +188,6 @@ fn decode_utxo_id(v: &Value) -> Result<UtxoId, UnshieldedError> {
     })
 }
 
-#[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 fn decode_hash32(field: &str, v: Option<&Value>) -> Result<[u8; 32], UnshieldedError> {
     let hex_str = v
         .and_then(Value::as_str)
@@ -374,5 +419,98 @@ mod tests {
             }
             other => panic!("expected Decode, got {other:?}"),
         }
+    }
+
+    use crate::unshielded::{TokenType, UnshieldedUtxo, UtxoId};
+    use futures::stream;
+
+    fn utxo(intent: u8, idx: u32, token: u8, value: u128) -> UnshieldedUtxo {
+        UnshieldedUtxo {
+            owner: "mn_addr_test1abcd".to_string(),
+            token_type: TokenType(vec![token]),
+            value,
+            id: UtxoId {
+                intent_hash: [intent; 32],
+                output_index: idx,
+            },
+            ctime: Some(1_700_000_000),
+            initial_nonce: [0u8; 32],
+        }
+    }
+
+    #[tokio::test]
+    async fn fold_terminates_on_first_progress() {
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Transaction {
+                created: vec![utxo(1, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+            Ok(Event::Progress { highest_transaction_id: 10 }),
+            // Below should never be reached:
+            Ok(Event::Transaction {
+                created: vec![utxo(2, 0, 0xAB, 999)],
+                spent: vec![],
+            }),
+        ];
+        let set = fold_events(stream::iter(events)).await.expect("ok");
+        assert_eq!(set.len(), 1);
+        assert_eq!(set.total_for(&TokenType(vec![0xAB])), 100);
+    }
+
+    #[tokio::test]
+    async fn fold_applies_create_then_spend() {
+        let id_a = UtxoId {
+            intent_hash: [0x11; 32],
+            output_index: 0,
+        };
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Transaction {
+                created: vec![utxo(0x11, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+            Ok(Event::Transaction {
+                created: vec![],
+                spent: vec![id_a],
+            }),
+            Ok(Event::Progress { highest_transaction_id: 5 }),
+        ];
+        let set = fold_events(stream::iter(events)).await.expect("ok");
+        assert!(set.is_empty());
+    }
+
+    #[tokio::test]
+    async fn fold_returns_stream_closed_early_without_progress() {
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Transaction {
+                created: vec![utxo(1, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+        ];
+        let err = fold_events(stream::iter(events)).await.unwrap_err();
+        assert!(matches!(err, UnshieldedError::StreamClosedEarly));
+    }
+
+    #[tokio::test]
+    async fn fold_propagates_first_error() {
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Transaction {
+                created: vec![utxo(1, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+            Err(UnshieldedError::Decode("boom".into())),
+            Ok(Event::Progress { highest_transaction_id: 1 }),
+        ];
+        let err = fold_events(stream::iter(events)).await.unwrap_err();
+        assert!(matches!(err, UnshieldedError::Decode(_)));
+    }
+
+    #[tokio::test]
+    async fn fold_handles_empty_transaction_events() {
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Transaction { created: vec![], spent: vec![] }),
+            Ok(Event::Progress { highest_transaction_id: 0 }),
+        ];
+        let set = fold_events(stream::iter(events)).await.expect("ok");
+        assert!(set.is_empty());
     }
 }

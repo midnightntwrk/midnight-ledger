@@ -52,14 +52,12 @@ impl UtxoSet {
     }
 
     /// Insert (or overwrite) one UTXO.
-    #[allow(dead_code)] // Used by snapshot driver (Task 4) and tests.
     pub(crate) fn insert(&mut self, u: UnshieldedUtxo) {
         self.utxos.insert(u.id, u);
     }
 
     /// Remove a UTXO by id (no-op if absent — matches the
     /// indexer's at-least-once guarantee for spends).
-    #[allow(dead_code)] // Used by snapshot driver (Task 4) and tests.
     pub(crate) fn remove(&mut self, id: &UtxoId) {
         self.utxos.remove(id);
     }
