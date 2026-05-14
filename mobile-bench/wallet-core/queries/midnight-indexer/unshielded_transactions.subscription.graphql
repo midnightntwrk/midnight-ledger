@@ -1,0 +1,23 @@
+subscription UnshieldedTransactions($address: UnshieldedAddress!, $transactionId: Int) {
+  unshieldedTransactions(address: $address, transactionId: $transactionId) {
+    __typename
+    ... on UnshieldedTransaction {
+      createdUtxos {
+        owner
+        tokenType
+        value
+        intentHash
+        outputIndex
+        ctime
+        initialNonce
+      }
+      spentUtxos {
+        intentHash
+        outputIndex
+      }
+    }
+    ... on UnshieldedTransactionsProgress {
+      highestTransactionId
+    }
+  }
+}
