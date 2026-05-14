@@ -522,7 +522,7 @@ export class DustLocalState {
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
   readonly params: DustParameters;
-  readonly syncTime: Date;
+  syncTime: Date;
   readonly generatingTreeFirstFree: bigint;
   readonly commitmentTreeFirstFree: bigint;
 }
