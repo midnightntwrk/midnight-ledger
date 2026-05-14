@@ -80,7 +80,6 @@ pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
 ///
 /// Pulled out so the folding/termination logic can be unit-tested
 /// against a hand-built `Stream<Event>` without a live WS.
-#[allow(dead_code)] // Used by `snapshot()` and tests; `snapshot()` is wired into Wallet in Task 5.
 pub(super) async fn fold_events<S>(stream: S) -> Result<UtxoSet, UnshieldedError>
 where
     S: Stream<Item = Result<Event, UnshieldedError>>,
@@ -106,8 +105,7 @@ where
 /// Open a fresh graphql-transport-ws subscription against the
 /// indexer, replay UTXO events into a `UtxoSet`, terminate on
 /// the first `Progress` event. Closes the WS on return.
-#[allow(dead_code)] // Wired into `Wallet::sync_unshielded()` in Task 5.
-pub(super) async fn snapshot(
+pub(crate) async fn snapshot(
     ws_url: &str,
     address: &str,
 ) -> Result<UtxoSet, UnshieldedError> {

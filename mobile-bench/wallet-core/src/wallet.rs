@@ -131,6 +131,19 @@ impl Wallet {
             .map_err(|e| WalletError::Address(e.to_string()))
     }
 
+    /// Snapshot the unshielded UTXO set for this wallet's default
+    /// address. See `docs/superpowers/specs/2026-05-14-unshielded-sync-design.md`.
+    /// Opens a fresh `graphql-transport-ws` WebSocket to the
+    /// indexer, replays UTXO create/spend events, terminates on
+    /// the first `Progress` event, and returns the live set.
+    pub async fn sync_unshielded(&self) -> Result<crate::UtxoSet, crate::UnshieldedError> {
+        let address = self
+            .unshielded_address()
+            .map_err(|e| crate::UnshieldedError::InvalidAddress(e.to_string()))?;
+        let cfg = self.network.config();
+        crate::unshielded::snapshot::snapshot(cfg.indexer_ws_url, &address).await
+    }
+
     /// 32-byte raw seed. Returned by-copy to keep callers honest
     /// about it being secret material. `cfg(test)` because it's
     /// only referenced from in-crate tests today; remove the gate
