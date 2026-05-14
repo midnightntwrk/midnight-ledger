@@ -280,6 +280,7 @@ pub fn App() -> Element {
                     div { class: "seed-blob", "{url}" }
                 }
 
+                BalancePanel { network: *network.read() }
                 ResolveDidPanel { network: *network.read() }
                 CreateDidPanel { network: *network.read() }
             }
@@ -340,6 +341,53 @@ fn CreateDidPanel(network: Network) -> Element {
         if let Some(res) = result.read().as_ref() {
             match res {
                 Ok(did) => rsx! { div { class: "seed-blob", "{did}" } },
+                Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
+            }
+        }
+    }
+}
+
+#[component]
+fn BalancePanel(network: Network) -> Element {
+    let mut result = use_signal::<Option<Result<String, String>>>(|| None);
+    let mut pending = use_signal(|| false);
+
+    let sync = move |_| {
+        if *pending.read() {
+            return;
+        }
+        pending.set(true);
+        result.set(None);
+        spawn(async move {
+            let w = Wallet::demo(network);
+            let r = match w.sync_unshielded().await {
+                Ok(set) => {
+                    let mut lines = Vec::new();
+                    lines.push(format!("utxos: {}", set.len()));
+                    for (token, value) in set.balance_by_token() {
+                        lines.push(format!("  {}: {}", hex::encode(&token.0), value));
+                    }
+                    Ok(lines.join("\n"))
+                }
+                Err(e) => Err(e.to_string()),
+            };
+            result.set(Some(r));
+            pending.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "row", "Balance" }
+        div { class: "row",
+            button {
+                disabled: *pending.read(),
+                onclick: sync,
+                {if *pending.read() { "Syncing…" } else { "Sync balance" }}
+            }
+        }
+        if let Some(res) = result.read().as_ref() {
+            match res {
+                Ok(text) => rsx! { div { class: "seed-blob", "{text}" } },
                 Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
             }
         }
