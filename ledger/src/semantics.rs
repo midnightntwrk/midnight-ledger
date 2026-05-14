@@ -721,6 +721,32 @@ impl<D: DB> LedgerState<D> {
                 let res = (state, vec![]);
                 Ok(res)
             }
+            SystemTransaction::UnlockToTreasury { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to treasury rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to treasury");
+                let mut treasury = self.treasury.clone();
+                let native_token = treasury
+                    .get(&TokenType::Unshielded(NIGHT))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(*amount);
+                treasury = treasury.insert(TokenType::Unshielded(NIGHT), native_token);
+                let state = LedgerState {
+                    locked_pool: self.locked_pool - *amount,
+                    treasury,
+                    ..self.clone()
+                };
+                let res = (state, vec![]);
+                Ok(res)
+            }
             // NOTE: Treasury payments have been completely disabled until governance for the
             // treasury has been agreed. All code has been commented out to maximize clarity.
             SystemTransaction::PayFromTreasuryShielded { .. }
@@ -1316,7 +1342,8 @@ impl<D: DB> LedgerState<D> {
     ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
         match &tx.inner {
             Transaction::Standard(stx) => {
-                let (state, deferred_events) = self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
+                let (state, deferred_events) =
+                    self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
                 debug!(
                     "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
                     self.state_hash(),
@@ -2290,7 +2317,8 @@ mod tests {
         let expected_fee = basis_points_of(
             INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
             amount,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(
             new_state
                 .bridge_receiving

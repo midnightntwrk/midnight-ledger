@@ -712,7 +712,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v7]"]
+#[tag = "system-transaction[v8]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -735,6 +735,9 @@ pub enum SystemTransaction {
     DistributeReserve(u128),
     CNightGeneratesDustUpdate {
         events: Vec<CNightGeneratesDustEvent>,
+    },
+    UnlockToTreasury {
+        amount: u128,
     },
 }
 tag_enforcement_test!(SystemTransaction);
@@ -2263,7 +2266,7 @@ impl SystemTransaction {
                 // n offers
                 cost * outputs.len()
             }
-            PayBlockRewardsToTreasury { .. } => {
+            PayBlockRewardsToTreasury { .. } | UnlockToTreasury { .. } => {
                 let mut cost = RunningCost::ZERO;
                 cost += model.cell_read(16) + model.cell_write(16, true);
                 cost += model.map_index(EXPECTED_TOKEN_TYPE_DEPTH);
