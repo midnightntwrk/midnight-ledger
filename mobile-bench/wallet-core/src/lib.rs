@@ -17,6 +17,7 @@ mod indexer;
 mod network;
 mod node;
 mod probe;
+mod unshielded;
 mod wallet;
 
 pub use did::{
@@ -32,3 +33,6 @@ pub use network::{Network, NetworkConfig};
 pub use node::{MidnightSigner, NodeClient, NodeError, NodeHealth, NodeStatus, SignerError};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError};
+pub use unshielded::{
+    TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
+};
