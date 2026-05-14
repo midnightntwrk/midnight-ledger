@@ -70,6 +70,11 @@ pub fn App() -> Element {
     let mut phase = use_signal(|| SyncPhase::Idle);
     let mut chain = use_signal::<ChainSnapshot>(ChainSnapshot::default);
     let mut probe = use_signal::<Option<ProbeResult>>(|| None);
+    // Latest NIGHT subunit total from `Wallet::sync_unshielded()`.
+    // None = never synced or sync in flight; Some(0) = synced, no
+    // funds. The `unshielded_balance` future kicks off after a
+    // successful Connect (see below).
+    let mut night_subunits = use_signal::<Option<u128>>(|| None);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -116,6 +121,7 @@ pub fn App() -> Element {
         let net = *network.read();
         phase.set(SyncPhase::Connecting);
         chain.set(ChainSnapshot::default());
+        night_subunits.set(None);
 
         spawn(async move {
             let probe_result = probe_connectivity(net).await;
@@ -169,6 +175,32 @@ pub fn App() -> Element {
             } else {
                 SyncPhase::Stalled(errs.join("; "))
             });
+
+            // After a successful Connect, snapshot the unshielded
+            // UTXO set so BalancesCard can render the real NIGHT
+            // total. We deliberately use `Wallet::demo(net)` to
+            // match the seed shown in the address card; the
+            // generate flow currently shares the same demo path.
+            // A snapshot failure is non-fatal — the UI stays on
+            // "—" rather than reverting the Synced phase.
+            if errs.is_empty() {
+                let w = Wallet::demo(net);
+                match w.sync_unshielded().await {
+                    Ok(set) => {
+                        // NIGHT's raw 64-char token type is 32 zero bytes
+                        // (per the example-counter MIGRATION_GUIDE — the
+                        // v4 `nativeToken()` tagged form would silently
+                        // miss the balance).
+                        let night = set.total_for(
+                            &wallet_core::TokenType(vec![0u8; 32]),
+                        );
+                        night_subunits.set(Some(night));
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "unshielded snapshot failed");
+                    }
+                }
+            }
         });
     };
 
@@ -197,6 +229,7 @@ pub fn App() -> Element {
 
         BalancesCard {
             connected: matches!(*phase.read(), SyncPhase::Synced),
+            night_subunits: *night_subunits.read(),
         }
 
         button {
@@ -496,33 +529,65 @@ fn AddressCard(address: String) -> Element {
     }
 }
 
+/// Render a u128 subunit count as a comma-grouped decimal string —
+/// e.g. `250000000000000` → `"250,000,000,000,000"`. Matches
+/// example-counter's `formatBalance` (`BigInt.toLocaleString()`)
+/// so the displayed values agree between wallets.
+fn format_subunits(n: u128) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
 #[component]
-fn BalancesCard(connected: bool) -> Element {
+fn BalancesCard(connected: bool, night_subunits: Option<u128>) -> Element {
+    // Three display states for NIGHT:
+    //   • not connected           → "—"
+    //   • connected, sync pending → "syncing…"
+    //   • connected, sync done    → "<grouped subunit count>"
+    // DUST stays on "—" with a hint — the dustGenerations
+    // subscription is Phase B and not wired yet.
+    let night_text = match (connected, night_subunits) {
+        (false, _) => "—".to_string(),
+        (true, None) => "syncing…".to_string(),
+        (true, Some(n)) => format_subunits(n),
+    };
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Balances" }
             div { class: "balance-row",
                 span { class: "label", "NIGHT" }
                 span { class: "value",
-                    {if connected { "0.000 000" } else { "—" }}
+                    "{night_text}"
                     span { class: "unit", " NIGHT" }
                 }
             }
             div { class: "balance-row",
                 span { class: "label", "Dust" }
                 span { class: "value",
-                    {if connected { "0.000 000" } else { "—" }}
+                    // DUST stays on "—" — the dustGenerations
+                    // subscription is Phase B. The hint row below
+                    // tells the user why.
+                    "—"
                     span { class: "unit", " DUST" }
                 }
             }
-            // Hint row reminds the user how to make funds appear. Replaced with the
-            // `dust-progress` bar in Phase B once a registered NIGHT UTXO exists.
+            // Hint row replaces the `dust-progress` bar that will land in
+            // Phase B (dustGenerations subscription + registered NIGHT UTXOs).
             div { class: "balance-row",
                 span { class: "hint",
-                    {if connected {
-                        "Send NIGHT to the address above. Register UTXOs to start accruing Dust."
-                    } else {
-                        "Connect to the network to see live balances."
+                    {match (connected, night_subunits) {
+                        (false, _) => "Connect to the network to see live balances.",
+                        (true, None) => "Snapshotting unshielded UTXOs from the indexer…",
+                        (true, Some(0)) => "No NIGHT yet. Send NIGHT to the address above.",
+                        (true, Some(_)) => "DUST tracking lands in Phase B — register NIGHT UTXOs to accrue.",
                     }}
                 }
             }

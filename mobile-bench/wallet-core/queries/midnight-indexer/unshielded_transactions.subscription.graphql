@@ -2,6 +2,9 @@ subscription UnshieldedTransactions($address: UnshieldedAddress!, $transactionId
   unshieldedTransactions(address: $address, transactionId: $transactionId) {
     __typename
     ... on UnshieldedTransaction {
+      transaction {
+        id
+      }
       createdUtxos {
         owner
         tokenType

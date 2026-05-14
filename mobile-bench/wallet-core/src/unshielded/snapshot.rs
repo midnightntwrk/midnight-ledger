@@ -19,12 +19,18 @@ pub(super) const UNSHIELDED_TRANSACTIONS_QUERY: &str = include_str!(
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Event {
     Transaction {
+        /// Indexer-assigned transaction id (`Transaction.id` in the
+        /// schema). Used to compare against `Progress.highestTransactionId`
+        /// for termination — see `fold_events`.
+        transaction_id: i64,
         created: Vec<UnshieldedUtxo>,
         spent: Vec<UtxoId>,
     },
-    /// The indexer's "you're caught up" signal. The carried
-    /// `highest_transaction_id` is informational — we terminate on
-    /// any Progress event regardless of value.
+    /// The indexer's high-water-mark for this address. **Arrives
+    /// first**, before any historical Transaction events, so it is
+    /// NOT a "caught up" signal — it's an "I'm currently at id N for
+    /// this address" marker. `fold_events` terminates once it has
+    /// consumed Transaction events up to that id.
     Progress {
         highest_transaction_id: i64,
     },
@@ -41,6 +47,11 @@ pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
         .ok_or_else(|| UnshieldedError::Decode("missing __typename".into()))?;
     match typename {
         "UnshieldedTransaction" => {
+            let transaction_id = obj
+                .get("transaction")
+                .and_then(|t| t.get("id"))
+                .and_then(Value::as_i64)
+                .ok_or_else(|| UnshieldedError::Decode("missing transaction.id".into()))?;
             let created_raw = obj
                 .get("createdUtxos")
                 .and_then(Value::as_array)
@@ -57,7 +68,7 @@ pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
                 .iter()
                 .map(decode_utxo_id)
                 .collect::<Result<Vec<_>, _>>()?;
-            Ok(Event::Transaction { created, spent })
+            Ok(Event::Transaction { transaction_id, created, spent })
         }
         "UnshieldedTransactionsProgress" => {
             let high = obj
@@ -74,32 +85,98 @@ pub(super) fn decode_event(data: &Value) -> Result<Event, UnshieldedError> {
     }
 }
 
-/// Fold an event stream into a `UtxoSet`, stopping on the first
-/// `Progress` event. Returns `StreamClosedEarly` if the stream
-/// ends before a `Progress` event arrives.
+/// How long to wait after the most recent event before declaring the
+/// snapshot done. Belt-and-braces for the case where a `Progress`
+/// event was received with a high-water-mark we can never reach
+/// (e.g. indexer reports a global tip rather than an address-scoped
+/// one). Set comfortably above expected inter-frame latency.
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Fold an event stream into a `UtxoSet`, terminating when the
+/// indexer has delivered the historical backlog.
 ///
-/// Pulled out so the folding/termination logic can be unit-tested
-/// against a hand-built `Stream<Event>` without a live WS.
+/// Termination — verified against a live preprod-style standalone
+/// indexer (`docs/superpowers/specs/2026-05-14-unshielded-sync-design.md`
+/// open question #1):
+/// the indexer emits `Progress { highest_transaction_id }` as the
+/// **first** frame on the subscription — an "I'm currently at id N for
+/// this address" marker — then streams the historical
+/// `Transaction { transaction_id, … }` events. We track the highest
+/// `transaction_id` consumed and exit once it meets or exceeds the
+/// recorded target. Empty-history addresses fall out for free
+/// because Progress arrives with `highest_transaction_id <= 0`, the
+/// last_id starts at 0, and the comparison passes immediately.
+///
+/// An idle timeout (`IDLE_TIMEOUT`) is a backstop: if the indexer's
+/// recorded high-water-mark is unreachable (shouldn't happen, but
+/// would otherwise hang), the snapshot still returns once the
+/// stream has been quiet for long enough — provided Progress has
+/// been seen. Without Progress, an idle gap is still an error
+/// (`StreamClosedEarly`).
+///
+/// Pulled out so this logic can be unit-tested against a hand-built
+/// `Stream<Event>` with no live WS.
 pub(super) async fn fold_events<S>(stream: S) -> Result<UtxoSet, UnshieldedError>
 where
     S: Stream<Item = Result<Event, UnshieldedError>>,
 {
     let mut set = UtxoSet::new();
+    let mut target: Option<i64> = None;
+    let mut last_seen_id: i64 = 0;
     futures::pin_mut!(stream);
-    while let Some(item) = stream.next().await {
-        match item? {
-            Event::Transaction { created, spent } => {
-                for u in created {
-                    set.insert(u);
-                }
-                for id in spent {
-                    set.remove(&id);
-                }
+
+    loop {
+        // Early-exit check before each poll — handles the empty-history
+        // address case where Progress(0) arrives with no transactions.
+        if let Some(hi) = target {
+            if last_seen_id >= hi {
+                return Ok(set);
             }
-            Event::Progress { .. } => return Ok(set),
+        }
+
+        let next = tokio::time::timeout(IDLE_TIMEOUT, stream.next()).await;
+        match next {
+            Ok(Some(item)) => match item? {
+                Event::Transaction {
+                    transaction_id,
+                    created,
+                    spent,
+                } => {
+                    for u in created {
+                        set.insert(u);
+                    }
+                    for id in spent {
+                        set.remove(&id);
+                    }
+                    if transaction_id > last_seen_id {
+                        last_seen_id = transaction_id;
+                    }
+                }
+                Event::Progress {
+                    highest_transaction_id,
+                } => {
+                    target = Some(highest_transaction_id);
+                }
+            },
+            // Stream closed cleanly — that's only OK if the indexer
+            // explicitly told us we're caught up via `complete`,
+            // which fold_events never sees directly. The transport
+            // layer turns `complete` into stream-end, so we treat
+            // an early end as `StreamClosedEarly` unless Progress
+            // already told us we're done (handled by the early-exit
+            // check at the top of the loop).
+            Ok(None) => return Err(UnshieldedError::StreamClosedEarly),
+            // Idle timeout. If Progress arrived earlier, treat the
+            // silence as "no more historicals coming"; otherwise
+            // surface the early stall as an error.
+            Err(_elapsed) => {
+                if target.is_some() {
+                    return Ok(set);
+                }
+                return Err(UnshieldedError::StreamClosedEarly);
+            }
         }
     }
-    Err(UnshieldedError::StreamClosedEarly)
 }
 
 /// Open a fresh graphql-transport-ws subscription against the
@@ -235,6 +312,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 7 },
                 "createdUtxos": [{
                     "owner": "mn_addr_test1abcd",
                     "tokenType": hex::encode([0xAB]),
@@ -252,7 +330,8 @@ mod tests {
         });
         let ev = decode_event(&data).expect("decode");
         match ev {
-            Event::Transaction { created, spent } => {
+            Event::Transaction { transaction_id, created, spent } => {
+                assert_eq!(transaction_id, 7);
                 assert_eq!(created.len(), 1);
                 assert_eq!(created[0].value, 1_000_000);
                 assert_eq!(created[0].id.output_index, 0);
@@ -272,17 +351,37 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 0 },
                 "createdUtxos": [],
                 "spentUtxos": []
             }
         });
         let ev = decode_event(&data).expect("decode");
         match ev {
-            Event::Transaction { created, spent } => {
+            Event::Transaction { transaction_id, created, spent } => {
+                assert_eq!(transaction_id, 0);
                 assert!(created.is_empty());
                 assert!(spent.is_empty());
             }
             other => panic!("expected Transaction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_missing_transaction_id_errors() {
+        let data = json!({
+            "unshieldedTransactions": {
+                "__typename": "UnshieldedTransaction",
+                "createdUtxos": [],
+                "spentUtxos": []
+            }
+        });
+        let err = decode_event(&data).unwrap_err();
+        match err {
+            UnshieldedError::Decode(msg) => {
+                assert!(msg.contains("transaction.id"), "msg={msg}");
+            }
+            other => panic!("expected Decode, got {other:?}"),
         }
     }
 
@@ -309,6 +408,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 1 },
                 "createdUtxos": [],
                 "spentUtxos": [{
                     "intentHash": hex::encode([0x44; 16]),
@@ -325,6 +425,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 1 },
                 "createdUtxos": [],
                 "spentUtxos": [{
                     "intentHash": intent_hex(0x55),
@@ -349,6 +450,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 1 },
                 "createdUtxos": [{
                     "owner": "mn_addr_test1abcd",
                     "tokenType": hex::encode([0xAB]),
@@ -375,6 +477,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 1 },
                 "createdUtxos": [{
                     "owner": "mn_addr_test1abcd",
                     "value": "100",
@@ -399,6 +502,7 @@ mod tests {
         let data = json!({
             "unshieldedTransactions": {
                 "__typename": "UnshieldedTransaction",
+                "transaction": { "id": 1 },
                 "createdUtxos": [{
                     "owner": "mn_addr_test1abcd",
                     "tokenType": hex::encode([0xAB]),
@@ -437,22 +541,60 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn fold_terminates_on_first_progress() {
+    async fn fold_progress_first_then_transactions_terminates_at_target() {
+        // Real-indexer ordering (verified by direct WS probe against a
+        // local standalone stack — open question #1 from the design
+        // spec): `Progress { hi }` arrives BEFORE the historical
+        // `Transaction` events. fold_events must keep consuming
+        // until `last_seen_id >= hi`, not bail on the first Progress.
+        // Beyond the id that matches the target, further events are
+        // not consumed — they belong to the post-snapshot live tail.
         let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Progress { highest_transaction_id: 9 }),
             Ok(Event::Transaction {
+                transaction_id: 4,
                 created: vec![utxo(1, 0, 0xAB, 100)],
                 spent: vec![],
             }),
-            Ok(Event::Progress { highest_transaction_id: 10 }),
-            // Below should never be reached:
             Ok(Event::Transaction {
-                created: vec![utxo(2, 0, 0xAB, 999)],
+                transaction_id: 6,
+                created: vec![utxo(2, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+            Ok(Event::Transaction {
+                transaction_id: 9,
+                created: vec![utxo(3, 0, 0xAB, 100)],
+                spent: vec![],
+            }),
+            // Below should never be reached: fold should have
+            // terminated on the id=9 event matching target=9.
+            Ok(Event::Transaction {
+                transaction_id: 11,
+                created: vec![utxo(4, 0, 0xAB, 9999)],
                 spent: vec![],
             }),
         ];
         let set = fold_events(stream::iter(events)).await.expect("ok");
-        assert_eq!(set.len(), 1);
-        assert_eq!(set.total_for(&TokenType(vec![0xAB])), 100);
+        assert_eq!(set.len(), 3);
+        assert_eq!(set.total_for(&TokenType(vec![0xAB])), 300);
+    }
+
+    #[tokio::test]
+    async fn fold_empty_address_progress_zero_terminates_immediately() {
+        // Empty-history address: Progress(0) arrives, no Transaction
+        // events follow. last_seen_id starts at 0, so the early-exit
+        // check at the top of the loop fires on the next iteration.
+        let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Progress { highest_transaction_id: 0 }),
+            // Should never be reached:
+            Ok(Event::Transaction {
+                transaction_id: 99,
+                created: vec![utxo(1, 0, 0xAB, 9999)],
+                spent: vec![],
+            }),
+        ];
+        let set = fold_events(stream::iter(events)).await.expect("ok");
+        assert!(set.is_empty());
     }
 
     #[tokio::test]
@@ -462,15 +604,17 @@ mod tests {
             output_index: 0,
         };
         let events: Vec<Result<Event, UnshieldedError>> = vec![
+            Ok(Event::Progress { highest_transaction_id: 2 }),
             Ok(Event::Transaction {
+                transaction_id: 1,
                 created: vec![utxo(0x11, 0, 0xAB, 100)],
                 spent: vec![],
             }),
             Ok(Event::Transaction {
+                transaction_id: 2,
                 created: vec![],
                 spent: vec![id_a],
             }),
-            Ok(Event::Progress { highest_transaction_id: 5 }),
         ];
         let set = fold_events(stream::iter(events)).await.expect("ok");
         assert!(set.is_empty());
@@ -478,8 +622,12 @@ mod tests {
 
     #[tokio::test]
     async fn fold_returns_stream_closed_early_without_progress() {
+        // Stream ends without ever emitting a Progress event. We
+        // don't know whether we're caught up, so the snapshot fails
+        // rather than silently returning a partial set.
         let events: Vec<Result<Event, UnshieldedError>> = vec![
             Ok(Event::Transaction {
+                transaction_id: 1,
                 created: vec![utxo(1, 0, 0xAB, 100)],
                 spent: vec![],
             }),
@@ -492,6 +640,7 @@ mod tests {
     async fn fold_propagates_first_error() {
         let events: Vec<Result<Event, UnshieldedError>> = vec![
             Ok(Event::Transaction {
+                transaction_id: 1,
                 created: vec![utxo(1, 0, 0xAB, 100)],
                 spent: vec![],
             }),
@@ -505,8 +654,12 @@ mod tests {
     #[tokio::test]
     async fn fold_handles_empty_transaction_events() {
         let events: Vec<Result<Event, UnshieldedError>> = vec![
-            Ok(Event::Transaction { created: vec![], spent: vec![] }),
-            Ok(Event::Progress { highest_transaction_id: 0 }),
+            Ok(Event::Progress { highest_transaction_id: 1 }),
+            Ok(Event::Transaction {
+                transaction_id: 1,
+                created: vec![],
+                spent: vec![],
+            }),
         ];
         let set = fold_events(stream::iter(events)).await.expect("ok");
         assert!(set.is_empty());
