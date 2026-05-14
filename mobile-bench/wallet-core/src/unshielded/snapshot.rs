@@ -96,7 +96,7 @@ fn decode_utxo(v: &Value) -> Result<UnshieldedUtxo, UnshieldedError> {
     let value: u128 = value_str
         .parse()
         .map_err(|e| UnshieldedError::Decode(format!("utxo.value: {e}")))?;
-    let intent_hash = decode_intent_hash(v.get("intentHash"))?;
+    let intent_hash = decode_hash32("created.intentHash", v.get("intentHash"))?;
     let output_index = v
         .get("outputIndex")
         .and_then(Value::as_i64)
@@ -109,20 +109,7 @@ fn decode_utxo(v: &Value) -> Result<UnshieldedUtxo, UnshieldedError> {
     let ctime = v.get("ctime").and_then(Value::as_i64).and_then(|s| {
         if s >= 0 { Some(s as u64) } else { None }
     });
-    let nonce_hex = v
-        .get("initialNonce")
-        .and_then(Value::as_str)
-        .ok_or_else(|| UnshieldedError::Decode("utxo.initialNonce".into()))?;
-    let nonce_bytes = hex::decode(nonce_hex.trim_start_matches("0x"))
-        .map_err(|e| UnshieldedError::Decode(format!("utxo.initialNonce: {e}")))?;
-    let mut initial_nonce = [0u8; 32];
-    if nonce_bytes.len() != 32 {
-        return Err(UnshieldedError::Decode(format!(
-            "utxo.initialNonce: expected 32 bytes, got {}",
-            nonce_bytes.len()
-        )));
-    }
-    initial_nonce.copy_from_slice(&nonce_bytes);
+    let initial_nonce = decode_hash32("utxo.initialNonce", v.get("initialNonce"))?;
 
     Ok(UnshieldedUtxo {
         owner,
@@ -139,7 +126,7 @@ fn decode_utxo(v: &Value) -> Result<UnshieldedUtxo, UnshieldedError> {
 
 #[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
 fn decode_utxo_id(v: &Value) -> Result<UtxoId, UnshieldedError> {
-    let intent_hash = decode_intent_hash(v.get("intentHash"))?;
+    let intent_hash = decode_hash32("spent.intentHash", v.get("intentHash"))?;
     let output_index = v
         .get("outputIndex")
         .and_then(Value::as_i64)
@@ -156,15 +143,15 @@ fn decode_utxo_id(v: &Value) -> Result<UtxoId, UnshieldedError> {
 }
 
 #[allow(dead_code)] // Used by snapshot driver in Task 4 and tests.
-fn decode_intent_hash(v: Option<&Value>) -> Result<[u8; 32], UnshieldedError> {
+fn decode_hash32(field: &str, v: Option<&Value>) -> Result<[u8; 32], UnshieldedError> {
     let hex_str = v
         .and_then(Value::as_str)
-        .ok_or_else(|| UnshieldedError::Decode("intentHash".into()))?;
+        .ok_or_else(|| UnshieldedError::Decode(format!("{field}: missing")))?;
     let bytes = hex::decode(hex_str.trim_start_matches("0x"))
-        .map_err(|e| UnshieldedError::Decode(format!("intentHash: {e}")))?;
+        .map_err(|e| UnshieldedError::Decode(format!("{field}: {e}")))?;
     if bytes.len() != 32 {
         return Err(UnshieldedError::Decode(format!(
-            "intentHash: expected 32 bytes, got {}",
+            "{field}: expected 32 bytes, got {}",
             bytes.len()
         )));
     }
@@ -288,5 +275,104 @@ mod tests {
         });
         let err = decode_event(&data).unwrap_err();
         assert!(matches!(err, UnshieldedError::Decode(_)));
+    }
+
+    #[test]
+    fn decode_negative_output_index_errors() {
+        let data = json!({
+            "unshieldedTransactions": {
+                "__typename": "UnshieldedTransaction",
+                "createdUtxos": [],
+                "spentUtxos": [{
+                    "intentHash": intent_hex(0x55),
+                    "outputIndex": -1
+                }]
+            }
+        });
+        let err = decode_event(&data).unwrap_err();
+        match err {
+            UnshieldedError::Decode(msg) => {
+                assert!(msg.contains("outputIndex"), "msg={msg}");
+            }
+            other => panic!("expected Decode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_value_not_string_errors() {
+        // The indexer documents `value: String` (u128-as-decimal).
+        // A bare JSON number would slip past `as_str`; verify we
+        // reject it with a field-named error.
+        let data = json!({
+            "unshieldedTransactions": {
+                "__typename": "UnshieldedTransaction",
+                "createdUtxos": [{
+                    "owner": "mn_addr_test1abcd",
+                    "tokenType": hex::encode([0xAB]),
+                    "value": 1_000_000,
+                    "intentHash": intent_hex(0x11),
+                    "outputIndex": 0,
+                    "ctime": 1_700_000_000,
+                    "initialNonce": nonce_hex(0x22)
+                }],
+                "spentUtxos": []
+            }
+        });
+        let err = decode_event(&data).unwrap_err();
+        match err {
+            UnshieldedError::Decode(msg) => {
+                assert!(msg.contains("utxo.value"), "msg={msg}");
+            }
+            other => panic!("expected Decode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_missing_token_type_errors() {
+        let data = json!({
+            "unshieldedTransactions": {
+                "__typename": "UnshieldedTransaction",
+                "createdUtxos": [{
+                    "owner": "mn_addr_test1abcd",
+                    "value": "100",
+                    "intentHash": intent_hex(0x11),
+                    "outputIndex": 0,
+                    "initialNonce": nonce_hex(0x22)
+                }],
+                "spentUtxos": []
+            }
+        });
+        let err = decode_event(&data).unwrap_err();
+        match err {
+            UnshieldedError::Decode(msg) => {
+                assert!(msg.contains("tokenType"), "msg={msg}");
+            }
+            other => panic!("expected Decode, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decode_bad_initial_nonce_length_errors() {
+        let data = json!({
+            "unshieldedTransactions": {
+                "__typename": "UnshieldedTransaction",
+                "createdUtxos": [{
+                    "owner": "mn_addr_test1abcd",
+                    "tokenType": hex::encode([0xAB]),
+                    "value": "100",
+                    "intentHash": intent_hex(0x11),
+                    "outputIndex": 0,
+                    "initialNonce": hex::encode([0xCC; 8])
+                }],
+                "spentUtxos": []
+            }
+        });
+        let err = decode_event(&data).unwrap_err();
+        match err {
+            UnshieldedError::Decode(msg) => {
+                assert!(msg.contains("initialNonce"), "msg={msg}");
+            }
+            other => panic!("expected Decode, got {other:?}"),
+        }
     }
 }
