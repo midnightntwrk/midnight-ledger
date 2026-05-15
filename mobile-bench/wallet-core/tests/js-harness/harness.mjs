@@ -26,6 +26,23 @@ import * as readline from "node:readline";
 
 const HARNESS_VERSION = "0.1.0";
 
+/**
+ * Walk a JSON value, replacing objects of shape `{ "$bigint": "123" }`
+ * with the equivalent JS `BigInt`. JSON has no native bigint type;
+ * the Compact runtime's `Field` / `Uint<N>` args need BigInt. The
+ * tagged-object convention keeps the wire format pure JSON.
+ */
+function reviveBigints(value) {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(reviveBigints);
+  if (typeof value.$bigint === "string") return BigInt(value.$bigint);
+  const out = {};
+  for (const [k, v] of Object.entries(value)) {
+    out[k] = reviveBigints(v);
+  }
+  return out;
+}
+
 /** Strict hex → Uint8Array. Throws on odd length or invalid chars. */
 function hexToBytes(hex) {
   const clean = typeof hex === "string" && hex.startsWith("0x") ? hex.slice(2) : hex;
@@ -141,7 +158,11 @@ const methods = {
     if (typeof fn !== "function") {
       throw new Error(`unknown circuit: ${params.circuit}`);
     }
-    const args = Array.isArray(params.circuitArgs) ? params.circuitArgs : [];
+    // Revive any `{ "$bigint": "123" }` placeholders to JS BigInt
+    // before passing to the circuit (Compact expects BigInt for
+    // `Field`, `Uint<N>`, etc.).
+    const rawArgs = Array.isArray(params.circuitArgs) ? params.circuitArgs : [];
+    const args = rawArgs.map(reviveBigints);
     const results = fn(circuitContext, ...args);
     const proofData = results.proofData;
 
