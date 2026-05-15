@@ -102,6 +102,114 @@ enum SessionEvent {
         tx_hash: [u8; 32],
         block_hash: [u8; 32],
     },
+    /// A DID circuit invocation the user prepared in the UI. The
+    /// wallet does NOT submit these yet — see DidOperationsPanel
+    /// for the local-only flow. Once the Compact-runtime bridge
+    /// lands, the same operation will be turned into a real
+    /// `ContractCall` transaction.
+    #[allow(dead_code)] // wired up by DidOperationsPanel — see commit history.
+    OperationDrafted {
+        did: String,
+        operation: DidOperation,
+    },
+}
+
+/// One DID circuit invocation, drafted in the UI. Shape mirrors
+/// the corresponding Compact circuit in
+/// `mobile-bench/wallet-core/contracts/midnight-did/did.compact`.
+///
+/// Variants are constructed by `DidOperationsPanel` (next commit);
+/// the enum lives here so `SessionEvent::OperationDrafted` can
+/// reference it from the existing session-log plumbing.
+#[allow(dead_code)] // populated by DidOperationsPanel — see commit history.
+#[derive(Clone, PartialEq, Eq)]
+enum DidOperation {
+    AddAlsoKnownAs { value: String },
+    RemoveAlsoKnownAs { value: String },
+    AddVerificationMethod(VerificationMethodInput),
+    UpdateVerificationMethod(VerificationMethodInput),
+    RemoveVerificationMethod { id: String },
+    AddVerificationMethodRelation { relation: String, method_id: String },
+    RemoveVerificationMethodRelation { relation: String, method_id: String },
+    AddService(ServiceInput),
+    UpdateService(ServiceInput),
+    RemoveService { id: String },
+    Deactivate,
+}
+
+impl DidOperation {
+    fn circuit(&self) -> &'static str {
+        match self {
+            Self::AddAlsoKnownAs { .. } => "addAlsoKnownAs",
+            Self::RemoveAlsoKnownAs { .. } => "removeAlsoKnownAs",
+            Self::AddVerificationMethod(_) => "addVerificationMethod",
+            Self::UpdateVerificationMethod(_) => "updateVerificationMethod",
+            Self::RemoveVerificationMethod { .. } => "removeVerificationMethod",
+            Self::AddVerificationMethodRelation { .. } => "addVerificationMethodRelation",
+            Self::RemoveVerificationMethodRelation { .. } => "removeVerificationMethodRelation",
+            Self::AddService(_) => "addService",
+            Self::UpdateService(_) => "updateService",
+            Self::RemoveService { .. } => "removeService",
+            Self::Deactivate => "deactivate",
+        }
+    }
+
+    /// Single-line human-readable summary for the session log.
+    fn summary(&self) -> String {
+        match self {
+            Self::AddAlsoKnownAs { value } | Self::RemoveAlsoKnownAs { value } => {
+                format!("value: {value}")
+            }
+            Self::AddVerificationMethod(vm) | Self::UpdateVerificationMethod(vm) => {
+                format!("id: {} · {}/{}", vm.id, vm.key_type, vm.curve)
+            }
+            Self::RemoveVerificationMethod { id } | Self::RemoveService { id } => {
+                format!("id: {id}")
+            }
+            Self::AddVerificationMethodRelation { relation, method_id }
+            | Self::RemoveVerificationMethodRelation { relation, method_id } => {
+                format!("{relation} ← {method_id}")
+            }
+            Self::AddService(s) | Self::UpdateService(s) => {
+                format!("id: {} · {} → {}", s.id, s.typ, s.endpoint)
+            }
+            Self::Deactivate => "—".to_string(),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct VerificationMethodInput {
+    id: String,
+    key_type: String,
+    curve: String,
+    pk_x: String,
+    pk_y: String,
+}
+
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct ServiceInput {
+    id: String,
+    typ: String,
+    endpoint: String,
+}
+
+/// Timing snapshot for one completed pipeline run. Built by the
+/// receiver side: each `WizardStage` arrival timestamps with
+/// `Instant::now()`; durations are the deltas between consecutive
+/// timestamps + the implicit "start → first stage" leg.
+#[derive(Clone, PartialEq, Eq)]
+struct TimingRun {
+    /// "create_did" or "load_did_circuit:<circuit>" — what the
+    /// pipeline was doing.
+    label: String,
+    /// Per-stage duration in milliseconds. Indexed by `PIPELINE`
+    /// order; entries past the last reached stage are left at 0.
+    per_stage_ms: [u64; 6],
+    /// End-to-end duration from spawn to terminal (Done or Failed).
+    total_ms: u64,
+    /// Whether the run ended in Done (true) or Failed (false).
+    succeeded: bool,
 }
 
 #[component]
@@ -134,6 +242,9 @@ pub fn App() -> Element {
     // resolve, and circuit load gets one entry. Persisted in
     // memory only; cleared when the user reloads the page.
     let mut session_log = use_signal::<Vec<SessionEvent>>(Vec::new);
+    // Per-pipeline timing snapshots, newest last. Shown in the
+    // Diagnostics tab as a stacked bar / breakdown per run.
+    let mut timing_log = use_signal::<Vec<TimingRun>>(Vec::new);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -370,6 +481,11 @@ pub fn App() -> Element {
                         });
                         session_log.set(log);
                     },
+                    on_timing: move |run: TimingRun| {
+                        let mut log = timing_log.read().clone();
+                        log.push(run);
+                        timing_log.set(log);
+                    },
                 }
                 ResolveDidPanel {
                     network: *network.read(),
@@ -395,10 +511,16 @@ pub fn App() -> Element {
                         });
                         session_log.set(log);
                     },
+                    on_timing: move |run: TimingRun| {
+                        let mut log = timing_log.read().clone();
+                        log.push(run);
+                        timing_log.set(log);
+                    },
                 }
                 SessionLogPanel { events: session_log.read().clone() }
             },
             Tab::Diagnostics => rsx! {
+                TimingsPanel { runs: timing_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "row", "Seed (hex):" }
                     div { class: "seed-blob", "{w.seed_hex}" }
@@ -495,6 +617,52 @@ fn step_status(idx: usize, stages: &[wallet_core::WizardStage]) -> StepStatus {
     }
 }
 
+/// Map a `WizardStage` to its 0-based slot in `PIPELINE`, or
+/// `None` for terminal stages (Done / Failed).
+fn stage_pipeline_idx(s: &wallet_core::WizardStage) -> Option<usize> {
+    use wallet_core::WizardStage as W;
+    Some(match s {
+        W::SyncingDust => 0,
+        W::Composing => 1,
+        W::Balancing => 2,
+        W::Proving => 3,
+        W::Submitting => 4,
+        W::Confirming => 5,
+        W::Done(_) | W::Failed(_) => return None,
+    })
+}
+
+/// Compute a `TimingRun` from a sequence of `(stage_idx, arrival_time)`
+/// observations plus the terminal timestamp. Each stage's duration is
+/// "next arrival - own arrival"; the last reached stage uses `t_end`
+/// as its "next". Stages never reached stay at 0 ms.
+fn build_timing(
+    label: String,
+    observations: &[(usize, std::time::Instant)],
+    t_end: std::time::Instant,
+    succeeded: bool,
+) -> TimingRun {
+    let mut per_stage_ms = [0u64; 6];
+    for win in observations.windows(2) {
+        let (i0, t0) = win[0];
+        let (_, t1) = win[1];
+        per_stage_ms[i0] = t1.saturating_duration_since(t0).as_millis() as u64;
+    }
+    if let Some(&(last_idx, last_t)) = observations.last() {
+        per_stage_ms[last_idx] = t_end.saturating_duration_since(last_t).as_millis() as u64;
+    }
+    let total_ms = observations
+        .first()
+        .map(|&(_, t0)| t_end.saturating_duration_since(t0).as_millis() as u64)
+        .unwrap_or(0);
+    TimingRun {
+        label,
+        per_stage_ms,
+        total_ms,
+        succeeded,
+    }
+}
+
 /// Final outcome from the stages stream, if any.
 fn terminal(stages: &[wallet_core::WizardStage]) -> Option<TerminalView<'_>> {
     use wallet_core::WizardStage as W;
@@ -514,6 +682,7 @@ enum TerminalView<'a> {
 fn CreateDidWizard(
     network: Network,
     on_done: EventHandler<wallet_core::DeployOutcome>,
+    on_timing: EventHandler<TimingRun>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -527,11 +696,25 @@ fn CreateDidWizard(
         running.set(true);
         stages.set(Vec::new());
         let on_done = on_done.clone();
+        let on_timing = on_timing.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
             let mut stream = std::pin::pin!(w.create_did());
+            let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
             while let Some(stage) = stream.next().await {
+                let now = std::time::Instant::now();
+                if let Some(idx) = stage_pipeline_idx(&stage) {
+                    observations.push((idx, now));
+                } else {
+                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    on_timing.call(build_timing(
+                        "create_did".to_string(),
+                        &observations,
+                        now,
+                        succeeded,
+                    ));
+                }
                 let mut current = stages.read().clone();
                 if let WizardStage::Done(o) = &stage {
                     on_done.call(o.clone());
@@ -808,6 +991,7 @@ fn LoadCircuitPanel(
     seed_did: Option<String>,
     seed_counter: Option<u32>,
     on_done: EventHandler<(String, String, wallet_core::DeployOutcome)>,
+    on_timing: EventHandler<TimingRun>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -891,11 +1075,26 @@ fn LoadCircuitPanel(
         running.set(true);
         stages.set(Vec::new());
         let on_done = on_done.clone();
+        let on_timing = on_timing.clone();
+        let timing_label = format!("load_did_circuit:{name}");
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
             let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name.clone(), counter));
+            let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
             while let Some(stage) = stream.next().await {
+                let now = std::time::Instant::now();
+                if let Some(idx) = stage_pipeline_idx(&stage) {
+                    observations.push((idx, now));
+                } else {
+                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    on_timing.call(build_timing(
+                        timing_label.clone(),
+                        &observations,
+                        now,
+                        succeeded,
+                    ));
+                }
                 let mut current = stages.read().clone();
                 if let WizardStage::Done(o) = &stage {
                     on_done.call((did_for_log.clone(), name.clone(), o.clone()));
@@ -1000,6 +1199,80 @@ fn LoadCircuitPanel(
 }
 
 #[component]
+fn TimingsPanel(runs: Vec<TimingRun>) -> Element {
+    if runs.is_empty() {
+        return rsx! {
+            div { class: "session-log-empty",
+                "Run a Create DID or Load circuit to capture per-stage timings."
+            }
+        };
+    }
+    rsx! {
+        div { class: "wizard-header", "Pipeline timings" }
+        ul { class: "session-log",
+            for (idx , run) in runs.iter().enumerate().rev() {
+                {render_timing_entry(idx, run)}
+            }
+        }
+    }
+}
+
+fn render_timing_entry(idx: usize, run: &TimingRun) -> Element {
+    let outcome = if run.succeeded { "ok" } else { "err" };
+    let total = format_ms(run.total_ms);
+    // Find max stage duration so we can scale bars relatively.
+    let max_stage = run.per_stage_ms.iter().copied().max().unwrap_or(0).max(1);
+    let label = run.label.clone();
+    rsx! {
+        li {
+            key: "timing-{idx}",
+            class: "session-log-entry timing {outcome}",
+            div { class: "head",
+                span { class: "kind", "{label}" }
+                span { class: "when", "#{idx + 1} · total {total}" }
+            }
+            ul { class: "timing-bars",
+                for (i , label) in PIPELINE.iter().enumerate() {
+                    {render_timing_bar(label, run.per_stage_ms[i], max_stage)}
+                }
+            }
+        }
+    }
+}
+
+fn render_timing_bar(label: &str, ms: u64, max_ms: u64) -> Element {
+    // Bar width in percent — empty stages stay at 0% so the user
+    // sees clearly that work didn't happen there.
+    let pct = if max_ms == 0 { 0 } else { ((ms * 100) / max_ms).min(100) };
+    rsx! {
+        li { class: "timing-bar-row",
+            span { class: "timing-bar-label", "{label}" }
+            div { class: "timing-bar-track",
+                div { class: "timing-bar-fill", style: "width: {pct}%;" }
+            }
+            span { class: "timing-bar-value", "{format_ms(ms)}" }
+        }
+    }
+}
+
+/// Compact human-readable duration: 850ms / 1.2s / 41.8s / 2m 03s.
+fn format_ms(ms: u64) -> String {
+    if ms < 1_000 {
+        format!("{ms}ms")
+    } else if ms < 10_000 {
+        let s = ms as f64 / 1000.0;
+        format!("{s:.2}s")
+    } else if ms < 60_000 {
+        let s = ms as f64 / 1000.0;
+        format!("{s:.1}s")
+    } else {
+        let m = ms / 60_000;
+        let s = (ms % 60_000) / 1_000;
+        format!("{m}m {s:02}s")
+    }
+}
+
+#[component]
 fn SessionLogPanel(events: Vec<SessionEvent>) -> Element {
     if events.is_empty() {
         return rsx! {
@@ -1056,6 +1329,18 @@ fn render_session_entry(idx: usize, event: &SessionEvent) -> Element {
                 div { class: "detail", "{did}" }
                 div { class: "detail", "tx 0x{hex::encode(tx_hash)}" }
                 div { class: "detail", "block 0x{hex::encode(block_hash)}" }
+            }
+        },
+        SessionEvent::OperationDrafted { did, operation } => rsx! {
+            li {
+                key: "{idx}",
+                class: "session-log-entry circuit",
+                div { class: "head",
+                    span { class: "kind", "Drafted {operation.circuit()}" }
+                    span { class: "when", "#{idx + 1} · local-only" }
+                }
+                div { class: "detail", "{did}" }
+                div { class: "detail", "{operation.summary()}" }
             }
         },
     }
