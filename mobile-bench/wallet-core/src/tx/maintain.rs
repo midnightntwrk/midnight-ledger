@@ -8,21 +8,23 @@ use base_crypto::signatures::{Signature, SigningKey};
 use base_crypto::time::Timestamp;
 use coin_structure::contract::ContractAddress;
 use ledger::structure::{
-    Intent, MaintenanceUpdate, ProofPreimageMarker, SignaturesValue, SingleUpdate,
-    StandardTransaction, Transaction,
+    Intent, MaintenanceUpdate, ProofPreimageMarker, SingleUpdate, StandardTransaction, Transaction,
 };
 use rand::{CryptoRng, Rng};
 use storage::DefaultDB;
-use storage::storage::{Array, HashMap};
+use storage::storage::HashMap;
 use transient_crypto::commitment::PedersenRandomness;
 
 use super::TxError;
 use super::build::UnprovenTx;
 
-/// Segment slot for the maintenance intent. Distinct from the
-/// deploy segment (1, see `tx/build.rs`) and the dust-balance
-/// segment (0xFEED, see `tx/balance.rs`).
-const MAINTAIN_SEGMENT: u16 = 2;
+/// Segment slot for the maintenance intent. The reference
+/// `test_utilities::test_intents` always puts maintenance updates
+/// at segment 1; deviating from that triggers an
+/// `InvalidDustSpendProof` somewhere in the dust intent's tree
+/// state check (root cause not yet pinned down — pragmatic fix
+/// is to match the reference layout).
+const MAINTAIN_SEGMENT: u16 = 1;
 
 /// Compose a `MaintenanceUpdate` carrying a single
 /// `VerifierKeyInsert(entry_point, V3(vk))` update, sign its
@@ -48,37 +50,15 @@ pub(crate) fn build_load_verifier_key<R: Rng + CryptoRng>(
         ledger::structure::ContractOperationVersionedVerifierKey::V3(verifier_key),
     );
 
-    let updates = {
-        let mut a = Array::new();
-        a = a.push(single);
-        a
-    };
-
-    // Sign the data-to-sign before populating `signatures`, then
-    // attach. The `data_to_sign()` covers address + updates + counter
-    // (NOT signatures), so signing before/after attach doesn't
-    // matter — but it's cleanest to compute it from a partially-
-    // built update.
-    let probe = MaintenanceUpdate::<DefaultDB> {
-        address: contract_address,
-        updates: updates.clone(),
-        counter,
-        signatures: Array::new(),
-    };
-    let payload = probe.data_to_sign();
+    // Use the canonical constructor + add_signature path
+    // (`ledger/src/construct.rs:299-318`). `add_signature` sorts
+    // signatures internally; manual struct construction was a
+    // candidate cause of an InvalidDustSpendProof regression.
+    let upd: MaintenanceUpdate<DefaultDB> =
+        MaintenanceUpdate::new(contract_address, vec![single], counter);
+    let payload = upd.data_to_sign();
     let sig = sk.sign(rng, &payload);
-    let signatures = {
-        let mut a = Array::new();
-        a = a.push(SignaturesValue(0u32, sig));
-        a
-    };
-
-    let upd: MaintenanceUpdate<DefaultDB> = MaintenanceUpdate {
-        address: contract_address,
-        updates,
-        counter,
-        signatures,
-    };
+    let upd = upd.add_signature(0u32, sig);
 
     let intent: Intent<Signature, ProofPreimageMarker, PedersenRandomness, DefaultDB> =
         Intent::empty(rng, ttl);

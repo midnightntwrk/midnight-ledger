@@ -37,10 +37,8 @@ async fn load_add_verification_method_after_fresh_deploy() {
     }
     let did = did_id.expect("deploy yielded Done");
 
-    // Give the indexer a beat to ingest the deploy's dust spends
-    // before we re-sync. Without this, the load step's dust state
-    // may be against the pre-deploy merkle root.
-    tokio::time::sleep(std::time::Duration::from_secs(8)).await;
+    // Give the indexer a beat to settle before the maintenance step.
+    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
 
     // 2. Load the addVerificationMethod verifier key via a
     //    MaintenanceUpdate. Counter is 0 — the contract was just
