@@ -8,6 +8,12 @@ mod protocol;
 
 pub fn run() {
     let _ = tracing_subscriber::fmt::try_init();
+    // rustls 0.23 panics on first TLS use if no `CryptoProvider` is
+    // marked default — dioxus-desktop pulls in `aws-lc-rs` while
+    // reqwest / tokio-tungstenite pull `ring`. Pick the wallet-core
+    // default (`ring`) *before* any future hits TLS (probe, indexer
+    // fetch, node WS, etc.). Idempotent; safe across reloads.
+    wallet_core::ensure_default_crypto_provider();
     desktop_or_mobile_launch();
 }
 

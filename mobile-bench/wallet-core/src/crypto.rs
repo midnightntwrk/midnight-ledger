@@ -9,7 +9,7 @@ use std::sync::Once;
 ///
 /// Safe to call from any thread, any number of times: the underlying
 /// `install_default()` would itself error on a second call.
-pub(crate) fn ensure_default_crypto_provider() {
+pub fn ensure_default_crypto_provider() {
     static ONCE: Once = Once::new();
     ONCE.call_once(|| {
         let _ = rustls::crypto::ring::default_provider().install_default();
