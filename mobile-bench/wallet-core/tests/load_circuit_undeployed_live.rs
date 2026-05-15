@@ -38,7 +38,11 @@ async fn load_add_verification_method_after_fresh_deploy() {
     let did = did_id.expect("deploy yielded Done");
 
     // Give the indexer a beat to settle before the maintenance step.
-    tokio::time::sleep(std::time::Duration::from_secs(10)).await;
+    // 30s is empirically enough for `dustLedgerEvents` to surface the
+    // deploy's own `DustSpendProcessed` — without it, the second sync
+    // returns the pre-deploy state and we re-spend the already-used
+    // UTXO, surfacing as `DustDoubleSpend`.
+    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
     // 2. Load the addVerificationMethod verifier key via a
     //    MaintenanceUpdate. Counter is 0 — the contract was just

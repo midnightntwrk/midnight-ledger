@@ -419,11 +419,22 @@ impl Wallet {
             // 3. Balancing
             yield crate::WizardStage::Balancing;
             let params = ledger::structure::INITIAL_PARAMETERS;
+            // Use `dust_state.sync_time` as the dust intent's ctime —
+            // the verifier's `commitment_root` / `generation_root` are
+            // looked up via `root_history.get(ctime)`, which exact-matches
+            // entries inserted by `post_block_update` at block tblocks.
+            // `sync_time` is the latest tblock our replay observed, so the
+            // chain's history has an exact entry there with the same root
+            // our local commitment_tree currently holds. Using wall-clock
+            // `now` would land after later blocks have advanced the chain's
+            // root → predecessor lookup returns a newer root → public-input
+            // mismatch → InvalidDustSpendProof.
+            let ctime = dust_state.sync_time;
             let mut ctx = crate::tx::balance::BalanceCtx {
                 dust_state: &mut dust_state,
                 dust_key: &dust_key,
                 params: &params,
-                time: base_crypto::time::Timestamp::from_secs(now_ms / 1000),
+                time: ctime,
                 ttl,
                 network_id: net_id,
             };
@@ -561,11 +572,14 @@ impl Wallet {
             // 3. Balancing
             yield crate::WizardStage::Balancing;
             let params = ledger::structure::INITIAL_PARAMETERS;
+            // See `create_did` for why we use `sync_time` as the dust
+            // intent's ctime rather than wall-clock now.
+            let ctime = dust_state.sync_time;
             let mut ctx = crate::tx::balance::BalanceCtx {
                 dust_state: &mut dust_state,
                 dust_key: &dust_key,
                 params: &params,
-                time: base_crypto::time::Timestamp::from_secs(now_ms / 1000),
+                time: ctime,
                 ttl,
                 network_id: net_id,
             };
