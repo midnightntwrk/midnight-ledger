@@ -29,6 +29,12 @@ pub use did::{
     VerificationMethodRef, VerificationMethodRelation, VerificationMethodType,
 };
 
+/// Names of every DID circuit whose verifier key is bundled and
+/// loadable via [`Wallet::load_did_circuit`].
+pub fn did_circuit_names() -> &'static [&'static str] {
+    did::artifacts::CIRCUIT_NAMES
+}
+
 pub use address::{AddressError, truncate_middle, unshielded_bech32m, unshielded_hrp};
 pub use hd::{HdError, Role};
 pub use indexer::{ChainTipInfo, ContractStateInfo, IndexerClient, IndexerError};

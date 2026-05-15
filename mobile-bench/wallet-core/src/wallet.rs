@@ -537,19 +537,19 @@ impl Wallet {
                 }
             };
 
-            // Resolve the artifact + parse its verifier key.
-            let artifact = if circuit_name == crate::did::artifacts::ADD_VERIFICATION_METHOD.name {
-                &crate::did::artifacts::ADD_VERIFICATION_METHOD
-            } else {
-                yield crate::WizardStage::Failed(format!(
-                    "unknown circuit '{circuit_name}': only addVerificationMethod is bundled today"
-                ));
-                return;
-            };
-            let vk = match artifact.parsed_verifier_key() {
-                Ok(v) => v,
-                Err(e) => {
+            // Resolve the verifier key for this circuit from the bundled
+            // 11-entry registry. Any name outside that set is a config
+            // error — surface it before kicking off the network round trip.
+            let vk = match crate::did::artifacts::parsed_verifier_key_by_name(&circuit_name) {
+                Some(Ok(v)) => v,
+                Some(Err(e)) => {
                     yield crate::WizardStage::Failed(format!("parse verifier key: {e}"));
+                    return;
+                }
+                None => {
+                    yield crate::WizardStage::Failed(format!(
+                        "unknown circuit '{circuit_name}': not in the DID artifact registry",
+                    ));
                     return;
                 }
             };
