@@ -20,6 +20,7 @@ pub mod js_bridge;
 mod network;
 mod node;
 mod probe;
+pub mod secret_storage;
 mod tx;
 mod unshielded;
 mod wallet;

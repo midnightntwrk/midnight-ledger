@@ -80,6 +80,19 @@ anyhow = "1.0"
 # Async-trait sugar for the JsBridge trait — dyn-compatible
 # trait with async methods.
 async-trait = "0.1"
+
+# secret-storage — multi-curve key handling. Ed25519 (RFC 8032),
+# P-256 (NIST FIPS 186-4 ECDSA). Jubjub Schnorr reuses the in-tree
+# `transient-crypto`. AES-256-GCM + scrypt for at-rest envelope.
+# HKDF-SHA256 for BIP32-derived → curve-key derivation. UUID v4
+# for opaque `keyRef` handles.
+ed25519-dalek = { version = "2.1", features = ["rand_core"] }
+p256 = { version = "0.13", features = ["ecdsa"] }
+aes-gcm = "0.10"
+scrypt = "0.11"
+hkdf = "0.12"
+uuid = { version = "1", features = ["v4", "serde"] }
+base64 = "0.22"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"
