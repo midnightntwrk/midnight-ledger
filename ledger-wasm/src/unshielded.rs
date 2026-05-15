@@ -11,9 +11,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::conversions::*;
+use crate::{conversions::*, crypto::SignatureEnabled};
 use ledger::structure::{Signature as LSignature, UnshieldedOffer as LedgerUnshieldedOffer};
-use onchain_runtime_wasm::conversions::PreSignature;
 use storage::db::InMemoryDB;
 use wasm_bindgen::prelude::*;
 
@@ -88,12 +87,11 @@ impl UnshieldedOffer {
             .map(value_to_utxo_output)
             .collect::<Result<Vec<_>, _>>()?;
         let mut signatures = signatures
-            .into_iter()
+            .iter()
             .map(|sig| {
-                Ok::<_, JsError>(match from_value::<PreSignature>(sig)? {
-                    PreSignature::Schnorr(raw) => LSignature::Schnorr(from_hex_ser(&raw)?),
-                    PreSignature::ECDSA(raw) => LSignature::ECDSA(from_hex_ser(&raw)?),
-                })
+                let sig = SignatureEnabled::try_ref(sig)?
+                    .ok_or_else(|| JsError::new("Expected `SignatureEnabled`"))?;
+                Ok::<_, JsError>(sig.0.clone())
             })
             .collect::<Result<Vec<_>, _>>()?;
         if signatures.len() == inputs.len() {
@@ -124,27 +122,29 @@ impl UnshieldedOffer {
     #[wasm_bindgen(js_name = "addSignatures")]
     pub fn add_signatures(&mut self, signatures: Vec<JsValue>) -> Result<UnshieldedOffer, JsError> {
         use UnshieldedOfferTypes::*;
-        let parse_sigs = move || {
-            signatures
-                .into_iter()
-                .map(|sig| {
-                    Ok::<_, JsError>(match from_value::<PreSignature>(sig)? {
-                        PreSignature::Schnorr(raw) => LSignature::Schnorr(from_hex_ser(&raw)?),
-                        PreSignature::ECDSA(raw) => LSignature::ECDSA(from_hex_ser(&raw)?),
-                    })
-                })
-                .collect::<Result<Vec<_>, _>>()
-        };
-
         Ok(UnshieldedOffer(match &mut self.0 {
             Signature(val) => {
-                val.add_signatures(parse_sigs()?);
+                let signatures = signatures
+                    .iter()
+                    .map(|v| {
+                        let s = SignatureEnabled::try_ref(v)?
+                            .ok_or_else(|| JsError::new("Expected `SignatureEnabled`"))?;
+                        Ok::<_, JsError>(s.0.clone())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                val.add_signatures(signatures);
                 Signature(val.clone())
             }
             SignatureErased(val) => {
-                // NOTE: The type signature *requires* signatures to be present here, but the rust
-                // code requires these to be blank. So we erase them.
-                val.add_signatures(parse_sigs()?.into_iter().map(|_| ()).collect());
+                let signatures = signatures
+                    .iter()
+                    .map(|v| {
+                        let _ = crate::crypto::SignatureErased::try_ref(v)?
+                            .ok_or_else(|| JsError::new("Expected `SignatureEnabled`"))?;
+                        Ok::<_, JsError>(())
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                val.add_signatures(signatures);
                 SignatureErased(val.clone())
             }
         }))
@@ -210,24 +210,19 @@ impl UnshieldedOffer {
     }
 
     #[wasm_bindgen(getter = signatures)]
-    pub fn signatures(&self) -> Result<Vec<JsValue>, JsError> {
+    pub fn signatures(&self) -> Vec<JsValue> {
         use UnshieldedOfferTypes::*;
         match &self.0 {
             Signature(val) => val
                 .signatures
                 .iter_deref()
-                .map(|sig| {
-                    Ok(to_value(&match sig {
-                        LSignature::Schnorr(sig) => PreSignature::Schnorr(to_hex_ser(&sig)?),
-                        LSignature::ECDSA(sig) => PreSignature::ECDSA(to_hex_ser(&sig)?),
-                    })?)
-                })
+                .map(|sig| SignatureEnabled(sig.clone()).into())
                 .collect(),
-            SignatureErased(val) => Ok(val
+            SignatureErased(val) => val
                 .signatures
                 .iter_deref()
-                .map(|()| JsValue::UNDEFINED)
-                .collect()),
+                .map(|()| crate::crypto::SignatureErased().into())
+                .collect(),
         }
     }
 }
