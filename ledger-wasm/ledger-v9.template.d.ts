@@ -522,7 +522,7 @@ export class DustLocalState {
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
   readonly params: DustParameters;
-  readonly syncTime: Date;
+  syncTime: Date;
   readonly generatingTreeFirstFree: bigint;
   readonly commitmentTreeFirstFree: bigint;
 }
@@ -1515,6 +1515,11 @@ export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): Dust
  * Calculate Dust nonce
  */
 export function dustNonce(initialNonce: DustInitialNonce, seq: bigint, sk: DustSecretKey): DustNonce;
+
+/**
+ * Calculate Dust first nonce (when seq=0)
+ */
+export function dustFirstNonce(backingNight: DustInitialNonce, dustAddress: DustPublicKey): DustNonce;
 
 /**
  * Calculate Dust initial nonce (a backing night hash)
