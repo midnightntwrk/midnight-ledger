@@ -16,15 +16,29 @@
 //!    Rust because the seed never leaves Rust. The JS side wraps them
 //!    as `window.midnightWallet.<method>(...)` with promise semantics.
 
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
-use wallet_core::{Network, Wallet, unshielded_bech32m};
+use wallet_core::{Network, unshielded_bech32m};
+
+/// Per-DID random controller secret store. Populated by
+/// `CreateDidWizard.on_done` and read by the
+/// `getControllerSecretKey` bridge RPC during JS-driven circuit
+/// execution. In-memory only — lost on app restart. Each DID's
+/// 32 bytes never leave this process; they round-trip across the
+/// Dioxus channel as hex but only inside the embedded WebView.
+pub type ControllerSecretStore = Arc<Mutex<HashMap<String, [u8; 32]>>>;
 
 #[derive(Clone, Default)]
 pub struct BridgeState {
     pub proof_server_url: Arc<OnceCell<String>>,
+    /// `did_string → 32-byte sk`. Cloning the BridgeState clones the
+    /// Arc, so the map is shared across the bridge loop, the UI, and
+    /// any future callers.
+    pub controller_secrets: ControllerSecretStore,
 }
 
 impl BridgeState {
@@ -36,6 +50,24 @@ impl BridgeState {
     /// the local proof-server has finished booting.
     pub fn proof_server_url(&self) -> Option<String> {
         self.proof_server_url.get().cloned()
+    }
+
+    /// Record the random sk minted for a freshly-deployed DID.
+    /// Overwrites any existing entry (a fresh deploy with the same
+    /// id would be impossible on-chain, but defensive).
+    pub fn remember_controller_secret(&self, did: String, sk: [u8; 32]) {
+        if let Ok(mut g) = self.controller_secrets.lock() {
+            g.insert(did, sk);
+        }
+    }
+
+    /// Look up the sk for a given DID. Returns `None` if we never
+    /// minted that DID or have forgotten its sk.
+    pub fn controller_secret_for(&self, did: &str) -> Option<[u8; 32]> {
+        self.controller_secrets
+            .lock()
+            .ok()
+            .and_then(|g| g.get(did).copied())
     }
 }
 
@@ -198,25 +230,25 @@ async fn run_method(
             Err("signData: not implemented yet".to_string())
         }
         "getControllerSecretKey" => {
-            // The on-chain `localSecretKey()` witness during a DID
-            // circuit call. The JS-side circuit executor invokes
-            // this via the existing JSON-RPC bridge while the
-            // Compact runtime is collecting witness values. The
-            // raw 32 bytes never leave the embedded WebView — they
-            // round-trip across the Dioxus channel as hex strings.
-            // The `network` param is reserved for a future
-            // multi-wallet world where the active seed depends on
-            // the network; today we ignore it and use the active
-            // seed the bridge was bootstrapped with.
-            let _p: AddressParams = serde_json::from_value(params)
+            // The on-chain `localSecretKey()` witness for a circuit
+            // call on a specific DID. Each DID has its own random
+            // controller sk minted at `create_did` time and stored
+            // in `BridgeState.controller_secrets`. The 32 bytes
+            // never leave the embedded WebView — they round-trip
+            // across the Dioxus channel as hex strings.
+            #[derive(serde::Deserialize)]
+            struct Params {
+                did: String,
+            }
+            let p: Params = serde_json::from_value(params)
                 .map_err(|e| format!("invalid params: {e}"))?;
-            let seed = decode_seed(active_seed_hex)?;
-            let net = Network::Undeployed; // placeholder; only used to construct the Wallet
-            let wallet = Wallet::from_seed(seed, net);
-            let bytes = wallet
-                .did_controller_secret_bytes()
-                .map_err(|e| format!("derive secret: {e}"))?;
-            Ok(serde_json::json!({ "secretKeyHex": hex::encode(bytes) }))
+            let sk = state
+                .controller_secret_for(&p.did)
+                .ok_or_else(|| format!(
+                    "no controller secret known for {} — was the DID created in this session?",
+                    p.did
+                ))?;
+            Ok(serde_json::json!({ "secretKeyHex": hex::encode(sk) }))
         }
         // ──────────────────────────────────────────────────────
         // ContractCall pipeline hookpoints. See
@@ -280,9 +312,10 @@ window.midnightWallet = window.midnightWallet || {};
     window.midnightWallet.signData          = (role, data)    => call("signData", { role, data });
     window.midnightWallet.bundleError       = (payload)       => call("bundleError", payload);
     // Witness callback used by the DID-circuit JS executor. Returns
-    // `{ secretKeyHex }` for the active wallet's controller. The 32
-    // bytes never leave the WebView.
-    window.midnightWallet.getControllerSecretKey = (network) => call("getControllerSecretKey", { network });
+    // `{ secretKeyHex }` for the specified DID. The 32 bytes never
+    // leave the WebView. Errors out if no sk is known for that DID
+    // (e.g. created in a previous session — in-memory store).
+    window.midnightWallet.getControllerSecretKey = (did) => call("getControllerSecretKey", { did });
 
     // Drain responses forever.
     (async () => {

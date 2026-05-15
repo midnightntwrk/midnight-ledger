@@ -229,61 +229,30 @@ impl Wallet {
             .map_err(|e| WalletError::Address(format!("signing key: {e}")))
     }
 
-    /// Raw 32-byte controller secret — the value the on-chain DID
-    /// contract's `localSecretKey()` witness must return at call
-    /// time. **Treat as secret material.** Today only the JS-bridge
-    /// witness callback consumes it (it never leaves this process —
-    /// stays inside the embedded WebView).
-    pub fn did_controller_secret_bytes(&self) -> Result<[u8; 32], WalletError> {
-        crate::hd::derive_child_priv(
-            &self.seed_bytes,
-            0,
-            crate::hd::Role::NightExternal,
-            0,
-        )
-        .map_err(|e| WalletError::Address(e.to_string()))
-    }
-
-    /// 32-byte commitment that the on-chain DID contract stores as
-    /// `controllerPublicKey`. **Not** a curve-derived public key —
-    /// the `publicKey` circuit in `did.compact` defines it as:
+    /// 32-byte commitment the on-chain DID contract stores as
+    /// `controllerPublicKey`. The `publicKey` circuit in `did.compact`
+    /// is:
     ///
     /// ```compact
     /// publicKey(sk) = persistentHash(["did:controller:pk" + pad32, sk]);
     /// ```
     ///
-    /// i.e. `SHA-256("did:controller:pk" + 14 zero bytes || sk)`.
-    /// This is a domain-separated commitment to the secret key,
-    /// used by the contract to authorize the controller without
-    /// revealing the key. The wallet computes the same value off-
-    /// chain so it can pre-compute the deploy address before
-    /// sending the deploy intent.
-    pub fn did_controller_public_key(&self) -> Result<[u8; 32], WalletError> {
+    /// i.e. `SHA-256("did:controller:pk" + 15 zero bytes || sk)`.
+    /// Domain-separated commitment to the secret — the contract
+    /// authorises the controller via this pk without learning sk.
+    ///
+    /// Each DID gets its own random sk (see [`Wallet::create_did`]);
+    /// without that sk the wallet cannot update or deactivate the
+    /// DID. Mirror in JS: `DIDContract.pureCircuits.publicKey(sk)`.
+    pub fn controller_public_key_for(secret: &[u8; 32]) -> [u8; 32] {
         use sha2::{Digest, Sha256};
-        // The same secret scalar used for BIP340 schnorr signing
-        // (BIP32 path m/44'/2400'/0'/0/0). The contract's
-        // `localSecretKey()` witness must return these same bytes
-        // at deploy time.
-        let secret = crate::hd::derive_child_priv(
-            &self.seed_bytes,
-            0,
-            crate::hd::Role::NightExternal,
-            0,
-        )
-        .map_err(|e| WalletError::Address(e.to_string()))?;
-
-        // Compact's `pad(32, "did:controller:pk")` = the ASCII
-        // bytes followed by NULs out to 32 bytes (left-justified
-        // pad — confirmed against `did.compact` Vector<2, Bytes<32>>
-        // serialization).
         let mut domain = [0u8; 32];
         let tag = b"did:controller:pk";
         domain[..tag.len()].copy_from_slice(tag);
-
         let mut hasher = Sha256::new();
         hasher.update(domain);
         hasher.update(secret);
-        Ok(hasher.finalize().into())
+        hasher.finalize().into()
     }
 
     /// Compose what the new DID's id *would be* if we deployed
@@ -298,25 +267,12 @@ impl Wallet {
     /// is bit-for-bit what the chain would accept, and (b) show the
     /// would-be DID in the UI so the user knows what address they
     /// would control.
-    pub fn create_did_preview(&self) -> Result<crate::DidId, crate::DidError> {
-        let pk = self
-            .did_controller_public_key()
-            .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .unwrap_or(0);
-        let mut rng = rand::thread_rng();
-        let committee = vec![self
-            .did_maintenance_verifying_key()
-            .map_err(|e| crate::DidError::Indexer(e.to_string()))?];
-        crate::did::deploy::preview_did_id(&mut rng, self.network, pk, now_ms, committee)
-    }
-
-    /// Like `create_did_preview` but with caller-supplied
-    /// pk-commitment, timestamp, and nonce — lets the pipeline
-    /// compute the on-chain DID id from the *exact* inputs fed
-    /// to `tx::build_deploy`.
+    /// Compose what the new DID's id *would be* given a caller-
+    /// supplied pk-commitment, timestamp, and nonce. Each DID gets
+    /// a fresh random `controller_sk`, so a wallet-level "what's my
+    /// next DID" preview is no longer meaningful — pass the sk in
+    /// via `pk_commitment = Wallet::controller_public_key_for(&sk)`
+    /// to see the address before submission.
     pub fn create_did_preview_with(
         &self,
         pk_commitment: [u8; 32],
@@ -387,10 +343,14 @@ impl Wallet {
 
             // 2. Composing
             yield crate::WizardStage::Composing;
-            let pk_commitment = match wallet.did_controller_public_key() {
-                Ok(pk) => pk,
-                Err(e) => { yield crate::WizardStage::Failed(format!("controller pk: {e}")); return; }
-            };
+            // StdRng (not ThreadRng) so the returned Stream is Send.
+            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            // Generate a fresh random controller secret per DID. The
+            // wallet must persist this — without it we cannot supply
+            // the `localSecretKey()` witness for any subsequent
+            // update / deactivate circuit call on this DID.
+            let controller_sk: [u8; 32] = rand::Rng::r#gen(&mut rng);
+            let pk_commitment = Wallet::controller_public_key_for(&controller_sk);
             let now_ms = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_millis() as u64)
@@ -401,8 +361,6 @@ impl Wallet {
                 ttl_s = now_ms / 1000 + 3600,
                 "create_did: intent ttl",
             );
-            // StdRng (not ThreadRng) so the returned Stream is Send.
-            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
             let nonce: [u8; 32] = rand::Rng::r#gen(&mut rng);
             let net_id = network.config().network_id;
             let maintenance_vk = match wallet.did_maintenance_verifying_key() {
@@ -492,6 +450,7 @@ impl Wallet {
                 did_id: preview_id,
                 tx_hash: submit.tx_hash,
                 block_hash: submit.block_hash,
+                controller_sk,
             });
         }
     }
@@ -637,6 +596,8 @@ impl Wallet {
                 did_id,
                 tx_hash: submit.tx_hash,
                 block_hash: submit.block_hash,
+                // MaintenanceUpdate does not mint a DID; no fresh sk.
+                controller_sk: [0u8; 32],
             });
         }
     }

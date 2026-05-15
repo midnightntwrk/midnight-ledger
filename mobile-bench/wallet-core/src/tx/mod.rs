@@ -23,6 +23,14 @@ pub struct DeployOutcome {
     pub did_id: DidId,
     pub tx_hash: [u8; 32],
     pub block_hash: [u8; 32],
+    /// 32-byte random secret the wallet committed as the DID's
+    /// `controllerPublicKey` at deploy time. **Caller must persist
+    /// this** — losing it means losing control of the DID
+    /// (`localSecretKey()` witness can no longer be supplied to
+    /// any update / deactivate circuit). All-zero on outcomes
+    /// from `MaintenanceUpdate`-only paths where no fresh DID was
+    /// minted.
+    pub controller_sk: [u8; 32],
 }
 
 #[allow(dead_code)] // Wired by Wallet::create_did in Task 11.

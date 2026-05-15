@@ -42,7 +42,7 @@ declare global {
        *  raw secret hex — only useful in this spike for verifying
        *  the round-trip; production circuit calls feed the bytes
        *  directly into Compact's witness slot and never log them. */
-      bridgeWitnessTest(params: { network: string }): Promise<{
+      bridgeWitnessTest(params: { did: string }): Promise<{
         sourceLength: number;
         controllerPkPublic: string;
         secretHexFirst8: string;
@@ -81,14 +81,14 @@ function loadContractLayer() {
  * then computes `publicKey(sk)` via the bundled `pureCircuits`
  * helper to verify the bytes round-trip is faithful.
  */
-async function bridgeWitnessTest(params: { network: string }) {
+async function bridgeWitnessTest(params: { did: string }) {
   const t0 = Date.now();
   const layer = await loadContractLayer();
   const bridge = (window as any).midnightWallet;
   if (!bridge?.getControllerSecretKey) {
     throw new Error("midnightWallet.getControllerSecretKey not exposed by the bridge");
   }
-  const { secretKeyHex } = await bridge.getControllerSecretKey(params.network);
+  const { secretKeyHex } = await bridge.getControllerSecretKey(params.did);
   if (typeof secretKeyHex !== "string" || secretKeyHex.length !== 64) {
     throw new Error(`unexpected secret length: ${secretKeyHex?.length}`);
   }

@@ -36,19 +36,24 @@
 
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::HashOutput;
+#[cfg(test)]
 use coin_structure::contract::ContractAddress;
 use ledger::structure::ContractDeploy;
 use onchain_state::state::{
     ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState,
     EntryPointBuf, StateValue,
 };
+#[cfg(test)]
 use rand::RngCore;
 use storage::DefaultDB;
 use storage::arena::Sp;
 use storage::storage::{Array, HashMap as StorageHashMap};
 
+#[cfg(test)]
 use crate::did::error::DidError;
+#[cfg(test)]
 use crate::did::id::{ContractAddressBytes, DidId};
+#[cfg(test)]
 use crate::network::Network;
 
 /// The 11 entry-point names did.compact exposes. Order taken from
@@ -172,7 +177,8 @@ pub(crate) fn compose_deploy(
 /// Compose the deploy + return the address as a `DidId` on the
 /// chosen network. `nonce` is generated from the supplied RNG so
 /// callers can produce deterministic previews from a seeded RNG
-/// in tests.
+/// in tests. Used by `did::deploy::tests::deploy_address_*`.
+#[cfg(test)]
 pub(crate) fn preview_did_id<R: RngCore>(
     rng: &mut R,
     network: Network,

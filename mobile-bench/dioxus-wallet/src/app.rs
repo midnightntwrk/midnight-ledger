@@ -466,6 +466,11 @@ pub fn App() -> Element {
                     network: *network.read(),
                     on_done: move |o: wallet_core::DeployOutcome| {
                         let did = o.did_id.to_did_string();
+                        // Stash the per-DID random controller secret in
+                        // the shared bridge store so subsequent JS-driven
+                        // circuit calls can look it up via the
+                        // `getControllerSecretKey` RPC.
+                        bridge_state.read().remember_controller_secret(did.clone(), o.controller_sk);
                         last_did_id.set(Some(did.clone()));
                         let mut log = session_log.read().clone();
                         log.push(SessionEvent::Deploy {
@@ -522,7 +527,7 @@ pub fn App() -> Element {
                 SessionLogPanel { events: session_log.read().clone() }
             },
             Tab::Diagnostics => rsx! {
-                JsBridgePanel {}
+                JsBridgePanel { seed_did: last_did_id.read().clone() }
                 TimingsPanel { runs: timing_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "row", "Seed (hex):" }
@@ -765,6 +770,10 @@ fn CreateDidWizard(
                 div { class: "seed-blob", "0x{hex::encode(outcome.tx_hash)}" }
                 div { class: "row label", "Block hash" }
                 div { class: "seed-blob", "0x{hex::encode(outcome.block_hash)}" }
+                div { class: "row label",
+                    "Controller secret (save this — without it you cannot update or deactivate this DID)"
+                }
+                div { class: "seed-blob", "0x{hex::encode(outcome.controller_sk)}" }
             }
         } else if let Some(TerminalView::Failed(msg)) = &term {
             div { class: "wizard-outcome err",
@@ -1635,10 +1644,18 @@ struct WitnessTestResult {
 }
 
 #[component]
-fn JsBridgePanel() -> Element {
+fn JsBridgePanel(seed_did: Option<String>) -> Element {
     let mut message = use_signal(|| "hello from rust".to_string());
     let mut result = use_signal::<Option<Result<BridgeProbeResult, String>>>(|| None);
     let mut pending = use_signal(|| false);
+    let mut witness_did = use_signal(|| seed_did.clone().unwrap_or_default());
+    use_effect(move || {
+        if let Some(seed) = seed_did.clone() {
+            if *witness_did.read() != seed {
+                witness_did.set(seed);
+            }
+        }
+    });
     let mut witness_result = use_signal::<Option<Result<WitnessTestResult, String>>>(|| None);
     let mut witness_pending = use_signal(|| false);
 
@@ -1680,23 +1697,31 @@ fn JsBridgePanel() -> Element {
         if *witness_pending.read() {
             return;
         }
+        let did = witness_did.read().trim().to_string();
+        if did.is_empty() {
+            witness_result.set(Some(Err("enter a DID created in this session first".into())));
+            return;
+        }
         witness_pending.set(true);
         witness_result.set(None);
+        let did_json = serde_json::to_string(&did).unwrap_or_else(|_| "\"\"".into());
         // Nested chain: this eval calls `bridgeWitnessTest` which
-        // internally awaits `window.midnightWallet.getControllerSecretKey`
+        // internally awaits `window.midnightWallet.getControllerSecretKey({ did })`
         // — i.e. JS → Rust → JS → continued execution → final return.
         // Verifies the witness-callback chain we need for ContractCall.
-        let snippet = r#"if (!window.midnightDidBundle?.bridgeWitnessTest) {
-            return { error: "bridgeWitnessTest not loaded" };
-        }
-        try {
-            const r = await window.midnightDidBundle.bridgeWitnessTest({ network: "undeployed" });
-            return r;
-        } catch (e) {
-            return { error: String(e?.message ?? e) };
-        }"#;
+        let snippet = format!(
+            r#"if (!window.midnightDidBundle?.bridgeWitnessTest) {{
+                return {{ error: "bridgeWitnessTest not loaded" }};
+            }}
+            try {{
+                const r = await window.midnightDidBundle.bridgeWitnessTest({{ did: {did_json} }});
+                return r;
+            }} catch (e) {{
+                return {{ error: String(e?.message ?? e) }};
+            }}"#
+        );
         spawn(async move {
-            let r: Result<WitnessTestResult, String> = match document::eval(snippet).await {
+            let r: Result<WitnessTestResult, String> = match document::eval(&snippet).await {
                 Ok(v) => serde_json::from_value::<WitnessTestResult>(v)
                     .map_err(|e| format!("decode: {e}")),
                 Err(e) => Err(format!("eval failed: {e}")),
@@ -1722,6 +1747,15 @@ fn JsBridgePanel() -> Element {
                 disabled: *pending.read(),
                 onclick: probe,
                 {if *pending.read() { "Probing…" } else { "Probe bridge" }}
+            }
+        }
+        div { class: "row",
+            input {
+                r#type: "text",
+                placeholder: "did:midnight:undeployed:… (witness lookup)",
+                value: "{witness_did.read()}",
+                oninput: move |e| witness_did.set(e.value()),
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
             }
             button {
                 disabled: *witness_pending.read(),
