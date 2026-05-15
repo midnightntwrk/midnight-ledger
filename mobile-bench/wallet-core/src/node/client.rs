@@ -92,21 +92,33 @@ impl NodeClient {
     /// `Midnight.send_mn_transaction(bytes)` runtime call, then
     /// wait for it to be included in a block. Does NOT wait for
     /// finality — that's a design choice (see deploy-submit spec).
+    ///
+    /// The pallet declares `send_mn_transaction` as an unsigned
+    /// extrinsic (validated via `ValidateUnsigned`). We submit
+    /// **unsigned** — wrapping in a substrate envelope-signed
+    /// extrinsic causes the node to reject with
+    /// `Invalid Transaction (1010)`. The `_signer` arg is kept on
+    /// the signature for forward-compat with future signed
+    /// extrinsics; today it's unused. Mirrors the upstream
+    /// toolkit's `sender.rs` create_unsigned() pattern.
     #[allow(dead_code)] // Wired by Wallet::create_did in Task 11.
     pub async fn submit_deploy(
         &self,
         bytes: Vec<u8>,
-        signer: &crate::MidnightSigner,
+        _signer: &crate::MidnightSigner,
     ) -> Result<SubmitResult, NodeError> {
         use midnight_node_metadata::midnight_metadata_latest as runtime;
 
         use subxt::tx::TxStatus;
 
         let call = runtime::tx().midnight().send_mn_transaction(bytes);
-        let mut progress = self
+        let unsigned = self
             .subxt
             .tx()
-            .sign_and_submit_then_watch_default(&call, signer)
+            .create_unsigned(&call)
+            .map_err(|e| NodeError::Submit(format!("create_unsigned: {e}")))?;
+        let mut progress = unsigned
+            .submit_and_watch()
             .await
             .map_err(|e| NodeError::Submit(e.to_string()))?;
 

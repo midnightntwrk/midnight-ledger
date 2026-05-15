@@ -119,16 +119,15 @@ pub(crate) fn compose_initial_state(
 
     let root = state_array(vec![constants, mutable]);
 
-    // Operations table: 11 named entry points, each with no
-    // verifier-key today. Verifier keys are loaded later via
-    // MaintenanceUpdate, matching the upstream pattern (the JS
-    // `setOperation(name, new ContractOperation())` is also
-    // empty at deploy time).
-    let mut operations = StorageHashMap::<EntryPointBuf, ContractOperation, DefaultDB>::new();
-    for name in DID_ENTRY_POINTS {
-        let key = EntryPointBuf(name.as_bytes().to_vec());
-        operations = operations.insert(key, ContractOperation::new(None));
-    }
+    // Operations table starts EMPTY. The chain's well_formed
+    // check (`ledger/src/verify.rs:354`) iterates every operation
+    // and requires each to carry a verifier key (`v2 = Some(_)`).
+    // Inserting all 11 DID entry points with `ContractOperation::new(None)`
+    // would fail well_formed with `VerifierKeyNotSet`. We deploy
+    // an empty operations map and load circuits' verifier keys
+    // later via MaintenanceUpdate (Phase 5+ work).
+    let operations = StorageHashMap::<EntryPointBuf, ContractOperation, DefaultDB>::new();
+    let _ = DID_ENTRY_POINTS;   // kept on the public surface for future MaintenanceUpdate use
 
     ContractState {
         data: ChargedState::new(root),

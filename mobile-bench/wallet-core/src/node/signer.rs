@@ -63,20 +63,20 @@ impl MidnightSigner {
     }
 
     /// 65-byte ECDSA signature in substrate's `(r, s, recovery_id)`
-    /// layout. The signer-payload is the SCALE-encoded extrinsic
-    /// envelope contents subxt prepares.
+    /// layout. The signer-payload comes from subxt: it's either the
+    /// raw bytes (≤256) or `blake2_256(raw_bytes)` (>256).
+    /// Substrate's `MultiSignature::Ecdsa` verification recovers
+    /// the pubkey against `blake2_256(payload_we_received)`, so we
+    /// MUST sign that exact digest — `k256::sign_recoverable()`
+    /// would silently use SHA-256 internally, which substrate
+    /// rejects (the recovered pubkey doesn't match the AccountId,
+    /// → "Invalid Transaction (1010)").
     pub fn sign_envelope(&self, payload: &[u8]) -> [u8; 65] {
-        // substrate hashes payloads > 256 bytes with blake2_256
-        // before signing.
-        let to_sign: Vec<u8> = if payload.len() > 256 {
-            blake2_256(payload).to_vec()
-        } else {
-            payload.to_vec()
-        };
+        let digest = blake2_256(payload);
         let (sig, recovery_id): (EcdsaSignature, _) = self
             .signing_key
-            .sign_recoverable(&to_sign)
-            .expect("ECDSA sign over a 32-byte digest cannot fail");
+            .sign_prehash_recoverable(&digest)
+            .expect("ECDSA sign over a 32-byte prehash cannot fail");
         let mut out = [0u8; 65];
         out[..64].copy_from_slice(&sig.to_bytes());
         out[64] = recovery_id.to_byte();
@@ -178,6 +178,10 @@ mod tests {
 
     #[test]
     fn signature_round_trip() {
+        // The signature is over `blake2_256(msg)` (substrate's
+        // MultiSignature::Ecdsa verification expects that
+        // digest). We verify the same way: compute the prehash,
+        // then `verify_prehash` on the recovered signature.
         let signer = signer_from_demo(Network::Undeployed);
         let msg = b"deploy-DID-test";
         let sig = signer.sign_envelope(msg);
@@ -185,12 +189,14 @@ mod tests {
         assert_eq!(sig.len(), 65);
         // Recovery ID must be 0..=3 (substrate ECDSA convention).
         assert!(sig[64] <= 3);
-        // Verify the signature with the corresponding verifying key.
-        use k256::ecdsa::signature::Verifier;
+
+        use k256::ecdsa::signature::hazmat::PrehashVerifier;
         let vk = signer.signing_key.verifying_key();
         let r: [u8; 32] = sig[..32].try_into().unwrap();
         let s: [u8; 32] = sig[32..64].try_into().unwrap();
         let parsed = EcdsaSignature::from_scalars(r, s).unwrap();
-        vk.verify(msg, &parsed).expect("signature must verify");
+        let digest = blake2_256(msg);
+        vk.verify_prehash(&digest, &parsed)
+            .expect("signature must verify against blake2_256 prehash");
     }
 }

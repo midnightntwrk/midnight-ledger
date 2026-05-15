@@ -5,8 +5,14 @@
 use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use ledger::structure::{
-    GUARANTEED_SEGMENT, Intent, ProofPreimageMarker, StandardTransaction, Transaction,
+    Intent, ProofPreimageMarker, StandardTransaction, Transaction,
 };
+
+/// Segment id for the deploy intent. MUST be non-zero —
+/// intents at `GUARANTEED_SEGMENT (= 0)` are rejected by the
+/// ledger's `well_formed` check with `IntentAtGuaranteedSegmentId`.
+/// Picked `1` to match `ledger/tests/intent.rs:667`.
+const DEPLOY_SEGMENT: u16 = 1;
 use rand::{CryptoRng, Rng};
 use storage::DefaultDB;
 use storage::storage::HashMap;
@@ -38,7 +44,7 @@ pub(crate) fn build_deploy<R: Rng + CryptoRng>(
     let intent = intent.add_deploy(deploy);
 
     let mut intents = HashMap::new();
-    intents = intents.insert(GUARANTEED_SEGMENT, intent);
+    intents = intents.insert(DEPLOY_SEGMENT, intent);
 
     let stx = StandardTransaction::new(network_id, intents, None, HashMap::new());
     Ok(Transaction::Standard(stx))

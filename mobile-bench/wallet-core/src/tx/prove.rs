@@ -12,7 +12,7 @@ use ledger::structure::{ProofMarker, Transaction};
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use rand::{CryptoRng, Rng};
 use storage::DefaultDB;
-use transient_crypto::commitment::PedersenRandomness;
+use transient_crypto::commitment::PureGeneratorPedersen;
 use zkir_v2::LocalProvingProvider;
 use zswap::prove::ZswapResolver;
 use zswap::ZSWAP_EXPECTED_FILES;
@@ -21,7 +21,12 @@ use crate::artifacts::dust::dust_resolver;
 use super::TxError;
 use super::build::UnprovenTx;
 
-pub(crate) type ProvenTx = Transaction<Signature, ProofMarker, PedersenRandomness, DefaultDB>;
+/// Final proved-and-sealed tx — same shape as
+/// `test_utilities::TxBound<S, D>`. The chain expects this exact
+/// header tag `transaction[v9](signature[v1],proof,pedersen-schnorr[v1])`;
+/// the unsealed `PedersenRandomness` form (`embedded-fr[v1]`) is
+/// rejected with "Invalid Transaction (1010)".
+pub(crate) type ProvenTx = Transaction<Signature, ProofMarker, PureGeneratorPedersen, DefaultDB>;
 
 /// Build a `Resolver` with bundled DUST keys + fetched zswap
 /// params. The external_resolver returns None for every key
@@ -55,9 +60,15 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
         params: &resolver,
         resolver: &resolver,
     };
-    tx.prove(provider, &INITIAL_COST_MODEL)
+    let proved = tx
+        .prove(provider, &INITIAL_COST_MODEL)
         .await
-        .map_err(|e| TxError::Prove(e.to_string()))
+        .map_err(|e| TxError::Prove(e.to_string()))?;
+    // Seal: PedersenRandomness → PureGeneratorPedersen so the
+    // serialized tx carries the `pedersen-schnorr[v1]` header tag
+    // the chain's deserializer expects. Without this, the node
+    // rejects with "Invalid Transaction (1010)".
+    Ok(proved.seal(rng))
 }
 
 #[cfg(test)]

@@ -342,6 +342,11 @@ impl Wallet {
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
             let ttl = base_crypto::time::Timestamp::from_secs(now_ms / 1000 + 3600);
+            tracing::debug!(
+                now_s = now_ms / 1000,
+                ttl_s = now_ms / 1000 + 3600,
+                "create_did: intent ttl",
+            );
             // StdRng (not ThreadRng) so the returned Stream is Send.
             let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
             let nonce: [u8; 32] = rand::Rng::r#gen(&mut rng);
@@ -367,6 +372,7 @@ impl Wallet {
                 dust_key: &dust_key,
                 params: &params,
                 time: base_crypto::time::Timestamp::from_secs(now_ms / 1000),
+                ttl,
                 network_id: net_id,
             };
             let balanced = match crate::tx::balance::balance(unproven, &mut ctx) {

@@ -30,7 +30,13 @@ pub(crate) struct BalanceCtx<'a> {
     pub dust_state: &'a mut DustLocalState<DefaultDB>,
     pub dust_key: &'a DustSecretKey,
     pub params: &'a LedgerParameters,
+    /// Current chain time — used by `dust_state.spend()` to age
+    /// DUST UTXOs against the spend's nominal timestamp.
     pub time: Timestamp,
+    /// Time-to-live for the dust intent. Must be ≥ current chain
+    /// `tblock + slot_duration + skipped_margin` once validation
+    /// runs. Same value the deploy intent uses (`time + 3600`).
+    pub ttl: Timestamp,
     pub network_id: &'a str,
 }
 
@@ -47,7 +53,16 @@ pub(crate) fn balance(
     // 0xFEED doesn't collide on repeated merges).
     let original_tx = tx.clone();
     let original_dust = ctx.dust_state.clone();
-    let mut rng = ChaCha20Rng::seed_from_u64(0);
+    // From-entropy, not seed-0. The dust intent's hash includes
+    // its `binding_commitment` (rng-derived) plus ttl, but NOT
+    // its `dust_actions` (see `to_hash_data` in
+    // `ledger/src/structure.rs:883`). Two attempts within the
+    // same second with the same RNG seed would produce the same
+    // intent hash, and the chain's replay-protection map would
+    // reject the second as `IntentAlreadyExists` — surfaces as
+    // `Malformed(TransactionApplicationError)` → `Invalid
+    // Transaction (1010)`.
+    let mut rng = ChaCha20Rng::from_entropy();
     let mut last_dust: u128 = 0;
     let mut current = tx;
 
@@ -107,7 +122,7 @@ pub(crate) fn balance(
         }
 
         let mut intent: Intent<Signature, ProofPreimageMarker, PedersenRandomness, DefaultDB> =
-            Intent::empty(&mut rng, ctx.time);
+            Intent::empty(&mut rng, ctx.ttl);
         intent.dust_actions = Some(Sp::new(DustActions {
             spends,
             registrations: Array::new(),
