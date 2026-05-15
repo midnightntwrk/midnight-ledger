@@ -229,6 +229,21 @@ impl Wallet {
             .map_err(|e| WalletError::Address(format!("signing key: {e}")))
     }
 
+    /// Raw 32-byte controller secret — the value the on-chain DID
+    /// contract's `localSecretKey()` witness must return at call
+    /// time. **Treat as secret material.** Today only the JS-bridge
+    /// witness callback consumes it (it never leaves this process —
+    /// stays inside the embedded WebView).
+    pub fn did_controller_secret_bytes(&self) -> Result<[u8; 32], WalletError> {
+        crate::hd::derive_child_priv(
+            &self.seed_bytes,
+            0,
+            crate::hd::Role::NightExternal,
+            0,
+        )
+        .map_err(|e| WalletError::Address(e.to_string()))
+    }
+
     /// 32-byte commitment that the on-chain DID contract stores as
     /// `controllerPublicKey`. **Not** a curve-derived public key —
     /// the `publicKey` circuit in `did.compact` defines it as:

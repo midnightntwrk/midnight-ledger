@@ -34,6 +34,20 @@ declare global {
         compactRuntimeExports: string[];
         timeMs: number;
       }>;
+      /** Nested round-trip: Rust → JS → (back to Rust) → JS → Rust.
+       *  Exercises the witness-callback chain we need for circuit
+       *  execution. Returns the public hash of the controller's
+       *  secret key (so the secret never leaves the WebView in the
+       *  return path either), plus an `originHex` field that's the
+       *  raw secret hex — only useful in this spike for verifying
+       *  the round-trip; production circuit calls feed the bytes
+       *  directly into Compact's witness slot and never log them. */
+      bridgeWitnessTest(params: { network: string }): Promise<{
+        sourceLength: number;
+        controllerPkPublic: string;
+        secretHexFirst8: string;
+        elapsedMs: number;
+      }>;
     };
     MIDNIGHT_PROOF_SERVER?: string;
     MIDNIGHT_NETWORK?: string;
@@ -58,6 +72,39 @@ function loadContractLayer() {
     })();
   }
   return contractLayerPromise;
+}
+
+/**
+ * Nested round-trip helper. Touches the contract layer (so the
+ * Compact runtime is loaded), then calls back into Rust via the
+ * existing JSON-RPC bridge to fetch the controller secret bytes,
+ * then computes `publicKey(sk)` via the bundled `pureCircuits`
+ * helper to verify the bytes round-trip is faithful.
+ */
+async function bridgeWitnessTest(params: { network: string }) {
+  const t0 = Date.now();
+  const layer = await loadContractLayer();
+  const bridge = (window as any).midnightWallet;
+  if (!bridge?.getControllerSecretKey) {
+    throw new Error("midnightWallet.getControllerSecretKey not exposed by the bridge");
+  }
+  const { secretKeyHex } = await bridge.getControllerSecretKey(params.network);
+  if (typeof secretKeyHex !== "string" || secretKeyHex.length !== 64) {
+    throw new Error(`unexpected secret length: ${secretKeyHex?.length}`);
+  }
+  // Hex → Uint8Array(32).
+  const sk = new Uint8Array(32);
+  for (let i = 0; i < 32; i++) {
+    sk[i] = parseInt(secretKeyHex.slice(i * 2, i * 2 + 2), 16);
+  }
+  const pk = layer.contract.DIDContract.pureCircuits.publicKey(sk);
+  const pkHex = Array.from(pk, (b) => b.toString(16).padStart(2, "0")).join("");
+  return {
+    sourceLength: sk.length,
+    controllerPkPublic: pkHex,
+    secretHexFirst8: secretKeyHex.slice(0, 8),
+    elapsedMs: Date.now() - t0,
+  };
 }
 
 async function bridgeProbe(params: { message: string }) {
@@ -90,6 +137,7 @@ window.midnightDidBundle = {
   ready: true,
   loadContractLayer,
   bridgeProbe,
+  bridgeWitnessTest,
 };
 
 console.log(

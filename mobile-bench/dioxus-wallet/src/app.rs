@@ -1621,11 +1621,26 @@ struct BridgeProbeResult {
     error: Option<String>,
 }
 
+/// Result of a `bridgeWitnessTest` round-trip — Rust → JS → Rust →
+/// JS → Rust. Verifies the witness-callback chain we need before
+/// real circuit execution.
+#[derive(Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase", default)]
+struct WitnessTestResult {
+    source_length: i64,
+    controller_pk_public: String,
+    secret_hex_first8: String,
+    elapsed_ms: i64,
+    error: Option<String>,
+}
+
 #[component]
 fn JsBridgePanel() -> Element {
     let mut message = use_signal(|| "hello from rust".to_string());
     let mut result = use_signal::<Option<Result<BridgeProbeResult, String>>>(|| None);
     let mut pending = use_signal(|| false);
+    let mut witness_result = use_signal::<Option<Result<WitnessTestResult, String>>>(|| None);
+    let mut witness_pending = use_signal(|| false);
 
     let probe = move |_| {
         if *pending.read() {
@@ -1661,6 +1676,36 @@ fn JsBridgePanel() -> Element {
         });
     };
 
+    let probe_witness = move |_| {
+        if *witness_pending.read() {
+            return;
+        }
+        witness_pending.set(true);
+        witness_result.set(None);
+        // Nested chain: this eval calls `bridgeWitnessTest` which
+        // internally awaits `window.midnightWallet.getControllerSecretKey`
+        // — i.e. JS → Rust → JS → continued execution → final return.
+        // Verifies the witness-callback chain we need for ContractCall.
+        let snippet = r#"if (!window.midnightDidBundle?.bridgeWitnessTest) {
+            return { error: "bridgeWitnessTest not loaded" };
+        }
+        try {
+            const r = await window.midnightDidBundle.bridgeWitnessTest({ network: "undeployed" });
+            return r;
+        } catch (e) {
+            return { error: String(e?.message ?? e) };
+        }"#;
+        spawn(async move {
+            let r: Result<WitnessTestResult, String> = match document::eval(snippet).await {
+                Ok(v) => serde_json::from_value::<WitnessTestResult>(v)
+                    .map_err(|e| format!("decode: {e}")),
+                Err(e) => Err(format!("eval failed: {e}")),
+            };
+            witness_result.set(Some(r));
+            witness_pending.set(false);
+        });
+    };
+
     rsx! {
         div { class: "wizard-header", "JS bridge spike" }
         div { class: "session-log-empty",
@@ -1677,6 +1722,11 @@ fn JsBridgePanel() -> Element {
                 disabled: *pending.read(),
                 onclick: probe,
                 {if *pending.read() { "Probing…" } else { "Probe bridge" }}
+            }
+            button {
+                disabled: *witness_pending.read(),
+                onclick: probe_witness,
+                {if *witness_pending.read() { "Witness…" } else { "Witness test" }}
             }
         }
         if let Some(r) = result.read().as_ref() {
@@ -1722,6 +1772,50 @@ fn JsBridgePanel() -> Element {
                 Err(e) => rsx! {
                     div { class: "wizard-outcome err",
                         div { class: "row label", "Eval error" }
+                        div { class: "seed-blob", "{e}" }
+                    }
+                },
+            }
+        }
+        if let Some(r) = witness_result.read().as_ref() {
+            match r {
+                Ok(w) => {
+                    if let Some(err) = w.error.as_ref() {
+                        rsx! {
+                            div { class: "wizard-outcome err",
+                                div { class: "row label", "Witness JS-side error" }
+                                div { class: "seed-blob", "{err}" }
+                            }
+                        }
+                    } else {
+                        rsx! {
+                            div { class: "wizard-outcome ok",
+                                div { class: "row label", "Witness round-trip OK (JS → Rust → JS chain works)" }
+                                div { class: "did-meta-grid",
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Secret prefix" }
+                                        span { class: "value", "{w.secret_hex_first8}…" }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Length" }
+                                        span { class: "value", "{w.source_length} bytes" }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Elapsed" }
+                                        span { class: "value", "{w.elapsed_ms} ms" }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Controller pk" }
+                                        span { class: "value", "{w.controller_pk_public}…" }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => rsx! {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Witness eval error" }
                         div { class: "seed-blob", "{e}" }
                     }
                 },

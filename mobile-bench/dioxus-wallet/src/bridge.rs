@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
-use wallet_core::{Network, unshielded_bech32m};
+use wallet_core::{Network, Wallet, unshielded_bech32m};
 
 #[derive(Clone, Default)]
 pub struct BridgeState {
@@ -197,6 +197,27 @@ async fn run_method(
             // produce a schnorr signature over the payload.
             Err("signData: not implemented yet".to_string())
         }
+        "getControllerSecretKey" => {
+            // The on-chain `localSecretKey()` witness during a DID
+            // circuit call. The JS-side circuit executor invokes
+            // this via the existing JSON-RPC bridge while the
+            // Compact runtime is collecting witness values. The
+            // raw 32 bytes never leave the embedded WebView — they
+            // round-trip across the Dioxus channel as hex strings.
+            // The `network` param is reserved for a future
+            // multi-wallet world where the active seed depends on
+            // the network; today we ignore it and use the active
+            // seed the bridge was bootstrapped with.
+            let _p: AddressParams = serde_json::from_value(params)
+                .map_err(|e| format!("invalid params: {e}"))?;
+            let seed = decode_seed(active_seed_hex)?;
+            let net = Network::Undeployed; // placeholder; only used to construct the Wallet
+            let wallet = Wallet::from_seed(seed, net);
+            let bytes = wallet
+                .did_controller_secret_bytes()
+                .map_err(|e| format!("derive secret: {e}"))?;
+            Ok(serde_json::json!({ "secretKeyHex": hex::encode(bytes) }))
+        }
         // ──────────────────────────────────────────────────────
         // ContractCall pipeline hookpoints. See
         // `dioxus-wallet/src/app.rs::DidOperationsPanel` — drafts
@@ -258,6 +279,10 @@ window.midnightWallet = window.midnightWallet || {};
     window.midnightWallet.getPublicKey      = (role, network) => call("getPublicKey", { role, network });
     window.midnightWallet.signData          = (role, data)    => call("signData", { role, data });
     window.midnightWallet.bundleError       = (payload)       => call("bundleError", payload);
+    // Witness callback used by the DID-circuit JS executor. Returns
+    // `{ secretKeyHex }` for the active wallet's controller. The 32
+    // bytes never leave the WebView.
+    window.midnightWallet.getControllerSecretKey = (network) => call("getControllerSecretKey", { network });
 
     // Drain responses forever.
     (async () => {
