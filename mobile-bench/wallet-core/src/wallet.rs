@@ -669,6 +669,49 @@ impl Wallet {
             crate::did::contract::decode_did_ledger_state(&info.state_hex)?;
         Ok(crate::did::contract::ledger_to_domain(&ledger_state, id))
     }
+
+    /// Like [`resolve_did`] but also returns the on-chain housekeeping
+    /// (`maintenance_counter`, last tx + block) the LoadCircuitPanel
+    /// needs in order to compose the next `MaintenanceUpdate` without
+    /// asking the user to track the counter manually.
+    pub async fn resolve_did_full(
+        &self,
+        did: &str,
+    ) -> Result<crate::ResolvedDid, crate::DidError> {
+        let id = crate::DidId::parse(did)?;
+        if id.network != self.network {
+            return Err(crate::DidError::Indexer(format!(
+                "DID network {:?} does not match wallet network {:?}",
+                id.network, self.network
+            )));
+        }
+
+        let client = crate::IndexerClient::new(self.network)
+            .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
+        let info = client
+            .contract_state(&id.contract_address_hex())
+            .await
+            .map_err(|e| crate::DidError::Indexer(e.to_string()))?
+            .ok_or_else(|| {
+                crate::DidError::Indexer(format!(
+                    "no contract action for address {} on {}",
+                    id.contract_address_hex(),
+                    self.network.label()
+                ))
+            })?;
+
+        let ledger_state =
+            crate::did::contract::decode_did_ledger_state(&info.state_hex)?;
+        let maintenance_counter =
+            crate::did::contract::decode_maintenance_counter(&info.state_hex)?;
+        let document = crate::did::contract::ledger_to_domain(&ledger_state, id);
+        Ok(crate::ResolvedDid {
+            document,
+            maintenance_counter,
+            last_block_height: info.last_block_height,
+            last_tx_hash: info.last_tx_hash,
+        })
+    }
 }
 
 #[cfg(test)]

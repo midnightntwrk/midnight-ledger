@@ -382,3 +382,33 @@ details .panel .row {
 .wizard-outcome.ok  { border-left-color: var(--success); }
 .wizard-outcome.err { border-left-color: var(--error); }
 .wizard-outcome.err .seed-blob { color: var(--error); }
+
+.did-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  margin: 6px 0 8px;
+}
+.did-meta-cell {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+.did-meta-cell .label {
+  font-size: 10px;
+  color: var(--text-muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.did-meta-cell .value {
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

@@ -79,6 +79,11 @@ pub fn App() -> Element {
     // ResolveDidPanel pre-populates its input from this so the
     // user can immediately verify their freshly-created DID.
     let mut last_did_id = use_signal::<Option<String>>(|| None);
+    // Last `(did, maintenance_counter)` ResolveDidPanel surfaced.
+    // LoadCircuitPanel consumes this to pre-fill its counter input
+    // so the user doesn't have to track the counter manually
+    // between maintenance updates.
+    let mut last_resolved = use_signal::<Option<(String, u32)>>(|| None);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -321,6 +326,9 @@ pub fn App() -> Element {
                 ResolveDidPanel {
                     network: *network.read(),
                     seed_did: last_did_id.read().clone(),
+                    on_resolved: move |(did, counter): (String, u32)| {
+                        last_resolved.set(Some((did, counter)));
+                    },
                 }
                 CreateDidWizard {
                     network: *network.read(),
@@ -329,6 +337,7 @@ pub fn App() -> Element {
                 LoadCircuitPanel {
                     network: *network.read(),
                     seed_did: last_did_id.read().clone(),
+                    seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
                 }
             }
         }
@@ -560,8 +569,26 @@ fn BalancePanel(network: Network) -> Element {
     }
 }
 
+/// Successful resolve outcome — what the ResolveDidPanel displays
+/// after a chain round-trip. The document JSON is computed lazily
+/// for the toggle so we don't burn cycles rendering it when collapsed.
+#[derive(Clone)]
+struct ResolveView {
+    counter: u32,
+    last_block_height: Option<i64>,
+    last_tx_hash: String,
+    deactivated: bool,
+    vm_count: usize,
+    service_count: usize,
+    document_json: String,
+}
+
 #[component]
-fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
+fn ResolveDidPanel(
+    network: Network,
+    seed_did: Option<String>,
+    on_resolved: EventHandler<(String, u32)>,
+) -> Element {
     let mut input = use_signal(|| seed_did.clone().unwrap_or_default());
     // Re-seed the input whenever a new `seed_did` arrives — e.g.
     // the wizard just deployed a fresh DID. We only OVERWRITE
@@ -574,8 +601,9 @@ fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
             }
         }
     });
-    let mut result = use_signal::<Option<Result<String, String>>>(|| None);
+    let mut result = use_signal::<Option<Result<ResolveView, String>>>(|| None);
     let mut pending = use_signal(|| false);
+    let mut show_json = use_signal(|| false);
 
     let resolve = move |_| {
         if *pending.read() {
@@ -588,15 +616,26 @@ fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
         }
         pending.set(true);
         result.set(None);
+        let on_resolved = on_resolved.clone();
         spawn(async move {
-            let r = match Ok::<_, wallet_core::WalletError>(Wallet::demo(network)) {
-                Ok(w) => match w.resolve_did(&did_str).await {
-                    Ok(doc) => match serde_json::to_string_pretty(&doc) {
-                        Ok(s) => Ok(s),
-                        Err(e) => Err(format!("serialise: {e}")),
-                    },
-                    Err(e) => Err(e.to_string()),
-                },
+            let w = Wallet::demo(network);
+            let r: Result<ResolveView, String> = match w.resolve_did_full(&did_str).await {
+                Ok(resolved) => {
+                    let did_string = resolved.document.id.to_did_string();
+                    let json = serde_json::to_string_pretty(&resolved.document)
+                        .unwrap_or_else(|e| format!("serialise: {e}"));
+                    let view = ResolveView {
+                        counter: resolved.maintenance_counter,
+                        last_block_height: resolved.last_block_height,
+                        last_tx_hash: resolved.last_tx_hash,
+                        deactivated: resolved.document.deactivated,
+                        vm_count: resolved.document.verification_method.len(),
+                        service_count: resolved.document.service.len(),
+                        document_json: json,
+                    };
+                    on_resolved.call((did_string, resolved.maintenance_counter));
+                    Ok(view)
+                }
                 Err(e) => Err(e.to_string()),
             };
             result.set(Some(r));
@@ -605,7 +644,7 @@ fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
     };
 
     rsx! {
-        div { class: "row", "Resolve DID" }
+        div { class: "wizard-header", "Resolve DID" }
         div { class: "row",
             input {
                 r#type: "text",
@@ -617,20 +656,73 @@ fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
             button {
                 disabled: *pending.read(),
                 onclick: resolve,
-                {if *pending.read() { "…" } else { "Resolve" }}
+                {if *pending.read() { "Resolving…" } else { "Resolve" }}
             }
         }
         if let Some(res) = result.read().as_ref() {
             match res {
-                Ok(json) => rsx! { div { class: "seed-blob", "{json}" } },
-                Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
+                Ok(view) => {
+                    let status_class = if view.deactivated { "wizard-outcome err" } else { "wizard-outcome ok" };
+                    let status_label = if view.deactivated { "Deactivated" } else { "Active" };
+                    let block = view
+                        .last_block_height
+                        .map(|h| format_int(h))
+                        .unwrap_or_else(|| "—".into());
+                    rsx! {
+                        div { class: "{status_class}",
+                            div { class: "row label", "{status_label}" }
+                            div { class: "did-meta-grid",
+                                div { class: "did-meta-cell",
+                                    span { class: "label", "Counter" }
+                                    span { class: "value", "{view.counter}" }
+                                }
+                                div { class: "did-meta-cell",
+                                    span { class: "label", "VMs" }
+                                    span { class: "value", "{view.vm_count}" }
+                                }
+                                div { class: "did-meta-cell",
+                                    span { class: "label", "Services" }
+                                    span { class: "value", "{view.service_count}" }
+                                }
+                                div { class: "did-meta-cell",
+                                    span { class: "label", "Last block" }
+                                    span { class: "value", "{block}" }
+                                }
+                            }
+                            div { class: "row label", "Last tx" }
+                            div { class: "seed-blob", "0x{view.last_tx_hash}" }
+                            div { class: "row",
+                                button {
+                                    onclick: move |_| {
+                                        let cur = *show_json.read();
+                                        show_json.set(!cur);
+                                    },
+                                    {if *show_json.read() { "Hide document" } else { "Show document JSON" }}
+                                }
+                            }
+                            if *show_json.read() {
+                                div { class: "seed-blob", "{view.document_json}" }
+                            }
+                        }
+                    }
+                }
+                Err(e) => rsx! {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Failed" }
+                        div { class: "seed-blob", "{e}" }
+                    }
+                },
             }
         }
     }
 }
 
 #[component]
-fn LoadCircuitPanel(network: Network, seed_did: Option<String>) -> Element {
+fn LoadCircuitPanel(
+    network: Network,
+    seed_did: Option<String>,
+    seed_counter: Option<u32>,
+) -> Element {
     use wallet_core::WizardStage;
 
     // DID input — auto-seeded from the most recent deploy.
@@ -653,7 +745,28 @@ fn LoadCircuitPanel(network: Network, seed_did: Option<String>) -> Element {
         .position(|n| *n == "addVerificationMethod")
         .unwrap_or(0);
     let mut circuit_idx = use_signal(|| default_idx);
-    let mut counter_str = use_signal(|| "0".to_string());
+    // Initial counter: whatever the parent resolved most recently,
+    // or 0 (first maintenance after a fresh deploy).
+    let mut counter_str = use_signal(|| seed_counter.map(|c| c.to_string()).unwrap_or_else(|| "0".to_string()));
+    // Re-seed the counter whenever a new resolve completes, but
+    // only if the user hasn't manually edited away from the prior
+    // seed.
+    let mut last_seed = use_signal::<Option<u32>>(|| seed_counter);
+    use_effect(move || {
+        if let Some(c) = seed_counter {
+            let last = *last_seed.read();
+            let current_text = counter_str.read().clone();
+            let current_matches_last = last
+                .map(|p| current_text == p.to_string())
+                .unwrap_or(true);
+            if Some(c) != last && current_matches_last {
+                counter_str.set(c.to_string());
+                last_seed.set(Some(c));
+            } else if Some(c) != last {
+                last_seed.set(Some(c));
+            }
+        }
+    });
 
     let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
     let mut running = use_signal(|| false);

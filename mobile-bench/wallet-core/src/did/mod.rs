@@ -32,3 +32,20 @@ pub use types::{
     VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
     VerificationMethodType,
 };
+
+/// A DID document plus the on-chain housekeeping that doesn't live
+/// in DID Core. Returned by [`crate::Wallet::resolve_did_full`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ResolvedDid {
+    pub document: DidDocument,
+    /// Counter the chain stamps on the contract's maintenance
+    /// authority. The next `MaintenanceUpdate` for this contract
+    /// must use exactly this value.
+    pub maintenance_counter: u32,
+    /// Block height of the last action (deploy / call / update)
+    /// the indexer has seen for the DID.
+    pub last_block_height: Option<i64>,
+    /// `tx_hash` of that last action, hex-encoded.
+    pub last_tx_hash: String,
+}

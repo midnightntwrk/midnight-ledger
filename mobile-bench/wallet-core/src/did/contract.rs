@@ -79,6 +79,19 @@ pub(crate) struct DidLedgerState {
     pub(crate) services: Vec<Service>,
 }
 
+/// Counter for the contract's maintenance authority, plucked out of
+/// the same `ContractState` payload `decode_did_ledger_state` walks.
+/// The next `MaintenanceUpdate` for this contract must use exactly
+/// this value (the on-chain check increments after each accepted
+/// update — see `ledger/src/structure.rs::ContractMaintenanceAuthority`).
+pub(crate) fn decode_maintenance_counter(state_hex: &str) -> Result<u32, DidError> {
+    let bytes = hex::decode(state_hex.trim_start_matches("0x"))
+        .map_err(|e| DidError::DecodeState(format!("hex: {e}")))?;
+    let state: ContractState<DefaultDB> = tagged_deserialize(&bytes[..])
+        .map_err(|e| DidError::DecodeState(format!("tagged_deserialize: {e}")))?;
+    Ok(state.maintenance_authority.counter)
+}
+
 pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState, DidError> {
     let bytes = hex::decode(state_hex.trim_start_matches("0x"))
         .map_err(|e| DidError::DecodeState(format!("hex: {e}")))?;

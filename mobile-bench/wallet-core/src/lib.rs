@@ -25,7 +25,7 @@ mod wallet;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
-    DidIdError, KeyType, PublicKeyJwk, Service, ServiceEndpoint, VerificationMethod,
+    DidIdError, KeyType, PublicKeyJwk, ResolvedDid, Service, ServiceEndpoint, VerificationMethod,
     VerificationMethodRef, VerificationMethodRelation, VerificationMethodType,
 };
 
