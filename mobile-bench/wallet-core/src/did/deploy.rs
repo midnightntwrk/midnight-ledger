@@ -177,6 +177,43 @@ pub fn testing_initial_deploy_state_hex(
     Ok(hex::encode(bytes))
 }
 
+/// Like [`testing_initial_deploy_state_hex`] but pre-loads each
+/// named circuit's verifier key into the contract state's
+/// `operations` map. Models the post-MaintenanceUpdate state the
+/// chain holds after the wallet has loaded that circuit's VK —
+/// without actually running a MaintenanceUpdate. Used by offline
+/// integration tests that drive `createUnprovenCallTxFromInitialStates`,
+/// which requires the called operation to be present in the state.
+#[doc(hidden)]
+pub fn testing_deploy_state_with_circuits_hex(
+    controller_sk: &[u8; 32],
+    timestamp_ms: u64,
+    circuit_names: &[&str],
+) -> Result<String, std::io::Error> {
+    use onchain_state::state::{ContractOperation, EntryPointBuf};
+
+    let pk = crate::wallet::Wallet::controller_public_key_for(controller_sk);
+    let mut state = compose_initial_state(pk, timestamp_ms, Vec::new());
+    for name in circuit_names {
+        let vk_bytes = crate::did::artifacts::verifier_key_bytes(name)
+            .ok_or_else(|| std::io::Error::new(
+                std::io::ErrorKind::NotFound,
+                format!("unknown circuit '{name}'"),
+            ))?;
+        let vk: transient_crypto::proofs::VerifierKey =
+            serialize::tagged_deserialize(vk_bytes)?;
+        // ContractOperation::new takes Option<VerifierKey>; populated
+        // entries are what `well_formed` accepts as "this circuit is
+        // callable".
+        let op = ContractOperation::new(Some(vk));
+        let key = EntryPointBuf(name.as_bytes().to_vec());
+        state.operations = state.operations.insert(key, op);
+    }
+    let mut bytes = Vec::new();
+    serialize::tagged_serialize(&state, &mut bytes)?;
+    Ok(hex::encode(bytes))
+}
+
 /// Build a deterministic `ContractDeploy` for a given controller
 /// commitment + timestamp + nonce. The deploy's address is
 /// `SHA-256(tagged_serialize(self))` so callers can preview the

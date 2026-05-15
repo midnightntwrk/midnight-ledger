@@ -221,6 +221,119 @@ const methods = {
   },
 
   /**
+   * Produce a SCALE-serialised `UnprovenTransaction` that calls a
+   * DID circuit on a deployed contract. Step 6 of the bridge plan
+   * — the Rust side will deserialise this, balance dust, prove,
+   * and submit via the existing pipeline.
+   *
+   * The upstream `createUnprovenCallTxFromInitialStates` does the
+   * heavy lifting: runs the circuit, partitions the transcript,
+   * commits the inputs, wraps in a `Transaction<PreProof,…>`.
+   *
+   * Inputs (all bytes encoded as hex strings):
+   * - `did`, `circuit`, `circuitArgs` — what to call.
+   * - `contractStateHex` — current `ContractState` from indexer.
+   * - `zswapChainStateHex` — current `ZswapChainState` (use the
+   *   ledger-state-derived form; DID contracts have an empty one
+   *   in practice but the API still wants it).
+   * - `ledgerParametersHex` — chain LedgerParameters.
+   * - `controllerSecretHex` — 32-byte controller sk that fulfils
+   *   `localSecretKey()` witness.
+   * - `coinPublicKeyHex`, `encryptionPublicKeyHex` — the user's
+   *   Zswap public keys (the resulting tx will be balanced/spent
+   *   against this wallet).
+   * - `networkId` — "undeployed" / "testnet" / etc.
+   */
+  prepareUnprovenCallTx: async (params) => {
+    const t0 = Date.now();
+    const { contract: c, compactRuntime: cr } = await loadContractLayer();
+    const [jsContracts, ledgerV8, compactJs, networkIdMod, zkProvMod] = await Promise.all([
+      import("@midnight-ntwrk/midnight-js-contracts"),
+      import("@midnight-ntwrk/ledger-v8"),
+      import("@midnight-ntwrk/compact-js"),
+      import("@midnight-ntwrk/midnight-js-network-id"),
+      import("@midnight-ntwrk/midnight-js-node-zk-config-provider"),
+    ]);
+    networkIdMod.setNetworkId(params.networkId ?? "undeployed");
+
+    const skBytes = hexToBytes(params.controllerSecretHex);
+    if (skBytes.length !== 32) {
+      throw new Error(`controllerSecretHex must be 32 bytes, got ${skBytes.length}`);
+    }
+    // Witnesses for the DID contract — `localSecretKey` returns the
+    // wallet's 32-byte controller sk; `currentTimestamp` returns
+    // wall-clock ms; `getSchnorrReduction` is only used by
+    // `verifyJubjub*` circuits which aren't drivable from this path.
+    const witnesses = {
+      localSecretKey: (ctx) => [ctx.privateState, skBytes],
+      currentTimestamp: (ctx) => [ctx.privateState, BigInt(Date.now())],
+      getSchnorrReduction: (ctx) => [ctx.privateState, [0n, 0n]],
+    };
+
+    const compiledContract = compactJs.CompiledContract.make(
+      "did",
+      c.DIDContract.Contract,
+    ).pipe(
+      compactJs.CompiledContract.withWitnesses(witnesses),
+      compactJs.CompiledContract.withCompiledFileAssets(DID_ZK_ASSETS_PATH),
+    );
+
+    const zkConfigProvider = new zkProvMod.NodeZkConfigProvider(DID_ZK_ASSETS_PATH);
+
+    // Materialise on-chain inputs. The upstream
+    // `createUnprovenCallTxFromInitialStates` runs the contract
+    // state through `coerceToChargedState` (compact-runtime), which
+    // accepts `onchain-runtime`'s `ContractState` — NOT
+    // `ledger-v8`'s same-named class. `cr.ContractState` (re-exported
+    // from `compact-runtime`) is the right one.
+    // Empty / initial fallbacks are legal for `zswapChainState`
+    // (DID contracts touch no Zswap state) and `ledgerParameters`
+    // (use chain initial params).
+    const contractState = cr.ContractState.deserialize(
+      hexToBytes(params.contractStateHex),
+    );
+    const zswapChainState = params.zswapChainStateHex
+      ? ledgerV8.ZswapChainState.deserialize(hexToBytes(params.zswapChainStateHex))
+      : new ledgerV8.ZswapChainState();
+    const ledgerParameters = params.ledgerParametersHex
+      ? ledgerV8.LedgerParameters.deserialize(hexToBytes(params.ledgerParametersHex))
+      : ledgerV8.LedgerParameters.initialParameters();
+
+    // `args` may carry `{ $bigint: "n" }` placeholders for Field /
+    // Uint args (same convention as `inspectCircuit`).
+    const args = Array.isArray(params.circuitArgs)
+      ? params.circuitArgs.map(reviveBigints)
+      : [];
+
+    const callTxData = await jsContracts.createUnprovenCallTxFromInitialStates(
+      zkConfigProvider,
+      {
+        compiledContract,
+        circuitId: params.circuit,
+        contractAddress: params.contractAddressHex,
+        args,
+        coinPublicKey: params.coinPublicKeyHex,
+        initialContractState: contractState,
+        initialZswapChainState: zswapChainState,
+        ledgerParameters,
+        initialPrivateState: { secretKey: skBytes },
+      },
+      params.encryptionPublicKeyHex,
+    );
+
+    // `UnsubmittedCallTxData = CallResult & { private: UnsubmittedTxData }`
+    // where the `unprovenTx` lives under `.private`. CallResultPublic
+    // has the post-state + transcript; we don't need those here.
+    const unprovenBytes = callTxData.private.unprovenTx.serialize();
+    return {
+      circuit: params.circuit,
+      unprovenTxHex: bytesToHex(unprovenBytes),
+      unprovenTxBytes: unprovenBytes.length,
+      elapsedMs: Date.now() - t0,
+    };
+  },
+
+  /**
    * Smoke test for the contract layer. Returns a summary of which
    * DID circuits + Compact runtime helpers are exposed by the
    * vendored package. The Rust side asserts on circuit names so a
