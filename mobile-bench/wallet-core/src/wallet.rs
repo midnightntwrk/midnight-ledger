@@ -3,7 +3,56 @@ use rand_chacha::ChaCha20Rng;
 use serialize::Serializable;
 use zswap::keys::{Seed, SecretKeys};
 
+use crate::js_bridge::JsBridge;
 use crate::network::Network;
+
+/// Shape of the `prepareUnprovenCallTx` harness response. Lives
+/// here (rather than on a public type) because `call_did_circuit`
+/// is the only consumer.
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct PrepareUnprovenCallTxResult {
+    unproven_tx_hex: String,
+    #[allow(dead_code)] // surfaced for diagnostics
+    elapsed_ms: i64,
+}
+
+/// Drive the harness's `prepareUnprovenCallTx` and return the hex
+/// blob. Pulled out so `call_did_circuit` reads top-down without
+/// the JSON-ferrying noise.
+#[allow(clippy::too_many_arguments)]
+async fn call_prepare_unproven(
+    bridge: &crate::js_bridge::NodeChildBridge,
+    did: String,
+    circuit: String,
+    circuit_args: serde_json::Value,
+    contract_state_hex: String,
+    contract_address_hex: String,
+    controller_sk: [u8; 32],
+    coin_public_key_hex: String,
+    encryption_public_key_hex: String,
+    network_id: String,
+) -> Result<String, crate::js_bridge::JsBridgeError> {
+    let r: PrepareUnprovenCallTxResult = bridge
+        .call(
+            "prepareUnprovenCallTx",
+            serde_json::json!({
+                "did": did,
+                "circuit": circuit,
+                "circuitArgs": circuit_args,
+                "contractStateHex": contract_state_hex,
+                "contractAddressHex": contract_address_hex,
+                "zswapChainStateHex": serde_json::Value::Null,
+                "ledgerParametersHex": serde_json::Value::Null,
+                "controllerSecretHex": hex::encode(controller_sk),
+                "coinPublicKeyHex": coin_public_key_hex,
+                "encryptionPublicKeyHex": encryption_public_key_hex,
+                "networkId": network_id,
+            }),
+        )
+        .await?;
+    Ok(r.unproven_tx_hex)
+}
 
 /// Stable hardcoded seed used by [`Wallet::demo`] for non-Undeployed
 /// networks so the dev UI shows the *same* coin/encryption public
@@ -597,6 +646,182 @@ impl Wallet {
                 tx_hash: submit.tx_hash,
                 block_hash: submit.block_hash,
                 // MaintenanceUpdate does not mint a DID; no fresh sk.
+                controller_sk: [0u8; 32],
+            });
+        }
+    }
+
+    /// Invoke a DID circuit on a deployed contract — the *Update*
+    /// / *Deactivate* half of CRUD. The Compact circuit body runs
+    /// in a Node-driven JS harness (the production WebView path
+    /// uses the same code via Dioxus eval); the resulting
+    /// `UnprovenTransaction` is balanced, proven, and submitted
+    /// natively in Rust through the existing pipeline.
+    ///
+    /// `controller_sk` is the per-DID random secret the wallet
+    /// minted at deploy time (in [`DeployOutcome::controller_sk`]).
+    /// Without it, the circuit's `localSecretKey()` witness can't
+    /// be supplied and the call fails the contract's controller
+    /// assertion.
+    ///
+    /// `args_json` is a JSON array of circuit arguments. Each is
+    /// passed through unchanged to JS — bigints use the
+    /// `{ "$bigint": "n" }` tagged form. `[]` for `deactivate`.
+    pub fn call_did_circuit(
+        &self,
+        did_id: crate::DidId,
+        circuit: String,
+        args_json: serde_json::Value,
+        controller_sk: [u8; 32],
+    ) -> impl futures::Stream<Item = crate::WizardStage> + Send + 'static {
+        use coin_structure::contract::ContractAddress;
+        use base_crypto::hash::HashOutput;
+
+        let network = self.network;
+        let seed_bytes = self.seed_bytes;
+        async_stream::stream! {
+            yield crate::WizardStage::SyncingDust;
+            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut dust_state = match wallet.sync_dust().await {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
+            };
+            let dust_key = match wallet.dust_secret_key() {
+                Ok(k) => k,
+                Err(e) => { yield crate::WizardStage::Failed(format!("dust key: {e}")); return; }
+            };
+
+            // 2. Composing — the heavy lift: JS-side Compact runtime
+            //    builds the UnprovenTransaction. Rust pulls current
+            //    contract state from the indexer first.
+            yield crate::WizardStage::Composing;
+            let coin_pk_hex = match wallet.coin_public_key_hex() {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("coin pk: {e}")); return; }
+            };
+            let enc_pk_hex = match wallet.encryption_public_key_hex() {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("encryption pk: {e}")); return; }
+            };
+            let indexer = match crate::IndexerClient::new(network) {
+                Ok(c) => c,
+                Err(e) => { yield crate::WizardStage::Failed(format!("indexer client: {e}")); return; }
+            };
+            let addr_hex = did_id.contract_address_hex();
+            let info = match indexer.contract_state(&addr_hex).await {
+                Ok(Some(i)) => i,
+                Ok(None) => {
+                    yield crate::WizardStage::Failed(format!(
+                        "no on-chain state for {addr_hex} — was the DID deployed?",
+                    ));
+                    return;
+                }
+                Err(e) => { yield crate::WizardStage::Failed(format!("indexer: {e}")); return; }
+            };
+
+            // Spawn the harness + ask it to build an UnprovenTransaction
+            // for this circuit call.
+            let bridge = match crate::js_bridge::NodeChildBridge::spawn(
+                &crate::js_bridge::NodeChildBridge::default_harness_path(),
+            ) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("spawn harness: {e}")); return; }
+            };
+            let unproven_hex = match call_prepare_unproven(
+                &bridge,
+                did_id.to_did_string(),
+                circuit.clone(),
+                args_json,
+                info.state_hex,
+                addr_hex.clone(),
+                controller_sk,
+                coin_pk_hex,
+                enc_pk_hex,
+                network.config().network_id.to_string(),
+            )
+            .await
+            {
+                Ok(h) => h,
+                Err(e) => { yield crate::WizardStage::Failed(format!("prepare call tx: {e}")); return; }
+            };
+            let unproven_bytes = match hex::decode(&unproven_hex) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("hex decode: {e}")); return; }
+            };
+            let unproven: crate::tx::build::UnprovenTx =
+                match serialize::tagged_deserialize(&unproven_bytes[..]) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        yield crate::WizardStage::Failed(format!(
+                            "deserialise unproven tx: {e}"
+                        ));
+                        return;
+                    }
+                };
+
+            // 3. Balancing — same dust pipeline our deploy uses.
+            yield crate::WizardStage::Balancing;
+            let params = ledger::structure::INITIAL_PARAMETERS;
+            let now_secs = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
+            let ctime = dust_state.sync_time;
+            let mut ctx = crate::tx::balance::BalanceCtx {
+                dust_state: &mut dust_state,
+                dust_key: &dust_key,
+                params: &params,
+                time: ctime,
+                ttl,
+                network_id: network.config().network_id,
+            };
+            let balanced = match crate::tx::balance::balance(unproven, &mut ctx) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("balance: {e}")); return; }
+            };
+
+            // 4. Proving
+            yield crate::WizardStage::Proving;
+            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+                Ok(p) => p,
+                Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
+            };
+
+            // 5. Submitting
+            yield crate::WizardStage::Submitting;
+            let scale_bytes = match crate::tx::scale::scale_encode(&proven) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("encode: {e}")); return; }
+            };
+            let signer = match wallet.midnight_signer() {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
+            };
+            let node = match crate::NodeClient::connect(network).await {
+                Ok(n) => n,
+                Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
+            };
+
+            // 6. Confirming
+            yield crate::WizardStage::Confirming;
+            let submit = match node.submit_deploy(scale_bytes, &signer).await {
+                Ok(r) => r,
+                Err(e) => { yield crate::WizardStage::Failed(format!("submit: {e}")); return; }
+            };
+
+            // Resolve placeholder ContractAddress to silence
+            // unused-import on the trait if we ever drop the
+            // call-site below. Keeps the import live for future
+            // intra-call address checks.
+            let _: ContractAddress = ContractAddress(HashOutput(did_id.contract_address));
+
+            yield crate::WizardStage::Done(crate::DeployOutcome {
+                did_id,
+                tx_hash: submit.tx_hash,
+                block_hash: submit.block_hash,
+                // ContractCall doesn't mint a DID; no fresh sk.
                 controller_sk: [0u8; 32],
             });
         }
