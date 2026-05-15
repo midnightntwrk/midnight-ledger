@@ -107,7 +107,6 @@ enum SessionEvent {
     /// for the local-only flow. Once the Compact-runtime bridge
     /// lands, the same operation will be turned into a real
     /// `ContractCall` transaction.
-    #[allow(dead_code)] // wired up by DidOperationsPanel — see commit history.
     OperationDrafted {
         did: String,
         operation: DidOperation,
@@ -117,11 +116,6 @@ enum SessionEvent {
 /// One DID circuit invocation, drafted in the UI. Shape mirrors
 /// the corresponding Compact circuit in
 /// `mobile-bench/wallet-core/contracts/midnight-did/did.compact`.
-///
-/// Variants are constructed by `DidOperationsPanel` (next commit);
-/// the enum lives here so `SessionEvent::OperationDrafted` can
-/// reference it from the existing session-log plumbing.
-#[allow(dead_code)] // populated by DidOperationsPanel — see commit history.
 #[derive(Clone, PartialEq, Eq)]
 enum DidOperation {
     AddAlsoKnownAs { value: String },
@@ -515,6 +509,14 @@ pub fn App() -> Element {
                         let mut log = timing_log.read().clone();
                         log.push(run);
                         timing_log.set(log);
+                    },
+                }
+                DidOperationsPanel {
+                    seed_did: last_did_id.read().clone(),
+                    on_drafted: move |(did, op): (String, DidOperation)| {
+                        let mut log = session_log.read().clone();
+                        log.push(SessionEvent::OperationDrafted { did, operation: op });
+                        session_log.set(log);
                     },
                 }
                 SessionLogPanel { events: session_log.read().clone() }
@@ -1193,6 +1195,407 @@ fn LoadCircuitPanel(
             div { class: "wizard-outcome err",
                 div { class: "row label", "Failed" }
                 div { class: "seed-blob", "{msg}" }
+            }
+        }
+    }
+}
+
+/// Variants of the 11-circuit dropdown. Order matches the
+/// dropdown's display order; numeric tag is the `<select>` value
+/// we round-trip through `e.value().parse()`.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum OpKind {
+    AddAlsoKnownAs,
+    RemoveAlsoKnownAs,
+    AddVerificationMethod,
+    UpdateVerificationMethod,
+    RemoveVerificationMethod,
+    AddVerificationMethodRelation,
+    RemoveVerificationMethodRelation,
+    AddService,
+    UpdateService,
+    RemoveService,
+    Deactivate,
+}
+
+impl OpKind {
+    const ALL: &'static [OpKind] = &[
+        OpKind::AddAlsoKnownAs,
+        OpKind::RemoveAlsoKnownAs,
+        OpKind::AddVerificationMethod,
+        OpKind::UpdateVerificationMethod,
+        OpKind::RemoveVerificationMethod,
+        OpKind::AddVerificationMethodRelation,
+        OpKind::RemoveVerificationMethodRelation,
+        OpKind::AddService,
+        OpKind::UpdateService,
+        OpKind::RemoveService,
+        OpKind::Deactivate,
+    ];
+
+    fn circuit_name(&self) -> &'static str {
+        match self {
+            Self::AddAlsoKnownAs => "addAlsoKnownAs",
+            Self::RemoveAlsoKnownAs => "removeAlsoKnownAs",
+            Self::AddVerificationMethod => "addVerificationMethod",
+            Self::UpdateVerificationMethod => "updateVerificationMethod",
+            Self::RemoveVerificationMethod => "removeVerificationMethod",
+            Self::AddVerificationMethodRelation => "addVerificationMethodRelation",
+            Self::RemoveVerificationMethodRelation => "removeVerificationMethodRelation",
+            Self::AddService => "addService",
+            Self::UpdateService => "updateService",
+            Self::RemoveService => "removeService",
+            Self::Deactivate => "deactivate",
+        }
+    }
+}
+
+const KEY_TYPES: &[&str] = &["EC", "RSA", "oct", "OKP"];
+const CURVE_TYPES: &[&str] = &["Ed25519", "Jubjub", "P256"];
+const RELATIONS: &[&str] = &[
+    "Authentication",
+    "AssertionMethod",
+    "KeyAgreement",
+    "CapabilityInvocation",
+    "CapabilityDelegation",
+];
+
+#[component]
+fn DidOperationsPanel(
+    seed_did: Option<String>,
+    on_drafted: EventHandler<(String, DidOperation)>,
+) -> Element {
+    let mut did_input = use_signal(|| seed_did.clone().unwrap_or_default());
+    use_effect(move || {
+        if let Some(seed) = seed_did.clone() {
+            if *did_input.read() != seed {
+                did_input.set(seed);
+            }
+        }
+    });
+
+    let mut op_idx = use_signal(|| 0usize);
+
+    // All circuit-specific fields share one signal each. A
+    // single panel surfaces fields conditionally on `op_idx`; the
+    // ones not visible carry stale state but are inert.
+    let mut f_value = use_signal(String::new);
+    let mut f_id = use_signal(String::new);
+    let mut f_key_type_idx = use_signal(|| 0usize);
+    let mut f_curve_idx = use_signal(|| 0usize);
+    let mut f_pk_x = use_signal(String::new);
+    let mut f_pk_y = use_signal(String::new);
+    let mut f_relation_idx = use_signal(|| 0usize);
+    let mut f_method_id = use_signal(String::new);
+    let mut f_typ = use_signal(String::new);
+    let mut f_endpoint = use_signal(String::new);
+    let mut error = use_signal::<Option<String>>(|| None);
+    let mut last_drafted = use_signal::<Option<DidOperation>>(|| None);
+
+    let on_draft = move |_| {
+        let did_str = did_input.read().trim().to_string();
+        if did_str.is_empty() {
+            error.set(Some("enter a did:midnight:… string".into()));
+            return;
+        }
+        if wallet_core::DidId::parse(&did_str).is_err() {
+            error.set(Some(format!("not a valid DID: {did_str}")));
+            return;
+        }
+        let op = OpKind::ALL[*op_idx.read()];
+        let drafted = match op {
+            OpKind::AddAlsoKnownAs => {
+                let v = f_value.read().trim().to_string();
+                if v.is_empty() {
+                    error.set(Some("value is required".into()));
+                    return;
+                }
+                DidOperation::AddAlsoKnownAs { value: v }
+            }
+            OpKind::RemoveAlsoKnownAs => {
+                let v = f_value.read().trim().to_string();
+                if v.is_empty() {
+                    error.set(Some("value is required".into()));
+                    return;
+                }
+                DidOperation::RemoveAlsoKnownAs { value: v }
+            }
+            OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => {
+                let id = f_id.read().trim().to_string();
+                let pk_x = f_pk_x.read().trim().to_string();
+                let pk_y = f_pk_y.read().trim().to_string();
+                if id.is_empty() || pk_x.is_empty() || pk_y.is_empty() {
+                    error.set(Some("id, pk_x, pk_y are required".into()));
+                    return;
+                }
+                let vm = VerificationMethodInput {
+                    id,
+                    key_type: KEY_TYPES[*f_key_type_idx.read()].to_string(),
+                    curve: CURVE_TYPES[*f_curve_idx.read()].to_string(),
+                    pk_x,
+                    pk_y,
+                };
+                match op {
+                    OpKind::AddVerificationMethod => DidOperation::AddVerificationMethod(vm),
+                    OpKind::UpdateVerificationMethod => DidOperation::UpdateVerificationMethod(vm),
+                    _ => unreachable!(),
+                }
+            }
+            OpKind::RemoveVerificationMethod => {
+                let id = f_id.read().trim().to_string();
+                if id.is_empty() {
+                    error.set(Some("id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveVerificationMethod { id }
+            }
+            OpKind::AddVerificationMethodRelation => {
+                let method_id = f_method_id.read().trim().to_string();
+                if method_id.is_empty() {
+                    error.set(Some("method_id is required".into()));
+                    return;
+                }
+                DidOperation::AddVerificationMethodRelation {
+                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
+                    method_id,
+                }
+            }
+            OpKind::RemoveVerificationMethodRelation => {
+                let method_id = f_method_id.read().trim().to_string();
+                if method_id.is_empty() {
+                    error.set(Some("method_id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveVerificationMethodRelation {
+                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
+                    method_id,
+                }
+            }
+            OpKind::AddService | OpKind::UpdateService => {
+                let id = f_id.read().trim().to_string();
+                let typ = f_typ.read().trim().to_string();
+                let endpoint = f_endpoint.read().trim().to_string();
+                if id.is_empty() || typ.is_empty() || endpoint.is_empty() {
+                    error.set(Some("id, type, endpoint are required".into()));
+                    return;
+                }
+                let s = ServiceInput { id, typ, endpoint };
+                match op {
+                    OpKind::AddService => DidOperation::AddService(s),
+                    OpKind::UpdateService => DidOperation::UpdateService(s),
+                    _ => unreachable!(),
+                }
+            }
+            OpKind::RemoveService => {
+                let id = f_id.read().trim().to_string();
+                if id.is_empty() {
+                    error.set(Some("id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveService { id }
+            }
+            OpKind::Deactivate => DidOperation::Deactivate,
+        };
+        error.set(None);
+        last_drafted.set(Some(drafted.clone()));
+        on_drafted.call((did_str, drafted));
+    };
+
+    let op = OpKind::ALL[*op_idx.read()];
+    let cur_idx = *op_idx.read();
+    let cur_kt = *f_key_type_idx.read();
+    let cur_cv = *f_curve_idx.read();
+    let cur_rel = *f_relation_idx.read();
+    rsx! {
+        div { class: "wizard-header", "DID operation (draft only)" }
+        div { class: "session-log-empty",
+            "Drafts capture intent locally. On-chain submission lands once the Compact-runtime JS bridge is wired (see bridge.rs TODOs)."
+        }
+        div { class: "row",
+            input {
+                r#type: "text",
+                placeholder: "did:midnight:undeployed:…",
+                value: "{did_input.read()}",
+                oninput: move |e| did_input.set(e.value()),
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+        }
+        div { class: "row",
+            label { style: "min-width: 80px;", "Circuit" }
+            select {
+                onchange: move |e| {
+                    if let Ok(idx) = e.value().parse::<usize>() {
+                        op_idx.set(idx);
+                    }
+                },
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                for (i , kind) in OpKind::ALL.iter().enumerate() {
+                    option {
+                        value: "{i}",
+                        selected: i == cur_idx,
+                        "{kind.circuit_name()}"
+                    }
+                }
+            }
+        }
+
+        // Per-circuit form fields. The ones not matching `op` are
+        // simply skipped — their signal state is irrelevant.
+        match op {
+            OpKind::AddAlsoKnownAs | OpKind::RemoveAlsoKnownAs => rsx! {
+                FormRow {
+                    label: "value",
+                    value: f_value.read().clone(),
+                    on_change: move |s: String| f_value.set(s),
+                    placeholder: "https://alias.example.com or arbitrary identifier",
+                }
+            },
+            OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => rsx! {
+                FormRow {
+                    label: "id",
+                    value: f_id.read().clone(),
+                    on_change: move |s: String| f_id.set(s),
+                    placeholder: "key-0 / authkey-2025-05",
+                }
+                FormSelect {
+                    label: "key_type",
+                    options: KEY_TYPES,
+                    selected_idx: cur_kt,
+                    on_select: move |i: usize| f_key_type_idx.set(i),
+                }
+                FormSelect {
+                    label: "curve",
+                    options: CURVE_TYPES,
+                    selected_idx: cur_cv,
+                    on_select: move |i: usize| f_curve_idx.set(i),
+                }
+                FormRow {
+                    label: "pk.x",
+                    value: f_pk_x.read().clone(),
+                    on_change: move |s: String| f_pk_x.set(s),
+                    placeholder: "field element (hex or decimal)",
+                }
+                FormRow {
+                    label: "pk.y",
+                    value: f_pk_y.read().clone(),
+                    on_change: move |s: String| f_pk_y.set(s),
+                    placeholder: "field element (hex or decimal)",
+                }
+            },
+            OpKind::RemoveVerificationMethod | OpKind::RemoveService => rsx! {
+                FormRow {
+                    label: "id",
+                    value: f_id.read().clone(),
+                    on_change: move |s: String| f_id.set(s),
+                    placeholder: "fragment id to remove",
+                }
+            },
+            OpKind::AddVerificationMethodRelation | OpKind::RemoveVerificationMethodRelation => rsx! {
+                FormSelect {
+                    label: "relation",
+                    options: RELATIONS,
+                    selected_idx: cur_rel,
+                    on_select: move |i: usize| f_relation_idx.set(i),
+                }
+                FormRow {
+                    label: "method_id",
+                    value: f_method_id.read().clone(),
+                    on_change: move |s: String| f_method_id.set(s),
+                    placeholder: "existing verification-method fragment id",
+                }
+            },
+            OpKind::AddService | OpKind::UpdateService => rsx! {
+                FormRow {
+                    label: "id",
+                    value: f_id.read().clone(),
+                    on_change: move |s: String| f_id.set(s),
+                    placeholder: "service fragment id",
+                }
+                FormRow {
+                    label: "type",
+                    value: f_typ.read().clone(),
+                    on_change: move |s: String| f_typ.set(s),
+                    placeholder: "e.g. LinkedDomains",
+                }
+                FormRow {
+                    label: "endpoint",
+                    value: f_endpoint.read().clone(),
+                    on_change: move |s: String| f_endpoint.set(s),
+                    placeholder: "https://example.com/.well-known/did-config",
+                }
+            },
+            OpKind::Deactivate => rsx! {
+                div { class: "row",
+                    span { style: "color: var(--text-muted); font-size: 11px;",
+                        "No input. Sets the DID inactive and prevents further updates."
+                    }
+                }
+            },
+        }
+
+        div { class: "row",
+            button { onclick: on_draft, "Draft operation" }
+        }
+
+        if let Some(msg) = error.read().as_ref() {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "Validation" }
+                div { class: "seed-blob", "{msg}" }
+            }
+        } else if let Some(op) = last_drafted.read().as_ref() {
+            div { class: "wizard-outcome ok",
+                div { class: "row label", "Drafted (logged)" }
+                div { class: "seed-blob", "{op.circuit()} · {op.summary()}" }
+            }
+        }
+    }
+}
+
+#[component]
+fn FormRow(
+    label: &'static str,
+    value: String,
+    on_change: EventHandler<String>,
+    placeholder: &'static str,
+) -> Element {
+    rsx! {
+        div { class: "row",
+            label { style: "min-width: 80px;", "{label}" }
+            input {
+                r#type: "text",
+                value: "{value}",
+                placeholder: "{placeholder}",
+                oninput: move |e| on_change.call(e.value()),
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+        }
+    }
+}
+
+#[component]
+fn FormSelect(
+    label: &'static str,
+    options: &'static [&'static str],
+    selected_idx: usize,
+    on_select: EventHandler<usize>,
+) -> Element {
+    rsx! {
+        div { class: "row",
+            label { style: "min-width: 80px;", "{label}" }
+            select {
+                onchange: move |e| {
+                    if let Ok(i) = e.value().parse::<usize>() {
+                        on_select.call(i);
+                    }
+                },
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                for (i , opt) in options.iter().enumerate() {
+                    option {
+                        value: "{i}",
+                        selected: i == selected_idx,
+                        "{opt}"
+                    }
+                }
             }
         }
     }

@@ -197,6 +197,32 @@ async fn run_method(
             // produce a schnorr signature over the payload.
             Err("signData: not implemented yet".to_string())
         }
+        // ──────────────────────────────────────────────────────
+        // ContractCall pipeline hookpoints. See
+        // `dioxus-wallet/src/app.rs::DidOperationsPanel` — drafts
+        // collected there will be submitted through these methods
+        // once wired. The JS side will use the bundled
+        // `@midnight-ntwrk/midnight-did-contract` package to run
+        // the Compact circuit against current state and return a
+        // serialised `ContractCallPrototype`; Rust then wraps it
+        // in an `Intent`, balances dust, proves the spend, and
+        // submits.
+        "didOp.prepareCall" => {
+            // Expected params (TODO finalize):
+            //   { did: string, circuit: string, inputs: object,
+            //     controllerPublicKey: hex }
+            // Expected result: { prototype: hex-serialised
+            //   ContractCallPrototype<DefaultDB> }
+            // The JS side runs the circuit against on-chain state
+            // and returns the prototype; Rust builds the rest of
+            // the transaction.
+            Err("didOp.prepareCall: not implemented yet (Compact runtime bridge)".to_string())
+        }
+        "didOp.submit" => {
+            // Expected params: { prototype: hex, did: string }
+            // Returns: { tx_hash, block_hash, did }
+            Err("didOp.submit: not implemented yet (Compact runtime bridge)".to_string())
+        }
         other => Err(format!("unknown method: {other}")),
     }
 }
