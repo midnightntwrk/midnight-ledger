@@ -2848,6 +2848,140 @@ mod tests {
             .expect("DEADLOCK: only one thread completed — lock ordering violation");
     }
 
+    /// Reproducer for the qanet-green indexer-api deadlock observed 13/14 May 2026.
+    ///
+    /// Hypothesis: with multiple concurrent threads each driving `force_as_arc`
+    /// on cold lazy `Sp`s (the access pattern produced by indexer-api when many
+    /// fresh-wallet subscriptions trigger `MerkleTreeCollapsedUpdate::new`
+    /// concurrently), the metadata / sp_cache / backend lock-ordering machinery
+    /// can close a cycle the existing `force_as_arc_lock_ordering_regression`
+    /// test does not catch (it covers only the force_as_arc vs new_sp_locked
+    /// ABBA between two threads).
+    ///
+    /// This test spawns N threads, each repeatedly fetching lazy roots and
+    /// dereferencing them so each deref triggers `force_as_arc` →
+    /// `from_arena` → `BackendLoader::get` recursively across child Sps. If a
+    /// cycle exists in this access pattern, at least one thread fails to make
+    /// progress within the timeout.
+    #[test]
+    fn merkle_walk_force_as_arc_concurrent_regression() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Inner {
+            #[storable(child)]
+            a: Sp<u32>,
+            #[storable(child)]
+            b: Sp<u32>,
+            #[storable(child)]
+            c: Sp<u32>,
+        }
+
+        #[derive(Storable, Clone, PartialEq, Eq)]
+        struct Outer {
+            #[storable(child)]
+            x: Sp<Inner>,
+            #[storable(child)]
+            y: Sp<Inner>,
+            #[storable(child)]
+            z: Sp<Inner>,
+        }
+
+        let arena = new_arena();
+
+        // Build a small set of nested structures, persist + unload so subsequent
+        // accesses must lazy-load through the backend (the cold path that
+        // exercises BackendLoader::get). Mirrors the unload pattern used by
+        // `force_as_arc_lock_ordering_regression`.
+        const N_ROOTS: u32 = 10;
+        let mut root_keys = Vec::with_capacity(N_ROOTS as usize);
+        for i in 0..N_ROOTS {
+            let mk_inner = |base: u32| Inner {
+                a: arena.alloc(base),
+                b: arena.alloc(base + 1),
+                c: arena.alloc(base + 2),
+            };
+            let outer = arena.alloc(Outer {
+                x: arena.alloc(mk_inner(i * 100)),
+                y: arena.alloc(mk_inner(i * 100 + 10)),
+                z: arena.alloc(mk_inner(i * 100 + 20)),
+            });
+            let mut tracked = outer.into_tracked();
+            tracked.persist();
+            root_keys.push(ArenaKey::Ref(tracked.root.clone()));
+            tracked.unload();
+            drop(tracked);
+        }
+        arena.with_backend(|b| b.flush_all_changes_to_db());
+
+        const N_THREADS: usize = 8;
+        const N_ITERS: usize = 200;
+        let (tx, rx) = mpsc::channel::<Result<usize, String>>();
+
+        for thread_id in 0..N_THREADS {
+            let arena_t = arena.clone();
+            let keys_t = root_keys.clone();
+            let tx_t = tx.clone();
+            std::thread::spawn(move || {
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    for _ in 0..N_ITERS {
+                        for key in &keys_t {
+                            let outer_sp = arena_t
+                                .get_lazy_unversioned::<Outer>(key)
+                                .expect("get_lazy_unversioned");
+                            // Deref → force_as_arc on Outer; recurse into
+                            // children so each child Sp also triggers
+                            // force_as_arc on the cold path.
+                            let outer = &*outer_sp;
+                            let _ = &*outer.x;
+                            let _ = &*outer.y;
+                            let _ = &*outer.z;
+                            drop(outer_sp);
+                        }
+                    }
+                }));
+                match result {
+                    Ok(()) => tx_t.send(Ok(thread_id)).ok(),
+                    Err(panic) => {
+                        let msg = if let Some(s) = panic.downcast_ref::<&str>() {
+                            (*s).to_owned()
+                        } else if let Some(s) = panic.downcast_ref::<String>() {
+                            s.clone()
+                        } else {
+                            "unknown panic payload".to_owned()
+                        };
+                        tx_t.send(Err(format!("thread {thread_id}: {msg}"))).ok()
+                    }
+                };
+            });
+        }
+        drop(tx);
+
+        let timeout = Duration::from_secs(30);
+        let mut completed = 0usize;
+        let mut panics: Vec<String> = Vec::new();
+        for _ in 0..N_THREADS {
+            match rx.recv_timeout(timeout) {
+                Ok(Ok(_)) => completed += 1,
+                Ok(Err(panic_msg)) => panics.push(panic_msg),
+                Err(_) => panic!(
+                    "HANG: only {completed} of {N_THREADS} threads completed and {} panicked within {:?} — likely a real lock cycle, not a panic race",
+                    panics.len(),
+                    timeout
+                ),
+            }
+        }
+
+        if !panics.is_empty() {
+            panic!(
+                "RACE: {} of {N_THREADS} threads panicked (likely TOCTOU on metadata HashMap), {completed} completed cleanly. First few panics:\n  {}",
+                panics.len(),
+                panics.iter().take(3).cloned().collect::<Vec<_>>().join("\n  "),
+            );
+        }
+    }
+
     /// Regression: serialize_to_node_list_bounded panicked when the same content
     /// hash appeared as both ArenaKey::Direct and ArenaKey::Ref
     #[test]
