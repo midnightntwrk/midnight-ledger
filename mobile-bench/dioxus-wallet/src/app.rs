@@ -315,50 +315,35 @@ pub fn App() -> Element {
 
                 BalancePanel { network: *network.read() }
                 ResolveDidPanel { network: *network.read() }
-                CreateDidPanel { network: *network.read() }
+                CreateDidWizard { network: *network.read() }
             }
         }
     }
 }
 
 #[component]
-fn CreateDidPanel(network: Network) -> Element {
-    let mut result = use_signal::<Option<Result<String, String>>>(|| None);
-    let mut pending = use_signal(|| false);
+fn CreateDidWizard(network: Network) -> Element {
+    use wallet_core::WizardStage;
 
-    let create = move |_| {
-        if *pending.read() {
+    let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
+    let mut running = use_signal(|| false);
+
+    let start = move |_| {
+        if *running.read() {
             return;
         }
-        pending.set(true);
-        result.set(None);
+        running.set(true);
+        stages.set(Vec::new());
         spawn(async move {
+            use futures::StreamExt;
             let w = Wallet::demo(network);
-
-            // Phase 3 deploy preview: composes the post-constructor
-            // ContractState in-Rust and reports the deterministic
-            // ContractDeploy address. No network IO.
-            let preview_did = w
-                .create_did_preview()
-                .map(|id| id.to_did_string())
-                .unwrap_or_else(|e| format!("(preview err: {e})"));
-            let pk = w
-                .did_controller_public_key()
-                .map(|b| hex::encode(b))
-                .unwrap_or_else(|e| format!("(err: {e})"));
-
-            // Submission half is still stubbed — call it so the UI
-            // surfaces the actual error from `create_did` below the
-            // preview block.
-            let submit_status = match w.create_did().await {
-                Ok(id) => format!("submitted: {}", id.to_did_string()),
-                Err(e) => format!("submit: {e}"),
-            };
-
-            result.set(Some(Ok(format!(
-                "preview did: {preview_did}\n\ncontrollerPublicKey: {pk}\n\n{submit_status}"
-            ))));
-            pending.set(false);
+            let mut stream = std::pin::pin!(w.create_did());
+            while let Some(stage) = stream.next().await {
+                let mut current = stages.read().clone();
+                current.push(stage);
+                stages.set(current);
+            }
+            running.set(false);
         });
     };
 
@@ -366,17 +351,35 @@ fn CreateDidPanel(network: Network) -> Element {
         div { class: "row", "Create DID" }
         div { class: "row",
             button {
-                disabled: *pending.read(),
-                onclick: create,
-                {if *pending.read() { "Creating…" } else { "Create DID (Phase 3 stub)" }}
+                disabled: *running.read(),
+                onclick: start,
+                {if *running.read() { "Submitting…" } else { "Create DID" }}
             }
         }
-        if let Some(res) = result.read().as_ref() {
-            match res {
-                Ok(did) => rsx! { div { class: "seed-blob", "{did}" } },
-                Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
+        for stage in stages.read().iter() {
+            div { class: "seed-blob",
+                {render_stage(stage)}
             }
         }
+    }
+}
+
+fn render_stage(s: &wallet_core::WizardStage) -> String {
+    use wallet_core::WizardStage as W;
+    match s {
+        W::SyncingDust => "• syncing dust…".to_string(),
+        W::Composing => "• composing…".to_string(),
+        W::Balancing => "• balancing fees…".to_string(),
+        W::Proving => "• proving…".to_string(),
+        W::Submitting => "• submitting…".to_string(),
+        W::Confirming => "• waiting for inclusion…".to_string(),
+        W::Done(o) => format!(
+            "✓ done\n  did:    {}\n  tx:     0x{}\n  block:  0x{}",
+            o.did_id.to_did_string(),
+            hex::encode(o.tx_hash),
+            hex::encode(o.block_hash),
+        ),
+        W::Failed(e) => format!("✗ failed: {e}"),
     }
 }
 

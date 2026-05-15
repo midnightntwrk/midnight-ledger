@@ -2688,6 +2688,7 @@ dependencies = [
  "arboard",
  "dioxus",
  "dirs 5.0.1",
+ "futures",
  "hex",
  "jni",
  "ndk-context",

@@ -295,24 +295,121 @@ impl Wallet {
         crate::did::deploy::preview_did_id(&mut rng, self.network, pk, now_ms)
     }
 
-    /// **Phase 3 stub** — returns
-    /// [`crate::DidError::WriteNotImplemented`]. The deploy payload
-    /// is fully composed (see [`Self::create_did_preview`]); the
-    /// missing pieces are the substrate `Transaction` envelope
-    /// wrapping, fee balancing (gated on Phase B unshielded sync),
-    /// and submit-and-watch via the typed
-    /// `Midnight.send_mn_transaction` call. Documented in
-    /// `mobile-bench/DID_PLAN.md`.
-    pub async fn create_did(&self) -> Result<crate::DidId, crate::DidError> {
-        // Surface the would-be id in the error path so the UI
-        // shows something useful.
-        let preview = self.create_did_preview()?;
-        tracing::info!(
-            preview_did = %preview,
-            network = ?self.network,
-            "create_did stub — would deploy DID contract"
-        );
-        Err(crate::DidError::WriteNotImplemented)
+    /// Like `create_did_preview` but with caller-supplied
+    /// pk-commitment, timestamp, and nonce — lets the pipeline
+    /// compute the on-chain DID id from the *exact* inputs fed
+    /// to `tx::build_deploy`.
+    pub fn create_did_preview_with(
+        &self,
+        pk_commitment: [u8; 32],
+        timestamp_ms: u64,
+        nonce: [u8; 32],
+    ) -> Result<crate::DidId, crate::DidError> {
+        let deploy = crate::did::deploy::compose_deploy(pk_commitment, timestamp_ms, nonce);
+        let bytes: crate::ContractAddressBytes = deploy.address().0.0;
+        Ok(crate::DidId::new(self.network, bytes))
+    }
+
+    /// Submit a real deploy of the DID contract. Returns a
+    /// `Stream<WizardStage>` so the UI renders progress.
+    /// See docs/superpowers/specs/2026-05-15-did-deploy-submit-design.md.
+    pub fn create_did(
+        &self,
+    ) -> impl futures::Stream<Item = crate::WizardStage> + Send + 'static {
+        let network = self.network;
+        let seed_bytes = self.seed_bytes;
+        async_stream::stream! {
+            // 1. SyncingDust
+            yield crate::WizardStage::SyncingDust;
+            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut dust_state = match wallet.sync_dust().await {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
+            };
+            let dust_key = match wallet.dust_secret_key() {
+                Ok(k) => k,
+                Err(e) => { yield crate::WizardStage::Failed(format!("dust key: {e}")); return; }
+            };
+
+            // 2. Composing
+            yield crate::WizardStage::Composing;
+            let pk_commitment = match wallet.did_controller_public_key() {
+                Ok(pk) => pk,
+                Err(e) => { yield crate::WizardStage::Failed(format!("controller pk: {e}")); return; }
+            };
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let ttl = base_crypto::time::Timestamp::from_secs(now_ms / 1000 + 3600);
+            // StdRng (not ThreadRng) so the returned Stream is Send.
+            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            let nonce: [u8; 32] = rand::Rng::r#gen(&mut rng);
+            let net_id = network.config().network_id;
+            let unproven = match crate::tx::build::build_deploy(
+                pk_commitment, net_id, now_ms, nonce, ttl, &mut rng,
+            ) {
+                Ok(t) => t,
+                Err(e) => { yield crate::WizardStage::Failed(format!("compose: {e}")); return; }
+            };
+
+            // Preview DID id from the exact inputs we just used.
+            let preview_id = match wallet.create_did_preview_with(pk_commitment, now_ms, nonce) {
+                Ok(id) => id,
+                Err(e) => { yield crate::WizardStage::Failed(format!("preview id: {e}")); return; }
+            };
+
+            // 3. Balancing
+            yield crate::WizardStage::Balancing;
+            let params = ledger::structure::INITIAL_PARAMETERS;
+            let mut ctx = crate::tx::balance::BalanceCtx {
+                dust_state: &mut dust_state,
+                dust_key: &dust_key,
+                params: &params,
+                time: base_crypto::time::Timestamp::from_secs(now_ms / 1000),
+                network_id: net_id,
+            };
+            let balanced = match crate::tx::balance::balance(unproven, &mut ctx) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("balance: {e}")); return; }
+            };
+
+            // 4. Proving
+            yield crate::WizardStage::Proving;
+            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+                Ok(p) => p,
+                Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
+            };
+
+            // 5. Submitting
+            yield crate::WizardStage::Submitting;
+            let bytes = match crate::tx::scale::scale_encode(&proven) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("encode: {e}")); return; }
+            };
+            let signer = match wallet.midnight_signer() {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
+            };
+            let node = match crate::NodeClient::connect(network).await {
+                Ok(n) => n,
+                Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
+            };
+
+            // 6. Confirming
+            yield crate::WizardStage::Confirming;
+            let submit = match node.submit_deploy(bytes, &signer).await {
+                Ok(r) => r,
+                Err(e) => { yield crate::WizardStage::Failed(format!("submit: {e}")); return; }
+            };
+
+            yield crate::WizardStage::Done(crate::DeployOutcome {
+                did_id: preview_id,
+                tx_hash: submit.tx_hash,
+                block_hash: submit.block_hash,
+            });
+        }
     }
 
     /// Resolve a Midnight DID to a [`crate::DidDocument`] by querying
