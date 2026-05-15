@@ -7,8 +7,22 @@
 //! Run with:
 //!   cargo test -p wallet-core --test js_prepare_call_tx -- --nocapture
 
+use base_crypto::signatures::Signature;
+use ledger::structure::{ProofPreimageMarker, Transaction};
+use storage::DefaultDB;
+use transient_crypto::commitment::PedersenRandomness;
 use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
 use wallet_core::{Network, Wallet};
+
+/// Same shape as `wallet_core::tx::build::UnprovenTx`. Repeated
+/// here because it's `pub(crate)` over there; we want to deserialise
+/// the JS-produced bytes into the exact Rust counterpart.
+type RustUnprovenTx = Transaction<
+    Signature,
+    ProofPreimageMarker,
+    PedersenRandomness,
+    DefaultDB,
+>;
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]
@@ -79,4 +93,35 @@ async fn prepare_deactivate_unproven_call_tx() {
         "[deactivate prepare] {} bytes UnprovenTransaction in {} ms",
         r.unproven_tx_bytes, r.elapsed_ms,
     );
+
+    // Round-trip the bytes through Rust's `tagged_deserialize`. If
+    // this succeeds the JS UnprovenTransaction format is shape-
+    // compatible with our `wallet_core::tx::build::UnprovenTx` —
+    // i.e. ready to feed into our existing balance/prove/submit
+    // pipeline. The shape:
+    //   Transaction<SignatureEnabled, PreProof, PreBinding>    (JS)
+    //   Transaction<Signature, ProofPreimageMarker, PedersenRandomness>  (Rust)
+    // Marker names differ; serialised layout matches.
+    let tx: RustUnprovenTx = serialize::tagged_deserialize(&bytes[..])
+        .expect("deserialise JS-produced UnprovenTransaction into Rust ledger type");
+    match &tx {
+        Transaction::Standard(stx) => {
+            assert!(
+                !stx.network_id.is_empty(),
+                "network_id should be set ('undeployed')"
+            );
+            // The deactivate circuit's intent rides in some segment
+            // — there must be at least one intent.
+            assert!(
+                stx.intents.iter().count() > 0,
+                "tx must contain at least one intent",
+            );
+            eprintln!(
+                "[deactivate prepare] decoded Standard tx, network_id={:?}, intents={}",
+                stx.network_id,
+                stx.intents.iter().count(),
+            );
+        }
+        other => panic!("expected Transaction::Standard, got {other:?}"),
+    }
 }
