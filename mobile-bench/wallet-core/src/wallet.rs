@@ -144,6 +144,21 @@ impl Wallet {
         crate::unshielded::snapshot::snapshot(cfg.indexer_ws_url, &address).await
     }
 
+    /// Snapshot the wallet's DUST state by replaying the
+    /// indexer's `dustLedgerEvents` stream into a fresh
+    /// `DustLocalState`. The returned state is consumed by
+    /// `tx::balance` to cover deploy/call fees.
+    pub async fn sync_dust(
+        &self,
+    ) -> Result<crate::DustLocalState<storage::DefaultDB>, crate::DustError> {
+        let sk = self
+            .dust_secret_key()
+            .map_err(|e| crate::DustError::InvalidPublicKey(e.to_string()))?;
+        let cfg = self.network.config();
+        let params = ledger::structure::INITIAL_PARAMETERS.dust;
+        crate::dust::snapshot::snapshot(cfg.indexer_ws_url, &sk, params).await
+    }
+
     /// Derive the DUST secret key for this wallet.
     ///
     /// The seed feeding `ledger::dust::DustSecretKey::derive_secret_key`

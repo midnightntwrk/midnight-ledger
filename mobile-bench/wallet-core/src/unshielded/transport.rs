@@ -20,7 +20,7 @@ use super::UnshieldedError;
 /// Subscribe over a fresh graphql-transport-ws WebSocket. Returns
 /// an async stream of `next.payload.data` JSON values, ending when
 /// the server sends `complete`/`error` or when the WS drops.
-pub(super) async fn subscribe(
+pub(crate) async fn subscribe(
     ws_url: &str,
     query: &str,
     variables: Value,

@@ -4,9 +4,12 @@
 //! hydrate the wallet's DUST state. See the design spec for the
 //! termination semantics.
 
-use serde_json::Value;
+use futures::{Stream, StreamExt};
+use ledger::dust::DustLocalState;
+use serde_json::{Value, json};
 use storage::DefaultDB;
 
+use crate::unshielded::transport;
 use super::DustError;
 
 #[allow(dead_code)] // Used by snapshot (Task 5) and tests.
@@ -51,10 +54,101 @@ pub(super) fn decode_event(data: &Value) -> Result<DecodedEvent, DustError> {
     Ok(DecodedEvent { id, max_id, event })
 }
 
+const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Fold the event stream into an ordered Vec<ledger::events::Event>,
+/// then replay against an empty `DustLocalState` to produce the
+/// hydrated state. Termination: stop after seeing an event with
+/// `id == max_id` (the indexer's own "you're caught up" marker).
+/// Idle timeout (5s) is the belt-and-braces backstop.
+pub(super) async fn fold_events<S>(
+    stream: S,
+    sk: &ledger::dust::DustSecretKey,
+    params: ledger::dust::DustParameters,
+) -> Result<DustLocalState<DefaultDB>, DustError>
+where
+    S: Stream<Item = Result<DecodedEvent, DustError>>,
+{
+    let mut events: Vec<ledger::events::Event<DefaultDB>> = Vec::new();
+    let mut last_id: i64 = -1;
+    let mut target_max: Option<i64> = None;
+    futures::pin_mut!(stream);
+
+    loop {
+        // Early exit on caught-up.
+        if let Some(max) = target_max {
+            if last_id >= max {
+                break;
+            }
+        }
+
+        let next = tokio::time::timeout(IDLE_TIMEOUT, stream.next()).await;
+        match next {
+            Ok(Some(item)) => {
+                let DecodedEvent { id, max_id, event } = item?;
+                events.push(event);
+                last_id = id;
+                target_max = Some(max_id);
+            }
+            Ok(None) => {
+                if target_max.is_some() {
+                    break;
+                }
+                return Err(DustError::StreamClosedEarly);
+            }
+            Err(_) => {
+                if target_max.is_some() {
+                    break;
+                }
+                return Err(DustError::StreamClosedEarly);
+            }
+        }
+    }
+
+    let state = DustLocalState::new(params);
+    state
+        .replay_events(sk, events.iter())
+        .map_err(|e| DustError::Replay(e.to_string()))
+}
+
+/// Open a subscription, fold, hydrate. Caller supplies the dust
+/// secret key + params.
+pub(crate) async fn snapshot(
+    ws_url: &str,
+    sk: &ledger::dust::DustSecretKey,
+    params: ledger::dust::DustParameters,
+) -> Result<DustLocalState<DefaultDB>, DustError> {
+    let stream = transport::subscribe(
+        ws_url,
+        DUST_LEDGER_EVENTS_QUERY,
+        json!({ "id": 0 }),
+    )
+    .await
+    .map_err(translate_unshielded_error)?;
+
+    let events = stream.map(|item| {
+        item.map_err(translate_unshielded_error)
+            .and_then(|v| decode_event(&v))
+    });
+    fold_events(events, sk, params).await
+}
+
+fn translate_unshielded_error(e: crate::unshielded::UnshieldedError) -> DustError {
+    use crate::unshielded::UnshieldedError as U;
+    match e {
+        U::WsConnect(s) => DustError::WsConnect(s),
+        U::WsHandshake(s) => DustError::WsHandshake(s),
+        U::GqlError(s) => DustError::GqlError(s),
+        U::UnexpectedFrame(s) => DustError::UnexpectedFrame(s),
+        U::Decode(s) => DustError::Decode(s),
+        U::StreamClosedEarly => DustError::StreamClosedEarly,
+        U::InvalidAddress(s) => DustError::InvalidPublicKey(s),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     /// We can't easily synthesise a valid scale-encoded
     /// ledger::events::Event<D> in a unit test without dragging
@@ -100,5 +194,19 @@ mod tests {
             DustError::Decode(msg) => assert!(msg.contains("raw hex"), "msg={msg}"),
             other => panic!("expected Decode, got {other:?}"),
         }
+    }
+
+    use futures::stream;
+
+    /// Empty event stream with no Progress observed → StreamClosedEarly.
+    /// The real happy path runs against live events in Task 12.
+    #[tokio::test]
+    async fn fold_returns_stream_closed_early_when_no_events() {
+        let events: Vec<Result<DecodedEvent, DustError>> = vec![];
+        let mut rng = rand::rngs::OsRng;
+        let sk = ledger::dust::DustSecretKey::sample(&mut rng);
+        let params = ledger::structure::INITIAL_PARAMETERS.dust;
+        let result = fold_events(stream::iter(events), &sk, params).await;
+        assert!(matches!(result, Err(DustError::StreamClosedEarly)));
     }
 }
