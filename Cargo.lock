@@ -1462,9 +1462,9 @@ dependencies = [
 
 [[package]]
 name = "digest"
-version = "0.11.2"
+version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4850db49bf08e663084f7fb5c87d202ef91a3907271aff24a94eb97ff039153c"
+checksum = "f1dd6dbb5841937940781866fa1281a1ff7bd3bf827091440879f9994983d5c2"
 dependencies = [
  "block-buffer 0.12.0",
  "const-oid 0.10.2",
@@ -1477,7 +1477,7 @@ version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2de63d600bc7fab91180bc17385f29b342468dc8ef2af09dceba450a293de3da"
 dependencies = [
- "digest 0.11.2",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -2090,7 +2090,7 @@ dependencies = [
 name = "hashbrown"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f467dd6dccf739c208452f8014c75c18bb8301b050ad1cfb27153803edb0f51"
+checksum = "ed5909b6e89a2db4456e54cd5f673791d7eca6732202bbf2a9cc504fe2f9b84a"
 dependencies = [
  "allocator-api2",
  "equivalent",
@@ -2203,9 +2203,9 @@ checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
 name = "hybrid-array"
-version = "0.4.11"
+version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08d46837a0ed51fe95bd3b05de33cd64a1ee88fc797477ca48446872504507c5"
+checksum = "9155a582abd142abc056962c29e3ce5ff2ad5469f4246b537ed42c5deba857da"
 dependencies = [
  "typenum",
 ]
@@ -2785,7 +2785,7 @@ version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e0b564323a0fb6d54b864f625ae139de9612e27edb944dda37c109f05aac531"
 dependencies = [
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -3224,8 +3224,8 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
- "digest 0.11.2",
- "hashbrown 0.17.0",
+ "digest 0.11.3",
+ "hashbrown 0.17.1",
  "midnight-base-crypto",
  "midnight-onchain-state",
  "midnight-serialize",
@@ -3253,10 +3253,10 @@ dependencies = [
  "criterion",
  "crypto",
  "derive-where",
- "digest 0.11.2",
+ "digest 0.11.3",
  "fake",
  "fs2",
- "hashbrown 0.17.0",
+ "hashbrown 0.17.1",
  "hex",
  "itertools 0.14.0",
  "konst",
@@ -3895,18 +3895,18 @@ dependencies = [
 
 [[package]]
 name = "pin-project"
-version = "1.1.12"
+version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cbf0d9e68100b3a7989b4901972f265cd542e560a3a8a724e1e20322f4d06ce9"
+checksum = "2466b2336ed02bcdca6b294417127b90ec92038d1d5c4fbeac971a922e0e0924"
 dependencies = [
  "pin-project-internal",
 ]
 
 [[package]]
 name = "pin-project-internal"
-version = "1.1.12"
+version = "1.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a990e22f43e84855daf260dded30524ef4a9021cc7541c26540500a50b624389"
+checksum = "c96395f0a926bc13b1c17622aaddda1ecb55d49c8f1bf9777e4d877800a43f8b"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
@@ -4539,7 +4539,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4937,7 +4937,7 @@ checksum = "446ba717509524cb3f22f17ecc096f10f4822d76ab5c0b9822c5f9c284e825f4"
 dependencies = [
  "cfg-if",
  "cpufeatures 0.3.0",
- "digest 0.11.2",
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4946,7 +4946,7 @@ version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be176f1a57ce4e3d31c1a166222d9768de5954f811601fb7ca06fc8203905ce1"
 dependencies = [
- "digest 0.11.2",
+ "digest 0.11.3",
  "keccak",
 ]
 
@@ -6158,6 +6158,15 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
+dependencies = [
+ "windows-targets 0.52.6",
+]
+
+[[package]]
+name = "windows-sys"
+version = "0.59.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
