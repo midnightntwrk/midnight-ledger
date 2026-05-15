@@ -10438,6 +10438,7 @@ dependencies = [
  "midnight-onchain-state",
  "midnight-serialize",
  "midnight-storage",
+ "midnight-transient-crypto",
  "midnight-zswap",
  "parity-scale-codec",
  "rand 0.8.6",

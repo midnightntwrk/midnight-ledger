@@ -9,6 +9,7 @@
 //! Public API is the `WizardStage` stream emitted by
 //! `Wallet::create_did()` (Task 11).
 
+pub(crate) mod build;
 pub(crate) mod scale;
 
 use crate::DidId;
