@@ -49,6 +49,8 @@ pub use unshielded::{
     TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
 };
 pub use crypto::ensure_default_crypto_provider;
+#[doc(hidden)]
+pub use did::deploy::testing_initial_deploy_state_hex;
 pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};

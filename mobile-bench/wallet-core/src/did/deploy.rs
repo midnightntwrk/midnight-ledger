@@ -154,6 +154,29 @@ pub(crate) fn compose_initial_state(
     }
 }
 
+/// Build a fresh-deploy DID `ContractState` and return its
+/// tagged-serialized hex form. Test-only helper for the
+/// Compact-runtime JS harness: feed `sk` (32 bytes) and a
+/// timestamp; get back the state hex the harness can deserialise
+/// via `ContractState.deserialize` and pass to `createCircuitContext`.
+///
+/// The state matches what the chain stores just after a successful
+/// `compose_deploy` extrinsic lands — `active = true`,
+/// `controllerPublicKey = Wallet::controller_public_key_for(sk)`,
+/// empty maps for every collection. Sufficient for offline circuit
+/// inspection (`deactivate`, etc.) before we wire the live chain.
+#[doc(hidden)] // not part of the wallet's public API surface
+pub fn testing_initial_deploy_state_hex(
+    controller_sk: &[u8; 32],
+    timestamp_ms: u64,
+) -> Result<String, std::io::Error> {
+    let pk = crate::wallet::Wallet::controller_public_key_for(controller_sk);
+    let state = compose_initial_state(pk, timestamp_ms, Vec::new());
+    let mut bytes = Vec::new();
+    serialize::tagged_serialize(&state, &mut bytes)?;
+    Ok(hex::encode(bytes))
+}
+
 /// Build a deterministic `ContractDeploy` for a given controller
 /// commitment + timestamp + nonce. The deploy's address is
 /// `SHA-256(tagged_serialize(self))` so callers can preview the
