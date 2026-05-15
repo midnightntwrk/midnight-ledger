@@ -75,6 +75,10 @@ pub fn App() -> Element {
     // funds. The `unshielded_balance` future kicks off after a
     // successful Connect (see below).
     let mut night_subunits = use_signal::<Option<u128>>(|| None);
+    // Last DID id this session deployed via CreateDidWizard.
+    // ResolveDidPanel pre-populates its input from this so the
+    // user can immediately verify their freshly-created DID.
+    let mut last_did_id = use_signal::<Option<String>>(|| None);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -314,8 +318,14 @@ pub fn App() -> Element {
                 }
 
                 BalancePanel { network: *network.read() }
-                ResolveDidPanel { network: *network.read() }
-                CreateDidWizard { network: *network.read() }
+                ResolveDidPanel {
+                    network: *network.read(),
+                    seed_did: last_did_id.read().clone(),
+                }
+                CreateDidWizard {
+                    network: *network.read(),
+                    on_done: move |did: String| last_did_id.set(Some(did)),
+                }
             }
         }
     }
@@ -406,7 +416,7 @@ enum TerminalView<'a> {
 }
 
 #[component]
-fn CreateDidWizard(network: Network) -> Element {
+fn CreateDidWizard(network: Network, on_done: EventHandler<String>) -> Element {
     use wallet_core::WizardStage;
 
     let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
@@ -418,12 +428,16 @@ fn CreateDidWizard(network: Network) -> Element {
         }
         running.set(true);
         stages.set(Vec::new());
+        let on_done = on_done.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
             let mut stream = std::pin::pin!(w.create_did());
             while let Some(stage) = stream.next().await {
                 let mut current = stages.read().clone();
+                if let WizardStage::Done(o) = &stage {
+                    on_done.call(o.did_id.to_did_string());
+                }
                 current.push(stage);
                 stages.set(current);
             }
@@ -543,8 +557,19 @@ fn BalancePanel(network: Network) -> Element {
 }
 
 #[component]
-fn ResolveDidPanel(network: Network) -> Element {
-    let mut input = use_signal(String::new);
+fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
+    let mut input = use_signal(|| seed_did.clone().unwrap_or_default());
+    // Re-seed the input whenever a new `seed_did` arrives — e.g.
+    // the wizard just deployed a fresh DID. We only OVERWRITE
+    // when the seed actually changes to avoid clobbering the
+    // user's manual typing.
+    use_effect(move || {
+        if let Some(seed) = seed_did.clone() {
+            if *input.read() != seed {
+                input.set(seed);
+            }
+        }
+    });
     let mut result = use_signal::<Option<Result<String, String>>>(|| None);
     let mut pending = use_signal(|| false);
 
