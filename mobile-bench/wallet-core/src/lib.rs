@@ -19,6 +19,7 @@ mod indexer;
 mod network;
 mod node;
 mod probe;
+mod tx;
 mod unshielded;
 mod wallet;
 
@@ -40,3 +41,4 @@ pub use unshielded::{
 };
 pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
+pub use tx::{DeployOutcome, TxError, WizardStage};
