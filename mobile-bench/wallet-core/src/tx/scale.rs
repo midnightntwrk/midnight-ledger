@@ -28,7 +28,7 @@ mod tests {
         let pk = [0xabu8; 32];
         let ts = 1_777_840_000_000u64;
         let nonce = [0x99u8; 32];
-        let deploy = compose_deploy(pk, ts, nonce);
+        let deploy = compose_deploy(pk, ts, nonce, Vec::new());
 
         let bytes = scale_encode(&deploy).expect("encode");
         assert!(!bytes.is_empty(), "produced empty bytes");

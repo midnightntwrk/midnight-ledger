@@ -36,8 +36,9 @@ pub(crate) fn build_deploy<R: Rng + CryptoRng>(
     nonce: [u8; 32],
     ttl: Timestamp,
     rng: &mut R,
+    maintenance_committee: Vec<base_crypto::signatures::VerifyingKey>,
 ) -> Result<UnprovenTx, TxError> {
-    let deploy = compose_deploy(pk_commitment, timestamp_ms, nonce);
+    let deploy = compose_deploy(pk_commitment, timestamp_ms, nonce, maintenance_committee);
 
     let intent: Intent<Signature, ProofPreimageMarker, PedersenRandomness, DefaultDB> =
         Intent::empty(rng, ttl);
@@ -64,7 +65,7 @@ mod tests {
         let nonce = [0x99u8; 32];
         let ttl = Timestamp::from_secs(now / 1000 + 3600);
 
-        let tx = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng)
+        let tx = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng, Vec::new())
             .expect("build");
 
         match &tx {
@@ -85,8 +86,8 @@ mod tests {
         let nonce = [0x99u8; 32];
         let ttl = Timestamp::from_secs(now / 1000 + 3600);
 
-        let a = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng_a).unwrap();
-        let b = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng_b).unwrap();
+        let a = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng_a, Vec::new()).unwrap();
+        let b = build_deploy(pk, "undeployed", now, nonce, ttl, &mut rng_b, Vec::new()).unwrap();
 
         let mut ba = Vec::new();
         let mut bb = Vec::new();

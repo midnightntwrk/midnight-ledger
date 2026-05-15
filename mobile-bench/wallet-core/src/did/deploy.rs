@@ -79,6 +79,7 @@ pub(crate) const DID_ENTRY_POINTS: &[&str] = &[
 pub(crate) fn compose_initial_state(
     controller_pk_commitment: [u8; 32],
     timestamp_ms: u64,
+    maintenance_committee: Vec<base_crypto::signatures::VerifyingKey>,
 ) -> ContractState<DefaultDB> {
     let constants = state_array(vec![
         // contractVersion: Uint<32> = 1
@@ -129,10 +130,21 @@ pub(crate) fn compose_initial_state(
     let operations = StorageHashMap::<EntryPointBuf, ContractOperation, DefaultDB>::new();
     let _ = DID_ENTRY_POINTS;   // kept on the public surface for future MaintenanceUpdate use
 
+    // Threshold = 1 if any members, else 0 — keeps default behavior
+    // (no authority, no MaintenanceUpdates possible) compatible.
+    // The caller wires the wallet's own BIP340 verifying key here so
+    // a follow-up MaintenanceUpdate can load verifier keys.
+    let threshold = if maintenance_committee.is_empty() { 0 } else { 1 };
+    let maintenance_authority = ContractMaintenanceAuthority {
+        committee: maintenance_committee,
+        threshold,
+        counter: 0,
+    };
+
     ContractState {
         data: ChargedState::new(root),
         operations,
-        maintenance_authority: ContractMaintenanceAuthority::default(),
+        maintenance_authority,
         balance: StorageHashMap::new(),
     }
 }
@@ -145,9 +157,14 @@ pub(crate) fn compose_deploy(
     controller_pk_commitment: [u8; 32],
     timestamp_ms: u64,
     nonce: [u8; 32],
+    maintenance_committee: Vec<base_crypto::signatures::VerifyingKey>,
 ) -> ContractDeploy<DefaultDB> {
     ContractDeploy {
-        initial_state: compose_initial_state(controller_pk_commitment, timestamp_ms),
+        initial_state: compose_initial_state(
+            controller_pk_commitment,
+            timestamp_ms,
+            maintenance_committee,
+        ),
         nonce: HashOutput(nonce),
     }
 }
@@ -161,10 +178,16 @@ pub(crate) fn preview_did_id<R: RngCore>(
     network: Network,
     controller_pk_commitment: [u8; 32],
     timestamp_ms: u64,
+    maintenance_committee: Vec<base_crypto::signatures::VerifyingKey>,
 ) -> Result<DidId, DidError> {
     let mut nonce = [0u8; 32];
     rng.fill_bytes(&mut nonce);
-    let deploy = compose_deploy(controller_pk_commitment, timestamp_ms, nonce);
+    let deploy = compose_deploy(
+        controller_pk_commitment,
+        timestamp_ms,
+        nonce,
+        maintenance_committee,
+    );
     let addr: ContractAddress = deploy.address();
     let bytes: ContractAddressBytes = addr.0.0;
     Ok(DidId::new(network, bytes))
@@ -231,7 +254,7 @@ mod tests {
         // and confirm the scalar fields match.
         let pk = [0xabu8; 32];
         let ts = 1_777_840_000_000u64;
-        let state = compose_initial_state(pk, ts);
+        let state = compose_initial_state(pk, ts, Vec::new());
 
         // Serialise through tagged_serialize so the decoder gets
         // the same bytes the indexer would return.
@@ -257,8 +280,8 @@ mod tests {
         let pk = [0x42u8; 32];
         let ts = 1_777_840_000_000u64;
         let nonce = [0x99u8; 32];
-        let a = compose_deploy(pk, ts, nonce).address();
-        let b = compose_deploy(pk, ts, nonce).address();
+        let a = compose_deploy(pk, ts, nonce, Vec::new()).address();
+        let b = compose_deploy(pk, ts, nonce, Vec::new()).address();
         assert_eq!(a.0.0, b.0.0);
     }
 
@@ -266,8 +289,8 @@ mod tests {
     fn deploy_address_differs_per_nonce() {
         let pk = [0x42u8; 32];
         let ts = 1_777_840_000_000u64;
-        let a = compose_deploy(pk, ts, [0x01u8; 32]).address();
-        let b = compose_deploy(pk, ts, [0x02u8; 32]).address();
+        let a = compose_deploy(pk, ts, [0x01u8; 32], Vec::new()).address();
+        let b = compose_deploy(pk, ts, [0x02u8; 32], Vec::new()).address();
         assert_ne!(a.0.0, b.0.0);
     }
 
@@ -284,7 +307,7 @@ mod tests {
         // endianness mistakes and pad-direction mistakes.
         let pk = [0xabu8; 32];
         let ts: u64 = 1_719_791_440_123;
-        let state = compose_initial_state(pk, ts);
+        let state = compose_initial_state(pk, ts, Vec::new());
 
         let mut buf = Vec::new();
         serialize::tagged_serialize(&state, &mut buf)
@@ -319,7 +342,7 @@ mod tests {
     #[test]
     fn preview_did_id_round_trips_through_codec() {
         let mut rng = ChaCha20Rng::seed_from_u64(0xdeadbeef);
-        let id = preview_did_id(&mut rng, Network::PreProd, [0x77u8; 32], 0)
+        let id = preview_did_id(&mut rng, Network::PreProd, [0x77u8; 32], 0, Vec::new())
             .expect("preview");
         let s = id.to_did_string();
         let back = DidId::parse(&s).expect("parse");

@@ -292,7 +292,10 @@ impl Wallet {
             .map(|d| d.as_millis() as u64)
             .unwrap_or(0);
         let mut rng = rand::thread_rng();
-        crate::did::deploy::preview_did_id(&mut rng, self.network, pk, now_ms)
+        let committee = vec![self
+            .did_maintenance_verifying_key()
+            .map_err(|e| crate::DidError::Indexer(e.to_string()))?];
+        crate::did::deploy::preview_did_id(&mut rng, self.network, pk, now_ms, committee)
     }
 
     /// Like `create_did_preview` but with caller-supplied
@@ -305,9 +308,45 @@ impl Wallet {
         timestamp_ms: u64,
         nonce: [u8; 32],
     ) -> Result<crate::DidId, crate::DidError> {
-        let deploy = crate::did::deploy::compose_deploy(pk_commitment, timestamp_ms, nonce);
+        let committee = vec![self
+            .did_maintenance_verifying_key()
+            .map_err(|e| crate::DidError::Indexer(e.to_string()))?];
+        let deploy =
+            crate::did::deploy::compose_deploy(pk_commitment, timestamp_ms, nonce, committee);
         let bytes: crate::ContractAddressBytes = deploy.address().0.0;
         Ok(crate::DidId::new(self.network, bytes))
+    }
+
+    /// BIP340-Schnorr signing key for the wallet's DID maintenance
+    /// authority. Used to:
+    ///   - populate the deploy's `ContractMaintenanceAuthority.committee`
+    ///     (via [`did_maintenance_verifying_key`])
+    ///   - sign `MaintenanceUpdate::data_to_sign()` when loading the
+    ///     11 DID circuits' verifier keys post-deploy.
+    /// Derived from the BIP-44 child at `m/44'/2400'/0'/0/0` —
+    /// the same `NightExternal` path the unshielded address uses, so
+    /// `unshielded_address` and the maintenance authority are bound
+    /// to the same secret.
+    pub fn did_maintenance_signing_key(
+        &self,
+    ) -> Result<base_crypto::signatures::SigningKey, WalletError> {
+        let child = crate::hd::derive_child_priv(
+            &self.seed_bytes,
+            0,
+            crate::hd::Role::NightExternal,
+            0,
+        )
+        .map_err(|e| WalletError::Address(format!("hd: {e}")))?;
+        base_crypto::signatures::SigningKey::from_bytes(&child)
+            .map_err(|e| WalletError::Address(format!("schnorr sk: {e}")))
+    }
+
+    /// BIP340-Schnorr verifying key that goes into the contract's
+    /// `ContractMaintenanceAuthority.committee` slot at deploy time.
+    pub fn did_maintenance_verifying_key(
+        &self,
+    ) -> Result<base_crypto::signatures::VerifyingKey, WalletError> {
+        Ok(self.did_maintenance_signing_key()?.verifying_key())
     }
 
     /// Submit a real deploy of the DID contract. Returns a
@@ -351,8 +390,21 @@ impl Wallet {
             let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
             let nonce: [u8; 32] = rand::Rng::r#gen(&mut rng);
             let net_id = network.config().network_id;
+            let maintenance_vk = match wallet.did_maintenance_verifying_key() {
+                Ok(vk) => vk,
+                Err(e) => {
+                    yield crate::WizardStage::Failed(format!("maintenance key: {e}"));
+                    return;
+                }
+            };
             let unproven = match crate::tx::build::build_deploy(
-                pk_commitment, net_id, now_ms, nonce, ttl, &mut rng,
+                pk_commitment,
+                net_id,
+                now_ms,
+                nonce,
+                ttl,
+                &mut rng,
+                vec![maintenance_vk],
             ) {
                 Ok(t) => t,
                 Err(e) => { yield crate::WizardStage::Failed(format!("compose: {e}")); return; }
