@@ -13,6 +13,7 @@ mod address;
 mod artifacts;
 mod crypto;
 mod did;
+mod dust;
 mod hd;
 mod indexer;
 mod network;
@@ -37,3 +38,5 @@ pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError
 pub use unshielded::{
     TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
 };
+pub use dust::DustError;
+pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
