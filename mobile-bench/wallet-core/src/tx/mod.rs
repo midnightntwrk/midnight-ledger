@@ -11,6 +11,7 @@
 
 pub(crate) mod balance;
 pub(crate) mod build;
+pub(crate) mod maintain;
 pub(crate) mod prove;
 pub(crate) mod scale;
 

@@ -470,6 +470,148 @@ impl Wallet {
         }
     }
 
+    /// Submit a MaintenanceUpdate that loads a single circuit's
+    /// verifier key into a freshly-deployed DID contract. Reuses
+    /// the same WizardStage pipeline as `create_did` — the Done
+    /// outcome carries the maintenance-tx hash + block hash; the
+    /// DID id is unchanged.
+    ///
+    /// `counter` is the maintenance-authority's counter value at
+    /// the time of submission. For the first MaintenanceUpdate
+    /// against a contract that was just deployed, this is 0;
+    /// every successful update bumps it.
+    ///
+    /// `circuit` selects which bundled artifact to load. Today
+    /// only `"addVerificationMethod"` is bundled — the other 10
+    /// follow in a subsequent slice once their artifacts land.
+    pub fn load_did_circuit(
+        &self,
+        did_id: crate::DidId,
+        circuit_name: String,
+        counter: u32,
+    ) -> impl futures::Stream<Item = crate::WizardStage> + Send + 'static {
+        use coin_structure::contract::ContractAddress;
+        use base_crypto::hash::HashOutput;
+
+        let network = self.network;
+        let seed_bytes = self.seed_bytes;
+        async_stream::stream! {
+            // 1. SyncingDust
+            yield crate::WizardStage::SyncingDust;
+            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut dust_state = match wallet.sync_dust().await {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
+            };
+            let dust_key = match wallet.dust_secret_key() {
+                Ok(k) => k,
+                Err(e) => { yield crate::WizardStage::Failed(format!("dust key: {e}")); return; }
+            };
+
+            // 2. Composing
+            yield crate::WizardStage::Composing;
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let ttl = base_crypto::time::Timestamp::from_secs(now_ms / 1000 + 3600);
+            let mut rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            let net_id = network.config().network_id;
+
+            let sk = match wallet.did_maintenance_signing_key() {
+                Ok(k) => k,
+                Err(e) => {
+                    yield crate::WizardStage::Failed(format!("maintenance key: {e}"));
+                    return;
+                }
+            };
+
+            // Resolve the artifact + parse its verifier key.
+            let artifact = if circuit_name == crate::did::artifacts::ADD_VERIFICATION_METHOD.name {
+                &crate::did::artifacts::ADD_VERIFICATION_METHOD
+            } else {
+                yield crate::WizardStage::Failed(format!(
+                    "unknown circuit '{circuit_name}': only addVerificationMethod is bundled today"
+                ));
+                return;
+            };
+            let vk = match artifact.parsed_verifier_key() {
+                Ok(v) => v,
+                Err(e) => {
+                    yield crate::WizardStage::Failed(format!("parse verifier key: {e}"));
+                    return;
+                }
+            };
+
+            let contract_address = ContractAddress(HashOutput(did_id.contract_address));
+            let unproven = match crate::tx::maintain::build_load_verifier_key(
+                contract_address,
+                &circuit_name,
+                vk,
+                counter,
+                &sk,
+                net_id,
+                ttl,
+                &mut rng,
+            ) {
+                Ok(t) => t,
+                Err(e) => { yield crate::WizardStage::Failed(format!("compose: {e}")); return; }
+            };
+
+            // 3. Balancing
+            yield crate::WizardStage::Balancing;
+            let params = ledger::structure::INITIAL_PARAMETERS;
+            let mut ctx = crate::tx::balance::BalanceCtx {
+                dust_state: &mut dust_state,
+                dust_key: &dust_key,
+                params: &params,
+                time: base_crypto::time::Timestamp::from_secs(now_ms / 1000),
+                ttl,
+                network_id: net_id,
+            };
+            let balanced = match crate::tx::balance::balance(unproven, &mut ctx) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("balance: {e}")); return; }
+            };
+
+            // 4. Proving
+            yield crate::WizardStage::Proving;
+            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
+            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+                Ok(p) => p,
+                Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
+            };
+
+            // 5. Submitting
+            yield crate::WizardStage::Submitting;
+            let bytes = match crate::tx::scale::scale_encode(&proven) {
+                Ok(b) => b,
+                Err(e) => { yield crate::WizardStage::Failed(format!("encode: {e}")); return; }
+            };
+            let signer = match wallet.midnight_signer() {
+                Ok(s) => s,
+                Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
+            };
+            let node = match crate::NodeClient::connect(network).await {
+                Ok(n) => n,
+                Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
+            };
+
+            // 6. Confirming
+            yield crate::WizardStage::Confirming;
+            let submit = match node.submit_deploy(bytes, &signer).await {
+                Ok(r) => r,
+                Err(e) => { yield crate::WizardStage::Failed(format!("submit: {e}")); return; }
+            };
+
+            yield crate::WizardStage::Done(crate::DeployOutcome {
+                did_id,
+                tx_hash: submit.tx_hash,
+                block_hash: submit.block_hash,
+            });
+        }
+    }
+
     /// Resolve a Midnight DID to a [`crate::DidDocument`] by querying
     /// the indexer for the contract's current state and decoding it.
     ///

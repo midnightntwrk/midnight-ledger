@@ -52,6 +52,19 @@ pub(crate) const ADD_VERIFICATION_METHOD: CircuitArtifacts = CircuitArtifacts {
 #[allow(dead_code)]
 const _: &str = ROOT;
 
+impl CircuitArtifacts {
+    /// Parse the bundled `.verifier` bytes into a typed
+    /// `VerifierKey` (tagged-serialized form). Consumed by the
+    /// MaintenanceUpdate pipeline that loads circuits onto a
+    /// freshly-deployed DID contract.
+    #[allow(dead_code)] // Wired by tx::maintain in the follow-up commit.
+    pub(crate) fn parsed_verifier_key(
+        &self,
+    ) -> Result<transient_crypto::proofs::VerifierKey, std::io::Error> {
+        serialize::tagged_deserialize::<transient_crypto::proofs::VerifierKey>(self.verifier_key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
