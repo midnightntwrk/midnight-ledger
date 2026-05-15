@@ -89,7 +89,7 @@ NIGHT sync (`Wallet::sync_unshielded()`) is **not** part of this pipeline — a 
 | `mobile-bench/wallet-core/src/tx/balance.rs` | Port simplified DUST-only balancer from `TestState::balance_tx` | **Create** |
 | `mobile-bench/wallet-core/src/tx/prove.rs` | Wrap `ledger::prove::tx_prove` with our embedded `Resolver` | **Create** |
 | `mobile-bench/wallet-core/src/tx/scale.rs` | `Transaction → Vec<u8>` via `serialize::Serializable` | **Create** |
-| `mobile-bench/wallet-core/src/artifacts/dust.rs` | Bundle `dust/spend.{bzkir,prover,verifier}` via `include_bytes!`; build a `DustResolver` | **Create** |
+| `mobile-bench/wallet-core/src/artifacts/dust.rs` | Build a `DustResolver` pointing at the standard `~/.cache/midnight/zk-params/` cache dir; `MidnightDataProvider` in `FetchMode::OnDemand` auto-downloads `dust/<version>/spend.{prover,verifier,bzkir}` from `srs.midnight.network` on first use. Hashes come bundled via `DUST_EXPECTED_FILES` in `ledger::dust`. | **Create** |
 | `mobile-bench/wallet-core/src/node/client.rs` | Add `submit_deploy(scale_bytes, signer) → SubmitResult` using subxt typed extrinsic | **Modify** |
 | `mobile-bench/wallet-core/src/wallet.rs` | Replace `Wallet::create_did()` stub with the real pipeline | **Modify** |
 | `mobile-bench/wallet-core/src/lib.rs` | New modules + re-exports | **Modify** |
@@ -285,25 +285,20 @@ impl NodeClient {
 
 ### `artifacts::dust`
 
-```rust
-const DUST_SPEND_BZKIR: &[u8] = include_bytes!("../../../../../ledger/static/dust/spend.bzkir");
-const DUST_SPEND_PROVER: &[u8] = include_bytes!("../../../../../ledger/static/dust/spend.prover");
-const DUST_SPEND_VERIFIER: &[u8] = include_bytes!("../../../../../ledger/static/dust/spend.verifier");
+`ledger/static/dust/` only contains `.sha256` hashes, not the artifact bytes themselves. `MidnightDataProvider` fetches the real `.prover/.verifier/.bzkir` from `https://srs.midnight.network/` and caches them at `~/.cache/midnight/zk-params/` (or `$MIDNIGHT_PP`/`$XDG_CACHE_HOME`). The cache is shared with every other midnight tool, so on a developer machine that has already run `ledger`'s test suite, the artifacts are likely already present.
 
-pub(crate) fn dust_resolver() -> DustResolver {
-    let provider = MidnightDataProvider::new_with_static_bytes(
-        DUST_EXPECTED_FILES,
-        &[
-            ("dust/spend.bzkir",    DUST_SPEND_BZKIR),
-            ("dust/spend.prover",   DUST_SPEND_PROVER),
-            ("dust/spend.verifier", DUST_SPEND_VERIFIER),
-        ],
-    );
-    DustResolver(provider)
+```rust
+pub(crate) fn dust_resolver() -> Result<DustResolver, std::io::Error> {
+    let provider = MidnightDataProvider::new(
+        FetchMode::OnDemand,
+        OutputMode::Log,
+        ledger::dust::DUST_EXPECTED_FILES.to_owned(),
+    )?;
+    Ok(DustResolver(provider))
 }
 ```
 
-The `MidnightDataProvider` has an in-memory constructor that doesn't fetch over the network. If the existing API requires a path-based provider, we'll vendor the artifacts into `target`/`OUT_DIR` at build time and point the provider there.
+First deploy on a fresh machine pays a small download cost (a few hundred KB for `spend.prover` + tiny `.verifier`/`.bzkir`). Subsequent deploys are offline-capable.
 
 ## Data flow
 
@@ -377,7 +372,7 @@ The integration test is the proof point. It exercises the bundled DUST resolver,
 
 ## Open questions to verify during implementation
 
-1. **`MidnightDataProvider` static-bytes constructor.** The reference in `test_resolver` uses `FetchMode::OnDemand` from a file path. We need a static-bytes / in-memory mode. If it doesn't exist, vendor the artifacts into a tempdir at startup and use `FetchMode::Synchronous`. Either path works; the question is which is less code.
+1. **`MidnightDataProvider` cache pre-population.** First-time deploy depends on `srs.midnight.network` reachability — confirm during integration testing. If we want true offline-first behavior, follow-up work either bundles bytes via a custom in-memory provider OR ships a build-time fetcher that pulls artifacts into the cache at compile time.
 
 2. **DUST address format.** Phase 3 derives the secret at `m/44'/2400'/0'/2/0`, but the bech32m HRP and payload format for DUST is presumed to be `mn_addr_dust_<networkId>` + SHA-256 of the public key. Confirm against the indexer schema — if the `DustAddress` scalar wants raw hex, we encode differently.
 
