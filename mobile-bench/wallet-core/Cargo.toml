@@ -33,7 +33,7 @@ sha2 = "0.10"
 
 # Async + IO.
 async-stream = "0.3"
-tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync", "time"] }
+tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync", "time", "process", "io-util"] }
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 tokio-tungstenite = { version = "0.24", default-features = false, features = ["rustls-tls-webpki-roots", "connect"] }
 futures = "0.3"
@@ -77,6 +77,9 @@ rustls = { version = "0.23", default-features = false, features = ["ring"] }
 # Errors / serde / utility.
 thiserror = "2.0"
 anyhow = "1.0"
+# Async-trait sugar for the JsBridge trait — dyn-compatible
+# trait with async methods.
+async-trait = "0.1"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 hex = "0.4"

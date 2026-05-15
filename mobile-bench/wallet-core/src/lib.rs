@@ -16,6 +16,7 @@ mod did;
 mod dust;
 mod hd;
 mod indexer;
+pub mod js_bridge;
 mod network;
 mod node;
 mod probe;
@@ -47,6 +48,7 @@ pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError
 pub use unshielded::{
     TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
 };
+pub use crypto::ensure_default_crypto_provider;
 pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};
