@@ -326,6 +326,10 @@ pub fn App() -> Element {
                     network: *network.read(),
                     on_done: move |did: String| last_did_id.set(Some(did)),
                 }
+                LoadCircuitPanel {
+                    network: *network.read(),
+                    seed_did: last_did_id.read().clone(),
+                }
             }
         }
     }
@@ -620,6 +624,172 @@ fn ResolveDidPanel(network: Network, seed_did: Option<String>) -> Element {
             match res {
                 Ok(json) => rsx! { div { class: "seed-blob", "{json}" } },
                 Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
+            }
+        }
+    }
+}
+
+#[component]
+fn LoadCircuitPanel(network: Network, seed_did: Option<String>) -> Element {
+    use wallet_core::WizardStage;
+
+    // DID input — auto-seeded from the most recent deploy.
+    let mut input = use_signal(|| seed_did.clone().unwrap_or_default());
+    use_effect(move || {
+        if let Some(seed) = seed_did.clone() {
+            if *input.read() != seed {
+                input.set(seed);
+            }
+        }
+    });
+
+    let circuit_names = wallet_core::did_circuit_names();
+    // Default to `addVerificationMethod` — the most common first
+    // step after a fresh deploy. Sits at a known position in the
+    // registry; we look it up so a reordering doesn't silently
+    // change the default.
+    let default_idx = circuit_names
+        .iter()
+        .position(|n| *n == "addVerificationMethod")
+        .unwrap_or(0);
+    let mut circuit_idx = use_signal(|| default_idx);
+    let mut counter_str = use_signal(|| "0".to_string());
+
+    let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
+    let mut running = use_signal(|| false);
+    // Parse error from invalid DID / counter input — surfaced as a
+    // local failure without going through the wizard's terminal
+    // state, since we don't even attempt the network if inputs are
+    // malformed.
+    let mut input_error = use_signal::<Option<String>>(|| None);
+
+    let start = move |_| {
+        if *running.read() {
+            return;
+        }
+        let did_str = input.read().clone();
+        if did_str.is_empty() {
+            input_error.set(Some("enter a did:midnight:… string".into()));
+            return;
+        }
+        let did_id = match wallet_core::DidId::parse(&did_str) {
+            Ok(d) => d,
+            Err(e) => {
+                input_error.set(Some(format!("parse DID: {e}")));
+                return;
+            }
+        };
+        let counter: u32 = match counter_str.read().trim().parse() {
+            Ok(c) => c,
+            Err(e) => {
+                input_error.set(Some(format!("counter must be a u32: {e}")));
+                return;
+            }
+        };
+        let name = circuit_names[*circuit_idx.read()].to_string();
+        input_error.set(None);
+        running.set(true);
+        stages.set(Vec::new());
+        spawn(async move {
+            use futures::StreamExt;
+            let w = Wallet::demo(network);
+            let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name, counter));
+            while let Some(stage) = stream.next().await {
+                let mut current = stages.read().clone();
+                current.push(stage);
+                stages.set(current);
+            }
+            running.set(false);
+        });
+    };
+
+    let stages_snapshot = stages.read().clone();
+    let term = terminal(&stages_snapshot);
+    let has_started = !stages_snapshot.is_empty();
+    let button_label = match (*running.read(), &term) {
+        (true, _) => "Submitting…",
+        (false, Some(TerminalView::Failed(_))) => "Retry",
+        (false, Some(TerminalView::Done(_))) => "Load another",
+        (false, None) => "Load circuit",
+    };
+
+    let current_idx = *circuit_idx.read();
+    rsx! {
+        div { class: "wizard-header", "Load circuit verifier key" }
+        div { class: "row",
+            input {
+                r#type: "text",
+                placeholder: "did:midnight:undeployed:…",
+                value: "{input.read()}",
+                oninput: move |e| input.set(e.value()),
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+        }
+        div { class: "row",
+            label { style: "min-width: 80px;", "Circuit" }
+            select {
+                onchange: move |e| {
+                    if let Ok(idx) = e.value().parse::<usize>() {
+                        circuit_idx.set(idx);
+                    }
+                },
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                for (idx , name) in circuit_names.iter().enumerate() {
+                    option {
+                        value: "{idx}",
+                        selected: idx == current_idx,
+                        "{name}"
+                    }
+                }
+            }
+        }
+        div { class: "row",
+            label { style: "min-width: 80px;", "Counter" }
+            input {
+                r#type: "number",
+                min: "0",
+                value: "{counter_str.read()}",
+                oninput: move |e| counter_str.set(e.value()),
+                style: "width: 120px; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+            span { style: "font-size: 11px; color: var(--text-muted);",
+                "Defaults to 0 (first maintenance after deploy)."
+            }
+        }
+        div { class: "row",
+            button {
+                disabled: *running.read(),
+                onclick: start,
+                "{button_label}"
+            }
+        }
+
+        if let Some(msg) = input_error.read().as_ref() {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "Input" }
+                div { class: "seed-blob", "{msg}" }
+            }
+        }
+
+        if has_started {
+            ul { class: "wizard-steps",
+                for (idx , label) in PIPELINE.iter().enumerate() {
+                    {render_step_row(idx, label, step_status(idx, &stages_snapshot))}
+                }
+            }
+        }
+
+        if let Some(TerminalView::Done(outcome)) = &term {
+            div { class: "wizard-outcome ok",
+                div { class: "row label", "Tx hash" }
+                div { class: "seed-blob", "0x{hex::encode(outcome.tx_hash)}" }
+                div { class: "row label", "Block hash" }
+                div { class: "seed-blob", "0x{hex::encode(outcome.block_hash)}" }
+            }
+        } else if let Some(TerminalView::Failed(msg)) = &term {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "Failed" }
+                div { class: "seed-blob", "{msg}" }
             }
         }
     }
