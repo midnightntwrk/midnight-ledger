@@ -20,6 +20,7 @@ use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::{

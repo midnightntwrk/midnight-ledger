@@ -131,9 +131,9 @@ impl Deserializable for CoinCiphertext {
         recursive_depth: u32,
     ) -> Result<Self, std::io::Error> {
         let c = EmbeddedGroupAffine::deserialize(reader, recursive_depth)?;
-        // See note in `transient_crypto::encryption::SecretKey::decrypt` for why the point at
-        // infinity is excluded.
-        if c.is_infinity() {
+        // See note in `transient_crypto::encryption::SecretKey::decrypt` for why the identity
+        // element is excluded.
+        if c.is_identity() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 "ciphertext challenge may not be the point at infinity",

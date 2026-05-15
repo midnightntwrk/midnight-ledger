@@ -1,6 +1,6 @@
 [package]
-name = "midnight-ledger-wasm"
-version = "8.1.0-rc.1"
+name = "midnight-ledger-wasm-v9"
+version = "0.1.0"
 license.workspace = true
 edition = "2024"
 publish = false
@@ -13,7 +13,7 @@ default = []
 
 [dependencies]
 zswap = { path = "../zswap", package = "midnight-zswap" }
-ledger = { path = "../ledger", package = "midnight-ledger", default-features = false }
+ledger = { path = "../ledger", package = "midnight-ledger-v9", default-features = false }
 onchain-runtime-wasm = { path = "../onchain-runtime-wasm", package = "midnight-onchain-runtime-wasm" }
 onchain-runtime = { path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 storage = { path = "../storage", package = "midnight-storage" }

@@ -4,7 +4,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## Unreleased (9.0)
+
+- feat: add explicit price floor, denominated in full blocks, and governed by
+  ledger parameters.
+- fix: correctly exclude the identity point during coin ciphertext decryption
+
+## Unreleased (8.2)
 
 - feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
 - feat: proof-server support for ZKIR 2.1
@@ -17,6 +23,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 - feat: expose finer-grained control for the wallet in wasm bindings.
 - feat: expose event contents to the extent that they are useful to the wallet in wasm bindings.
+- breaking: fix Zswap root retention period to match spec - global TTL param instead of hardcoded 1 hour;
+- breaking: adjust Zswap Ledger state API to take retention duration in the `post_block_update` hook
 
 ## 8.0.3
 

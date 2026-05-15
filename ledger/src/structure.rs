@@ -712,7 +712,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v6]"]
+#[tag = "system-transaction[v7]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -1196,7 +1196,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v5]"]
+#[tag = "ledger-parameters[v6]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1220,6 +1220,8 @@ pub struct LedgerParameters {
     pub cardano_to_midnight_bridge_fee_basis_points: u32,
     // Note: This is denominated in STARs (atomic night units)
     pub c_to_m_bridge_min_amount: u128,
+    // The minimum value for `fee_prices.overall_price`.
+    pub min_block_price: FixedPoint,
 }
 tag_enforcement_test!(LedgerParameters);
 
@@ -1280,6 +1282,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
     cost_dimension_min_ratio: FixedPoint::from_u64_div(1, 4),
     price_adjustment_a_parameter: FixedPoint::from_u64_div(100, 1),
     c_to_m_bridge_min_amount: 1000,
+    min_block_price: FixedPoint::from_u64_div(10, 1),
 };
 
 #[derive(Storable)]
@@ -1298,6 +1301,7 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<D: DB> {
     pub(crate) inner: Transaction<(), (), Pedersen, D>,
     pub(crate) hash: TransactionHash,
+    pub(crate) fees: u128,
 }
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
@@ -2995,14 +2999,14 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v13]"]
+#[tag = "ledger-state[v15]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
     #[storable(child)]
     pub parameters: Sp<LedgerParameters, D>,
     pub locked_pool: u128,
-    pub bridge_receiving: Map<UserAddress, u128, D>,
+    pub bridge_receiving: Map<UserAddress, u128, D, NightAnn>,
     pub reserve_pool: u128,
     pub block_reward_pool: u128,
     pub unclaimed_block_rewards: Map<UserAddress, u128, D, NightAnn>,

@@ -35,6 +35,7 @@ use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
 use midnight_ledger::test_utilities::{Tx, TxBound};
 use midnight_ledger::test_utilities::{test_intents, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;

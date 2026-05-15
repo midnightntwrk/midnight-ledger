@@ -888,26 +888,49 @@ describe('Ledger API - Transaction', () => {
       includeClaimReceive: true
     });
 
+    const ttl = plus1Hour(state.time);
+
+    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = tx.addCalls(
+      FIRST_SEGMENT_SPECIFIER,
+      [callA.preCall],
+      state.ledger.parameters,
+      ttl,
+      [],
+      [callA.zswapOutput],
+      []
+    );
+    const balancedPre = state.balanceTx(tx.eraseProofs());
+    state.assertApply(balancedPre, balancedStrictness);
+
     const callB = buildCallAndOutput({
       state,
       addr,
       encodedAddr,
       op,
       token,
-      baseKey: 3,
+      baseKey: 0,
       includeClaimReceive: true
     });
 
-    const ttl = plus1Hour(state.time);
+    const callC = buildCallAndOutput({
+      state,
+      addr,
+      encodedAddr,
+      op,
+      token,
+      baseKey: 0,
+      includeClaimReceive: true
+    });
 
-    let tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
+    tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID);
     tx = tx.addCalls(
       FIRST_SEGMENT_SPECIFIER,
-      [callA.preCall, callB.preCall],
+      [callB.preCall, callC.preCall],
       state.ledger.parameters,
       ttl,
       [],
-      [callA.zswapOutput, callB.zswapOutput],
+      [callB.zswapOutput, callC.zswapOutput],
       []
     );
 
@@ -916,14 +939,13 @@ describe('Ledger API - Transaction', () => {
 
     tx.wellFormed(state.ledger, unbalancedStrictness, state.time);
     const balanced = state.balanceTx(tx.eraseProofs());
+    console.log(tx.toString());
     state.assertApply(balanced, balancedStrictness);
 
     const arr = state.ledger.index(addr)!.data.state.asArray()!;
     expect(arr[2].asCell().value[0]).toEqual(ONE_VALUE);
-    expect(arr[5].asCell().value[0]).toEqual(ONE_VALUE);
 
-    expect(arr[0].asCell().value[0]).toEqual(callA.coinCom.value[0]);
-    expect(arr[3].asCell().value[0]).toEqual(callB.coinCom.value[0]);
+    expect(arr[0].asCell().value[0]).toEqual(callC.coinCom.value[0]);
   });
 
   test('addCalls - sets intent ttl to the provided ttl', () => {
@@ -1329,7 +1351,7 @@ describe('Ledger API - Transaction', () => {
     const token: ShieldedTokenType = Static.defaultShieldedTokenType();
 
     state.rewardsShielded(token, 5_000_000_000n);
-    state.giveFeeToken(1, INITIAL_NIGHT_AMOUNT);
+    state.giveFeeToken(3, INITIAL_NIGHT_AMOUNT);
 
     const unbalancedStrictness = new WellFormedStrictness();
     unbalancedStrictness.enforceBalancing = false;

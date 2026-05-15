@@ -22,6 +22,7 @@ use midnight_ledger::test_utilities::{
     Resolver, test_intents, test_resolver, tx_prove, verifier_key,
 };
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::state::{ContractOperation, ContractState, StateValue, stval};
 use rand::SeedableRng;
 use rand::rngs::StdRng;

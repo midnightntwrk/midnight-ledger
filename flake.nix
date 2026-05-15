@@ -96,12 +96,12 @@
         };
         contractSrc = inclusive.lib.inclusive ./. [./zswap/zswap.compact ./ledger/dust.compact ./zkir-precompiles];
         rust-build = self.packages.${system}.rust-build-toolchain;
-        ledger-version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+        ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
         proof-server-version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
-        mkWasm = { name, package-name, require-artifacts ? false, features ? [], experimental ? false }:
+        mkWasm = { name, crate-name, package-name, require-artifacts ? false, features ? [], experimental ? false }:
           self.lib.${system}.bagel-wasm {
-            inherit name package-name features;
+            inherit name crate-name package-name features;
             path = name;
             src = rustWorkspaceSrc;
             version = (builtins.fromTOML (builtins.readFile ./${name}/Cargo.toml)).package.version
@@ -387,11 +387,11 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; package-name = "onchain-runtime-v3"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v3"; };
 
-          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; package-name = "ledger-v8"; require-artifacts = true; };
-          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
-          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
+          packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v9"; package-name = "ledger-v9"; require-artifacts = true; };
+          packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };
+          packages.zkir-v3-wasm = mkWasm { name = "zkir-v3-wasm"; crate-name = "midnight-zkir-v3-wasm"; package-name = "zkir-v3"; require-artifacts = true; };
 
           # For now, that's the only binary output
           packages.proof-server = mkLedger {build-target = "midnight-proof-server";};
