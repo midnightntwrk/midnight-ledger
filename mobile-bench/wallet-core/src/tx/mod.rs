@@ -11,6 +11,7 @@
 
 pub(crate) mod balance;
 pub(crate) mod build;
+pub(crate) mod prove;
 pub(crate) mod scale;
 
 use crate::DidId;

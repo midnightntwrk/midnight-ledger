@@ -14,6 +14,8 @@ network-tests = []
 [dependencies]
 # Existing workspace members.
 zswap = { path = "../../zswap", package = "midnight-zswap" }
+zkir-v2 = { path = "../../zkir", package = "midnight-zkir" }
+onchain-runtime = { path = "../../onchain-runtime", package = "midnight-onchain-runtime" }
 serialize = { path = "../../serialize", package = "midnight-serialize" }
 base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
 coin-structure = { path = "../../coin-structure", package = "midnight-coin-structure" }
