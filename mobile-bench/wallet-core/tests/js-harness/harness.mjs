@@ -154,6 +154,23 @@ const methods = {
       null, // privateState: this contract has no private state field
     );
 
+    // Optional setup: run a chain of circuits first to evolve the
+    // state (e.g. `addAlsoKnownAs` before testing `removeAlsoKnownAs`).
+    // Each step's post-state `circuitContext` feeds the next. The
+    // ProofData from these setup runs is discarded — only the final
+    // (under-test) circuit's preimage gets returned.
+    let ctx = circuitContext;
+    const setup = Array.isArray(params.setup) ? params.setup : [];
+    for (const step of setup) {
+      const stepFn = contractInstance.impureCircuits[step.circuit];
+      if (typeof stepFn !== "function") {
+        throw new Error(`unknown setup circuit: ${step.circuit}`);
+      }
+      const stepArgs = Array.isArray(step.args) ? step.args.map(reviveBigints) : [];
+      const stepResult = stepFn(ctx, ...stepArgs);
+      ctx = stepResult.context;
+    }
+
     const fn = contractInstance.impureCircuits[params.circuit];
     if (typeof fn !== "function") {
       throw new Error(`unknown circuit: ${params.circuit}`);
@@ -163,7 +180,7 @@ const methods = {
     // `Field`, `Uint<N>`, etc.).
     const rawArgs = Array.isArray(params.circuitArgs) ? params.circuitArgs : [];
     const args = rawArgs.map(reviveBigints);
-    const results = fn(circuitContext, ...args);
+    const results = fn(ctx, ...args);
     const proofData = results.proofData;
 
     const preimage = cr.proofDataIntoSerializedPreimage(

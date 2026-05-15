@@ -25,9 +25,17 @@ struct InspectResult {
     elapsed_ms: i64,
 }
 
+/// A single circuit invocation: the name + JSON args for it.
+/// `serde_json::Value::Array` is the wire shape the harness expects.
+fn step(circuit: &str, args: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "circuit": circuit, "args": args })
+}
+
 /// Run one inspect-circuit pass and assert preimage round-trips.
-/// Returns the decoded `ProofPreimage` so callers can do extra
-/// circuit-specific assertions.
+/// `setup` is a chain of prior calls used to evolve state before the
+/// circuit under test runs (e.g. `addAlsoKnownAs` before
+/// `removeAlsoKnownAs`). Returns the decoded `ProofPreimage` so
+/// callers can do extra circuit-specific assertions.
 async fn run_inspect(
     bridge: &NodeChildBridge,
     circuit: &str,
@@ -35,6 +43,7 @@ async fn run_inspect(
     contract_address_hex: &str,
     controller_secret_hex: &str,
     circuit_args: serde_json::Value,
+    setup: serde_json::Value,
 ) -> transient_crypto::proofs::ProofPreimage {
     let r: InspectResult = bridge
         .call(
@@ -45,6 +54,7 @@ async fn run_inspect(
                 "contractAddressHex": contract_address_hex,
                 "controllerSecretHex": controller_secret_hex,
                 "circuitArgs": circuit_args,
+                "setup": setup,
             }),
         )
         .await
@@ -98,10 +108,39 @@ fn bigint(n: &str) -> serde_json::Value {
     serde_json::json!({ "$bigint": n })
 }
 
+/// Canonical valid VerificationMethod fixture — OKP / Ed25519,
+/// satisfying the contract's curve constraint. Helper because
+/// six tests need the same shape.
+fn ed25519_vm(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        // VerificationMethodType.JsonWebKey = 1
+        "typ": 1,
+        "publicKeyJwk": {
+            // KeyType.OKP = 3, CurveType.Ed25519 = 0
+            "kty": 3,
+            "crv": 0,
+            "x": bigint("1"),
+            "y": bigint("2"),
+        }
+    })
+}
+
+fn linked_domains_service(id: &str, endpoint: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "typ": "LinkedDomains",
+        "serviceEndpoint": endpoint,
+    })
+}
+
+/// `VerificationMethodRelation` enum tag (1..=5). 0 = Undefined,
+/// rejected by the contract; the five valid values map to the
+/// five DID Core relation slots.
+const REL_AUTHENTICATION: i32 = 1;
+
 #[tokio::test]
 async fn add_also_known_as() {
-    // Simplest "write" circuit — adds a string to the alsoKnownAs
-    // set. Starting state has the set empty, so insert succeeds.
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
@@ -110,67 +149,189 @@ async fn add_also_known_as() {
         &s.addr_hex,
         &s.sk_hex,
         serde_json::json!(["https://alias.example.com"]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn remove_also_known_as() {
+    // Needs the value present first; insert it in setup.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "removeAlsoKnownAs",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!(["https://alias.example.com"]),
+        serde_json::json!([
+            step("addAlsoKnownAs", serde_json::json!(["https://alias.example.com"])),
+        ]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn add_verification_method() {
-    // Inserts a verificationMethods[id] entry. Starting state has
-    // the map empty, so insert succeeds. KeyType / CurveType /
-    // VerificationMethodType are integer enums in the JS bindings;
-    // `x` and `y` are Field elements (bigint).
     let s = fresh_setup();
-    // Contract asserts kty=EC ↔ crv ∈ {Jubjub, P256}; kty=OKP ↔ crv=Ed25519.
-    // Use OKP/Ed25519 — matches the on-chain "valid Ed25519 verification
-    // method" case the upstream tests cover.
-    let verification_method = serde_json::json!({
-        "id": "key-0",
-        // VerificationMethodType.JsonWebKey = 1
-        "typ": 1,
-        "publicKeyJwk": {
-            // KeyType.OKP = 3
-            "kty": 3,
-            // CurveType.Ed25519 = 0
-            "crv": 0,
-            "x": bigint("1"),
-            "y": bigint("2"),
-        }
-    });
     run_inspect(
         &s.bridge,
         "addVerificationMethod",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!([verification_method]),
+        serde_json::json!([ed25519_vm("key-0")]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn update_verification_method() {
+    // Needs the id already present; setup adds the original entry.
+    let s = fresh_setup();
+    let original = ed25519_vm("key-0");
+    let updated = serde_json::json!({
+        "id": "key-0",
+        "typ": 1,
+        "publicKeyJwk": {
+            "kty": 3,
+            "crv": 0,
+            "x": bigint("11"),
+            "y": bigint("22"),
+        }
+    });
+    run_inspect(
+        &s.bridge,
+        "updateVerificationMethod",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([updated]),
+        serde_json::json!([step("addVerificationMethod", serde_json::json!([original]))]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn remove_verification_method() {
+    // Needs the id present; not referenced by any relation
+    // (the contract asserts each before allowing remove). Setup
+    // just inserts a fresh VM, no relation references.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "removeVerificationMethod",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!(["key-0"]),
+        serde_json::json!([step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")]))]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn add_verification_method_relation() {
+    // Needs the VM to exist before we can relate it.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "addVerificationMethodRelation",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([REL_AUTHENTICATION, "key-0"]),
+        serde_json::json!([step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")]))]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn remove_verification_method_relation() {
+    // Add the VM, add the relation, then test removing the relation.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "removeVerificationMethodRelation",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([REL_AUTHENTICATION, "key-0"]),
+        serde_json::json!([
+            step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")])),
+            step("addVerificationMethodRelation", serde_json::json!([REL_AUTHENTICATION, "key-0"])),
+        ]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn add_service() {
-    // Inserts a services[id] entry. Empty map, insert succeeds.
     let s = fresh_setup();
-    let service = serde_json::json!({
-        "id": "svc-0",
-        "typ": "LinkedDomains",
-        "serviceEndpoint": "https://example.com/.well-known/did-config"
-    });
     run_inspect(
         &s.bridge,
         "addService",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!([service]),
+        serde_json::json!([linked_domains_service(
+            "svc-0",
+            "https://example.com/.well-known/did-config",
+        )]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn update_service() {
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "updateService",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([linked_domains_service(
+            "svc-0",
+            "https://other.example.com/.well-known/did-config",
+        )]),
+        serde_json::json!([step(
+            "addService",
+            serde_json::json!([linked_domains_service(
+                "svc-0",
+                "https://example.com/.well-known/did-config",
+            )]),
+        )]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn remove_service() {
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "removeService",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!(["svc-0"]),
+        serde_json::json!([step(
+            "addService",
+            serde_json::json!([linked_domains_service(
+                "svc-0",
+                "https://example.com/.well-known/did-config",
+            )]),
+        )]),
     )
     .await;
 }
 
 #[tokio::test]
 async fn deactivate_no_args() {
-    // Smoke; full assertions live in `js_inspect_deactivate`.
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
@@ -178,6 +339,7 @@ async fn deactivate_no_args() {
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
+        serde_json::json!([]),
         serde_json::json!([]),
     )
     .await;
