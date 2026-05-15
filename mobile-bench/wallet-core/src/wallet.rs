@@ -144,6 +144,28 @@ impl Wallet {
         crate::unshielded::snapshot::snapshot(cfg.indexer_ws_url, &address).await
     }
 
+    /// Derive the DUST secret key for this wallet.
+    ///
+    /// The seed feeding `ledger::dust::DustSecretKey::derive_secret_key`
+    /// is the BIP44 child at `m/44'/2400'/0'/2/0` (account 0, role
+    /// Dust, index 0) — same path the upstream wallet SDKs use.
+    pub fn dust_secret_key(&self) -> Result<ledger::dust::DustSecretKey, WalletError> {
+        let child = crate::hd::derive_child_priv(&self.seed_bytes, 0, crate::hd::Role::Dust, 0)
+            .map_err(|e| WalletError::Address(format!("hd: {e}")))?;
+        Ok(ledger::dust::DustSecretKey::derive_secret_key(&child))
+    }
+
+    /// Hex-encoded 32-byte DUST public key (little-endian Fr bytes).
+    /// Ready to feed as a `HexEncoded` indexer scalar for any
+    /// future address-keyed DUST queries — `dustLedgerEvents`
+    /// itself is global and doesn't need this, but it's the
+    /// natural display form too.
+    pub fn dust_public_key_hex(&self) -> Result<String, WalletError> {
+        let sk = self.dust_secret_key()?;
+        let pk = ledger::dust::DustPublicKey::from(sk);
+        Ok(hex::encode(pk.0.as_le_bytes()))
+    }
+
     /// 32-byte raw seed. Returned by-copy to keep callers honest
     /// about it being secret material. `cfg(test)` because it's
     /// only referenced from in-crate tests today; remove the gate
@@ -378,5 +400,29 @@ mod tests {
         let pre = Wallet::demo(Network::PreProd);
         let und = Wallet::demo(Network::Undeployed);
         assert_ne!(pre.seed_hex(), und.seed_hex());
+    }
+
+    #[test]
+    fn dust_public_key_hex_is_deterministic_per_seed() {
+        // DustSecretKey doesn't derive PartialEq, so we compare
+        // via the public-key hex (which round-trips through the
+        // canonical Fr → 32-LE-bytes path).
+        let a = Wallet::demo(Network::Undeployed).dust_public_key_hex().unwrap();
+        let b = Wallet::demo(Network::Undeployed).dust_public_key_hex().unwrap();
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn dust_public_key_hex_is_64_chars() {
+        let hex = Wallet::demo(Network::Undeployed).dust_public_key_hex().unwrap();
+        assert_eq!(hex.len(), 64, "expected 32-byte hex, got {hex}");
+        assert!(hex.chars().all(|c| c.is_ascii_hexdigit() && !c.is_uppercase()));
+    }
+
+    #[test]
+    fn dust_public_key_differs_per_seed() {
+        let pre = Wallet::demo(Network::PreProd).dust_public_key_hex().unwrap();
+        let und = Wallet::demo(Network::Undeployed).dust_public_key_hex().unwrap();
+        assert_ne!(pre, und);
     }
 }
