@@ -333,3 +333,52 @@ details .panel .row {
   font-size: 11px;
   padding-left: 110px;
 }
+
+/* ── Create DID wizard ────────────────────────────────────────── */
+.wizard-header {
+  margin: 16px 16px 4px;
+  font-weight: 600;
+  font-size: 14px;
+}
+.wizard-steps {
+  list-style: none;
+  margin: 8px 16px 4px;
+  padding: 0;
+}
+.wizard-step {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.wizard-glyph {
+  width: 16px;
+  display: inline-block;
+  text-align: center;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.wizard-step.pending  .wizard-glyph { color: var(--text-faint); }
+.wizard-step.pending  .wizard-label { color: var(--text-faint); }
+.wizard-step.active   { color: var(--text); }
+.wizard-step.active   .wizard-glyph { color: var(--accent, #6ea8f8); }
+.wizard-step.done     .wizard-glyph { color: var(--success); }
+.wizard-step.done     .wizard-label { color: var(--text); }
+.wizard-step.failed   .wizard-glyph { color: var(--error); }
+.wizard-step.failed   .wizard-label { color: var(--error); }
+.wizard-active-tag {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.wizard-outcome {
+  margin: 12px 16px 8px;
+  padding: 12px;
+  border-radius: 6px;
+  border-left: 3px solid var(--text-faint);
+  background: rgba(255, 255, 255, 0.02);
+}
+.wizard-outcome.ok  { border-left-color: var(--success); }
+.wizard-outcome.err { border-left-color: var(--error); }
+.wizard-outcome.err .seed-blob { color: var(--error); }

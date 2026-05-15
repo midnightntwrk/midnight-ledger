@@ -321,6 +321,90 @@ pub fn App() -> Element {
     }
 }
 
+/// Fixed pipeline order — used to render a checklist with one row
+/// per stage. Done/Failed sit outside this list as terminal states.
+const PIPELINE: &[&str] = &[
+    "Syncing DUST",
+    "Composing",
+    "Balancing fees",
+    "Proving",
+    "Submitting",
+    "Confirming inclusion",
+];
+
+/// State of a single pipeline row at a given moment.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum StepStatus {
+    Pending,
+    Active,
+    Done,
+    /// Reached after a Failed terminal — show the step that was in
+    /// flight as the failure point, others stay Pending.
+    FailedHere,
+}
+
+/// Map an index in `PIPELINE` to its current status given the
+/// stream's last seen stage and any terminal state.
+fn step_status(idx: usize, stages: &[wallet_core::WizardStage]) -> StepStatus {
+    use wallet_core::WizardStage as W;
+
+    // Project each WizardStage to a pipeline index, or to a terminal.
+    let mut last_pipeline_idx: Option<usize> = None;
+    let mut terminal_done = false;
+    let mut terminal_failed_at: Option<usize> = None;
+    for stage in stages {
+        match stage {
+            W::SyncingDust => last_pipeline_idx = Some(0),
+            W::Composing => last_pipeline_idx = Some(1),
+            W::Balancing => last_pipeline_idx = Some(2),
+            W::Proving => last_pipeline_idx = Some(3),
+            W::Submitting => last_pipeline_idx = Some(4),
+            W::Confirming => last_pipeline_idx = Some(5),
+            W::Done(_) => {
+                terminal_done = true;
+                last_pipeline_idx = Some(PIPELINE.len() - 1);
+            }
+            W::Failed(_) => {
+                terminal_failed_at = last_pipeline_idx;
+            }
+        }
+    }
+
+    if terminal_done {
+        return StepStatus::Done;
+    }
+    if let Some(failed_at) = terminal_failed_at {
+        if idx == failed_at {
+            return StepStatus::FailedHere;
+        }
+        if idx < failed_at {
+            return StepStatus::Done;
+        }
+        return StepStatus::Pending;
+    }
+    match last_pipeline_idx {
+        None => StepStatus::Pending,
+        Some(cur) if idx < cur => StepStatus::Done,
+        Some(cur) if idx == cur => StepStatus::Active,
+        _ => StepStatus::Pending,
+    }
+}
+
+/// Final outcome from the stages stream, if any.
+fn terminal(stages: &[wallet_core::WizardStage]) -> Option<TerminalView<'_>> {
+    use wallet_core::WizardStage as W;
+    stages.iter().rev().find_map(|s| match s {
+        W::Done(o) => Some(TerminalView::Done(o)),
+        W::Failed(msg) => Some(TerminalView::Failed(msg.as_str())),
+        _ => None,
+    })
+}
+
+enum TerminalView<'a> {
+    Done(&'a wallet_core::DeployOutcome),
+    Failed(&'a str),
+}
+
 #[component]
 fn CreateDidWizard(network: Network) -> Element {
     use wallet_core::WizardStage;
@@ -347,39 +431,67 @@ fn CreateDidWizard(network: Network) -> Element {
         });
     };
 
+    let stages_snapshot = stages.read().clone();
+    let term = terminal(&stages_snapshot);
+    let has_started = !stages_snapshot.is_empty();
+    let button_label = match (*running.read(), &term) {
+        (true, _) => "Submitting…",
+        (false, Some(TerminalView::Failed(_))) => "Retry",
+        (false, Some(TerminalView::Done(_))) => "Create another",
+        (false, None) => "Create DID",
+    };
+
     rsx! {
-        div { class: "row", "Create DID" }
+        div { class: "wizard-header", "Create DID" }
         div { class: "row",
             button {
                 disabled: *running.read(),
                 onclick: start,
-                {if *running.read() { "Submitting…" } else { "Create DID" }}
+                "{button_label}"
             }
         }
-        for stage in stages.read().iter() {
-            div { class: "seed-blob",
-                {render_stage(stage)}
+
+        if has_started {
+            ul { class: "wizard-steps",
+                for (idx , label) in PIPELINE.iter().enumerate() {
+                    {render_step_row(idx, label, step_status(idx, &stages_snapshot))}
+                }
+            }
+        }
+
+        if let Some(TerminalView::Done(outcome)) = &term {
+            div { class: "wizard-outcome ok",
+                div { class: "row label", "DID" }
+                div { class: "seed-blob", "{outcome.did_id.to_did_string()}" }
+                div { class: "row label", "Tx hash" }
+                div { class: "seed-blob", "0x{hex::encode(outcome.tx_hash)}" }
+                div { class: "row label", "Block hash" }
+                div { class: "seed-blob", "0x{hex::encode(outcome.block_hash)}" }
+            }
+        } else if let Some(TerminalView::Failed(msg)) = &term {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "Failed" }
+                div { class: "seed-blob", "{msg}" }
             }
         }
     }
 }
 
-fn render_stage(s: &wallet_core::WizardStage) -> String {
-    use wallet_core::WizardStage as W;
-    match s {
-        W::SyncingDust => "• syncing dust…".to_string(),
-        W::Composing => "• composing…".to_string(),
-        W::Balancing => "• balancing fees…".to_string(),
-        W::Proving => "• proving…".to_string(),
-        W::Submitting => "• submitting…".to_string(),
-        W::Confirming => "• waiting for inclusion…".to_string(),
-        W::Done(o) => format!(
-            "✓ done\n  did:    {}\n  tx:     0x{}\n  block:  0x{}",
-            o.did_id.to_did_string(),
-            hex::encode(o.tx_hash),
-            hex::encode(o.block_hash),
-        ),
-        W::Failed(e) => format!("✗ failed: {e}"),
+fn render_step_row(_idx: usize, label: &str, status: StepStatus) -> Element {
+    let (glyph, class) = match status {
+        StepStatus::Pending => ("○", "wizard-step pending"),
+        StepStatus::Active => ("●", "wizard-step active"),
+        StepStatus::Done => ("✓", "wizard-step done"),
+        StepStatus::FailedHere => ("✗", "wizard-step failed"),
+    };
+    rsx! {
+        li { class: "{class}",
+            span { class: "wizard-glyph", "{glyph}" }
+            span { class: "wizard-label", "{label}" }
+            if matches!(status, StepStatus::Active) {
+                span { class: "wizard-active-tag", "…" }
+            }
+        }
     }
 }
 
