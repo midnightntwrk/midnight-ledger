@@ -61,6 +61,49 @@ struct ChainSnapshot {
     last_error: Option<String>,
 }
 
+/// Top-level tabs. Wallet shows identity + balance; DIDs holds the
+/// create/resolve/load flow plus session activity; Diagnostics
+/// surfaces probes + proof-server URL + raw seed/keys for power
+/// users.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tab {
+    Wallet,
+    Dids,
+    Diagnostics,
+}
+
+impl Tab {
+    fn label(&self) -> &'static str {
+        match self {
+            Tab::Wallet => "Wallet",
+            Tab::Dids => "DIDs",
+            Tab::Diagnostics => "Diagnostics",
+        }
+    }
+}
+
+/// One entry in the in-memory session activity log. Sized for the
+/// log panel — we keep just the fields a user would want to see at
+/// a glance plus copy-paste-able hashes.
+#[derive(Clone, PartialEq, Eq)]
+enum SessionEvent {
+    Deploy {
+        did: String,
+        tx_hash: [u8; 32],
+        block_hash: [u8; 32],
+    },
+    Resolve {
+        did: String,
+        counter: u32,
+    },
+    LoadCircuit {
+        did: String,
+        circuit: String,
+        tx_hash: [u8; 32],
+        block_hash: [u8; 32],
+    },
+}
+
 #[component]
 pub fn App() -> Element {
     let mut network = use_signal(|| Network::PreProd);
@@ -84,6 +127,13 @@ pub fn App() -> Element {
     // so the user doesn't have to track the counter manually
     // between maintenance updates.
     let mut last_resolved = use_signal::<Option<(String, u32)>>(|| None);
+    // Top-of-page tab selection. Default to Wallet so first-time
+    // users see the address + balance immediately.
+    let mut active_tab = use_signal(|| Tab::Wallet);
+    // Chronological log of session-scoped events: each deploy,
+    // resolve, and circuit load gets one entry. Persisted in
+    // memory only; cleared when the user reloads the page.
+    let mut session_log = use_signal::<Vec<SessionEvent>>(Vec::new);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -232,69 +282,123 @@ pub fn App() -> Element {
             tip_height: chain.read().tip.as_ref().map(|t| t.height),
         }
 
-        if let Some(w) = wallet.read().as_ref() {
-            AddressCard { address: w.address.clone() }
-        }
-
-        BalancesCard {
-            connected: matches!(*phase.read(), SyncPhase::Synced),
-            night_subunits: *night_subunits.read(),
-        }
-
-        button {
-            class: "cta",
-            disabled: busy,
-            onclick: move |_| connect(),
-            {match &*phase.read() {
-                SyncPhase::Idle => "Connect".to_string(),
-                SyncPhase::Connecting => "Connecting…".to_string(),
-                SyncPhase::Synced => "Reconnect".to_string(),
-                SyncPhase::Stalled(_) => "Retry".to_string(),
-            }}
-        }
-
-        div { class: "row",
-            div { class: "label", "Network" }
-            select {
-                onchange: move |e| {
-                    if let Some(n) = parse_network(&e.value()) {
-                        network.set(n);
-                        chain.set(ChainSnapshot::default());
-                        phase.set(SyncPhase::Idle);
-                        // Demo wallets are network-aware: PreProd
-                        // / mainnet / etc. share DEMO_SEED_HEX, but
-                        // Undeployed uses UNDEPLOYED_GENESIS_SEED_HEX
-                        // (the prefunded standalone genesis). If the
-                        // user has either of those loaded, refresh
-                        // to the right one for the new network. A
-                        // user-generated random wallet stays put.
-                        let was_demo = wallet
-                            .read()
-                            .as_ref()
-                            .map(|w| {
-                                w.seed_hex == wallet_core::DEMO_SEED_HEX
-                                    || w.seed_hex
-                                        == wallet_core::UNDEPLOYED_GENESIS_SEED_HEX
-                            })
-                            .unwrap_or(false);
-                        if was_demo {
-                            wallet.set(Some(WalletInfo::from_wallet(&Wallet::demo(n))));
-                        }
-                    }
-                },
-                for n in Network::ALL {
-                    option {
-                        value: "{network_value(n)}",
-                        selected: *network.read() == n,
-                        "{n.label()}"
-                    }
+        // Tab navigation. Each button sets active_tab; rendering
+        // below is a single match on the current value.
+        div { class: "tab-nav",
+            for t in [Tab::Wallet, Tab::Dids, Tab::Diagnostics] {
+                button {
+                    class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
+                    onclick: move |_| active_tab.set(t),
+                    "{t.label()}"
                 }
             }
         }
 
-        details {
-            summary { "Advanced" }
-            div { class: "panel",
+        match *active_tab.read() {
+            Tab::Wallet => rsx! {
+                if let Some(w) = wallet.read().as_ref() {
+                    AddressCard { address: w.address.clone() }
+                }
+
+                BalancesCard {
+                    connected: matches!(*phase.read(), SyncPhase::Synced),
+                    night_subunits: *night_subunits.read(),
+                }
+
+                button {
+                    class: "cta",
+                    disabled: busy,
+                    onclick: move |_| connect(),
+                    {match &*phase.read() {
+                        SyncPhase::Idle => "Connect".to_string(),
+                        SyncPhase::Connecting => "Connecting…".to_string(),
+                        SyncPhase::Synced => "Reconnect".to_string(),
+                        SyncPhase::Stalled(_) => "Retry".to_string(),
+                    }}
+                }
+
+                div { class: "row",
+                    div { class: "label", "Network" }
+                    select {
+                        onchange: move |e| {
+                            if let Some(n) = parse_network(&e.value()) {
+                                network.set(n);
+                                chain.set(ChainSnapshot::default());
+                                phase.set(SyncPhase::Idle);
+                                let was_demo = wallet
+                                    .read()
+                                    .as_ref()
+                                    .map(|w| {
+                                        w.seed_hex == wallet_core::DEMO_SEED_HEX
+                                            || w.seed_hex
+                                                == wallet_core::UNDEPLOYED_GENESIS_SEED_HEX
+                                    })
+                                    .unwrap_or(false);
+                                if was_demo {
+                                    wallet.set(Some(WalletInfo::from_wallet(&Wallet::demo(n))));
+                                }
+                            }
+                        },
+                        for n in Network::ALL {
+                            option {
+                                value: "{network_value(n)}",
+                                selected: *network.read() == n,
+                                "{n.label()}"
+                            }
+                        }
+                    }
+                }
+
+                div { class: "row",
+                    button { onclick: move |_| load_demo(), "Reload demo" }
+                    button { onclick: move |_| generate(), "Random wallet" }
+                }
+
+                BalancePanel { network: *network.read() }
+            },
+            Tab::Dids => rsx! {
+                CreateDidWizard {
+                    network: *network.read(),
+                    on_done: move |o: wallet_core::DeployOutcome| {
+                        let did = o.did_id.to_did_string();
+                        last_did_id.set(Some(did.clone()));
+                        let mut log = session_log.read().clone();
+                        log.push(SessionEvent::Deploy {
+                            did,
+                            tx_hash: o.tx_hash,
+                            block_hash: o.block_hash,
+                        });
+                        session_log.set(log);
+                    },
+                }
+                ResolveDidPanel {
+                    network: *network.read(),
+                    seed_did: last_did_id.read().clone(),
+                    on_resolved: move |(did, counter): (String, u32)| {
+                        last_resolved.set(Some((did.clone(), counter)));
+                        let mut log = session_log.read().clone();
+                        log.push(SessionEvent::Resolve { did, counter });
+                        session_log.set(log);
+                    },
+                }
+                LoadCircuitPanel {
+                    network: *network.read(),
+                    seed_did: last_did_id.read().clone(),
+                    seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
+                    on_done: move |(did, circuit, o): (String, String, wallet_core::DeployOutcome)| {
+                        let mut log = session_log.read().clone();
+                        log.push(SessionEvent::LoadCircuit {
+                            did,
+                            circuit,
+                            tx_hash: o.tx_hash,
+                            block_hash: o.block_hash,
+                        });
+                        session_log.set(log);
+                    },
+                }
+                SessionLogPanel { events: session_log.read().clone() }
+            },
+            Tab::Diagnostics => rsx! {
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "row", "Seed (hex):" }
                     div { class: "seed-blob", "{w.seed_hex}" }
@@ -302,10 +406,6 @@ pub fn App() -> Element {
                     div { class: "seed-blob", "{w.coin_pk_hex}" }
                     div { class: "row", "Encryption PK:" }
                     div { class: "seed-blob", "{w.enc_pk_hex}" }
-                }
-                div { class: "row",
-                    button { onclick: move |_| load_demo(), "Reload demo" }
-                    button { onclick: move |_| generate(), "Random wallet" }
                 }
                 if let Some(p) = probe.read().as_ref() {
                     div { class: "row", "Last probe — {p.network.label()}" }
@@ -321,25 +421,7 @@ pub fn App() -> Element {
                     div { class: "row", "Embedded proof-server:" }
                     div { class: "seed-blob", "{url}" }
                 }
-
-                BalancePanel { network: *network.read() }
-                ResolveDidPanel {
-                    network: *network.read(),
-                    seed_did: last_did_id.read().clone(),
-                    on_resolved: move |(did, counter): (String, u32)| {
-                        last_resolved.set(Some((did, counter)));
-                    },
-                }
-                CreateDidWizard {
-                    network: *network.read(),
-                    on_done: move |did: String| last_did_id.set(Some(did)),
-                }
-                LoadCircuitPanel {
-                    network: *network.read(),
-                    seed_did: last_did_id.read().clone(),
-                    seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
-                }
-            }
+            },
         }
     }
 }
@@ -429,7 +511,10 @@ enum TerminalView<'a> {
 }
 
 #[component]
-fn CreateDidWizard(network: Network, on_done: EventHandler<String>) -> Element {
+fn CreateDidWizard(
+    network: Network,
+    on_done: EventHandler<wallet_core::DeployOutcome>,
+) -> Element {
     use wallet_core::WizardStage;
 
     let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
@@ -449,7 +534,7 @@ fn CreateDidWizard(network: Network, on_done: EventHandler<String>) -> Element {
             while let Some(stage) = stream.next().await {
                 let mut current = stages.read().clone();
                 if let WizardStage::Done(o) = &stage {
-                    on_done.call(o.did_id.to_did_string());
+                    on_done.call(o.clone());
                 }
                 current.push(stage);
                 stages.set(current);
@@ -722,6 +807,7 @@ fn LoadCircuitPanel(
     network: Network,
     seed_did: Option<String>,
     seed_counter: Option<u32>,
+    on_done: EventHandler<(String, String, wallet_core::DeployOutcome)>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -800,15 +886,20 @@ fn LoadCircuitPanel(
             }
         };
         let name = circuit_names[*circuit_idx.read()].to_string();
+        let did_for_log = did_str.clone();
         input_error.set(None);
         running.set(true);
         stages.set(Vec::new());
+        let on_done = on_done.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
-            let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name, counter));
+            let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name.clone(), counter));
             while let Some(stage) = stream.next().await {
                 let mut current = stages.read().clone();
+                if let WizardStage::Done(o) = &stage {
+                    on_done.call((did_for_log.clone(), name.clone(), o.clone()));
+                }
                 current.push(stage);
                 stages.set(current);
             }
@@ -905,6 +996,68 @@ fn LoadCircuitPanel(
                 div { class: "seed-blob", "{msg}" }
             }
         }
+    }
+}
+
+#[component]
+fn SessionLogPanel(events: Vec<SessionEvent>) -> Element {
+    if events.is_empty() {
+        return rsx! {
+            div { class: "session-log-empty",
+                "Activity will appear here as you create, resolve, and load circuits."
+            }
+        };
+    }
+    rsx! {
+        div { class: "wizard-header", "Session activity" }
+        ul { class: "session-log",
+            // Newest entries first — last appended event is the most recent.
+            for (idx , event) in events.iter().enumerate().rev() {
+                {render_session_entry(idx, event)}
+            }
+        }
+    }
+}
+
+fn render_session_entry(idx: usize, event: &SessionEvent) -> Element {
+    match event {
+        SessionEvent::Deploy { did, tx_hash, block_hash } => rsx! {
+            li {
+                key: "{idx}",
+                class: "session-log-entry deploy",
+                div { class: "head",
+                    span { class: "kind", "Created DID" }
+                    span { class: "when", "#{idx + 1}" }
+                }
+                div { class: "detail", "{did}" }
+                div { class: "detail", "tx 0x{hex::encode(tx_hash)}" }
+                div { class: "detail", "block 0x{hex::encode(block_hash)}" }
+            }
+        },
+        SessionEvent::Resolve { did, counter } => rsx! {
+            li {
+                key: "{idx}",
+                class: "session-log-entry resolve",
+                div { class: "head",
+                    span { class: "kind", "Resolved" }
+                    span { class: "when", "#{idx + 1} · counter {counter}" }
+                }
+                div { class: "detail", "{did}" }
+            }
+        },
+        SessionEvent::LoadCircuit { did, circuit, tx_hash, block_hash } => rsx! {
+            li {
+                key: "{idx}",
+                class: "session-log-entry circuit",
+                div { class: "head",
+                    span { class: "kind", "Loaded {circuit}" }
+                    span { class: "when", "#{idx + 1}" }
+                }
+                div { class: "detail", "{did}" }
+                div { class: "detail", "tx 0x{hex::encode(tx_hash)}" }
+                div { class: "detail", "block 0x{hex::encode(block_hash)}" }
+            }
+        },
     }
 }
 
