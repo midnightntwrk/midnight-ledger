@@ -9,8 +9,7 @@ use base_crypto::time::Timestamp;
 use coin_structure::coin::TokenType;
 use ledger::dust::{DustActions, DustLocalState, DustSecretKey};
 use ledger::structure::{
-    GUARANTEED_SEGMENT, Intent, LedgerParameters, ProofPreimageMarker, StandardTransaction,
-    Transaction,
+    Intent, LedgerParameters, ProofPreimageMarker, StandardTransaction, Transaction,
 };
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
@@ -22,6 +21,11 @@ use transient_crypto::commitment::PedersenRandomness;
 use super::TxError;
 use super::build::UnprovenTx;
 
+/// Segment slot for the dust-balance Intent. Must NOT collide
+/// with the guaranteed segment (0) where the deploy lives.
+/// Matches test_utilities::balance_tx's choice (0xFEED).
+const DUST_BALANCE_SEGMENT: u16 = 0xFEED;
+
 pub(crate) struct BalanceCtx<'a> {
     pub dust_state: &'a mut DustLocalState<DefaultDB>,
     pub dust_key: &'a DustSecretKey,
@@ -32,17 +36,26 @@ pub(crate) struct BalanceCtx<'a> {
 
 #[allow(dead_code)] // Wired by Wallet::create_did in Task 11.
 pub(crate) fn balance(
-    mut tx: UnprovenTx,
+    tx: UnprovenTx,
     ctx: &mut BalanceCtx<'_>,
 ) -> Result<UnprovenTx, TxError> {
+    // Snapshot the input tx and the input dust state so each
+    // iteration can rebuild the dust intent from scratch (matches
+    // test_utilities::balance_tx's pattern — it merges the latest
+    // dust intent into the ORIGINAL tx each iteration, never
+    // accumulating across iterations, so the segment key
+    // 0xFEED doesn't collide on repeated merges).
+    let original_tx = tx.clone();
+    let original_dust = ctx.dust_state.clone();
     let mut rng = ChaCha20Rng::seed_from_u64(0);
     let mut last_dust: u128 = 0;
+    let mut current = tx;
 
     loop {
-        let fees = tx
+        let fees = current
             .fees(ctx.params, false)
             .map_err(|e| TxError::Balance(format!("fees: {e}")))?;
-        let balance_map = tx
+        let balance_map = current
             .balance(Some(fees))
             .map_err(|e| TxError::Balance(format!("balance: {e}")))?;
         let dust_short = balance_map
@@ -50,11 +63,16 @@ pub(crate) fn balance(
             .and_then(|v| (*v < 0).then_some((-*v) as u128))
             .unwrap_or(0);
         if dust_short == 0 {
-            return Ok(tx);
+            return Ok(current);
         }
 
         let dust_to_cover = dust_short + last_dust;
         last_dust = dust_to_cover;
+
+        // Reset dust_state to the input snapshot — the loop's
+        // earlier spends are abandoned. The intent we build below
+        // covers the full running total, not just the increment.
+        *ctx.dust_state = original_dust.clone();
 
         let mut spends = Array::new();
         let utxos: Vec<_> = ctx.dust_state.utxos().collect();
@@ -96,14 +114,16 @@ pub(crate) fn balance(
             ctime: ctx.time,
         }));
         let mut intents = HashMap::new();
-        intents = intents.insert(GUARANTEED_SEGMENT, intent);
+        intents = intents.insert(DUST_BALANCE_SEGMENT, intent);
         let merge_with = Transaction::Standard(StandardTransaction::new(
             ctx.network_id,
             intents,
             None,
             HashMap::new(),
         ));
-        tx = tx
+        // Merge into the ORIGINAL — every iteration produces a
+        // single-dust-intent tx, never accumulating.
+        current = original_tx
             .merge(&merge_with)
             .map_err(|e| TxError::Balance(format!("merge dust intent: {e}")))?;
     }
