@@ -10,6 +10,7 @@
 #![deny(warnings)]
 
 mod address;
+mod artifacts;
 mod crypto;
 mod did;
 mod hd;
