@@ -33,10 +33,11 @@
 pub(crate) mod crypto;
 pub(crate) mod curve_support;
 pub mod errors;
+pub(crate) mod hd_derivation;
 pub mod types;
 
 pub use errors::SecretStoreError;
 pub use types::{
-    GenerateKeyInput, ImportKeyInput, MidnightCurve, MidnightKeyType, PublicJwk, SecretKeyRef,
-    SecretStorage, SignOutput, StoredKeyMeta, VerifyInput,
+    DeriveKeyFromSeedInput, GenerateKeyInput, ImportKeyInput, MidnightCurve, MidnightKeyType,
+    PublicJwk, SecretKeyRef, SecretStorage, SignOutput, StoredKeyMeta, VerifyInput,
 };
