@@ -15,12 +15,14 @@ use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
-use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::encode::{
+    encode_incircuit, encode_incircuit_for_commit, encode_offcircuit, encode_offcircuit_for_commit,
+};
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
-use super::ir::{Identifier, Instruction as I, IrSource, Operand};
+use super::ir::{Identifier, Instruction as I, IrSource, Operand, TypedIdentifier};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use base_crypto::hash::{HashOutput, persistent_hash};
@@ -64,6 +66,77 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
+}
+
+/// Compute the width (in `Fr`s) of a single typed slot inside a flat
+/// `Fr` stream that carries values in *preimage-bearing* form.
+pub fn typed_slot_width(
+    val_t: &IrType,
+    stream: &[Fr],
+    idx: usize,
+    stream_name: &'static str,
+    slot_name: &Identifier,
+) -> Result<usize, anyhow::Error> {
+    match val_t {
+        IrType::Opaque => {
+            if idx >= stream.len() {
+                bail!(
+                    "Opaque {slot_name:?}: ran out of {stream_name} at offset {idx} \
+                     (need at least the byte_len Fr)"
+                );
+            }
+            let byte_len = u32::try_from(stream[idx]).map_err(|_| {
+                anyhow!(
+                    "Opaque {slot_name:?}: byte_len Fr at {stream_name}[{idx}] out of \
+                     u32 range"
+                )
+            })? as usize;
+            let w = 1 + byte_len.div_ceil(FR_BYTES_STORED);
+            if idx + w > stream.len() {
+                bail!(
+                    "Opaque {slot_name:?}: {stream_name} truncated; need {} Frs from \
+                     offset {idx} but only {} are available",
+                    w,
+                    stream.len() - idx
+                );
+            }
+            Ok(w)
+        }
+        _ => {
+            let w = val_t.encoded_len();
+            if idx + w > stream.len() {
+                bail!(
+                    "{slot_name:?}: {stream_name} truncated; need {w} Frs of {val_t:?} \
+                     from offset {idx} but only {} are available",
+                    stream.len() - idx
+                );
+            }
+            Ok(w)
+        }
+    }
+}
+
+/// Walk a typed-identifier slice and a flat `Fr` stream in lockstep,
+/// returning the decoded `IrValue` for each position in declaration order.
+pub fn decode_typed_sequence(
+    typed: &[TypedIdentifier],
+    flat: &[Fr],
+) -> Result<Vec<IrValue>, anyhow::Error> {
+    let mut out = Vec::with_capacity(typed.len());
+    let mut idx = 0;
+    for slot in typed.iter() {
+        let w = typed_slot_width(&slot.val_t, flat, idx, "input vector", &slot.name)?;
+        let value = decode_offcircuit(&flat[idx..idx + w], &slot.val_t)?;
+        out.push(value);
+        idx += w;
+    }
+    if idx != flat.len() {
+        bail!(
+            "decode_typed_sequence: consumed {idx} Frs but input vector has {}",
+            flat.len()
+        );
+    }
+    Ok(out)
 }
 
 fn fab_decode_to_bytes(
@@ -198,28 +271,10 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
+        let decoded_inputs = decode_typed_sequence(&self.inputs, &preimage.inputs)?;
         let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
-
-        let mut idx = 0;
-        for input_id in self.inputs.iter() {
-            let w = input_id.val_t.encoded_len();
-            if idx + w > preimage.inputs.len() {
-                bail!(
-                    "Not enough raw inputs: ran out at index {} while decoding {:?}",
-                    idx,
-                    input_id.name
-                );
-            }
-            let value = decode_offcircuit(&preimage.inputs[idx..idx + w], &input_id.val_t)?;
+        for (input_id, value) in self.inputs.iter().zip(decoded_inputs) {
             memory.insert(input_id.name.clone(), value);
-            idx += w;
-        }
-        if idx != preimage.inputs.len() {
-            bail!(
-                "Expected {} raw inputs, received {}",
-                idx,
-                preimage.inputs.len()
-            );
         }
 
         let mut pis = vec![preimage.binding_input];
@@ -373,7 +428,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = typed_slot_width(
+                                val_t,
+                                &preimage.public_transcript_outputs,
+                                public_transcript_outputs_idx,
+                                "public_transcript_outputs",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.public_transcript_outputs
                                 [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
                             public_transcript_outputs_idx += w;
@@ -392,7 +453,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = typed_slot_width(
+                                val_t,
+                                &preimage.private_transcript,
+                                private_transcript_outputs_idx,
+                                "private_transcript",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.private_transcript
                                 [private_transcript_outputs_idx
                                     ..private_transcript_outputs_idx + w];
@@ -558,7 +625,6 @@ impl IrSource {
                         }
                     }
                 }
-                I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
                 I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
@@ -578,6 +644,26 @@ impl IrSource {
                     let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
                     let p = JubjubSubgroup::generator() * s;
                     memory.insert(output.clone(), IrValue::JubjubPoint(p));
+                }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        bail!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        );
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(&memory, val)?;
+                        if value.get_type() != *expected_t {
+                            bail!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            );
+                        }
+                        outputs.push(value);
+                    }
                 }
             }
         }
@@ -600,10 +686,25 @@ impl IrSource {
             let comm_comm = preimage
                 .communications_commitment
                 .ok_or(anyhow!("Expected communications randomness"))?;
+            // We must rebuild the comm_comm preimage in commit-bearing
+            // form to match what the JS bridge fed into `transient_hash`
+            // for the commitment.
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
-            comm_comm_inputs.extend(preimage.inputs.iter());
-            for output in outputs.iter() {
-                comm_comm_inputs.push(output.clone().try_into()?);
+            for input_id in self.inputs.iter() {
+                let value = memory.get(&input_id.name).ok_or_else(|| {
+                    anyhow!(
+                        "comm_comm: declared input {:?} missing from memory after preprocess",
+                        input_id.name
+                    )
+                })?;
+                for ir_val in encode_offcircuit_for_commit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
+            }
+            for value in outputs.iter() {
+                for ir_val in encode_offcircuit_for_commit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
             }
             if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
                 error!(
@@ -697,20 +798,13 @@ impl Relation for IrSource {
                           cell: CircuitValue,
                           mem: &mut HashMap<Identifier, CircuitValue>|
          -> Result<(), Error> {
-            // If id exists in the witness memory, make sure the value that
-            // we are inserting is the same.
-            // Miguel: This seems unnecessary to me. I would fail when calling
-            // `mem_insert` with an id that exists in the witness memory.
-            witness.as_ref()
-                .zip(cell.value())
-                .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) && *expected != *v  {
-                        error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
-                        return true;
-                    }
-                    false
-                })?;
-
+            if mem.contains_key(&id) {
+                error!(id = ?id, "Identifier bound twice during synthesize. This is a bug.");
+                return Err(Error::Synthesis(format!(
+                    "Identifier {id:?} bound twice during synthesize; \
+                     each IR variable must be assigned at most once."
+                )));
+            }
             mem.insert(id, cell);
             Ok(())
         };
@@ -826,10 +920,6 @@ impl Relation for IrSource {
                         let guarded_x = std.select(layouter, &guard, &x, &zero)?;
                         pi_push(guarded_x, &mut public_inputs)?;
                     }
-                }
-                I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, val)?;
-                    outputs.push(val);
                 }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
@@ -1037,6 +1127,26 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        )));
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(std, layouter, &memory, val)?;
+                        if value.get_type() != *expected_t {
+                            return Err(Error::Synthesis(format!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            )));
+                        }
+                        outputs.push(value);
+                    }
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1051,16 +1161,26 @@ impl Relation for IrSource {
             let comm_comm_rand = std.assign(layouter, comm_comm_rand_value)?;
 
             let mut preimage = vec![comm_comm_rand];
+            // Inputs MUST go through the commit-form encoder so
+            // that an `Opaque` output emits its single cached
+            // `commit` AssignedNative.
             for id in &self.inputs {
                 if let Some(val) = memory.get(&id.name) {
-                    let x: AssignedNative<_> = val.clone().try_into()?;
-                    preimage.push(x);
+                    for cv in encode_incircuit_for_commit(std, layouter, val)? {
+                        let x: AssignedNative<_> = cv.try_into()?;
+                        preimage.push(x);
+                    }
                 }
             }
 
-            for output in &outputs {
-                let x: AssignedNative<_> = output.clone().try_into()?;
-                preimage.push(x);
+            for value in &outputs {
+                // Outputs MUST go through the commit-form encoder so
+                // that an `Opaque` output emits its single cached
+                // `commit` AssignedNative.
+                for cv in encode_incircuit_for_commit(std, layouter, value)? {
+                    let x: AssignedNative<_> = cv.try_into()?;
+                    preimage.push(x);
+                }
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;
