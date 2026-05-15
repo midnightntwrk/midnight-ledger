@@ -1,0 +1,16 @@
+{
+  "name": "wallet-core-test-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Node-driven JSON-RPC harness for wallet-core integration tests. Talks to the same midnight-did-contract package the dioxus-wallet WebView ships, via `file:` deps pointing at the vendored copies.",
+  "scripts": {
+    "harness": "node harness.mjs"
+  },
+  "dependencies": {
+    "@midnight-ntwrk/midnight-did-contract": "file:../../../dioxus-wallet/assets/web/pkg/midnight-did-contract",
+    "@midnight-ntwrk/compact-runtime": "file:../../../dioxus-wallet/assets/web/pkg/compact-runtime",
+    "@midnight-ntwrk/onchain-runtime-v3": "file:../../../dioxus-wallet/assets/web/pkg/onchain-runtime-v3",
+    "object-inspect": "file:../../../dioxus-wallet/assets/web/pkg/object-inspect"
+  }
+}

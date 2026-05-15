@@ -63,6 +63,76 @@ async fn unknown_method_returns_js_error() {
     );
 }
 
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct ContractLayerInfo {
+    contract_exports: Vec<String>,
+    compact_runtime_exports: Vec<String>,
+    circuit_names: Vec<String>,
+    has_proof_data_into_serialized_preimage: bool,
+    has_create_circuit_context: bool,
+}
+
+#[tokio::test]
+async fn contract_layer_info_lists_all_11_did_circuits() {
+    // The harness loads `@midnight-ntwrk/midnight-did-contract` +
+    // `@midnight-ntwrk/compact-runtime` from the vendored copies
+    // under `dioxus-wallet/assets/web/pkg/`. Asserts that:
+    // 1. The vendor + npm wiring works (no module-resolution
+    //    failures despite the symlinked file: deps).
+    // 2. All 11 DID circuits we expect to call are present —
+    //    catches an upstream rename or version drift early.
+    // 3. The two compact-runtime helpers our circuit-call pipeline
+    //    will use (`createCircuitContext`,
+    //    `proofDataIntoSerializedPreimage`) exist.
+    let bridge = NodeChildBridge::spawn(&NodeChildBridge::default_harness_path())
+        .expect("spawn harness");
+    let info: ContractLayerInfo = bridge
+        .call("contractLayerInfo", serde_json::Value::Null)
+        .await
+        .expect("contractLayerInfo call");
+
+    assert!(
+        info.contract_exports.contains(&"DIDContract".to_string()),
+        "contract package missing DIDContract export: {:?}",
+        info.contract_exports,
+    );
+
+    // Two key compact-runtime helpers our ContractCall pipeline
+    // depends on. If either is renamed upstream the test fails
+    // here, not deep inside circuit execution.
+    assert!(
+        info.has_create_circuit_context,
+        "compact-runtime missing createCircuitContext"
+    );
+    assert!(
+        info.has_proof_data_into_serialized_preimage,
+        "compact-runtime missing proofDataIntoSerializedPreimage"
+    );
+
+    // All 11 DID circuits, in any order.
+    let expected = [
+        "addAlsoKnownAs",
+        "removeAlsoKnownAs",
+        "addVerificationMethod",
+        "updateVerificationMethod",
+        "removeVerificationMethod",
+        "addVerificationMethodRelation",
+        "removeVerificationMethodRelation",
+        "addService",
+        "updateService",
+        "removeService",
+        "deactivate",
+    ];
+    for name in expected {
+        assert!(
+            info.circuit_names.iter().any(|n| n == name),
+            "missing DID circuit '{name}' — present: {:?}",
+            info.circuit_names,
+        );
+    }
+}
+
 #[tokio::test]
 async fn multiple_sequential_calls_share_one_bridge() {
     // The harness is single-threaded; the bridge serialises calls.

@@ -86,9 +86,31 @@ impl NodeChildBridge {
     /// Spawn `node <harness_script>` and capture stdin/stdout.
     /// Stderr is inherited so harness diagnostics surface in
     /// `cargo test -- --nocapture` output.
+    ///
+    /// **`--preserve-symlinks`** is load-bearing: the harness'
+    /// `node_modules` is a tree of symlinks into vendored packages
+    /// under `dioxus-wallet/assets/web/pkg/`. Without this flag,
+    /// Node resolves a symlink to its real path and then walks
+    /// up *that* directory tree looking for `node_modules`, missing
+    /// our harness directory. With it, resolution stays inside the
+    /// harness tree.
     pub fn spawn(harness_script: &std::path::Path) -> Result<Self, JsBridgeError> {
         use std::process::Stdio;
+        // Surface a clear error if the harness hasn't been
+        // bootstrapped — far less mysterious than "Cannot find
+        // package …" from deep inside Node.
+        if let Some(dir) = harness_script.parent() {
+            let nm = dir.join("node_modules");
+            if !nm.exists() {
+                return Err(JsBridgeError::Transport(format!(
+                    "{} missing — run `cd {} && npm install --ignore-scripts` once",
+                    nm.display(),
+                    dir.display(),
+                )));
+            }
+        }
         let mut child = tokio::process::Command::new("node")
+            .arg("--preserve-symlinks")
             .arg(harness_script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
