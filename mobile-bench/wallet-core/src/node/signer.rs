@@ -23,6 +23,9 @@
 
 use blake2::{Blake2b, Digest, digest::consts::U32};
 use k256::ecdsa::{Signature as EcdsaSignature, SigningKey, VerifyingKey};
+use subxt::{Config, SubstrateConfig};
+use subxt::tx::Signer as SubxtSigner;
+use subxt::utils::{AccountId32, MultiAddress, MultiSignature};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SignerError {
@@ -91,6 +94,26 @@ impl MidnightSigner {
     }
 }
 
+impl SubxtSigner<SubstrateConfig> for MidnightSigner {
+    fn account_id(&self) -> <SubstrateConfig as Config>::AccountId {
+        AccountId32(self.account_id_bytes)
+    }
+
+    fn sign(&self, payload: &[u8]) -> <SubstrateConfig as Config>::Signature {
+        let sig_bytes = self.sign_envelope(payload);
+        MultiSignature::Ecdsa(sig_bytes)
+    }
+}
+
+/// `Into<MultiAddress<AccountId32, u32>>` helper for callers that
+/// want the substrate address (not the raw AccountId) — e.g. log
+/// formatting.
+impl From<&MidnightSigner> for MultiAddress<AccountId32, u32> {
+    fn from(s: &MidnightSigner) -> Self {
+        MultiAddress::Id(AccountId32(s.account_id_bytes))
+    }
+}
+
 /// Substrate's blake2-256 hash. Wallet-core only needs it on this
 /// codepath, so we keep the helper local rather than pulling in
 /// `sp-crypto-hashing`.
@@ -141,6 +164,16 @@ mod tests {
         let und = signer_from_demo(Network::Undeployed);
         let pre = signer_from_demo(Network::PreProd);
         assert_ne!(und.account_id_bytes(), pre.account_id_bytes());
+    }
+
+    #[test]
+    fn signer_impls_subxt_signer_for_substrate_config() {
+        use subxt::tx::Signer as _;
+        let s = signer_from_demo(Network::Undeployed);
+        let acct: AccountId32 = s.account_id();
+        assert_eq!(acct.0, s.account_id_bytes());
+        let sig = SubxtSigner::<SubstrateConfig>::sign(&s, b"hello");
+        assert!(matches!(sig, MultiSignature::Ecdsa(_)));
     }
 
     #[test]

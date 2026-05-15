@@ -33,7 +33,9 @@ pub use address::{AddressError, truncate_middle, unshielded_bech32m, unshielded_
 pub use hd::{HdError, Role};
 pub use indexer::{ChainTipInfo, ContractStateInfo, IndexerClient, IndexerError};
 pub use network::{Network, NetworkConfig};
-pub use node::{MidnightSigner, NodeClient, NodeError, NodeHealth, NodeStatus, SignerError};
+pub use node::{
+    MidnightSigner, NodeClient, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult,
+};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError};
 pub use unshielded::{

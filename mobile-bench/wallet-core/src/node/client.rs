@@ -1,6 +1,6 @@
 //! Node JSON-RPC client. Phase-1 — raw substrate methods via
-//! `jsonrpsee`. We swap to `subxt + midnight-node-metadata` when we
-//! need typed extrinsic submission (iter-1 send step).
+//! `jsonrpsee`. Phase-2 adds a `subxt::OnlineClient` alongside for
+//! typed extrinsic submission (`Midnight.send_mn_transaction`).
 
 use jsonrpsee::core::client::ClientT;
 use jsonrpsee::rpc_params;
@@ -8,6 +8,7 @@ use jsonrpsee::ws_client::WsClient;
 use jsonrpsee::ws_client::WsClientBuilder;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
+use subxt::{OnlineClient, SubstrateConfig};
 
 use crate::crypto::ensure_default_crypto_provider;
 use crate::network::Network;
@@ -16,6 +17,10 @@ use crate::network::Network;
 pub enum NodeError {
     #[error("ws-client: {0}")]
     Ws(#[from] jsonrpsee::core::client::Error),
+    #[error("subxt: {0}")]
+    Subxt(String),
+    #[error("submit: {0}")]
+    Submit(String),
 }
 
 /// Subset of substrate's `system_health` response we surface to the UI.
@@ -36,8 +41,16 @@ pub struct NodeStatus {
     pub finalized_head_hash: String,
 }
 
+/// Outcome of a successful in-block submission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmitResult {
+    pub tx_hash: [u8; 32],
+    pub block_hash: [u8; 32],
+}
+
 pub struct NodeClient {
     inner: WsClient,
+    subxt: OnlineClient<SubstrateConfig>,
 }
 
 impl NodeClient {
@@ -49,7 +62,10 @@ impl NodeClient {
             .connection_timeout(Duration::from_secs(10))
             .build(cfg.node_ws_url)
             .await?;
-        Ok(Self { inner })
+        let subxt = OnlineClient::<SubstrateConfig>::from_url(cfg.node_ws_url)
+            .await
+            .map_err(|e| NodeError::Subxt(e.to_string()))?;
+        Ok(Self { inner, subxt })
     }
 
     pub async fn health(&self) -> Result<NodeHealth, NodeError> {
@@ -69,6 +85,58 @@ impl NodeClient {
         Ok(NodeStatus {
             health: health?,
             finalized_head_hash: finalized_head_hash?,
+        })
+    }
+
+    /// Submit a SCALE-encoded Midnight transaction via the
+    /// `Midnight.send_mn_transaction(bytes)` runtime call, then
+    /// wait for it to be included in a block. Does NOT wait for
+    /// finality — that's a design choice (see deploy-submit spec).
+    #[allow(dead_code)] // Wired by Wallet::create_did in Task 11.
+    pub async fn submit_deploy(
+        &self,
+        bytes: Vec<u8>,
+        signer: &crate::MidnightSigner,
+    ) -> Result<SubmitResult, NodeError> {
+        use midnight_node_metadata::midnight_metadata_latest as runtime;
+
+        use subxt::tx::TxStatus;
+
+        let call = runtime::tx().midnight().send_mn_transaction(bytes);
+        let mut progress = self
+            .subxt
+            .tx()
+            .sign_and_submit_then_watch_default(&call, signer)
+            .await
+            .map_err(|e| NodeError::Submit(e.to_string()))?;
+
+        // subxt 0.44 doesn't have a one-shot wait_for_in_block —
+        // we drive the status stream and break on the first
+        // `InBestBlock` / `InFinalizedBlock` variant. (Finalized is
+        // strictly stronger; we accept either.)
+        let in_block = loop {
+            match progress.next().await {
+                Some(Ok(TxStatus::InBestBlock(b))) | Some(Ok(TxStatus::InFinalizedBlock(b))) => {
+                    break b;
+                }
+                Some(Ok(TxStatus::Invalid { message }))
+                | Some(Ok(TxStatus::Dropped { message }))
+                | Some(Ok(TxStatus::Error { message })) => {
+                    return Err(NodeError::Submit(message));
+                }
+                Some(Ok(_)) => continue,
+                Some(Err(e)) => return Err(NodeError::Submit(e.to_string())),
+                None => return Err(NodeError::Submit("tx status stream ended early".into())),
+            }
+        };
+        in_block
+            .wait_for_success()
+            .await
+            .map_err(|e| NodeError::Submit(format!("wait_for_success: {e}")))?;
+
+        Ok(SubmitResult {
+            tx_hash: in_block.extrinsic_hash().0,
+            block_hash: in_block.block_hash().0,
         })
     }
 }
