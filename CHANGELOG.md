@@ -4,6 +4,15 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
+- feat: proof-server support for ZKIR 2.1
+- fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
+- fix: fix potential panic in bridge fee processing
+- fix: address non-associativity of Dust event processing.
+- fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
+
 ## 8.1.0
 
 - feat: expose finer-grained control for the wallet in wasm bindings.

@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::instructions::AssignmentInstructions;
-use midnight_curves::JubjubSubgroup;
+use midnight_curves::{Fr as JubjubFr, JubjubSubgroup};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -71,5 +71,10 @@ pub fn assign_incircuit(
             .jubjub()
             .assign_many(layouter, &convert_values::<JubjubSubgroup>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::JubjubPoint).collect()),
+
+        IrType::JubjubScalar => std_lib
+            .jubjub()
+            .assign_many(layouter, &convert_values::<JubjubFr>(values)?)
+            .map(|xs| xs.into_iter().map(CircuitValue::JubjubScalar).collect()),
     }
 }

@@ -15,7 +15,7 @@
 
 #[cfg(feature = "proving")]
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::{Signature, SigningKey};
+use base_crypto::schnorr::{Signature, SigningKey};
 use coin_structure::contract::ContractAddress;
 #[cfg(feature = "proving")]
 use midnight_ledger::test_utilities::{Resolver, test_resolver, tx_prove};
