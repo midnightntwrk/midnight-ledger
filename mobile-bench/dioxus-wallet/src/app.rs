@@ -522,6 +522,7 @@ pub fn App() -> Element {
                 SessionLogPanel { events: session_log.read().clone() }
             },
             Tab::Diagnostics => rsx! {
+                JsBridgePanel {}
                 TimingsPanel { runs: timing_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "row", "Seed (hex):" }
@@ -1596,6 +1597,134 @@ fn FormSelect(
                         "{opt}"
                     }
                 }
+            }
+        }
+    }
+}
+
+/// Result of a `bridgeProbe` round-trip. Mirrors the JS-side
+/// payload (see `web/src/entry.ts::bridgeProbe`). `error` is the
+/// only field populated on the JS-side error path (e.g. the bundle
+/// hasn't loaded because we built without `--features js-bridge`).
+#[derive(Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize, Debug)]
+#[serde(rename_all = "camelCase", default)]
+struct BridgeProbeResult {
+    echoed: String,
+    version: String,
+    bundle_ready: bool,
+    contract_layer_loaded: bool,
+    contract_exports: Vec<String>,
+    compact_runtime_exports: Vec<String>,
+    time_ms: i64,
+    /// Only set on the JS-side error path. When this is `Some`,
+    /// the other fields are stale defaults.
+    error: Option<String>,
+}
+
+#[component]
+fn JsBridgePanel() -> Element {
+    let mut message = use_signal(|| "hello from rust".to_string());
+    let mut result = use_signal::<Option<Result<BridgeProbeResult, String>>>(|| None);
+    let mut pending = use_signal(|| false);
+
+    let probe = move |_| {
+        if *pending.read() {
+            return;
+        }
+        pending.set(true);
+        result.set(None);
+        let msg = message.read().clone();
+        let msg_json = serde_json::to_string(&msg).unwrap_or_else(|_| "\"\"".into());
+        // Build a small async JS expression that defends against the
+        // js-bridge feature being off (bundle absent) and any thrown
+        // error inside the probe. Returning a plain object either
+        // way means Rust always gets a parseable JSON payload.
+        let snippet = format!(
+            r#"if (!window.midnightDidBundle?.bridgeProbe) {{
+                return {{ error: "midnightDidBundle.bridgeProbe not loaded — rebuild with --features js-bridge" }};
+            }}
+            try {{
+                const r = await window.midnightDidBundle.bridgeProbe({{ message: {msg_json} }});
+                return r;
+            }} catch (e) {{
+                return {{ error: String(e?.message ?? e) }};
+            }}"#,
+        );
+        spawn(async move {
+            let r: Result<BridgeProbeResult, String> = match document::eval(&snippet).await {
+                Ok(v) => serde_json::from_value::<BridgeProbeResult>(v)
+                    .map_err(|e| format!("decode probe result: {e}")),
+                Err(e) => Err(format!("eval failed: {e}")),
+            };
+            result.set(Some(r));
+            pending.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "wizard-header", "JS bridge spike" }
+        div { class: "session-log-empty",
+            "Round-trips a message through Dioxus eval → bundle.bridgeProbe → back. Requires --features js-bridge."
+        }
+        div { class: "row",
+            input {
+                r#type: "text",
+                value: "{message.read()}",
+                oninput: move |e| message.set(e.value()),
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+            button {
+                disabled: *pending.read(),
+                onclick: probe,
+                {if *pending.read() { "Probing…" } else { "Probe bridge" }}
+            }
+        }
+        if let Some(r) = result.read().as_ref() {
+            match r {
+                Ok(probe) => {
+                    if let Some(err) = probe.error.as_ref() {
+                        rsx! {
+                            div { class: "wizard-outcome err",
+                                div { class: "row label", "JS-side error" }
+                                div { class: "seed-blob", "{err}" }
+                            }
+                        }
+                    } else {
+                        let exports_n = probe.contract_exports.len();
+                        let runtime_n = probe.compact_runtime_exports.len();
+                        rsx! {
+                            div { class: "wizard-outcome ok",
+                                div { class: "row label", "Round-trip OK" }
+                                div { class: "did-meta-grid",
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Echoed" }
+                                        span { class: "value", "{probe.echoed}" }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Bundle v" }
+                                        span { class: "value", "{probe.version}" }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Contract" }
+                                        span { class: "value", {if probe.contract_layer_loaded { format!("loaded · {exports_n} exports") } else { "not loaded".to_string() }} }
+                                    }
+                                    div { class: "did-meta-cell",
+                                        span { class: "label", "Runtime" }
+                                        span { class: "value", "{runtime_n} exports" }
+                                    }
+                                }
+                                div { class: "row label", "Contract exports" }
+                                div { class: "seed-blob", "{probe.contract_exports.join(\", \")}" }
+                            }
+                        }
+                    }
+                }
+                Err(e) => rsx! {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Eval error" }
+                        div { class: "seed-blob", "{e}" }
+                    }
+                },
             }
         }
     }

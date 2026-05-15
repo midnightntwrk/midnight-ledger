@@ -21,6 +21,19 @@ declare global {
         contract: typeof import("@midnight-ntwrk/midnight-did-contract");
         compactRuntime: typeof import("@midnight-ntwrk/compact-runtime");
       }>;
+      /** Round-trip probe: callable from Rust via Dioxus `eval`,
+       *  reports what's loaded in the bundle. Used as the first
+       *  step toward the ContractCall bridge — verifies that Rust
+       *  can drive JS and get a structured result back. */
+      bridgeProbe(params: { message: string }): Promise<{
+        echoed: string;
+        version: string;
+        bundleReady: boolean;
+        contractLayerLoaded: boolean;
+        contractExports: string[];
+        compactRuntimeExports: string[];
+        timeMs: number;
+      }>;
     };
     MIDNIGHT_PROOF_SERVER?: string;
     MIDNIGHT_NETWORK?: string;
@@ -47,12 +60,36 @@ function loadContractLayer() {
   return contractLayerPromise;
 }
 
+async function bridgeProbe(params: { message: string }) {
+  // Touch the contract layer so the probe also reports its load
+  // status. If the dynamic import has already happened (smoke
+  // test ran on startup) this is a no-op cache hit.
+  let layer: Awaited<ReturnType<typeof loadContractLayer>> | null = null;
+  try {
+    layer = await loadContractLayer();
+  } catch (e) {
+    console.warn("[bridgeProbe] contract layer load failed", e);
+  }
+  return {
+    echoed: params.message,
+    version: "0.1.0",
+    bundleReady: true,
+    contractLayerLoaded: layer !== null,
+    contractExports: layer ? Object.keys(layer.contract).slice(0, 16) : [],
+    compactRuntimeExports: layer
+      ? Object.keys(layer.compactRuntime).slice(0, 16)
+      : [],
+    timeMs: Date.now(),
+  };
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
   didDomain: midnightDidDomain,
   ready: true,
   loadContractLayer,
+  bridgeProbe,
 };
 
 console.log(
