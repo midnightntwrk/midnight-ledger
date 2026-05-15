@@ -87,13 +87,13 @@ impl NodeChildBridge {
     /// Stderr is inherited so harness diagnostics surface in
     /// `cargo test -- --nocapture` output.
     ///
-    /// **`--preserve-symlinks`** is load-bearing: the harness'
-    /// `node_modules` is a tree of symlinks into vendored packages
-    /// under `dioxus-wallet/assets/web/pkg/`. Without this flag,
-    /// Node resolves a symlink to its real path and then walks
-    /// up *that* directory tree looking for `node_modules`, missing
-    /// our harness directory. With it, resolution stays inside the
-    /// harness tree.
+    /// We deliberately *do not* pass `--preserve-symlinks`: every
+    /// `file:` dep in the harness `package.json` points at the
+    /// upstream midnight-did repo's already-installed
+    /// `node_modules`, so transitive resolution wants to walk the
+    /// symlink's real path (the upstream tree where `effect-ts`
+    /// etc. live), not the symlink path (our harness, which only
+    /// has the direct deps).
     pub fn spawn(harness_script: &std::path::Path) -> Result<Self, JsBridgeError> {
         use std::process::Stdio;
         // Surface a clear error if the harness hasn't been
@@ -110,7 +110,6 @@ impl NodeChildBridge {
             }
         }
         let mut child = tokio::process::Command::new("node")
-            .arg("--preserve-symlinks")
             .arg(harness_script)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

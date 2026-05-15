@@ -23,8 +23,28 @@
 //   ← {"id":1,"result":{"ok":true,"version":"0.1.0"}}
 
 import * as readline from "node:readline";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const HARNESS_VERSION = "0.1.0";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+/**
+ * Path to the bundled DID circuit artifacts (prover keys, verifier
+ * keys, IR). Same `<contract>/dist/managed/did/` layout the upstream
+ * `NodeZkConfigProvider` expects.
+ */
+const DID_ZK_ASSETS_PATH = path.resolve(
+  __dirname,
+  "node_modules",
+  "@midnight-ntwrk",
+  "midnight-did-contract",
+  "dist",
+  "managed",
+  "did",
+);
 
 /**
  * Walk a JSON value, replacing objects of shape `{ "$bigint": "123" }`

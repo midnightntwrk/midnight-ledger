@@ -3,14 +3,19 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Node-driven JSON-RPC harness for wallet-core integration tests. Talks to the same midnight-did-contract package the dioxus-wallet WebView ships, via `file:` deps pointing at the vendored copies.",
+  "description": "Node-driven JSON-RPC harness for wallet-core integration tests. All deps point at the upstream midnight-did repo's resolved node_modules (already npm-installed there), so we inherit the full transitive dep tree (effect-ts, etc.) without rebuilding it.",
   "scripts": {
     "harness": "node harness.mjs"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did-contract": "file:../../../dioxus-wallet/assets/web/pkg/midnight-did-contract",
-    "@midnight-ntwrk/compact-runtime": "file:../../../dioxus-wallet/assets/web/pkg/compact-runtime",
-    "@midnight-ntwrk/onchain-runtime-v3": "file:../../../dioxus-wallet/assets/web/pkg/onchain-runtime-v3",
-    "object-inspect": "file:../../../dioxus-wallet/assets/web/pkg/object-inspect"
+    "@midnight-ntwrk/midnight-did-contract": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-did-contract",
+    "@midnight-ntwrk/compact-runtime": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/compact-runtime",
+    "@midnight-ntwrk/onchain-runtime-v3": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/onchain-runtime-v3",
+    "@midnight-ntwrk/ledger-v8": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/ledger-v8",
+    "@midnight-ntwrk/compact-js": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/compact-js",
+    "@midnight-ntwrk/midnight-js-contracts": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-contracts",
+    "@midnight-ntwrk/midnight-js-types": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-types",
+    "@midnight-ntwrk/midnight-js-network-id": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-network-id",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider"
   }
 }
