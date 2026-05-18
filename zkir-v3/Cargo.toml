@@ -26,6 +26,14 @@ proptest = [
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+# Required by `decode_impact::decode_impact_inputs`, which materializes a
+# flat-Impact byte stream into runtime `Op<ResultModeVerify, D>` for CCC
+# query execution. (Previously these lived under [dev-dependencies] for
+# the cross-encoder tests in `zkir_mode.rs`; promoted because `src/`
+# code now reaches into them.)
+onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
+runtime-state = { path = "../onchain-state", package = "midnight-onchain-state" }
+storage = { path = "../storage", package = "midnight-storage" }
 
 midnight-curves = { version = "0.2.0" }
 midnight-proofs = { version = "^0.7.0" }
@@ -65,3 +73,8 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-zkir-v3 = { path = ".", features = ["proptest"] }
 actix-rt = "^2.9.0"
+# proptest features for runtime types used by the property-based decoder
+# round-trip in `decode_impact::tests`.
+onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm", features = ["proptest"] }
+runtime-state = { path = "../onchain-state", package = "midnight-onchain-state", features = ["proptest"] }
+storage = { path = "../storage", package = "midnight-storage", features = ["proptest"] }

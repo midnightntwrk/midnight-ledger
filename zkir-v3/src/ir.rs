@@ -29,6 +29,7 @@ use transient_crypto::proofs::{
 };
 
 use crate::ir_types::IrType;
+use crate::zkir_mode::ZkirOp;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -39,6 +40,10 @@ pub struct IrSource {
     pub version: IrMinorVersion,
     /// The list of input identifiers for this circuit
     pub inputs: Vec<TypedIdentifier>,
+    /// The output types this circuit returns, positionally. The actual
+    /// values are produced by an `Instruction::Output` terminator whose
+    /// operand list is type-checked against this signature.
+    pub outputs: Vec<IrType>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -123,11 +128,17 @@ pub struct TypedIdentifier {
     pub(crate) val_t: IrType,
 }
 
+impl TypedIdentifier {
+    pub fn new(name: Identifier, val_t: IrType) -> Self {
+        TypedIdentifier { name, val_t }
+    }
+}
+
 tag_enforcement_test!(TypedIdentifier);
 
 /// An operand that can be either a variable reference or an immediate value
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operand {
     /// A reference to a variable in circuit memory
     Variable(Identifier),
@@ -404,23 +415,12 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Conditional impact instruction - declares multiple public inputs under a guard condition.
+    /// Guarded structured ImpactVM operations.
     ///
-    /// No outputs, but adds the inputs as public inputs and activity information to
-    /// [`IrSource::prove`] and [`IrSource::check`].
-    ///
-    /// In-circuit, if `guard` is `false`, instead of adding the `inputs` as public inputs,
-    /// it will add `n` zeros as public inputs (where `n` is the number of `inputs`).
-    /// This is enforced with in-circuit constraints.
-    ///
-    /// NB: Currently, we require that all `inputs` be of type `Native`.
-    /// A runtime error will be raised otherwise.
-    Impact {
-        /// The boolean condition under which the public inputs are active
-        guard: Operand,
-        /// The sequence of values to declare as public inputs
-        inputs: Vec<Operand>,
-    },
+    /// If `guard` is true, encodes `ops` into the public-input vector;
+    /// otherwise emits zeros.
+    #[cfg_attr(feature = "proptest", proptest(skip))]
+    Impact { guard: Operand, ops: Vec<ZkirOp> },
     /// Multiplies an elliptic curve point by a scalar.
     ///
     /// This operation will result in an error if the operand given as `a`
@@ -482,14 +482,6 @@ pub enum Instruction {
         bits: u32,
         /// The output variable name
         output: Identifier,
-    },
-    /// Outputs `val` from the circuit, including it in the communications
-    /// commitment.
-    ///
-    /// No outputs (at the level of the IR VM), despite the name
-    Output {
-        /// The variable or immediate to output
-        val: Operand,
     },
     /// Calls a circuit-friendly hash function on a sequence of items.
     ///
@@ -635,6 +627,15 @@ pub enum Instruction {
         val_t: IrType,
         /// The output variable name
         output: Identifier,
+    },
+    /// Circuit terminator. Produces the circuit's return values, in
+    /// signature order, and ends execution. The operand list is type-checked
+    /// against `IrSource::outputs` (length and per-position type), then each
+    /// operand is encoded via `encode_offcircuit` / `encode_incircuit` and
+    /// pushed into the outputs accumulator.
+    Output {
+        /// The values returned, one per `IrSource::outputs[i]`.
+        vals: Vec<Operand>,
     },
 }
 tag_enforcement_test!(Instruction);
