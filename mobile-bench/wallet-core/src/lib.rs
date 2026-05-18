@@ -21,6 +21,7 @@ mod network;
 mod node;
 mod probe;
 pub mod secret_storage;
+pub mod store;
 mod tx;
 mod unshielded;
 mod wallet;
