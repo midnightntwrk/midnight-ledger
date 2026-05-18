@@ -1,8 +1,8 @@
-[**@midnight/ledger v8.1.0-rc.1**](README.md)
+[**@midnight/ledger v8.1.0**](README.md)
 
 ***
 
-# @midnight/ledger v8.1.0-rc.1
+# @midnight/ledger v8.1.0
 
 ## Classes
 

@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v8.1.0**](../README.md)
 
 ***
 
@@ -77,7 +77,7 @@ findPathForLeaf(
    leaf, 
    indexStart?, 
    indexEnd?, 
-   alreadyHashed?): undefined | AlignedValue;
+   alreadyHashed?): AlignedValue | undefined;
 ```
 
 **`Internal`**
@@ -105,7 +105,7 @@ Returns undefined if the leaf is not in the tree.
 
 #### Returns
 
-`undefined` \| [`AlignedValue`](../type-aliases/AlignedValue.md)
+[`AlignedValue`](../type-aliases/AlignedValue.md) \| `undefined`
 
 ***
 
@@ -158,7 +158,7 @@ not automatically rehash trees.
 ### root()
 
 ```ts
-root(): undefined | AlignedValue;
+root(): AlignedValue | undefined;
 ```
 
 **`Internal`**
@@ -168,7 +168,7 @@ Returns undefined if the tree has not been fully hashed.
 
 #### Returns
 
-`undefined` \| [`AlignedValue`](../type-aliases/AlignedValue.md)
+[`AlignedValue`](../type-aliases/AlignedValue.md) \| `undefined`
 
 ***
 
