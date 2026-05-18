@@ -22,7 +22,7 @@ use crate::store::envelope::SecretEnvelope;
 
 /// The on-disk schema this binary expects. Migration runs
 /// `0..SCHEMA_VERSION` closures at `open()`.
-pub const SCHEMA_VERSION: u32 = 2;
+pub const SCHEMA_VERSION: u32 = 3;
 
 // ── Wallet identity ────────────────────────────────────────────
 
@@ -107,6 +107,24 @@ pub(crate) const KEYS: TableDefinition<([u8; 16], &'static str), &'static [u8]> 
 /// to scan the entire `keys` table.
 pub(crate) const KEYS_BY_WALLET: MultimapTableDefinition<[u8; 16], &'static str> =
     MultimapTableDefinition::new("keys_by_wallet");
+
+/// DID inventory — keyed by `(network, did)`. Bincoded
+/// `DidInventoryRowV1`. Survives a wallet reload so the
+/// inventory tab is no longer session-scoped.
+pub(crate) const DID_INVENTORY: TableDefinition<(u8, &'static str), &'static [u8]> =
+    TableDefinition::new("did_inventory");
+
+/// Secondary index: `network → did_string`. Lets the App
+/// hydrate "all DIDs I've touched on this network" in one
+/// O(n) scan without decoding every row.
+pub(crate) const DIDS_BY_NETWORK: MultimapTableDefinition<u8, &'static str> =
+    MultimapTableDefinition::new("dids_by_network");
+
+/// Resolved-DID cache — keyed by `(network, did)`. Bincoded
+/// `ResolvedCacheRowV1`. Disposable: a schema-version-bump
+/// can drop the whole table and let the next resolve repopulate.
+pub(crate) const RESOLVED_CACHE: TableDefinition<(u8, &'static str), &'static [u8]> =
+    TableDefinition::new("resolved_cache");
 
 // ── Row types ─────────────────────────────────────────────────
 
@@ -211,6 +229,44 @@ impl From<PublicJwkStored> for PublicJwk {
             y: p.y,
         }
     }
+}
+
+/// Inventory status of a tracked DID. Mirrors the
+/// `DidInventoryStatus` enum the dioxus-wallet UI keeps in-
+/// memory; matching variant names so the persistence layer
+/// doesn't need a conversion table.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum InventoryStatus {
+    Pending,
+    Active,
+    Deactivated,
+}
+
+/// DID inventory row, version 1. Carries every field the UI's
+/// inventory table shows. Created / updated timestamps are
+/// unix-ms; the UI can render "last seen" badges from them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DidInventoryRowV1 {
+    pub network: NetworkTag,
+    pub status: InventoryStatus,
+    pub counter: Option<u32>,
+    pub vm_count: Option<u32>,
+    pub service_count: Option<u32>,
+    pub last_block_height: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Resolved-DID cache row. Carries a JSON snapshot of
+/// `ResolvedDid` plus a `cached_at` timestamp so the UI can
+/// surface "this snapshot is N seconds old" hints. JSON
+/// instead of bincode because `ResolvedDid` already implements
+/// `Serialize` / `Deserialize` for JSON exposure and a schema
+/// drift translates cleanly into a serde error → drop + refresh.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ResolvedCacheRowV1 {
+    pub resolved_json: String,
+    pub cached_at: i64,
 }
 
 /// Key row, version 1. Carries metadata + derivation; never

@@ -14,8 +14,8 @@ use redb::ReadableTable;
 
 use crate::store::error::StoreError;
 use crate::store::schema::{
-    CONTROLLER_SECRETS, KEYS, KEYS_BY_WALLET, META, META_SCHEMA_VERSION_KEY, SCHEMA_VERSION,
-    WALLETS,
+    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, KEYS, KEYS_BY_WALLET, META,
+    META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, WALLETS,
 };
 use crate::store::WalletStore;
 
@@ -38,6 +38,7 @@ pub(crate) fn run(store: &WalletStore) -> Result<(), StoreError> {
         match (v, next) {
             (0, 1) => migrate_v0_to_v1(store)?,
             (1, 2) => migrate_v1_to_v2(store)?,
+            (2, 3) => migrate_v2_to_v3(store)?,
             (from, to) => {
                 return Err(StoreError::Migration(format!(
                     "no migration registered for {from} → {to}",
@@ -125,6 +126,31 @@ fn migrate_v0_to_v1(store: &WalletStore) -> Result<(), StoreError> {
     txn.commit()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
     write_version(store, 1)
+}
+
+fn migrate_v2_to_v3(store: &WalletStore) -> Result<(), StoreError> {
+    // v2 → v3 adds three tables: `did_inventory`, the
+    // `dids_by_network` index, and `resolved_cache`. No
+    // existing rows to walk — pre-v3 wallets just have no
+    // inventory or cache yet.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .open_table(DID_INVENTORY)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let _ = txn
+            .open_multimap_table(DIDS_BY_NETWORK)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let _ = txn
+            .open_table(RESOLVED_CACHE)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 3)
 }
 
 fn migrate_v1_to_v2(store: &WalletStore) -> Result<(), StoreError> {

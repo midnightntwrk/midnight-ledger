@@ -406,9 +406,64 @@ pub fn App() -> Element {
             let path = wallet_store_path();
             match wallet_core::store::WalletStore::open(&path, DEV_STORE_PASSPHRASE) {
                 Ok(store) => {
-                    state.set_store(store);
+                    state.set_store(store.clone());
                     let n = state.hydrate_controller_secrets(net);
-                    tracing::info!(path=%path.display(), hydrated=n, "wallet store opened");
+                    // Bulk-load the DID inventory rows for the
+                    // current network into the UI signal.
+                    let mut inv_map: std::collections::BTreeMap<
+                        String,
+                        DidInventoryEntry,
+                    > = Default::default();
+                    let mut inv_count = 0usize;
+                    if let Ok(rows) = store.list_did_inventory(net) {
+                        for row in rows {
+                            inv_count += 1;
+                            inv_map.insert(
+                                row.did.clone(),
+                                DidInventoryEntry {
+                                    did: row.did,
+                                    network_label: net.label().to_string(),
+                                    status: status_from_store(row.status),
+                                    counter: row.counter,
+                                    vm_count: row.vm_count.map(|v| v as usize),
+                                    service_count: row.service_count.map(|v| v as usize),
+                                    last_block_height: row.last_block_height,
+                                },
+                            );
+                        }
+                    }
+                    if !inv_map.is_empty() {
+                        did_inventory.set(inv_map);
+                    }
+                    // Hydrate the resolved-cache map so the
+                    // detail tabs still have content after a
+                    // reload (the cross-resolve diff card needs
+                    // *something* to diff against on first
+                    // resolve of a session — the prior on-disk
+                    // entry plays that role until a fresh
+                    // resolve overwrites it).
+                    let mut cache_map = std::collections::HashMap::new();
+                    let mut cache_count = 0usize;
+                    if let Ok(rows) = store.list_resolved_cache(net) {
+                        for (did, json, _at) in rows {
+                            if let Ok(r) =
+                                serde_json::from_str::<wallet_core::ResolvedDid>(&json)
+                            {
+                                cache_map.insert(did, r);
+                                cache_count += 1;
+                            }
+                        }
+                    }
+                    if !cache_map.is_empty() {
+                        resolved_cache.set(cache_map);
+                    }
+                    tracing::info!(
+                        path=%path.display(),
+                        hydrated_controller_secrets=n,
+                        hydrated_inventory=inv_count,
+                        hydrated_cache=cache_count,
+                        "wallet store opened",
+                    );
                 }
                 Err(e) => tracing::warn!(error=%e, path=%path.display(), "wallet store open failed"),
             }
@@ -647,20 +702,23 @@ pub fn App() -> Element {
                         // Drop into the inventory as Pending — the next
                         // Resolve flips it to Active/Deactivated and
                         // populates the counters.
+                        let entry = DidInventoryEntry {
+                            did: did.clone(),
+                            network_label: o.did_id.network.label().to_string(),
+                            status: DidInventoryStatus::Pending,
+                            counter: None,
+                            vm_count: None,
+                            service_count: None,
+                            last_block_height: None,
+                        };
                         let mut inv = did_inventory.read().clone();
-                        inv.insert(
-                            did.clone(),
-                            DidInventoryEntry {
-                                did: did.clone(),
-                                network_label: o.did_id.network.label().to_string(),
-                                status: DidInventoryStatus::Pending,
-                                counter: None,
-                                vm_count: None,
-                                service_count: None,
-                                last_block_height: None,
-                            },
-                        );
+                        inv.insert(did.clone(), entry.clone());
                         did_inventory.set(inv);
+                        persist_inventory_entry(
+                            &bridge_state.read(),
+                            *network.read(),
+                            &entry,
+                        );
                         let mut log = session_log.read().clone();
                         log.push(SessionEvent::Deploy {
                             did,
@@ -707,8 +765,13 @@ pub fn App() -> Element {
                                 last_block_height: resolved.last_block_height,
                             };
                             let mut inv = did_inventory.read().clone();
-                            inv.insert(did_string.clone(), entry);
+                            inv.insert(did_string.clone(), entry.clone());
                             did_inventory.set(inv);
+                            persist_inventory_entry(
+                                &bridge_state.read(),
+                                *network.read(),
+                                &entry,
+                            );
                             // Snapshot the current resolve into the
                             // penultimate slot before overwriting it
                             // — the Resolver tab diffs the two so
@@ -723,6 +786,12 @@ pub fn App() -> Element {
                             let mut cache = cache_snap;
                             cache.insert(did_string.clone(), resolved.clone());
                             resolved_cache.set(cache);
+                            persist_resolved_cache(
+                                &bridge_state.read(),
+                                *network.read(),
+                                &did_string,
+                                &resolved,
+                            );
                             // Session log gets a Resolve event.
                             let mut log = session_log.read().clone();
                             log.push(SessionEvent::Resolve {
@@ -778,8 +847,13 @@ pub fn App() -> Element {
                         },
                         on_seen: move |entry: DidInventoryEntry| {
                             let mut inv = did_inventory.read().clone();
-                            inv.insert(entry.did.clone(), entry);
+                            inv.insert(entry.did.clone(), entry.clone());
                             did_inventory.set(inv);
+                            persist_inventory_entry(
+                                &bridge_state.read(),
+                                *network.read(),
+                                &entry,
+                            );
                         },
                     }
                     LoadCircuitPanel {
@@ -4366,6 +4440,73 @@ fn copy_to_clipboard(s: &str) -> Result<(), String> {
 #[cfg(target_os = "android")]
 fn copy_to_clipboard(_s: &str) -> Result<(), String> {
     Ok(())
+}
+
+/// Translate the wallet-core `InventoryStatus` (persisted)
+/// to the dioxus-wallet `DidInventoryStatus` (in-memory).
+/// Both enums carry the same variant names; the mapping is
+/// purely a type-system bridge.
+fn status_from_store(s: wallet_core::store::InventoryStatus) -> DidInventoryStatus {
+    match s {
+        wallet_core::store::InventoryStatus::Pending => DidInventoryStatus::Pending,
+        wallet_core::store::InventoryStatus::Active => DidInventoryStatus::Active,
+        wallet_core::store::InventoryStatus::Deactivated => DidInventoryStatus::Deactivated,
+    }
+}
+
+fn status_to_store(s: DidInventoryStatus) -> wallet_core::store::InventoryStatus {
+    match s {
+        DidInventoryStatus::Pending => wallet_core::store::InventoryStatus::Pending,
+        DidInventoryStatus::Active => wallet_core::store::InventoryStatus::Active,
+        DidInventoryStatus::Deactivated => wallet_core::store::InventoryStatus::Deactivated,
+    }
+}
+
+/// Write-through helper — pushes the latest UI-side inventory
+/// state into the persistent store. Best-effort; a store error
+/// is logged but doesn't fail the in-memory update, so an
+/// unhealthy disk doesn't break the current session.
+fn persist_inventory_entry(
+    bridge_state: &BridgeState,
+    network: Network,
+    entry: &DidInventoryEntry,
+) {
+    let Some(store) = bridge_state.store() else {
+        return;
+    };
+    let row = wallet_core::store::DidInventoryEntry {
+        did: entry.did.clone(),
+        network,
+        status: status_to_store(entry.status),
+        counter: entry.counter,
+        vm_count: entry.vm_count.map(|v| v as u32),
+        service_count: entry.service_count.map(|v| v as u32),
+        last_block_height: entry.last_block_height,
+        created_at: 0,
+        updated_at: 0,
+    };
+    if let Err(e) = store.put_did_inventory(row) {
+        tracing::warn!(error=%e, did=%entry.did, "persist did inventory failed");
+    }
+}
+
+/// Write-through helper — caches the resolved JSON snapshot
+/// under `(network, did)` so the detail tabs survive a reload.
+fn persist_resolved_cache(
+    bridge_state: &BridgeState,
+    network: Network,
+    did: &str,
+    resolved: &wallet_core::ResolvedDid,
+) {
+    let Some(store) = bridge_state.store() else {
+        return;
+    };
+    let Ok(json) = serde_json::to_string(resolved) else {
+        return;
+    };
+    if let Err(e) = store.put_resolved_cache(network, did, json) {
+        tracing::warn!(error=%e, did=%did, "persist resolved cache failed");
+    }
 }
 
 /// Dev-only passphrase for the persistent wallet store. A

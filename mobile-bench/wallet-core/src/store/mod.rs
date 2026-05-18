@@ -51,9 +51,10 @@ pub use schema::{NetworkTag, SCHEMA_VERSION, WalletId};
 use codec::Bincoded;
 pub use envelope::{SecretEnvelope, decrypt_secret, encrypt_secret};
 pub(crate) use envelope::encrypt_secret as wrap_secret;
-pub use schema::KeyDerivation;
+pub use schema::{InventoryStatus, KeyDerivation};
 use schema::{
-    CONTROLLER_SECRETS, KEYS, KEYS_BY_WALLET, KeyRowV1, META, WALLETS, WalletRowV1,
+    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DidInventoryRowV1, KEYS, KEYS_BY_WALLET,
+    KeyRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, WALLETS, WalletRowV1,
 };
 
 use crate::secret_storage::{
@@ -524,6 +525,199 @@ impl WalletStore {
         }
     }
 
+    // ── DID inventory ─────────────────────────────────────────────
+
+    /// Upsert an inventory row for the given DID. Stamps
+    /// `updated_at`; preserves `created_at` if a row already
+    /// exists.
+    pub fn put_did_inventory(
+        &self,
+        entry: DidInventoryEntry,
+    ) -> Result<(), StoreError> {
+        let net = NetworkTag::from(entry.network).0;
+        let did = entry.did.as_str();
+        let now = unix_now_ms();
+        let mut row = DidInventoryRowV1 {
+            network: NetworkTag::from(entry.network),
+            status: entry.status,
+            counter: entry.counter,
+            vm_count: entry.vm_count,
+            service_count: entry.service_count,
+            last_block_height: entry.last_block_height,
+            created_at: 0,
+            updated_at: now,
+        };
+        // Preserve created_at if the row already exists.
+        {
+            let txn = self
+                .db
+                .begin_read()
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let table = txn
+                .open_table(DID_INVENTORY)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            if let Some(g) = table
+                .get((net, did))
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+            {
+                let prior: DidInventoryRowV1 = Bincoded::decode(g.value())?;
+                row.created_at = prior.created_at;
+            }
+        }
+        if row.created_at == 0 {
+            row.created_at = now;
+        }
+        let bincoded = Bincoded::encode(&row)?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(DID_INVENTORY)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert((net, did), bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut idx = txn
+                .open_multimap_table(DIDS_BY_NETWORK)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            idx.insert(net, did)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Pull every inventory row for a network. Used to
+    /// hydrate the App's `did_inventory` signal at startup.
+    pub fn list_did_inventory(
+        &self,
+        network: Network,
+    ) -> Result<Vec<DidInventoryEntry>, StoreError> {
+        let net = NetworkTag::from(network).0;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(DID_INVENTORY)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in table
+            .range((net, "")..(net.saturating_add(1), ""))
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        {
+            let (k, v) = entry.map_err(|e| StoreError::Backend(e.to_string()))?;
+            let (_, did) = k.value();
+            let row: DidInventoryRowV1 = Bincoded::decode(v.value())?;
+            out.push(DidInventoryEntry {
+                did: did.to_string(),
+                network,
+                status: row.status,
+                counter: row.counter,
+                vm_count: row.vm_count,
+                service_count: row.service_count,
+                last_block_height: row.last_block_height,
+                created_at: row.created_at,
+                updated_at: row.updated_at,
+            });
+        }
+        out.sort_by(|a, b| a.created_at.cmp(&b.created_at).then(a.did.cmp(&b.did)));
+        Ok(out)
+    }
+
+    // ── Resolved-DID cache ────────────────────────────────────────
+
+    /// Persist the most-recent resolve for a DID. Caller
+    /// passes the JSON-serialised `ResolvedDid` so this module
+    /// doesn't need to depend on the DID layer.
+    pub fn put_resolved_cache(
+        &self,
+        network: Network,
+        did: &str,
+        resolved_json: String,
+    ) -> Result<(), StoreError> {
+        let now = unix_now_ms();
+        let row = ResolvedCacheRowV1 {
+            resolved_json,
+            cached_at: now,
+        };
+        let bincoded = Bincoded::encode(&row)?;
+        let key = (NetworkTag::from(network).0, did);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(RESOLVED_CACHE)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert(key, bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Read a cached resolve, if any. Returns the JSON string
+    /// + the cached-at timestamp; the UI decodes via serde
+    /// (a drift error is the caller's signal to drop the row
+    /// and re-resolve).
+    pub fn get_resolved_cache(
+        &self,
+        network: Network,
+        did: &str,
+    ) -> Result<Option<(String, i64)>, StoreError> {
+        let key = (NetworkTag::from(network).0, did);
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(RESOLVED_CACHE)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(g) = table
+            .get(key)
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let row: ResolvedCacheRowV1 = Bincoded::decode(g.value())?;
+        Ok(Some((row.resolved_json, row.cached_at)))
+    }
+
+    /// Bulk load every cached resolve for a network. Powers
+    /// the App-startup hydration of `resolved_cache` so the
+    /// detail view's tabs still have content after a reload.
+    pub fn list_resolved_cache(
+        &self,
+        network: Network,
+    ) -> Result<Vec<(String, String, i64)>, StoreError> {
+        let net = NetworkTag::from(network).0;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(RESOLVED_CACHE)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in table
+            .range((net, "")..(net.saturating_add(1), ""))
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        {
+            let (k, v) = entry.map_err(|e| StoreError::Backend(e.to_string()))?;
+            let (_, did) = k.value();
+            let row: ResolvedCacheRowV1 = Bincoded::decode(v.value())?;
+            out.push((did.to_string(), row.resolved_json, row.cached_at));
+        }
+        Ok(out)
+    }
+
     /// Inspect the on-disk schema version. Public so callers
     /// can surface "store is up to date" diagnostics without
     /// touching internals.
@@ -549,6 +743,26 @@ impl WalletStore {
             .unwrap_or(0);
         Ok(v)
     }
+}
+
+/// One DID inventory row as the UI sees it. Mirrors the
+/// `DidInventoryEntry` struct dioxus-wallet keeps in-memory
+/// today — the App will replace that signal's persistence
+/// with calls into the store.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DidInventoryEntry {
+    /// `did:midnight:<network>:<address>` — primary key.
+    pub did: String,
+    pub network: Network,
+    pub status: InventoryStatus,
+    pub counter: Option<u32>,
+    pub vm_count: Option<u32>,
+    pub service_count: Option<u32>,
+    pub last_block_height: Option<i64>,
+    /// Unix-ms. Zero on a fresh row → `put_did_inventory`
+    /// stamps it on first write.
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 /// Wallet metadata — everything in the wallet row except the
@@ -739,6 +953,99 @@ mod tests {
         let pre = store.list_controller_secrets(Network::PreProd).unwrap();
         assert_eq!(pre.len(), 1);
         assert_eq!(pre[0].0, did_p);
+    }
+
+    #[test]
+    fn did_inventory_round_trip() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let did = "did:midnight:undeployed:0000000000000000000000000000000000000000000000000000000000000abc";
+        store
+            .put_did_inventory(DidInventoryEntry {
+                did: did.to_string(),
+                network: Network::Undeployed,
+                status: InventoryStatus::Pending,
+                counter: None,
+                vm_count: None,
+                service_count: None,
+                last_block_height: None,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        let all = store.list_did_inventory(Network::Undeployed).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].did, did);
+        assert_eq!(all[0].status, InventoryStatus::Pending);
+        assert!(all[0].created_at > 0);
+    }
+
+    #[test]
+    fn did_inventory_update_preserves_created_at() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let did = "did:midnight:undeployed:abc";
+        store
+            .put_did_inventory(DidInventoryEntry {
+                did: did.to_string(),
+                network: Network::Undeployed,
+                status: InventoryStatus::Pending,
+                counter: None,
+                vm_count: None,
+                service_count: None,
+                last_block_height: None,
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        let first = store.list_did_inventory(Network::Undeployed).unwrap()[0].clone();
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        store
+            .put_did_inventory(DidInventoryEntry {
+                did: did.to_string(),
+                network: Network::Undeployed,
+                status: InventoryStatus::Active,
+                counter: Some(1),
+                vm_count: Some(2),
+                service_count: Some(1),
+                last_block_height: Some(99),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        let second = store.list_did_inventory(Network::Undeployed).unwrap()[0].clone();
+        assert_eq!(first.created_at, second.created_at);
+        assert!(second.updated_at >= first.updated_at);
+        assert_eq!(second.status, InventoryStatus::Active);
+    }
+
+    #[test]
+    fn resolved_cache_round_trip() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let did = "did:midnight:undeployed:abc";
+        store
+            .put_resolved_cache(Network::Undeployed, did, r#"{"foo":"bar"}"#.to_string())
+            .unwrap();
+        let (json, cached_at) = store
+            .get_resolved_cache(Network::Undeployed, did)
+            .unwrap()
+            .unwrap();
+        assert_eq!(json, r#"{"foo":"bar"}"#);
+        assert!(cached_at > 0);
+    }
+
+    #[test]
+    fn list_resolved_cache_filters_by_network() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        store
+            .put_resolved_cache(Network::Undeployed, "did:undep:a", "{}".into())
+            .unwrap();
+        store
+            .put_resolved_cache(Network::Undeployed, "did:undep:b", "{}".into())
+            .unwrap();
+        store
+            .put_resolved_cache(Network::PreProd, "did:preprod:c", "{}".into())
+            .unwrap();
+        let undep = store.list_resolved_cache(Network::Undeployed).unwrap();
+        assert_eq!(undep.len(), 2);
     }
 
     #[test]
