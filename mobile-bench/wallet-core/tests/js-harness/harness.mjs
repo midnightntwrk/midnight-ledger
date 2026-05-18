@@ -339,6 +339,134 @@ const methods = {
    * vendored package. The Rust side asserts on circuit names so a
    * future upstream rename is caught in CI.
    */
+  /**
+   * Bridge into `@midnight-ntwrk/midnight-did-jubjub-schnorr`'s
+   * `pureCircuits.schnorrChallengeDigest`. Returns the
+   * JS-computed challenge as a decimal-string bigint so the
+   * Rust test can compare it to the Rust `transient_hash`
+   * implementation. No reduction is applied here — the caller
+   * mods by 2^248 on whichever side it prefers.
+   *
+   * Inputs are five bigints (announcement.x, announcement.y,
+   * pk.x, pk.y, digest[0..4]) carried over the JSON wire as
+   * `{ "$bigint": "<decimal>" }` tagged objects (see
+   * `reviveBigints`).
+   */
+  schnorrChallenge: async (params) => {
+    const t0 = Date.now();
+    const schnorrLib = await import(
+      "@midnight-ntwrk/midnight-did-jubjub-schnorr"
+    );
+    const ann = reviveBigints(params.announcement);
+    const pk = reviveBigints(params.publicKey);
+    const digest = reviveBigints(params.digest);
+    if (!Array.isArray(digest) || digest.length !== 4) {
+      throw new Error(
+        `digest must be a 4-element array, got ${digest?.length}`,
+      );
+    }
+    const challenge = schnorrLib.pureCircuits.schnorrChallengeDigest(
+      ann.x,
+      ann.y,
+      pk.x,
+      pk.y,
+      digest,
+    );
+    return {
+      challenge: challenge.toString(10),
+      elapsedMs: Date.now() - t0,
+    };
+  },
+
+  /**
+   * Drive the impure `schnorrVerifyDigest` circuit from the
+   * upstream `jubjub-schnorr` package. The witness
+   * `getSchnorrReduction(cFull) -> [q, c]` is provided here:
+   * `cFull = q * 2^248 + c` with `c < 2^248`. The Rust side
+   * passes the Rust-computed signature (announcement + response)
+   * + public key + digest; we evaluate the circuit and return
+   * either `{ verified: true }` (no `assert` fired) or
+   * `{ verified: false, error: <msg> }` (assert caught at the
+   * circuit boundary).
+   *
+   * No contract address / on-chain state is involved — the
+   * circuit just executes against an in-memory contract instance
+   * with a placeholder `privateState`.
+   */
+  schnorrVerify: async (params) => {
+    const t0 = Date.now();
+    const schnorrLib = await import(
+      "@midnight-ntwrk/midnight-did-jubjub-schnorr"
+    );
+    const { compactRuntime: cr } = await loadContractLayer();
+    const ann = reviveBigints(params.announcement);
+    const pk = reviveBigints(params.publicKey);
+    const digest = reviveBigints(params.digest);
+    const response = reviveBigints(params.response);
+    if (!Array.isArray(digest) || digest.length !== 4) {
+      throw new Error(
+        `digest must be a 4-element array, got ${digest?.length}`,
+      );
+    }
+    if (typeof response !== "bigint") {
+      throw new Error("response must be a $bigint");
+    }
+    // 2^248 — module constant used by the witness.
+    const TWO_248 = schnorrLib.TWO_248;
+    const Contract = schnorrLib.JubjubSchnorrContract.Contract;
+    const witnesses = {
+      // `cFull` is the un-reduced challenge; split into a
+      // 248-bit residue + the high quotient.
+      getSchnorrReduction: (ctx, cFull) => {
+        const c = cFull % TWO_248;
+        const q = (cFull - c) / TWO_248;
+        return [ctx.privateState, [q, c]];
+      },
+    };
+    const contract = new Contract(witnesses);
+
+    // Build a circuit context from a fresh constructor run. The
+    // schnorr module's `Ledger` is `{}` so the initial state is
+    // effectively a placeholder — we just need *something*
+    // shaped like a ContractState so `createCircuitContext`
+    // accepts it.
+    const dummyCoinPk = "00".repeat(32);
+    const dummyAddress = "00".repeat(32);
+    const initial = contract.initialState(
+      cr.createConstructorContext({}, dummyCoinPk),
+    );
+    const ctx = cr.createCircuitContext(
+      dummyAddress,
+      dummyCoinPk,
+      initial.currentContractState,
+      initial.currentPrivateState,
+    );
+    let result;
+    try {
+      result = contract.impureCircuits.schnorrVerifyDigest(
+        ctx,
+        digest,
+        { announcement: { x: ann.x, y: ann.y }, response },
+        { x: pk.x, y: pk.y },
+      );
+    } catch (e) {
+      return {
+        verified: false,
+        error: String(e?.message ?? e),
+        elapsedMs: Date.now() - t0,
+      };
+    }
+    // `schnorrVerifyDigest` returns `[]` (unit) on success; if
+    // we got this far, no assert fired.
+    return {
+      verified: true,
+      result: Array.isArray(result?.result)
+        ? `[${result.result.length} items]`
+        : "ok",
+      elapsedMs: Date.now() - t0,
+    };
+  },
+
   contractLayerInfo: async () => {
     const { contract, compactRuntime } = await loadContractLayer();
     const did = contract.DIDContract;
