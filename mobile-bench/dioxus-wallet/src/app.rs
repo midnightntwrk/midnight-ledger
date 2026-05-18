@@ -2844,6 +2844,7 @@ enum DetailTab {
     Relationships,
     Services,
     Operations,
+    Sign,
     Resolver,
     RawState,
 }
@@ -2856,6 +2857,7 @@ impl DetailTab {
         DetailTab::Relationships,
         DetailTab::Services,
         DetailTab::Operations,
+        DetailTab::Sign,
         DetailTab::Resolver,
         DetailTab::RawState,
     ];
@@ -2868,6 +2870,7 @@ impl DetailTab {
             DetailTab::Relationships => "Relationships",
             DetailTab::Services => "Services",
             DetailTab::Operations => "Operations",
+            DetailTab::Sign => "Sign",
             DetailTab::Resolver => "Resolver",
             DetailTab::RawState => "Raw state",
         }
@@ -3203,9 +3206,11 @@ fn DidDetailView(
         div { class: "detail-pane",
             {render_detail_tab(
                 cur_tab,
-                &did,
+                network,
+                did.clone(),
                 cached.as_ref(),
                 previous_cached.as_ref(),
+                controller_secret,
                 &session_log,
             )}
         }
@@ -3214,11 +3219,26 @@ fn DidDetailView(
 
 fn render_detail_tab(
     tab: DetailTab,
-    did: &str,
+    network: Network,
+    did: String,
     resolved: Option<&wallet_core::ResolvedDid>,
     previous: Option<&wallet_core::ResolvedDid>,
+    controller_secret: Option<[u8; 32]>,
     session_log: &[SessionEvent],
 ) -> Element {
+    // Sign tab is the only one we let the user open before
+    // the first successful resolve — the keypair derivation
+    // doesn't depend on chain state. Every other tab needs
+    // `resolved` to have any content.
+    if tab == DetailTab::Sign {
+        return rsx! {
+            SignTab {
+                network,
+                did: did.clone(),
+                controller_secret,
+            }
+        };
+    }
     let Some(r) = resolved else {
         return rsx! {
             div { class: "detail-empty",
@@ -3232,8 +3252,9 @@ fn render_detail_tab(
         DetailTab::Methods => render_methods_tab(r),
         DetailTab::Relationships => render_relationships_tab(r),
         DetailTab::Services => render_services_tab(r),
-        DetailTab::Operations => render_operations_tab(did, session_log),
-        DetailTab::Resolver => render_resolver_tab(did, r, previous),
+        DetailTab::Operations => render_operations_tab(&did, session_log),
+        DetailTab::Sign => unreachable!("handled above"),
+        DetailTab::Resolver => render_resolver_tab(&did, r, previous),
         DetailTab::RawState => render_raw_state_tab(r),
     }
 }
@@ -3731,6 +3752,263 @@ fn render_raw_state_tab(r: &wallet_core::ResolvedDid) -> Element {
         }
         div { class: "seed-blob", "{full_hex}" }
     }
+}
+
+
+/// `Sign` tab — demonstrates the in-tree Jubjub Schnorr port
+/// against a user-typed payload. The signing key is derived
+/// deterministically from `(controller_secret, did)` (see
+/// `sign_tab_seed`), so the same DID always signs with the
+/// same key. Local verify is instant; on-chain verify spawns
+/// a one-shot Node harness, calls `schnorrVerify[Digest]`,
+/// and surfaces the result — proving the Rust signature still
+/// passes the upstream Compact circuit.
+#[component]
+fn SignTab(
+    network: Network,
+    did: String,
+    controller_secret: Option<[u8; 32]>,
+) -> Element {
+    use wallet_core::secret_storage::jubjub_schnorr;
+
+    let mut payload = use_signal(|| String::from("hello, did"));
+    // Three results — one per verify path. `None` until the
+    // user clicks; `Some(Ok(true|false))` after a clean run;
+    // `Some(Err)` if the bridge / decoder failed.
+    let mut local_result = use_signal::<Option<bool>>(|| None);
+    let mut bridge_result = use_signal::<Option<Result<bool, String>>>(|| None);
+    let mut upstream_result = use_signal::<Option<Result<bool, String>>>(|| None);
+    let mut bridge_in_flight = use_signal(|| false);
+
+    let Some(controller_secret) = controller_secret else {
+        return rsx! {
+            h3 { "Sign with Jubjub Schnorr" }
+            div { class: "detail-empty",
+                "Controller secret unknown — signing needs the wallet that created this DID."
+            }
+        };
+    };
+
+    // One round trip through the wallet-core diagnostic
+    // helper does everything: derive pk, hash to digest, sign,
+    // encode both wire forms. Re-deriving on every render is
+    // cheap (~1ms) and keeps the component a pure function of
+    // its inputs.
+    let seed = jubjub_schnorr::seed_from_controller_and_did(&controller_secret, &did);
+    let payload_bytes = payload.read().as_bytes().to_vec();
+    let diag = jubjub_schnorr::sign_payload_diagnostic(&seed, &payload_bytes);
+    let pk_x_dec = diag.pk_x_decimal.clone();
+    let pk_y_dec = diag.pk_y_decimal.clone();
+    let sig_compact_hex = diag.compact_hex.clone();
+    let sig_upstream_hex = diag.upstream_hex.clone();
+    let digest_dec = diag.digest_decimal.clone();
+
+    let on_verify_local = {
+        let seed = seed;
+        let payload_bytes = payload_bytes.clone();
+        let compact_bytes = hex::decode(&diag.compact_hex).expect("hex from sign diag");
+        move |_| {
+            local_result.set(Some(jubjub_schnorr::verify_payload_with_seed(
+                &seed,
+                &payload_bytes,
+                &compact_bytes,
+            )));
+        }
+    };
+
+    // Reusable JSON builders for the two bridge methods. The
+    // decimal-string fields come straight from the diagnostic.
+    let digest_json: Vec<serde_json::Value> = diag
+        .digest_decimal
+        .iter()
+        .map(|d| serde_json::json!({ "$bigint": d }))
+        .collect();
+    let pk_json = serde_json::json!({
+        "x": { "$bigint": diag.pk_x_decimal },
+        "y": { "$bigint": diag.pk_y_decimal },
+    });
+    let bridge_request_compact = serde_json::json!({
+        "announcement": {
+            "x": { "$bigint": diag.announcement_x_decimal },
+            "y": { "$bigint": diag.announcement_y_decimal },
+        },
+        "publicKey": pk_json.clone(),
+        "digest": digest_json.clone(),
+        "response": { "$bigint": diag.response_decimal },
+    });
+    let bridge_request_upstream = serde_json::json!({
+        "signatureHex": sig_upstream_hex.clone(),
+        "publicKey": pk_json,
+        "digest": digest_json,
+    });
+
+    let on_verify_bridge = {
+        let req = bridge_request_compact.clone();
+        move |_| {
+            if *bridge_in_flight.read() {
+                return;
+            }
+            bridge_in_flight.set(true);
+            bridge_result.set(None);
+            let req = req.clone();
+            spawn(async move {
+                let outcome = call_bridge_verify(&req, "schnorrVerify").await;
+                bridge_result.set(Some(outcome));
+                bridge_in_flight.set(false);
+            });
+        }
+    };
+    let on_verify_bridge_upstream = {
+        let req = bridge_request_upstream.clone();
+        move |_| {
+            if *bridge_in_flight.read() {
+                return;
+            }
+            bridge_in_flight.set(true);
+            upstream_result.set(None);
+            let req = req.clone();
+            spawn(async move {
+                let outcome = call_bridge_verify(&req, "schnorrVerifyUpstreamEncoded").await;
+                upstream_result.set(Some(outcome));
+                bridge_in_flight.set(false);
+            });
+        }
+    };
+
+    // Silence unused-variable lints if we ever drop a verify path.
+    let _ = network;
+
+    rsx! {
+        h3 { "Sign with Jubjub Schnorr" }
+        div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
+            "Key derived deterministically from "
+            code { "SHA-256(\"midnight-did:wallet:sign-tab:v1\" || controller_sk || did)" }
+            ". Identical across reloads of the same wallet."
+        }
+        div { class: "row",
+            label { style: "min-width: 80px;", "Payload" }
+            input {
+                r#type: "text",
+                value: "{payload.read()}",
+                oninput: move |e| {
+                    payload.set(e.value());
+                    // Clear stale verify results — they refer to
+                    // the old payload's signature.
+                    local_result.set(None);
+                    bridge_result.set(None);
+                    upstream_result.set(None);
+                },
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+            }
+        }
+        h3 { "Public key (Jubjub subgroup)" }
+        div { class: "detail-kv",
+            div { class: "k", "pk.x" }
+            div { class: "v", "{pk_x_dec}" }
+            div { class: "k", "pk.y" }
+            div { class: "v", "{pk_y_dec}" }
+        }
+        h3 { "Digest (4-limb Fr)" }
+        div { class: "detail-kv",
+            div { class: "k", "d[0]" } div { class: "v", "{digest_dec[0]}" }
+            div { class: "k", "d[1]" } div { class: "v", "{digest_dec[1]}" }
+            div { class: "k", "d[2]" } div { class: "v", "{digest_dec[2]}" }
+            div { class: "k", "d[3]" } div { class: "v", "{digest_dec[3]}" }
+        }
+        h3 { "Signature" }
+        div { class: "detail-kv",
+            div { class: "k", "Compact (64B)" }
+            div { class: "v",
+                {copy_btn(sig_compact_hex.clone(), "Copy compact hex")}
+                "0x{sig_compact_hex}"
+            }
+            div { class: "k", "Upstream (96B)" }
+            div { class: "v",
+                {copy_btn(sig_upstream_hex.clone(), "Copy upstream hex")}
+                "0x{sig_upstream_hex}"
+            }
+        }
+        h3 { "Verify" }
+        div { class: "row",
+            button { onclick: on_verify_local, "Verify locally" }
+            button {
+                disabled: *bridge_in_flight.read(),
+                onclick: on_verify_bridge,
+                "Verify via on-chain circuit"
+            }
+            button {
+                disabled: *bridge_in_flight.read(),
+                onclick: on_verify_bridge_upstream,
+                "Verify via decodeJubjubSignature"
+            }
+        }
+        {render_sign_verify_result("Local Rust", local_result.read().as_ref().copied().map(Ok))}
+        {render_sign_verify_result("On-chain circuit", bridge_result.read().clone())}
+        {render_sign_verify_result("Upstream decode + circuit", upstream_result.read().clone())}
+    }
+}
+
+/// Helper for the three verify outcomes the Sign tab can show.
+/// `None` → not yet clicked; `Some(Ok(true))` → accepted;
+/// `Some(Ok(false))` → rejected (algebraic failure);
+/// `Some(Err)` → bridge / decode error.
+fn render_sign_verify_result(label: &str, state: Option<Result<bool, String>>) -> Element {
+    match state {
+        None => rsx! {},
+        Some(Ok(true)) => rsx! {
+            div { class: "wizard-outcome ok",
+                div { class: "row label", "{label} verify" }
+                div { class: "seed-blob", "accepted ✓" }
+            }
+        },
+        Some(Ok(false)) => rsx! {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "{label} verify" }
+                div { class: "seed-blob", "rejected ✗" }
+            }
+        },
+        Some(Err(e)) => rsx! {
+            div { class: "wizard-outcome err",
+                div { class: "row label", "{label} verify" }
+                div { class: "seed-blob", "bridge error: {e}" }
+            }
+        },
+    }
+}
+
+/// One-shot spawn of `NodeChildBridge`, fire the given method
+/// with the given JSON, return `Ok(verified)` or `Err(message)`.
+/// The harness child is dropped at function return — fine for
+/// the Sign tab's button-click cadence; if we ever surface a
+/// heavier verify flow we'd want a long-lived bridge handle.
+async fn call_bridge_verify(
+    req: &serde_json::Value,
+    method: &str,
+) -> Result<bool, String> {
+    use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct VerifyOut {
+        verified: bool,
+        error: Option<String>,
+    }
+    let bridge = NodeChildBridge::spawn(&NodeChildBridge::default_harness_path())
+        .map_err(|e| format!("spawn harness: {e}"))?;
+    let out: VerifyOut = bridge
+        .call(method, req.clone())
+        .await
+        .map_err(|e| format!("{method}: {e}"))?;
+    if let Some(err) = out.error {
+        // Surface circuit asserts as `Ok(false)` (the signature
+        // is structurally valid but algebraically rejected),
+        // not as `Err` — the user wants to see "rejected" for
+        // a tampered sig, not "bridge error".
+        if err.contains("Invalid Jubjub Schnorr signature") {
+            return Ok(false);
+        }
+        return Err(err);
+    }
+    Ok(out.verified)
 }
 
 #[component]
