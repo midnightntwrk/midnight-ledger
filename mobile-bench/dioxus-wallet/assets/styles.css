@@ -943,3 +943,36 @@ details .panel .row {
   background: var(--surface-3);
   color: var(--text-faint);
 }
+
+/* Wallet-store status badge — sits below the StatusLine,
+ * surfaces a one-glance view of "is persistence on?" with row
+ * counts (wallets · DIDs · keys). Visually subdued so it
+ * doesn't compete with the main status / tab strip. */
+.store-badge {
+  margin: 6px 16px 0;
+  padding: 6px 10px;
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  font-size: 11px;
+  border-radius: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border-faint);
+}
+.store-badge.ok {
+  border-color: rgba(46, 230, 166, 0.25);
+}
+.store-badge.pending {
+  border-color: rgba(255, 176, 32, 0.35);
+}
+.store-badge .label {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.store-badge .kv {
+  color: var(--text-soft);
+}
+.store-badge .kv strong {
+  color: var(--text);
+  font-weight: 600;
+}

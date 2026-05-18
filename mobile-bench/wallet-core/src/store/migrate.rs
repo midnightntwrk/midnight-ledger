@@ -15,7 +15,7 @@ use redb::ReadableTable;
 use crate::store::error::StoreError;
 use crate::store::schema::{
     CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, KEYS, KEYS_BY_WALLET, META,
-    META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, WALLETS,
+    META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, SESSIONS, WALLETS,
 };
 use crate::store::WalletStore;
 
@@ -39,6 +39,7 @@ pub(crate) fn run(store: &WalletStore) -> Result<(), StoreError> {
             (0, 1) => migrate_v0_to_v1(store)?,
             (1, 2) => migrate_v1_to_v2(store)?,
             (2, 3) => migrate_v2_to_v3(store)?,
+            (3, 4) => migrate_v3_to_v4(store)?,
             (from, to) => {
                 return Err(StoreError::Migration(format!(
                     "no migration registered for {from} → {to}",
@@ -126,6 +127,22 @@ fn migrate_v0_to_v1(store: &WalletStore) -> Result<(), StoreError> {
     txn.commit()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
     write_version(store, 1)
+}
+
+fn migrate_v3_to_v4(store: &WalletStore) -> Result<(), StoreError> {
+    // v3 → v4 adds the `sessions` single-row table.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .open_table(SESSIONS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 4)
 }
 
 fn migrate_v2_to_v3(store: &WalletStore) -> Result<(), StoreError> {

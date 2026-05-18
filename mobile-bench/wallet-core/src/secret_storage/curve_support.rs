@@ -286,6 +286,61 @@ fn p256_public_jwk_from(signing: &p256::ecdsa::SigningKey) -> Result<PublicJwk, 
     })
 }
 
+/// On-chain-friendly view of a `PublicJwk`. Matches the
+/// shape upstream `normalizePublicForLedger` returns: every
+/// EC point's `(x, y)` rendered as 32-byte big-endian buffers.
+/// For OKP (Ed25519), `y` is zero-filled — Ed25519 only has
+/// an `x` coordinate; consumers that pass this to the
+/// Compact circuit treat the zero `y` as "not used".
+///
+/// `x` / `y` decoding is base64url for the EC curves
+/// (P-256, Jubjub) — matches the upstream JS encoding for
+/// these JWKs. Returns `Err` if the JWK doesn't decode
+/// cleanly.
+pub fn public_for_ledger(public_jwk: &PublicJwk) -> Result<PublicForLedger, SecretStoreError> {
+    let x_bytes = URL_SAFE_NO_PAD
+        .decode(public_jwk.x.as_bytes())
+        .map_err(|e| SecretStoreError::InvalidInput(format!("JWK x b64url: {e}")))?;
+    let mut x = [0u8; 32];
+    pad_left_into_32(&x_bytes, &mut x)?;
+    let mut y = [0u8; 32];
+    if let Some(y_str) = public_jwk.y.as_ref() {
+        let y_bytes = URL_SAFE_NO_PAD
+            .decode(y_str.as_bytes())
+            .map_err(|e| SecretStoreError::InvalidInput(format!("JWK y b64url: {e}")))?;
+        pad_left_into_32(&y_bytes, &mut y)?;
+    }
+    Ok(PublicForLedger {
+        kty: public_jwk.kty,
+        crv: public_jwk.crv,
+        x_be: x,
+        y_be: y,
+    })
+}
+
+fn pad_left_into_32(src: &[u8], dst: &mut [u8; 32]) -> Result<(), SecretStoreError> {
+    if src.len() > 32 {
+        return Err(SecretStoreError::InvalidInput(format!(
+            "ledger coord must be ≤ 32 bytes (got {})",
+            src.len(),
+        )));
+    }
+    let offset = 32 - src.len();
+    dst[offset..].copy_from_slice(src);
+    Ok(())
+}
+
+/// Ledger-facing view of a public key — `x_be` / `y_be` are
+/// the 32-byte big-endian coordinate buffers the on-chain
+/// `verifyJubjubSignature` (and friends) circuit ingests.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicForLedger {
+    pub kty: MidnightKeyType,
+    pub crv: MidnightCurve,
+    pub x_be: [u8; 32],
+    pub y_be: [u8; 32],
+}
+
 /// Build a `PublicJwk` from a Jubjub point. JWK `x` / `y` are
 /// 32-byte big-endian base64url, matching upstream's
 /// `bigintTo32Be` serialisation. The conversion goes via the
@@ -357,6 +412,18 @@ fn be_to_le_32(be: &[u8]) -> [u8; 32] {
         le[31 - i] = *b;
     }
     le
+}
+
+/// Build a `PublicForLedger` directly from a `SecretStorage`
+/// + a `key_ref`. Convenience for callers that want the
+/// ledger view but don't already hold the `PublicJwk` — runs
+/// the trait's `get_public_key` then normalises.
+pub async fn public_for_ledger_by_ref<S: super::types::SecretStorage>(
+    store: &S,
+    key_ref: &str,
+) -> Result<PublicForLedger, SecretStoreError> {
+    let pk = store.get_public_key(key_ref).await?;
+    public_for_ledger(&pk)
 }
 
 #[cfg(test)]
@@ -434,6 +501,31 @@ mod tests {
             Err(_) => {}
             Ok(true) => panic!("tampered Jubjub signature must not verify"),
         }
+    }
+
+    #[test]
+    fn public_for_ledger_ed25519_yields_zero_y() {
+        let mut rng = deterministic_rng();
+        let (_, pk) = generate(MidnightKeyType::OKP, MidnightCurve::Ed25519, &mut rng).unwrap();
+        let ledger = public_for_ledger(&pk).unwrap();
+        assert_eq!(ledger.kty, MidnightKeyType::OKP);
+        assert_eq!(ledger.crv, MidnightCurve::Ed25519);
+        assert_eq!(ledger.x_be.len(), 32);
+        // OKP keys have no y coord — the helper zero-fills.
+        assert_eq!(ledger.y_be, [0u8; 32]);
+    }
+
+    #[test]
+    fn public_for_ledger_p256_has_both_coords() {
+        let mut rng = deterministic_rng();
+        let (_, pk) = generate(MidnightKeyType::EC, MidnightCurve::P256, &mut rng).unwrap();
+        let ledger = public_for_ledger(&pk).unwrap();
+        assert_eq!(ledger.crv, MidnightCurve::P256);
+        // P-256 has both x and y — neither should be all-zero
+        // (probabilistic but guaranteed enough for a fixed
+        // deterministic test rng).
+        assert!(ledger.x_be.iter().any(|&b| b != 0));
+        assert!(ledger.y_be.iter().any(|&b| b != 0));
     }
 
     #[test]

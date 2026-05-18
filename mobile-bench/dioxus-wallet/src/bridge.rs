@@ -36,6 +36,12 @@ use wallet_core::{Network, unshielded_bech32m};
 pub type ControllerSecretStore = Arc<Mutex<HashMap<String, [u8; 32]>>>;
 
 #[derive(Clone, Default)]
+// `PartialEq` here lets `BridgeState` ride as a Dioxus
+// component prop (the `#[component]` macro requires Props
+// to be Eq). Two `BridgeState` values are equal iff every
+// inner `Arc` is pointer-equal — fine because the App
+// constructs exactly one `BridgeState` and clones it; we
+// never compare independently-built handles for content.
 pub struct BridgeState {
     pub proof_server_url: Arc<OnceCell<String>>,
     /// `did_string → 32-byte sk`. Cloning the BridgeState clones the
@@ -51,6 +57,15 @@ pub struct BridgeState {
     /// the previous in-memory-only model.
     pub store: Arc<OnceCell<WalletStore>>,
 }
+
+impl PartialEq for BridgeState {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.proof_server_url, &other.proof_server_url)
+            && Arc::ptr_eq(&self.controller_secrets, &other.controller_secrets)
+            && Arc::ptr_eq(&self.store, &other.store)
+    }
+}
+impl Eq for BridgeState {}
 
 impl BridgeState {
     pub fn new() -> Self {

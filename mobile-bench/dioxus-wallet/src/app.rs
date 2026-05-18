@@ -70,6 +70,7 @@ enum Tab {
     Wallet,
     Dids,
     Diagnostics,
+    Settings,
 }
 
 impl Tab {
@@ -78,6 +79,33 @@ impl Tab {
             Tab::Wallet => "Wallet",
             Tab::Dids => "DIDs",
             Tab::Diagnostics => "Diagnostics",
+            Tab::Settings => "Settings",
+        }
+    }
+
+    /// Stable u8 encoding for the persistent session row.
+    /// New variants must claim the next free integer; never
+    /// reorder existing ones.
+    fn to_persist(self) -> u8 {
+        match self {
+            Tab::Wallet => 0,
+            Tab::Dids => 1,
+            Tab::Diagnostics => 2,
+            Tab::Settings => 3,
+        }
+    }
+
+    /// Decode the persisted u8 back to a variant. Unknown
+    /// values (e.g. a downgrade from a future binary that had
+    /// more tabs) fall back to `Wallet` — the safest
+    /// "where was I" default.
+    fn from_persist(b: u8) -> Self {
+        match b {
+            0 => Tab::Wallet,
+            1 => Tab::Dids,
+            2 => Tab::Diagnostics,
+            3 => Tab::Settings,
+            _ => Tab::Wallet,
         }
     }
 }
@@ -457,11 +485,29 @@ pub fn App() -> Element {
                     if !cache_map.is_empty() {
                         resolved_cache.set(cache_map);
                     }
+                    // Restore the last-session row. Falls back
+                    // silently if the row is absent (first
+                    // launch) or the network it captured no
+                    // longer matches the user's current pick
+                    // — we only apply tab / open_did / etc.
+                    // when the snapshot's network agrees with
+                    // the active one.
+                    let mut restored_session = false;
+                    if let Ok(Some(snap)) = store.get_session() {
+                        if snap.network == net {
+                            active_tab.set(Tab::from_persist(snap.active_tab));
+                            open_did.set(snap.open_did);
+                            last_did_id.set(snap.last_did_id);
+                            last_resolved.set(snap.last_resolved);
+                            restored_session = true;
+                        }
+                    }
                     tracing::info!(
                         path=%path.display(),
                         hydrated_controller_secrets=n,
                         hydrated_inventory=inv_count,
                         hydrated_cache=cache_count,
+                        restored_session,
                         "wallet store opened",
                     );
                 }
@@ -477,6 +523,27 @@ pub fn App() -> Element {
                 Ok(url) => proof_server.set(Some(url)),
                 Err(e) => tracing::warn!(error=%e, "embedded proof-server unavailable"),
             }
+        }
+    });
+
+    // Persist the session row whenever any of its component
+    // signals changes. `use_effect` re-runs after every render
+    // that touched at least one of the read signals, so this
+    // approach is debounced "to the next render boundary" by
+    // construction — fine for the rate of mutations the wallet
+    // actually drives (clicks, not loops).
+    use_effect(move || {
+        let net = *network.read();
+        let tab = *active_tab.read();
+        let open = open_did.read().clone();
+        let last_did = last_did_id.read().clone();
+        let last_res = last_resolved.read().clone();
+        let state = bridge_state.read().clone();
+        // Only persist after the store has been attached. The
+        // use_future above runs concurrently with the first
+        // render, so this effect could fire before `set_store`.
+        if state.store().is_some() {
+            persist_session(&state, net, tab, open, last_did, last_res);
         }
     });
 
@@ -610,10 +677,12 @@ pub fn App() -> Element {
             tip_height: chain.read().tip.as_ref().map(|t| t.height),
         }
 
+        WalletStoreBadge { state: bridge_state.read().clone() }
+
         // Tab navigation. Each button sets active_tab; rendering
         // below is a single match on the current value.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Diagnostics] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Diagnostics, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -912,6 +981,9 @@ pub fn App() -> Element {
                     div { class: "row", "Embedded proof-server:" }
                     div { class: "seed-blob", "{url}" }
                 }
+            },
+            Tab::Settings => rsx! {
+                SettingsTab { bridge_state: bridge_state.read().clone() }
             },
         }
     }
@@ -2648,6 +2720,172 @@ struct WitnessTestResult {
     secret_hex_first8: String,
     elapsed_ms: i64,
     error: Option<String>,
+}
+
+/// Thin status badge that lives between the StatusLine and
+/// the tab strip. Reports whether the persistent wallet store
+/// is attached + the current row counts at a glance —
+/// confirmation that the persistence layer is actually
+/// running.
+#[component]
+fn WalletStoreBadge(state: BridgeState) -> Element {
+    let stats = state.store().and_then(|s| s.stats().ok());
+    let (label, n_wallets, n_dids, n_keys): (&'static str, u64, u64, u64) = match &stats {
+        Some(s) => ("Store · ok", s.wallets, s.did_inventory, s.keys),
+        None => ("Store · opening…", 0, 0, 0),
+    };
+    let class = if stats.is_some() {
+        "store-badge ok"
+    } else {
+        "store-badge pending"
+    };
+    rsx! {
+        div { class: "{class}",
+            span { class: "label", "{label}" }
+            span { class: "kv",
+                strong { "{n_wallets}" }
+                " wallet"
+                {if n_wallets == 1 { "" } else { "s" }}
+            }
+            span { class: "kv",
+                strong { "{n_dids}" }
+                " DID"
+                {if n_dids == 1 { "" } else { "s" }}
+            }
+            span { class: "kv",
+                strong { "{n_keys}" }
+                " key"
+                {if n_keys == 1 { "" } else { "s" }}
+            }
+        }
+    }
+}
+
+/// Settings tab — render the wallet store's diagnostics + a
+/// quick visual breakdown of every persisted table's row
+/// counts. Refreshes the snapshot on mount; the user can hit
+/// the "Refresh" button after a wallet operation to see new
+/// counts.
+///
+/// `bridge_state` is cloned in so the component owns its own
+/// `BridgeState` handle for the duration; the underlying
+/// `WalletStore` arc is cheap to share.
+#[component]
+fn SettingsTab(bridge_state: BridgeState) -> Element {
+    let mut stats =
+        use_signal::<Option<Result<wallet_core::store::StoreStats, String>>>(|| None);
+    let path = wallet_store_path();
+    let path_display = path.display().to_string();
+
+    let mut load_stats = {
+        let state = bridge_state.clone();
+        move || {
+            let snap = state.store().and_then(|s| s.stats().ok());
+            stats.set(Some(match snap {
+                Some(s) => Ok(s),
+                None => Err("wallet store not yet open".to_string()),
+            }));
+        }
+    };
+
+    use_effect({
+        let mut load_stats = load_stats.clone();
+        move || {
+            load_stats();
+        }
+    });
+
+    let snap = stats.read().clone();
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Persistent wallet store" }
+            div { class: "detail-kv",
+                div { class: "k", "File path" }
+                div { class: "v", "{path_display}" }
+                div { class: "k", "Status" }
+                div { class: "v",
+                    {match &snap {
+                        Some(Ok(_)) => "Open · healthy".to_string(),
+                        Some(Err(e)) => format!("Unhealthy · {e}"),
+                        None => "Loading…".to_string(),
+                    }}
+                }
+            }
+            {match &snap {
+                Some(Ok(s)) => rsx! {
+                    h3 { "Schema" }
+                    div { class: "detail-kv",
+                        div { class: "k", "Version" }
+                        div { class: "v", "v{s.schema_version}" }
+                    }
+                    h3 { "Row counts" }
+                    table { class: "detail-table",
+                        thead { tr { th { "Table" } th { "Rows" } } }
+                        tbody {
+                            tr { td { "wallets" }              td { "{s.wallets}" } }
+                            tr { td { "keys" }                 td { "{s.keys}" } }
+                            tr { td { "controller_secrets" }   td { "{s.controller_secrets}" } }
+                            tr { td { "did_inventory" }        td { "{s.did_inventory}" } }
+                            tr { td { "resolved_cache" }       td { "{s.resolved_cache}" } }
+                            tr { td { "sessions" }             td { "{s.sessions}" } }
+                        }
+                    }
+                },
+                Some(Err(e)) => rsx! {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Store unhealthy" }
+                        div { class: "seed-blob", "{e}" }
+                    }
+                },
+                None => rsx! { div { class: "detail-empty", "Loading store stats…" } },
+            }}
+            div { class: "row",
+                button {
+                    onclick: move |_| load_stats(),
+                    "Refresh"
+                }
+                {copy_btn(path_display.clone(), "Copy file path")}
+            }
+        }
+
+        div { class: "card",
+            div { class: "card-header", "Crypto suites" }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
+                "Three curves are wired through the RedbSecretStore:"
+            }
+            table { class: "detail-table",
+                thead {
+                    tr { th { "Curve" } th { "JWK kty" } th { "Derivation" } th { "Use" } }
+                }
+                tbody {
+                    tr {
+                        td { "Ed25519" } td { class: "muted", "OKP" }
+                        td { class: "muted", "BIP32 → HKDF-SHA256" }
+                        td { class: "muted", "DID authentication" }
+                    }
+                    tr {
+                        td { "P-256" } td { class: "muted", "EC" }
+                        td { class: "muted", "BIP32 → HKDF, normalised" }
+                        td { class: "muted", "DID assertion / authn" }
+                    }
+                    tr {
+                        td { "Jubjub Schnorr" } td { class: "muted", "EC" }
+                        td { class: "muted", "BIP32 → HKDF, raw scalar" }
+                        td { class: "muted", "Midnight on-chain auth" }
+                    }
+                }
+            }
+        }
+
+        div { class: "card",
+            div { class: "card-header", "Dev passphrase" }
+            div { style: "color: var(--text-muted); font-size: 11px;",
+                "The store is unlocked with a fixed development passphrase "
+                code { "midnight-did-wallet-dev:v1" }
+                " — a future slice will surface an unlock prompt and let you set / rotate it."
+            }
+        }
+    }
 }
 
 #[component]
@@ -4487,6 +4725,35 @@ fn persist_inventory_entry(
     };
     if let Err(e) = store.put_did_inventory(row) {
         tracing::warn!(error=%e, did=%entry.did, "persist did inventory failed");
+    }
+}
+
+/// Write-through helper for the single-row session table.
+/// Pushes the active tab, current network, open DID, and the
+/// last-resolved tuple. Silent on store-write errors — the
+/// session row is purely a UX convenience, never a hard
+/// dependency.
+fn persist_session(
+    bridge_state: &BridgeState,
+    network: Network,
+    active_tab: Tab,
+    open_did: Option<String>,
+    last_did_id: Option<String>,
+    last_resolved: Option<(String, u32)>,
+) {
+    let Some(store) = bridge_state.store() else {
+        return;
+    };
+    let snap = wallet_core::store::SessionSnapshot {
+        network,
+        active_tab: active_tab.to_persist(),
+        open_did,
+        last_did_id,
+        last_resolved,
+        updated_at: 0,
+    };
+    if let Err(e) = store.put_session(snap) {
+        tracing::warn!(error=%e, "persist session failed");
     }
 }
 

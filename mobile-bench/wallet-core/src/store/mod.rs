@@ -40,7 +40,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rand::RngCore;
-use redb::{Database, ReadableTable};
+use redb::{Database, ReadableTable, ReadableTableMetadata};
 use uuid::Uuid;
 
 use crate::Network;
@@ -54,7 +54,8 @@ pub(crate) use envelope::encrypt_secret as wrap_secret;
 pub use schema::{InventoryStatus, KeyDerivation};
 use schema::{
     CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DidInventoryRowV1, KEYS, KEYS_BY_WALLET,
-    KeyRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, WALLETS, WalletRowV1,
+    KeyRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, SESSION_CURRENT_KEY, SESSIONS,
+    SessionRowV1, WALLETS, WalletRowV1,
 };
 
 use crate::secret_storage::{
@@ -718,6 +719,123 @@ impl WalletStore {
         Ok(out)
     }
 
+    // ── Session ───────────────────────────────────────────────────
+
+    /// Persist the most recent session snapshot. Single-row
+    /// table — overwrites the prior value. Cheap enough to
+    /// call on every state change of interest (the UI debounces
+    /// rapid mutations).
+    pub fn put_session(&self, snapshot: SessionSnapshot) -> Result<(), StoreError> {
+        let row = SessionRowV1 {
+            network: NetworkTag::from(snapshot.network),
+            active_tab: snapshot.active_tab,
+            open_did: snapshot.open_did,
+            last_did_id: snapshot.last_did_id,
+            last_resolved: snapshot.last_resolved,
+            updated_at: unix_now_ms(),
+        };
+        let bincoded = Bincoded::encode(&row)?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(SESSIONS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert(SESSION_CURRENT_KEY, bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Restore the last persisted session snapshot, if any.
+    /// `None` on a fresh wallet store.
+    pub fn get_session(&self) -> Result<Option<SessionSnapshot>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(SESSIONS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(g) = table
+            .get(SESSION_CURRENT_KEY)
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let row: SessionRowV1 = Bincoded::decode(g.value())?;
+        // Reject corrupt network tags rather than silently
+        // falling back to mainnet.
+        let net = match row.network.0 {
+            1 => Network::Mainnet,
+            2 => Network::PreProd,
+            3 => Network::Preview,
+            4 => Network::QaNet,
+            5 => Network::DevNet,
+            6 => Network::Undeployed,
+            other => {
+                return Err(StoreError::Corruption(format!(
+                    "unknown network tag {other} in session row",
+                )));
+            }
+        };
+        Ok(Some(SessionSnapshot {
+            network: net,
+            active_tab: row.active_tab,
+            open_did: row.open_did,
+            last_did_id: row.last_did_id,
+            last_resolved: row.last_resolved,
+            updated_at: row.updated_at,
+        }))
+    }
+
+    /// One-shot stats snapshot — table row counts + schema
+    /// version. Lets the UI render a Settings card without
+    /// holding the file open.
+    pub fn stats(&self) -> Result<StoreStats, StoreError> {
+        let v = self.schema_version()?;
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        // Each table has its own concrete (K, V) so we can't
+        // share one helper; the `len()` call lives on the
+        // `ReadableTable` trait already imported at the top
+        // of the file.
+        let wallets = txn.open_table(WALLETS).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        let keys = txn.open_table(KEYS).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        let controller_secrets = txn
+            .open_table(CONTROLLER_SECRETS)
+            .ok()
+            .and_then(|t| t.len().ok())
+            .unwrap_or(0);
+        let did_inventory = txn
+            .open_table(DID_INVENTORY)
+            .ok()
+            .and_then(|t| t.len().ok())
+            .unwrap_or(0);
+        let resolved_cache = txn
+            .open_table(RESOLVED_CACHE)
+            .ok()
+            .and_then(|t| t.len().ok())
+            .unwrap_or(0);
+        let sessions = txn.open_table(SESSIONS).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        Ok(StoreStats {
+            schema_version: v,
+            wallets,
+            keys,
+            controller_secrets,
+            did_inventory,
+            resolved_cache,
+            sessions,
+        })
+    }
+
     /// Inspect the on-disk schema version. Public so callers
     /// can surface "store is up to date" diagnostics without
     /// touching internals.
@@ -743,6 +861,39 @@ impl WalletStore {
             .unwrap_or(0);
         Ok(v)
     }
+}
+
+/// Counts + schema version snapshot — what
+/// [`WalletStore::stats`] returns. Wired into the
+/// dioxus-wallet Settings tab so the user can see how many
+/// rows live in each table.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreStats {
+    pub schema_version: u32,
+    pub wallets: u64,
+    pub keys: u64,
+    pub controller_secrets: u64,
+    pub did_inventory: u64,
+    pub resolved_cache: u64,
+    pub sessions: u64,
+}
+
+/// Last-session snapshot — what the UI needs to restore its
+/// per-session state after a reload. Persisted under a
+/// single-row key (`"current"`); a fresh wallet store returns
+/// `None` from `get_session`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SessionSnapshot {
+    pub network: Network,
+    /// Integer the dioxus-wallet `Tab` enum maps to. Kept as
+    /// `u8` so a UI variant rename doesn't break decoding —
+    /// the App's match-all-other-variants-to-default policy
+    /// is in the wrapper code.
+    pub active_tab: u8,
+    pub open_did: Option<String>,
+    pub last_did_id: Option<String>,
+    pub last_resolved: Option<(String, u32)>,
+    pub updated_at: i64,
 }
 
 /// One DID inventory row as the UI sees it. Mirrors the
@@ -1015,6 +1166,55 @@ mod tests {
         assert_eq!(first.created_at, second.created_at);
         assert!(second.updated_at >= first.updated_at);
         assert_eq!(second.status, InventoryStatus::Active);
+    }
+
+    #[test]
+    fn session_round_trip() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        assert!(store.get_session().unwrap().is_none());
+        store
+            .put_session(SessionSnapshot {
+                network: Network::Undeployed,
+                active_tab: 2,
+                open_did: Some("did:midnight:undeployed:x".into()),
+                last_did_id: Some("did:midnight:undeployed:x".into()),
+                last_resolved: Some(("did:midnight:undeployed:x".into(), 7)),
+                updated_at: 0,
+            })
+            .unwrap();
+        let snap = store.get_session().unwrap().unwrap();
+        assert_eq!(snap.network, Network::Undeployed);
+        assert_eq!(snap.active_tab, 2);
+        assert_eq!(snap.last_resolved.as_ref().unwrap().1, 7);
+        assert!(snap.updated_at > 0);
+    }
+
+    #[test]
+    fn session_overwrites_in_place() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        store
+            .put_session(SessionSnapshot {
+                network: Network::Undeployed,
+                active_tab: 0,
+                open_did: None,
+                last_did_id: None,
+                last_resolved: None,
+                updated_at: 0,
+            })
+            .unwrap();
+        store
+            .put_session(SessionSnapshot {
+                network: Network::PreProd,
+                active_tab: 5,
+                open_did: Some("did:b".into()),
+                last_did_id: Some("did:b".into()),
+                last_resolved: None,
+                updated_at: 0,
+            })
+            .unwrap();
+        let snap = store.get_session().unwrap().unwrap();
+        assert_eq!(snap.network, Network::PreProd);
+        assert_eq!(snap.active_tab, 5);
     }
 
     #[test]

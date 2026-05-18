@@ -31,7 +31,7 @@
 //! only the file envelope and JSON layout differ.
 
 pub(crate) mod crypto;
-pub(crate) mod curve_support;
+pub mod curve_support;
 pub mod errors;
 pub mod file_secret_store;
 pub(crate) mod hd_derivation;
@@ -39,6 +39,7 @@ pub mod jubjub_schnorr;
 pub mod redb_secret_store;
 pub mod types;
 
+pub use curve_support::{PublicForLedger, public_for_ledger, public_for_ledger_by_ref};
 pub use errors::SecretStoreError;
 pub use file_secret_store::FileSecretStore;
 pub use types::{

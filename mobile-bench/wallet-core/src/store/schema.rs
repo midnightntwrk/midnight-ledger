@@ -22,7 +22,7 @@ use crate::store::envelope::SecretEnvelope;
 
 /// The on-disk schema this binary expects. Migration runs
 /// `0..SCHEMA_VERSION` closures at `open()`.
-pub const SCHEMA_VERSION: u32 = 3;
+pub const SCHEMA_VERSION: u32 = 4;
 
 // ── Wallet identity ────────────────────────────────────────────
 
@@ -125,6 +125,15 @@ pub(crate) const DIDS_BY_NETWORK: MultimapTableDefinition<u8, &'static str> =
 /// can drop the whole table and let the next resolve repopulate.
 pub(crate) const RESOLVED_CACHE: TableDefinition<(u8, &'static str), &'static [u8]> =
     TableDefinition::new("resolved_cache");
+
+/// Single-row session state. Key is the literal `"current"` —
+/// today we don't keep multiple session histories, just the
+/// most recent. Value is a bincoded `SessionRowV1`. Restoring
+/// happens at App startup; persistence runs on every state
+/// change of interest (open_did, active_tab, last_resolved).
+pub(crate) const SESSIONS: TableDefinition<&'static str, &'static [u8]> =
+    TableDefinition::new("sessions");
+pub(crate) const SESSION_CURRENT_KEY: &str = "current";
 
 // ── Row types ─────────────────────────────────────────────────
 
@@ -254,6 +263,23 @@ pub(crate) struct DidInventoryRowV1 {
     pub service_count: Option<u32>,
     pub last_block_height: Option<i64>,
     pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Session row, version 1. Carries the UI's per-session
+/// signals so the wallet restores its state after a reload.
+/// `network`, `active_tab`, and `open_did` are the user-facing
+/// "where was I" trio; `last_did_id` / `last_resolved` feed
+/// the LoadCircuit and Resolve panel auto-fills.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct SessionRowV1 {
+    pub network: NetworkTag,
+    /// Integer that the dioxus-wallet's `Tab` enum maps to;
+    /// the App owns the mapping table.
+    pub active_tab: u8,
+    pub open_did: Option<String>,
+    pub last_did_id: Option<String>,
+    pub last_resolved: Option<(String, u32)>,
     pub updated_at: i64,
 }
 
