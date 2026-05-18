@@ -1,18 +1,15 @@
 //! Per-curve generate / sign / verify dispatch.
 //!
-//! Today covers two of the three Midnight DID curves:
+//! All three Midnight DID curves are now supported:
 //! - **Ed25519** via [`ed25519_dalek`] (RFC 8032 EdDSA).
 //! - **P-256** via [`p256`] (NIST ECDSA-SHA-256, raw `r||s` 64-byte
 //!   signature — matches the upstream JS `node:crypto` `sign("sha256", …)`
 //!   default).
-//!
-//! Jubjub Schnorr is the upstream's third curve; it uses a custom
-//! Midnight package (`@midnight-ntwrk/midnight-did-jubjub-schnorr`)
-//! that has no Rust counterpart in this tree. Stubbed to
-//! [`SecretStoreError::SigningNotSupported`] for now — the secret
-//! store still happily holds the keys, just can't sign with them.
-//! Lands when we vendor the algorithm into a `transient-crypto`-
-//! adjacent module.
+//! - **Jubjub Schnorr** via the in-tree
+//!   [`crate::secret_storage::jubjub_schnorr`] port of
+//!   `midnight-did/jubjub-schnorr/src/signing.ts`. Off-chain
+//!   sign / verify only — the on-chain `schnorrVerify` circuit
+//!   is exercised via the JS bridge.
 
 // `file_secret_store` (next commit) is the only non-test caller;
 // silence dead-code warnings on the intermediate API until then.
@@ -21,7 +18,9 @@
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use ed25519_dalek::{Signer as _, Verifier as _};
+use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
 
+use crate::secret_storage::jubjub_schnorr::{self, JUBJUB_SIGNATURE_LENGTH_BYTES};
 use crate::secret_storage::{MidnightCurve, MidnightKeyType, PublicJwk, SecretStoreError};
 
 /// Internal record of a private key — what the store actually
@@ -74,7 +73,24 @@ pub(crate) fn generate(
             };
             Ok((record, public))
         }
-        (MidnightKeyType::EC, MidnightCurve::Jubjub) => Err(jubjub_not_yet()),
+        (MidnightKeyType::EC, MidnightCurve::Jubjub) => {
+            // Match the upstream signing.ts convention: the
+            // private "seed" is 32 fresh random bytes; the
+            // secret scalar is `sha256(seed) mod ORDER`. Sampling
+            // the seed (rather than the scalar directly) keeps
+            // backups / re-imports stable across runtimes.
+            let mut seed = [0u8; 32];
+            rng.fill_bytes(&mut seed);
+            let pk = jubjub_schnorr::derive_public_key_from_seed(&seed);
+            Ok((
+                StoredPrivateRecord {
+                    kty,
+                    crv,
+                    private_bytes: seed.to_vec(),
+                },
+                jubjub_public_jwk_from_point(&pk)?,
+            ))
+        }
         (kty, crv) => Err(SecretStoreError::UnsupportedCurve(format!("{kty:?}/{crv:?}"))),
     }
 }
@@ -125,7 +141,23 @@ pub(crate) fn from_private_bytes(
                 public,
             ))
         }
-        (MidnightKeyType::EC, MidnightCurve::Jubjub) => Err(jubjub_not_yet()),
+        (MidnightKeyType::EC, MidnightCurve::Jubjub) => {
+            let seed: [u8; 32] = private_bytes.try_into().map_err(|_| {
+                SecretStoreError::InvalidInput(format!(
+                    "Jubjub seed must be 32 bytes, got {}",
+                    private_bytes.len(),
+                ))
+            })?;
+            let pk = jubjub_schnorr::derive_public_key_from_seed(&seed);
+            Ok((
+                StoredPrivateRecord {
+                    kty,
+                    crv,
+                    private_bytes: seed.to_vec(),
+                },
+                jubjub_public_jwk_from_point(&pk)?,
+            ))
+        }
         (kty, crv) => Err(SecretStoreError::UnsupportedCurve(format!("{kty:?}/{crv:?}"))),
     }
 }
@@ -157,7 +189,13 @@ pub(crate) fn sign(
             // `sign("sha256", …, key)` default for P-256.
             Ok(sig.to_bytes().to_vec())
         }
-        (MidnightKeyType::EC, MidnightCurve::Jubjub) => Err(jubjub_not_yet()),
+        (MidnightKeyType::EC, MidnightCurve::Jubjub) => {
+            let seed: [u8; 32] = record.private_bytes.as_slice().try_into().map_err(|_| {
+                SecretStoreError::Crypto("Jubjub stored seed wrong length".into())
+            })?;
+            let sig = jubjub_schnorr::sign_payload_from_seed(&seed, payload);
+            Ok(jubjub_schnorr::encode(&sig).to_vec())
+        }
         (kty, crv) => Err(SecretStoreError::UnsupportedCurve(format!("{kty:?}/{crv:?}"))),
     }
 }
@@ -211,7 +249,19 @@ pub(crate) fn verify(
             use p256::ecdsa::signature::Verifier;
             Ok(verifying.verify(payload, &sig).is_ok())
         }
-        (MidnightKeyType::EC, MidnightCurve::Jubjub) => Err(jubjub_not_yet()),
+        (MidnightKeyType::EC, MidnightCurve::Jubjub) => {
+            let pk = jubjub_public_point_from_jwk(public_jwk)?;
+            if signature.len() != JUBJUB_SIGNATURE_LENGTH_BYTES {
+                return Err(SecretStoreError::InvalidInput(format!(
+                    "Jubjub sig must be {JUBJUB_SIGNATURE_LENGTH_BYTES} bytes, got {}",
+                    signature.len(),
+                )));
+            }
+            let sig = jubjub_schnorr::decode(signature).ok_or_else(|| {
+                SecretStoreError::InvalidInput("Jubjub sig: malformed wire bytes".into())
+            })?;
+            Ok(jubjub_schnorr::verify_payload(&pk, payload, &sig))
+        }
         (kty, crv) => Err(SecretStoreError::UnsupportedCurve(format!("{kty:?}/{crv:?}"))),
     }
 }
@@ -236,12 +286,77 @@ fn p256_public_jwk_from(signing: &p256::ecdsa::SigningKey) -> Result<PublicJwk, 
     })
 }
 
-/// Placeholder error for the Jubjub branch until we vendor the
-/// algorithm into a Rust module.
-fn jubjub_not_yet() -> SecretStoreError {
-    SecretStoreError::SigningNotSupported(
-        "Jubjub: vendored Schnorr algorithm not yet ported; see secret_storage::curve_support module docs".into(),
-    )
+/// Build a `PublicJwk` from a Jubjub point. JWK `x` / `y` are
+/// 32-byte big-endian base64url, matching upstream's
+/// `bigintTo32Be` serialisation. The conversion goes via the
+/// `Fr` (outer base field) representation since Jubjub
+/// coordinates live there.
+fn jubjub_public_jwk_from_point(pk: &EmbeddedGroupAffine) -> Result<PublicJwk, SecretStoreError> {
+    let x = pk
+        .x()
+        .ok_or_else(|| SecretStoreError::Crypto("Jubjub pk has no affine x (identity?)".into()))?;
+    let y = pk
+        .y()
+        .ok_or_else(|| SecretStoreError::Crypto("Jubjub pk has no affine y (identity?)".into()))?;
+    Ok(PublicJwk {
+        kty: MidnightKeyType::EC,
+        crv: MidnightCurve::Jubjub,
+        x: URL_SAFE_NO_PAD.encode(fr_to_be_32(&x)),
+        y: Some(URL_SAFE_NO_PAD.encode(fr_to_be_32(&y))),
+    })
+}
+
+/// Inverse of [`jubjub_public_jwk_from_point`]. Decodes `x` /
+/// `y` from the JWK and reconstructs the `EmbeddedGroupAffine`
+/// via `EmbeddedGroupAffine::new`. Rejects malformed
+/// coordinates and off-curve points.
+fn jubjub_public_point_from_jwk(jwk: &PublicJwk) -> Result<EmbeddedGroupAffine, SecretStoreError> {
+    let y_str = jwk.y.as_ref().ok_or_else(|| {
+        SecretStoreError::InvalidInput("Jubjub JWK missing y coordinate".into())
+    })?;
+    let x_bytes = URL_SAFE_NO_PAD
+        .decode(jwk.x.as_bytes())
+        .map_err(|e| SecretStoreError::InvalidInput(format!("Jubjub x b64url: {e}")))?;
+    let y_bytes = URL_SAFE_NO_PAD
+        .decode(y_str.as_bytes())
+        .map_err(|e| SecretStoreError::InvalidInput(format!("Jubjub y b64url: {e}")))?;
+    if x_bytes.len() != 32 || y_bytes.len() != 32 {
+        return Err(SecretStoreError::InvalidInput(format!(
+            "Jubjub coords must be 32 bytes each (x={}, y={})",
+            x_bytes.len(),
+            y_bytes.len(),
+        )));
+    }
+    let x = Fr::from_le_bytes(&be_to_le_32(&x_bytes))
+        .ok_or_else(|| SecretStoreError::InvalidInput("Jubjub x not in field".into()))?;
+    let y = Fr::from_le_bytes(&be_to_le_32(&y_bytes))
+        .ok_or_else(|| SecretStoreError::InvalidInput("Jubjub y not in field".into()))?;
+    EmbeddedGroupAffine::new(x, y)
+        .ok_or_else(|| SecretStoreError::InvalidInput("Jubjub (x,y) off curve / off subgroup".into()))
+}
+
+/// Encode an `Fr` value as 32 big-endian bytes. Used for JWK
+/// `x` / `y` so the byte order matches upstream `bigintTo32Be`.
+fn fr_to_be_32(f: &Fr) -> [u8; 32] {
+    let mut le = f.as_le_bytes();
+    if le.len() < 32 {
+        le.resize(32, 0);
+    }
+    let mut be = [0u8; 32];
+    for (i, b) in le[..32].iter().enumerate() {
+        be[31 - i] = *b;
+    }
+    be
+}
+
+/// Reverse a 32-byte slice — the inverse of [`fr_to_be_32`]'s
+/// byte-order flip.
+fn be_to_le_32(be: &[u8]) -> [u8; 32] {
+    let mut le = [0u8; 32];
+    for (i, b) in be.iter().take(32).enumerate() {
+        le[31 - i] = *b;
+    }
+    le
 }
 
 #[cfg(test)]
@@ -294,10 +409,45 @@ mod tests {
     }
 
     #[test]
-    fn jubjub_is_unsupported_today() {
+    fn jubjub_generate_sign_verify_roundtrip() {
         let mut rng = deterministic_rng();
-        let err = generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap_err();
-        assert!(matches!(err, SecretStoreError::SigningNotSupported(_)));
+        let (record, pk) = generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap();
+        let msg = b"hello, Jubjub Schnorr";
+        let sig = sign(&record, msg).unwrap();
+        assert_eq!(
+            sig.len(),
+            JUBJUB_SIGNATURE_LENGTH_BYTES,
+            "Jubjub Schnorr sig wire size is {JUBJUB_SIGNATURE_LENGTH_BYTES} bytes",
+        );
+        assert!(verify(&pk, msg, &sig).unwrap());
+    }
+
+    #[test]
+    fn jubjub_verify_fails_on_tampered_signature() {
+        let mut rng = deterministic_rng();
+        let (record, pk) = generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap();
+        let mut sig = sign(&record, b"jubjub-msg").unwrap();
+        // Flip a bit in the response half (back of the wire).
+        sig[JUBJUB_SIGNATURE_LENGTH_BYTES - 1] ^= 0x01;
+        match verify(&pk, b"jubjub-msg", &sig) {
+            Ok(false) => {}
+            Err(_) => {}
+            Ok(true) => panic!("tampered Jubjub signature must not verify"),
+        }
+    }
+
+    #[test]
+    fn jubjub_from_private_bytes_round_trip() {
+        let mut rng = deterministic_rng();
+        let (rec1, pk1) = generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap();
+        let (rec2, pk2) =
+            from_private_bytes(MidnightKeyType::EC, MidnightCurve::Jubjub, &rec1.private_bytes)
+                .unwrap();
+        assert_eq!(rec1.private_bytes, rec2.private_bytes);
+        assert_eq!(pk1, pk2);
+        // And the re-imported record still produces a valid signature.
+        let sig = sign(&rec2, b"reimported").unwrap();
+        assert!(verify(&pk2, b"reimported", &sig).unwrap());
     }
 
     #[test]

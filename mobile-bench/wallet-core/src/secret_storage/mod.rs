@@ -35,6 +35,7 @@ pub(crate) mod curve_support;
 pub mod errors;
 pub mod file_secret_store;
 pub(crate) mod hd_derivation;
+pub mod jubjub_schnorr;
 pub mod types;
 
 pub use errors::SecretStoreError;
