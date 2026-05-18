@@ -188,6 +188,54 @@ struct ServiceInput {
     endpoint: String,
 }
 
+/// One row in the session-scoped DID inventory. A DID enters the
+/// inventory via a deploy (status `Pending` until resolved) or a
+/// resolve (status comes from the on-chain state). Subsequent
+/// resolves of the same DID update the row in place — counter +
+/// vm/service counts + last-seen block are kept fresh so the
+/// table always reflects the most recent observation.
+#[derive(Clone, PartialEq, Eq, Debug)]
+struct DidInventoryEntry {
+    /// `did:midnight:<network>:<address>` — primary key.
+    did: String,
+    network_label: String,
+    status: DidInventoryStatus,
+    /// `None` for a freshly-deployed DID that hasn't been
+    /// resolved yet (we don't know the counter chain-side until
+    /// the indexer catches up).
+    counter: Option<u32>,
+    vm_count: Option<usize>,
+    service_count: Option<usize>,
+    last_block_height: Option<i64>,
+}
+
+/// Status badge for [`DidInventoryEntry`]. `Pending` is what we
+/// show between deploy and first successful resolve; afterwards
+/// the resolve reports `Active` or `Deactivated`.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DidInventoryStatus {
+    Pending,
+    Active,
+    Deactivated,
+}
+
+impl DidInventoryStatus {
+    fn label(&self) -> &'static str {
+        match self {
+            Self::Pending => "Pending",
+            Self::Active => "Active",
+            Self::Deactivated => "Deactivated",
+        }
+    }
+    fn badge_class(&self) -> &'static str {
+        match self {
+            Self::Pending => "did-badge pending",
+            Self::Active => "did-badge active",
+            Self::Deactivated => "did-badge deactivated",
+        }
+    }
+}
+
 /// Timing snapshot for one completed pipeline run. Built by the
 /// receiver side: each `WizardStage` arrival timestamps with
 /// `Instant::now()`; durations are the deltas between consecutive
@@ -236,6 +284,12 @@ pub fn App() -> Element {
     // resolve, and circuit load gets one entry. Persisted in
     // memory only; cleared when the user reloads the page.
     let mut session_log = use_signal::<Vec<SessionEvent>>(Vec::new);
+    // Per-session DID inventory keyed by DID string. Adopts the
+    // UI/UX bundle's "DID-first inventory" pattern — every DID
+    // we touch (deploy, resolve) appears as a row in the inventory
+    // panel with its current best-known status + counter.
+    let mut did_inventory =
+        use_signal::<std::collections::BTreeMap<String, DidInventoryEntry>>(Default::default);
     // Per-pipeline timing snapshots, newest last. Shown in the
     // Diagnostics tab as a stacked bar / breakdown per run.
     let mut timing_log = use_signal::<Vec<TimingRun>>(Vec::new);
@@ -472,6 +526,23 @@ pub fn App() -> Element {
                         // `getControllerSecretKey` RPC.
                         bridge_state.read().remember_controller_secret(did.clone(), o.controller_sk);
                         last_did_id.set(Some(did.clone()));
+                        // Drop into the inventory as Pending — the next
+                        // Resolve flips it to Active/Deactivated and
+                        // populates the counters.
+                        let mut inv = did_inventory.read().clone();
+                        inv.insert(
+                            did.clone(),
+                            DidInventoryEntry {
+                                did: did.clone(),
+                                network_label: o.did_id.network.label().to_string(),
+                                status: DidInventoryStatus::Pending,
+                                counter: None,
+                                vm_count: None,
+                                service_count: None,
+                                last_block_height: None,
+                            },
+                        );
+                        did_inventory.set(inv);
                         let mut log = session_log.read().clone();
                         log.push(SessionEvent::Deploy {
                             did,
@@ -486,6 +557,12 @@ pub fn App() -> Element {
                         timing_log.set(log);
                     },
                 }
+                DidInventoryPanel {
+                    entries: did_inventory.read().values().cloned().collect(),
+                    on_select: move |did: String| {
+                        last_did_id.set(Some(did));
+                    },
+                }
                 ResolveDidPanel {
                     network: *network.read(),
                     seed_did: last_did_id.read().clone(),
@@ -494,6 +571,11 @@ pub fn App() -> Element {
                         let mut log = session_log.read().clone();
                         log.push(SessionEvent::Resolve { did, counter });
                         session_log.set(log);
+                    },
+                    on_seen: move |entry: DidInventoryEntry| {
+                        let mut inv = did_inventory.read().clone();
+                        inv.insert(entry.did.clone(), entry);
+                        did_inventory.set(inv);
                     },
                 }
                 LoadCircuitPanel {
@@ -868,6 +950,10 @@ fn ResolveDidPanel(
     network: Network,
     seed_did: Option<String>,
     on_resolved: EventHandler<(String, u32)>,
+    /// Fires *after* a successful resolve with the full inventory
+    /// row. Parent feeds this into `did_inventory` to keep the
+    /// DID inventory panel in sync.
+    on_seen: EventHandler<DidInventoryEntry>,
 ) -> Element {
     let mut input = use_signal(|| seed_did.clone().unwrap_or_default());
     // Re-seed the input whenever a new `seed_did` arrives — e.g.
@@ -897,6 +983,7 @@ fn ResolveDidPanel(
         pending.set(true);
         result.set(None);
         let on_resolved = on_resolved.clone();
+        let on_seen = on_seen.clone();
         spawn(async move {
             let w = Wallet::demo(network);
             let r: Result<ResolveView, String> = match w.resolve_did_full(&did_str).await {
@@ -907,13 +994,26 @@ fn ResolveDidPanel(
                     let view = ResolveView {
                         counter: resolved.maintenance_counter,
                         last_block_height: resolved.last_block_height,
-                        last_tx_hash: resolved.last_tx_hash,
+                        last_tx_hash: resolved.last_tx_hash.clone(),
                         deactivated: resolved.document.deactivated,
                         vm_count: resolved.document.verification_method.len(),
                         service_count: resolved.document.service.len(),
                         document_json: json,
                     };
-                    on_resolved.call((did_string, resolved.maintenance_counter));
+                    on_resolved.call((did_string.clone(), resolved.maintenance_counter));
+                    on_seen.call(DidInventoryEntry {
+                        did: did_string,
+                        network_label: resolved.document.id.network.label().to_string(),
+                        status: if resolved.document.deactivated {
+                            DidInventoryStatus::Deactivated
+                        } else {
+                            DidInventoryStatus::Active
+                        },
+                        counter: Some(resolved.maintenance_counter),
+                        vm_count: Some(resolved.document.verification_method.len()),
+                        service_count: Some(resolved.document.service.len()),
+                        last_block_height: resolved.last_block_height,
+                    });
                     Ok(view)
                 }
                 Err(e) => Err(e.to_string()),
@@ -1930,6 +2030,102 @@ fn format_ms(ms: u64) -> String {
         let s = (ms % 60_000) / 1_000;
         format!("{m}m {s:02}s")
     }
+}
+
+#[component]
+fn DidInventoryPanel(
+    entries: Vec<DidInventoryEntry>,
+    /// Fires when the user clicks "Open" — parent uses this to
+    /// re-seed the Resolve / LoadCircuit panels so the operator
+    /// can drive the next step on that DID.
+    on_select: EventHandler<String>,
+) -> Element {
+    if entries.is_empty() {
+        return rsx! {
+            div { class: "wizard-header", "DIDs" }
+            div { class: "session-log-empty",
+                "No DIDs in this session yet. Create one or resolve an existing one to populate the inventory."
+            }
+        };
+    }
+    rsx! {
+        div { class: "wizard-header", "DIDs ({entries.len()})" }
+        div { class: "did-inventory",
+            div { class: "did-inventory-row did-inventory-header",
+                span { class: "did-inventory-cell status", "Status" }
+                span { class: "did-inventory-cell network", "Network" }
+                span { class: "did-inventory-cell did", "DID" }
+                span { class: "did-inventory-cell counter", "Counter" }
+                span { class: "did-inventory-cell vms", "VMs" }
+                span { class: "did-inventory-cell services", "Services" }
+                span { class: "did-inventory-cell action", "" }
+            }
+            for entry in entries.iter() {
+                {render_inventory_row(entry, on_select.clone())}
+            }
+        }
+    }
+}
+
+fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<String>) -> Element {
+    let did_short = truncate_did(&entry.did);
+    let did_full = entry.did.clone();
+    let counter = entry
+        .counter
+        .map(|c| c.to_string())
+        .unwrap_or_else(|| "—".into());
+    let vms = entry
+        .vm_count
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "—".into());
+    let services = entry
+        .service_count
+        .map(|n| n.to_string())
+        .unwrap_or_else(|| "—".into());
+    let badge_class = entry.status.badge_class();
+    let status_label = entry.status.label();
+    let did_for_click = did_full.clone();
+    rsx! {
+        div {
+            key: "{did_full}",
+            class: "did-inventory-row",
+            span { class: "did-inventory-cell status",
+                span { class: "{badge_class}", "{status_label}" }
+            }
+            span { class: "did-inventory-cell network", "{entry.network_label}" }
+            span {
+                class: "did-inventory-cell did",
+                title: "{did_full}",
+                "{did_short}"
+            }
+            span { class: "did-inventory-cell counter", "{counter}" }
+            span { class: "did-inventory-cell vms", "{vms}" }
+            span { class: "did-inventory-cell services", "{services}" }
+            span { class: "did-inventory-cell action",
+                button {
+                    onclick: move |_| on_select.call(did_for_click.clone()),
+                    "Open"
+                }
+            }
+        }
+    }
+}
+
+/// Truncate a DID for table display — keeps the `did:midnight:net:`
+/// prefix and the last 6 chars of the address so it's still
+/// recognisable but doesn't blow out the column. Full DID lives on
+/// the row's `title` attribute for hover.
+fn truncate_did(did: &str) -> String {
+    let parts: Vec<&str> = did.splitn(4, ':').collect();
+    if parts.len() < 4 {
+        return did.to_string();
+    }
+    let prefix = parts[..3].join(":");
+    let addr = parts[3];
+    if addr.len() <= 10 {
+        return did.to_string();
+    }
+    format!("{prefix}:{}…{}", &addr[..4], &addr[addr.len() - 4..])
 }
 
 #[component]

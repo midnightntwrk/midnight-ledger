@@ -413,6 +413,78 @@ details .panel .row {
   white-space: nowrap;
 }
 
+/* DID inventory — tabular view of the session's DIDs, adopting
+ * the bundle's "Active / Pending / Deactivated" badge pattern. */
+.did-inventory {
+  margin: 6px 16px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  font-size: 11px;
+}
+.did-inventory-row {
+  display: grid;
+  grid-template-columns: 92px 100px 1fr 70px 50px 70px 70px;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.did-inventory-row:last-child { border-bottom: none; }
+.did-inventory-header {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.did-inventory-cell.did {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.did-inventory-cell.counter,
+.did-inventory-cell.vms,
+.did-inventory-cell.services {
+  font-family: ui-monospace, monospace;
+  color: var(--text-soft);
+  text-align: right;
+}
+.did-inventory-cell.action button {
+  padding: 3px 10px;
+  font-size: 10px;
+}
+
+/* Status badges. Mirror the bundle's
+ * Active=#2EE6A6 / Pending=#FFB020 / Deactivated/Failed=#FF5C7A
+ * (we use existing tokens, adjusted to be more saturated). */
+.did-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  border: 1px solid transparent;
+}
+.did-badge.active {
+  color: var(--success);
+  background: rgba(95, 178, 124, 0.12);
+  border-color: rgba(95, 178, 124, 0.35);
+}
+.did-badge.pending {
+  color: var(--warn);
+  background: rgba(216, 169, 79, 0.12);
+  border-color: rgba(216, 169, 79, 0.35);
+}
+.did-badge.deactivated {
+  color: var(--error);
+  background: rgba(229, 115, 115, 0.12);
+  border-color: rgba(229, 115, 115, 0.35);
+}
+
 /* Tab nav across the top */
 .tab-nav {
   display: flex;
