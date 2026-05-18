@@ -732,11 +732,16 @@ pub enum SystemTransaction {
         outputs: Vec<OutputInstructionUnshielded>,
         token_type: UnshieldedTokenType,
     },
-    DistributeReserve(u128),
+    DistributeReserve {
+        amount: u128,
+    },
     CNightGeneratesDustUpdate {
         events: Vec<CNightGeneratesDustEvent>,
     },
     UnlockToTreasury {
+        amount: u128,
+    },
+    UnlockToReserve {
         amount: u128,
     },
 }
@@ -2315,7 +2320,7 @@ impl SystemTransaction {
                 );
                 cost
             }
-            DistributeReserve(..) => {
+            DistributeReserve { .. } | UnlockToReserve { .. } => {
                 // changing two pool balances
                 let cost = model.cell_read(16) + model.cell_write(16, true);
                 cost * 2u64

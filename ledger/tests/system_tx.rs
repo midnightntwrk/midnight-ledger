@@ -42,7 +42,7 @@ async fn system_tx_pay_from_unshielded() {
     let address = UserAddress::from(verifying_key.clone());
 
     // Distribute reserve
-    let sys_tx_distribute = SystemTransaction::DistributeReserve(500_000);
+    let sys_tx_distribute = SystemTransaction::DistributeReserve { amount: 500_000 };
 
     let (ledger, _) = state
         .ledger
@@ -175,6 +175,40 @@ async fn system_tx_unlock_to_treasury_insufficient_locked_pool() {
             .expect("genesis settings should be valid");
 
     let sys_tx = SystemTransaction::UnlockToTreasury { amount: locked + 1 };
+    let result = ledger_state.apply_system_tx(&sys_tx, Timestamp::from_secs(0));
+    assert!(
+        result.is_err(),
+        "should reject unlock exceeding locked pool"
+    );
+}
+
+#[tokio::test]
+async fn system_tx_unlock_to_reserve() {
+    let locked = 500_000;
+    let reserve = MAX_SUPPLY - locked;
+    let ledger_state: LedgerState<InMemoryDB> =
+        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+            .expect("genesis settings should be valid");
+
+    let amount = 200_000;
+    let sys_tx = SystemTransaction::UnlockToReserve { amount };
+    let (ledger_state, _) = ledger_state
+        .apply_system_tx(&sys_tx, Timestamp::from_secs(0))
+        .expect("unlock to reserve should succeed");
+
+    assert_eq!(ledger_state.locked_pool, locked - amount);
+    assert_eq!(ledger_state.reserve_pool, reserve + amount);
+}
+
+#[tokio::test]
+async fn system_tx_unlock_to_reserve_insufficient_locked_pool() {
+    let locked = 100_000;
+    let reserve = MAX_SUPPLY - locked;
+    let ledger_state: LedgerState<InMemoryDB> =
+        LedgerState::with_genesis_settings("local-test", INITIAL_PARAMETERS, locked, reserve, 0)
+            .expect("genesis settings should be valid");
+
+    let sys_tx = SystemTransaction::UnlockToReserve { amount: locked + 1 };
     let result = ledger_state.apply_system_tx(&sys_tx, Timestamp::from_secs(0));
     assert!(
         result.is_err(),

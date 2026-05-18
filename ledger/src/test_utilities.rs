@@ -193,7 +193,7 @@ impl<D: DB> TestState<D> {
         let address = UserAddress::from(self.night_key.verifying_key());
 
         // Distribute reserve
-        let sys_tx_distribute = SystemTransaction::DistributeReserve(amount);
+        let sys_tx_distribute = SystemTransaction::DistributeReserve { amount };
 
         let (ledger, _) = self
             .ledger
