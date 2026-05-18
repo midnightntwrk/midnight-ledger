@@ -6,7 +6,7 @@
 	  "build:markdown-docs": "rm -rf ../docs/api/midnight-onchain-runtime && npx typedoc onchain-runtime-v3.d.ts --plugin typedoc-plugin-markdown"
   },
   "devDependencies": {
-    "typedoc": "0.27.9",
-    "typedoc-plugin-markdown": "4.3.2"
+    "typedoc": "0.28.19",
+    "typedoc-plugin-markdown": "4.11.0"
   }
 }
