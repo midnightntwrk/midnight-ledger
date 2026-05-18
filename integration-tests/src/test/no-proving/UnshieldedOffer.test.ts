@@ -582,7 +582,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       const roundOffer = round.guaranteedUnshieldedOffer!;
 
       expect(roundOffer.inputs.at(0)?.owner).toEqual(ecdsaVk);
-      expect(roundOffer.signatures.at(0)?.value).toEqual(sig);
+      expect((roundOffer.signatures.at(0) as SignatureEnabled).value).toEqual(sig);
     });
 
     /**
@@ -621,8 +621,8 @@ describe('Ledger API - UnshieldedOffer', () => {
 
       expect(roundOffer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
       expect(roundOffer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
-      expect(roundOffer.signatures.at(0)?.value.tag).toEqual(SignatureKindMarker.schnorr);
-      expect(roundOffer.signatures.at(1)?.value.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect((roundOffer.signatures.at(0) as SignatureEnabled).value.tag).toEqual(SignatureKindMarker.schnorr);
+      expect((roundOffer.signatures.at(1) as SignatureEnabled).value.tag).toEqual(SignatureKindMarker.ecdsa);
     });
 
     /**
