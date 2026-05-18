@@ -92,6 +92,34 @@ pub(crate) fn decode_maintenance_counter(state_hex: &str) -> Result<u32, DidErro
     Ok(state.maintenance_authority.counter)
 }
 
+/// Names of every circuit whose verifier key has been registered
+/// on-chain — `ContractState.operations` keyed by entry point.
+/// The chain rejects a `ContractCall` for any circuit not in this
+/// set (with `InvalidVerificationKey`), so the wallet must run a
+/// `MaintenanceUpdate` to add the VK first.
+///
+/// Entry-point names are stored as raw bytes; we surface them as
+/// UTF-8 strings (every DID circuit name is plain ASCII —
+/// `addAlsoKnownAs`, `deactivate`, etc.) and skip any bytes that
+/// don't decode cleanly. Order is unspecified — callers that need
+/// stable ordering should sort.
+pub(crate) fn decode_loaded_circuits(state_hex: &str) -> Result<Vec<String>, DidError> {
+    let bytes = hex::decode(state_hex.trim_start_matches("0x"))
+        .map_err(|e| DidError::DecodeState(format!("hex: {e}")))?;
+    let state: ContractState<DefaultDB> = tagged_deserialize(&bytes[..])
+        .map_err(|e| DidError::DecodeState(format!("tagged_deserialize: {e}")))?;
+    let mut names: Vec<String> = state
+        .operations
+        .iter()
+        .filter_map(|kv| {
+            let (ep, _) = &*kv;
+            std::str::from_utf8(&ep[..]).ok().map(String::from)
+        })
+        .collect();
+    names.sort();
+    Ok(names)
+}
+
 pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState, DidError> {
     let bytes = hex::decode(state_hex.trim_start_matches("0x"))
         .map_err(|e| DidError::DecodeState(format!("hex: {e}")))?;

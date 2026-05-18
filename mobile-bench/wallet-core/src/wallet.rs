@@ -955,6 +955,8 @@ impl Wallet {
             crate::did::contract::decode_did_ledger_state(&info.state_hex)?;
         let maintenance_counter =
             crate::did::contract::decode_maintenance_counter(&info.state_hex)?;
+        let loaded_circuits =
+            crate::did::contract::decode_loaded_circuits(&info.state_hex)?;
         // Snapshot the relation vectors before `ledger_to_domain`
         // consumes them — the UI's relationship matrix needs the
         // raw fragment ids, not the DID-URL-expanded form
@@ -978,6 +980,7 @@ impl Wallet {
             key_agreement_ids,
             capability_invocation_ids,
             capability_delegation_ids,
+            loaded_circuits,
         })
     }
 }

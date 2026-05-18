@@ -63,4 +63,13 @@ pub struct ResolvedDid {
     pub key_agreement_ids: Vec<String>,
     pub capability_invocation_ids: Vec<String>,
     pub capability_delegation_ids: Vec<String>,
+    /// Names of every circuit whose verifier key the chain
+    /// currently has registered for this contract — the keys of
+    /// `ContractState.operations`. A `ContractCall` for any
+    /// circuit not in this set is rejected with
+    /// `InvalidVerificationKey`, so the wallet must run a
+    /// `MaintenanceUpdate` to publish the VK first. The
+    /// Operation Builder consults this list to decide whether
+    /// to prepend a load step before each queued call.
+    pub loaded_circuits: Vec<String>,
 }
