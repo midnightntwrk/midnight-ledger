@@ -24,7 +24,7 @@ use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::transient_hash;
 use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
 use wallet_core::secret_storage::jubjub_schnorr::{
-    derive_public_key_from_seed, payload_to_digest, sign_payload_from_seed,
+    derive_public_key_from_seed, encode_upstream, payload_to_digest, sign_payload_from_seed,
 };
 
 /// Tagged bigint envelope the harness expects. Wraps a decimal
@@ -243,6 +243,95 @@ async fn tampered_signature_rejected_by_upstream_circuit() {
     assert!(
         !js.verified,
         "Upstream circuit must reject a tampered Rust signature",
+    );
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamDecodedPoint {
+    x: String,
+    y: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamDecoded {
+    announcement: UpstreamDecodedPoint,
+    response: String,
+}
+
+#[derive(serde::Deserialize, Debug)]
+#[serde(rename_all = "camelCase")]
+struct UpstreamVerifyResult {
+    verified: bool,
+    decoded: UpstreamDecoded,
+    error: Option<String>,
+    elapsed_ms: i64,
+}
+
+/// Bit-for-bit wire compat: encode the Rust signature in the
+/// upstream 96-byte BE format, hand the hex blob to the harness
+/// which decodes via upstream's own `decodeJubjubSignature`,
+/// then runs the on-chain `schnorrVerifyDigest` circuit. If our
+/// `encode_upstream` produces anything other than the bytes
+/// upstream expects, this fails.
+#[tokio::test]
+async fn rust_upstream_encoded_signature_verifies_via_decode_jubjub_signature() {
+    let bridge = NodeChildBridge::spawn(&NodeChildBridge::default_harness_path())
+        .expect("spawn harness");
+
+    let seed = fixture_seed();
+    let pk = derive_public_key_from_seed(&seed);
+    let payload = b"interop-test payload-upstream";
+    let digest = payload_to_digest(payload);
+    let sig = sign_payload_from_seed(&seed, payload);
+    let sig_hex = hex::encode(encode_upstream(&sig));
+
+    let req = serde_json::json!({
+        "signatureHex": sig_hex,
+        "publicKey": {
+            "x": fr_to_bigint(&pk.x().expect("pk not identity")),
+            "y": fr_to_bigint(&pk.y().expect("pk not identity")),
+        },
+        "digest": digest.iter().map(fr_to_bigint).collect::<Vec<_>>(),
+    });
+
+    let js: UpstreamVerifyResult = bridge
+        .call("schnorrVerifyUpstreamEncoded", req)
+        .await
+        .expect("schnorrVerifyUpstreamEncoded rpc");
+    eprintln!(
+        "[upstream-encode] verified={} error={:?} decoded.response={} ({} ms)",
+        js.verified, js.error, js.decoded.response, js.elapsed_ms,
+    );
+
+    // The decoder must reach the same (announcement, response)
+    // we signed with. Convert Rust-side to decimal strings the
+    // same way the harness does for comparison.
+    let expected_ann_x = le_bytes_to_decimal(
+        &sig.announcement.x().expect("ann.x").as_le_bytes(),
+    );
+    let expected_ann_y = le_bytes_to_decimal(
+        &sig.announcement.y().expect("ann.y").as_le_bytes(),
+    );
+    let expected_response = le_bytes_to_decimal(&sig.response.as_le_bytes());
+    assert_eq!(
+        js.decoded.announcement.x, expected_ann_x,
+        "upstream decode must recover the same announcement.x",
+    );
+    assert_eq!(
+        js.decoded.announcement.y, expected_ann_y,
+        "upstream decode must recover the same announcement.y",
+    );
+    assert_eq!(
+        js.decoded.response, expected_response,
+        "upstream decode must recover the same response scalar",
+    );
+
+    assert!(
+        js.verified,
+        "Upstream circuit must accept our upstream-encoded Rust signature (error: {:?})",
+        js.error,
     );
 }
 

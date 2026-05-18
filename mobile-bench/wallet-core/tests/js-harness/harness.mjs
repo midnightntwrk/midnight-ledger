@@ -467,6 +467,96 @@ const methods = {
     };
   },
 
+  /**
+   * Decode an upstream-encoded Jubjub Schnorr signature (96
+   * bytes: `ann.x BE || ann.y BE || response BE`) via
+   * `decodeJubjubSignature`, then run the on-chain
+   * `schnorrVerifyDigest` circuit on it. The Rust test passes
+   * the hex of the upstream wire form to assert that the Rust
+   * port's `encode_upstream` matches upstream's
+   * `encodeJubjubSignature` byte-for-byte — if the JS lib
+   * decodes our bytes into a valid signature object and the
+   * circuit accepts it, the two implementations are wire-
+   * compatible.
+   *
+   * Inputs:
+   *   - signatureHex: 192-char hex (96 bytes), upstream form
+   *   - publicKey:  { x: $bigint, y: $bigint }
+   *   - digest:     Array<$bigint>(4)
+   *
+   * Returns `{ verified, decoded: { announcement, response }, error?, elapsedMs }`.
+   */
+  schnorrVerifyUpstreamEncoded: async (params) => {
+    const t0 = Date.now();
+    const schnorrLib = await import(
+      "@midnight-ntwrk/midnight-did-jubjub-schnorr"
+    );
+    const { compactRuntime: cr } = await loadContractLayer();
+
+    const sigBytes = hexToBytes(params.signatureHex);
+    if (sigBytes.length !== 96) {
+      throw new Error(
+        `signatureHex must encode 96 bytes (got ${sigBytes.length})`,
+      );
+    }
+    const sig = schnorrLib.decodeJubjubSignature(sigBytes);
+
+    const pk = reviveBigints(params.publicKey);
+    const digest = reviveBigints(params.digest);
+    if (!Array.isArray(digest) || digest.length !== 4) {
+      throw new Error(
+        `digest must be a 4-element array, got ${digest?.length}`,
+      );
+    }
+
+    const TWO_248 = schnorrLib.TWO_248;
+    const Contract = schnorrLib.JubjubSchnorrContract.Contract;
+    const witnesses = {
+      getSchnorrReduction: (ctx, cFull) => {
+        const c = cFull % TWO_248;
+        const q = (cFull - c) / TWO_248;
+        return [ctx.privateState, [q, c]];
+      },
+    };
+    const contract = new Contract(witnesses);
+    const dummyCoinPk = "00".repeat(32);
+    const dummyAddress = "00".repeat(32);
+    const initial = contract.initialState(
+      cr.createConstructorContext({}, dummyCoinPk),
+    );
+    const ctx = cr.createCircuitContext(
+      dummyAddress,
+      dummyCoinPk,
+      initial.currentContractState,
+      initial.currentPrivateState,
+    );
+    let verified = false;
+    let error;
+    try {
+      contract.impureCircuits.schnorrVerifyDigest(
+        ctx,
+        digest,
+        sig,
+        { x: pk.x, y: pk.y },
+      );
+      verified = true;
+    } catch (e) {
+      error = String(e?.message ?? e);
+    }
+    return {
+      verified,
+      decoded: {
+        announcement: {
+          x: sig.announcement.x.toString(10),
+          y: sig.announcement.y.toString(10),
+        },
+        response: sig.response.toString(10),
+      },
+      error,
+      elapsedMs: Date.now() - t0,
+    };
+  },
+
   contractLayerInfo: async () => {
     const { contract, compactRuntime } = await loadContractLayer();
     const did = contract.DIDContract;

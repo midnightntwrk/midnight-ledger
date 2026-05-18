@@ -223,6 +223,64 @@ pub fn decode(bytes: &[u8]) -> Option<JubjubSchnorrSignature> {
     Some(JubjubSchnorrSignature { announcement, response })
 }
 
+/// Wire length for the upstream-compatible signature encoding —
+/// matches `JUBJUB_SIGNATURE_LENGTH_BYTES` in upstream's
+/// `signing.ts`. 96 bytes: `ann.x BE || ann.y BE || response BE`,
+/// each 32 bytes.
+pub const JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES: usize = 96;
+
+/// Bit-for-bit identical encoding to upstream
+/// `@midnight-ntwrk/midnight-did-jubjub-schnorr`'s
+/// `encodeJubjubSignature`. 96 bytes total:
+/// `ann.x (32B BE) || ann.y (32B BE) || response (32B BE)`.
+///
+/// Use this when a Rust-side signer needs to hand a signature
+/// to a JS verifier (or to any consumer matching upstream's
+/// wire format). Use [`encode`] when both sides are Rust and
+/// the compressed-point form is preferred.
+///
+/// `ann.x` / `ann.y` are the affine coordinates pulled via the
+/// existing `EmbeddedGroupAffine` accessors. The identity point
+/// would render as zeros — but a valid signature never has the
+/// identity as its announcement, so this case is unreachable
+/// in practice.
+pub fn encode_upstream(
+    sig: &JubjubSchnorrSignature,
+) -> [u8; JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES] {
+    let mut out = [0u8; JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES];
+    let ann_x = sig
+        .announcement
+        .x()
+        .unwrap_or_else(|| Fr::from(0u64));
+    let ann_y = sig
+        .announcement
+        .y()
+        .unwrap_or_else(|| Fr::from(0u64));
+    out[..32].copy_from_slice(&fr_to_be_32(&ann_x));
+    out[32..64].copy_from_slice(&fr_to_be_32(&ann_y));
+    out[64..96].copy_from_slice(&embedded_fr_to_be_32(&sig.response));
+    out
+}
+
+/// Inverse of [`encode_upstream`]. Returns `None` if the bytes
+/// don't decode cleanly — bad length, off-curve `(ann.x,
+/// ann.y)`, or a response that doesn't fit in `EmbeddedFr`.
+///
+/// Off-curve points are rejected at this layer via
+/// `EmbeddedGroupAffine::new`, so a downstream `verify_digest`
+/// call never has to worry about identity / non-subgroup
+/// announcements arriving from the wire.
+pub fn decode_upstream(bytes: &[u8]) -> Option<JubjubSchnorrSignature> {
+    if bytes.len() != JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES {
+        return None;
+    }
+    let ann_x = Fr::from_le_bytes(&be_to_le_32(&bytes[..32]))?;
+    let ann_y = Fr::from_le_bytes(&be_to_le_32(&bytes[32..64]))?;
+    let announcement = EmbeddedGroupAffine::new(ann_x, ann_y)?;
+    let response = EmbeddedFr::from_le_bytes(&be_to_le_32(&bytes[64..96]))?;
+    Some(JubjubSchnorrSignature { announcement, response })
+}
+
 // ── internals ────────────────────────────────────────────────────
 
 /// Reduce `bytes` (any length) to an `EmbeddedFr` value with
@@ -268,6 +326,160 @@ fn fr_to_be_32(f: &Fr) -> [u8; 32] {
         be[31 - i] = *b;
     }
     be
+}
+
+/// Same byte-order flip for `EmbeddedFr` (the response scalar
+/// of a Schnorr signature lives in the Jubjub scalar field).
+/// Upstream encodes it as 32 BE bytes per `bigintTo32Be`.
+fn embedded_fr_to_be_32(f: &EmbeddedFr) -> [u8; 32] {
+    let mut le = f.as_le_bytes();
+    if le.len() < 32 {
+        le.resize(32, 0);
+    }
+    let mut be = [0u8; 32];
+    for (i, b) in le[..32].iter().enumerate() {
+        be[31 - i] = *b;
+    }
+    be
+}
+
+/// Reverse a 32-byte big-endian slice to little-endian. The
+/// inverse of [`fr_to_be_32`] / [`embedded_fr_to_be_32`].
+fn be_to_le_32(be: &[u8]) -> [u8; 32] {
+    let mut le = [0u8; 32];
+    for (i, b) in be.iter().take(32).enumerate() {
+        le[31 - i] = *b;
+    }
+    le
+}
+
+/// Derive a deterministic Jubjub Schnorr signing seed for the
+/// `(controller_secret, did)` pair. Same seed across reloads
+/// of the wallet, but different per-DID and per-controller. The
+/// domain prefix keeps this output disjoint from any other
+/// "hash controller_secret + something" derivation the wallet
+/// might add later (e.g. encryption keys, DID-document
+/// authorisation tokens).
+///
+/// Used by the wallet's "Sign" tab in the DID detail view —
+/// every payload signed under a given DID always uses the same
+/// keypair, but unrelated DIDs (or different controllers) get
+/// independent keys.
+pub fn seed_from_controller_and_did(controller_secret: &[u8; 32], did: &str) -> [u8; 32] {
+    let mut h = Sha256::new();
+    h.update(b"midnight-did:wallet:sign-tab:v1");
+    h.update(controller_secret);
+    h.update(did.as_bytes());
+    let out = h.finalize();
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&out[..]);
+    seed
+}
+
+/// Pre-rendered, UI-friendly view of one Schnorr sign run.
+/// Every field is a decimal string or hex string so consumers
+/// don't need to depend on `transient_crypto` directly. Built
+/// by [`sign_payload_diagnostic`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SignedPayloadDiagnostic {
+    /// Public key's affine `x` / `y` coordinates in base 10.
+    pub pk_x_decimal: String,
+    pub pk_y_decimal: String,
+    /// 4-limb `Vector<4, Field>` digest as decimal strings.
+    pub digest_decimal: [String; 4],
+    /// Announcement point coordinates of the signature.
+    pub announcement_x_decimal: String,
+    pub announcement_y_decimal: String,
+    /// Response scalar (lives in the Jubjub scalar field).
+    pub response_decimal: String,
+    /// 64-byte compact wire form (`encode`).
+    pub compact_hex: String,
+    /// 96-byte upstream-compatible wire form (`encode_upstream`).
+    pub upstream_hex: String,
+}
+
+/// Sign + render a payload, returning every on-wire value the
+/// UI's "Sign" tab wants to display. Pure function — same seed
+/// + payload always yields the same diagnostic. Bundles the
+/// individual `derive_public_key_from_seed`, `payload_to_digest`,
+/// `sign_payload_from_seed`, `encode`, and `encode_upstream`
+/// calls so the UI does one round trip instead of five.
+pub fn sign_payload_diagnostic(
+    seed_bytes: &[u8],
+    payload: &[u8],
+) -> SignedPayloadDiagnostic {
+    let pk = derive_public_key_from_seed(seed_bytes);
+    let digest = payload_to_digest(payload);
+    let sig = sign_payload_from_seed(seed_bytes, payload);
+    SignedPayloadDiagnostic {
+        pk_x_decimal: fr_to_decimal(&pk.x().unwrap_or_else(|| Fr::from(0u64))),
+        pk_y_decimal: fr_to_decimal(&pk.y().unwrap_or_else(|| Fr::from(0u64))),
+        digest_decimal: [
+            fr_to_decimal(&digest[0]),
+            fr_to_decimal(&digest[1]),
+            fr_to_decimal(&digest[2]),
+            fr_to_decimal(&digest[3]),
+        ],
+        announcement_x_decimal: fr_to_decimal(
+            &sig.announcement.x().unwrap_or_else(|| Fr::from(0u64)),
+        ),
+        announcement_y_decimal: fr_to_decimal(
+            &sig.announcement.y().unwrap_or_else(|| Fr::from(0u64)),
+        ),
+        response_decimal: embedded_fr_to_decimal(&sig.response),
+        compact_hex: hex::encode(encode(&sig)),
+        upstream_hex: hex::encode(encode_upstream(&sig)),
+    }
+}
+
+/// Verify a payload directly from the same seed used to sign
+/// it. Bundles `derive_public_key_from_seed` +
+/// `verify_payload` so callers that already have the seed
+/// don't need to thread the public key around.
+pub fn verify_payload_with_seed(seed_bytes: &[u8], payload: &[u8], compact_sig: &[u8]) -> bool {
+    let Some(sig) = decode(compact_sig) else {
+        return false;
+    };
+    let pk = derive_public_key_from_seed(seed_bytes);
+    verify_payload(&pk, payload, &sig)
+}
+
+/// Render an `Fr` as a base-10 decimal string via long-division
+/// on u32 limbs. Used internally by the diagnostic shape; not
+/// exposed because callers should never need an `Fr` directly.
+fn fr_to_decimal(f: &Fr) -> String {
+    le_bytes_to_decimal(&f.as_le_bytes())
+}
+
+fn embedded_fr_to_decimal(f: &EmbeddedFr) -> String {
+    le_bytes_to_decimal(&f.as_le_bytes())
+}
+
+fn le_bytes_to_decimal(le: &[u8]) -> String {
+    let be: Vec<u8> = le.iter().rev().copied().collect();
+    let mut limbs: Vec<u32> = Vec::with_capacity(be.len().div_ceil(4));
+    for chunk in be.chunks(4) {
+        let mut limb = 0u32;
+        for &byte in chunk {
+            limb = (limb << 8) | (byte as u32);
+        }
+        limbs.push(limb);
+    }
+    if limbs.iter().all(|&l| l == 0) {
+        return "0".to_string();
+    }
+    let mut digits = Vec::new();
+    while !limbs.iter().all(|&l| l == 0) {
+        let mut rem: u64 = 0;
+        for limb in limbs.iter_mut() {
+            let acc = (rem << 32) | (*limb as u64);
+            *limb = (acc / 10) as u32;
+            rem = acc % 10;
+        }
+        digits.push((rem as u8) + b'0');
+    }
+    digits.reverse();
+    String::from_utf8(digits).expect("ascii digits")
 }
 
 #[cfg(test)]
@@ -337,6 +549,45 @@ mod tests {
     fn decode_rejects_wrong_length() {
         assert!(decode(&[0u8; 32]).is_none());
         assert!(decode(&[0u8; 96]).is_none());
+    }
+
+    #[test]
+    fn encode_upstream_decode_upstream_round_trip() {
+        let seed = fixed_seed();
+        let sig = sign_payload_from_seed(&seed, b"upstream-roundtrip");
+        let bytes = encode_upstream(&sig);
+        assert_eq!(bytes.len(), JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES);
+        let back = decode_upstream(&bytes).expect("decode_upstream round trip");
+        assert_eq!(back, sig);
+    }
+
+    #[test]
+    fn upstream_decoded_signature_still_verifies() {
+        let seed = fixed_seed();
+        let pk = derive_public_key_from_seed(&seed);
+        let payload = b"upstream-verify";
+        let sig = sign_payload_from_seed(&seed, payload);
+        let bytes = encode_upstream(&sig);
+        let back = decode_upstream(&bytes).expect("decode_upstream");
+        assert!(verify_payload(&pk, payload, &back));
+    }
+
+    #[test]
+    fn decode_upstream_rejects_wrong_length() {
+        assert!(decode_upstream(&[0u8; 32]).is_none());
+        assert!(decode_upstream(&[0u8; 64]).is_none());
+        assert!(decode_upstream(&[0u8; 97]).is_none());
+    }
+
+    #[test]
+    fn upstream_and_compact_formats_carry_same_signature() {
+        // Encode the same signature both ways, decode both
+        // ways, confirm they end up at the same (ann, response).
+        let seed = fixed_seed();
+        let sig = sign_payload_from_seed(&seed, b"two-formats");
+        let from_compact = decode(&encode(&sig)).expect("compact rt");
+        let from_upstream = decode_upstream(&encode_upstream(&sig)).expect("upstream rt");
+        assert_eq!(from_compact, from_upstream);
     }
 
     #[test]
