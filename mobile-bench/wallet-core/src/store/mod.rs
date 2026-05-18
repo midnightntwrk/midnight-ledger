@@ -40,7 +40,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use rand::RngCore;
-use redb::Database;
+use redb::{Database, ReadableTable};
 use uuid::Uuid;
 
 use crate::Network;
@@ -49,9 +49,15 @@ pub use error::StoreError;
 pub use schema::{NetworkTag, SCHEMA_VERSION, WalletId};
 
 use codec::Bincoded;
-use envelope::{decrypt_secret, encrypt_secret};
+pub use envelope::{SecretEnvelope, decrypt_secret, encrypt_secret};
+pub(crate) use envelope::encrypt_secret as wrap_secret;
+pub use schema::KeyDerivation;
 use schema::{
-    CONTROLLER_SECRETS, META, WALLETS, WalletRowV1,
+    CONTROLLER_SECRETS, KEYS, KEYS_BY_WALLET, KeyRowV1, META, WALLETS, WalletRowV1,
+};
+
+use crate::secret_storage::{
+    AlgorithmTag, MidnightCurve, MidnightKeyType, PublicJwk,
 };
 
 /// Façade over the on-disk redb file. Holds the unlocked
@@ -291,6 +297,233 @@ impl WalletStore {
         Ok(out)
     }
 
+    /// Enumerate every `WalletId` in the store. Order is the
+    /// redb iteration order (raw-bytes ascending), good enough
+    /// for "pick the only wallet" or "show a wallet list" UX.
+    pub fn list_wallet_ids(&self) -> Result<Vec<WalletId>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(WALLETS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut out = Vec::new();
+        for entry in table
+            .iter()
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        {
+            let (k, _) = entry.map_err(|e| StoreError::Backend(e.to_string()))?;
+            out.push(WalletId(k.value()));
+        }
+        Ok(out)
+    }
+
+    /// Read the wallet metadata (everything except the seed
+    /// envelope) for callers that want to render labels +
+    /// timestamps in a wallet picker without unwrapping the
+    /// secret.
+    pub fn wallet_meta(&self, id: WalletId) -> Result<Option<WalletMeta>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(WALLETS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(raw) = table
+            .get(id.0)
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let row: WalletRowV1 = Bincoded::decode(raw.value())?;
+        Ok(Some(WalletMeta {
+            id,
+            label: row.label,
+            network: row.network,
+            address_bech32: row.address_bech32,
+            created_at: row.created_at,
+            updated_at: row.updated_at,
+        }))
+    }
+
+    // ── Keys ──────────────────────────────────────────────────────
+
+    /// Persist a key row. Replaces any existing row at
+    /// `(wallet_id, key_ref)` and inserts into the secondary
+    /// `KEYS_BY_WALLET` index. Bumps `updated_at` to "now".
+    pub fn put_key(
+        &self,
+        wallet_id: WalletId,
+        key_ref: &str,
+        mut row: KeyRow,
+    ) -> Result<(), StoreError> {
+        let now = unix_now_ms();
+        if row.created_at == 0 {
+            row.created_at = now;
+        }
+        row.updated_at = now;
+        let bincoded = Bincoded::encode(&row.into_v1())?;
+        let key = (wallet_id.0, key_ref);
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(KEYS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert(key, bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut idx = txn
+                .open_multimap_table(KEYS_BY_WALLET)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            idx.insert(wallet_id.0, key_ref)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Load a key row, if present.
+    pub fn get_key(
+        &self,
+        wallet_id: WalletId,
+        key_ref: &str,
+    ) -> Result<Option<KeyRow>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(KEYS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(g) = table
+            .get((wallet_id.0, key_ref))
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+        else {
+            return Ok(None);
+        };
+        let v1: KeyRowV1 = Bincoded::decode(g.value())?;
+        Ok(Some(KeyRow::from_v1(v1)))
+    }
+
+    /// List every key belonging to a wallet. Optionally
+    /// filters by DID (matches `StoredKeyMeta.did`).
+    pub fn list_keys(
+        &self,
+        wallet_id: WalletId,
+        did_filter: Option<&str>,
+    ) -> Result<Vec<(String, KeyRow)>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let idx = txn
+            .open_multimap_table(KEYS_BY_WALLET)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut refs: Vec<String> = Vec::new();
+        let iter = idx
+            .get(wallet_id.0)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        for entry in iter {
+            let r = entry.map_err(|e| StoreError::Backend(e.to_string()))?;
+            refs.push(r.value().to_string());
+        }
+        let table = txn
+            .open_table(KEYS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut out = Vec::with_capacity(refs.len());
+        for r in refs {
+            let Some(g) = table
+                .get((wallet_id.0, r.as_str()))
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+            else {
+                continue;
+            };
+            let v1: KeyRowV1 = Bincoded::decode(g.value())?;
+            if let Some(want) = did_filter {
+                if v1.did.as_deref() != Some(want) {
+                    continue;
+                }
+            }
+            out.push((r, KeyRow::from_v1(v1)));
+        }
+        // Sort by created_at then ref so listings are stable.
+        out.sort_by(|a, b| a.1.created_at.cmp(&b.1.created_at).then(a.0.cmp(&b.0)));
+        Ok(out)
+    }
+
+    /// Delete a key row + drop the index entry.
+    pub fn delete_key(&self, wallet_id: WalletId, key_ref: &str) -> Result<(), StoreError> {
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(KEYS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .remove((wallet_id.0, key_ref))
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut idx = txn
+                .open_multimap_table(KEYS_BY_WALLET)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            idx.remove(wallet_id.0, key_ref)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Recover the raw scalar for a key. Branches on the
+    /// derivation variant: HKDF rows re-derive from the
+    /// wallet seed (which we unwrap once); Direct rows unwrap
+    /// the row's envelope.
+    pub fn key_private_bytes(
+        &self,
+        wallet_id: WalletId,
+        key_ref: &str,
+    ) -> Result<zeroize::Zeroizing<Vec<u8>>, StoreError> {
+        let Some(row) = self.get_key(wallet_id, key_ref)? else {
+            return Err(StoreError::NotFound("key"));
+        };
+        match row.derivation {
+            KeyDerivation::Hkdf {
+                account,
+                index,
+                candidate,
+            } => {
+                let seed = self.wallet_seed(wallet_id)?;
+                let seed_hex = hex::encode(&*seed);
+                let params = crate::secret_storage::DeriveKeyFromSeedInput {
+                    id: row.label,
+                    seed_hex,
+                    kty: row.kty,
+                    crv: row.crv,
+                    account: Some(account),
+                    index: Some(index),
+                    did: row.did,
+                    purpose: row.purpose,
+                };
+                let derived = crate::secret_storage::hd_derivation::derive_curve_private_from_seed(
+                    &params, candidate,
+                )
+                .map_err(StoreError::from)?;
+                Ok(zeroize::Zeroizing::new(derived.private_bytes))
+            }
+            KeyDerivation::Direct { envelope } => {
+                let bytes = decrypt_secret(self.passphrase(), &envelope)?;
+                Ok(zeroize::Zeroizing::new(bytes))
+            }
+        }
+    }
+
     /// Inspect the on-disk schema version. Public so callers
     /// can surface "store is up to date" diagnostics without
     /// touching internals.
@@ -315,6 +548,74 @@ impl WalletStore {
             })
             .unwrap_or(0);
         Ok(v)
+    }
+}
+
+/// Wallet metadata — everything in the wallet row except the
+/// encrypted seed. Returned by [`WalletStore::wallet_meta`]
+/// for UI surfaces that want to render labels / timestamps
+/// without unwrapping a secret.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct WalletMeta {
+    pub id: WalletId,
+    pub label: String,
+    pub network: NetworkTag,
+    pub address_bech32: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+/// Public face of `KeyRowV1` — same fields, but exported so
+/// callers (e.g. the upcoming `RedbSecretStore`) can build /
+/// inspect rows without depending on the crate-private V1
+/// alias. A version bump introduces `KeyRowV2` etc.; the
+/// `from_vN` / `into_vN` shims live next to the table
+/// accessors so the public API stays stable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct KeyRow {
+    pub label: String,
+    pub did: Option<String>,
+    pub purpose: Option<String>,
+    pub kty: MidnightKeyType,
+    pub crv: MidnightCurve,
+    pub public_jwk: PublicJwk,
+    pub algorithm: AlgorithmTag,
+    pub derivation: KeyDerivation,
+    /// Unix-ms. Zero on a fresh row → `put_key` stamps it on
+    /// first write.
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+impl KeyRow {
+    fn into_v1(self) -> KeyRowV1 {
+        KeyRowV1 {
+            label: self.label,
+            did: self.did,
+            purpose: self.purpose,
+            kty: self.kty,
+            crv: self.crv,
+            public_jwk: self.public_jwk.into(),
+            algorithm: self.algorithm,
+            derivation: self.derivation,
+            created_at: self.created_at,
+            updated_at: self.updated_at,
+        }
+    }
+
+    fn from_v1(v1: KeyRowV1) -> Self {
+        Self {
+            label: v1.label,
+            did: v1.did,
+            purpose: v1.purpose,
+            kty: v1.kty,
+            crv: v1.crv,
+            public_jwk: v1.public_jwk.into(),
+            algorithm: v1.algorithm,
+            derivation: v1.derivation,
+            created_at: v1.created_at,
+            updated_at: v1.updated_at,
+        }
     }
 }
 

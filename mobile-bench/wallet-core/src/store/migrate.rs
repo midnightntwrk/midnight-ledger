@@ -14,7 +14,8 @@ use redb::ReadableTable;
 
 use crate::store::error::StoreError;
 use crate::store::schema::{
-    CONTROLLER_SECRETS, META, META_SCHEMA_VERSION_KEY, SCHEMA_VERSION, WALLETS,
+    CONTROLLER_SECRETS, KEYS, KEYS_BY_WALLET, META, META_SCHEMA_VERSION_KEY, SCHEMA_VERSION,
+    WALLETS,
 };
 use crate::store::WalletStore;
 
@@ -36,6 +37,7 @@ pub(crate) fn run(store: &WalletStore) -> Result<(), StoreError> {
         let next = v + 1;
         match (v, next) {
             (0, 1) => migrate_v0_to_v1(store)?,
+            (1, 2) => migrate_v1_to_v2(store)?,
             (from, to) => {
                 return Err(StoreError::Migration(format!(
                     "no migration registered for {from} → {to}",
@@ -123,6 +125,28 @@ fn migrate_v0_to_v1(store: &WalletStore) -> Result<(), StoreError> {
     txn.commit()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
     write_version(store, 1)
+}
+
+fn migrate_v1_to_v2(store: &WalletStore) -> Result<(), StoreError> {
+    // v1 → v2 adds the keys table + the wallet-id index. No
+    // existing rows to walk — v1 didn't have a keys table at
+    // all. Materialise the new tables so subsequent read txns
+    // don't fault.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .open_table(KEYS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let _ = txn
+            .open_multimap_table(KEYS_BY_WALLET)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 2)
 }
 
 #[cfg(test)]

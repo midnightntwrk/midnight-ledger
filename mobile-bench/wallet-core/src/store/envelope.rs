@@ -18,7 +18,7 @@ use crate::store::error::StoreError;
 /// codec to anything human-readable we don't want the table
 /// growing by 4× for the tags.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub(crate) struct SecretEnvelope {
+pub struct SecretEnvelope {
     pub salt: Vec<u8>,
     pub iv: Vec<u8>,
     pub tag: Vec<u8>,
@@ -28,7 +28,7 @@ pub(crate) struct SecretEnvelope {
 /// Wrap a secret under the wallet store passphrase. Surfaces
 /// the underlying crypto failure (very rare — scrypt + AES-GCM
 /// are infallible in practice) as `StoreError::Crypto`.
-pub(crate) fn encrypt_secret(passphrase: &str, plaintext: &[u8]) -> Result<SecretEnvelope, StoreError> {
+pub fn encrypt_secret(passphrase: &str, plaintext: &[u8]) -> Result<SecretEnvelope, StoreError> {
     let mut rng = rand::thread_rng();
     let env = crate::secret_storage::crypto::encrypt_json(passphrase, plaintext, &mut rng)
         .map_err(StoreError::from)?;
@@ -43,7 +43,7 @@ pub(crate) fn encrypt_secret(passphrase: &str, plaintext: &[u8]) -> Result<Secre
 /// Unwrap a stored envelope back to plaintext. Wrong passphrase
 /// → `StoreError::Crypto` (the GCM auth tag mismatch surfaces
 /// at the underlying crypto layer).
-pub(crate) fn decrypt_secret(passphrase: &str, env: &SecretEnvelope) -> Result<Vec<u8>, StoreError> {
+pub fn decrypt_secret(passphrase: &str, env: &SecretEnvelope) -> Result<Vec<u8>, StoreError> {
     let upstream = crate::secret_storage::crypto::EncryptedPayload {
         salt: encode_b64(&env.salt),
         iv: encode_b64(&env.iv),
