@@ -290,6 +290,18 @@ pub fn App() -> Element {
     // panel with its current best-known status + counter.
     let mut did_inventory =
         use_signal::<std::collections::BTreeMap<String, DidInventoryEntry>>(Default::default);
+    // Which DID, if any, is currently "open" in the detail view.
+    // `None` → render the flat panels (Create / Resolve / etc.);
+    // `Some(did)` → render `DidDetailView` for that DID.
+    let mut open_did = use_signal::<Option<String>>(|| None);
+    // Cache of the most recent successful resolve for each DID.
+    // `DidDetailView` reads from this so opening / switching tabs
+    // doesn't have to re-query the indexer; a manual "Resolve
+    // latest" button refreshes it.
+    let mut resolved_cache =
+        use_signal::<std::collections::HashMap<String, wallet_core::ResolvedDid>>(
+            Default::default,
+        );
     // Per-pipeline timing snapshots, newest last. Shown in the
     // Diagnostics tab as a stacked bar / breakdown per run.
     let mut timing_log = use_signal::<Vec<TimingRun>>(Vec::new);
@@ -557,56 +569,122 @@ pub fn App() -> Element {
                         timing_log.set(log);
                     },
                 }
-                DidInventoryPanel {
-                    entries: did_inventory.read().values().cloned().collect(),
-                    on_select: move |did: String| {
-                        last_did_id.set(Some(did));
-                    },
+                if let Some(did_open) = open_did.read().clone() {
+                    // Detail mode: full 8-tab view of one DID.
+                    DidDetailView {
+                        network: *network.read(),
+                        did: did_open.clone(),
+                        cached: resolved_cache.read().get(&did_open).cloned(),
+                        controller_secret: bridge_state.read().controller_secret_for(&did_open),
+                        session_log: session_log.read().clone(),
+                        on_back: move |_| open_did.set(None),
+                        on_resolved: move |resolved: wallet_core::ResolvedDid| {
+                            let did_string = resolved.document.id.to_did_string();
+                            // Inventory row stays in sync.
+                            let entry = DidInventoryEntry {
+                                did: did_string.clone(),
+                                network_label: resolved.document.id.network.label().to_string(),
+                                status: if resolved.document.deactivated {
+                                    DidInventoryStatus::Deactivated
+                                } else {
+                                    DidInventoryStatus::Active
+                                },
+                                counter: Some(resolved.maintenance_counter),
+                                vm_count: Some(resolved.document.verification_method.len()),
+                                service_count: Some(resolved.document.service.len()),
+                                last_block_height: resolved.last_block_height,
+                            };
+                            let mut inv = did_inventory.read().clone();
+                            inv.insert(did_string.clone(), entry);
+                            did_inventory.set(inv);
+                            // Cache the full resolve for the detail tabs.
+                            let mut cache = resolved_cache.read().clone();
+                            cache.insert(did_string.clone(), resolved.clone());
+                            resolved_cache.set(cache);
+                            // Session log gets a Resolve event.
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::Resolve {
+                                did: did_string,
+                                counter: resolved.maintenance_counter,
+                            });
+                            session_log.set(log);
+                            // The maintenance counter feeds the
+                            // load-circuit auto-fill, same as before.
+                            last_resolved.set(Some((
+                                resolved.document.id.to_did_string(),
+                                resolved.maintenance_counter,
+                            )));
+                        },
+                        on_deactivated: move |(did, outcome): (String, wallet_core::DeployOutcome)| {
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::LoadCircuit {
+                                did,
+                                circuit: "deactivate".to_string(),
+                                tx_hash: outcome.tx_hash,
+                                block_hash: outcome.block_hash,
+                            });
+                            session_log.set(log);
+                        },
+                        on_timing: move |run: TimingRun| {
+                            let mut log = timing_log.read().clone();
+                            log.push(run);
+                            timing_log.set(log);
+                        },
+                    }
+                } else {
+                    // Browse mode: inventory + flat panels.
+                    DidInventoryPanel {
+                        entries: did_inventory.read().values().cloned().collect(),
+                        on_select: move |did: String| {
+                            last_did_id.set(Some(did.clone()));
+                            open_did.set(Some(did));
+                        },
+                    }
+                    ResolveDidPanel {
+                        network: *network.read(),
+                        seed_did: last_did_id.read().clone(),
+                        on_resolved: move |(did, counter): (String, u32)| {
+                            last_resolved.set(Some((did.clone(), counter)));
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::Resolve { did, counter });
+                            session_log.set(log);
+                        },
+                        on_seen: move |entry: DidInventoryEntry| {
+                            let mut inv = did_inventory.read().clone();
+                            inv.insert(entry.did.clone(), entry);
+                            did_inventory.set(inv);
+                        },
+                    }
+                    LoadCircuitPanel {
+                        network: *network.read(),
+                        seed_did: last_did_id.read().clone(),
+                        seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
+                        on_done: move |(did, circuit, o): (String, String, wallet_core::DeployOutcome)| {
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::LoadCircuit {
+                                did,
+                                circuit,
+                                tx_hash: o.tx_hash,
+                                block_hash: o.block_hash,
+                            });
+                            session_log.set(log);
+                        },
+                        on_timing: move |run: TimingRun| {
+                            let mut log = timing_log.read().clone();
+                            log.push(run);
+                            timing_log.set(log);
+                        },
+                    }
+                    DidOperationsPanel {
+                        seed_did: last_did_id.read().clone(),
+                        on_drafted: move |(did, op): (String, DidOperation)| {
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::OperationDrafted { did, operation: op });
+                            session_log.set(log);
+                        },
+                    }
+                    SessionLogPanel { events: session_log.read().clone() }
                 }
-                ResolveDidPanel {
-                    network: *network.read(),
-                    seed_did: last_did_id.read().clone(),
-                    on_resolved: move |(did, counter): (String, u32)| {
-                        last_resolved.set(Some((did.clone(), counter)));
-                        let mut log = session_log.read().clone();
-                        log.push(SessionEvent::Resolve { did, counter });
-                        session_log.set(log);
-                    },
-                    on_seen: move |entry: DidInventoryEntry| {
-                        let mut inv = did_inventory.read().clone();
-                        inv.insert(entry.did.clone(), entry);
-                        did_inventory.set(inv);
-                    },
-                }
-                LoadCircuitPanel {
-                    network: *network.read(),
-                    seed_did: last_did_id.read().clone(),
-                    seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
-                    on_done: move |(did, circuit, o): (String, String, wallet_core::DeployOutcome)| {
-                        let mut log = session_log.read().clone();
-                        log.push(SessionEvent::LoadCircuit {
-                            did,
-                            circuit,
-                            tx_hash: o.tx_hash,
-                            block_hash: o.block_hash,
-                        });
-                        session_log.set(log);
-                    },
-                    on_timing: move |run: TimingRun| {
-                        let mut log = timing_log.read().clone();
-                        log.push(run);
-                        timing_log.set(log);
-                    },
-                }
-                DidOperationsPanel {
-                    seed_did: last_did_id.read().clone(),
-                    on_drafted: move |(did, op): (String, DidOperation)| {
-                        let mut log = session_log.read().clone();
-                        log.push(SessionEvent::OperationDrafted { did, operation: op });
-                        session_log.set(log);
-                    },
-                }
-                SessionLogPanel { events: session_log.read().clone() }
             },
             Tab::Diagnostics => rsx! {
                 JsBridgePanel { seed_did: last_did_id.read().clone() }
@@ -2029,6 +2107,625 @@ fn format_ms(ms: u64) -> String {
         let m = ms / 60_000;
         let s = (ms % 60_000) / 1_000;
         format!("{m}m {s:02}s")
+    }
+}
+
+/// Which detail-page tab is currently visible.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum DetailTab {
+    Overview,
+    Document,
+    Methods,
+    Relationships,
+    Services,
+    Operations,
+    Resolver,
+    RawState,
+}
+
+impl DetailTab {
+    const ALL: &'static [DetailTab] = &[
+        DetailTab::Overview,
+        DetailTab::Document,
+        DetailTab::Methods,
+        DetailTab::Relationships,
+        DetailTab::Services,
+        DetailTab::Operations,
+        DetailTab::Resolver,
+        DetailTab::RawState,
+    ];
+
+    fn label(&self) -> &'static str {
+        match self {
+            DetailTab::Overview => "Overview",
+            DetailTab::Document => "DID Document",
+            DetailTab::Methods => "Methods",
+            DetailTab::Relationships => "Relationships",
+            DetailTab::Services => "Services",
+            DetailTab::Operations => "Operations",
+            DetailTab::Resolver => "Resolver",
+            DetailTab::RawState => "Raw state",
+        }
+    }
+}
+
+/// Centerpiece DID-detail view — adopts
+/// `midnight-did-uiux-bundle/06-wireframes.md` (line 48–61). Lives
+/// in the DIDs tab when an inventory row is "open" and renders an
+/// 8-tab panel for the picked DID: Overview, DID Document,
+/// Methods, Relationships, Services, Operations, Resolver,
+/// Raw state.
+///
+/// Reads from `cached: Option<ResolvedDid>` — the parent passes
+/// the most-recent resolve from `resolved_cache`. The "Resolve
+/// latest" header button re-fetches from the chain and bubbles
+/// the new `ResolvedDid` via `on_resolved`, which the parent
+/// writes back into the cache.
+///
+/// The "Deactivate" button fires
+/// `Wallet::call_did_circuit("deactivate", [])` — only enabled
+/// if `controller_known` (the per-DID random sk is in the
+/// session's `BridgeState.controller_secrets`).
+///
+/// `on_back` returns to the inventory/browse view; the parent
+/// clears its `open_did` signal.
+#[component]
+fn DidDetailView(
+    network: Network,
+    did: String,
+    cached: Option<wallet_core::ResolvedDid>,
+    /// Per-DID random sk if this session has it (the wallet
+    /// minted the DID here). `None` means the user resolved a
+    /// DID created elsewhere — Deactivate is disabled.
+    controller_secret: Option<[u8; 32]>,
+    session_log: Vec<SessionEvent>,
+    on_back: EventHandler<()>,
+    on_resolved: EventHandler<wallet_core::ResolvedDid>,
+    on_deactivated: EventHandler<(String, wallet_core::DeployOutcome)>,
+    on_timing: EventHandler<TimingRun>,
+) -> Element {
+    use wallet_core::WizardStage;
+
+    let mut tab = use_signal(|| DetailTab::Overview);
+    let mut resolving = use_signal(|| false);
+    let mut resolve_error = use_signal::<Option<String>>(|| None);
+    let mut deactivating = use_signal::<Vec<WizardStage>>(Vec::new);
+    let mut deactivate_error = use_signal::<Option<String>>(|| None);
+    let controller_known = controller_secret.is_some();
+
+    // Click handler for "Resolve latest".
+    let did_for_resolve = did.clone();
+    let resolve_latest = move |_| {
+        if *resolving.read() {
+            return;
+        }
+        resolving.set(true);
+        resolve_error.set(None);
+        let did_str = did_for_resolve.clone();
+        let on_resolved = on_resolved.clone();
+        spawn(async move {
+            let w = Wallet::demo(network);
+            match w.resolve_did_full(&did_str).await {
+                Ok(r) => on_resolved.call(r),
+                Err(e) => resolve_error.set(Some(e.to_string())),
+            }
+            resolving.set(false);
+        });
+    };
+
+    // Click handler for "Deactivate". Drives the full
+    // Wallet::call_did_circuit("deactivate") pipeline, surfacing
+    // each WizardStage so the user sees the progress.
+    let did_for_deactivate = did.clone();
+    let sk_for_deactivate = controller_secret;
+    let deactivate = move |_| {
+        let Some(sk) = sk_for_deactivate else {
+            deactivate_error.set(Some(
+                "controller secret not in session — was this DID created here?".into(),
+            ));
+            return;
+        };
+        if !deactivating.read().is_empty()
+            && !matches!(
+                deactivating.read().last(),
+                Some(WizardStage::Done(_)) | Some(WizardStage::Failed(_))
+            )
+        {
+            return; // already in flight
+        }
+        deactivate_error.set(None);
+        deactivating.set(Vec::new());
+        let did_str = did_for_deactivate.clone();
+        let on_deactivated = on_deactivated.clone();
+        let on_timing = on_timing.clone();
+        spawn(async move {
+            use futures::StreamExt;
+            let w = Wallet::demo(network);
+            let did_id = match wallet_core::DidId::parse(&did_str) {
+                Ok(d) => d,
+                Err(e) => {
+                    deactivate_error.set(Some(format!("parse DID: {e}")));
+                    return;
+                }
+            };
+            let timing_label = "call_did_circuit:deactivate".to_string();
+            let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
+            let mut stream = std::pin::pin!(w.call_did_circuit(
+                did_id,
+                "deactivate".to_string(),
+                serde_json::json!([]),
+                sk,
+            ));
+            while let Some(stage) = stream.next().await {
+                let now = std::time::Instant::now();
+                if let Some(idx) = stage_pipeline_idx(&stage) {
+                    observations.push((idx, now));
+                } else {
+                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    on_timing.call(build_timing(
+                        timing_label.clone(),
+                        &observations,
+                        now,
+                        succeeded,
+                    ));
+                }
+                let mut current = deactivating.read().clone();
+                if let WizardStage::Done(o) = &stage {
+                    on_deactivated.call((did_str.clone(), o.clone()));
+                } else if let WizardStage::Failed(msg) = &stage {
+                    deactivate_error.set(Some(msg.clone()));
+                }
+                current.push(stage);
+                deactivating.set(current);
+            }
+        });
+    };
+
+    // Auto-resolve on first mount if we don't have anything
+    // cached yet — saves the user a click.
+    let mut auto_resolve_done = use_signal(|| false);
+    {
+        let did_for_auto = did.clone();
+        let cached_some = cached.is_some();
+        use_effect(move || {
+            if !cached_some && !*auto_resolve_done.read() {
+                auto_resolve_done.set(true);
+                let did_str = did_for_auto.clone();
+                resolving.set(true);
+                spawn(async move {
+                    let w = Wallet::demo(network);
+                    match w.resolve_did_full(&did_str).await {
+                        Ok(r) => on_resolved.call(r),
+                        Err(e) => resolve_error.set(Some(e.to_string())),
+                    }
+                    resolving.set(false);
+                });
+            }
+        });
+    }
+
+    let did_short = truncate_did(&did);
+    let did_full = did.clone();
+    let status_label = match cached.as_ref() {
+        None => "Resolving…",
+        Some(r) => {
+            if r.document.deactivated {
+                "Deactivated"
+            } else {
+                "Active"
+            }
+        }
+    };
+    let status_class = match cached.as_ref() {
+        None => "did-badge pending",
+        Some(r) => {
+            if r.document.deactivated {
+                "did-badge deactivated"
+            } else {
+                "did-badge active"
+            }
+        }
+    };
+    let version = cached
+        .as_ref()
+        .map(|r| format!("v{}", r.document.version))
+        .unwrap_or_else(|| "—".to_string());
+    let cur_tab = *tab.read();
+
+    rsx! {
+        div { class: "detail-back-row",
+            button { onclick: move |_| on_back.call(()), "← Back to inventory" }
+        }
+        div { class: "detail-header",
+            div { class: "did-line",
+                span { class: "{status_class}", "{status_label}" }
+                span { class: "version", "{version}" }
+                span {
+                    class: "did-text",
+                    title: "{did_full}",
+                    "{did_short}"
+                }
+            }
+            div { class: "actions",
+                button {
+                    class: "btn-primary",
+                    disabled: true,
+                    title: "Operation Builder is the next slice",
+                    "Update DID"
+                }
+                button {
+                    disabled: *resolving.read(),
+                    onclick: resolve_latest,
+                    {if *resolving.read() { "Resolving…" } else { "Resolve latest" }}
+                }
+                button {
+                    class: "btn-danger",
+                    disabled: !controller_known
+                        || cached.as_ref().map(|r| r.document.deactivated).unwrap_or(false),
+                    title: if controller_known {
+                        "Submit a deactivate ContractCall via the JS bridge"
+                    } else {
+                        "Controller secret unknown — was this DID created in another session?"
+                    },
+                    onclick: deactivate,
+                    "Deactivate"
+                }
+            }
+            if let Some(err) = resolve_error.read().as_ref() {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Resolve failed" }
+                    div { class: "seed-blob", "{err}" }
+                }
+            }
+            if let Some(err) = deactivate_error.read().as_ref() {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Deactivate failed" }
+                    div { class: "seed-blob", "{err}" }
+                }
+            }
+            {
+                let stages_snap = deactivating.read().clone();
+                if !stages_snap.is_empty() {
+                    let term = terminal(&stages_snap);
+                    rsx! {
+                        ul { class: "wizard-steps",
+                            for (idx , label) in PIPELINE.iter().enumerate() {
+                                {render_step_row(idx, label, step_status(idx, &stages_snap))}
+                            }
+                        }
+                        if let Some(TerminalView::Done(o)) = &term {
+                            div { class: "wizard-outcome ok",
+                                div { class: "row label", "Deactivate landed" }
+                                div { class: "seed-blob", "tx 0x{hex::encode(o.tx_hash)}" }
+                                div { class: "seed-blob", "block 0x{hex::encode(o.block_hash)}" }
+                            }
+                        }
+                    }
+                } else {
+                    rsx! { "" }
+                }
+            }
+        }
+        div { class: "detail-tabs",
+            for t in DetailTab::ALL {
+                button {
+                    class: if cur_tab == *t { "detail-tab active" } else { "detail-tab" },
+                    onclick: move |_| tab.set(*t),
+                    "{t.label()}"
+                }
+            }
+        }
+        div { class: "detail-pane",
+            {render_detail_tab(cur_tab, &did, cached.as_ref(), &session_log)}
+        }
+    }
+}
+
+fn render_detail_tab(
+    tab: DetailTab,
+    did: &str,
+    resolved: Option<&wallet_core::ResolvedDid>,
+    session_log: &[SessionEvent],
+) -> Element {
+    let Some(r) = resolved else {
+        return rsx! {
+            div { class: "detail-empty",
+                "No resolved snapshot yet. Click \"Resolve latest\" or wait for the auto-resolve."
+            }
+        };
+    };
+    match tab {
+        DetailTab::Overview => render_overview_tab(r),
+        DetailTab::Document => render_document_tab(r),
+        DetailTab::Methods => render_methods_tab(r),
+        DetailTab::Relationships => render_relationships_tab(r),
+        DetailTab::Services => render_services_tab(r),
+        DetailTab::Operations => render_operations_tab(did, session_log),
+        DetailTab::Resolver => render_resolver_tab(did, r),
+        DetailTab::RawState => render_raw_state_tab(r),
+    }
+}
+
+fn render_overview_tab(r: &wallet_core::ResolvedDid) -> Element {
+    let counter = r.maintenance_counter;
+    let vms = r.document.verification_method.len();
+    let services = r.document.service.len();
+    let block = r
+        .last_block_height
+        .map(|h| format_int(h))
+        .unwrap_or_else(|| "—".into());
+    let last_tx = if r.last_tx_hash.is_empty() {
+        "—".to_string()
+    } else {
+        format!("0x{}", r.last_tx_hash)
+    };
+    rsx! {
+        h3 { "Summary" }
+        div { class: "did-meta-grid",
+            div { class: "did-meta-cell",
+                span { class: "label", "Version" }
+                span { class: "value", "{r.document.version}" }
+            }
+            div { class: "did-meta-cell",
+                span { class: "label", "Maintenance counter" }
+                span { class: "value", "{counter}" }
+            }
+            div { class: "did-meta-cell",
+                span { class: "label", "Methods" }
+                span { class: "value", "{vms}" }
+            }
+            div { class: "did-meta-cell",
+                span { class: "label", "Services" }
+                span { class: "value", "{services}" }
+            }
+            div { class: "did-meta-cell",
+                span { class: "label", "Last block" }
+                span { class: "value", "{block}" }
+            }
+            div { class: "did-meta-cell",
+                span { class: "label", "Last tx" }
+                span { class: "value", title: "{last_tx}", "{last_tx}" }
+            }
+        }
+    }
+}
+
+fn render_document_tab(r: &wallet_core::ResolvedDid) -> Element {
+    let json = serde_json::to_string_pretty(&r.document)
+        .unwrap_or_else(|e| format!("serialise: {e}"));
+    rsx! {
+        h3 { "DID Document" }
+        div { class: "seed-blob", "{json}" }
+    }
+}
+
+fn render_methods_tab(r: &wallet_core::ResolvedDid) -> Element {
+    if r.document.verification_method.is_empty() {
+        return rsx! {
+            h3 { "Verification methods" }
+            div { class: "detail-empty",
+                "This DID has no verification methods. Add one via the Operation Builder (coming soon)."
+            }
+        };
+    }
+    rsx! {
+        h3 { "Verification methods" }
+        table { class: "detail-table",
+            thead {
+                tr {
+                    th { "ID" }
+                    th { "Type" }
+                    th { "Curve" }
+                }
+            }
+            tbody {
+                for vm in r.document.verification_method.iter() {
+                    {
+                        // Type/curve names come straight from the JWK
+                        let kty = format!("{:?}", vm.public_key_jwk.kty);
+                        let crv = format!("{:?}", vm.public_key_jwk.crv);
+                        rsx! {
+                            tr {
+                                td { "{vm.id}" }
+                                td { class: "muted", "{kty}" }
+                                td { class: "muted", "{crv}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_relationships_tab(r: &wallet_core::ResolvedDid) -> Element {
+    // Rows = each verification method id; columns = relations.
+    // Cells show ✓ when the method is in that relation's set,
+    // — otherwise.
+    if r.document.verification_method.is_empty() {
+        return rsx! {
+            h3 { "Relationships" }
+            div { class: "detail-empty",
+                "Add a verification method first to see the relationship matrix."
+            }
+        };
+    }
+    // Strip the DID prefix from VM ids if present so the matrix
+    // shows fragment ids only (matches the on-chain raw form).
+    let method_ids: Vec<String> = r
+        .document
+        .verification_method
+        .iter()
+        .map(|vm| vm.id.rsplit('#').next().unwrap_or(&vm.id).to_string())
+        .collect();
+    let auth = &r.authentication_ids;
+    let assr = &r.assertion_method_ids;
+    let ka = &r.key_agreement_ids;
+    let ci = &r.capability_invocation_ids;
+    let cd = &r.capability_delegation_ids;
+    rsx! {
+        h3 { "Verification relationships" }
+        table { class: "relmat",
+            thead {
+                tr {
+                    th { "Method" }
+                    th { "Auth" }
+                    th { "Assert" }
+                    th { "KeyAgr" }
+                    th { "CapInv" }
+                    th { "CapDel" }
+                }
+            }
+            tbody {
+                for mid in method_ids.iter() {
+                    {render_relation_row(mid, auth, assr, ka, ci, cd)}
+                }
+            }
+        }
+    }
+}
+
+fn render_relation_row(
+    mid: &str,
+    auth: &[String],
+    assr: &[String],
+    ka: &[String],
+    ci: &[String],
+    cd: &[String],
+) -> Element {
+    let cell = |present: bool| {
+        if present {
+            rsx! { td { class: "relcheck", "✓" } }
+        } else {
+            rsx! { td { class: "reldash", "—" } }
+        }
+    };
+    rsx! {
+        tr {
+            td { "{mid}" }
+            {cell(auth.iter().any(|x| x == mid))}
+            {cell(assr.iter().any(|x| x == mid))}
+            {cell(ka.iter().any(|x| x == mid))}
+            {cell(ci.iter().any(|x| x == mid))}
+            {cell(cd.iter().any(|x| x == mid))}
+        }
+    }
+}
+
+fn render_services_tab(r: &wallet_core::ResolvedDid) -> Element {
+    if r.document.service.is_empty() {
+        return rsx! {
+            h3 { "Services" }
+            div { class: "detail-empty",
+                "This DID exposes no service endpoints."
+            }
+        };
+    }
+    rsx! {
+        h3 { "Services" }
+        table { class: "detail-table",
+            thead {
+                tr {
+                    th { "ID" }
+                    th { "Type" }
+                    th { "Endpoint" }
+                }
+            }
+            tbody {
+                for s in r.document.service.iter() {
+                    {
+                        let endpoint = match &s.service_endpoint {
+                            wallet_core::ServiceEndpoint::Uri(u) => u.clone(),
+                            wallet_core::ServiceEndpoint::Object(v) => v.to_string(),
+                        };
+                        rsx! {
+                            tr {
+                                td { "{s.id}" }
+                                td { class: "muted", "{s.typ}" }
+                                td { class: "muted", "{endpoint}" }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_operations_tab(did: &str, session_log: &[SessionEvent]) -> Element {
+    // Operations history for this DID — filter the global
+    // session log down to events that reference it. Renders the
+    // same row component the SessionLogPanel uses.
+    let matches: Vec<(usize, &SessionEvent)> = session_log
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| match e {
+            SessionEvent::Deploy { did: d, .. } => d == did,
+            SessionEvent::Resolve { did: d, .. } => d == did,
+            SessionEvent::LoadCircuit { did: d, .. } => d == did,
+            SessionEvent::OperationDrafted { did: d, .. } => d == did,
+        })
+        .collect();
+    if matches.is_empty() {
+        return rsx! {
+            h3 { "Operations" }
+            div { class: "detail-empty",
+                "No operations on this DID in the current session yet."
+            }
+        };
+    }
+    rsx! {
+        h3 { "Operations" }
+        ul { class: "session-log",
+            for (idx , event) in matches.iter().rev() {
+                {render_session_entry(*idx, event)}
+            }
+        }
+    }
+}
+
+fn render_resolver_tab(did: &str, r: &wallet_core::ResolvedDid) -> Element {
+    // Resolver diagnostics — adopts the bundle's "Resolve DID"
+    // diagnostics card (prototype/index.html line 112-113).
+    let id = &r.document.id;
+    let net = id.network.label();
+    let block = r
+        .last_block_height
+        .map(|h| format_int(h))
+        .unwrap_or_else(|| "—".into());
+    let addr_hex = id.contract_address_hex();
+    rsx! {
+        h3 { "Resolver diagnostics" }
+        div { class: "detail-kv",
+            div { class: "k", "DID syntax" }
+            div { class: "v", "Valid · parsed by wallet_core::DidId::parse" }
+            div { class: "k", "Network" }
+            div { class: "v", "{net}" }
+            div { class: "k", "Contract address" }
+            div { class: "v", "0x{addr_hex}" }
+            div { class: "k", "Status" }
+            div { class: "v",
+                {if r.document.deactivated { "Deactivated" } else { "Active" }}
+            }
+            div { class: "k", "Version" }
+            div { class: "v", "{r.document.version}" }
+            div { class: "k", "Maintenance counter" }
+            div { class: "v", "{r.maintenance_counter}" }
+            div { class: "k", "Resolver latency" }
+            div { class: "v", "{r.resolve_latency_ms} ms" }
+            div { class: "k", "Last indexed block" }
+            div { class: "v", "{block}" }
+            div { class: "k", "DID input" }
+            div { class: "v", "{did}" }
+        }
+    }
+}
+
+fn render_raw_state_tab(r: &wallet_core::ResolvedDid) -> Element {
+    let n = r.raw_state_hex.len() / 2;
+    rsx! {
+        h3 { "Raw ledger state ({n} bytes)" }
+        div { class: "seed-blob", "0x{r.raw_state_hex}" }
     }
 }
 

@@ -48,4 +48,19 @@ pub struct ResolvedDid {
     pub last_block_height: Option<i64>,
     /// `tx_hash` of that last action, hex-encoded.
     pub last_tx_hash: String,
+    /// Hex-encoded `ContractState` bytes the indexer returned —
+    /// raw on-chain state, surfaced to the UI's "Raw ledger
+    /// state" tab for diagnostics.
+    pub raw_state_hex: String,
+    /// Wall-clock duration the resolve took (indexer round-trip
+    /// + state decode). Surfaced as "Resolver latency" in the
+    /// UI's Resolver tab.
+    pub resolve_latency_ms: u64,
+    /// Names of the verification-method `id`s in each relation
+    /// set. The UI builds the relationship matrix from this.
+    pub authentication_ids: Vec<String>,
+    pub assertion_method_ids: Vec<String>,
+    pub key_agreement_ids: Vec<String>,
+    pub capability_invocation_ids: Vec<String>,
+    pub capability_delegation_ids: Vec<String>,
 }

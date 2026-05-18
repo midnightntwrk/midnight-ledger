@@ -7,22 +7,25 @@
    * default rendering, so the system controls don't flash white. */
   color-scheme: dark;
 
-  --bg:           #0a0b0d;
-  --surface:      #13161b;
-  --surface-2:    #1a1d24;
+  /* Palette — aligned with the `midnight-did-uiux-bundle` design
+   * system (05-design-system.md). Mostly the same as before;
+   * accent shifted from blue-ish to the bundle's purple. */
+  --bg:           #080B14;
+  --surface:      #101827;
+  --surface-2:    #172033;
   --surface-3:    #1d2939;
   --surface-4:    #252b37;
-  --border:       #373a41;
-  --border-faint: #252a35;
-  --text:         #e6edf3;
+  --border:       #26334D;
+  --border-faint: #1d2638;
+  --text:         #F5F7FB;
   --text-soft:    #cecfd2;
-  --text-muted:   #a4a7ae;
+  --text-muted:   #9AA7BD;
   --text-faint:   #717680;
-  --accent:       #7c8cff;
-  --accent-soft:  #2a3052;
-  --success:      #5fb27c;
-  --warn:         #d8a94f;
-  --error:        #e57373;
+  --accent:       #7C5CFF;
+  --accent-soft:  #2a2052;
+  --success:      #2EE6A6;
+  --warn:         #FFB020;
+  --error:        #FF5C7A;
   --mono-tint:    #a3acc4;
 
   --radius-card: 12px;
@@ -602,4 +605,190 @@ details .panel .row {
 .timing-bar-value {
   color: var(--text);
   text-align: right;
+}
+
+/* DID Detail view — 8-tab centerpiece adopted from
+ * midnight-did-uiux-bundle/06-wireframes.md + prototype/index.html.
+ *
+ * Layout:
+ *   detail-header — DID + status badge + action buttons
+ *   detail-tabs   — pill row, accent underline on the active tab
+ *   detail-pane   — tab content area
+ */
+
+.detail-back-row {
+  margin: 8px 16px 0;
+}
+.detail-back-row button {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+
+.detail-header {
+  margin: 8px 16px 0;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.detail-header .did-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.detail-header .did-text {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.detail-header .version {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.detail-header .actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.detail-header .actions .btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  border: 0;
+}
+.detail-header .actions .btn-danger {
+  background: rgba(255, 92, 122, 0.12);
+  color: var(--error);
+  border: 1px solid rgba(255, 92, 122, 0.35);
+}
+.detail-header .actions button[disabled] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.detail-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px;
+  margin: 10px 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.detail-tab {
+  padding: 8px 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.detail-tab:hover {
+  color: var(--text);
+}
+.detail-tab.active {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.detail-pane {
+  margin: 10px 16px;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+}
+.detail-pane h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* Verification relationship matrix — rows = methods, columns = relations */
+.relmat {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+.relmat th,
+.relmat td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-faint);
+  text-align: center;
+}
+.relmat th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.relmat td:first-child,
+.relmat th:first-child {
+  text-align: left;
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+.relmat .relcheck {
+  color: var(--success);
+  font-weight: 700;
+}
+.relmat .reldash {
+  color: var(--text-faint);
+}
+
+/* Methods / services tables inside the detail tabs */
+.detail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+}
+.detail-table th,
+.detail-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border-faint);
+  text-align: left;
+  vertical-align: top;
+}
+.detail-table th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-family: inherit;
+}
+.detail-table td.muted {
+  color: var(--text-muted);
+}
+.detail-empty {
+  padding: 14px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-align: center;
+}
+.detail-kv {
+  display: grid;
+  grid-template-columns: 130px 1fr;
+  gap: 6px;
+  font-size: 11px;
+}
+.detail-kv .k {
+  color: var(--text-muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+.detail-kv .v {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+  overflow-wrap: anywhere;
 }

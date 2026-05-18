@@ -936,6 +936,7 @@ impl Wallet {
             )));
         }
 
+        let started = std::time::Instant::now();
         let client = crate::IndexerClient::new(self.network)
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
         let info = client
@@ -954,12 +955,29 @@ impl Wallet {
             crate::did::contract::decode_did_ledger_state(&info.state_hex)?;
         let maintenance_counter =
             crate::did::contract::decode_maintenance_counter(&info.state_hex)?;
+        // Snapshot the relation vectors before `ledger_to_domain`
+        // consumes them — the UI's relationship matrix needs the
+        // raw fragment ids, not the DID-URL-expanded form
+        // `ledger_to_domain` produces.
+        let authentication_ids = ledger_state.authentication.clone();
+        let assertion_method_ids = ledger_state.assertion_method.clone();
+        let key_agreement_ids = ledger_state.key_agreement.clone();
+        let capability_invocation_ids = ledger_state.capability_invocation.clone();
+        let capability_delegation_ids = ledger_state.capability_delegation.clone();
         let document = crate::did::contract::ledger_to_domain(&ledger_state, id);
+        let resolve_latency_ms = started.elapsed().as_millis() as u64;
         Ok(crate::ResolvedDid {
             document,
             maintenance_counter,
             last_block_height: info.last_block_height,
             last_tx_hash: info.last_tx_hash,
+            raw_state_hex: info.state_hex,
+            resolve_latency_ms,
+            authentication_ids,
+            assertion_method_ids,
+            key_agreement_ids,
+            capability_invocation_ids,
+            capability_delegation_ids,
         })
     }
 }
