@@ -340,6 +340,24 @@ fn aligned_atom_at<'a>(
     Ok(atom.0.as_slice())
 }
 
+/// Read a Compact enum tag from atom `idx`. Compact serialises
+/// the variant index as a minimal-byte little-endian unsigned
+/// integer, so variant `0` ends up as an empty byte slice
+/// (no bytes needed). Treat the empty case as tag `0`; anything
+/// longer than a single byte is rejected — every Midnight DID
+/// enum has well under 256 variants.
+fn enum_tag_or_zero(av: &AlignedValue, idx: usize, field: &str) -> Result<u8, DidError> {
+    let bytes = aligned_atom_at(av, idx, field)?;
+    match bytes {
+        [] => Ok(0),
+        [b] => Ok(*b),
+        more => Err(DidError::DecodeState(format!(
+            "{field}: enum tag too wide ({} bytes)",
+            more.len(),
+        ))),
+    }
+}
+
 /// Decode an [`AlignedValue`] atom as a UTF-8 string. Compact's
 /// `OpaqueString` descriptor uses a single `compress` atom carrying
 /// raw UTF-8 bytes (no length prefix — the atom boundary is the
@@ -434,36 +452,40 @@ fn decode_vm_map(
             }
         };
         let id = decode_string_atom(av, 0, &format!("{field}.id"))?;
-        let typ_byte = aligned_atom_at(av, 1, &format!("{field}.typ"))?;
-        let typ = match typ_byte.first().copied() {
-            Some(0) => VerificationMethodType::JsonWebKey, // Undefined → fall back
-            Some(1) => VerificationMethodType::JsonWebKey,
+        // Compact serialises a small-int enum tag as a
+        // minimal-byte LEB128: variant 0 → 0 bytes; variant N → 1
+        // byte. So `None` (empty atom) means "tag 0" — treat it
+        // the same as `Some(0)`.
+        let typ_tag = enum_tag_or_zero(av, 1, &format!("{field}.typ"))?;
+        let typ = match typ_tag {
+            0 => VerificationMethodType::JsonWebKey, // Undefined → fall back
+            1 => VerificationMethodType::JsonWebKey,
             other => {
                 return Err(DidError::DecodeState(format!(
-                    "{field}.typ: unexpected enum byte {other:?}"
+                    "{field}.typ: unexpected enum tag {other}"
                 )));
             }
         };
-        let kty_byte = aligned_atom_at(av, 2, &format!("{field}.kty"))?;
-        let kty = match kty_byte.first().copied() {
-            Some(0) => KeyType::EC,
-            Some(1) => KeyType::EC, // RSA — not represented in our enum, fall back
-            Some(2) => KeyType::EC, // oct
-            Some(3) => KeyType::OKP,
+        let kty_tag = enum_tag_or_zero(av, 2, &format!("{field}.kty"))?;
+        let kty = match kty_tag {
+            0 => KeyType::EC,
+            1 => KeyType::EC, // RSA — not represented in our enum, fall back
+            2 => KeyType::EC, // oct
+            3 => KeyType::OKP,
             other => {
                 return Err(DidError::DecodeState(format!(
-                    "{field}.kty: unexpected enum byte {other:?}"
+                    "{field}.kty: unexpected enum tag {other}"
                 )));
             }
         };
-        let crv_byte = aligned_atom_at(av, 3, &format!("{field}.crv"))?;
-        let crv = match crv_byte.first().copied() {
-            Some(0) => CurveType::Ed25519,
-            Some(1) => CurveType::Jubjub,
-            Some(2) => CurveType::P256,
+        let crv_tag = enum_tag_or_zero(av, 3, &format!("{field}.crv"))?;
+        let crv = match crv_tag {
+            0 => CurveType::Ed25519,
+            1 => CurveType::Jubjub,
+            2 => CurveType::P256,
             other => {
                 return Err(DidError::DecodeState(format!(
-                    "{field}.crv: unexpected enum byte {other:?}"
+                    "{field}.crv: unexpected enum tag {other}"
                 )));
             }
         };
