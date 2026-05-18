@@ -578,8 +578,8 @@ checksum = "ba44fa3e70871c2bc00d44f08c95be68145ae28a60de8182e649eee2f17a872b"
 dependencies = [
  "ff",
  "hex",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "num-bigint",
  "rand 0.8.6",
  "serde",
@@ -1163,6 +1163,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "curve25519-dalek"
+version = "4.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97fb8b7c4503de7d6ae7b42ab72a5a59857b4c937ec27a3d4539dba95b5ab2be"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "curve25519-dalek-derive",
+ "fiat-crypto",
+ "group",
+ "rand_core 0.6.4",
+ "rustc_version",
+ "subtle",
+ "zeroize",
+]
+
+[[package]]
+name = "curve25519-dalek-derive"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f46882e17999c6cc590af592290432be3bce0428cb0d5f8b6715e4dc7b383eb3"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
+]
+
+[[package]]
 name = "darling"
 version = "0.20.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1553,6 +1581,7 @@ dependencies = [
  "sec1",
  "serdect",
  "subtle",
+ "tap",
  "zeroize",
 ]
 
@@ -1712,6 +1741,12 @@ dependencies = [
  "rand_core 0.6.4",
  "subtle",
 ]
+
+[[package]]
+name = "fiat-crypto"
+version = "0.2.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28dea519a9695b9977216879a3ebfddf92f1c08c05d984f8996aecd6ecdc811d"
 
 [[package]]
 name = "find-msvc-tools"
@@ -2894,8 +2929,8 @@ dependencies = [
  "ff",
  "group",
  "lazy_static",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "num-bigint",
  "num-integer",
  "num-traits",
@@ -2903,6 +2938,28 @@ dependencies = [
  "rustc-hash",
  "sha2 0.10.9",
  "sha3-circuit",
+ "subtle",
+]
+
+[[package]]
+name = "midnight-circuits"
+version = "7.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a87ddffe23ec9bc99afd943d69954dcfedf62484836bac5e176a65d72d89074"
+dependencies = [
+ "base64 0.13.1",
+ "ff",
+ "group",
+ "lazy_static",
+ "midnight-curves 0.3.0",
+ "midnight-proofs 0.8.0",
+ "num-bigint",
+ "num-integer",
+ "num-traits",
+ "rand 0.8.6",
+ "ripemd",
+ "rustc-hash",
+ "sha2 0.10.9",
  "subtle",
 ]
 
@@ -2944,6 +3001,36 @@ dependencies = [
  "num-bigint",
  "pairing",
  "paste",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_arrays",
+ "sha2 0.10.9",
+ "subtle",
+]
+
+[[package]]
+name = "midnight-curves"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "30489f54343b238003dcb58809e7c1ebdd7283494b9d0f54c0a565a6aa3abe5d"
+dependencies = [
+ "bitvec",
+ "blst",
+ "byte-slice-cast",
+ "curve25519-dalek",
+ "digest 0.10.7",
+ "ff",
+ "getrandom 0.2.17",
+ "group",
+ "hex",
+ "k256",
+ "lazy_static",
+ "num-bigint",
+ "p256",
+ "pairing",
+ "paste",
+ "primeorder",
  "rand_core 0.6.4",
  "rayon",
  "serde",
@@ -3181,7 +3268,28 @@ dependencies = [
  "ff",
  "getrandom 0.2.17",
  "group",
- "midnight-curves",
+ "midnight-curves 0.2.0",
+ "num-bigint",
+ "rand_chacha 0.3.1",
+ "rand_core 0.6.4",
+ "rayon",
+ "serde",
+ "serde_derive",
+ "tracing",
+]
+
+[[package]]
+name = "midnight-proofs"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "742c98d17c83c48aa2705e0da29b9758f47252af2fc78f6369bb070ba490af0f"
+dependencies = [
+ "blake2b_simd",
+ "ff",
+ "getrandom 0.2.17",
+ "group",
+ "itertools 0.14.0",
+ "midnight-curves 0.3.0",
  "num-bigint",
  "rand_chacha 0.3.1",
  "rand_core 0.6.4",
@@ -3319,9 +3427,9 @@ dependencies = [
  "lru",
  "midnight-base-crypto",
  "midnight-base-crypto-derive",
- "midnight-circuits",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-circuits 7.0.0",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "midnight-serialize",
  "midnight-storage-core",
  "midnight-transient-crypto",
@@ -3354,9 +3462,9 @@ dependencies = [
  "blake2b_simd",
  "ff",
  "group",
- "midnight-circuits",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-circuits 6.1.0",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "num-bigint",
  "num-traits",
  "rand 0.8.6",
@@ -3380,8 +3488,8 @@ dependencies = [
  "indicatif",
  "log",
  "midnight-base-crypto",
- "midnight-circuits",
- "midnight-proofs",
+ "midnight-circuits 7.0.0",
+ "midnight-proofs 0.7.1",
  "midnight-serialize",
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
@@ -3417,9 +3525,9 @@ dependencies = [
  "indicatif",
  "log",
  "midnight-base-crypto",
- "midnight-circuits",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-circuits 7.0.0",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "midnight-serialize",
  "midnight-transient-crypto",
  "midnight-zk-stdlib",
@@ -3773,6 +3881,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a80800c0488c3a21695ea981a54918fbb37abf04f4d0720c453632255e2ff0e"
 
 [[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+]
+
+[[package]]
 name = "pairing"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4033,6 +4152,15 @@ checksum = "479ca8adacdd7ce8f1fb39ce9ecccbfe93a3f1344b3d0d97f20bc0196208f62b"
 dependencies = [
  "proc-macro2",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+dependencies = [
+ "elliptic-curve",
 ]
 
 [[package]]
@@ -4472,6 +4600,15 @@ dependencies = [
  "libc",
  "untrusted",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "ripemd"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4dd4211456b4172d7e44261920c25acf07367c4f04bb5f5d54fc21b090d9b159"
+dependencies = [
+ "digest 0.11.3",
 ]
 
 [[package]]
@@ -4958,8 +5095,8 @@ checksum = "be83e5373c70fbe71d6aa678da6d139029a497faccd1c693f393526fe0195101"
 dependencies = [
  "blake2b_simd",
  "ff",
- "midnight-curves",
- "midnight-proofs",
+ "midnight-curves 0.2.0",
+ "midnight-proofs 0.7.1",
  "num-bigint",
  "rand 0.8.6",
 ]
