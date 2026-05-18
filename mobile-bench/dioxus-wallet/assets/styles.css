@@ -792,3 +792,134 @@ details .panel .row {
   color: var(--text);
   overflow-wrap: anywhere;
 }
+
+/* Operation Builder — 3-pane palette / form / preview adopted
+ * from midnight-did-uiux-bundle/06-wireframes.md "Operation
+ * Builder" sketch. Below 720px the panes stack vertically
+ * (phone-first); above that they sit side-by-side.
+ */
+
+.op-builder {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+  margin: 10px 16px;
+}
+@media (min-width: 720px) {
+  .op-builder {
+    grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr);
+  }
+}
+
+.op-pane {
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  min-width: 0;
+}
+.op-pane h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.op-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.op-item {
+  padding: 7px 10px;
+  font-size: 11px;
+  font-family: ui-monospace, monospace;
+  color: var(--text-soft);
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.op-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.op-item.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.op-queue {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.op-queue-row {
+  display: grid;
+  grid-template-columns: 24px auto 1fr;
+  gap: 6px 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+  font-size: 11px;
+}
+.op-queue-name {
+  font-family: ui-monospace, monospace;
+  color: var(--text);
+}
+.op-queue-summary {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+.op-queue-tx,
+.op-queue-err {
+  grid-column: 1 / -1;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  overflow-wrap: anywhere;
+}
+.op-queue-tx {
+  color: var(--success);
+}
+.op-queue-err {
+  color: var(--error);
+}
+
+.op-stat {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 700;
+}
+.op-stat.pending {
+  background: var(--surface-3);
+  color: var(--text-faint);
+}
+.op-stat.running {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.op-stat.done {
+  background: rgba(46, 230, 166, 0.12);
+  color: var(--success);
+}
+.op-stat.failed {
+  background: rgba(255, 92, 122, 0.12);
+  color: var(--error);
+}
+.op-stat.skipped {
+  background: var(--surface-3);
+  color: var(--text-faint);
+}

@@ -170,6 +170,75 @@ impl DidOperation {
             Self::Deactivate => "—".to_string(),
         }
     }
+
+    /// Translate the drafted operation into the JSON `args` array
+    /// expected by `Wallet::call_did_circuit` (which hands it to
+    /// the JS harness verbatim). Mirrors the per-circuit shapes
+    /// exercised in `tests/js_inspect_circuits.rs`:
+    /// - bigints are tagged as `{ "$bigint": "<n>" }` so the
+    ///   harness revives them as JS BigInt (JSON has no native
+    ///   bigint, JS Number tops out at 2^53);
+    /// - enum tags match the `.compact` source order — see
+    ///   `KeyType`, `CurveType`, `VerificationMethodType`,
+    ///   `VerificationMethodRelation` declarations in
+    ///   `contracts/midnight-did/did.compact`.
+    fn args_json(&self) -> serde_json::Value {
+        match self {
+            Self::AddAlsoKnownAs { value } | Self::RemoveAlsoKnownAs { value } => {
+                serde_json::json!([value])
+            }
+            Self::AddVerificationMethod(vm) | Self::UpdateVerificationMethod(vm) => {
+                serde_json::json!([vm_to_json(vm)])
+            }
+            Self::RemoveVerificationMethod { id } | Self::RemoveService { id } => {
+                serde_json::json!([id])
+            }
+            Self::AddVerificationMethodRelation { relation, method_id }
+            | Self::RemoveVerificationMethodRelation { relation, method_id } => {
+                serde_json::json!([relation_tag(relation), method_id])
+            }
+            Self::AddService(s) | Self::UpdateService(s) => serde_json::json!([{
+                "id": s.id,
+                "typ": s.typ,
+                "serviceEndpoint": s.endpoint,
+            }]),
+            Self::Deactivate => serde_json::json!([]),
+        }
+    }
+}
+
+/// Look up an enum tag by name from a `&[&str]` table whose order
+/// matches the contract's `.compact` declaration order. Returns
+/// the offset; 0-based for `KeyType`/`CurveType`, callers add 1
+/// for `VerificationMethodRelation` (whose declaration starts with
+/// `Undefined` which we don't surface in the UI).
+fn enum_tag(table: &[&str], name: &str) -> i32 {
+    table.iter().position(|s| *s == name).unwrap_or(0) as i32
+}
+
+fn relation_tag(name: &str) -> i32 {
+    // Contract enum: Undefined=0, Authentication=1, …, CapabilityDelegation=5.
+    // Our UI table `RELATIONS` skips Undefined, so add 1.
+    enum_tag(RELATIONS, name) + 1
+}
+
+/// Build the JSON `VerificationMethod` struct payload — `typ` is
+/// always `JsonWebKey` (the only variant the contract accepts);
+/// `publicKeyJwk.x/y` are bigints expressed as decimal strings so
+/// `BigInt(str)` revives them in JS. A "0x…" prefix also works
+/// because `BigInt("0x…")` is well-defined.
+fn vm_to_json(vm: &VerificationMethodInput) -> serde_json::Value {
+    serde_json::json!({
+        "id": vm.id,
+        // VerificationMethodType.JsonWebKey = 1
+        "typ": 1,
+        "publicKeyJwk": {
+            "kty": enum_tag(KEY_TYPES, &vm.key_type),
+            "crv": enum_tag(CURVE_TYPES, &vm.curve),
+            "x": serde_json::json!({ "$bigint": vm.pk_x.clone() }),
+            "y": serde_json::json!({ "$bigint": vm.pk_y.clone() }),
+        }
+    })
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -629,6 +698,11 @@ pub fn App() -> Element {
                             let mut log = timing_log.read().clone();
                             log.push(run);
                             timing_log.set(log);
+                        },
+                        on_event: move |ev: SessionEvent| {
+                            let mut log = session_log.read().clone();
+                            log.push(ev);
+                            session_log.set(log);
                         },
                     }
                 } else {
@@ -1739,6 +1813,509 @@ fn DidOperationsPanel(
     }
 }
 
+/// Buildable circuit kinds — every variant except `Deactivate`,
+/// which has its own dedicated button in the detail header (it
+/// closes the DID for further updates; not a thing to batch).
+const BUILDABLE_OPS: &[OpKind] = &[
+    OpKind::AddAlsoKnownAs,
+    OpKind::RemoveAlsoKnownAs,
+    OpKind::AddVerificationMethod,
+    OpKind::UpdateVerificationMethod,
+    OpKind::RemoveVerificationMethod,
+    OpKind::AddVerificationMethodRelation,
+    OpKind::RemoveVerificationMethodRelation,
+    OpKind::AddService,
+    OpKind::UpdateService,
+    OpKind::RemoveService,
+];
+
+/// Status of a queued operation as the batch flows through
+/// `Wallet::call_did_circuit`. Drives the per-row indicator in
+/// the preview pane.
+#[derive(Clone, PartialEq, Eq)]
+enum QueueStatus {
+    Pending,
+    Running,
+    Done { tx_hex: String },
+    Failed { err: String },
+    /// A later op in the batch never ran because an earlier op
+    /// failed. We stop on the first failure rather than press on
+    /// against unknown state.
+    Skipped,
+}
+
+/// 3-pane Operation Builder (palette / form / preview) adopted
+/// from `midnight-did-uiux-bundle`. Drafts ride one batch queue;
+/// `Submit batch` iterates them through `Wallet::call_did_circuit`
+/// sequentially, awaiting each call's terminal `WizardStage`
+/// before starting the next. State changes between maintenance
+/// updates so we must serialize.
+///
+/// `Deactivate` is intentionally NOT buildable here — the detail
+/// header has its own button for it. The builder is for
+/// composing / mutating the DID document; deactivate is
+/// terminal.
+#[component]
+fn DidOperationBuilder(
+    network: Network,
+    did: String,
+    controller_secret: [u8; 32],
+    on_back: EventHandler<()>,
+    on_event: EventHandler<SessionEvent>,
+    on_resolved: EventHandler<wallet_core::ResolvedDid>,
+) -> Element {
+    let mut op_idx = use_signal(|| 0usize);
+
+    // Per-circuit form fields. Same single-set-of-signals
+    // pattern as `DidOperationsPanel` — the fields not relevant
+    // to the current op carry stale state but are inert.
+    let mut f_value = use_signal(String::new);
+    let mut f_id = use_signal(String::new);
+    let mut f_key_type_idx = use_signal(|| 0usize);
+    let mut f_curve_idx = use_signal(|| 0usize);
+    let mut f_pk_x = use_signal(String::new);
+    let mut f_pk_y = use_signal(String::new);
+    let mut f_relation_idx = use_signal(|| 0usize);
+    let mut f_method_id = use_signal(String::new);
+    let mut f_typ = use_signal(String::new);
+    let mut f_endpoint = use_signal(String::new);
+    let mut form_error = use_signal::<Option<String>>(|| None);
+
+    // Queue + execution state.
+    let mut queue = use_signal::<Vec<(DidOperation, QueueStatus)>>(Vec::new);
+    let mut running = use_signal(|| false);
+    let mut batch_error = use_signal::<Option<String>>(|| None);
+
+    let on_add_to_batch = move |_| {
+        let op = BUILDABLE_OPS[*op_idx.read()];
+        let drafted = match op {
+            OpKind::AddAlsoKnownAs => {
+                let v = f_value.read().trim().to_string();
+                if v.is_empty() {
+                    form_error.set(Some("value is required".into()));
+                    return;
+                }
+                DidOperation::AddAlsoKnownAs { value: v }
+            }
+            OpKind::RemoveAlsoKnownAs => {
+                let v = f_value.read().trim().to_string();
+                if v.is_empty() {
+                    form_error.set(Some("value is required".into()));
+                    return;
+                }
+                DidOperation::RemoveAlsoKnownAs { value: v }
+            }
+            OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => {
+                let id = f_id.read().trim().to_string();
+                let pk_x = f_pk_x.read().trim().to_string();
+                let pk_y = f_pk_y.read().trim().to_string();
+                if id.is_empty() || pk_x.is_empty() || pk_y.is_empty() {
+                    form_error.set(Some("id, pk.x, pk.y are required".into()));
+                    return;
+                }
+                let vm = VerificationMethodInput {
+                    id,
+                    key_type: KEY_TYPES[*f_key_type_idx.read()].to_string(),
+                    curve: CURVE_TYPES[*f_curve_idx.read()].to_string(),
+                    pk_x,
+                    pk_y,
+                };
+                match op {
+                    OpKind::AddVerificationMethod => DidOperation::AddVerificationMethod(vm),
+                    OpKind::UpdateVerificationMethod => DidOperation::UpdateVerificationMethod(vm),
+                    _ => unreachable!(),
+                }
+            }
+            OpKind::RemoveVerificationMethod => {
+                let id = f_id.read().trim().to_string();
+                if id.is_empty() {
+                    form_error.set(Some("id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveVerificationMethod { id }
+            }
+            OpKind::AddVerificationMethodRelation => {
+                let method_id = f_method_id.read().trim().to_string();
+                if method_id.is_empty() {
+                    form_error.set(Some("method_id is required".into()));
+                    return;
+                }
+                DidOperation::AddVerificationMethodRelation {
+                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
+                    method_id,
+                }
+            }
+            OpKind::RemoveVerificationMethodRelation => {
+                let method_id = f_method_id.read().trim().to_string();
+                if method_id.is_empty() {
+                    form_error.set(Some("method_id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveVerificationMethodRelation {
+                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
+                    method_id,
+                }
+            }
+            OpKind::AddService | OpKind::UpdateService => {
+                let id = f_id.read().trim().to_string();
+                let typ = f_typ.read().trim().to_string();
+                let endpoint = f_endpoint.read().trim().to_string();
+                if id.is_empty() || typ.is_empty() || endpoint.is_empty() {
+                    form_error.set(Some("id, type, endpoint are required".into()));
+                    return;
+                }
+                let s = ServiceInput { id, typ, endpoint };
+                match op {
+                    OpKind::AddService => DidOperation::AddService(s),
+                    OpKind::UpdateService => DidOperation::UpdateService(s),
+                    _ => unreachable!(),
+                }
+            }
+            OpKind::RemoveService => {
+                let id = f_id.read().trim().to_string();
+                if id.is_empty() {
+                    form_error.set(Some("id is required".into()));
+                    return;
+                }
+                DidOperation::RemoveService { id }
+            }
+            OpKind::Deactivate => unreachable!("Deactivate not buildable here"),
+        };
+        form_error.set(None);
+        let mut q = queue.read().clone();
+        q.push((drafted, QueueStatus::Pending));
+        queue.set(q);
+    };
+
+    let did_for_submit = did.clone();
+    let sk_for_submit = controller_secret;
+    let on_submit_batch = move |_| {
+        if *running.read() {
+            return;
+        }
+        let snapshot: Vec<DidOperation> = queue
+            .read()
+            .iter()
+            .filter_map(|(op, st)| match st {
+                QueueStatus::Pending | QueueStatus::Failed { .. } => Some(op.clone()),
+                _ => None,
+            })
+            .collect();
+        if snapshot.is_empty() {
+            batch_error.set(Some("queue is empty".into()));
+            return;
+        }
+        let Ok(did_id) = wallet_core::DidId::parse(&did_for_submit) else {
+            batch_error.set(Some(format!("parse DID: {}", did_for_submit)));
+            return;
+        };
+        // Reset queue to all-pending so we don't carry stale ✓
+        // markers from a previous run.
+        let reset: Vec<(DidOperation, QueueStatus)> = queue
+            .read()
+            .iter()
+            .map(|(op, _)| (op.clone(), QueueStatus::Pending))
+            .collect();
+        queue.set(reset);
+        batch_error.set(None);
+        running.set(true);
+
+        let did_for_log = did_for_submit.clone();
+        let on_event = on_event.clone();
+        let on_resolved = on_resolved.clone();
+        spawn(async move {
+            use futures::StreamExt;
+            use wallet_core::WizardStage;
+            let wallet = Wallet::demo(network);
+            let total = queue.read().len();
+            for i in 0..total {
+                let op = {
+                    let q = queue.read();
+                    q[i].0.clone()
+                };
+                // Mark running
+                {
+                    let mut q = queue.read().clone();
+                    q[i].1 = QueueStatus::Running;
+                    queue.set(q);
+                }
+                let mut stream = std::pin::pin!(wallet.call_did_circuit(
+                    did_id.clone(),
+                    op.circuit().to_string(),
+                    op.args_json(),
+                    sk_for_submit,
+                ));
+                let mut terminal: Option<WizardStage> = None;
+                while let Some(stage) = stream.next().await {
+                    if matches!(&stage, WizardStage::Done(_) | WizardStage::Failed(_)) {
+                        terminal = Some(stage);
+                        break;
+                    }
+                }
+                match terminal {
+                    Some(WizardStage::Done(o)) => {
+                        let tx_hex = hex::encode(o.tx_hash);
+                        let block_hash = o.block_hash;
+                        let mut q = queue.read().clone();
+                        q[i].1 = QueueStatus::Done { tx_hex: tx_hex.clone() };
+                        queue.set(q);
+                        on_event.call(SessionEvent::LoadCircuit {
+                            did: did_for_log.clone(),
+                            circuit: op.circuit().to_string(),
+                            tx_hash: o.tx_hash,
+                            block_hash,
+                        });
+                    }
+                    Some(WizardStage::Failed(msg)) => {
+                        let mut q = queue.read().clone();
+                        q[i].1 = QueueStatus::Failed { err: msg };
+                        // Mark every later op as skipped so the
+                        // user sees that the batch was aborted.
+                        for j in (i + 1)..total {
+                            q[j].1 = QueueStatus::Skipped;
+                        }
+                        queue.set(q);
+                        break;
+                    }
+                    _ => {
+                        let mut q = queue.read().clone();
+                        q[i].1 = QueueStatus::Failed {
+                            err: "stream ended without terminal stage".into(),
+                        };
+                        for j in (i + 1)..total {
+                            q[j].1 = QueueStatus::Skipped;
+                        }
+                        queue.set(q);
+                        break;
+                    }
+                }
+            }
+            // Re-resolve the DID so the surrounding detail view
+            // reflects the new state (counter, vm count, etc.).
+            match wallet.resolve_did_full(&did_for_log).await {
+                Ok(r) => on_resolved.call(r),
+                Err(e) => tracing::warn!(error=%e, "post-batch resolve failed"),
+            }
+            running.set(false);
+        });
+    };
+
+    let on_clear_batch = move |_: dioxus::events::MouseEvent| {
+        if *running.read() {
+            return;
+        }
+        queue.set(Vec::new());
+        batch_error.set(None);
+    };
+
+    let cur_idx = *op_idx.read();
+    let cur_op = BUILDABLE_OPS[cur_idx];
+    let cur_kt = *f_key_type_idx.read();
+    let cur_cv = *f_curve_idx.read();
+    let cur_rel = *f_relation_idx.read();
+    let queue_len = queue.read().len();
+    let is_running = *running.read();
+
+    rsx! {
+        div { class: "detail-back-row",
+            button { onclick: move |_| on_back.call(()),
+                "← Back to detail"
+            }
+        }
+        div { class: "op-builder",
+            // ── Pane 1 : palette ──────────────────────────────
+            div { class: "op-pane palette",
+                h3 { "Operations" }
+                ul { class: "op-list",
+                    for (i , kind) in BUILDABLE_OPS.iter().enumerate() {
+                        li {
+                            class: if i == cur_idx { "op-item active" } else { "op-item" },
+                            onclick: move |_| op_idx.set(i),
+                            "{kind.circuit_name()}"
+                        }
+                    }
+                }
+            }
+
+            // ── Pane 2 : form ─────────────────────────────────
+            div { class: "op-pane form",
+                h3 { "{cur_op.circuit_name()}" }
+                match cur_op {
+                    OpKind::AddAlsoKnownAs | OpKind::RemoveAlsoKnownAs => rsx! {
+                        FormRow {
+                            label: "value",
+                            value: f_value.read().clone(),
+                            on_change: move |s: String| f_value.set(s),
+                            placeholder: "https://alias.example.com or arbitrary identifier",
+                        }
+                    },
+                    OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => rsx! {
+                        FormRow {
+                            label: "id",
+                            value: f_id.read().clone(),
+                            on_change: move |s: String| f_id.set(s),
+                            placeholder: "key-0 / authkey-2025-05",
+                        }
+                        FormSelect {
+                            label: "key_type",
+                            options: KEY_TYPES,
+                            selected_idx: cur_kt,
+                            on_select: move |i: usize| f_key_type_idx.set(i),
+                        }
+                        FormSelect {
+                            label: "curve",
+                            options: CURVE_TYPES,
+                            selected_idx: cur_cv,
+                            on_select: move |i: usize| f_curve_idx.set(i),
+                        }
+                        FormRow {
+                            label: "pk.x",
+                            value: f_pk_x.read().clone(),
+                            on_change: move |s: String| f_pk_x.set(s),
+                            placeholder: "field element (decimal or 0x… hex)",
+                        }
+                        FormRow {
+                            label: "pk.y",
+                            value: f_pk_y.read().clone(),
+                            on_change: move |s: String| f_pk_y.set(s),
+                            placeholder: "field element (decimal or 0x… hex)",
+                        }
+                    },
+                    OpKind::RemoveVerificationMethod | OpKind::RemoveService => rsx! {
+                        FormRow {
+                            label: "id",
+                            value: f_id.read().clone(),
+                            on_change: move |s: String| f_id.set(s),
+                            placeholder: "fragment id to remove",
+                        }
+                    },
+                    OpKind::AddVerificationMethodRelation
+                    | OpKind::RemoveVerificationMethodRelation => rsx! {
+                        FormSelect {
+                            label: "relation",
+                            options: RELATIONS,
+                            selected_idx: cur_rel,
+                            on_select: move |i: usize| f_relation_idx.set(i),
+                        }
+                        FormRow {
+                            label: "method_id",
+                            value: f_method_id.read().clone(),
+                            on_change: move |s: String| f_method_id.set(s),
+                            placeholder: "existing verification-method fragment id",
+                        }
+                    },
+                    OpKind::AddService | OpKind::UpdateService => rsx! {
+                        FormRow {
+                            label: "id",
+                            value: f_id.read().clone(),
+                            on_change: move |s: String| f_id.set(s),
+                            placeholder: "service fragment id",
+                        }
+                        FormRow {
+                            label: "type",
+                            value: f_typ.read().clone(),
+                            on_change: move |s: String| f_typ.set(s),
+                            placeholder: "e.g. LinkedDomains",
+                        }
+                        FormRow {
+                            label: "endpoint",
+                            value: f_endpoint.read().clone(),
+                            on_change: move |s: String| f_endpoint.set(s),
+                            placeholder: "https://example.com/.well-known/did-config",
+                        }
+                    },
+                    OpKind::Deactivate => rsx! {
+                        div { class: "detail-empty",
+                            "Deactivate has its own button in the header."
+                        }
+                    },
+                }
+
+                div { class: "row",
+                    button {
+                        disabled: is_running,
+                        onclick: on_add_to_batch,
+                        "Add to batch"
+                    }
+                }
+                if let Some(msg) = form_error.read().as_ref() {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Validation" }
+                        div { class: "seed-blob", "{msg}" }
+                    }
+                }
+            }
+
+            // ── Pane 3 : preview / queue ──────────────────────
+            div { class: "op-pane preview",
+                h3 { "Batch ({queue_len})" }
+                if queue_len == 0 {
+                    div { class: "detail-empty",
+                        "Nothing queued yet. Configure an op on the left, then \"Add to batch\"."
+                    }
+                } else {
+                    ol { class: "op-queue",
+                        for (i , entry) in queue.read().iter().enumerate() {
+                            li { class: "op-queue-row",
+                                span { class: queue_status_class(&entry.1),
+                                    "{queue_status_label(&entry.1)}"
+                                }
+                                span { class: "op-queue-name", "{i + 1}. {entry.0.circuit()}" }
+                                span { class: "op-queue-summary", "{entry.0.summary()}" }
+                                if let QueueStatus::Done { tx_hex } = &entry.1 {
+                                    div { class: "op-queue-tx", "tx 0x{tx_hex}" }
+                                }
+                                if let QueueStatus::Failed { err } = &entry.1 {
+                                    div { class: "op-queue-err", "{err}" }
+                                }
+                            }
+                        }
+                    }
+                    div { class: "row",
+                        button {
+                            class: "btn-primary",
+                            disabled: is_running,
+                            onclick: on_submit_batch,
+                            {if is_running { "Submitting…" } else { "Submit batch" }}
+                        }
+                        button {
+                            disabled: is_running,
+                            onclick: on_clear_batch,
+                            "Clear"
+                        }
+                    }
+                }
+                if let Some(msg) = batch_error.read().as_ref() {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Batch error" }
+                        div { class: "seed-blob", "{msg}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn queue_status_label(s: &QueueStatus) -> &'static str {
+    match s {
+        QueueStatus::Pending => "•",
+        QueueStatus::Running => "…",
+        QueueStatus::Done { .. } => "✓",
+        QueueStatus::Failed { .. } => "✗",
+        QueueStatus::Skipped => "—",
+    }
+}
+
+fn queue_status_class(s: &QueueStatus) -> &'static str {
+    match s {
+        QueueStatus::Pending => "op-stat pending",
+        QueueStatus::Running => "op-stat running",
+        QueueStatus::Done { .. } => "op-stat done",
+        QueueStatus::Failed { .. } => "op-stat failed",
+        QueueStatus::Skipped => "op-stat skipped",
+    }
+}
+
 #[component]
 fn FormRow(
     label: &'static str,
@@ -2183,6 +2760,7 @@ fn DidDetailView(
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
     on_deactivated: EventHandler<(String, wallet_core::DeployOutcome)>,
     on_timing: EventHandler<TimingRun>,
+    on_event: EventHandler<SessionEvent>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -2191,6 +2769,12 @@ fn DidDetailView(
     let mut resolve_error = use_signal::<Option<String>>(|| None);
     let mut deactivating = use_signal::<Vec<WizardStage>>(Vec::new);
     let mut deactivate_error = use_signal::<Option<String>>(|| None);
+    // When true, render `DidOperationBuilder` instead of the
+    // 8-tab view. Toggled by the "Update DID" button (which is
+    // disabled unless we have the controller secret for this DID
+    // — write circuits need it for the `localSecretKey()`
+    // witness).
+    let mut builder_mode = use_signal(|| false);
     let controller_known = controller_secret.is_some();
 
     // Click handler for "Resolve latest".
@@ -2332,6 +2916,41 @@ fn DidDetailView(
         .unwrap_or_else(|| "—".to_string());
     let cur_tab = *tab.read();
 
+    // Builder mode short-circuits the 8-tab render. We still
+    // require the controller secret (UI guards this on the
+    // toggle) — if we somehow ended up here without one, drop
+    // back to tabs.
+    if *builder_mode.read() {
+        if let Some(sk) = controller_secret {
+            let did_for_builder = did.clone();
+            return rsx! {
+                DidOperationBuilder {
+                    network,
+                    did: did_for_builder,
+                    controller_secret: sk,
+                    on_back: move |_| builder_mode.set(false),
+                    on_event,
+                    on_resolved,
+                }
+            };
+        }
+        // Defensive fallback if we lost the secret somehow.
+        builder_mode.set(false);
+    }
+
+    let deactivated_now = cached
+        .as_ref()
+        .map(|r| r.document.deactivated)
+        .unwrap_or(false);
+    let update_disabled = !controller_known || deactivated_now;
+    let update_title = if !controller_known {
+        "Controller secret unknown — was this DID created in another session?"
+    } else if deactivated_now {
+        "DID is deactivated; no further updates accepted"
+    } else {
+        "Open the Operation Builder (palette / form / preview)"
+    };
+
     rsx! {
         div { class: "detail-back-row",
             button { onclick: move |_| on_back.call(()), "← Back to inventory" }
@@ -2349,8 +2968,9 @@ fn DidDetailView(
             div { class: "actions",
                 button {
                     class: "btn-primary",
-                    disabled: true,
-                    title: "Operation Builder is the next slice",
+                    disabled: update_disabled,
+                    title: "{update_title}",
+                    onclick: move |_| builder_mode.set(true),
                     "Update DID"
                 }
                 button {
