@@ -441,17 +441,42 @@ impl Wallet {
             // 3. Balancing
             yield crate::WizardStage::Balancing;
             let params = ledger::structure::INITIAL_PARAMETERS;
-            // Use `dust_state.sync_time` as the dust intent's ctime —
-            // the verifier's `commitment_root` / `generation_root` are
-            // looked up via `root_history.get(ctime)`, which exact-matches
-            // entries inserted by `post_block_update` at block tblocks.
-            // `sync_time` is the latest tblock our replay observed, so the
-            // chain's history has an exact entry there with the same root
-            // our local commitment_tree currently holds. Using wall-clock
-            // `now` would land after later blocks have advanced the chain's
-            // root → predecessor lookup returns a newer root → public-input
-            // mismatch → InvalidDustSpendProof.
-            let ctime = dust_state.sync_time;
+            // Pick a `ctime` the verifier will accept and that
+            // matches our local commitment_tree.root().
+            //
+            // The verifier's `commitment_root` is looked up via
+            // `root_history.get(ctime)` (exact match else predecessor;
+            // entries inserted on every `post_block_update`). The
+            // value must equal the root our local tree holds.
+            //
+            // Two constraints stacked:
+            // 1. Validity window: `tblock - 3h ≤ ctime ≤ tblock` (the
+            //    chain's `OutOfDustValidityWindow` check).
+            // 2. Root match: between the most-recent block whose
+            //    `root_history` we agree with and `ctime`, no
+            //    dust events advanced the tree.
+            //
+            // On a wallet whose `sync_time` is recent (every block
+            // generates a fresh DUST event for the holder),
+            // `sync_time` itself satisfies both. After a chain
+            // reset or for a wallet with only genesis allocation,
+            // `sync_time` is stuck at block 0's tblock — way
+            // outside the 3-hour window. Falling back to the
+            // chain tip's tblock keeps us inside the window; the
+            // root match holds because no dust events have
+            // advanced our local tree (single-tenant standalone).
+            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+                Ok(c) => match c.chain_tip().await {
+                    Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+                    _ => 0,
+                },
+                Err(_) => 0,
+            };
+            let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+                base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+            } else {
+                dust_state.sync_time
+            };
             let mut ctx = crate::tx::balance::BalanceCtx {
                 dust_state: &mut dust_state,
                 dust_key: &dust_key,
@@ -595,9 +620,20 @@ impl Wallet {
             // 3. Balancing
             yield crate::WizardStage::Balancing;
             let params = ledger::structure::INITIAL_PARAMETERS;
-            // See `create_did` for why we use `sync_time` as the dust
-            // intent's ctime rather than wall-clock now.
-            let ctime = dust_state.sync_time;
+            // See `create_did` for the full rationale on ctime
+            // selection (chain-tip vs sync_time).
+            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+                Ok(c) => match c.chain_tip().await {
+                    Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+                    _ => 0,
+                },
+                Err(_) => 0,
+            };
+            let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+                base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+            } else {
+                dust_state.sync_time
+            };
             let mut ctx = crate::tx::balance::BalanceCtx {
                 dust_state: &mut dust_state,
                 dust_key: &dust_key,
@@ -767,7 +803,20 @@ impl Wallet {
                 .map(|d| d.as_secs())
                 .unwrap_or(0);
             let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
-            let ctime = dust_state.sync_time;
+            // See `create_did` for the full rationale on ctime
+            // selection (chain-tip vs sync_time).
+            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+                Ok(c) => match c.chain_tip().await {
+                    Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
+                    _ => 0,
+                },
+                Err(_) => 0,
+            };
+            let ctime = if chain_tip_secs > dust_state.sync_time.to_secs() as u64 {
+                base_crypto::time::Timestamp::from_secs(chain_tip_secs)
+            } else {
+                dust_state.sync_time
+            };
             let mut ctx = crate::tx::balance::BalanceCtx {
                 dust_state: &mut dust_state,
                 dust_key: &dust_key,
