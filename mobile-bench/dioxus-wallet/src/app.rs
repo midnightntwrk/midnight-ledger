@@ -371,6 +371,15 @@ pub fn App() -> Element {
         use_signal::<std::collections::HashMap<String, wallet_core::ResolvedDid>>(
             Default::default,
         );
+    // Penultimate resolve per DID — populated by snapshotting the
+    // current `resolved_cache` entry just before it's overwritten.
+    // The Resolver tab consumes this to render a "what changed
+    // since the previous resolve" diff card (per UI/UX bundle's
+    // Resolver inspector).
+    let mut previous_resolved_cache =
+        use_signal::<std::collections::HashMap<String, wallet_core::ResolvedDid>>(
+            Default::default,
+        );
     // Per-pipeline timing snapshots, newest last. Shown in the
     // Diagnostics tab as a stacked bar / breakdown per run.
     let mut timing_log = use_signal::<Vec<TimingRun>>(Vec::new);
@@ -644,6 +653,10 @@ pub fn App() -> Element {
                         network: *network.read(),
                         did: did_open.clone(),
                         cached: resolved_cache.read().get(&did_open).cloned(),
+                        previous_cached: previous_resolved_cache
+                            .read()
+                            .get(&did_open)
+                            .cloned(),
                         controller_secret: bridge_state.read().controller_secret_for(&did_open),
                         session_log: session_log.read().clone(),
                         on_back: move |_| open_did.set(None),
@@ -666,8 +679,18 @@ pub fn App() -> Element {
                             let mut inv = did_inventory.read().clone();
                             inv.insert(did_string.clone(), entry);
                             did_inventory.set(inv);
+                            // Snapshot the current resolve into the
+                            // penultimate slot before overwriting it
+                            // — the Resolver tab diffs the two so
+                            // the user sees what changed.
+                            let cache_snap = resolved_cache.read().clone();
+                            if let Some(prev) = cache_snap.get(&did_string) {
+                                let mut prev_map = previous_resolved_cache.read().clone();
+                                prev_map.insert(did_string.clone(), prev.clone());
+                                previous_resolved_cache.set(prev_map);
+                            }
                             // Cache the full resolve for the detail tabs.
-                            let mut cache = resolved_cache.read().clone();
+                            let mut cache = cache_snap;
                             cache.insert(did_string.clone(), resolved.clone());
                             resolved_cache.set(cache);
                             // Session log gets a Resolve event.
@@ -2876,6 +2899,12 @@ fn DidDetailView(
     network: Network,
     did: String,
     cached: Option<wallet_core::ResolvedDid>,
+    /// The resolve immediately preceding `cached`, if any. The
+    /// Resolver tab diffs these two to surface "what changed
+    /// since the previous resolve" (counter / VM / service /
+    /// alsoKnownAs / loaded-VKs deltas). `None` on the first
+    /// successful resolve of a DID this session.
+    previous_cached: Option<wallet_core::ResolvedDid>,
     /// Per-DID random sk if this session has it (the wallet
     /// minted the DID here). `None` means the user resolved a
     /// DID created elsewhere — Deactivate is disabled.
@@ -3172,7 +3201,13 @@ fn DidDetailView(
             }
         }
         div { class: "detail-pane",
-            {render_detail_tab(cur_tab, &did, cached.as_ref(), &session_log)}
+            {render_detail_tab(
+                cur_tab,
+                &did,
+                cached.as_ref(),
+                previous_cached.as_ref(),
+                &session_log,
+            )}
         }
     }
 }
@@ -3181,6 +3216,7 @@ fn render_detail_tab(
     tab: DetailTab,
     did: &str,
     resolved: Option<&wallet_core::ResolvedDid>,
+    previous: Option<&wallet_core::ResolvedDid>,
     session_log: &[SessionEvent],
 ) -> Element {
     let Some(r) = resolved else {
@@ -3197,7 +3233,7 @@ fn render_detail_tab(
         DetailTab::Relationships => render_relationships_tab(r),
         DetailTab::Services => render_services_tab(r),
         DetailTab::Operations => render_operations_tab(did, session_log),
-        DetailTab::Resolver => render_resolver_tab(did, r),
+        DetailTab::Resolver => render_resolver_tab(did, r, previous),
         DetailTab::RawState => render_raw_state_tab(r),
     }
 }
@@ -3272,6 +3308,7 @@ fn render_methods_tab(r: &wallet_core::ResolvedDid) -> Element {
                     th { "ID" }
                     th { "Type" }
                     th { "Curve" }
+                    th { "" }
                 }
             }
             tbody {
@@ -3280,11 +3317,13 @@ fn render_methods_tab(r: &wallet_core::ResolvedDid) -> Element {
                         // Type/curve names come straight from the JWK
                         let kty = format!("{:?}", vm.public_key_jwk.kty);
                         let crv = format!("{:?}", vm.public_key_jwk.crv);
+                        let id = vm.id.clone();
                         rsx! {
                             tr {
                                 td { "{vm.id}" }
                                 td { class: "muted", "{kty}" }
                                 td { class: "muted", "{crv}" }
+                                td { {copy_btn(id, "Copy DID URL")} }
                             }
                         }
                     }
@@ -3385,6 +3424,7 @@ fn render_services_tab(r: &wallet_core::ResolvedDid) -> Element {
                     th { "ID" }
                     th { "Type" }
                     th { "Endpoint" }
+                    th { "" }
                 }
             }
             tbody {
@@ -3394,11 +3434,17 @@ fn render_services_tab(r: &wallet_core::ResolvedDid) -> Element {
                             wallet_core::ServiceEndpoint::Uri(u) => u.clone(),
                             wallet_core::ServiceEndpoint::Object(v) => v.to_string(),
                         };
+                        let id = s.id.clone();
+                        let endpoint_clip = endpoint.clone();
                         rsx! {
                             tr {
                                 td { "{s.id}" }
                                 td { class: "muted", "{s.typ}" }
                                 td { class: "muted", "{endpoint}" }
+                                td {
+                                    {copy_btn(id, "Copy service id")}
+                                    {copy_btn(endpoint_clip, "Copy endpoint")}
+                                }
                             }
                         }
                     }
@@ -3440,7 +3486,11 @@ fn render_operations_tab(did: &str, session_log: &[SessionEvent]) -> Element {
     }
 }
 
-fn render_resolver_tab(did: &str, r: &wallet_core::ResolvedDid) -> Element {
+fn render_resolver_tab(
+    did: &str,
+    r: &wallet_core::ResolvedDid,
+    previous: Option<&wallet_core::ResolvedDid>,
+) -> Element {
     // Resolver diagnostics — adopts the bundle's "Resolve DID"
     // diagnostics card (prototype/index.html line 112-113).
     let id = &r.document.id;
@@ -3450,6 +3500,19 @@ fn render_resolver_tab(did: &str, r: &wallet_core::ResolvedDid) -> Element {
         .map(|h| format_int(h))
         .unwrap_or_else(|| "—".into());
     let addr_hex = id.contract_address_hex();
+    // Raw-state size in bytes (hex string length / 2) and a
+    // short fingerprint — first 8 + last 4 chars of the hex —
+    // so the user can eyeball whether two resolves of the same
+    // DID hit the same on-chain state without diffing the full
+    // ~kB blob.
+    let raw_bytes = r.raw_state_hex.len() / 2;
+    let raw_fp = state_fingerprint(&r.raw_state_hex);
+    let loaded = r.loaded_circuits.len();
+    let loaded_summary = if loaded == 0 {
+        "—".to_string()
+    } else {
+        r.loaded_circuits.join(", ")
+    };
     rsx! {
         h3 { "Resolver diagnostics" }
         div { class: "detail-kv",
@@ -3471,17 +3534,202 @@ fn render_resolver_tab(did: &str, r: &wallet_core::ResolvedDid) -> Element {
             div { class: "v", "{r.resolve_latency_ms} ms" }
             div { class: "k", "Last indexed block" }
             div { class: "v", "{block}" }
+            div { class: "k", "Raw state size" }
+            div { class: "v", "{raw_bytes} bytes" }
+            div { class: "k", "Raw state fingerprint" }
+            div { class: "v", "{raw_fp}" }
+            div { class: "k", "Loaded VKs" }
+            div { class: "v", "{loaded} ({loaded_summary})" }
             div { class: "k", "DID input" }
             div { class: "v", "{did}" }
         }
+        {render_resolve_diff(r, previous)}
+    }
+}
+
+/// Render the "what changed since the previous resolve" diff
+/// card. `None` previous → render a placeholder so the user
+/// understands the card exists. Otherwise enumerate the deltas
+/// we care about: counter, version, deactivated, vm + service
+/// counts, alsoKnownAs, services, loaded VKs, raw state size /
+/// fingerprint.
+fn render_resolve_diff(
+    cur: &wallet_core::ResolvedDid,
+    prev: Option<&wallet_core::ResolvedDid>,
+) -> Element {
+    let Some(prev) = prev else {
+        return rsx! {
+            h3 { "Cross-resolve diff" }
+            div { class: "detail-empty",
+                "Only one resolve recorded this session. Click \"Resolve latest\" again to compare."
+            }
+        };
+    };
+
+    let mut rows: Vec<(String, String, String)> = Vec::new();
+    let push = |rows: &mut Vec<(String, String, String)>, k: &str, prev: String, cur: String| {
+        if prev != cur {
+            rows.push((k.to_string(), prev, cur));
+        }
+    };
+    push(
+        &mut rows,
+        "Version",
+        prev.document.version.to_string(),
+        cur.document.version.to_string(),
+    );
+    push(
+        &mut rows,
+        "Counter",
+        prev.maintenance_counter.to_string(),
+        cur.maintenance_counter.to_string(),
+    );
+    push(
+        &mut rows,
+        "Deactivated",
+        prev.document.deactivated.to_string(),
+        cur.document.deactivated.to_string(),
+    );
+    push(
+        &mut rows,
+        "Methods",
+        prev.document.verification_method.len().to_string(),
+        cur.document.verification_method.len().to_string(),
+    );
+    push(
+        &mut rows,
+        "Services",
+        prev.document.service.len().to_string(),
+        cur.document.service.len().to_string(),
+    );
+    push(
+        &mut rows,
+        "alsoKnownAs",
+        prev.document.also_known_as.len().to_string(),
+        cur.document.also_known_as.len().to_string(),
+    );
+    push(
+        &mut rows,
+        "Loaded VKs",
+        prev.loaded_circuits.len().to_string(),
+        cur.loaded_circuits.len().to_string(),
+    );
+    push(
+        &mut rows,
+        "Last block",
+        prev.last_block_height
+            .map(|h| format_int(h))
+            .unwrap_or_else(|| "—".into()),
+        cur.last_block_height
+            .map(|h| format_int(h))
+            .unwrap_or_else(|| "—".into()),
+    );
+    push(
+        &mut rows,
+        "Last tx",
+        format!(
+            "0x{}",
+            short_hex_or_dash(&prev.last_tx_hash),
+        ),
+        format!(
+            "0x{}",
+            short_hex_or_dash(&cur.last_tx_hash),
+        ),
+    );
+    let prev_fp = state_fingerprint(&prev.raw_state_hex);
+    let cur_fp = state_fingerprint(&cur.raw_state_hex);
+    push(
+        &mut rows,
+        "Raw state fingerprint",
+        prev_fp,
+        cur_fp,
+    );
+    // VKs newly loaded since the previous resolve — useful to
+    // confirm an auto-load step in the Operation Builder
+    // actually landed.
+    let prev_set: std::collections::HashSet<&str> =
+        prev.loaded_circuits.iter().map(String::as_str).collect();
+    let new_vks: Vec<&str> = cur
+        .loaded_circuits
+        .iter()
+        .map(String::as_str)
+        .filter(|c| !prev_set.contains(*c))
+        .collect();
+    if !new_vks.is_empty() {
+        rows.push((
+            "Newly loaded VKs".to_string(),
+            "—".to_string(),
+            new_vks.join(", "),
+        ));
+    }
+
+    if rows.is_empty() {
+        return rsx! {
+            h3 { "Cross-resolve diff" }
+            div { class: "detail-empty",
+                "No fields changed between the previous and current resolve."
+            }
+        };
+    }
+    rsx! {
+        h3 { "Cross-resolve diff" }
+        table { class: "detail-table",
+            thead {
+                tr {
+                    th { "Field" }
+                    th { "Previous" }
+                    th { "Current" }
+                }
+            }
+            tbody {
+                for (k , prev_v , cur_v) in rows.into_iter() {
+                    tr {
+                        td { "{k}" }
+                        td { class: "muted", "{prev_v}" }
+                        td { "{cur_v}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Short fingerprint of an opaque hex blob — first 8 + "…" +
+/// last 4 chars. Cheap to glance, enough to spot when two
+/// resolves see the same on-chain state without comparing the
+/// full ~kB hex string.
+fn state_fingerprint(hex: &str) -> String {
+    let h = hex.trim_start_matches("0x");
+    if h.len() <= 12 {
+        h.to_string()
+    } else {
+        format!("{}…{}", &h[..8], &h[h.len() - 4..])
+    }
+}
+
+fn short_hex_or_dash(hex: &str) -> String {
+    let h = hex.trim_start_matches("0x");
+    if h.is_empty() {
+        "—".to_string()
+    } else if h.len() <= 12 {
+        h.to_string()
+    } else {
+        format!("{}…{}", &h[..8], &h[h.len() - 4..])
     }
 }
 
 fn render_raw_state_tab(r: &wallet_core::ResolvedDid) -> Element {
     let n = r.raw_state_hex.len() / 2;
+    let full_hex = format!("0x{}", r.raw_state_hex);
     rsx! {
         h3 { "Raw ledger state ({n} bytes)" }
-        div { class: "seed-blob", "0x{r.raw_state_hex}" }
+        div { class: "row",
+            {copy_btn(full_hex.clone(), "Copy raw state hex")}
+            span { style: "color: var(--text-muted); font-size: 11px;",
+                "fingerprint {state_fingerprint(&r.raw_state_hex)}"
+            }
+        }
+        div { class: "seed-blob", "{full_hex}" }
     }
 }
 
@@ -3810,6 +4058,26 @@ fn copy_to_clipboard(s: &str) -> Result<(), String> {
 #[cfg(target_os = "android")]
 fn copy_to_clipboard(_s: &str) -> Result<(), String> {
     Ok(())
+}
+
+/// Small inline ⧉ button that copies `value` to the system
+/// clipboard on click. Used in the Methods + Services tables and
+/// the Raw State pane so every long, hand-typeable string has a
+/// one-click extract. No "copied!" feedback — that needs signal
+/// state which only works inside `#[component]` fns and these
+/// render helpers are plain `fn`s. The button is small enough
+/// that the silent copy is the right trade.
+fn copy_btn(value: String, title: &'static str) -> Element {
+    rsx! {
+        button {
+            class: "copy-btn inline",
+            title: "{title}",
+            onclick: move |_| {
+                let _ = copy_to_clipboard(&value);
+            },
+            "⧉"
+        }
+    }
 }
 
 fn network_value(n: Network) -> &'static str {
