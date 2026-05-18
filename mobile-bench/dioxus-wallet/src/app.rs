@@ -391,6 +391,30 @@ pub fn App() -> Element {
     let bridge_state = use_signal(BridgeState::new);
     let mut proof_server = use_signal::<Option<String>>(|| None);
 
+    // Open the persistent wallet store once at startup and
+    // hand the handle to BridgeState. Failures are logged but
+    // don't crash the app — a missing store means controller
+    // secrets stay session-scoped (the previous behaviour).
+    //
+    // Default passphrase for the prototype: a fixed dev
+    // string. A future slice will surface an unlock prompt and
+    // let the user set / rotate this.
+    use_future(move || {
+        let state = bridge_state.read().clone();
+        let net = *network.read();
+        async move {
+            let path = wallet_store_path();
+            match wallet_core::store::WalletStore::open(&path, DEV_STORE_PASSPHRASE) {
+                Ok(store) => {
+                    state.set_store(store);
+                    let n = state.hydrate_controller_secrets(net);
+                    tracing::info!(path=%path.display(), hydrated=n, "wallet store opened");
+                }
+                Err(e) => tracing::warn!(error=%e, path=%path.display(), "wallet store open failed"),
+            }
+        }
+    });
+
     use_future(move || {
         let state = bridge_state.read().clone();
         async move {
@@ -614,7 +638,11 @@ pub fn App() -> Element {
                         // the shared bridge store so subsequent JS-driven
                         // circuit calls can look it up via the
                         // `getControllerSecretKey` RPC.
-                        bridge_state.read().remember_controller_secret(did.clone(), o.controller_sk);
+                        bridge_state.read().remember_controller_secret(
+                            *network.read(),
+                            did.clone(),
+                            o.controller_sk,
+                        );
                         last_did_id.set(Some(did.clone()));
                         // Drop into the inventory as Pending — the next
                         // Resolve flips it to Active/Deactivated and
@@ -657,7 +685,9 @@ pub fn App() -> Element {
                             .read()
                             .get(&did_open)
                             .cloned(),
-                        controller_secret: bridge_state.read().controller_secret_for(&did_open),
+                        controller_secret: bridge_state
+                            .read()
+                            .controller_secret_for_on(*network.read(), &did_open),
                         session_log: session_log.read().clone(),
                         on_back: move |_| open_did.set(None),
                         on_resolved: move |resolved: wallet_core::ResolvedDid| {
@@ -4336,6 +4366,28 @@ fn copy_to_clipboard(s: &str) -> Result<(), String> {
 #[cfg(target_os = "android")]
 fn copy_to_clipboard(_s: &str) -> Result<(), String> {
     Ok(())
+}
+
+/// Dev-only passphrase for the persistent wallet store. A
+/// future slice will surface an unlock prompt and let the user
+/// set / rotate this — until then the prototype just uses a
+/// fixed string so the file-on-disk decrypts across runs
+/// without user input.
+const DEV_STORE_PASSPHRASE: &str = "midnight-did-wallet-dev:v1";
+
+/// Path the persistent wallet store lives at. Uses the OS
+/// data-dir (`~/Library/Application Support/...` on macOS,
+/// `~/.local/share/...` on Linux, `%APPDATA%/...` on Windows)
+/// so multiple wallets on the same machine don't fight. Falls
+/// back to a `./wallet.redb` next to the binary if the dirs
+/// crate can't resolve a data dir.
+fn wallet_store_path() -> std::path::PathBuf {
+    if let Some(base) = dirs::data_dir() {
+        let dir = base.join("midnight-did-wallet");
+        let _ = std::fs::create_dir_all(&dir);
+        return dir.join("wallet.redb");
+    }
+    std::path::PathBuf::from("wallet.redb")
 }
 
 /// Small inline ⧉ button that copies `value` to the system

@@ -22,14 +22,17 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
+use wallet_core::store::WalletStore;
 use wallet_core::{Network, unshielded_bech32m};
 
 /// Per-DID random controller secret store. Populated by
 /// `CreateDidWizard.on_done` and read by the
 /// `getControllerSecretKey` bridge RPC during JS-driven circuit
-/// execution. In-memory only — lost on app restart. Each DID's
-/// 32 bytes never leave this process; they round-trip across the
-/// Dioxus channel as hex but only inside the embedded WebView.
+/// execution. In-memory hot cache; the canonical source of truth
+/// is the persistent `WalletStore` (when attached via
+/// [`BridgeState::set_store`]). Each DID's 32 bytes round-trip
+/// across the Dioxus channel as hex but only inside the embedded
+/// WebView.
 pub type ControllerSecretStore = Arc<Mutex<HashMap<String, [u8; 32]>>>;
 
 #[derive(Clone, Default)]
@@ -39,6 +42,14 @@ pub struct BridgeState {
     /// Arc, so the map is shared across the bridge loop, the UI, and
     /// any future callers.
     pub controller_secrets: ControllerSecretStore,
+    /// Persistent backing store. Set once at app startup via
+    /// [`set_store`]. When present, `remember_controller_secret`
+    /// writes through (best-effort — a store error is logged but
+    /// does not fail the in-memory cache update, so an unhealthy
+    /// disk doesn't break a freshly-deployed DID's signing path
+    /// for the current session). When absent, behaviour matches
+    /// the previous in-memory-only model.
+    pub store: Arc<OnceCell<WalletStore>>,
 }
 
 impl BridgeState {
@@ -52,22 +63,112 @@ impl BridgeState {
         self.proof_server_url.get().cloned()
     }
 
+    /// Attach a `WalletStore`. Idempotent — subsequent calls
+    /// after the first succeed are no-ops. Returns the store
+    /// handle that ended up installed (either the just-set one
+    /// or a previously-set one) so the caller doesn't need a
+    /// follow-up read.
+    pub fn set_store(&self, store: WalletStore) -> WalletStore {
+        let _ = self.store.set(store);
+        self.store.get().cloned().expect("just-set store reachable")
+    }
+
+    /// Borrow the attached store, if any. Returns `None` before
+    /// `set_store` has run — useful during the early bridge
+    /// boot path that fires before the store is opened.
+    #[allow(dead_code)] // Surfaced via [`Self::store`] for future bridge-RPC handlers
+    /// that want to persist beyond controller secrets.
+    pub fn store(&self) -> Option<&WalletStore> {
+        self.store.get()
+    }
+
     /// Record the random sk minted for a freshly-deployed DID.
     /// Overwrites any existing entry (a fresh deploy with the same
-    /// id would be impossible on-chain, but defensive).
-    pub fn remember_controller_secret(&self, did: String, sk: [u8; 32]) {
+    /// id would be impossible on-chain, but defensive). Persists
+    /// to the attached `WalletStore` (if any) under
+    /// `(network, did)`; a write failure is logged and the
+    /// in-memory cache is still populated so the current session
+    /// is uninterrupted.
+    pub fn remember_controller_secret(&self, network: Network, did: String, sk: [u8; 32]) {
         if let Ok(mut g) = self.controller_secrets.lock() {
-            g.insert(did, sk);
+            g.insert(did.clone(), sk);
+        }
+        if let Some(store) = self.store.get() {
+            if let Err(e) = store.put_controller_secret(network, &did, &sk) {
+                tracing::warn!(error=%e, did=%did, "persist controller secret failed");
+            }
         }
     }
 
-    /// Look up the sk for a given DID. Returns `None` if we never
-    /// minted that DID or have forgotten its sk.
+    /// Look up the sk for a given DID. Hits the in-memory cache
+    /// first; falls back to the persistent store on miss (and
+    /// repopulates the cache on success). The store-fallback
+    /// path needs the network the DID belongs to — callers
+    /// usually have it; the wrapper [`controller_secret_for`]
+    /// keeps the legacy network-less surface for hot reads.
+    pub fn controller_secret_for_on(
+        &self,
+        network: Network,
+        did: &str,
+    ) -> Option<[u8; 32]> {
+        if let Some(found) = self.controller_secret_for(did) {
+            return Some(found);
+        }
+        let store = self.store.get()?;
+        match store.get_controller_secret(network, did) {
+            Ok(Some(sk)) => {
+                let bytes: [u8; 32] = *sk;
+                if let Ok(mut g) = self.controller_secrets.lock() {
+                    g.insert(did.to_string(), bytes);
+                }
+                Some(bytes)
+            }
+            Ok(None) => None,
+            Err(e) => {
+                tracing::warn!(error=%e, did=%did, "load controller secret failed");
+                None
+            }
+        }
+    }
+
+    /// Legacy network-less accessor — only checks the in-memory
+    /// cache. Kept because some hot paths (e.g. the bridge RPC
+    /// loop, where we don't have the network in scope cheaply)
+    /// can't justify a store hit per call. UI code that already
+    /// knows the network should prefer
+    /// [`controller_secret_for_on`].
     pub fn controller_secret_for(&self, did: &str) -> Option<[u8; 32]> {
         self.controller_secrets
             .lock()
             .ok()
             .and_then(|g| g.get(did).copied())
+    }
+
+    /// Pull every controller secret on `network` out of the
+    /// persistent store and into the in-memory cache. Called
+    /// once at app startup right after [`set_store`]. Returns
+    /// the number of secrets hydrated (or 0 if no store is
+    /// attached).
+    pub fn hydrate_controller_secrets(&self, network: Network) -> usize {
+        let Some(store) = self.store.get() else {
+            return 0;
+        };
+        match store.list_controller_secrets(network) {
+            Ok(rows) => {
+                let n = rows.len();
+                if let Ok(mut g) = self.controller_secrets.lock() {
+                    for (did, sk) in rows {
+                        let bytes: [u8; 32] = *sk;
+                        g.insert(did, bytes);
+                    }
+                }
+                n
+            }
+            Err(e) => {
+                tracing::warn!(error=%e, "hydrate controller secrets failed");
+                0
+            }
+        }
     }
 }
 
