@@ -1835,8 +1835,21 @@ const BUILDABLE_OPS: &[OpKind] = &[
 #[derive(Clone, PartialEq, Eq)]
 enum QueueStatus {
     Pending,
-    Running,
-    Done { tx_hex: String },
+    /// Currently running. `phase` is the human-readable
+    /// substep — "Loading VK", "Calling circuit". The auto-load
+    /// path may dwell on "Loading VK" for the duration of one
+    /// MaintenanceUpdate (deploy + balance + prove + submit +
+    /// confirm + indexer-settle wait) before transitioning.
+    Running { phase: String },
+    Done {
+        tx_hex: String,
+        /// If the wallet auto-loaded the circuit's verifier key
+        /// just before the call, this is the tx hash of that
+        /// `MaintenanceUpdate`. The preview pane surfaces it
+        /// inline so the user understands the two transactions
+        /// landed for one queued op.
+        loaded_tx_hex: Option<String>,
+    },
     Failed { err: String },
     /// A later op in the batch never ran because an earlier op
     /// failed. We stop on the first failure rather than press on
@@ -1860,6 +1873,22 @@ fn DidOperationBuilder(
     network: Network,
     did: String,
     controller_secret: [u8; 32],
+    /// Circuits whose verifier key is already registered on
+    /// `ContractState.operations`. Drives the auto-load step:
+    /// any queued op whose `circuit()` isn't in this set gets a
+    /// preceding `Wallet::load_did_circuit` MaintenanceUpdate
+    /// before its `ContractCall`. The set is local to the
+    /// component — the spawned submit closure clones it and
+    /// extends it as it runs, so successive ops in the same
+    /// batch reuse a single load.
+    loaded_circuits: Vec<String>,
+    /// Current `maintenance_authority.counter` for the contract.
+    /// Every `MaintenanceUpdate` the auto-load path emits must
+    /// use this exact counter (chain rejects mismatches with
+    /// `InvalidMaintenanceUpdate`); the closure bumps it locally
+    /// after each accepted load. Subsequent loads in the same
+    /// batch use the bumped value.
+    initial_counter: u32,
     on_back: EventHandler<()>,
     on_event: EventHandler<SessionEvent>,
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
@@ -2023,6 +2052,9 @@ fn DidOperationBuilder(
         let did_for_log = did_for_submit.clone();
         let on_event = on_event.clone();
         let on_resolved = on_resolved.clone();
+        let mut loaded_set: std::collections::HashSet<String> =
+            loaded_circuits.iter().cloned().collect();
+        let mut counter_cursor: u32 = initial_counter;
         spawn(async move {
             use futures::StreamExt;
             use wallet_core::WizardStage;
@@ -2033,15 +2065,88 @@ fn DidOperationBuilder(
                     let q = queue.read();
                     q[i].0.clone()
                 };
-                // Mark running
+                let circuit = op.circuit().to_string();
+
+                // ── Phase 1: auto-load VK if not on-chain ─────
+                let mut loaded_tx_hex: Option<String> = None;
+                if !loaded_set.contains(&circuit) {
+                    {
+                        let mut q = queue.read().clone();
+                        q[i].1 = QueueStatus::Running {
+                            phase: format!("Loading VK ({circuit})"),
+                        };
+                        queue.set(q);
+                    }
+                    let mut load_stream = std::pin::pin!(wallet.load_did_circuit(
+                        did_id.clone(),
+                        circuit.clone(),
+                        counter_cursor,
+                    ));
+                    let mut load_terminal: Option<WizardStage> = None;
+                    while let Some(stage) = load_stream.next().await {
+                        if matches!(&stage, WizardStage::Done(_) | WizardStage::Failed(_)) {
+                            load_terminal = Some(stage);
+                            break;
+                        }
+                    }
+                    match load_terminal {
+                        Some(WizardStage::Done(o)) => {
+                            let load_tx = hex::encode(o.tx_hash);
+                            loaded_tx_hex = Some(load_tx.clone());
+                            loaded_set.insert(circuit.clone());
+                            counter_cursor = counter_cursor.saturating_add(1);
+                            on_event.call(SessionEvent::LoadCircuit {
+                                did: did_for_log.clone(),
+                                circuit: format!("{circuit} (auto-load VK)"),
+                                tx_hash: o.tx_hash,
+                                block_hash: o.block_hash,
+                            });
+                            // Give the indexer a beat to pick the
+                            // new VK up before the ContractCall
+                            // tries to look it up. The live batch
+                            // test settles 30s between writes;
+                            // the auto-load path is the same
+                            // shape so use the same floor.
+                            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                        }
+                        Some(WizardStage::Failed(msg)) => {
+                            let mut q = queue.read().clone();
+                            q[i].1 = QueueStatus::Failed {
+                                err: format!("auto-load {circuit}: {msg}"),
+                            };
+                            for j in (i + 1)..total {
+                                q[j].1 = QueueStatus::Skipped;
+                            }
+                            queue.set(q);
+                            break;
+                        }
+                        _ => {
+                            let mut q = queue.read().clone();
+                            q[i].1 = QueueStatus::Failed {
+                                err: format!(
+                                    "auto-load {circuit}: stream ended without terminal stage",
+                                ),
+                            };
+                            for j in (i + 1)..total {
+                                q[j].1 = QueueStatus::Skipped;
+                            }
+                            queue.set(q);
+                            break;
+                        }
+                    }
+                }
+
+                // ── Phase 2: ContractCall the circuit ─────────
                 {
                     let mut q = queue.read().clone();
-                    q[i].1 = QueueStatus::Running;
+                    q[i].1 = QueueStatus::Running {
+                        phase: format!("Calling {circuit}"),
+                    };
                     queue.set(q);
                 }
                 let mut stream = std::pin::pin!(wallet.call_did_circuit(
                     did_id.clone(),
-                    op.circuit().to_string(),
+                    circuit.clone(),
                     op.args_json(),
                     sk_for_submit,
                 ));
@@ -2057,14 +2162,26 @@ fn DidOperationBuilder(
                         let tx_hex = hex::encode(o.tx_hash);
                         let block_hash = o.block_hash;
                         let mut q = queue.read().clone();
-                        q[i].1 = QueueStatus::Done { tx_hex: tx_hex.clone() };
+                        q[i].1 = QueueStatus::Done {
+                            tx_hex: tx_hex.clone(),
+                            loaded_tx_hex: loaded_tx_hex.clone(),
+                        };
                         queue.set(q);
                         on_event.call(SessionEvent::LoadCircuit {
                             did: did_for_log.clone(),
-                            circuit: op.circuit().to_string(),
+                            circuit: circuit.clone(),
                             tx_hash: o.tx_hash,
                             block_hash,
                         });
+                        // Settle between ops so the next call's
+                        // `prepareUnprovenCallTx` reads fresh
+                        // state. ContractCall doesn't bump the
+                        // maintenance counter, but does change
+                        // `version` + the operations transcript
+                        // — both feed back into the harness.
+                        if i + 1 < total {
+                            tokio::time::sleep(std::time::Duration::from_secs(15)).await;
+                        }
                     }
                     Some(WizardStage::Failed(msg)) => {
                         let mut q = queue.read().clone();
@@ -2262,7 +2379,15 @@ fn DidOperationBuilder(
                                 }
                                 span { class: "op-queue-name", "{i + 1}. {entry.0.circuit()}" }
                                 span { class: "op-queue-summary", "{entry.0.summary()}" }
-                                if let QueueStatus::Done { tx_hex } = &entry.1 {
+                                if let QueueStatus::Running { phase } = &entry.1 {
+                                    div { class: "op-queue-phase", "{phase}…" }
+                                }
+                                if let QueueStatus::Done { tx_hex, loaded_tx_hex } = &entry.1 {
+                                    if let Some(load_tx) = loaded_tx_hex {
+                                        div { class: "op-queue-tx muted",
+                                            "auto-load VK · tx 0x{load_tx}"
+                                        }
+                                    }
                                     div { class: "op-queue-tx", "tx 0x{tx_hex}" }
                                 }
                                 if let QueueStatus::Failed { err } = &entry.1 {
@@ -2299,7 +2424,7 @@ fn DidOperationBuilder(
 fn queue_status_label(s: &QueueStatus) -> &'static str {
     match s {
         QueueStatus::Pending => "•",
-        QueueStatus::Running => "…",
+        QueueStatus::Running { .. } => "…",
         QueueStatus::Done { .. } => "✓",
         QueueStatus::Failed { .. } => "✗",
         QueueStatus::Skipped => "—",
@@ -2309,7 +2434,7 @@ fn queue_status_label(s: &QueueStatus) -> &'static str {
 fn queue_status_class(s: &QueueStatus) -> &'static str {
     match s {
         QueueStatus::Pending => "op-stat pending",
-        QueueStatus::Running => "op-stat running",
+        QueueStatus::Running { .. } => "op-stat running",
         QueueStatus::Done { .. } => "op-stat done",
         QueueStatus::Failed { .. } => "op-stat failed",
         QueueStatus::Skipped => "op-stat skipped",
@@ -2923,11 +3048,22 @@ fn DidDetailView(
     if *builder_mode.read() {
         if let Some(sk) = controller_secret {
             let did_for_builder = did.clone();
+            // Pull the on-chain VK set + counter from the cached
+            // resolve. If we haven't resolved yet, the builder
+            // gets an empty set and counter 0 — every queued op
+            // will be auto-loaded (counter starts at 0 on a
+            // fresh deploy, so this is also correct).
+            let (loaded_circuits, initial_counter) = cached
+                .as_ref()
+                .map(|r| (r.loaded_circuits.clone(), r.maintenance_counter))
+                .unwrap_or_else(|| (Vec::new(), 0));
             return rsx! {
                 DidOperationBuilder {
                     network,
                     did: did_for_builder,
                     controller_secret: sk,
+                    loaded_circuits,
+                    initial_counter,
                     on_back: move |_| builder_mode.set(false),
                     on_event,
                     on_resolved,

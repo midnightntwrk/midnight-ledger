@@ -880,7 +880,8 @@ details .panel .row {
   overflow-wrap: anywhere;
 }
 .op-queue-tx,
-.op-queue-err {
+.op-queue-err,
+.op-queue-phase {
   grid-column: 1 / -1;
   font-family: ui-monospace, monospace;
   font-size: 10px;
@@ -889,8 +890,14 @@ details .panel .row {
 .op-queue-tx {
   color: var(--success);
 }
+.op-queue-tx.muted {
+  color: var(--text-muted);
+}
 .op-queue-err {
   color: var(--error);
+}
+.op-queue-phase {
+  color: var(--accent);
 }
 
 .op-stat {
