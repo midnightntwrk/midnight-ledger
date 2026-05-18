@@ -311,5 +311,29 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
         'signature verification failed for supplied intent'
       );
     });
+
+    /**
+     * `eraseSignatures()` drops the signature payload from a signed claim. The
+     * ECDSA branch needs explicit coverage because erasure is generic across
+     * signature kinds, and a regression that only erased schnorr would not be
+     * caught by the existing tests.
+     *
+     * @given A ClaimRewardsTransaction signed with an ECDSA signature
+     * @when Calling `eraseSignatures()`
+     * @then The resulting transaction's `signature` is a `SignatureErased` and
+     *   the ECDSA owner is preserved
+     */
+    test('eraseSignatures strips an ECDSA signature from a signed claim', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const rewards = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, ecdsaVk, Static.nonce(), 'Reward');
+      const signed = rewards.addSignature(signData(ecdsaSk, rewards.dataToSign));
+
+      const erased = signed.eraseSignatures();
+
+      expect(erased.signature).toBeInstanceOf(SignatureErased);
+      expect(erased.owner).toEqual(ecdsaVk);
+      expect(erased.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
   });
 });

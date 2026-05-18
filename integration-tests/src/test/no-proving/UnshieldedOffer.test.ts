@@ -12,19 +12,51 @@
 // limitations under the License.
 
 import {
+  addressFromKey,
+  ClaimRewardsTransaction,
   Intent,
   sampleIntentHash,
   sampleSigningKey,
   sampleUserAddress,
-  type Signature,
+  SignatureEnabled,
+  SignatureErased,
+  type SignatureVerifyingKey,
   signatureVerifyingKey,
   signData,
+  type SigningKey,
+  Transaction,
   UnshieldedOffer,
+  type UserAddress,
+  type Utxo,
   type UtxoOutput,
-  type UtxoSpend
+  type UtxoSpend,
+  WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
-import { getNewUnshieldedOffer, Random } from '@/test-objects';
+import { getNewUnshieldedOffer, INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Random } from '@/test-objects';
 import { BindingMarker, ProofMarker, SignatureKindMarker, SignatureMarker } from '@/test/utils/Markers';
+import { TestState } from '@/test/utils/TestState';
+
+const mintNightToEcdsa = (
+  state: TestState,
+  ecdsaSk: SigningKey,
+  ecdsaVk: SignatureVerifyingKey,
+  ecdsaAddress: UserAddress
+): Utxo => {
+  state.distributeNight(ecdsaAddress, INITIAL_NIGHT_AMOUNT, state.time);
+  const claim = ClaimRewardsTransaction.new(
+    LOCAL_TEST_NETWORK_ID,
+    INITIAL_NIGHT_AMOUNT,
+    ecdsaVk,
+    Random.nonce(),
+    'Reward'
+  );
+  const signed = claim.addSignature(signData(ecdsaSk, claim.dataToSign));
+  const claimTx = Transaction.fromRewards(signed);
+  const strictness = new WellFormedStrictness();
+  strictness.verifySignatures = true;
+  state.assertApply(claimTx, strictness);
+  return Array.from(state.ledger.utxo.utxos).find((u) => u.owner === ecdsaAddress)!;
+};
 
 describe('Ledger API - UnshieldedOffer', () => {
   /**
@@ -52,9 +84,9 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature]);
+    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [new SignatureEnabled(signature)]);
 
-    expect(unshieldedOffer.signatures.at(0)).toEqual(signature);
+    expect(unshieldedOffer.signatures.at(0)?.value).toEqual(signature);
     expect(unshieldedOffer.inputs.at(0)).toEqual(utxoSpend);
     expect(unshieldedOffer.inputs.length).toEqual(1);
     expect(unshieldedOffer.outputs.at(0)).toEqual(utxoOutput);
@@ -120,9 +152,13 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature, signature]);
+    const unshieldedOffer = UnshieldedOffer.new(
+      [utxoSpend],
+      [utxoOutput],
+      [new SignatureEnabled(signature), new SignatureEnabled(signature)]
+    );
 
-    const signatures: Signature[] = Array(64).fill(signature);
+    const signatures: SignatureEnabled[] = Array(64).fill(new SignatureEnabled(signature));
 
     const updated = unshieldedOffer.addSignatures(signatures);
     expect(updated.signatures.length).toEqual(64 + 2);
@@ -191,7 +227,7 @@ describe('Ledger API - UnshieldedOffer', () => {
     const unshieldedOffer = UnshieldedOffer.new(
       [utxoSpend1, utxoSpend2],
       [utxoOutput1, utxoOutput2],
-      [signature1, signature2]
+      [new SignatureEnabled(signature1), new SignatureEnabled(signature2)]
     );
 
     expect(unshieldedOffer.signatures.length).toEqual(2);
@@ -231,7 +267,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token2.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature]);
+    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [new SignatureEnabled(signature)]);
 
     expect(unshieldedOffer.inputs.at(0)?.type).toEqual(token1.raw);
     expect(unshieldedOffer.outputs.at(0)?.type).toEqual(token2.raw);
@@ -268,12 +304,12 @@ describe('Ledger API - UnshieldedOffer', () => {
           type: token.raw
         }
       ],
-      [signature1]
+      [new SignatureEnabled(signature1)]
     );
-    const unshieldedOfferWithSignature = unshieldedOffer.addSignatures([signature1]);
-    const updated = unshieldedOfferWithSignature.addSignatures([signature2]);
+    const unshieldedOfferWithSignature = unshieldedOffer.addSignatures([new SignatureEnabled(signature1)]);
+    const updated = unshieldedOfferWithSignature.addSignatures([new SignatureEnabled(signature2)]);
 
-    expect(updated.signatures).toEqual([signature1, signature1, signature2]);
+    expect(updated.signatures.map((s) => s.value)).toEqual([signature1, signature1, signature2]);
   });
 
   /**
@@ -303,7 +339,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature]);
+    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [new SignatureEnabled(signature)]);
 
     expect(unshieldedOffer.inputs.at(0)?.value).toEqual(0n);
     expect(unshieldedOffer.outputs.at(0)?.value).toEqual(0n);
@@ -336,7 +372,11 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature, signature]);
+    const unshieldedOffer = UnshieldedOffer.new(
+      [utxoSpend],
+      [utxoOutput],
+      [new SignatureEnabled(signature), new SignatureEnabled(signature)]
+    );
 
     expect(unshieldedOffer.signatures.length).toEqual(2);
     expect(unshieldedOffer.inputs.length).toEqual(1);
@@ -369,7 +409,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       type: token.raw
     };
 
-    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [signature]);
+    const unshieldedOffer = UnshieldedOffer.new([utxoSpend], [utxoOutput], [new SignatureEnabled(signature)]);
 
     expect(unshieldedOffer.toString()).toMatch(/UnshieldedOffer.*/);
   });
@@ -408,20 +448,19 @@ describe('Ledger API - UnshieldedOffer', () => {
             type: token.raw
           }
         ],
-        [sig]
+        [new SignatureEnabled(sig)]
       );
 
       expect(offer.inputs.at(0)?.owner).toEqual(ecdsaVk);
       expect(offer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
-      expect(offer.signatures.at(0)).toEqual(sig);
-      expect(offer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(offer.signatures.at(0)?.value).toEqual(sig);
+      expect(offer.signatures.at(0)?.value.tag).toEqual(SignatureKindMarker.ecdsa);
     });
 
     /**
      * Test that an offer with mixed-kind inputs preserves signature order.
      *
-     * @given Two UTXO inputs — one Schnorr-owned, one ECDSA-owned — and a
-     *   signature for each in declaration order
+     * @given Two UTXO inputs (one Schnorr-owned, one ECDSA-owned) and a signature for each in declaration order
      * @when Building the UnshieldedOffer
      * @then The signatures and owner tags must appear in the same order via
      *   the getters
@@ -442,16 +481,16 @@ describe('Ledger API - UnshieldedOffer', () => {
           { value: 50n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 1 }
         ],
         [{ value: 100n, owner: sampleUserAddress(), type: token.raw }],
-        [schnorrSig, ecdsaSig]
+        [new SignatureEnabled(schnorrSig), new SignatureEnabled(ecdsaSig)]
       );
 
       expect(offer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
       expect(offer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
       expect(offer.signatures.length).toEqual(2);
-      expect(offer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.schnorr);
-      expect(offer.signatures.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
-      expect(offer.signatures.at(0)).toEqual(schnorrSig);
-      expect(offer.signatures.at(1)).toEqual(ecdsaSig);
+      expect(offer.signatures.at(0)?.value.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(offer.signatures.at(1)?.value.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(offer.signatures.at(0)?.value).toEqual(schnorrSig);
+      expect(offer.signatures.at(1)?.value).toEqual(ecdsaSig);
     });
 
     /**
@@ -472,28 +511,28 @@ describe('Ledger API - UnshieldedOffer', () => {
       const base = UnshieldedOffer.new(
         [{ value: 10n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
         [{ value: 10n, owner: sampleUserAddress(), type: token.raw }],
-        [firstSig]
+        [new SignatureEnabled(firstSig)]
       );
 
-      const updated = base.addSignatures([secondSig]);
+      const updated = base.addSignatures([new SignatureEnabled(secondSig)]);
 
       expect(updated.signatures.length).toEqual(2);
-      expect(updated.signatures.at(0)).toEqual(firstSig);
-      expect(updated.signatures.at(1)).toEqual(secondSig);
+      expect(updated.signatures.at(0)?.value).toEqual(firstSig);
+      expect(updated.signatures.at(1)?.value).toEqual(secondSig);
     });
 
     /**
-     * Pin the surprising behaviour documented in
-     * ledger-wasm/src/unshielded.rs: the TS signature requires Signature[]
-     * even on a signature-erased offer, but the rust side requires unit, so
-     * the shim silently discards anything you hand it.
+     * After erasing signatures, addSignatures takes SignatureErased
+     * placeholders rather than real signatures: erasure means the wire form
+     * no longer carries signatures, and the getter returns SignatureErased
+     * instances rather than the original bytes.
      *
      * @given An offer with a real ecdsa signature that's been erased, then
-     *   re-given an ecdsa signature via addSignatures
+     *   re-given an erased placeholder via addSignatures
      * @when Reading back the signatures via the getter
-     * @then The slot should be `undefined` — the signature was discarded
+     * @then The slot is a SignatureErased - the ecdsa bytes are gone
      */
-    test('addSignatures on signature-erased offer silently erases ECDSA signatures', () => {
+    test('addSignatures on signature-erased offer accepts only erased placeholders', () => {
       const intentHash = sampleIntentHash();
       const token = Random.unshieldedTokenType();
       const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
@@ -503,19 +542,18 @@ describe('Ledger API - UnshieldedOffer', () => {
       const signed = UnshieldedOffer.new(
         [{ value: 10n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
         [{ value: 10n, owner: sampleUserAddress(), type: token.raw }],
-        [ecdsaSig]
+        [new SignatureEnabled(ecdsaSig)]
       );
 
       const erased = signed.eraseSignatures();
-      const reAdded = erased.addSignatures([ecdsaSig]);
+      const reAdded = erased.addSignatures([new SignatureErased()]);
 
-      // Getter returns undefined slots for the erased variant.
       expect(reAdded.signatures.length).toEqual(1);
-      expect(reAdded.signatures.at(0)).toBeUndefined();
+      expect(reAdded.signatures.at(0)).toBeInstanceOf(SignatureErased);
     });
 
     /**
-     * UnshieldedOffer has no direct serialize() — round-trip it through its
+     * UnshieldedOffer has no direct serialize() - round-trip it through its
      * containing Intent, which is the realistic wire scenario.
      *
      * @given An Intent carrying an ECDSA-owned, ECDSA-signed UnshieldedOffer
@@ -536,7 +574,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
         [{ value: 100n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 0 }],
         [{ value: 100n, owner: sampleUserAddress(), type: token.raw }],
-        [sig]
+        [new SignatureEnabled(sig)]
       );
 
       const wire = intent.serialize();
@@ -544,7 +582,7 @@ describe('Ledger API - UnshieldedOffer', () => {
       const roundOffer = round.guaranteedUnshieldedOffer!;
 
       expect(roundOffer.inputs.at(0)?.owner).toEqual(ecdsaVk);
-      expect(roundOffer.signatures.at(0)).toEqual(sig);
+      expect(roundOffer.signatures.at(0)?.value).toEqual(sig);
     });
 
     /**
@@ -574,7 +612,7 @@ describe('Ledger API - UnshieldedOffer', () => {
           { value: 1n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 1 }
         ],
         [{ value: 2n, owner: sampleUserAddress(), type: token.raw }],
-        [schnorrSig, ecdsaSig]
+        [new SignatureEnabled(schnorrSig), new SignatureEnabled(ecdsaSig)]
       );
 
       const wire = intent.serialize();
@@ -583,8 +621,54 @@ describe('Ledger API - UnshieldedOffer', () => {
 
       expect(roundOffer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
       expect(roundOffer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
-      expect(roundOffer.signatures.at(0)?.tag).toEqual(SignatureKindMarker.schnorr);
-      expect(roundOffer.signatures.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(roundOffer.signatures.at(0)?.value.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(roundOffer.signatures.at(1)?.value.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * An UnshieldedOffer spending a UTXO owned by an ECDSA
+     * verifying key, signed by the matching ECDSA secret key, must round-trip
+     * through `wellFormed` and `apply` and actually consume the source UTXO.
+     * This covers the e2e no-proving path for ECDSA-owned UTXO spends
+     * exclusive of cryptographic verification (the offer-signature check is
+     * gated on a sealed binding, which only exists post-proving; the raw
+     * `verifySignature` ECDSA path is exercised by the function-level tests).
+     *
+     * @given A ledger with NIGHT distributed to an ECDSA-derived address and
+     *   an Intent spending that UTXO with a matching ECDSA signature
+     * @when Applying the transaction
+     * @then The transaction is accepted and the spent UTXO is consumed
+     */
+    test('apply consumes an ECDSA-signed UnshieldedOffer spend', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const ecdsaAddress = addressFromKey(ecdsaVk);
+
+      const state = TestState.new();
+      const sourceUtxo = mintNightToEcdsa(state, ecdsaSk, ecdsaVk, ecdsaAddress);
+
+      const intent = Intent.new(state.time);
+      const inputs: UtxoSpend[] = [
+        {
+          value: sourceUtxo.value,
+          owner: ecdsaVk,
+          type: sourceUtxo.type,
+          intentHash: sourceUtxo.intentHash,
+          outputNo: sourceUtxo.outputNo
+        }
+      ];
+      const outputs: UtxoOutput[] = [{ value: sourceUtxo.value, owner: sampleUserAddress(), type: sourceUtxo.type }];
+
+      intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(inputs, outputs, []);
+      const sig = signData(ecdsaSk, intent.signatureData(0));
+      intent.guaranteedUnshieldedOffer = intent.guaranteedUnshieldedOffer.addSignatures([new SignatureEnabled(sig)]);
+
+      const tx = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
+      const strictness = new WellFormedStrictness();
+      strictness.enforceBalancing = false;
+      state.assertApply(tx, strictness);
+
+      expect(Array.from(state.ledger.utxo.utxos).find((u) => u.intentHash === sourceUtxo.intentHash)).toBeUndefined();
     });
   });
 });

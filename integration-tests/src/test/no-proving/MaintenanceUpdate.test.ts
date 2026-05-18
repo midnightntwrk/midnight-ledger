@@ -173,8 +173,7 @@ describe('Ledger API - MaintenanceUpdate', () => {
      * Pin: signature kinds at different indices are independent of each
      * other; mixing them is allowed.
      *
-     * @given A MaintenanceUpdate with a schnorr sig at index 0 and an
-     *   ecdsa sig at index 1
+     * @given A MaintenanceUpdate with a schnorr sig at index 0 and an ecdsa sig at index 1
      * @when Reading the signatures back via the getter
      * @then Each index must report its original tag
      */
@@ -197,11 +196,9 @@ describe('Ledger API - MaintenanceUpdate', () => {
     });
 
     /**
-     * MaintenanceUpdate has no direct serialize() — use toString as a
-     * structural-equality proxy.
+     * MaintenanceUpdate has no direct serialize() - use toString as a structural-equality proxy.
      *
-     * @given Two MaintenanceUpdates built identically with the same mixed
-     *   schnorr+ecdsa signatures at the same indices
+     * @given Two MaintenanceUpdates built identically with the same mixed schnorr+ecdsa signatures at the same indices
      * @when Comparing their toString outputs
      * @then They must be byte-equal
      */

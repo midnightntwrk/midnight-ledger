@@ -613,7 +613,7 @@ describe('Cryptographic Attack Vector Tests', () => {
      * Address derivation differs across algorithms: ECDSA prefixes its raw
      * key bytes with the "mn:ecdsa:" domain separator before hashing, while
      * Schnorr does not. Two verifying keys randomly sampled from each scheme
-     * must yield distinct addresses — otherwise an attacker could craft a
+     * must yield distinct addresses - otherwise an attacker could craft a
      * Schnorr key that addresses the same account as an existing ECDSA key
      * (or vice-versa) and front-run a claim.
      *
@@ -635,7 +635,7 @@ describe('Cryptographic Attack Vector Tests', () => {
      * @given an ECDSA-signed message and a `corruptSignature` mutation
      * @when the corruption is applied
      * @then the `tag` must survive intact and the corrupted signature must
-     *       fail verification — confirming the test util's post-PR fix
+     *       fail verification - confirming the test util's post-PR fix
      */
     test('corruptSignature preserves the ecdsa tag and produces an invalid signature', () => {
       const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
@@ -653,7 +653,7 @@ describe('Cryptographic Attack Vector Tests', () => {
 
     /**
      * ECDSA's RFC-6979 deterministic nonces mean signing the same message
-     * twice produces identical bytes. That's intentional, not a flaw — but
+     * twice produces identical bytes. That's intentional, not a flaw - but
      * an attacker should not be able to use that determinism to forge a
      * signature for a *different* message. This pins that property.
      *
@@ -696,7 +696,7 @@ describe('Cryptographic Attack Vector Tests', () => {
 
       const rHex = sig.value.slice(0, 64);
       const sHex = sig.value.slice(64);
-      const sFlipped = N - BigInt('0x' + sHex);
+      const sFlipped = N - BigInt(`0x${sHex}`);
       const flippedHex = sFlipped.toString(16).padStart(64, '0');
       const flipped = { tag: SignatureKindMarker.ecdsa, value: rHex + flippedHex };
 
@@ -718,7 +718,9 @@ describe('Cryptographic Attack Vector Tests', () => {
       const N = BigInt('0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141');
       let v = N;
       for (let i = 31; i >= 0; i--) {
+        // eslint-disable-next-line no-bitwise
         nBytes[i] = Number(v & 0xffn);
+        // eslint-disable-next-line no-bitwise
         v >>= 8n;
       }
       expect(() => signingKeyFromBip340(nBytes)).toThrow(/signature/i);
