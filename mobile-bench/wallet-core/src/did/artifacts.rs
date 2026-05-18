@@ -3,16 +3,14 @@
 //!
 //! Two bundle shapes coexist:
 //!
-//! - [`CircuitArtifacts`] — full bundle (prover key, verifier key,
-//!   IR) for circuits we both prove *and* load. Today only
-//!   `addVerificationMethod` is full-bundle because nothing else
-//!   exercises the prover side yet (ContractCall pipeline is
-//!   pending).
-//! - [`VERIFIER_KEYS`] — verifier-only registry for the full set of
-//!   11 DID circuits. Used by `Wallet::load_did_circuit` to push
-//!   any of them onto a freshly-deployed DID via MaintenanceUpdate.
-//!   The verifier bytes are tagged-serialized
-//!   `transient_crypto::proofs::VerifierKey`.
+//! - [`CIRCUIT_ARTIFACTS`] — full bundles (prover key, verifier
+//!   key, bzkir, zkir source) for every circuit. The prover
+//!   pipeline ([`tx::prove`]) looks the per-circuit prover key
+//!   up by `KeyLocation = "midnight/did/<name>"`.
+//! - [`VERIFIER_KEYS`] — verifier-only registry. Used by
+//!   `Wallet::load_did_circuit` to push any of the 11 circuits
+//!   onto a freshly-deployed DID via MaintenanceUpdate. Bytes
+//!   are tagged-serialized `transient_crypto::proofs::VerifierKey`.
 //!
 //! The Compact source is also vendored at
 //! `contracts/midnight-did/did.compact` for documentation — it's
@@ -32,21 +30,50 @@ pub(crate) struct CircuitArtifacts {
     pub zkir_json: &'static [u8],
 }
 
-pub(crate) const ADD_VERIFICATION_METHOD: CircuitArtifacts = CircuitArtifacts {
-    name: "addVerificationMethod",
-    prover_key: include_bytes!(concat!(
-        "../../contracts/midnight-did/addVerificationMethod.prover"
-    )),
-    verifier_key: include_bytes!(concat!(
-        "../../contracts/midnight-did/addVerificationMethod.verifier"
-    )),
-    bzkir: include_bytes!(concat!(
-        "../../contracts/midnight-did/addVerificationMethod.bzkir"
-    )),
-    zkir_json: include_bytes!(concat!(
-        "../../contracts/midnight-did/addVerificationMethod.zkir"
-    )),
-};
+/// Helper for the full-bundle constants below — DRY around the
+/// `include_bytes!` path templating. Could be a `macro_rules!`
+/// but `concat!` already does the heavy lifting at the call site.
+macro_rules! full_bundle {
+    ($name:literal) => {
+        CircuitArtifacts {
+            name: $name,
+            prover_key: include_bytes!(concat!("../../contracts/midnight-did/", $name, ".prover")),
+            verifier_key: include_bytes!(concat!(
+                "../../contracts/midnight-did/",
+                $name,
+                ".verifier"
+            )),
+            bzkir: include_bytes!(concat!("../../contracts/midnight-did/", $name, ".bzkir")),
+            zkir_json: include_bytes!(concat!("../../contracts/midnight-did/", $name, ".zkir")),
+        }
+    };
+}
+
+pub(crate) const ADD_VERIFICATION_METHOD: CircuitArtifacts =
+    full_bundle!("addVerificationMethod");
+
+/// Full-bundle registry for every DID circuit (11 entries).
+/// Order matches `CIRCUIT_NAMES`. `Wallet::call_did_circuit`'s
+/// prover step looks the right entry up by name.
+pub(crate) const CIRCUIT_ARTIFACTS: &[CircuitArtifacts] = &[
+    full_bundle!("addAlsoKnownAs"),
+    full_bundle!("addService"),
+    full_bundle!("addVerificationMethod"),
+    full_bundle!("addVerificationMethodRelation"),
+    full_bundle!("deactivate"),
+    full_bundle!("removeAlsoKnownAs"),
+    full_bundle!("removeService"),
+    full_bundle!("removeVerificationMethod"),
+    full_bundle!("removeVerificationMethodRelation"),
+    full_bundle!("updateService"),
+    full_bundle!("updateVerificationMethod"),
+];
+
+/// Look up the full artifact bundle for `name`. Returns `None`
+/// if no circuit with that name is bundled.
+pub(crate) fn circuit_artifacts(name: &str) -> Option<&'static CircuitArtifacts> {
+    CIRCUIT_ARTIFACTS.iter().find(|c| c.name == name)
+}
 
 /// Verifier-only registry: every DID circuit's verifier key,
 /// keyed by the camelCase entry-point name the contract uses.

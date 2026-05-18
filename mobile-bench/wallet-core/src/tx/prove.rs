@@ -13,13 +13,22 @@ use onchain_runtime::cost_model::INITIAL_COST_MODEL;
 use rand::{CryptoRng, Rng};
 use storage::DefaultDB;
 use transient_crypto::commitment::PureGeneratorPedersen;
+use transient_crypto::proofs::ProvingKeyMaterial;
 use zkir_v2::LocalProvingProvider;
 use zswap::prove::ZswapResolver;
 use zswap::ZSWAP_EXPECTED_FILES;
 
 use crate::artifacts::dust::dust_resolver;
+use crate::did::artifacts::circuit_artifacts;
 use super::TxError;
 use super::build::UnprovenTx;
+
+/// The `KeyLocation` prefix the low-level
+/// `inspectCircuit` path embeds. The newer
+/// `createUnprovenCallTxFromInitialStates` path used by
+/// `prepareUnprovenCallTx` emits the bare circuit name instead
+/// — both shapes are handled below.
+const DID_KEY_LOCATION_PREFIX: &str = "midnight/did/";
 
 /// Final proved-and-sealed tx — same shape as
 /// `test_utilities::TxBound<S, D>`. The chain expects this exact
@@ -29,9 +38,13 @@ use super::build::UnprovenTx;
 pub(crate) type ProvenTx = Transaction<Signature, ProofMarker, PureGeneratorPedersen, DefaultDB>;
 
 /// Build a `Resolver` with bundled DUST keys + fetched zswap
-/// params. The external_resolver returns None for every key
-/// location since DID write circuits (which would need their
-/// own proving keys) are out of scope for this slice.
+/// params + an external resolver that serves the 11 DID circuit
+/// prover keys from `crate::did::artifacts::CIRCUIT_ARTIFACTS`.
+/// Every DID `ProofPreimage` carries `key_location =
+/// "midnight/did/<circuit>"`; the closure below strips that
+/// prefix, looks the matching `CircuitArtifacts` up, and returns
+/// `ProvingKeyMaterial { prover_key, verifier_key, ir_source =
+/// bzkir }`.
 fn build_resolver() -> Result<Resolver, TxError> {
     let zswap = ZswapResolver(
         MidnightDataProvider::new(
@@ -45,7 +58,28 @@ fn build_resolver() -> Result<Resolver, TxError> {
     Ok(Resolver::new(
         zswap,
         dust,
-        Box::new(|_loc| Box::pin(std::future::ready(Ok(None)))),
+        Box::new(|loc| {
+            let path = loc.0.into_owned();
+            Box::pin(async move {
+                // Two key-location shapes flow in from the two
+                // harness paths: prefixed (`midnight/did/<name>`)
+                // from the low-level `inspectCircuit` path, and
+                // bare (`<name>`) from
+                // `createUnprovenCallTxFromInitialStates`. Strip
+                // the prefix if present, then look up.
+                let name = path
+                    .strip_prefix(DID_KEY_LOCATION_PREFIX)
+                    .unwrap_or(&path);
+                let Some(art) = circuit_artifacts(name) else {
+                    return Ok(None);
+                };
+                Ok(Some(ProvingKeyMaterial {
+                    prover_key: art.prover_key.to_vec(),
+                    verifier_key: art.verifier_key.to_vec(),
+                    ir_source: art.bzkir.to_vec(),
+                }))
+            })
+        }),
     ))
 }
 
