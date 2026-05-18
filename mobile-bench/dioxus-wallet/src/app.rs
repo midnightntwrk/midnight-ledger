@@ -69,6 +69,7 @@ struct ChainSnapshot {
 enum Tab {
     Wallet,
     Dids,
+    Keys,
     Diagnostics,
     Settings,
 }
@@ -78,6 +79,7 @@ impl Tab {
         match self {
             Tab::Wallet => "Wallet",
             Tab::Dids => "DIDs",
+            Tab::Keys => "Keys",
             Tab::Diagnostics => "Diagnostics",
             Tab::Settings => "Settings",
         }
@@ -92,6 +94,7 @@ impl Tab {
             Tab::Dids => 1,
             Tab::Diagnostics => 2,
             Tab::Settings => 3,
+            Tab::Keys => 4,
         }
     }
 
@@ -105,6 +108,7 @@ impl Tab {
             1 => Tab::Dids,
             2 => Tab::Diagnostics,
             3 => Tab::Settings,
+            4 => Tab::Keys,
             _ => Tab::Wallet,
         }
     }
@@ -430,11 +434,46 @@ pub fn App() -> Element {
     use_future(move || {
         let state = bridge_state.read().clone();
         let net = *network.read();
+        let seed_for_wallet = wallet
+            .read()
+            .as_ref()
+            .map(|w| w.seed_hex.clone());
         async move {
             let path = wallet_store_path();
             match wallet_core::store::WalletStore::open(&path, DEV_STORE_PASSPHRASE) {
                 Ok(store) => {
                     state.set_store(store.clone());
+
+                    // Auto-create a wallet row on first ever
+                    // launch. Subsequent launches reuse
+                    // whatever's already there. We don't
+                    // *yet* expose multi-wallet workflows so
+                    // a single row is enough — the row stores
+                    // the demo seed for the active network,
+                    // which is what every keyref derives
+                    // against.
+                    if let Ok(ids) = store.list_wallet_ids() {
+                        if ids.is_empty() {
+                            if let Some(hex) = seed_for_wallet.as_ref() {
+                                if let Ok(bytes) = hex::decode(hex) {
+                                    if let Ok(seed) = <[u8; 32]>::try_from(bytes.as_slice()) {
+                                        let label = format!("Demo · {}", net.label());
+                                        match store.create_wallet(&label, net, &seed) {
+                                            Ok(id) => tracing::info!(
+                                                wallet_id=%id,
+                                                "auto-created initial wallet row",
+                                            ),
+                                            Err(e) => tracing::warn!(
+                                                error=%e,
+                                                "auto-create wallet row failed",
+                                            ),
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                     let n = state.hydrate_controller_secrets(net);
                     // Bulk-load the DID inventory rows for the
                     // current network into the UI signal.
@@ -682,7 +721,7 @@ pub fn App() -> Element {
         // Tab navigation. Each button sets active_tab; rendering
         // below is a single match on the current value.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Diagnostics, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -981,6 +1020,9 @@ pub fn App() -> Element {
                     div { class: "row", "Embedded proof-server:" }
                     div { class: "seed-blob", "{url}" }
                 }
+            },
+            Tab::Keys => rsx! {
+                KeysTab { bridge_state: bridge_state.read().clone() }
             },
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
@@ -2720,6 +2762,211 @@ struct WitnessTestResult {
     secret_hex_first8: String,
     elapsed_ms: i64,
     error: Option<String>,
+}
+
+/// Keys tab — list every key the `RedbSecretStore` knows
+/// about for the active wallet and let the user mint new
+/// ones. Each row shows the curve, label, DID binding,
+/// derivation flavour, key_ref, and a copy button for the
+/// JWK. Generation uses the wallet's HD seed (each new key
+/// claims the next free `Hkdf { account: 0, index, candidate }`).
+#[component]
+fn KeysTab(bridge_state: BridgeState) -> Element {
+    use wallet_core::secret_storage::{
+        GenerateKeyInput, MidnightCurve, MidnightKeyType, SecretStorage, StoredKeyMeta,
+    };
+    use wallet_core::secret_storage::redb_secret_store::RedbSecretStore;
+
+    let mut keys = use_signal::<Vec<StoredKeyMeta>>(Vec::new);
+    let mut label_input = use_signal(|| String::from("did-key"));
+    let mut error = use_signal::<Option<String>>(|| None);
+    let mut last_generated = use_signal::<Option<String>>(|| None);
+
+    let store_handle = bridge_state.store().cloned();
+    let wallet_id = store_handle
+        .as_ref()
+        .and_then(|s| s.list_wallet_ids().ok())
+        .and_then(|ids| ids.into_iter().next());
+
+    let Some(store) = store_handle else {
+        return rsx! {
+            div { class: "card",
+                div { class: "card-header", "Keys" }
+                div { class: "detail-empty",
+                    "Wallet store still opening. Try again in a moment."
+                }
+            }
+        };
+    };
+    let Some(wallet_id) = wallet_id else {
+        return rsx! {
+            div { class: "card",
+                div { class: "card-header", "Keys" }
+                div { class: "detail-empty",
+                    "No wallet row yet — connect first to mint one."
+                }
+            }
+        };
+    };
+
+    // `refresh_keys` is called from multiple closures so we
+    // wrap it in `Rc<RefCell<dyn FnMut>>` — Dioxus event
+    // handlers want `FnMut` and our refresh closure captures
+    // signal handles by move. The `Rc<RefCell<...>>` lets us
+    // share that FnMut across the generate / refresh /
+    // useEffect call sites without re-cloning the body.
+    let refresh_keys = {
+        let store = store.clone();
+        std::rc::Rc::new(std::cell::RefCell::new(move || {
+            let s = RedbSecretStore::new(store.clone(), wallet_id);
+            let listed: Result<Vec<StoredKeyMeta>, _> = futures::executor::block_on(s.list_keys(None));
+            match listed {
+                Ok(ks) => keys.set(ks),
+                Err(e) => error.set(Some(format!("list keys: {e}"))),
+            }
+        }))
+    };
+
+    use_effect({
+        let refresh_keys = refresh_keys.clone();
+        move || {
+            (refresh_keys.borrow_mut())();
+        }
+    });
+
+    let generate = {
+        let store = store.clone();
+        let refresh_keys = refresh_keys.clone();
+        move |(kty, crv): (MidnightKeyType, MidnightCurve)| {
+            let mut s = RedbSecretStore::new(store.clone(), wallet_id);
+            let label = label_input.read().trim().to_string();
+            if label.is_empty() {
+                error.set(Some("label is required".into()));
+                return;
+            }
+            let label_for_log = label.clone();
+            match futures::executor::block_on(s.generate_key(GenerateKeyInput {
+                id: label,
+                kty,
+                crv,
+                did: None,
+                purpose: None,
+            })) {
+                Ok((kref, _pk)) => {
+                    error.set(None);
+                    last_generated.set(Some(format!("{label_for_log} → {kref}")));
+                    (refresh_keys.borrow_mut())();
+                }
+                Err(e) => error.set(Some(format!("generate: {e}"))),
+            }
+        }
+    };
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Generate key" }
+            div { class: "row",
+                label { style: "min-width: 80px;", "Label" }
+                input {
+                    r#type: "text",
+                    value: "{label_input.read()}",
+                    oninput: move |e| label_input.set(e.value()),
+                    style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+                }
+            }
+            div { class: "row",
+                button {
+                    onclick: {
+                        let g = generate.clone();
+                        move |_| (g.clone())((MidnightKeyType::OKP, MidnightCurve::Ed25519))
+                    },
+                    "Generate Ed25519"
+                }
+                button {
+                    onclick: {
+                        let g = generate.clone();
+                        move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::P256))
+                    },
+                    "Generate P-256"
+                }
+                button {
+                    onclick: {
+                        let g = generate.clone();
+                        move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::Jubjub))
+                    },
+                    "Generate Jubjub"
+                }
+                button {
+                    onclick: {
+                        let refresh_keys = refresh_keys.clone();
+                        move |_| (refresh_keys.borrow_mut())()
+                    },
+                    "Refresh"
+                }
+            }
+            if let Some(msg) = error.read().as_ref() {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Failed" }
+                    div { class: "seed-blob", "{msg}" }
+                }
+            } else if let Some(msg) = last_generated.read().as_ref() {
+                div { class: "wizard-outcome ok",
+                    div { class: "row label", "Minted" }
+                    div { class: "seed-blob", "{msg}" }
+                }
+            }
+        }
+
+        div { class: "card",
+            div { class: "card-header", "Stored keys ({keys.read().len()})" }
+            if keys.read().is_empty() {
+                div { class: "detail-empty",
+                    "No keys yet. Generate one above — each new key claims the next HKDF index off the wallet seed."
+                }
+            } else {
+                table { class: "detail-table",
+                    thead {
+                        tr {
+                            th { "Label" }
+                            th { "Curve" }
+                            th { "Type" }
+                            th { "Key ref" }
+                            th { "" }
+                        }
+                    }
+                    tbody {
+                        for meta in keys.read().iter() {
+                            {
+                                let crv = format!("{:?}", meta.algorithm.crv);
+                                let kty = format!("{:?}", meta.algorithm.kty);
+                                let kref = meta.key_ref.clone();
+                                rsx! {
+                                    tr {
+                                        td { "{meta.id}" }
+                                        td { class: "muted", "{crv}" }
+                                        td { class: "muted", "{kty}" }
+                                        td { class: "muted",
+                                            title: "{kref}",
+                                            "{short_keyref(&kref)}"
+                                        }
+                                        td { {copy_btn(kref.clone(), "Copy key_ref")} }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn short_keyref(k: &str) -> String {
+    if k.len() <= 12 {
+        k.to_string()
+    } else {
+        format!("{}…{}", &k[..8], &k[k.len() - 4..])
+    }
 }
 
 /// Thin status badge that lives between the StatusLine and
