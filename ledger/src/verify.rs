@@ -98,6 +98,7 @@ pub trait StateReference<D: DB> {
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
+    fn ledger_state(&self) -> &LedgerState<D>;
 }
 
 fn get_op<D: DB>(
@@ -204,6 +205,9 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     }
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.state_hash()
+    }
+    fn ledger_state(&self) -> &LedgerState<D> {
+        self
     }
 }
 
@@ -344,6 +348,9 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     }
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.new_state.state_hash()
+    }
+    fn ledger_state(&self) -> &LedgerState<D> {
+        &self.new_state
     }
 }
 
@@ -609,7 +616,7 @@ where
 
                 let mut fees = 0;
                 ref_state.param_check(true, |params| {
-                    fees = match self.fees(params, true) {
+                    fees = match self.fees_with_state(params, ref_state.ledger_state(), true) {
                         Ok(fees) => fees,
                         Err(e) => {
                             if strictness.enforce_balancing {

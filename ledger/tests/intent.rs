@@ -703,7 +703,7 @@ async fn balanced_utxos_1_intent() {
         proven_unbalanced_tx.well_formed(&state.ledger, strictness, state.time);
 
     let fees = proven_unbalanced_tx
-        .fees(&state.ledger.parameters, false)
+        .fees_with_state(&state.ledger.parameters, &state.ledger, false)
         .unwrap();
 
     match res_unbalanced {

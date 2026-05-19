@@ -97,7 +97,7 @@ async fn test_registration_dust_payment() {
     let dust_fee = dbg!(
         tx.erase_proofs()
             .erase_signatures()
-            .fees(&state.ledger.parameters, true)
+            .fees_with_state(&state.ledger.parameters, &state.ledger, true)
             .unwrap()
     );
     let result = state.apply(&tx, strictness).unwrap();
