@@ -446,83 +446,26 @@ pub fn App() -> Element {
                 Ok(store) => {
                     state.set_store(store.clone());
 
-                    // Auto-create a wallet row on first ever
-                    // launch. Subsequent launches reuse
-                    // whatever's already there. We don't
-                    // *yet* expose multi-wallet workflows so
-                    // a single row is enough — the row stores
-                    // the demo seed for the active network,
-                    // which is what every keyref derives
-                    // against.
-                    if let Ok(ids) = store.list_wallet_ids() {
-                        if ids.is_empty() {
-                            if let Some(hex) = seed_for_wallet.as_ref() {
-                                if let Ok(bytes) = hex::decode(hex) {
-                                    if let Ok(seed) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                                        let label = format!("Demo · {}", net.label());
-                                        match store.create_wallet(&label, net, &seed) {
-                                            Ok(id) => tracing::info!(
-                                                wallet_id=%id,
-                                                "auto-created initial wallet row",
-                                            ),
-                                            Err(e) => tracing::warn!(
-                                                error=%e,
-                                                "auto-create wallet row failed",
-                                            ),
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
+                    // Bind the active wallet for this
+                    // network. Auto-creates a row if none
+                    // exists yet (e.g. first launch, or
+                    // first time the user opens this
+                    // network).
+                    let wallet_id = find_or_create_wallet_for_network(
+                        &store,
+                        net,
+                        seed_for_wallet.as_deref(),
+                    );
+                    state.set_active_wallet_id(wallet_id);
 
                     let n = state.hydrate_controller_secrets(net);
-                    // Bulk-load the DID inventory rows for the
-                    // current network into the UI signal.
-                    let mut inv_map: std::collections::BTreeMap<
-                        String,
-                        DidInventoryEntry,
-                    > = Default::default();
-                    let mut inv_count = 0usize;
-                    if let Ok(rows) = store.list_did_inventory(net) {
-                        for row in rows {
-                            inv_count += 1;
-                            inv_map.insert(
-                                row.did.clone(),
-                                DidInventoryEntry {
-                                    did: row.did,
-                                    network_label: net.label().to_string(),
-                                    status: status_from_store(row.status),
-                                    counter: row.counter,
-                                    vm_count: row.vm_count.map(|v| v as usize),
-                                    service_count: row.service_count.map(|v| v as usize),
-                                    last_block_height: row.last_block_height,
-                                },
-                            );
-                        }
-                    }
+                    let inv_map = load_inventory_for_network(&store, net);
+                    let inv_count = inv_map.len();
                     if !inv_map.is_empty() {
                         did_inventory.set(inv_map);
                     }
-                    // Hydrate the resolved-cache map so the
-                    // detail tabs still have content after a
-                    // reload (the cross-resolve diff card needs
-                    // *something* to diff against on first
-                    // resolve of a session — the prior on-disk
-                    // entry plays that role until a fresh
-                    // resolve overwrites it).
-                    let mut cache_map = std::collections::HashMap::new();
-                    let mut cache_count = 0usize;
-                    if let Ok(rows) = store.list_resolved_cache(net) {
-                        for (did, json, _at) in rows {
-                            if let Ok(r) =
-                                serde_json::from_str::<wallet_core::ResolvedDid>(&json)
-                            {
-                                cache_map.insert(did, r);
-                                cache_count += 1;
-                            }
-                        }
-                    }
+                    let cache_map = load_resolved_cache_for_network(&store, net);
+                    let cache_count = cache_map.len();
                     if !cache_map.is_empty() {
                         resolved_cache.set(cache_map);
                     }
@@ -545,6 +488,8 @@ pub fn App() -> Element {
                     }
                     tracing::info!(
                         path=%path.display(),
+                        network=?net,
+                        wallet_id=?wallet_id,
                         hydrated_controller_secrets=n,
                         hydrated_inventory=inv_count,
                         hydrated_cache=cache_count,
@@ -873,23 +818,52 @@ pub fn App() -> Element {
                     div { class: "label", "Network" }
                     select {
                         onchange: move |e| {
-                            if let Some(n) = parse_network(&e.value()) {
-                                network.set(n);
-                                chain.set(ChainSnapshot::default());
-                                phase.set(SyncPhase::Idle);
-                                let was_demo = wallet
-                                    .read()
-                                    .as_ref()
-                                    .map(|w| {
-                                        w.seed_hex == wallet_core::DEMO_SEED_HEX
-                                            || w.seed_hex
-                                                == wallet_core::UNDEPLOYED_GENESIS_SEED_HEX
-                                    })
-                                    .unwrap_or(false);
-                                if was_demo {
-                                    wallet.set(Some(WalletInfo::from_wallet(&Wallet::demo(n))));
-                                }
+                            let Some(n) = parse_network(&e.value()) else { return };
+                            if n == *network.read() {
+                                return;
                             }
+                            network.set(n);
+                            chain.set(ChainSnapshot::default());
+                            phase.set(SyncPhase::Idle);
+                            night_subunits.set(None);
+                            let was_demo = wallet
+                                .read()
+                                .as_ref()
+                                .map(|w| {
+                                    w.seed_hex == wallet_core::DEMO_SEED_HEX
+                                        || w.seed_hex
+                                            == wallet_core::UNDEPLOYED_GENESIS_SEED_HEX
+                                })
+                                .unwrap_or(false);
+                            // Always re-derive the WalletInfo
+                            // for the new network — even if the
+                            // user previously loaded a random
+                            // wallet, the next sync needs the
+                            // network-correct keys.
+                            let new_wallet = Wallet::demo(n);
+                            let seed_hex = new_wallet.seed_hex();
+                            if was_demo || wallet.read().is_none() {
+                                wallet.set(Some(WalletInfo::from_wallet(&new_wallet)));
+                            }
+                            // Re-hydrate every per-network
+                            // signal so the inventory, cache,
+                            // open-DID badge, and active wallet
+                            // id match the new network.
+                            let state = bridge_state.read().clone();
+                            spawn(async move {
+                                rehydrate_for_network(
+                                    state,
+                                    n,
+                                    Some(seed_hex),
+                                    did_inventory,
+                                    resolved_cache,
+                                    previous_resolved_cache,
+                                    open_did,
+                                    last_did_id,
+                                    last_resolved,
+                                )
+                                .await;
+                            });
                         },
                         for n in Network::ALL {
                             option {
@@ -3020,10 +2994,16 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
     let mut last_generated = use_signal::<Option<String>>(|| None);
 
     let store_handle = bridge_state.store().cloned();
-    let wallet_id = store_handle
-        .as_ref()
-        .and_then(|s| s.list_wallet_ids().ok())
-        .and_then(|ids| ids.into_iter().next());
+    // Always read the App's pinned active wallet. Falls back
+    // to the first wallet in the store if for some reason the
+    // pin hasn't been set yet (race between unlock + first
+    // tab click on Keys).
+    let wallet_id = bridge_state.active_wallet_id().or_else(|| {
+        store_handle
+            .as_ref()
+            .and_then(|s| s.list_wallet_ids().ok())
+            .and_then(|ids| ids.into_iter().next())
+    });
 
     let Some(store) = store_handle else {
         return rsx! {
@@ -3225,10 +3205,12 @@ fn list_stored_jubjub_keys_for_sign(bridge_state: &BridgeState) -> Vec<StoredJub
     let Some(store) = bridge_state.store() else {
         return Vec::new();
     };
-    let Some(wallet_id) = store
-        .list_wallet_ids()
-        .ok()
-        .and_then(|ids| ids.into_iter().next())
+    let Some(wallet_id) = bridge_state.active_wallet_id().or_else(|| {
+        store
+            .list_wallet_ids()
+            .ok()
+            .and_then(|ids| ids.into_iter().next())
+    })
     else {
         return Vec::new();
     };
@@ -3299,10 +3281,12 @@ fn list_stored_vm_keys(bridge_state: &BridgeState) -> Vec<StoredKeyForVm> {
     let Some(store) = bridge_state.store() else {
         return Vec::new();
     };
-    let Some(wallet_id) = store
-        .list_wallet_ids()
-        .ok()
-        .and_then(|ids| ids.into_iter().next())
+    let Some(wallet_id) = bridge_state.active_wallet_id().or_else(|| {
+        store
+            .list_wallet_ids()
+            .ok()
+            .and_then(|ids| ids.into_iter().next())
+    })
     else {
         return Vec::new();
     };
@@ -3369,6 +3353,15 @@ fn short_keyref(k: &str) -> String {
 #[component]
 fn WalletStoreBadge(state: BridgeState) -> Element {
     let stats = state.store().and_then(|s| s.stats().ok());
+    // Resolve the active wallet's label so the badge tells
+    // the user which wallet is currently bound. Falls back to
+    // `—` if nothing's active yet.
+    let active_label = state
+        .store()
+        .zip(state.active_wallet_id())
+        .and_then(|(s, id)| s.wallet_meta(id).ok().flatten())
+        .map(|m| m.label)
+        .unwrap_or_else(|| "—".to_string());
     let (label, n_wallets, n_dids, n_keys): (&'static str, u64, u64, u64) = match &stats {
         Some(s) => ("Store · ok", s.wallets, s.did_inventory, s.keys),
         None => ("Store · opening…", 0, 0, 0),
@@ -3381,6 +3374,9 @@ fn WalletStoreBadge(state: BridgeState) -> Element {
     rsx! {
         div { class: "{class}",
             span { class: "label", "{label}" }
+            span { class: "kv",
+                "active: " strong { "{active_label}" }
+            }
             span { class: "kv",
                 strong { "{n_wallets}" }
                 " wallet"
@@ -5451,6 +5447,213 @@ fn persist_inventory_entry(
     if let Err(e) = store.put_did_inventory(row) {
         tracing::warn!(error=%e, did=%entry.did, "persist did inventory failed");
     }
+}
+
+/// Find the wallet row matching `network` in the store, or
+/// auto-create one. Returns `Some(WalletId)` on success or
+/// `None` if no row exists and we couldn't mint one (e.g.
+/// `seed_hex_opt` is `None` or doesn't decode).
+fn find_or_create_wallet_for_network(
+    store: &wallet_core::store::WalletStore,
+    net: Network,
+    seed_hex_opt: Option<&str>,
+) -> Option<wallet_core::store::WalletId> {
+    use wallet_core::store::NetworkTag;
+    let target = NetworkTag::from(net);
+
+    // Look first — `wallet_meta` is a cheap read txn.
+    if let Ok(ids) = store.list_wallet_ids() {
+        for id in &ids {
+            if let Ok(Some(meta)) = store.wallet_meta(*id) {
+                if meta.network == target {
+                    return Some(*id);
+                }
+            }
+        }
+    }
+
+    // Nothing yet — mint a row tagged with this network's
+    // demo seed. The label encodes the network so the
+    // wallet picker can render rows like "Demo · PreProd".
+    let hex = seed_hex_opt?;
+    let bytes = hex::decode(hex).ok()?;
+    let seed: [u8; 32] = bytes.as_slice().try_into().ok()?;
+    let label = format!("Demo · {}", net.label());
+    match store.create_wallet(&label, net, &seed) {
+        Ok(id) => {
+            tracing::info!(wallet_id=%id, network=?net, "auto-created wallet row");
+            Some(id)
+        }
+        Err(e) => {
+            tracing::warn!(error=%e, network=?net, "auto-create wallet row failed");
+            None
+        }
+    }
+}
+
+/// Bulk-load DID inventory rows for `net` into the UI's
+/// in-memory map shape. Empty map on store error or empty
+/// table; the caller can `.is_empty()` to decide whether to
+/// even touch the signal.
+fn load_inventory_for_network(
+    store: &wallet_core::store::WalletStore,
+    net: Network,
+) -> std::collections::BTreeMap<String, DidInventoryEntry> {
+    let mut map = std::collections::BTreeMap::new();
+    let Ok(rows) = store.list_did_inventory(net) else {
+        return map;
+    };
+    for row in rows {
+        map.insert(
+            row.did.clone(),
+            DidInventoryEntry {
+                did: row.did,
+                network_label: net.label().to_string(),
+                status: status_from_store(row.status),
+                counter: row.counter,
+                vm_count: row.vm_count.map(|v| v as usize),
+                service_count: row.service_count.map(|v| v as usize),
+                last_block_height: row.last_block_height,
+            },
+        );
+    }
+    map
+}
+
+/// Reset every per-network UI signal and re-hydrate from
+/// the store for `new_net`. Used by the network switcher in
+/// the Wallet tab — keeps the inventory + cache + active
+/// wallet id in sync with whatever network the user just
+/// picked.
+///
+/// `seed_hex` is the demo seed for the target network; needed
+/// only if no wallet row exists for that network yet so we
+/// can auto-create one.
+///
+/// `bridge_state` must already have an attached store —
+/// nothing useful happens otherwise (the caller wouldn't
+/// have gotten here without unlocking first).
+async fn rehydrate_for_network(
+    bridge_state: BridgeState,
+    new_net: Network,
+    seed_hex: Option<String>,
+    mut did_inventory: Signal<std::collections::BTreeMap<String, DidInventoryEntry>>,
+    mut resolved_cache: Signal<
+        std::collections::HashMap<String, wallet_core::ResolvedDid>,
+    >,
+    mut previous_resolved_cache: Signal<
+        std::collections::HashMap<String, wallet_core::ResolvedDid>,
+    >,
+    mut open_did: Signal<Option<String>>,
+    mut last_did_id: Signal<Option<String>>,
+    mut last_resolved: Signal<Option<(String, u32)>>,
+) {
+    let Some(store) = bridge_state.store().cloned() else {
+        tracing::warn!("rehydrate: store not attached, skipping");
+        return;
+    };
+
+    // Drop any cached "open this DID on the prior network"
+    // state — the DID id from the old network won't exist
+    // (or means something different) on the new one.
+    open_did.set(None);
+    last_did_id.set(None);
+    last_resolved.set(None);
+    did_inventory.set(Default::default());
+    resolved_cache.set(Default::default());
+    previous_resolved_cache.set(Default::default());
+
+    // Wipe the in-memory controller-secret cache too —
+    // hydration below repopulates it for the new network.
+    if let Ok(mut g) = bridge_state.controller_secrets.lock() {
+        g.clear();
+    }
+
+    let wallet_id =
+        find_or_create_wallet_for_network(&store, new_net, seed_hex.as_deref());
+    bridge_state.set_active_wallet_id(wallet_id);
+
+    let secrets_count = bridge_state.hydrate_controller_secrets(new_net);
+    let inv_map = load_inventory_for_network(&store, new_net);
+    let inv_count = inv_map.len();
+    if !inv_map.is_empty() {
+        did_inventory.set(inv_map);
+    }
+    let cache_map = load_resolved_cache_for_network(&store, new_net);
+    let cache_count = cache_map.len();
+    if !cache_map.is_empty() {
+        resolved_cache.set(cache_map);
+    }
+    tracing::info!(
+        network=?new_net,
+        wallet_id=?wallet_id,
+        hydrated_controller_secrets=secrets_count,
+        hydrated_inventory=inv_count,
+        hydrated_cache=cache_count,
+        "network switch: re-hydrated",
+    );
+
+    // Auto-resolve every hydrated DID in the background —
+    // same shape as the unlock spawn's auto-resolve. A
+    // network switch is the other moment the inventory's
+    // counter / status badges could be stale.
+    let dids_to_refresh: Vec<String> = did_inventory.read().keys().cloned().collect();
+    for did_str in dids_to_refresh {
+        let bridge = bridge_state.clone();
+        spawn(async move {
+            let w = wallet_core::Wallet::demo(new_net);
+            if let Ok(resolved) = w.resolve_did_full(&did_str).await {
+                let did_string = resolved.document.id.to_did_string();
+                let entry = DidInventoryEntry {
+                    did: did_string.clone(),
+                    network_label: new_net.label().to_string(),
+                    status: if resolved.document.deactivated {
+                        DidInventoryStatus::Deactivated
+                    } else {
+                        DidInventoryStatus::Active
+                    },
+                    counter: Some(resolved.maintenance_counter),
+                    vm_count: Some(resolved.document.verification_method.len()),
+                    service_count: Some(resolved.document.service.len()),
+                    last_block_height: resolved.last_block_height,
+                };
+                let mut inv = did_inventory.read().clone();
+                inv.insert(did_string.clone(), entry.clone());
+                did_inventory.set(inv);
+                persist_inventory_entry(&bridge, new_net, &entry);
+                let cache_snap = resolved_cache.read().clone();
+                if let Some(prev) = cache_snap.get(&did_string) {
+                    let mut prev_map = previous_resolved_cache.read().clone();
+                    prev_map.insert(did_string.clone(), prev.clone());
+                    previous_resolved_cache.set(prev_map);
+                }
+                let mut cache = cache_snap;
+                cache.insert(did_string.clone(), resolved.clone());
+                resolved_cache.set(cache);
+                persist_resolved_cache(&bridge, new_net, &did_string, &resolved);
+            }
+        });
+    }
+}
+
+/// Bulk-load resolved-cache snapshots for `net`, decoded
+/// from the on-disk JSON. Entries that fail to decode are
+/// dropped silently — the next manual / auto resolve will
+/// refresh them.
+fn load_resolved_cache_for_network(
+    store: &wallet_core::store::WalletStore,
+    net: Network,
+) -> std::collections::HashMap<String, wallet_core::ResolvedDid> {
+    let mut map = std::collections::HashMap::new();
+    let Ok(rows) = store.list_resolved_cache(net) else {
+        return map;
+    };
+    for (did, json, _at) in rows {
+        if let Ok(r) = serde_json::from_str::<wallet_core::ResolvedDid>(&json) {
+            map.insert(did, r);
+        }
+    }
+    map
 }
 
 /// Write-through helper for the single-row session table.

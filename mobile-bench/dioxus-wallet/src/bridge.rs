@@ -22,7 +22,7 @@ use std::sync::Mutex;
 
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
-use wallet_core::store::WalletStore;
+use wallet_core::store::{WalletId, WalletStore};
 use wallet_core::{Network, unshielded_bech32m};
 
 /// Per-DID random controller secret store. Populated by
@@ -56,6 +56,12 @@ pub struct BridgeState {
     /// for the current session). When absent, behaviour matches
     /// the previous in-memory-only model.
     pub store: Arc<OnceCell<WalletStore>>,
+    /// `WalletId` the rest of the UI binds against — Keys tab,
+    /// Operation Builder VM picker, SignTab key picker. Set by
+    /// the App during hydration; one slot per
+    /// `(network, wallet)` swap. `None` means "no wallet active
+    /// for the current network yet" — pickers hide their lists.
+    pub active_wallet_id: Arc<Mutex<Option<WalletId>>>,
 }
 
 impl PartialEq for BridgeState {
@@ -63,6 +69,7 @@ impl PartialEq for BridgeState {
         Arc::ptr_eq(&self.proof_server_url, &other.proof_server_url)
             && Arc::ptr_eq(&self.controller_secrets, &other.controller_secrets)
             && Arc::ptr_eq(&self.store, &other.store)
+            && Arc::ptr_eq(&self.active_wallet_id, &other.active_wallet_id)
     }
 }
 impl Eq for BridgeState {}
@@ -95,6 +102,26 @@ impl BridgeState {
     /// that want to persist beyond controller secrets.
     pub fn store(&self) -> Option<&WalletStore> {
         self.store.get()
+    }
+
+    /// Pin the wallet the rest of the UI binds against. Called
+    /// once per network swap (and on first unlock) so the
+    /// pickers know which `WalletId` to read from. Silent
+    /// best-effort — a poisoned mutex just leaves the prior
+    /// value in place; the UI degrades to "no wallet active".
+    pub fn set_active_wallet_id(&self, id: Option<WalletId>) {
+        if let Ok(mut g) = self.active_wallet_id.lock() {
+            *g = id;
+        }
+    }
+
+    /// Snapshot the currently-active `WalletId`. `None` before
+    /// the App has finished hydrating for the active network.
+    pub fn active_wallet_id(&self) -> Option<WalletId> {
+        self.active_wallet_id
+            .lock()
+            .ok()
+            .and_then(|g| g.clone())
     }
 
     /// Record the random sk minted for a freshly-deployed DID.
