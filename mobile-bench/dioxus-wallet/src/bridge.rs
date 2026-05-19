@@ -346,9 +346,12 @@ async fn run_method(
     match method {
         "ping" => Ok(serde_json::json!({"ok": true})),
         "bundleError" => {
-            // Surface the JS-side error at WARN; the structured payload
-            // is whatever the JS error reporter built. We don't error
-            // out — JS shouldn't crash the bridge on a logging call.
+            // Route to the right tracing level based on the
+            // JS-side `kind` field. The channel is mis-named
+            // ("bundleError") for historical reasons — JS uses
+            // it for INFO status messages too (e.g.
+            // "contract layer loaded"), not just errors. Don't
+            // shout WARN at every info ping.
             let kind = params
                 .get("kind")
                 .and_then(|v| v.as_str())
@@ -364,7 +367,29 @@ async fn run_method(
                 .and_then(|v| v.as_str())
                 .unwrap_or("")
                 .to_string();
-            tracing::warn!(target: "bundle", %kind, %msg, %stack, "JS bundle error");
+            match kind.as_str() {
+                "info" => {
+                    tracing::info!(target: "bundle", %msg, "JS bundle event")
+                }
+                "warn" | "warning" => {
+                    tracing::warn!(target: "bundle", %msg, %stack, "JS bundle warning")
+                }
+                "error" => {
+                    tracing::error!(target: "bundle", %msg, %stack, "JS bundle error")
+                }
+                other => {
+                    // Unknown kind → keep WARN so unfamiliar
+                    // payload shapes still surface, but tag
+                    // the kind so it's clear we didn't route.
+                    tracing::warn!(
+                        target: "bundle",
+                        kind = %other,
+                        %msg,
+                        %stack,
+                        "JS bundle event (unknown kind)",
+                    )
+                }
+            }
             Ok(serde_json::json!({"ok": true}))
         }
         "getProofServerUrl" => state

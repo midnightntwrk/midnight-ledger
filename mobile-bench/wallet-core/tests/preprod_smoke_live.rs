@@ -17,39 +17,49 @@
 //!    via the JS bridge → Rust balance/prove/submit pipeline,
 //!    re-resolves and asserts the alias landed. First-pass
 //!    run failed at `Submitting` with
-//!    `Invalid Transaction (1010)` (Substrate's RPC code for
-//!    runtime-side validity rejection — BadProof or
-//!    BadSignature). Every earlier stage (SyncingDust /
-//!    Composing / Balancing / Proving) ran cleanly, the
-//!    controller-secret derivation matches upstream
-//!    (`SHA-256(addVerificationMethod.prover_bytes)` —
-//!    verified bit-equal against
-//!    `midnight-did/contract/src/managed/did/keys/`), and
-//!    the chain-tip ctime fix is wired into `call_did_circuit`.
+//!    `Invalid Transaction (1010)` (BadProof rejection).
 //!
-//!    Likely root causes (pick one to investigate next):
-//!    - **`INITIAL_PARAMETERS` drift**: `tx::balance` /
-//!      `tx::prove` use
-//!      `ledger::structure::INITIAL_PARAMETERS`, hardcoded
-//!      against the standalone Docker image. PreProd may
-//!      have a different dust fee schedule or generator
-//!      table baked into its runtime; our locally-balanced
-//!      tx would then disagree with the chain's expectation
-//!      and the runtime rejects.
-//!    - **Contract VK divergence**: the addAlsoKnownAs
-//!      verifier key registered on the user's PreProd DID
-//!      may differ from the one our prover key produces
-//!      proofs for. Loading the same `.verifier` via a
-//!      MaintenanceUpdate would resolve it, but the test
-//!      sees it already loaded (counter doesn't match what
-//!      we'd produce).
-//!    - **Outer signature scheme**: the SCALE-encoded tx
-//!      envelope carries a Substrate signature; if PreProd
-//!      requires a different signer / era / metadata
-//!      version than `subxt 0.44` ships, the chain rejects.
+//!    ### Root cause (confirmed)
 //!
-//!    `#[ignore]`'d so a default sweep doesn't fail; the
-//!    code path is preserved for the investigation.
+//!    See the sibling `preprod_vk_diff` test. The verifier
+//!    keys registered on the operator's PreProd DID
+//!    diverge from our bundled `.verifier` bytes for **all
+//!    11 circuits** — and also diverge from the operator's
+//!    *current* local `midnight-did-contract/` checkout.
+//!    The on-chain VKs were put there by an older
+//!    circuit-compilation when the DIDs were first
+//!    created (manager profile's `updatedAt: 2026-04-06`).
+//!    The chain verifies our proof against those stored
+//!    VKs; since our prover key targets a newer
+//!    compilation, no proof we generate will ever pass.
+//!
+//!    Things that are NOT the cause (ruled out):
+//!    - Controller-secret derivation — matches upstream
+//!      `SHA-256(addVerificationMethod.prover_bytes)`
+//!      bit-equal.
+//!    - Chain-tip ctime drift — fix from `06db33af` is
+//!      wired into `call_did_circuit` line 869+.
+//!    - Node version drift — PreProd runs `0.22.2-71fc6804`,
+//!      we're pinned to `node-0.22.3` (same major.minor,
+//!      patch differences shouldn't change runtime API).
+//!    - Earlier-stage failures — SyncingDust, Composing,
+//!      Balancing, Proving all ran cleanly.
+//!
+//!    ### How to fix
+//!
+//!    Reload the VKs on-chain via `MaintenanceUpdate`s —
+//!    `Wallet::load_did_circuit(did, circuit, counter)`
+//!    overwrites the entry in `ContractState.operations`
+//!    with the bundled `.verifier` bytes. MaintenanceUpdate
+//!    does NOT go through ZK circuit verification (it just
+//!    needs a DUST spend proof + the maintenance-authority
+//!    signature), so it should succeed where ContractCall
+//!    fails. After each reload, ContractCalls against that
+//!    circuit will validate.
+//!
+//!    A follow-up `preprod_reload_addAlsoKnownAs_vk` test
+//!    can drive this once the operator's OK to spend a few
+//!    DUST. Out of scope for this commit.
 //!
 //! Hardcoded configuration (per operator instruction):
 //! - Seed: matches the manager profile's `seed` field.
