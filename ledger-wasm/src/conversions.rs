@@ -19,8 +19,9 @@ use coin_structure::coin::{ShieldedTokenType, UnshieldedTokenType};
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, Date, Function, JsString, Map, Number};
 use ledger::events::{EventDetails, EventSource};
-use ledger::structure::UtxoMeta;
 use ledger::structure::{ClaimKind, SignatureKind};
+use ledger::structure::{SignatureVerifyingKey, UtxoMeta};
+use onchain_runtime_wasm::conversions::PreSignature;
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable};
 use std::io::{BufReader, Read};
@@ -238,7 +239,7 @@ struct PreQualifiedShieldedCoinInfo {
 #[derive(Serialize, Deserialize)]
 struct PreUtxoSpend {
     value: u128,
-    owner: String,
+    owner: PreSignature,
     #[serde(rename = "type")]
     type_: String,
     #[serde(rename = "intentHash")]
@@ -422,7 +423,10 @@ pub fn qualified_shielded_coininfo_to_value(
 pub fn utxo_spend_to_value(utxo: &UtxoSpend) -> Result<JsValue, JsError> {
     Ok(to_value(&PreUtxoSpend {
         value: utxo.value,
-        owner: to_hex_ser(&utxo.owner)?,
+        owner: match &utxo.owner {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(&vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(&vk)?),
+        },
         type_: to_hex_ser(&utxo.type_.0)?,
         intent_hash: to_hex_ser(&utxo.intent_hash)?,
         output_no: utxo.output_no,
@@ -433,7 +437,10 @@ pub fn value_to_utxo_spend(value: JsValue) -> Result<UtxoSpend, JsError> {
     let pre: PreUtxoSpend = from_value(value)?;
     Ok(UtxoSpend {
         value: pre.value,
-        owner: from_hex_ser(&pre.owner)?,
+        owner: match pre.owner {
+            PreSignature::Schnorr(raw) => SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?),
+        },
         type_: UnshieldedTokenType(from_hex_ser(&pre.type_)?),
         intent_hash: from_hex_ser(&pre.intent_hash)?,
         output_no: pre.output_no,

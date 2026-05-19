@@ -56,14 +56,18 @@ const NIGHT_RAW: RawTokenType = [0u8; 32];
 
 ## Signatures
 
-We also need to assume public key cryptography. We use Schnorr over Secp256k1,
-as specified in [BIP 340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki).
+We also need to assume public key cryptography. We support multiple algorithms, currently consisting of:
+
+- Schnorr over Secp256k1, as specified in [BIP 340](https://github.com/bitcoin/bips/blob/master/bip-0340.mediawiki).
+- ECDSA-SHA256 over Secp256k1, with high-s rejection
+
+Signing keys, verifying keys, and signatures are disjoint unions over these algorithms.
 
 ```rust
-type SigningKey = secp256k1::Scalar;
-type VerifyingKey = secp256k1::Point;
+enum SigningKey { Schnorr(...), ECDSA(...) }
+enum VerifyingKey { Schnorr(...), ECDSA(...) }
 // Where `M` is the data being signed
-type Signature<M> = secp256k1::schnorr::Signature;
+enum Signature<M> { Schnorr(...), ECDSA(...) }
 ```
 
 We support signature erasure by parameterising some data structures with a type

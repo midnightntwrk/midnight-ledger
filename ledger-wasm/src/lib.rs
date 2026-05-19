@@ -29,7 +29,6 @@ pub mod zswap_wasm;
 
 use crate::dust::DustSecretKey;
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr;
 use coin_structure::{
     coin::{
         PublicKey as CoinPublicKey, ShieldedTokenType, UnshieldedTokenType, UserAddress,
@@ -47,6 +46,7 @@ use ledger::{
     dust::{DustPublicKey, InitialNonce},
     structure::{FEE_TOKEN, IntentHash, ProofPreimageVersioned},
 };
+use onchain_runtime_wasm::conversions::PreSignature;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde_wasm_bindgen::from_value;
@@ -66,7 +66,7 @@ pub mod onchain_runtime {
     pub use onchain_runtime_wasm::*;
 }
 
-pub(crate) use onchain_runtime::{from_value_hex_ser, to_value_hex_ser, token_type_to_value};
+pub(crate) use onchain_runtime::{to_value_hex_ser, token_type_to_value};
 
 #[wasm_bindgen(getter, js_name = "nativeToken")]
 pub fn native_token() -> Result<JsValue, JsError> {
@@ -186,9 +186,14 @@ pub fn dust_initial_nonce(output_no: u64, intent_hash: String) -> Result<String,
 }
 
 #[wasm_bindgen(js_name = "addressFromKey")]
-pub fn address_from_key(key: &str) -> Result<String, JsError> {
-    let key: schnorr::VerifyingKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&UserAddress::from(key))
+pub fn address_from_key(key: JsValue) -> Result<String, JsError> {
+    let addr: UserAddress = match from_value::<PreSignature>(key)? {
+        PreSignature::Schnorr(raw) => {
+            from_hex_ser::<base_crypto::schnorr::VerifyingKey>(&raw)?.into()
+        }
+        PreSignature::ECDSA(raw) => from_hex_ser::<base_crypto::ecdsa::VerifyingKey>(&raw)?.into(),
+    };
+    to_value_hex_ser(&addr)
 }
 
 #[wasm_bindgen(js_name = "createProvingTransactionPayload")]

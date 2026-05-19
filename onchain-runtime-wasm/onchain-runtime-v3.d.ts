@@ -134,17 +134,24 @@ export class CoinSecretKey {
  */
 export type Nonce = string;
 /**
- * A hex-encoded signature BIP-340 verifying key, with a 3-byte version prefix
+ * The algorithm used for a particular signature.
+ *
+ * - `schnorr` corresponds to BIP-340 Schnorr signatures
+ * - `ecdsa` corresponds to ECDSA signatures over secp256k1
  */
-export type SignatureVerifyingKey = string;
+export type SignatureKind = 'schnorr' | 'ecdsa';
 /**
- * A hex-encoded signature BIP-340 signing key, with a 3-byte version prefix
+ * A hex-encoded signature verifying key annotated with its kind
  */
-export type SigningKey = string;
+export type SignatureVerifyingKey = { tag: SignatureKind, value: string };
 /**
- * A hex-encoded signature BIP-340 signature, with a 3-byte version prefix
+ * A hex-encoded signing key annotated with its kind
  */
-export type Signature = string;
+export type SigningKey = { tag: SignatureKind, value: string };
+/**
+ * A hex-encoded signature annotated with its kind
+ */
+export type Signature = { tag: SignatureKind, value: string };
 /**
  * An internal encoding of a value of the proof systems scalar field
  */
@@ -421,9 +428,10 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
 export function entryPointHash(entryPoint: string | Uint8Array): string;
 
 /**
- * Randomly samples a {@link SigningKey}.
+ * Randomly samples a {@link SigningKey}. If `kind` is not supplied, assumes
+ * `schnorr`.
  */
-export function sampleSigningKey(): SigningKey;
+export function sampleSigningKey(kind?: SignatureKind): SigningKey;
 
 /**
  * Creates a {@link SigningKey} from provided Bip340 private key.
@@ -785,7 +793,7 @@ export class ContractMaintenanceAuthority {
 
   serialize(): Uint8Array;
 
-  static deserialize(raw: Uint8Array): ContractState;
+  static deserialize(raw: Uint8Array): ContractMaintenanceAuthority;
 
   toString(compact?: boolean): string;
 }

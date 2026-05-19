@@ -18,7 +18,6 @@ use base_crypto::fab::{Aligned, Alignment, InvalidBuiltinDecode, Value, ValueAto
 use base_crypto::hash::persistent_hash;
 use base_crypto::hash::{BLANK_HASH, PERSISTENT_HASH_BYTES};
 use base_crypto::repr::{BinaryHashRepr, MemWrite};
-use base_crypto::schnorr::VerifyingKey;
 use fake::Dummy;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
@@ -889,9 +888,17 @@ impl rand::distributions::Distribution<UserAddress> for rand::distributions::Sta
     }
 }
 
-impl From<VerifyingKey> for UserAddress {
-    fn from(value: VerifyingKey) -> Self {
+impl From<base_crypto::schnorr::VerifyingKey> for UserAddress {
+    fn from(value: base_crypto::schnorr::VerifyingKey) -> Self {
         UserAddress(persistent_hash(value.binary_vec().as_slice()))
+    }
+}
+
+impl From<base_crypto::ecdsa::VerifyingKey> for UserAddress {
+    fn from(value: base_crypto::ecdsa::VerifyingKey) -> Self {
+        let mut repr = b"mn:ecdsa:".to_vec();
+        value.binary_repr(&mut repr);
+        UserAddress(persistent_hash(repr.as_slice()))
     }
 }
 

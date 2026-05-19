@@ -419,14 +419,14 @@ impl ProvingProvider for MockProver {
 
 #[cfg(test)]
 mod tests {
-    use base_crypto::{
-        data_provider::{self, MidnightDataProvider},
-        schnorr::Signature,
-    };
+    use base_crypto::data_provider::{self, MidnightDataProvider};
     use storage::db::InMemoryDB;
     use zswap::ZSWAP_EXPECTED_FILES;
 
-    use crate::{dust::DUST_EXPECTED_FILES, structure::Transaction};
+    use crate::{
+        dust::DUST_EXPECTED_FILES,
+        structure::{Signature, Transaction},
+    };
 
     #[test]
     fn test_mock_proving() {

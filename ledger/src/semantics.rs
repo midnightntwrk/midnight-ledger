@@ -1996,11 +1996,10 @@ impl SystemTransaction {
 mod tests {
     use crate::{
         annotation::NightAnn,
-        structure::{INITIAL_PARAMETERS, LedgerParameters},
+        structure::{INITIAL_PARAMETERS, LedgerParameters, SignatureVerifyingKey},
     };
 
     use super::*;
-    use base_crypto::schnorr::VerifyingKey;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;
@@ -2012,7 +2011,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
         let state = LedgerState {
@@ -2066,7 +2065,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), 1000);
         let state = LedgerState {
@@ -2121,7 +2120,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
@@ -2176,7 +2175,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), 200000);
@@ -2310,7 +2309,7 @@ mod tests {
     #[test]
     fn bridge_transfer_passes_invariant() {
         let mut rng = StdRng::seed_from_u64(0x42);
-        let target_address = UserAddress::from(rng.r#gen::<VerifyingKey>());
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
         let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
         let amount: u128 = 10_000_000_000;
 
@@ -2368,7 +2367,7 @@ mod tests {
     #[test]
     fn bridge_transfer_sub_minimum_passes_invariant() {
         let mut rng = StdRng::seed_from_u64(0x42);
-        let target_address = UserAddress::from(rng.r#gen::<VerifyingKey>());
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
         let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
         let amount: u128 = INITIAL_PARAMETERS.c_to_m_bridge_min_amount - 1;
 
