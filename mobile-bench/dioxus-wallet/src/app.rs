@@ -552,6 +552,90 @@ pub fn App() -> Element {
                         "wallet store opened",
                     );
                     unlock_state.set(UnlockState::Open);
+
+                    // Auto-resolve every hydrated DID in the
+                    // background. The persistent inventory
+                    // table just carries the last snapshot of
+                    // each DID's status / counter / vm count;
+                    // those values can drift between sessions
+                    // (someone calls a circuit while the
+                    // wallet is closed, a deactivate happens
+                    // from another client, etc.). Re-resolve
+                    // them so the inventory list shows fresh
+                    // values on the next paint.
+                    //
+                    // Done one task per DID so a slow
+                    // indexer hit doesn't block the others;
+                    // failures only log + leave the in-memory
+                    // entry as-is.
+                    let dids_to_refresh: Vec<String> =
+                        did_inventory.read().keys().cloned().collect();
+                    for did_str in dids_to_refresh {
+                        let net = net;
+                        let bridge = state.clone();
+                        spawn(async move {
+                            let w = wallet_core::Wallet::demo(net);
+                            match w.resolve_did_full(&did_str).await {
+                                Ok(resolved) => {
+                                    let did_string =
+                                        resolved.document.id.to_did_string();
+                                    let entry = DidInventoryEntry {
+                                        did: did_string.clone(),
+                                        network_label: net.label().to_string(),
+                                        status: if resolved.document.deactivated {
+                                            DidInventoryStatus::Deactivated
+                                        } else {
+                                            DidInventoryStatus::Active
+                                        },
+                                        counter: Some(resolved.maintenance_counter),
+                                        vm_count: Some(
+                                            resolved.document.verification_method.len(),
+                                        ),
+                                        service_count: Some(resolved.document.service.len()),
+                                        last_block_height: resolved.last_block_height,
+                                    };
+                                    let mut inv = did_inventory.read().clone();
+                                    inv.insert(did_string.clone(), entry.clone());
+                                    did_inventory.set(inv);
+                                    persist_inventory_entry(&bridge, net, &entry);
+                                    // Snapshot before overwrite
+                                    // for the cross-resolve diff
+                                    // card.
+                                    let cache_snap = resolved_cache.read().clone();
+                                    if let Some(prev) = cache_snap.get(&did_string) {
+                                        let mut prev_map =
+                                            previous_resolved_cache.read().clone();
+                                        prev_map.insert(
+                                            did_string.clone(),
+                                            prev.clone(),
+                                        );
+                                        previous_resolved_cache.set(prev_map);
+                                    }
+                                    let mut cache = cache_snap;
+                                    cache.insert(did_string.clone(), resolved.clone());
+                                    resolved_cache.set(cache);
+                                    persist_resolved_cache(
+                                        &bridge,
+                                        net,
+                                        &did_string,
+                                        &resolved,
+                                    );
+                                    tracing::debug!(
+                                        did=%did_string,
+                                        counter=resolved.maintenance_counter,
+                                        "auto-resolved at unlock",
+                                    );
+                                }
+                                Err(e) => {
+                                    tracing::debug!(
+                                        error=%e,
+                                        did=%did_str,
+                                        "auto-resolve at unlock failed (leaving cached snapshot)",
+                                    );
+                                }
+                            }
+                        });
+                    }
                 }
                 Err(e) => {
                     let msg = e.to_string();
@@ -3114,6 +3198,75 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
     }
 }
 
+/// Jubjub-only view of a stored key, paired with the raw
+/// 32-byte secret bytes the wallet uses to sign. The Sign
+/// tab consumes this directly; the `seed` field is what
+/// `jubjub_schnorr::sign_payload_diagnostic` ingests.
+///
+/// Stored in memory only for the duration of the SignTab
+/// render. The vec is rebuilt on every render so a key
+/// deleted in another tab disappears from the picker on the
+/// next paint.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StoredJubjubKeyEntry {
+    key_ref: String,
+    label: String,
+    seed: [u8; 32],
+}
+
+/// Filter the secret store to Jubjub-only keys, pulling each
+/// row's raw 32-byte secret out of the wallet via
+/// `WalletStore::key_private_bytes`. Returns `Vec::new()` if
+/// no wallet exists, the store is unreachable, or no Jubjub
+/// keys are stored — the picker hides itself in those cases.
+fn list_stored_jubjub_keys_for_sign(bridge_state: &BridgeState) -> Vec<StoredJubjubKeyEntry> {
+    use wallet_core::secret_storage::MidnightCurve;
+
+    let Some(store) = bridge_state.store() else {
+        return Vec::new();
+    };
+    let Some(wallet_id) = store
+        .list_wallet_ids()
+        .ok()
+        .and_then(|ids| ids.into_iter().next())
+    else {
+        return Vec::new();
+    };
+    let rows = match store.list_keys(wallet_id, None) {
+        Ok(rs) => rs,
+        Err(e) => {
+            tracing::warn!(error=%e, "list stored keys for Sign picker");
+            return Vec::new();
+        }
+    };
+    rows.into_iter()
+        .filter(|(_, row)| row.crv == MidnightCurve::Jubjub)
+        .filter_map(|(key_ref, row)| {
+            // `key_private_bytes` re-derives from the wallet
+            // seed for `Hkdf` rows (cheap) or unwraps the
+            // envelope for `Direct` rows (one scrypt). Both
+            // paths produce the same 32-byte buffer that
+            // `curve_support::sign` would pass to
+            // `jubjub_schnorr::sign_payload_from_seed`.
+            let bytes = store.key_private_bytes(wallet_id, &key_ref).ok()?;
+            if bytes.len() != 32 {
+                tracing::warn!(
+                    key_ref=%key_ref,
+                    "Jubjub stored secret length not 32; skipping",
+                );
+                return None;
+            }
+            let mut seed = [0u8; 32];
+            seed.copy_from_slice(&bytes);
+            Some(StoredJubjubKeyEntry {
+                key_ref,
+                label: row.label,
+                seed,
+            })
+        })
+        .collect()
+}
+
 /// One stored key in the shape the Operation Builder's
 /// verification-method picker consumes. Pre-computes the
 /// form-signal values so the click handler is a few
@@ -4045,6 +4198,7 @@ fn DidDetailView(
                 cached.as_ref(),
                 previous_cached.as_ref(),
                 controller_secret,
+                bridge_state.clone(),
                 &session_log,
             )}
         }
@@ -4058,6 +4212,7 @@ fn render_detail_tab(
     resolved: Option<&wallet_core::ResolvedDid>,
     previous: Option<&wallet_core::ResolvedDid>,
     controller_secret: Option<[u8; 32]>,
+    bridge_state: BridgeState,
     session_log: &[SessionEvent],
 ) -> Element {
     // Sign tab is the only one we let the user open before
@@ -4070,6 +4225,7 @@ fn render_detail_tab(
                 network,
                 did: did.clone(),
                 controller_secret,
+                bridge_state,
             }
         };
     }
@@ -4602,10 +4758,21 @@ fn SignTab(
     network: Network,
     did: String,
     controller_secret: Option<[u8; 32]>,
+    /// Persistent store handle. Lets the Sign tab enumerate
+    /// stored Jubjub keys so the user can pick which key the
+    /// signature comes from. When the store isn't attached or
+    /// has no Jubjub keys, only the "DID-derived" source is
+    /// available — same as the original behaviour.
+    bridge_state: BridgeState,
 ) -> Element {
     use wallet_core::secret_storage::jubjub_schnorr;
 
     let mut payload = use_signal(|| String::from("hello, did"));
+    // 0 → DID-derived (the original
+    // `seed_from_controller_and_did` path). 1..N → indexes
+    // into `stored_jubjub_keys`. The picker re-keys whenever
+    // the user selects a different row.
+    let mut source_idx = use_signal(|| 0usize);
     // Three results — one per verify path. `None` until the
     // user clicks; `Some(Ok(true|false))` after a clean run;
     // `Some(Err)` if the bridge / decoder failed.
@@ -4623,12 +4790,40 @@ fn SignTab(
         };
     };
 
+    // Stored Jubjub keys eligible to sign. Filtered from the
+    // full secret-storage listing because the Sign tab's
+    // pipeline is Jubjub-specific; Ed25519 / P-256 rows go to
+    // other consumers (e.g. the Operation Builder's VM
+    // picker).
+    let stored_jubjub_keys: Vec<StoredJubjubKeyEntry> =
+        list_stored_jubjub_keys_for_sign(&bridge_state);
+
+    // Resolve the chosen seed for THIS render. DID-derived
+    // path stays as before; stored-key path hands the row's
+    // raw 32-byte secret to `sign_payload_diagnostic`, which
+    // SHA-256s it the same way `curve_support::sign` does —
+    // so the signature this tab renders is bit-identical to
+    // what `RedbSecretStore::sign` would produce for the same
+    // (key_ref, payload).
+    let cur_source = *source_idx.read();
+    let (seed, source_label) = if cur_source == 0 || cur_source > stored_jubjub_keys.len() {
+        (
+            jubjub_schnorr::seed_from_controller_and_did(&controller_secret, &did),
+            "DID-derived (default)".to_string(),
+        )
+    } else {
+        let entry = &stored_jubjub_keys[cur_source - 1];
+        (
+            entry.seed,
+            format!("stored · {} ({})", entry.label, short_keyref(&entry.key_ref)),
+        )
+    };
+
     // One round trip through the wallet-core diagnostic
     // helper does everything: derive pk, hash to digest, sign,
     // encode both wire forms. Re-deriving on every render is
     // cheap (~1ms) and keeps the component a pure function of
     // its inputs.
-    let seed = jubjub_schnorr::seed_from_controller_and_did(&controller_secret, &did);
     let payload_bytes = payload.read().as_bytes().to_vec();
     let diag = jubjub_schnorr::sign_payload_diagnostic(&seed, &payload_bytes);
     let pk_x_dec = diag.pk_x_decimal.clone();
@@ -4712,12 +4907,50 @@ fn SignTab(
     // Silence unused-variable lints if we ever drop a verify path.
     let _ = network;
 
+    let keys_for_picker = stored_jubjub_keys.clone();
     rsx! {
         h3 { "Sign with Jubjub Schnorr" }
         div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
-            "Key derived deterministically from "
-            code { "SHA-256(\"midnight-did:wallet:sign-tab:v1\" || controller_sk || did)" }
-            ". Identical across reloads of the same wallet."
+            "Source: " strong { "{source_label}" } "."
+            br {}
+            "DID-derived keys live only in memory (deterministic from the DID's controller). "
+            "Stored keys are HD-derived off the wallet seed and persist in "
+            code { "~/.midnight/wallet-prototype/wallet.redb" } "."
+        }
+        div { class: "row",
+            label { style: "min-width: 80px;", "Signing key" }
+            select {
+                onchange: move |e| {
+                    if let Ok(i) = e.value().parse::<usize>() {
+                        source_idx.set(i);
+                        // Stored verify results refer to the
+                        // previous key; wipe them so the user
+                        // doesn't think a stale check still
+                        // applies.
+                        local_result.set(None);
+                        bridge_result.set(None);
+                        upstream_result.set(None);
+                    }
+                },
+                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                option {
+                    value: "0",
+                    selected: cur_source == 0,
+                    "DID-derived (controller_sk · did)"
+                }
+                for (i , k) in keys_for_picker.iter().enumerate() {
+                    option {
+                        value: "{i + 1}",
+                        selected: cur_source == i + 1,
+                        "stored · {k.label} ({short_keyref(&k.key_ref)})"
+                    }
+                }
+            }
+        }
+        if stored_jubjub_keys.is_empty() {
+            div { style: "color: var(--text-faint); font-size: 10px; margin-top: 4px;",
+                "Tip: generate a Jubjub key in the Keys tab to make it selectable here."
+            }
         }
         div { class: "row",
             label { style: "min-width: 80px;", "Payload" }
