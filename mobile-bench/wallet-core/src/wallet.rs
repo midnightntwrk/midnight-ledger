@@ -829,15 +829,26 @@ impl Wallet {
                 Err(e) => { yield crate::WizardStage::Failed(format!("spawn harness: {e}")); return; }
             };
             // Plumb the live chain Zswap state + LedgerParameters
-            // from the indexer (mirrors upstream
-            // `publicDataProvider.queryZSwapAndContractState`). Both
-            // are needed for `createUnprovenCallTxFromInitialStates`
-            // to route the call's transcript to `guaranteed_transcript`
-            // — passing `LedgerParameters.initialParameters()`
-            // produces `fallible_transcript` only, which the chain
-            // rejects with `Invalid Transaction (1010)` BadProof. See
-            // `preprod_decode_diff` for the byte-level diff that
-            // surfaced this.
+            // into the harness AND the Rust balance step. For
+            // `LedgerParameters` we want the params at the **chain
+            // tip**, not at the contract's last-call block — PreProd
+            // retunes parameters over time (cost model, block limits,
+            // fee schedule) and:
+            //   1. `ledger::construct::partition_transcripts` keys its
+            //      guaranteed/fallible split off those params (stale
+            //      params land the transcript in `fallible_transcript`,
+            //      chain rejects with `Invalid Transaction (1010)`);
+            //   2. `tx::balance::balance` computes `v_fee` from the
+            //      params' fee schedule (stale params produce a v_fee
+            //      that doesn't match what the chain re-derives during
+            //      validation, also surfacing as 1010).
+            // See `preprod_decode_diff` for the byte-diff that surfaced
+            // these and `BACKLOG.md` for Path B's longer-term direction.
+            let tip_params_hex = match indexer.chain_tip().await {
+                Ok(Some(t)) => t.ledger_parameters_hex,
+                _ => None,
+            };
+            let ledger_params_hex = tip_params_hex.or(info.ledger_parameters_hex);
             let unproven_hex = match call_prepare_unproven(
                 &bridge,
                 did_id.to_did_string(),
@@ -846,7 +857,7 @@ impl Wallet {
                 info.state_hex,
                 addr_hex.clone(),
                 info.zswap_state_hex,
-                info.ledger_parameters_hex,
+                ledger_params_hex.clone(),
                 controller_sk,
                 coin_pk_hex,
                 enc_pk_hex,
@@ -873,8 +884,20 @@ impl Wallet {
                 };
 
             // 3. Balancing — same dust pipeline our deploy uses.
+            // Parse the tip params we already fetched above; fall
+            // back to `INITIAL_PARAMETERS` only if the hex is absent
+            // or fails to decode. The chain re-derives v_fee from
+            // these same params during validation; building against
+            // stale params produces a v_fee the chain rejects (1010).
             yield crate::WizardStage::Balancing;
-            let params = ledger::structure::INITIAL_PARAMETERS;
+            let parsed_tip_params: Option<ledger::structure::LedgerParameters> =
+                ledger_params_hex.as_ref().and_then(|h| {
+                    let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                    serialize::tagged_deserialize(&bytes[..]).ok()
+                });
+            let initial_params_fallback = ledger::structure::INITIAL_PARAMETERS;
+            let params: &ledger::structure::LedgerParameters =
+                parsed_tip_params.as_ref().unwrap_or(&initial_params_fallback);
             let now_secs = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| d.as_secs())

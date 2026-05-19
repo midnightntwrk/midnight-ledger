@@ -41,6 +41,14 @@ pub enum IndexerError {
 }
 
 /// What the wallet shows as the "chain tip" pill.
+///
+/// `ledger_parameters_hex` carries `Block.ledgerParameters` at the
+/// tip — the snapshot the chain will use to validate tx submissions
+/// in the next block. PreProd's params evolve over time (cost
+/// model retuning, block-limit adjustments, etc.); building a tx
+/// against historical params makes `partition_transcripts` reach a
+/// different guaranteed/fallible split than the chain expects,
+/// surfacing as `Invalid Transaction (1010)` BadProof on submit.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChainTipInfo {
     pub hash: String,
@@ -48,6 +56,7 @@ pub struct ChainTipInfo {
     pub protocol_version: i64,
     pub timestamp_unix: i64,
     pub author_hex: Option<String>,
+    pub ledger_parameters_hex: Option<String>,
 }
 
 /// Snapshot of a contract's on-chain state, as last known to the
@@ -118,6 +127,7 @@ impl IndexerClient {
             protocol_version: b.protocol_version,
             timestamp_unix: b.timestamp,
             author_hex: b.author,
+            ledger_parameters_hex: Some(b.ledger_parameters),
         }))
     }
 

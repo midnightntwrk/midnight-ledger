@@ -292,12 +292,36 @@ const methods = {
     const contractState = cr.ContractState.deserialize(
       hexToBytes(params.contractStateHex),
     );
-    const zswapChainState = params.zswapChainStateHex
-      ? ledgerV8.ZswapChainState.deserialize(hexToBytes(params.zswapChainStateHex))
-      : new ledgerV8.ZswapChainState();
-    const ledgerParameters = params.ledgerParametersHex
-      ? ledgerV8.LedgerParameters.deserialize(hexToBytes(params.ledgerParametersHex))
-      : ledgerV8.LedgerParameters.initialParameters();
+    // Diagnostic: confirm we received the live state hex from Rust
+    // (the Path A fix). If either is missing we silently fall back to
+    // initial/empty values and the chain rejects the resulting proof
+    // with `Invalid Transaction (1010)`.
+    const zswapHexLen = params.zswapChainStateHex ? params.zswapChainStateHex.length : 0;
+    const ledgerHexLen = params.ledgerParametersHex ? params.ledgerParametersHex.length : 0;
+    console.error(
+      `[prepareUnprovenCallTx] zswapHex=${zswapHexLen}ch ledgerHex=${ledgerHexLen}ch`,
+    );
+    let zswapChainState;
+    try {
+      zswapChainState = params.zswapChainStateHex
+        ? ledgerV8.ZswapChainState.deserialize(hexToBytes(params.zswapChainStateHex))
+        : new ledgerV8.ZswapChainState();
+    } catch (e) {
+      console.error(`[prepareUnprovenCallTx] ZswapChainState.deserialize FAILED: ${e}`);
+      throw e;
+    }
+    let ledgerParameters;
+    try {
+      ledgerParameters = params.ledgerParametersHex
+        ? ledgerV8.LedgerParameters.deserialize(hexToBytes(params.ledgerParametersHex))
+        : ledgerV8.LedgerParameters.initialParameters();
+    } catch (e) {
+      console.error(`[prepareUnprovenCallTx] LedgerParameters.deserialize FAILED: ${e}`);
+      throw e;
+    }
+    console.error(
+      `[prepareUnprovenCallTx] zswap=${zswapChainState ? 'ok' : 'null'} ledgerParameters=${ledgerParameters ? 'ok' : 'null'}`,
+    );
 
     // `args` may carry `{ $bigint: "n" }` placeholders for Field /
     // Uint args (same convention as `inspectCircuit`).
@@ -320,6 +344,30 @@ const methods = {
       },
       params.encryptionPublicKeyHex,
     );
+    // Diagnostic: dump the partition the SDK chose. If [0] (guaranteed)
+    // is empty and [1] (fallible) has content, our pipeline lands the
+    // whole circuit in the fallible slot — which the chain rejects on
+    // submit. Upstream's manager lands it in guaranteed. Same SDK
+    // version (4.0.2), same compact-runtime (0.15.0), same inputs
+    // (verified above) — so this exposes whichever input is still
+    // wrong.
+    try {
+      const pt = callTxData.public.partitionedTranscript;
+      const desc = (t) => {
+        if (!t) return "null";
+        const prog = t.program ? t.program.length : 0;
+        const eff = t.effects ? Object.keys(t.effects).length : 0;
+        return `program=${prog}ops effects=${eff}keys`;
+      };
+      console.error(
+        `[prepareUnprovenCallTx] partition[0/guaranteed]: ${desc(pt?.[0])}`,
+      );
+      console.error(
+        `[prepareUnprovenCallTx] partition[1/fallible]:  ${desc(pt?.[1])}`,
+      );
+    } catch (e) {
+      console.error(`[prepareUnprovenCallTx] partition dump failed: ${e}`);
+    }
 
     // `UnsubmittedCallTxData = CallResult & { private: UnsubmittedTxData }`
     // where the `unprovenTx` lives under `.private`. CallResultPublic
