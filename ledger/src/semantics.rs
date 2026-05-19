@@ -1554,7 +1554,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op == ContractOperation::new(None) {
+                                    if op.v2 == None {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
@@ -1564,7 +1564,7 @@ impl<D: DB> LedgerState<D> {
                                 SingleUpdate::VerifierKeyInsert(ep, vk) => {
                                     let mut op = match cstate.operations.get(ep) {
                                         Some(op) => (*op).clone(),
-                                        None => ContractOperation::new(None),
+                                        None => ContractOperation::new(None, None),
                                     };
                                     if vk.as_version().has(&op) {
                                         return Err(TransactionInvalid::VerifierKeyAlreadyPresent(

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- feat: `ContractOperation` includes ir field
 - feat: add support for ECDSA signatures.
 - feat: Changed the structure of logged events according to events MIP (link tbd).
 

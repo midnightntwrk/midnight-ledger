@@ -747,7 +747,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v7]"]
+#[tag = "contract-state[v8]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -887,16 +887,17 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v4]"]
+#[tag = "contract-operation[v5]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
+    ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>) -> Self {
-        ContractOperation { v2: vk }
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
+        ContractOperation { v2: vk, ir }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
@@ -919,9 +920,10 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
+                ir: None,
             }
         } else {
-            ContractOperation { v2: None }
+            ContractOperation { v2: None, ir: None }
         }
     }
 }
@@ -961,9 +963,20 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None }
+        ContractOperation { v2: None, ir: None }
     }
 }
+
+idty!(Ir, IrBuf);
+impl Tagged for IrBuf {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        "ir-buf".into()
+    }
+    fn tag_unique_factor() -> String {
+        "vec(u8)".into()
+    }
+}
+tag_enforcement_test!(IrBuf);
 
 #[cfg(test)]
 mod tests {

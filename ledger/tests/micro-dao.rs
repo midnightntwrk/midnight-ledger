@@ -162,12 +162,12 @@ async fn micro_dao_inner(mode: TestMode) {
     let org_sk: HashOutput = rng.r#gen();
     let sep = b"lares:udao:pk";
     let org_pk = persistent_commit(sep, org_sk);
-    let advance_op = ContractOperation::new(verifier_key(&RESOLVER, "advance").await);
-    let buy_in_op = ContractOperation::new(verifier_key(&RESOLVER, "buyIn").await);
-    let cash_out_op = ContractOperation::new(verifier_key(&RESOLVER, "cashOut").await);
-    let set_topic_op = ContractOperation::new(verifier_key(&RESOLVER, "setTopic").await);
-    let vote_commit_op = ContractOperation::new(verifier_key(&RESOLVER, "voteCommit").await);
-    let vote_reveal_op = ContractOperation::new(verifier_key(&RESOLVER, "voteReveal").await);
+    let advance_op = ContractOperation::new(verifier_key(&RESOLVER, "advance").await, None);
+    let buy_in_op = ContractOperation::new(verifier_key(&RESOLVER, "buyIn").await, None);
+    let cash_out_op = ContractOperation::new(verifier_key(&RESOLVER, "cashOut").await, None);
+    let set_topic_op = ContractOperation::new(verifier_key(&RESOLVER, "setTopic").await, None);
+    let vote_commit_op = ContractOperation::new(verifier_key(&RESOLVER, "voteCommit").await, None);
+    let vote_reveal_op = ContractOperation::new(verifier_key(&RESOLVER, "voteReveal").await, None);
 
     dbg!(cfg!(feature = "proving"));
     // Initial states

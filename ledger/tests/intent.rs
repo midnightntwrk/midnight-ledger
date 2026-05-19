@@ -522,7 +522,7 @@ async fn balanced_utxos_1_intent() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -703,7 +703,7 @@ async fn balanced_utxos_1_intent() {
         proven_unbalanced_tx.well_formed(&state.ledger, strictness, state.time);
 
     let fees = proven_unbalanced_tx
-        .fees(&state.ledger.parameters, false)
+        .fees_with_state(&state.ledger.parameters, &state.ledger, false)
         .unwrap();
 
     match res_unbalanced {
@@ -748,7 +748,7 @@ async fn intents_cannot_balance_across_segments() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1027,7 +1027,7 @@ async fn causality_check_sanity_check() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1332,7 +1332,7 @@ async fn imbalanced_utxos_1_intent() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -1523,7 +1523,7 @@ async fn imbalanced_utxos_1_intent_fallible() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
@@ -2165,7 +2165,7 @@ async fn setup() -> (
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
