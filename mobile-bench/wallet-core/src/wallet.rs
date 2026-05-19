@@ -907,6 +907,15 @@ impl Wallet {
                 Ok(b) => b,
                 Err(e) => { yield crate::WizardStage::Failed(format!("encode: {e}")); return; }
             };
+            // Diagnostic hook: when `WALLET_CORE_DUMP_TX=<path>` is
+            // set, write the encoded tx bytes to disk before submit.
+            // Used by the preprod byte-diff investigation to capture
+            // both a known-good upstream tx and our own pipeline's
+            // output for a side-by-side comparison.
+            if let Ok(p) = std::env::var("WALLET_CORE_DUMP_TX") {
+                let _ = std::fs::write(&p, hex::encode(&scale_bytes));
+                tracing::info!(target: "wallet-core", path = %p, bytes = scale_bytes.len(), "dumped tx bytes pre-submit");
+            }
             let signer = match wallet.midnight_signer() {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
