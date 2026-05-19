@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use crate::result_mode::{ResultMode, ResultModeVerify};
-use base_crypto::fab::AlignedValue;
+use base_crypto::fab::{AlignedValue, InvalidBuiltinDecode};
 use base_crypto::repr::MemWrite;
 use derive_where::derive_where;
 #[cfg(feature = "proptest")]
@@ -79,6 +79,67 @@ impl FieldRepr for Key {
         }
     }
 }
+
+#[derive(Serializable, Serialize, Deserialize, Storable, Clone, Eq, PartialEq, Copy, Debug)]
+#[storable(base)]
+#[serde(rename_all = "kebab-case")]
+#[tag = "impact-log-event-type[v1]"]
+#[repr(u8)]
+pub enum LogEventType {
+    ShieldedSpend = 0,
+    ShieldedReceive = 1,
+    ShieldedMint = 2,
+    ShieldedBurn = 3,
+    UnshieldedSpend = 4,
+    UnshieldedReceive = 5,
+    UnshieldedMint = 6,
+    UnshieldedBurn = 7,
+    Paused = 8,
+    Unpaused = 9,
+    Misc = 10,
+}
+
+tag_enforcement_test!(LogEventType);
+
+impl TryFrom<u8> for LogEventType {
+    type Error = InvalidBuiltinDecode;
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        use LogEventType::*;
+        Ok(match value {
+            0 => ShieldedSpend,
+            1 => ShieldedReceive,
+            2 => ShieldedMint,
+            3 => ShieldedBurn,
+            4 => UnshieldedSpend,
+            5 => UnshieldedReceive,
+            6 => UnshieldedMint,
+            7 => UnshieldedBurn,
+            8 => Paused,
+            9 => Unpaused,
+            10 => Misc,
+            _ => return Err(InvalidBuiltinDecode("unknown LogEventType variant")),
+        })
+    }
+}
+
+#[derive_where(Clone, PartialEq, Eq, Debug)]
+#[derive(Storable, Serialize, Deserialize)]
+#[storable(db = D)]
+#[tag = "impact-versioned-log-item[v1]"]
+#[serde(
+    rename_all = "camelCase",
+    bound(
+        serialize = "StateValue<D>: Serialize",
+        deserialize = "StateValue<D>: Deserialize<'de>"
+    )
+)]
+pub struct VersionedLogItem<D: DB> {
+    pub version: u32,
+    pub event_type: LogEventType,
+    pub data: StateValue<D>,
+}
+
+tag_enforcement_test!(VersionedLogItem<InMemoryDB>);
 
 #[non_exhaustive]
 #[derive_where(Clone, Eq, PartialEq; M)]

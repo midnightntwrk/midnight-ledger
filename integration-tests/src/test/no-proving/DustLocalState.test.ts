@@ -39,6 +39,7 @@ import {
   dustCommitment,
   dustInitialNonce,
   dustNonce,
+  dustFirstNonce,
   dustNullifier
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
@@ -1421,6 +1422,8 @@ describe('Ledger API - DustLocalState', () => {
     // we can't calculate the nonce for seq=0
     expect(qdo.seq).toEqual(0);
     expect(() => dustNonce(qdo.backingNight, BigInt(qdo.seq), secretKey)).toThrow();
+    const firstNonce = dustFirstNonce(qdo.backingNight, qdo.owner);
+    expect(firstNonce).toEqual(qdo.nonce);
 
     const newCommitmentIndex = qdo.mtIndex + 1n;
     const fee = 1000n;

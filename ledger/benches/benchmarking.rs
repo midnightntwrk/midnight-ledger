@@ -132,7 +132,9 @@ pub fn rewards(c: &mut Criterion) {
     let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
     ledger_state = ledger_state
         .apply_system_tx(
-            &SystemTransaction::DistributeReserve(ledger_state.reserve_pool),
+            &SystemTransaction::DistributeReserve {
+                amount: ledger_state.reserve_pool,
+            },
             Timestamp::from_secs(0),
         )
         .unwrap()

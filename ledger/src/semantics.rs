@@ -718,6 +718,34 @@ impl<D: DB> LedgerState<D> {
                     treasury,
                     ..self.clone()
                 };
+                state.check_night_balance_invariant()?;
+                let res = (state, vec![]);
+                Ok(res)
+            }
+            SystemTransaction::UnlockToTreasury { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to treasury rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to treasury");
+                let mut treasury = self.treasury.clone();
+                let native_token = treasury
+                    .get(&TokenType::Unshielded(NIGHT))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(*amount);
+                treasury = treasury.insert(TokenType::Unshielded(NIGHT), native_token);
+                let state = LedgerState {
+                    locked_pool: self.locked_pool - *amount,
+                    treasury,
+                    ..self.clone()
+                };
+                state.check_night_balance_invariant()?;
                 let res = (state, vec![]);
                 Ok(res)
             }
@@ -950,7 +978,7 @@ impl<D: DB> LedgerState<D> {
                 state.dust = Sp::new(dust_state);
                 Ok((state, events))
             }
-            SystemTransaction::DistributeReserve(amount) => {
+            SystemTransaction::DistributeReserve { amount } => {
                 if *amount > self.reserve_pool {
                     error!(?amount, reserve_supply = ?self.reserve_pool, "[privileged] reserve distribution rejected due to insufficient reserve supply");
                     return Err(SystemTransactionError::IllegalReserveDistribution {
@@ -965,6 +993,31 @@ impl<D: DB> LedgerState<D> {
                 let new_st = LedgerState {
                     reserve_pool,
                     block_reward_pool,
+                    ..self.clone()
+                };
+
+                new_st.check_night_balance_invariant()?;
+
+                Ok((new_st, vec![]))
+            }
+            SystemTransaction::UnlockToReserve { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to reserve rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to reserve");
+
+                let locked_pool = self.locked_pool - *amount;
+                let reserve_pool = self.reserve_pool + *amount;
+
+                let new_st = LedgerState {
+                    reserve_pool,
+                    locked_pool,
                     ..self.clone()
                 };
 
