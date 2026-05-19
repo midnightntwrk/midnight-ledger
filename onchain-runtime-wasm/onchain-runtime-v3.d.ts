@@ -235,11 +235,25 @@ export type Op<R> = { noop: { n: number } } |
   { ins: { cached: boolean, n: number } } |
   'ckpt';
 /**
+ * The type of a log event embedded in {@link GatherResult}.
+ */
+export type LogEventType = 'shielded-spend' |
+  'shielded-receive' |
+  'shielded-mint' |
+  'shielded-burn' |
+  'unshielded-spend' |
+  'unshielded-receive' |
+  'unshielded-mint' |
+  'unshielded-burn' |
+  'paused' |
+  'unpaused' |
+  'misc';
+/**
  * An individual result of observing the results of a non-verifying VM program
  * execution
  */
 export type GatherResult = { tag: 'read', content: AlignedValue } |
-  { tag: 'log', content: EncodedStateValue };
+  { tag: 'log', content: { version: number, eventType: LogEventType, data: EncodedStateValue} };
 /**
  * An alternative encoding of {@link StateValue} for use in {@link Op} for
  * technical reasons

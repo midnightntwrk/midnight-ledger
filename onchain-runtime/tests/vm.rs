@@ -150,7 +150,26 @@ mod tests {
         // log
         assert_eq!(
             run_program(&[vmval!((4u64))], &ops![log]),
-            Ok((vec![], vec![GatherEvent::Log(stval!((4u64)))]))
+            Ok((
+                vec![],
+                vec![GatherEvent::Log(VersionedLogItem {
+                    version: 0,
+                    event_type: LogEventType::Misc,
+                    data: stval!((4u64))
+                })]
+            ))
+        );
+
+        assert_eq!(
+            run_program(&[vmval!([(2u32), (8u8), (4u64)])], &ops![log]),
+            Ok((
+                vec![],
+                vec![GatherEvent::Log(VersionedLogItem {
+                    version: 2,
+                    event_type: LogEventType::Paused,
+                    data: stval!((4u64))
+                })]
+            ))
         );
 
         // pop

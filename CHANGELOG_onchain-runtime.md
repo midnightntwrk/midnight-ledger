@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- feat: Changed the structure of logged events according to events MIP (link tbd).
+
 ## Version `3.1.0`
 
 - feat: add more flexibility to `findPathForLeaf`, allowing it to scan index
