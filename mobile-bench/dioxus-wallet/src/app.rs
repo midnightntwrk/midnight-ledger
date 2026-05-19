@@ -886,6 +886,7 @@ pub fn App() -> Element {
                         controller_secret: bridge_state
                             .read()
                             .controller_secret_for_on(*network.read(), &did_open),
+                        bridge_state: bridge_state.read().clone(),
                         session_log: session_log.read().clone(),
                         on_back: move |_| open_did.set(None),
                         on_resolved: move |resolved: wallet_core::ResolvedDid| {
@@ -2146,6 +2147,11 @@ fn DidOperationBuilder(
     network: Network,
     did: String,
     controller_secret: [u8; 32],
+    /// Persistent-store handle. Used to enumerate stored
+    /// secret-storage keys for the verification-method
+    /// picker; safe to pass even if the store hasn't loaded
+    /// any keys yet (the picker just shows an empty list).
+    bridge_state: BridgeState,
     /// Circuits whose verifier key is already registered on
     /// `ContractState.operations`. Drives the auto-load step:
     /// any queued op whose `circuit()` isn't in this set gets a
@@ -2187,6 +2193,13 @@ fn DidOperationBuilder(
     let mut queue = use_signal::<Vec<(DidOperation, QueueStatus)>>(Vec::new);
     let mut running = use_signal(|| false);
     let mut batch_error = use_signal::<Option<String>>(|| None);
+
+    // Stored keys eligible to fill the addVerificationMethod /
+    // updateVerificationMethod form. Loaded once at builder
+    // mount; the picker just renders from this snapshot.
+    // Empty when no wallet row exists yet OR no keys are
+    // stored — the picker hides itself in those cases.
+    let stored_vm_keys: Vec<StoredKeyForVm> = list_stored_vm_keys(&bridge_state);
 
     let on_add_to_batch = move |_| {
         let op = BUILDABLE_OPS[*op_idx.read()];
@@ -2539,36 +2552,77 @@ fn DidOperationBuilder(
                             placeholder: "https://alias.example.com or arbitrary identifier",
                         }
                     },
-                    OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => rsx! {
-                        FormRow {
-                            label: "id",
-                            value: f_id.read().clone(),
-                            on_change: move |s: String| f_id.set(s),
-                            placeholder: "key-0 / authkey-2025-05",
-                        }
-                        FormSelect {
-                            label: "key_type",
-                            options: KEY_TYPES,
-                            selected_idx: cur_kt,
-                            on_select: move |i: usize| f_key_type_idx.set(i),
-                        }
-                        FormSelect {
-                            label: "curve",
-                            options: CURVE_TYPES,
-                            selected_idx: cur_cv,
-                            on_select: move |i: usize| f_curve_idx.set(i),
-                        }
-                        FormRow {
-                            label: "pk.x",
-                            value: f_pk_x.read().clone(),
-                            on_change: move |s: String| f_pk_x.set(s),
-                            placeholder: "field element (decimal or 0x… hex)",
-                        }
-                        FormRow {
-                            label: "pk.y",
-                            value: f_pk_y.read().clone(),
-                            on_change: move |s: String| f_pk_y.set(s),
-                            placeholder: "field element (decimal or 0x… hex)",
+                    OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => {
+                        // Snapshot per render so the click closure
+                        // doesn't borrow into the outer fn.
+                        let keys_for_render = stored_vm_keys.clone();
+                        let keys_for_pick = stored_vm_keys.clone();
+                        rsx! {
+                            if !keys_for_render.is_empty() {
+                                div { class: "row",
+                                    label { style: "min-width: 80px;", "Use stored key" }
+                                    select {
+                                        onchange: move |e| {
+                                            let Ok(idx) = e.value().parse::<usize>() else { return };
+                                            if idx == 0 {
+                                                // "— manual entry —"; leave the
+                                                // form alone so any in-progress
+                                                // typing is preserved.
+                                                return;
+                                            }
+                                            if let Some(key) = keys_for_pick.get(idx - 1) {
+                                                f_id.set(key.label.clone());
+                                                f_key_type_idx.set(key.kty_idx);
+                                                f_curve_idx.set(key.crv_idx);
+                                                f_pk_x.set(key.pk_x_hex.clone());
+                                                f_pk_y.set(key.pk_y_hex.clone());
+                                            }
+                                        },
+                                        style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                                        option {
+                                            value: "0",
+                                            selected: true,
+                                            "— manual entry —"
+                                        }
+                                        for (i , k) in keys_for_render.iter().enumerate() {
+                                            option {
+                                                value: "{i + 1}",
+                                                "{k.label} · {k.crv_label} ({short_keyref(&k.key_ref)})"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            FormRow {
+                                label: "id",
+                                value: f_id.read().clone(),
+                                on_change: move |s: String| f_id.set(s),
+                                placeholder: "key-0 / authkey-2025-05",
+                            }
+                            FormSelect {
+                                label: "key_type",
+                                options: KEY_TYPES,
+                                selected_idx: cur_kt,
+                                on_select: move |i: usize| f_key_type_idx.set(i),
+                            }
+                            FormSelect {
+                                label: "curve",
+                                options: CURVE_TYPES,
+                                selected_idx: cur_cv,
+                                on_select: move |i: usize| f_curve_idx.set(i),
+                            }
+                            FormRow {
+                                label: "pk.x",
+                                value: f_pk_x.read().clone(),
+                                on_change: move |s: String| f_pk_x.set(s),
+                                placeholder: "field element (decimal or 0x… hex)",
+                            }
+                            FormRow {
+                                label: "pk.y",
+                                value: f_pk_y.read().clone(),
+                                on_change: move |s: String| f_pk_y.set(s),
+                                placeholder: "field element (decimal or 0x… hex)",
+                            }
                         }
                     },
                     OpKind::RemoveVerificationMethod | OpKind::RemoveService => rsx! {
@@ -3057,6 +3111,92 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
                 }
             }
         }
+    }
+}
+
+/// One stored key in the shape the Operation Builder's
+/// verification-method picker consumes. Pre-computes the
+/// form-signal values so the click handler is a few
+/// assignments and the row owns no references.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct StoredKeyForVm {
+    key_ref: String,
+    label: String,
+    /// Index into `KEY_TYPES` (`"EC" | "RSA" | "oct" | "OKP"`).
+    kty_idx: usize,
+    /// Index into `CURVE_TYPES` (`"Ed25519" | "Jubjub" | "P256"`).
+    crv_idx: usize,
+    /// Human-readable label for the dropdown — e.g. "Jubjub".
+    crv_label: &'static str,
+    /// `pk.x` as 0x-prefixed BE hex. The Operation Builder's
+    /// form treats this as the `{ "$bigint": <str> }` payload
+    /// — `BigInt("0x…")` is valid JS.
+    pk_x_hex: String,
+    pk_y_hex: String,
+}
+
+/// Snapshot every key in the secret store for the active
+/// wallet, normalised to the form the verification-method
+/// picker needs. Returns `Vec::new()` if no wallet exists or
+/// the secret store is unreachable — the picker hides itself
+/// in those cases.
+fn list_stored_vm_keys(bridge_state: &BridgeState) -> Vec<StoredKeyForVm> {
+    use wallet_core::secret_storage::public_for_ledger;
+
+    let Some(store) = bridge_state.store() else {
+        return Vec::new();
+    };
+    let Some(wallet_id) = store
+        .list_wallet_ids()
+        .ok()
+        .and_then(|ids| ids.into_iter().next())
+    else {
+        return Vec::new();
+    };
+    let rows = match store.list_keys(wallet_id, None) {
+        Ok(rs) => rs,
+        Err(e) => {
+            tracing::warn!(error=%e, "list stored keys for VM picker");
+            return Vec::new();
+        }
+    };
+    rows.into_iter()
+        .filter_map(|(key_ref, row)| {
+            let ledger = public_for_ledger(&row.public_jwk).ok()?;
+            let kty_idx = kty_to_idx(ledger.kty);
+            let (crv_idx, crv_label) = crv_to_idx_label(ledger.crv);
+            Some(StoredKeyForVm {
+                key_ref,
+                label: row.label.clone(),
+                kty_idx,
+                crv_idx,
+                crv_label,
+                pk_x_hex: format!("0x{}", hex::encode(ledger.x_be)),
+                pk_y_hex: format!("0x{}", hex::encode(ledger.y_be)),
+            })
+        })
+        .collect()
+}
+
+/// Map a `MidnightKeyType` to its position in the UI's
+/// `KEY_TYPES` table. Must agree with the table declaration
+/// in this file (`KEY_TYPES = ["EC", "RSA", "oct", "OKP"]`).
+fn kty_to_idx(kty: wallet_core::secret_storage::MidnightKeyType) -> usize {
+    use wallet_core::secret_storage::MidnightKeyType::*;
+    match kty {
+        EC => 0,
+        OKP => 3,
+    }
+}
+
+/// Map a `MidnightCurve` to its position in the UI's
+/// `CURVE_TYPES` table plus a static label for the dropdown.
+fn crv_to_idx_label(crv: wallet_core::secret_storage::MidnightCurve) -> (usize, &'static str) {
+    use wallet_core::secret_storage::MidnightCurve::*;
+    match crv {
+        Ed25519 => (0, "Ed25519"),
+        Jubjub => (1, "Jubjub"),
+        P256 => (2, "P-256"),
     }
 }
 
@@ -3600,6 +3740,10 @@ fn DidDetailView(
     /// minted the DID here). `None` means the user resolved a
     /// DID created elsewhere — Deactivate is disabled.
     controller_secret: Option<[u8; 32]>,
+    /// Persistent store + cache handle. Threaded through so
+    /// the Operation Builder's "use stored key" picker can
+    /// list keys directly from the secret store.
+    bridge_state: BridgeState,
     session_log: Vec<SessionEvent>,
     on_back: EventHandler<()>,
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
@@ -3777,11 +3921,13 @@ fn DidDetailView(
                 .as_ref()
                 .map(|r| (r.loaded_circuits.clone(), r.maintenance_counter))
                 .unwrap_or_else(|| (Vec::new(), 0));
+            let bridge_state_for_builder = bridge_state.clone();
             return rsx! {
                 DidOperationBuilder {
                     network,
                     did: did_for_builder,
                     controller_secret: sk,
+                    bridge_state: bridge_state_for_builder,
                     loaded_circuits,
                     initial_counter,
                     on_back: move |_| builder_mode.set(false),
