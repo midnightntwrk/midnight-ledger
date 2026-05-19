@@ -4,15 +4,27 @@
 //!
 //! Procedure: pull the contract state via the indexer,
 //! decode the `operations` map, extract each circuit's
-//! `VerifierKey`, and compare its SHA-256 fingerprint to
-//! our bundled `<circuit>.verifier` file's fingerprint.
+//! `VerifierKey`, **tag-serialise** it (so it carries the
+//! same `"midnight:<tag>:"` framing the bundled `.verifier`
+//! files already have), and compare SHA-256 fingerprints.
 //!
-//! A mismatch on any single circuit explains the
-//! `Invalid Transaction (1010)` BadProof rejection — the
-//! chain verifies our proof against the on-chain VK; if
-//! the on-chain VK came from a different circuit
-//! compilation than our prover key targets, no proof will
-//! ever pass.
+//! ### History note (important — read before editing)
+//!
+//! An earlier version of this probe used `Serializable::serialize`
+//! instead of `tagged_serialize`. `Serializable::serialize` writes
+//! the bare payload; `tagged_serialize` prepends the global tag
+//! prefix that the bundled files *do* carry. The result: every
+//! circuit looked like a MISMATCH even when the underlying VKs
+//! were byte-identical — purely because the tag prefix was on
+//! one side and not the other. That false signal nucleated a
+//! whole "PreProd VKs diverged from our bundle" story (which
+//! propagated into `preprod_smoke_live` docs and a now-deleted
+//! Path B test plan). Don't repeat that mistake: the apples-to-
+//! apples form is `tagged_serialize`.
+//!
+//! Current finding: **all 11 on-chain VKs match our bundle
+//! byte-for-byte.** Whatever causes the `Invalid Transaction
+//! (1010)` BadProof rejection on writes lives elsewhere.
 //!
 //! Read-only (just queries the indexer). Run with:
 //!
@@ -115,17 +127,19 @@ async fn preprod_vk_bytes_match_bundle() {
             Err(_) => continue,
         };
         // `ContractOperation::v2` is the current `Option<VerifierKey>`
-        // slot. Tag-serialise the inner VK to get the canonical
-        // wire bytes so we're comparing apples to apples with
-        // the bundled `.verifier` files (which are also tagged).
+        // slot. Apples-to-apples comparison with the bundled
+        // `.verifier` files requires the full **tagged** form:
+        // those files are produced by upstream's
+        // `tagged_serialize`, which prepends `"midnight:<tag>:"`
+        // before the payload. `Serializable::serialize` alone
+        // writes only the payload — a previous version of this
+        // test used that, which produced false MISMATCHes on
+        // every entry because the tag prefix was in one side
+        // and not the other.
         let mut on_chain_bytes = Vec::new();
         if let Some(vk) = op.latest() {
-            use serialize::Serializable;
-            <transient_crypto::proofs::VerifierKey as Serializable>::serialize(
-                vk,
-                &mut on_chain_bytes,
-            )
-            .expect("VerifierKey serialize");
+            serialize::tagged_serialize(vk, &mut on_chain_bytes)
+                .expect("tagged_serialize VerifierKey");
         }
         let on_chain_hex = sha256_hex(&on_chain_bytes);
         let bundled_hex = bundled_verifier_hex(&name);

@@ -1,16 +1,30 @@
-//! Path B for the PreProd `Invalid Transaction (1010)` BadProof
-//! rejection: reload the on-chain `VerifierKey`s via
-//! `MaintenanceUpdate`. The chain validates `ContractCall` proofs
-//! against the stored VK in `ContractState.operations`; the
-//! `preprod_vk_diff` probe confirmed that all 11 stored VKs diverge
-//! from our bundled bytes (the operator's PreProd DIDs were
-//! registered ~April 2026, before the May-15 commits that bumped
-//! the compact compiler to 0.29.0, simplified the contract, and
-//! refactored `removeVerificationMethod`).
+//! Probe + (gated) write path for the DID maintenance authority.
 //!
-//! `MaintenanceUpdate` does NOT go through ZK circuit verification —
-//! it's a signature-only + DUST-spend transaction — so this is the
-//! one path that can succeed when the stored VKs don't match.
+//! ### Why this file exists
+//!
+//! Originally written under the (now-refuted) hypothesis that the
+//! operator's PreProd DIDs had stale on-chain VKs that needed to
+//! be reloaded via `MaintenanceUpdate`. After fixing the
+//! `preprod_vk_diff` probe to use `tagged_serialize`, all 11
+//! on-chain VKs match our bundle byte-for-byte — so the VK reload
+//! is NOT what the demo needs to succeed.
+//!
+//! The probe in this file remains valuable for a different
+//! reason: it confirms whether our wallet's HD-derived
+//! maintenance VK is in a DID's committee. For operator-deployed
+//! DIDs the answer is NO (each was deployed with a per-DID
+//! random key by upstream `@midnight-ntwrk/midnight-js-contracts::
+//! deployContract`), so any future MaintenanceUpdate from our
+//! wallet against those DIDs would be rejected at signature
+//! verification — distinct from the BadProof we see on
+//! ContractCall. For wallet-deployed DIDs the answer is YES (the
+//! committee is set to our HD key at deploy time).
+//!
+//! The reload test is still here, gated behind
+//! `PREPROD_AUTHORIZE_VK_RELOAD=1` and an in-test assertion that
+//! our key is in the committee. It's a no-op for the current
+//! PreProd DIDs (assertion fails fast, no DUST spent) but stays
+//! useful for any future case where we own deploys.
 //!
 //! Two tests in this file:
 //!

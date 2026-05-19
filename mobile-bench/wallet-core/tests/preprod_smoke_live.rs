@@ -19,47 +19,42 @@
 //!    run failed at `Submitting` with
 //!    `Invalid Transaction (1010)` (BadProof rejection).
 //!
-//!    ### Root cause (confirmed)
+//!    ### Diagnosis status
 //!
-//!    See the sibling `preprod_vk_diff` test. The verifier
-//!    keys registered on the operator's PreProd DID
-//!    diverge from our bundled `.verifier` bytes for **all
-//!    11 circuits** — and also diverge from the operator's
-//!    *current* local `midnight-did-contract/` checkout.
-//!    The on-chain VKs were put there by an older
-//!    circuit-compilation when the DIDs were first
-//!    created (manager profile's `updatedAt: 2026-04-06`).
-//!    The chain verifies our proof against those stored
-//!    VKs; since our prover key targets a newer
-//!    compilation, no proof we generate will ever pass.
+//!    The earlier "VK divergence" hypothesis was based on a
+//!    flawed probe (`preprod_vk_diff` v1) that compared the
+//!    bundled `.verifier` file SHA against a *non*-tagged
+//!    serialization of the on-chain `VerifierKey`. After
+//!    fixing the probe to use `serialize::tagged_serialize`
+//!    (which prepends `"midnight:<tag>:"` the same way the
+//!    bundled files do), **all 11 on-chain VKs MATCH our
+//!    bundle byte-for-byte**.
 //!
-//!    Things that are NOT the cause (ruled out):
+//!    The remaining ruled-out causes:
 //!    - Controller-secret derivation — matches upstream
 //!      `SHA-256(addVerificationMethod.prover_bytes)`
-//!      bit-equal.
-//!    - Chain-tip ctime drift — fix from `06db33af` is
-//!      wired into `call_did_circuit` line 869+.
+//!      bit-equal (`hashProverKey` in
+//!      `midnight-did/api/src/lightweight.ts`).
+//!    - Prover-key bytes — bundle SHA matches every
+//!      consumer-app `node_modules/...midnight-did-contract/`
+//!      installation (verified Apr 29 / May 7 / May 13 builds
+//!      all share `92fcba0b1020b503…` for
+//!      `addVerificationMethod.prover`).
+//!    - Chain-tip ctime drift — fix from `06db33af` is wired
+//!      into `call_did_circuit`.
 //!    - Node version drift — PreProd runs `0.22.2-71fc6804`,
-//!      we're pinned to `node-0.22.3` (same major.minor,
-//!      patch differences shouldn't change runtime API).
-//!    - Earlier-stage failures — SyncingDust, Composing,
-//!      Balancing, Proving all ran cleanly.
+//!      we're pinned to `node-0.22.3` (patch differences).
+//!    - Maintenance-authority key — not relevant for
+//!      `ContractCall` (only for `MaintenanceUpdate`); see
+//!      `preprod_maintenance_authority_probe`.
 //!
-//!    ### How to fix
-//!
-//!    Reload the VKs on-chain via `MaintenanceUpdate`s —
-//!    `Wallet::load_did_circuit(did, circuit, counter)`
-//!    overwrites the entry in `ContractState.operations`
-//!    with the bundled `.verifier` bytes. MaintenanceUpdate
-//!    does NOT go through ZK circuit verification (it just
-//!    needs a DUST spend proof + the maintenance-authority
-//!    signature), so it should succeed where ContractCall
-//!    fails. After each reload, ContractCalls against that
-//!    circuit will validate.
-//!
-//!    A follow-up `preprod_reload_addAlsoKnownAs_vk` test
-//!    can drive this once the operator's OK to spend a few
-//!    DUST. Out of scope for this commit.
+//!    With all four obvious knobs ruled out, the write
+//!    needs to be re-run against the live chain so we can
+//!    see what *actually* fails now. The earlier 1010 may
+//!    have been the by-now-fixed ctime drift, or a transient
+//!    PreProd issue, or a still-unidentified mismatch in
+//!    the JS-bridge → Rust handoff. Un-ignore this test and
+//!    run with `--nocapture` to surface the next signal.
 //!
 //! Hardcoded configuration (per operator instruction):
 //! - Seed: matches the manager profile's `seed` field.
@@ -203,8 +198,10 @@ fn fresh_alias() -> String {
 }
 
 #[tokio::test]
-#[ignore = "PreProd submit fails with Invalid Transaction (1010); resolve case passes. \
-            Rerun with `cargo test … -- --ignored` once the parameter-drift root cause is fixed."]
+#[ignore = "Spends real PreProd DUST. The earlier VK-divergence hypothesis was \
+            refuted (see module docs). Run manually with \
+            `cargo test … preprod_add_also_known_as -- --ignored --nocapture` \
+            to surface what actually fails on the live chain now."]
 async fn preprod_add_also_known_as() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let w = preprod_wallet();
