@@ -10,7 +10,7 @@
 function prove(
    serializedPreimage, 
    provider, 
-overwriteBindingInput?): Promise<Uint8Array<ArrayBuffer>>;
+overwriteBindingInput?): Promise<Uint8Array<ArrayBufferLike>>;
 ```
 
 ## Parameters
@@ -29,4 +29,4 @@ overwriteBindingInput?): Promise<Uint8Array<ArrayBuffer>>;
 
 ## Returns
 
-`Promise`\<`Uint8Array`\<`ArrayBuffer`\>\>
+`Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>

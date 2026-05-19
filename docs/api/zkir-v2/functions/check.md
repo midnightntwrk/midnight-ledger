@@ -7,7 +7,7 @@
 # Function: check()
 
 ```ts
-function check(serializedPreimage, provider): Promise<bigint[]>;
+function check(serializedPreimage, provider): Promise<(bigint | undefined)[]>;
 ```
 
 ## Parameters
@@ -22,4 +22,4 @@ function check(serializedPreimage, provider): Promise<bigint[]>;
 
 ## Returns
 
-`Promise`\<`bigint`[]\>
+`Promise`\<(`bigint` \| `undefined`)[]\>

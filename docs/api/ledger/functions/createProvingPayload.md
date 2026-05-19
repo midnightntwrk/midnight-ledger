@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v8.1.0**](../README.md)
 
 ***
 
@@ -23,7 +23,7 @@ Creates a payload for proving a specific proof through the proof server
 
 ### overwriteBindingInput
 
-`undefined` | `bigint`
+`bigint` | `undefined`
 
 ### keyMaterial?
 
