@@ -423,24 +423,26 @@ pub fn App() -> Element {
     let bridge_state = use_signal(BridgeState::new);
     let mut proof_server = use_signal::<Option<String>>(|| None);
 
-    // Open the persistent wallet store once at startup and
-    // hand the handle to BridgeState. Failures are logged but
-    // don't crash the app — a missing store means controller
-    // secrets stay session-scoped (the previous behaviour).
-    //
-    // Default passphrase for the prototype: a fixed dev
-    // string. A future slice will surface an unlock prompt and
-    // let the user set / rotate this.
-    use_future(move || {
+    // Persistent wallet store lifecycle. Locked at boot —
+    // the user types a passphrase into the unlock card and
+    // we drive the open + hydration chain off that. Default
+    // value pre-fills as "midnight"; the input box lets the
+    // user override if they're opening a store sealed with a
+    // different passphrase.
+    let mut unlock_state = use_signal(|| UnlockState::Locked);
+    let mut passphrase_input = use_signal(|| DEV_STORE_PASSPHRASE.to_string());
+
+    let mut on_unlock = move |entered: String| {
         let state = bridge_state.read().clone();
         let net = *network.read();
         let seed_for_wallet = wallet
             .read()
             .as_ref()
             .map(|w| w.seed_hex.clone());
-        async move {
+        unlock_state.set(UnlockState::Opening);
+        spawn(async move {
             let path = wallet_store_path();
-            match wallet_core::store::WalletStore::open(&path, DEV_STORE_PASSPHRASE) {
+            match wallet_core::store::WalletStore::open(&path, &entered) {
                 Ok(store) => {
                     state.set_store(store.clone());
 
@@ -549,11 +551,16 @@ pub fn App() -> Element {
                         restored_session,
                         "wallet store opened",
                     );
+                    unlock_state.set(UnlockState::Open);
                 }
-                Err(e) => tracing::warn!(error=%e, path=%path.display(), "wallet store open failed"),
+                Err(e) => {
+                    let msg = e.to_string();
+                    tracing::warn!(error=%msg, path=%path.display(), "wallet store open failed");
+                    unlock_state.set(UnlockState::Failed(msg));
+                }
             }
-        }
-    });
+        });
+    };
 
     use_future(move || {
         let state = bridge_state.read().clone();
@@ -698,6 +705,31 @@ pub fn App() -> Element {
     };
 
     let busy = matches!(*phase.read(), SyncPhase::Connecting);
+
+    // If the store hasn't been unlocked yet, render the
+    // unlock card and short-circuit. The rest of the app
+    // depends on a hydrated store for inventory / keys /
+    // session restore, and locking the UI behind the gate is
+    // both more honest and simpler than rendering half-empty
+    // tabs.
+    let cur_unlock = unlock_state.read().clone();
+    if !matches!(cur_unlock, UnlockState::Open) {
+        return rsx! {
+            style { "{STYLES}" }
+            div { class: "header",
+                h1 { "Midnight Wallet" }
+            }
+            UnlockCard {
+                state: cur_unlock,
+                passphrase: passphrase_input.read().clone(),
+                on_input: move |s: String| passphrase_input.set(s),
+                on_unlock: move |_| {
+                    let p = passphrase_input.read().clone();
+                    on_unlock(p);
+                },
+            }
+        };
+    }
 
     rsx! {
         style { "{STYLES}" }
@@ -2762,6 +2794,73 @@ struct WitnessTestResult {
     secret_hex_first8: String,
     elapsed_ms: i64,
     error: Option<String>,
+}
+
+/// Pre-boot unlock card. Shown until `WalletStore::open()`
+/// succeeds; once unlocked, the App renders the full UI.
+/// The passphrase input pre-fills with the
+/// [`DEV_STORE_PASSPHRASE`] default ("midnight") so the
+/// common case is one click; the user can retype before
+/// hitting Unlock if they need to open a store sealed with
+/// a different value.
+#[component]
+fn UnlockCard(
+    state: UnlockState,
+    passphrase: String,
+    on_input: EventHandler<String>,
+    on_unlock: EventHandler<()>,
+) -> Element {
+    let busy = matches!(state, UnlockState::Opening);
+    let error_msg = match &state {
+        UnlockState::Failed(m) => Some(m.clone()),
+        _ => None,
+    };
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Unlock wallet store" }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
+                "The wallet keeps seeds, DID inventory, resolved snapshots, and "
+                "session state in an AES-encrypted file. Type the passphrase to "
+                "unlock it."
+            }
+            div { class: "row",
+                label { style: "min-width: 80px;", "Passphrase" }
+                input {
+                    r#type: "password",
+                    value: "{passphrase}",
+                    oninput: move |e| on_input.call(e.value()),
+                    onkeydown: move |e| {
+                        if e.key() == dioxus::events::Key::Enter && !busy {
+                            on_unlock.call(());
+                        }
+                    },
+                    style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+                }
+            }
+            div { class: "row",
+                button {
+                    class: "cta",
+                    disabled: busy,
+                    onclick: move |_| on_unlock.call(()),
+                    {if busy { "Unlocking…" } else { "Unlock" }}
+                }
+            }
+            if let Some(msg) = error_msg {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Unlock failed" }
+                    div { class: "seed-blob", "{msg}" }
+                    div {
+                        style: "color: var(--text-muted); font-size: 10px; margin-top: 6px;",
+                        "If you previously unlocked the store with a different "
+                        "passphrase, type it above. If this is the first launch, "
+                        "the default is "
+                        code { "midnight" }
+                        "."
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// Keys tab — list every key the `RedbSecretStore` knows
@@ -5023,12 +5122,26 @@ fn persist_resolved_cache(
     }
 }
 
-/// Dev-only passphrase for the persistent wallet store. A
-/// future slice will surface an unlock prompt and let the user
-/// set / rotate this — until then the prototype just uses a
-/// fixed string so the file-on-disk decrypts across runs
-/// without user input.
-const DEV_STORE_PASSPHRASE: &str = "midnight-did-wallet-dev:v1";
+/// Default passphrase shown in the unlock card. The user can
+/// override before clicking Unlock; the value lives in the
+/// `passphrase_input` signal until they do. Hardcoded to
+/// "midnight" for the prototype — a future slice may add
+/// rotation + a "remember on this machine" toggle.
+const DEV_STORE_PASSPHRASE: &str = "midnight";
+
+/// Tri-state used by the App-level unlock gate. `Locked` is
+/// the boot state; `Opening` means the open + hydration task
+/// is in flight; `Open` means the store is attached and the
+/// rest of the app can render; `Failed(msg)` means the
+/// last unlock attempt errored — the user can retype the
+/// passphrase and try again.
+#[derive(Clone, PartialEq, Eq, Debug)]
+enum UnlockState {
+    Locked,
+    Opening,
+    Open,
+    Failed(String),
+}
 
 /// Path the persistent wallet store lives at. Uses the OS
 /// data-dir (`~/Library/Application Support/...` on macOS,
