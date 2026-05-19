@@ -355,6 +355,46 @@ struct TimingRun {
     succeeded: bool,
 }
 
+/// Cost snapshot for one completed pipeline run. Computed by
+/// taking a `Wallet::balance_snapshot` immediately before
+/// driving the stream and again right after `Done` arrives;
+/// the deltas reported here are `before − after` clamped at
+/// zero (DUST accrues continuously, so a positive `after − before`
+/// just means "no transaction, just accrual" — surfaced as
+/// zero cost).
+#[derive(Clone, PartialEq, Eq)]
+struct CostRun {
+    /// "create_did", "load_did_circuit:<circuit>",
+    /// "call_did_circuit:<circuit>", "batch:<n_ops>".
+    label: String,
+    /// **Net** DUST burnt for this run, in atomic units
+    /// (10^-15 DUST). Computed as
+    /// `max(before − after, 0)` — DUST continuously accrues
+    /// from the wallet's NIGHT generators, so a strictly
+    /// "what did this tx cost" number isn't directly
+    /// observable here: a Done flow taking 30s also accrued
+    /// some DUST during those seconds, which is netted out
+    /// against the spent amount. The reported value is what
+    /// the user's balance actually moved by, not the raw
+    /// proving-time fee.
+    dust_consumed: u128,
+    /// NIGHT atomic units spent in this run (10^-6 NIGHT).
+    /// NIGHT doesn't accrue so this number is exact —
+    /// equal to the actual NIGHT moved by the transaction
+    /// (typically `0` for DID flows; the chain takes its
+    /// fee in DUST).
+    night_consumed: u128,
+    /// Wall-clock duration from the pre-snapshot to the
+    /// post-snapshot. Bigger than `TimingRun.total_ms` by the
+    /// two snapshot calls' overhead (~1–3s combined).
+    duration_ms: u64,
+    /// Whether the pipeline reached Done (true) or Failed
+    /// (false). Cost is still surfaced on failure because
+    /// some flows burn DUST during balancing even when the
+    /// final submission rejects.
+    succeeded: bool,
+}
+
 #[component]
 pub fn App() -> Element {
     let mut network = use_signal(|| Network::PreProd);
@@ -415,6 +455,9 @@ pub fn App() -> Element {
     // Per-pipeline timing snapshots, newest last. Shown in the
     // Diagnostics tab as a stacked bar / breakdown per run.
     let mut timing_log = use_signal::<Vec<TimingRun>>(Vec::new);
+    // Per-flow cost snapshots (dust + NIGHT consumed). Pushed
+    // by the spawn handlers that wrap each Wizard pipeline.
+    let mut cost_log = use_signal::<Vec<CostRun>>(Vec::new);
 
     // ── JS bridge + embedded proof-server ─────────────────────────
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
@@ -930,6 +973,11 @@ pub fn App() -> Element {
                         log.push(run);
                         timing_log.set(log);
                     },
+                    on_cost: move |cost: CostRun| {
+                        let mut log = cost_log.read().clone();
+                        log.push(cost);
+                        cost_log.set(log);
+                    },
                 }
                 if let Some(did_open) = open_did.read().clone() {
                     // Detail mode: full 8-tab view of one DID.
@@ -1020,6 +1068,11 @@ pub fn App() -> Element {
                             log.push(run);
                             timing_log.set(log);
                         },
+                        on_cost: move |cost: CostRun| {
+                            let mut log = cost_log.read().clone();
+                            log.push(cost);
+                            cost_log.set(log);
+                        },
                         on_event: move |ev: SessionEvent| {
                             let mut log = session_log.read().clone();
                             log.push(ev);
@@ -1074,6 +1127,11 @@ pub fn App() -> Element {
                             log.push(run);
                             timing_log.set(log);
                         },
+                        on_cost: move |cost: CostRun| {
+                            let mut log = cost_log.read().clone();
+                            log.push(cost);
+                            cost_log.set(log);
+                        },
                     }
                     DidOperationsPanel {
                         seed_did: last_did_id.read().clone(),
@@ -1089,6 +1147,7 @@ pub fn App() -> Element {
             Tab::Diagnostics => rsx! {
                 JsBridgePanel { seed_did: last_did_id.read().clone() }
                 TimingsPanel { runs: timing_log.read().clone() }
+                TxCostPanel { runs: cost_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "row", "Seed (hex):" }
                     div { class: "seed-blob", "{w.seed_hex}" }
@@ -1257,6 +1316,7 @@ fn CreateDidWizard(
     network: Network,
     on_done: EventHandler<wallet_core::DeployOutcome>,
     on_timing: EventHandler<TimingRun>,
+    on_cost: EventHandler<CostRun>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -1271,17 +1331,26 @@ fn CreateDidWizard(
         stages.set(Vec::new());
         let on_done = on_done.clone();
         let on_timing = on_timing.clone();
+        let on_cost = on_cost.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
+            // Bracket the pipeline with balance snapshots so
+            // we can compute the dust + NIGHT cost. A failure
+            // to take the pre-snapshot disables cost
+            // reporting for this run but doesn't block the
+            // pipeline.
+            let cost_start = std::time::Instant::now();
+            let before = w.balance_snapshot().await.ok();
             let mut stream = std::pin::pin!(w.create_did());
             let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
+            let mut succeeded = false;
             while let Some(stage) = stream.next().await {
                 let now = std::time::Instant::now();
                 if let Some(idx) = stage_pipeline_idx(&stage) {
                     observations.push((idx, now));
                 } else {
-                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    succeeded = matches!(&stage, WizardStage::Done(_));
                     on_timing.call(build_timing(
                         "create_did".to_string(),
                         &observations,
@@ -1295,6 +1364,15 @@ fn CreateDidWizard(
                 }
                 current.push(stage);
                 stages.set(current);
+            }
+            if let (Some(before), Ok(after)) = (before, w.balance_snapshot().await) {
+                on_cost.call(CostRun {
+                    label: "create_did".to_string(),
+                    dust_consumed: before.dust_atomic.saturating_sub(after.dust_atomic),
+                    night_consumed: before.night_atomic.saturating_sub(after.night_atomic),
+                    duration_ms: cost_start.elapsed().as_millis() as u64,
+                    succeeded,
+                });
             }
             running.set(false);
         });
@@ -1588,6 +1666,7 @@ fn LoadCircuitPanel(
     seed_counter: Option<u32>,
     on_done: EventHandler<(String, String, wallet_core::DeployOutcome)>,
     on_timing: EventHandler<TimingRun>,
+    on_cost: EventHandler<CostRun>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -1672,18 +1751,23 @@ fn LoadCircuitPanel(
         stages.set(Vec::new());
         let on_done = on_done.clone();
         let on_timing = on_timing.clone();
+        let on_cost = on_cost.clone();
         let timing_label = format!("load_did_circuit:{name}");
+        let cost_label = timing_label.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
+            let cost_start = std::time::Instant::now();
+            let before = w.balance_snapshot().await.ok();
             let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name.clone(), counter));
             let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
+            let mut succeeded = false;
             while let Some(stage) = stream.next().await {
                 let now = std::time::Instant::now();
                 if let Some(idx) = stage_pipeline_idx(&stage) {
                     observations.push((idx, now));
                 } else {
-                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    succeeded = matches!(&stage, WizardStage::Done(_));
                     on_timing.call(build_timing(
                         timing_label.clone(),
                         &observations,
@@ -1697,6 +1781,15 @@ fn LoadCircuitPanel(
                 }
                 current.push(stage);
                 stages.set(current);
+            }
+            if let (Some(before), Ok(after)) = (before, w.balance_snapshot().await) {
+                on_cost.call(CostRun {
+                    label: cost_label,
+                    dust_consumed: before.dust_atomic.saturating_sub(after.dust_atomic),
+                    night_consumed: before.night_atomic.saturating_sub(after.night_atomic),
+                    duration_ms: cost_start.elapsed().as_millis() as u64,
+                    succeeded,
+                });
             }
             running.set(false);
         });
@@ -2229,6 +2322,7 @@ fn DidOperationBuilder(
     on_back: EventHandler<()>,
     on_event: EventHandler<SessionEvent>,
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
+    on_cost: EventHandler<CostRun>,
 ) -> Element {
     let mut op_idx = use_signal(|| 0usize);
 
@@ -2396,6 +2490,7 @@ fn DidOperationBuilder(
         let did_for_log = did_for_submit.clone();
         let on_event = on_event.clone();
         let on_resolved = on_resolved.clone();
+        let on_cost = on_cost.clone();
         let mut loaded_set: std::collections::HashSet<String> =
             loaded_circuits.iter().cloned().collect();
         let mut counter_cursor: u32 = initial_counter;
@@ -2404,6 +2499,14 @@ fn DidOperationBuilder(
             use wallet_core::WizardStage;
             let wallet = Wallet::demo(network);
             let total = queue.read().len();
+            // Bracket the whole batch (loads + calls) with
+            // one cost snapshot pair. Per-op snapshots would
+            // mean 2N+1 indexer round-trips which dominates
+            // the wall-clock; the user-visible unit is the
+            // batch anyway.
+            let cost_start = std::time::Instant::now();
+            let before = wallet.balance_snapshot().await.ok();
+            let mut all_succeeded = true;
             for i in 0..total {
                 let op = {
                     let q = queue.read();
@@ -2536,6 +2639,7 @@ fn DidOperationBuilder(
                             q[j].1 = QueueStatus::Skipped;
                         }
                         queue.set(q);
+                        all_succeeded = false;
                         break;
                     }
                     _ => {
@@ -2547,9 +2651,22 @@ fn DidOperationBuilder(
                             q[j].1 = QueueStatus::Skipped;
                         }
                         queue.set(q);
+                        all_succeeded = false;
                         break;
                     }
                 }
+            }
+            // Cost telemetry for the whole batch — dust burns
+            // regardless of partial failures, so report it
+            // even if the run aborted mid-way.
+            if let (Some(before), Ok(after)) = (before, wallet.balance_snapshot().await) {
+                on_cost.call(CostRun {
+                    label: format!("batch:{total}"),
+                    dust_consumed: before.dust_atomic.saturating_sub(after.dust_atomic),
+                    night_consumed: before.night_atomic.saturating_sub(after.night_atomic),
+                    duration_ms: cost_start.elapsed().as_millis() as u64,
+                    succeeded: all_succeeded,
+                });
             }
             // Re-resolve the DID so the surrounding detail view
             // reflects the new state (counter, vm count, etc.).
@@ -3739,6 +3856,97 @@ fn JsBridgePanel(seed_did: Option<String>) -> Element {
 }
 
 #[component]
+fn TxCostPanel(runs: Vec<CostRun>) -> Element {
+    if runs.is_empty() {
+        return rsx! {
+            div { class: "session-log-empty",
+                "Run a Create DID, Load circuit, Deactivate, or batched submit "
+                "to capture per-flow dust + NIGHT cost."
+            }
+        };
+    }
+    // Aggregate totals across every run so the user sees the
+    // session's running tab.
+    let total_dust: u128 = runs.iter().map(|r| r.dust_consumed).sum();
+    let total_night: u128 = runs.iter().map(|r| r.night_consumed).sum();
+    rsx! {
+        div { class: "wizard-header",
+            "Transaction costs · "
+            "Σ dust {format_atomic_dust(total_dust)} · "
+            "Σ NIGHT {format_atomic_night(total_night)}"
+        }
+        ul { class: "session-log",
+            for (idx , run) in runs.iter().enumerate().rev() {
+                {render_cost_entry(idx, run)}
+            }
+        }
+    }
+}
+
+fn render_cost_entry(idx: usize, run: &CostRun) -> Element {
+    let outcome = if run.succeeded { "ok" } else { "err" };
+    let total = format_ms(run.duration_ms);
+    let dust = format_atomic_dust(run.dust_consumed);
+    let night = format_atomic_night(run.night_consumed);
+    rsx! {
+        li {
+            key: "cost-{idx}",
+            class: "session-log-entry timing {outcome}",
+            div { class: "head",
+                span { class: "kind", "{run.label}" }
+                span { class: "when", "#{idx + 1} · total {total}" }
+            }
+            div { class: "detail-kv",
+                div { class: "k", "DUST" }
+                div { class: "v", "{dust}" }
+                div { class: "k", "NIGHT" }
+                div { class: "v", "{night}" }
+            }
+        }
+    }
+}
+
+/// Render a DUST atomic-unit count with comma grouping and the
+/// "atomic" suffix. Dust is `10^-15 DUST` per atomic so even
+/// small transactions show 11+ digits; we leave the unit
+/// decimal-grouped for readability rather than converting.
+fn format_atomic_dust(n: u128) -> String {
+    if n == 0 {
+        "0 atomic".to_string()
+    } else {
+        format!("{} atomic", group_thousands(n))
+    }
+}
+
+/// Render a NIGHT atomic-unit count. NIGHT is `10^-6 NIGHT` so
+/// 1_000_000 atomic = 1 NIGHT. For values ≥ 10^6 we render a
+/// short suffix; smaller values stay as raw atomic units.
+fn format_atomic_night(n: u128) -> String {
+    if n == 0 {
+        "0 atomic".to_string()
+    } else if n >= 1_000_000 {
+        let whole = n / 1_000_000;
+        let frac = n % 1_000_000;
+        format!("{}.{:06} NIGHT", group_thousands(whole), frac)
+    } else {
+        format!("{} atomic", group_thousands(n))
+    }
+}
+
+/// Comma-group an integer for readability — `12345678 → "12,345,678"`.
+fn group_thousands(n: u128) -> String {
+    let s = n.to_string();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    for (i, c) in s.chars().rev().enumerate() {
+        if i > 0 && i % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out.chars().rev().collect()
+}
+
+#[component]
 fn TimingsPanel(runs: Vec<TimingRun>) -> Element {
     if runs.is_empty() {
         return rsx! {
@@ -3898,6 +4106,7 @@ fn DidDetailView(
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
     on_deactivated: EventHandler<(String, wallet_core::DeployOutcome)>,
     on_timing: EventHandler<TimingRun>,
+    on_cost: EventHandler<CostRun>,
     on_event: EventHandler<SessionEvent>,
 ) -> Element {
     use wallet_core::WizardStage;
@@ -3960,6 +4169,7 @@ fn DidDetailView(
         let did_str = did_for_deactivate.clone();
         let on_deactivated = on_deactivated.clone();
         let on_timing = on_timing.clone();
+        let on_cost = on_cost.clone();
         spawn(async move {
             use futures::StreamExt;
             let w = Wallet::demo(network);
@@ -3971,7 +4181,11 @@ fn DidDetailView(
                 }
             };
             let timing_label = "call_did_circuit:deactivate".to_string();
+            let cost_label = timing_label.clone();
+            let cost_start = std::time::Instant::now();
+            let before = w.balance_snapshot().await.ok();
             let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
+            let mut succeeded = false;
             let mut stream = std::pin::pin!(w.call_did_circuit(
                 did_id,
                 "deactivate".to_string(),
@@ -3983,7 +4197,7 @@ fn DidDetailView(
                 if let Some(idx) = stage_pipeline_idx(&stage) {
                     observations.push((idx, now));
                 } else {
-                    let succeeded = matches!(&stage, WizardStage::Done(_));
+                    succeeded = matches!(&stage, WizardStage::Done(_));
                     on_timing.call(build_timing(
                         timing_label.clone(),
                         &observations,
@@ -3999,6 +4213,15 @@ fn DidDetailView(
                 }
                 current.push(stage);
                 deactivating.set(current);
+            }
+            if let (Some(before), Ok(after)) = (before, w.balance_snapshot().await) {
+                on_cost.call(CostRun {
+                    label: cost_label,
+                    dust_consumed: before.dust_atomic.saturating_sub(after.dust_atomic),
+                    night_consumed: before.night_atomic.saturating_sub(after.night_atomic),
+                    duration_ms: cost_start.elapsed().as_millis() as u64,
+                    succeeded,
+                });
             }
         });
     };
@@ -4082,6 +4305,7 @@ fn DidDetailView(
                     on_back: move |_| builder_mode.set(false),
                     on_event,
                     on_resolved,
+                    on_cost,
                 }
             };
         }
@@ -5785,5 +6009,47 @@ fn parse_network(s: &str) -> Option<Network> {
         "devnet" => Some(Network::DevNet),
         "undeployed" => Some(Network::Undeployed),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn group_thousands_handles_boundaries() {
+        assert_eq!(group_thousands(0), "0");
+        assert_eq!(group_thousands(999), "999");
+        assert_eq!(group_thousands(1_000), "1,000");
+        assert_eq!(group_thousands(12_345_678), "12,345,678");
+        // u128 max: well beyond u64; sanity-check the loop terminates.
+        let max = u128::MAX;
+        let s = group_thousands(max);
+        assert!(s.len() > 30);
+        assert!(s.starts_with("340,"));
+    }
+
+    #[test]
+    fn format_atomic_dust_groups_and_suffixes() {
+        assert_eq!(format_atomic_dust(0), "0 atomic");
+        assert_eq!(format_atomic_dust(7), "7 atomic");
+        assert_eq!(format_atomic_dust(1_234_567), "1,234,567 atomic");
+    }
+
+    #[test]
+    fn format_atomic_night_switches_unit_at_one_million() {
+        // < 10^6 stays as raw atomic units.
+        assert_eq!(format_atomic_night(0), "0 atomic");
+        assert_eq!(format_atomic_night(999_999), "999,999 atomic");
+        // ≥ 10^6 renders as "X.YYYYYY NIGHT" with 6-digit fraction.
+        assert_eq!(format_atomic_night(1_000_000), "1.000000 NIGHT");
+        assert_eq!(format_atomic_night(1_500_000), "1.500000 NIGHT");
+        // Larger: comma-grouped whole part.
+        assert_eq!(
+            format_atomic_night(1_234_567_000_000),
+            "1,234,567.000000 NIGHT",
+        );
+        // Fractional part preserves leading zeros.
+        assert_eq!(format_atomic_night(1_000_001), "1.000001 NIGHT");
     }
 }

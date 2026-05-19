@@ -87,6 +87,32 @@ pub enum WalletError {
     Address(String),
 }
 
+/// DUST + NIGHT balance snapshot, in atomic units. Returned
+/// by [`Wallet::balance_snapshot`]; consumers compute the
+/// per-flow cost as `before − after` after a wizard pipeline
+/// reaches `Done`.
+///
+/// Notes for callers:
+/// - **DUST accrues over time.** Dust generators inside the
+///   chain pay out continuously from the wallet's NIGHT
+///   holdings, so two snapshots taken seconds apart with no
+///   transactions between them will see a small positive
+///   delta. UI consumers should clamp `before − after` at
+///   `0` rather than render negative costs.
+/// - **NIGHT only changes on transactions.** Deltas here are
+///   the actual NIGHT spent (or received) by the wallet
+///   between snapshots.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BalanceSnapshot {
+    /// DUST atomic units (10^-15 DUST). Equivalent to
+    /// `DustLocalState::wallet_balance(now)` at the snapshot
+    /// instant.
+    pub dust_atomic: u128,
+    /// NIGHT atomic units (10^-6 NIGHT). Sum of every UTXO
+    /// in the wallet's unshielded set.
+    pub night_atomic: u128,
+}
+
 /// A bare wallet — seed + derived keys + which network it talks to.
 /// Iter-1 step-1 has no balance, no UTXOs, no sync; that's iter-2.
 pub struct Wallet {
@@ -191,6 +217,43 @@ impl Wallet {
             .map_err(|e| crate::UnshieldedError::InvalidAddress(e.to_string()))?;
         let cfg = self.network.config();
         crate::unshielded::snapshot::snapshot(cfg.indexer_ws_url, &address).await
+    }
+
+    // BalanceSnapshot lives at module scope right below the
+    // impl block so it picks up `pub use` cleanly via lib.rs.
+
+    /// One-shot snapshot of the wallet's DUST + NIGHT
+    /// balances. Used to bracket a transaction-pipeline run:
+    /// take a snapshot before the flow starts, drive the
+    /// `WizardStage` stream, snapshot again on `Done`, and
+    /// compute `before − after` to get the per-flow cost.
+    ///
+    /// Both balances are reported in atomic units (10^-6 NIGHT,
+    /// 10^-15 DUST). NIGHT is summed across every UTXO in the
+    /// wallet's unshielded set; DUST is the
+    /// `wallet_balance(now)` of the freshly-synced
+    /// `DustLocalState`. The dust value moves with chain time
+    /// (it accrues from the underlying NIGHT generators) so a
+    /// no-op snapshot taken seconds later will read slightly
+    /// higher; consumers should treat tiny positive deltas as
+    /// "no transaction, just accrual" rather than a refund.
+    pub async fn balance_snapshot(&self) -> Result<BalanceSnapshot, WalletError> {
+        let dust = self
+            .sync_dust()
+            .await
+            .map_err(|e| WalletError::Address(format!("sync_dust: {e}")))?;
+        let unshielded = self
+            .sync_unshielded()
+            .await
+            .map_err(|e| WalletError::Address(format!("sync_unshielded: {e}")))?;
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let now_ts = base_crypto::time::Timestamp::from_secs(now);
+        let dust_atomic = dust.wallet_balance(now_ts);
+        let night_atomic: u128 = unshielded.iter().fold(0u128, |a, u| a.saturating_add(u.value));
+        Ok(BalanceSnapshot { dust_atomic, night_atomic })
     }
 
     /// Snapshot the wallet's DUST state by replaying the

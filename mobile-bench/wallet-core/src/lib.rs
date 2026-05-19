@@ -46,7 +46,9 @@ pub use node::{
     MidnightSigner, NodeClient, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult,
 };
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
-pub use wallet::{DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError};
+pub use wallet::{
+    BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
+};
 pub use unshielded::{
     TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
 };
