@@ -5143,15 +5143,20 @@ enum UnlockState {
     Failed(String),
 }
 
-/// Path the persistent wallet store lives at. Uses the OS
-/// data-dir (`~/Library/Application Support/...` on macOS,
-/// `~/.local/share/...` on Linux, `%APPDATA%/...` on Windows)
-/// so multiple wallets on the same machine don't fight. Falls
-/// back to a `./wallet.redb` next to the binary if the dirs
-/// crate can't resolve a data dir.
+/// Path the persistent wallet store lives at — pinned to
+/// `~/.midnight/wallet-prototype/wallet.redb` for the
+/// prototype. Stays out of platform-specific data dirs
+/// (`~/Library/Application Support/...` etc.) so all three
+/// host OSes share the same conventional location for the
+/// duration of the prototype work; a production build would
+/// likely move back to the OS-idiomatic dir.
+///
+/// Falls back to a `./wallet.redb` next to the binary if the
+/// home dir can't be resolved (unlikely on macOS / Linux /
+/// Windows but defensive).
 fn wallet_store_path() -> std::path::PathBuf {
-    if let Some(base) = dirs::data_dir() {
-        let dir = base.join("midnight-did-wallet");
+    if let Some(home) = dirs::home_dir() {
+        let dir = home.join(".midnight").join("wallet-prototype");
         let _ = std::fs::create_dir_all(&dir);
         return dir.join("wallet.redb");
     }
