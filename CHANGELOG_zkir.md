@@ -4,6 +4,12 @@
 
 - feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
 - feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
+- test: pin prover/verifier key SHA-256 hashes for every precompile in
+  `zkir-precompiles/` and add a V0/V1 smoke fixture in
+  `zkir/tests/precompile_hashes.rs`, catching silent drift in `IrMinorVersion::V0`
+  keys (which must stay byte-identical to pre-#154). Refresh after an
+  intentional key change with
+  `UPDATE_ZKIR_HASHES=1 cargo test -p midnight-zkir --test precompile_hashes`.
 
 ## Version `2.1.0`
 
