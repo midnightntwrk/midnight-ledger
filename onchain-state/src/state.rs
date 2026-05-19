@@ -747,7 +747,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v7]"]
+#[tag = "contract-state[v8]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,

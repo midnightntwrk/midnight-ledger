@@ -848,7 +848,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v7]"]
+#[tag = "intent[v8]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1298,7 +1298,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v10]"]
+#[tag = "transaction[v11]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1582,7 +1582,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v10]"]
+#[tag = "standard-transaction[v11]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -2610,7 +2610,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v5]"]
+#[tag = "contract-deploy[v6]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2840,7 +2840,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v7]"]
+#[tag = "contract-action[v8]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -3176,7 +3176,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v16]"]
+#[tag = "ledger-state[v17]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
