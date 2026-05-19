@@ -2,12 +2,31 @@
 
 mod app;
 mod bridge;
+mod logs;
 mod platform;
 #[cfg(all(feature = "js-bridge", not(target_os = "android")))]
 mod protocol;
 
 pub fn run() {
-    let _ = tracing_subscriber::fmt::try_init();
+    // Two tracing layers ride together: the standard `fmt`
+    // layer for stderr (developer feedback when running
+    // `cargo run`) and `WalletLogLayer` which feeds the UI's
+    // Logs tab + the redb archive. Install once at process
+    // start; both consume every event the macros emit.
+    //
+    // We hand the matching `LogCapture` over to `App` via a
+    // module-local OnceLock so the bridge can pick it up
+    // without threading a parameter through `run()` →
+    // `launch()` → component tree.
+    let (capture, rx) = logs::LogCapture::new();
+    let _ = logs::LOG_CAPTURE.set(capture.clone());
+    let _ = logs::LOG_RX.set(std::sync::Mutex::new(Some(rx)));
+    use tracing_subscriber::layer::SubscriberExt as _;
+    use tracing_subscriber::util::SubscriberInitExt as _;
+    let _ = tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(logs::WalletLogLayer::new(capture))
+        .try_init();
     // rustls 0.23 panics on first TLS use if no `CryptoProvider` is
     // marked default — dioxus-desktop pulls in `aws-lc-rs` while
     // reqwest / tokio-tungstenite pull `ring`. Pick the wallet-core

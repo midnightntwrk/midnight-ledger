@@ -22,7 +22,7 @@ use crate::store::envelope::SecretEnvelope;
 
 /// The on-disk schema this binary expects. Migration runs
 /// `0..SCHEMA_VERSION` closures at `open()`.
-pub const SCHEMA_VERSION: u32 = 4;
+pub const SCHEMA_VERSION: u32 = 5;
 
 // ── Wallet identity ────────────────────────────────────────────
 
@@ -135,6 +135,16 @@ pub(crate) const SESSIONS: TableDefinition<&'static str, &'static [u8]> =
     TableDefinition::new("sessions");
 pub(crate) const SESSION_CURRENT_KEY: &str = "current";
 
+/// Application log archive. Keyed by the event's monotonic
+/// timestamp (unix nanoseconds) so iteration is naturally
+/// chronological — redb returns keys in ascending order.
+/// Value is a bincoded `LogRowV1`.
+///
+/// The dioxus-wallet UI's `WalletLogLayer` (a
+/// `tracing_subscriber::Layer`) writes here in batches; the
+/// Logs tab reads back with `list_logs_recent`.
+pub(crate) const LOGS: TableDefinition<i64, &'static [u8]> = TableDefinition::new("logs");
+
 // ── Row types ─────────────────────────────────────────────────
 
 /// Wallet row, version 1. A schema change creates `WalletRowV2`
@@ -200,6 +210,36 @@ pub enum KeyDerivation {
     Direct {
         envelope: SecretEnvelope,
     },
+}
+
+/// Severity level for a log row. Mirrors `tracing::Level`'s
+/// variants without pulling in the crate at the store layer.
+/// Stored as a bincode tag; ordering matches `tracing::Level`
+/// (Error highest, Trace lowest).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LogLevel {
+    Error,
+    Warn,
+    Info,
+    Debug,
+    Trace,
+}
+
+/// One captured tracing event. Body is intentionally tiny —
+/// `target` keeps the module name (e.g.
+/// `"dioxuswalletmain::app"`), `message` is the
+/// human-readable string the `tracing::info!("…")` macro
+/// produced. Structured fields beyond `message` are folded
+/// into the message; surfacing them as a separate map is
+/// future work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct LogRowV1 {
+    /// Unix milliseconds. Matches the timestamp the UI
+    /// renders next to each row.
+    pub timestamp_ms: i64,
+    pub level: LogLevel,
+    pub target: String,
+    pub message: String,
 }
 
 /// Storage-side mirror of `PublicJwk`. The upstream

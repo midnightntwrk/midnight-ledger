@@ -25,6 +25,8 @@ use tokio::sync::OnceCell;
 use wallet_core::store::{WalletId, WalletStore};
 use wallet_core::{Network, unshielded_bech32m};
 
+use crate::logs::LogCapture;
+
 /// Per-DID random controller secret store. Populated by
 /// `CreateDidWizard.on_done` and read by the
 /// `getControllerSecretKey` bridge RPC during JS-driven circuit
@@ -62,6 +64,10 @@ pub struct BridgeState {
     /// `(network, wallet)` swap. `None` means "no wallet active
     /// for the current network yet" — pickers hide their lists.
     pub active_wallet_id: Arc<Mutex<Option<WalletId>>>,
+    /// In-memory log ring + persist-channel handle. The Logs
+    /// tab reads via `snapshot()`; the App spawns the
+    /// drainer once the store is attached.
+    pub log_capture: Arc<OnceCell<LogCapture>>,
 }
 
 impl PartialEq for BridgeState {
@@ -70,6 +76,7 @@ impl PartialEq for BridgeState {
             && Arc::ptr_eq(&self.controller_secrets, &other.controller_secrets)
             && Arc::ptr_eq(&self.store, &other.store)
             && Arc::ptr_eq(&self.active_wallet_id, &other.active_wallet_id)
+            && Arc::ptr_eq(&self.log_capture, &other.log_capture)
     }
 }
 impl Eq for BridgeState {}
@@ -122,6 +129,20 @@ impl BridgeState {
             .lock()
             .ok()
             .and_then(|g| g.clone())
+    }
+
+    /// Attach the process-global `LogCapture` handle. Called
+    /// once during App construction; later sets are no-ops.
+    pub fn set_log_capture(&self, capture: LogCapture) {
+        let _ = self.log_capture.set(capture);
+    }
+
+    /// Borrow the captured-logs handle, if attached. The
+    /// Logs tab reads this every render via `snapshot()`;
+    /// pre-attach calls return `None` (the tab shows an
+    /// empty state).
+    pub fn log_capture(&self) -> Option<&LogCapture> {
+        self.log_capture.get()
     }
 
     /// Record the random sk minted for a freshly-deployed DID.

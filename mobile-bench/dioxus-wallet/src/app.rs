@@ -71,6 +71,7 @@ enum Tab {
     Dids,
     Keys,
     Diagnostics,
+    Logs,
     Settings,
 }
 
@@ -81,6 +82,7 @@ impl Tab {
             Tab::Dids => "DIDs",
             Tab::Keys => "Keys",
             Tab::Diagnostics => "Diagnostics",
+            Tab::Logs => "Logs",
             Tab::Settings => "Settings",
         }
     }
@@ -95,6 +97,7 @@ impl Tab {
             Tab::Diagnostics => 2,
             Tab::Settings => 3,
             Tab::Keys => 4,
+            Tab::Logs => 5,
         }
     }
 
@@ -109,6 +112,7 @@ impl Tab {
             2 => Tab::Diagnostics,
             3 => Tab::Settings,
             4 => Tab::Keys,
+            5 => Tab::Logs,
             _ => Tab::Wallet,
         }
     }
@@ -463,7 +467,16 @@ pub fn App() -> Element {
     // BridgeState is cheap-clone (Arc<OnceCell<String>>); we keep a
     // copy in a signal for UI display and pass another into the
     // background spawn / bridge loop.
-    let bridge_state = use_signal(BridgeState::new);
+    let bridge_state = use_signal(|| {
+        let state = BridgeState::new();
+        // Attach the process-global log capture handle the
+        // tracing layer was installed against. The Logs tab
+        // reads its in-memory ring via this same handle.
+        if let Some(cap) = crate::logs::LOG_CAPTURE.get() {
+            state.set_log_capture(cap.clone());
+        }
+        state
+    });
     let mut proof_server = use_signal::<Option<String>>(|| None);
 
     // Persistent wallet store lifecycle. Locked at boot —
@@ -488,6 +501,23 @@ pub fn App() -> Element {
             match wallet_core::store::WalletStore::open(&path, &entered) {
                 Ok(store) => {
                     state.set_store(store.clone());
+
+                    // Spawn the log persistence drainer once
+                    // — it owns the receiver half of the
+                    // channel `lib.rs::run()` set up, batches
+                    // events, and writes them to the `logs`
+                    // table. Subsequent unlock retries don't
+                    // re-spawn (the receiver was already
+                    // taken).
+                    if let Some(slot) = crate::logs::LOG_RX.get() {
+                        if let Some(rx) = slot.lock().ok().and_then(|mut g| g.take()) {
+                            let store_for_drain = store.clone();
+                            spawn(async move {
+                                crate::logs::run_persist_drainer(store_for_drain, rx).await;
+                            });
+                            tracing::info!("log persist drainer spawned");
+                        }
+                    }
 
                     // Bind the active wallet for this
                     // network. Auto-creates a row if none
@@ -825,7 +855,7 @@ pub fn App() -> Element {
         // Tab navigation. Each button sets active_tab; rendering
         // below is a single match on the current value.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -1173,6 +1203,9 @@ pub fn App() -> Element {
             },
             Tab::Keys => rsx! {
                 KeysTab { bridge_state: bridge_state.read().clone() }
+            },
+            Tab::Logs => rsx! {
+                LogsTab { bridge_state: bridge_state.read().clone() }
             },
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
@@ -3454,6 +3487,274 @@ fn crv_to_idx_label(crv: wallet_core::secret_storage::MidnightCurve) -> (usize, 
     }
 }
 
+/// Logs tab — renders the in-memory ring buffer maintained
+/// by `WalletLogLayer`. Updates whenever a new tracing event
+/// fires (and we re-render). Older entries beyond the ring
+/// capacity live in the redb `logs` table; the "Load older
+/// from disk" button pulls another batch out of there into
+/// the on-screen view.
+///
+/// Filters: a per-level toggle row (Error / Warn / Info /
+/// Debug / Trace) lets the user narrow noise. Defaults to
+/// Info+ so the tab doesn't drown in Debug noise on first
+/// open.
+#[component]
+fn LogsTab(bridge_state: BridgeState) -> Element {
+    use crate::logs::CapturedLog;
+
+    // Per-level toggles. Default: Error/Warn/Info on, Debug
+    // and Trace off — most users want signal not firehose.
+    let mut show_error = use_signal(|| true);
+    let mut show_warn = use_signal(|| true);
+    let mut show_info = use_signal(|| true);
+    let mut show_debug = use_signal(|| false);
+    let mut show_trace = use_signal(|| false);
+    // Free-text search (case-insensitive) across the
+    // message + target fields.
+    let mut search = use_signal(String::new);
+    // Extra rows pulled from the on-disk archive via
+    // "Load older from disk". Concatenated onto the ring
+    // snapshot at render time so the user sees both sources
+    // chronologically in one stream.
+    let mut older: Signal<Vec<CapturedLog>> = use_signal(Vec::new);
+
+    let capture = bridge_state.log_capture().cloned();
+
+    // Live snapshot from the ring (newest-first).
+    let live: Vec<CapturedLog> = capture
+        .as_ref()
+        .map(|c| c.snapshot())
+        .unwrap_or_default();
+    let older_snap = older.read().clone();
+
+    let load_older = {
+        let bs = bridge_state.clone();
+        move |_| {
+            let Some(store) = bs.store() else { return };
+            // Pull the most-recent 200 rows from disk that
+            // aren't already in the live ring.
+            let live_min_ts = capture
+                .as_ref()
+                .map(|c| c.snapshot())
+                .unwrap_or_default()
+                .last()
+                .map(|e| e.timestamp_ns);
+            match store.list_logs_recent(500) {
+                Ok(rows) => {
+                    let mapped: Vec<CapturedLog> = rows
+                        .into_iter()
+                        .filter(|r| match live_min_ts {
+                            Some(min) => r.timestamp_ns < min,
+                            None => true,
+                        })
+                        .map(|r| CapturedLog {
+                            timestamp_ns: r.timestamp_ns,
+                            timestamp_ms: r.timestamp_ms,
+                            level: r.level,
+                            target: r.target,
+                            message: r.message,
+                        })
+                        .collect();
+                    older.set(mapped);
+                }
+                Err(e) => {
+                    tracing::warn!(error=%e, "load older logs from store failed");
+                }
+            }
+        }
+    };
+
+    let clear_ring = {
+        let bs = bridge_state.clone();
+        move |_| {
+            if let Some(c) = bs.log_capture() {
+                c.clear_ring();
+            }
+            older.set(Vec::new());
+        }
+    };
+
+    let clear_archive = {
+        let bs = bridge_state.clone();
+        move |_| {
+            let Some(store) = bs.store() else { return };
+            if let Err(e) = store.clear_logs() {
+                tracing::warn!(error=%e, "clear archive failed");
+            }
+            older.set(Vec::new());
+        }
+    };
+
+    // Compose the full visible stream: live (newest-first)
+    // followed by older from disk (also newest-first), then
+    // apply level + search filters.
+    let mut combined: Vec<CapturedLog> =
+        Vec::with_capacity(live.len() + older_snap.len());
+    combined.extend(live.into_iter());
+    combined.extend(older_snap.into_iter());
+
+    let want_error = *show_error.read();
+    let want_warn = *show_warn.read();
+    let want_info = *show_info.read();
+    let want_debug = *show_debug.read();
+    let want_trace = *show_trace.read();
+    let search_str = search.read().trim().to_lowercase();
+    let filtered: Vec<CapturedLog> = combined
+        .into_iter()
+        .filter(|e| match e.level {
+            wallet_core::store::LogLevel::Error => want_error,
+            wallet_core::store::LogLevel::Warn => want_warn,
+            wallet_core::store::LogLevel::Info => want_info,
+            wallet_core::store::LogLevel::Debug => want_debug,
+            wallet_core::store::LogLevel::Trace => want_trace,
+        })
+        .filter(|e| {
+            if search_str.is_empty() {
+                true
+            } else {
+                e.message.to_lowercase().contains(&search_str)
+                    || e.target.to_lowercase().contains(&search_str)
+            }
+        })
+        .collect();
+
+    let total_visible = filtered.len();
+
+    let persist_state = if bridge_state.store().is_some() {
+        "Persisting to ~/.midnight/wallet-prototype/wallet.redb"
+    } else {
+        "Live only — store not yet attached; entries vanish on reload until unlock completes"
+    };
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header",
+                "Logs ({total_visible} visible)"
+            }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
+                "{persist_state}"
+            }
+            div { class: "row",
+                LogLevelToggle { label: "Error", value: want_error,
+                    on_toggle: move |v: bool| show_error.set(v) }
+                LogLevelToggle { label: "Warn",  value: want_warn,
+                    on_toggle: move |v: bool| show_warn.set(v) }
+                LogLevelToggle { label: "Info",  value: want_info,
+                    on_toggle: move |v: bool| show_info.set(v) }
+                LogLevelToggle { label: "Debug", value: want_debug,
+                    on_toggle: move |v: bool| show_debug.set(v) }
+                LogLevelToggle { label: "Trace", value: want_trace,
+                    on_toggle: move |v: bool| show_trace.set(v) }
+            }
+            div { class: "row",
+                label { style: "min-width: 80px;", "Search" }
+                input {
+                    r#type: "text",
+                    value: "{search.read()}",
+                    placeholder: "substring of message or target",
+                    oninput: move |e| search.set(e.value()),
+                    style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
+                }
+            }
+            div { class: "row",
+                button {
+                    onclick: load_older,
+                    "Load older from disk"
+                }
+                button {
+                    onclick: clear_ring,
+                    "Clear live"
+                }
+                button {
+                    class: "btn-danger",
+                    onclick: clear_archive,
+                    "Clear archive"
+                }
+            }
+            if filtered.is_empty() {
+                div { class: "detail-empty",
+                    "No log entries match the current filter. Adjust the level toggles or search."
+                }
+            } else {
+                ul { class: "log-list",
+                    for (idx , entry) in filtered.iter().enumerate() {
+                        {render_log_entry(idx, entry)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Single log-level pill + checkbox-style toggle. Click
+/// flips the value through the supplied event handler.
+#[component]
+fn LogLevelToggle(label: &'static str, value: bool, on_toggle: EventHandler<bool>) -> Element {
+    let class = if value {
+        format!("log-level-pill {} active", label.to_lowercase())
+    } else {
+        format!("log-level-pill {}", label.to_lowercase())
+    };
+    rsx! {
+        button {
+            class: "{class}",
+            onclick: move |_| on_toggle.call(!value),
+            "{label}"
+        }
+    }
+}
+
+fn render_log_entry(idx: usize, entry: &crate::logs::CapturedLog) -> Element {
+    let level = log_level_class(entry.level);
+    let stamp = format_log_timestamp(entry.timestamp_ms);
+    let target = entry.target.clone();
+    let message = entry.message.clone();
+    rsx! {
+        li {
+            key: "log-{idx}",
+            class: "log-row {level}",
+            span { class: "stamp", "{stamp}" }
+            span { class: "level", "{log_level_label(entry.level)}" }
+            span { class: "target", "{target}" }
+            span { class: "message", "{message}" }
+        }
+    }
+}
+
+fn log_level_class(level: wallet_core::store::LogLevel) -> &'static str {
+    use wallet_core::store::LogLevel::*;
+    match level {
+        Error => "level-error",
+        Warn => "level-warn",
+        Info => "level-info",
+        Debug => "level-debug",
+        Trace => "level-trace",
+    }
+}
+
+fn log_level_label(level: wallet_core::store::LogLevel) -> &'static str {
+    use wallet_core::store::LogLevel::*;
+    match level {
+        Error => "ERROR",
+        Warn => "WARN",
+        Info => "INFO",
+        Debug => "DEBUG",
+        Trace => "TRACE",
+    }
+}
+
+/// Render a unix-ms timestamp as `HH:MM:SS.mmm` (UTC). Cheap
+/// to compute, plenty of precision for tail-following.
+fn format_log_timestamp(ts_ms: i64) -> String {
+    let total_secs = ts_ms.div_euclid(1000);
+    let millis = ts_ms.rem_euclid(1000) as u32;
+    let secs = total_secs.rem_euclid(86_400);
+    let h = (secs / 3600) as u32;
+    let m = ((secs % 3600) / 60) as u32;
+    let s = (secs % 60) as u32;
+    format!("{h:02}:{m:02}:{s:02}.{millis:03}")
+}
+
 fn short_keyref(k: &str) -> String {
     if k.len() <= 12 {
         k.to_string()
@@ -3580,6 +3881,7 @@ fn SettingsTab(bridge_state: BridgeState) -> Element {
                             tr { td { "did_inventory" }        td { "{s.did_inventory}" } }
                             tr { td { "resolved_cache" }       td { "{s.resolved_cache}" } }
                             tr { td { "sessions" }             td { "{s.sessions}" } }
+                            tr { td { "logs" }                 td { "{s.logs}" } }
                         }
                     }
                 },

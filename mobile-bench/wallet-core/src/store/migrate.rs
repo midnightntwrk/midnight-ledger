@@ -14,7 +14,7 @@ use redb::ReadableTable;
 
 use crate::store::error::StoreError;
 use crate::store::schema::{
-    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, KEYS, KEYS_BY_WALLET, META,
+    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, KEYS, KEYS_BY_WALLET, LOGS, META,
     META_SCHEMA_VERSION_KEY, RESOLVED_CACHE, SCHEMA_VERSION, SESSIONS, WALLETS,
 };
 use crate::store::WalletStore;
@@ -40,6 +40,7 @@ pub(crate) fn run(store: &WalletStore) -> Result<(), StoreError> {
             (1, 2) => migrate_v1_to_v2(store)?,
             (2, 3) => migrate_v2_to_v3(store)?,
             (3, 4) => migrate_v3_to_v4(store)?,
+            (4, 5) => migrate_v4_to_v5(store)?,
             (from, to) => {
                 return Err(StoreError::Migration(format!(
                     "no migration registered for {from} → {to}",
@@ -127,6 +128,25 @@ fn migrate_v0_to_v1(store: &WalletStore) -> Result<(), StoreError> {
     txn.commit()
         .map_err(|e| StoreError::Backend(e.to_string()))?;
     write_version(store, 1)
+}
+
+fn migrate_v4_to_v5(store: &WalletStore) -> Result<(), StoreError> {
+    // v4 → v5 adds the `logs` table — chronological archive
+    // of the dioxus-wallet's `tracing` events. Empty on
+    // creation; the UI's `WalletLogLayer` populates it in
+    // batches.
+    let txn = store
+        .db()
+        .begin_write()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    {
+        let _ = txn
+            .open_table(LOGS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+    }
+    txn.commit()
+        .map_err(|e| StoreError::Backend(e.to_string()))?;
+    write_version(store, 5)
 }
 
 fn migrate_v3_to_v4(store: &WalletStore) -> Result<(), StoreError> {

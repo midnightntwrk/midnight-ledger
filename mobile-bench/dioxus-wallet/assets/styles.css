@@ -976,3 +976,97 @@ details .panel .row {
   color: var(--text);
   font-weight: 600;
 }
+
+/* Logs tab — toggleable level pills + tabular row list */
+
+.log-level-pill {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.log-level-pill:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+.log-level-pill.active {
+  color: var(--text);
+}
+.log-level-pill.error.active {
+  background: rgba(255, 92, 122, 0.18);
+  border-color: var(--error);
+  color: var(--error);
+}
+.log-level-pill.warn.active {
+  background: rgba(255, 176, 32, 0.18);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.log-level-pill.info.active {
+  background: rgba(124, 92, 255, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.log-level-pill.debug.active {
+  background: var(--surface-4);
+  border-color: var(--text-muted);
+  color: var(--text);
+}
+.log-level-pill.trace.active {
+  background: var(--surface-4);
+  border-color: var(--text-faint);
+  color: var(--text-soft);
+}
+
+.log-list {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  max-height: 520px;
+  overflow-y: auto;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+.log-row {
+  display: grid;
+  grid-template-columns: 88px 56px 1fr 2fr;
+  gap: 6px;
+  align-items: baseline;
+  padding: 4px 10px;
+  font-family: ui-monospace, monospace;
+  font-size: 10.5px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.log-row:last-child { border-bottom: none; }
+.log-row .stamp {
+  color: var(--text-faint);
+}
+.log-row .level {
+  font-weight: 700;
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.log-row .target {
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.log-row .message {
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.log-row.level-error .level { color: var(--error); }
+.log-row.level-error .message { color: var(--error); }
+.log-row.level-warn .level { color: var(--warn); }
+.log-row.level-info .level { color: var(--accent); }
+.log-row.level-debug .level { color: var(--text-muted); }
+.log-row.level-trace .level { color: var(--text-faint); }

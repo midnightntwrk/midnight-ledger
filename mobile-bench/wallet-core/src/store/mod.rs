@@ -51,11 +51,11 @@ pub use schema::{NetworkTag, SCHEMA_VERSION, WalletId};
 use codec::Bincoded;
 pub use envelope::{SecretEnvelope, decrypt_secret, encrypt_secret};
 pub(crate) use envelope::encrypt_secret as wrap_secret;
-pub use schema::{InventoryStatus, KeyDerivation};
+pub use schema::{InventoryStatus, KeyDerivation, LogLevel};
 use schema::{
     CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DidInventoryRowV1, KEYS, KEYS_BY_WALLET,
-    KeyRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, SESSION_CURRENT_KEY, SESSIONS,
-    SessionRowV1, WALLETS, WalletRowV1,
+    KeyRowV1, LOGS, LogRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, SESSION_CURRENT_KEY,
+    SESSIONS, SessionRowV1, WALLETS, WalletRowV1,
 };
 
 use crate::secret_storage::{
@@ -794,6 +794,99 @@ impl WalletStore {
         }))
     }
 
+    // ── Logs ──────────────────────────────────────────────────────
+
+    /// Batch-append log rows. The drainer task in the UI
+    /// pulls events off a channel and calls this once per
+    /// flush window so we get O(1) write txns per second
+    /// instead of one per event. Each row's primary key is
+    /// its own `timestamp_ns` — collisions are extremely
+    /// unlikely (sub-nanosecond resolution) and we let the
+    /// later row win on the unlikely clash.
+    pub fn append_logs(&self, rows: &[LogRow]) -> Result<(), StoreError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(LOGS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            for r in rows {
+                let v1 = LogRowV1 {
+                    timestamp_ms: r.timestamp_ms,
+                    level: r.level,
+                    target: r.target.clone(),
+                    message: r.message.clone(),
+                };
+                let bincoded = Bincoded::encode(&v1)?;
+                table
+                    .insert(r.timestamp_ns, bincoded.as_slice())
+                    .map_err(|e| StoreError::Backend(e.to_string()))?;
+            }
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Read the most recent `limit` log rows in
+    /// reverse-chronological order (newest first). Skips the
+    /// in-memory ring buffer used by the live UI — call this
+    /// for "load older from disk" affordances.
+    pub fn list_logs_recent(&self, limit: usize) -> Result<Vec<LogRow>, StoreError> {
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(LOGS)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let mut out = Vec::with_capacity(limit.min(1024));
+        let iter = table
+            .iter()
+            .map_err(|e| StoreError::Backend(e.to_string()))?
+            .rev();
+        for entry in iter {
+            let (k, v) = entry.map_err(|e| StoreError::Backend(e.to_string()))?;
+            let row: LogRowV1 = Bincoded::decode(v.value())?;
+            out.push(LogRow {
+                timestamp_ns: k.value(),
+                timestamp_ms: row.timestamp_ms,
+                level: row.level,
+                target: row.target,
+                message: row.message,
+            });
+            if out.len() >= limit {
+                break;
+            }
+        }
+        Ok(out)
+    }
+
+    /// Drop every log row. Useful for a "Clear logs" button
+    /// in the UI. Idempotent.
+    pub fn clear_logs(&self) -> Result<(), StoreError> {
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(LOGS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .retain(|_, _| false)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
     /// One-shot stats snapshot — table row counts + schema
     /// version. Lets the UI render a Settings card without
     /// holding the file open.
@@ -825,6 +918,7 @@ impl WalletStore {
             .and_then(|t| t.len().ok())
             .unwrap_or(0);
         let sessions = txn.open_table(SESSIONS).ok().and_then(|t| t.len().ok()).unwrap_or(0);
+        let logs = txn.open_table(LOGS).ok().and_then(|t| t.len().ok()).unwrap_or(0);
         Ok(StoreStats {
             schema_version: v,
             wallets,
@@ -833,6 +927,7 @@ impl WalletStore {
             did_inventory,
             resolved_cache,
             sessions,
+            logs,
         })
     }
 
@@ -876,6 +971,23 @@ pub struct StoreStats {
     pub did_inventory: u64,
     pub resolved_cache: u64,
     pub sessions: u64,
+    pub logs: u64,
+}
+
+/// One persisted log row, as the UI surfaces it. Identical
+/// fields to the on-disk `LogRowV1`, with the row key
+/// (`timestamp_ns`) exposed so callers can paginate.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct LogRow {
+    /// Monotonic timestamp in unix nanoseconds — the row's
+    /// primary key.
+    pub timestamp_ns: i64,
+    /// Same instant in unix milliseconds — what the UI
+    /// renders next to each row.
+    pub timestamp_ms: i64,
+    pub level: LogLevel,
+    pub target: String,
+    pub message: String,
 }
 
 /// Last-session snapshot — what the UI needs to restore its
@@ -1215,6 +1327,64 @@ mod tests {
         let snap = store.get_session().unwrap().unwrap();
         assert_eq!(snap.network, Network::PreProd);
         assert_eq!(snap.active_tab, 5);
+    }
+
+    #[test]
+    fn logs_append_then_list_recent_orders_newest_first() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        // Append in chronological order — list_logs_recent
+        // should return them newest-first.
+        let rows: Vec<LogRow> = (0..5)
+            .map(|i| LogRow {
+                timestamp_ns: 1_000_000_000 + i,
+                timestamp_ms: 1 + i,
+                level: LogLevel::Info,
+                target: "test".to_string(),
+                message: format!("event {i}"),
+            })
+            .collect();
+        store.append_logs(&rows).unwrap();
+        let recent = store.list_logs_recent(10).unwrap();
+        assert_eq!(recent.len(), 5);
+        // First entry is the newest insertion (i == 4).
+        assert_eq!(recent[0].message, "event 4");
+        assert_eq!(recent[4].message, "event 0");
+    }
+
+    #[test]
+    fn logs_list_recent_respects_limit() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let rows: Vec<LogRow> = (0..20)
+            .map(|i| LogRow {
+                timestamp_ns: 1_000_000_000 + i,
+                timestamp_ms: i,
+                level: LogLevel::Debug,
+                target: "test".to_string(),
+                message: format!("e{i}"),
+            })
+            .collect();
+        store.append_logs(&rows).unwrap();
+        let recent = store.list_logs_recent(7).unwrap();
+        assert_eq!(recent.len(), 7);
+        // Newest 7: indices 19..13.
+        assert_eq!(recent[0].message, "e19");
+        assert_eq!(recent[6].message, "e13");
+    }
+
+    #[test]
+    fn logs_clear_drops_every_row() {
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let rows = vec![LogRow {
+            timestamp_ns: 1,
+            timestamp_ms: 0,
+            level: LogLevel::Warn,
+            target: "t".into(),
+            message: "m".into(),
+        }];
+        store.append_logs(&rows).unwrap();
+        assert_eq!(store.list_logs_recent(10).unwrap().len(), 1);
+        store.clear_logs().unwrap();
+        assert_eq!(store.list_logs_recent(10).unwrap().len(), 0);
     }
 
     #[test]
