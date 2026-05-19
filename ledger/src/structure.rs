@@ -28,8 +28,6 @@ use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::MemWrite;
-use base_crypto::signatures::Signature;
-use base_crypto::signatures::{SigningKey, VerifyingKey};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::NIGHT;
 use coin_structure::coin::PublicAddress;
@@ -39,7 +37,7 @@ use coin_structure::contract::ContractAddress;
 use derive_where::derive_where;
 use fake::Dummy;
 use introspection_derive::Introspection;
-use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue};
+use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue, Effects};
 use onchain_runtime::state::ChargedState;
 use onchain_runtime::state::ContractOperation;
 use onchain_runtime::state::{ContractMaintenanceAuthority, ContractState, EntryPointBuf};
@@ -84,7 +82,11 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
     type Signature<T>: Ord + Serializable + Deserializable + Storable<D> + Debug + Tagged;
 
     /// Verify a signature against a message
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Self::Signature<T>) -> bool;
+    fn signature_verify<T>(
+        msg: &[u8],
+        key: SignatureVerifyingKey,
+        signature: &Self::Signature<T>,
+    ) -> bool;
 
     fn sign<R: Rng + CryptoRng, T>(
         sk: &SigningKey,
@@ -96,7 +98,7 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
 impl<D: DB> SignatureKind<D> for () {
     type Signature<T> = ();
 
-    fn signature_verify<T>(_msg: &[u8], _key: VerifyingKey, _signature: &()) -> bool {
+    fn signature_verify<T>(_msg: &[u8], _key: SignatureVerifyingKey, _signature: &()) -> bool {
         true
     }
 
@@ -106,7 +108,7 @@ impl<D: DB> SignatureKind<D> for () {
 impl<D: DB> SignatureKind<D> for Signature {
     type Signature<T> = Signature;
 
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Signature) -> bool {
+    fn signature_verify<T>(msg: &[u8], key: SignatureVerifyingKey, signature: &Signature) -> bool {
         key.verify(msg, signature)
     }
 
@@ -712,7 +714,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v7]"]
+#[tag = "system-transaction[v8]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -732,9 +734,17 @@ pub enum SystemTransaction {
         outputs: Vec<OutputInstructionUnshielded>,
         token_type: UnshieldedTokenType,
     },
-    DistributeReserve(u128),
+    DistributeReserve {
+        amount: u128,
+    },
     CNightGeneratesDustUpdate {
         events: Vec<CNightGeneratesDustEvent>,
+    },
+    UnlockToTreasury {
+        amount: u128,
+    },
+    UnlockToReserve {
+        amount: u128,
     },
 }
 tag_enforcement_test!(SystemTransaction);
@@ -751,7 +761,7 @@ impl<D: DB> SegIntent<D> {
 }
 
 #[derive(Storable)]
-#[tag = "unshielded-offer[v1]"]
+#[tag = "unshielded-offer[v2]"]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
 #[storable(db = D)]
 pub struct UnshieldedOffer<S: SignatureKind<D>, D: DB> {
@@ -838,7 +848,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v6]"]
+#[tag = "intent[v7]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1025,14 +1035,14 @@ impl TransactionCostModel {
     pub(crate) fn cell_read(&self, size: u64) -> RunningCost {
         self.runtime_cost_model.read_cell(size, true)
     }
-    fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
+    pub(crate) fn cell_write(&self, size: u64, overwrite: bool) -> RunningCost {
         RunningCost {
             bytes_written: size,
             bytes_deleted: if overwrite { size } else { 0 },
             ..RunningCost::ZERO
         }
     }
-    fn cell_delete(&self, size: u64) -> RunningCost {
+    pub(crate) fn cell_delete(&self, size: u64) -> RunningCost {
         RunningCost {
             bytes_deleted: size,
             ..RunningCost::ZERO
@@ -1046,23 +1056,23 @@ impl TransactionCostModel {
             + self.runtime_cost_model.proof_verify_coeff_size * size;
         RunningCost::compute(time)
     }
-    fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn map_insert(&self, log_size: usize, overwrite: bool) -> RunningCost {
         let layers = log_size.div_ceil(4);
         self.cell_write(PERSISTENT_HASH_BYTES as u64 * 16, true) * layers as u64
             + self.cell_write(PERSISTENT_HASH_BYTES as u64, overwrite)
     }
-    fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
+    pub(crate) fn map_remove(&self, log_size: usize, guaranteed_present: bool) -> RunningCost {
         if guaranteed_present {
             self.map_insert(log_size, true)
         } else {
             self.map_insert(log_size, true) + self.map_index(log_size)
         }
     }
-    fn time_filter_map_lookup(&self) -> RunningCost {
+    pub(crate) fn time_filter_map_lookup(&self) -> RunningCost {
         // TODO: This is a good approximation, but not accurate.
         self.map_index(8) * 2u64
     }
-    fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
+    pub(crate) fn time_filter_map_insert(&self, overwrite: bool) -> RunningCost {
         // Two map insertions, the 'set' and the 'time_map'.
         self.map_insert(8, overwrite) * 2u64
     }
@@ -1079,11 +1089,19 @@ impl TransactionCostModel {
         let raw_overwrites = self.cell_write((FR_BYTES * 3 + 2) as u64, true) * log_size as u64;
         raw_writes + raw_overwrites
     }
-    fn merkle_tree_insert_unamortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_unamortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         let rehashes = RunningCost::compute(self.runtime_cost_model.transient_hash * log_size);
         rehashes + self.merkle_tree_insert_no_rehash(log_size, overwrite)
     }
-    fn merkle_tree_insert_amortized(&self, log_size: usize, overwrite: bool) -> RunningCost {
+    pub(crate) fn merkle_tree_insert_amortized(
+        &self,
+        log_size: usize,
+        overwrite: bool,
+    ) -> RunningCost {
         // The amortization turns n writes into a tree of depth d from
         // nd hashes to n log_2 n + d hashes. That means that the hashes we cost *per insert*
         // isn't constant.
@@ -1098,7 +1116,7 @@ impl TransactionCostModel {
     fn tree_copy<T: Storable<D>, D: DB>(&self, value: Sp<T, D>) -> RunningCost {
         self.runtime_cost_model.tree_copy(value)
     }
-    fn stack_setup_cost<D: DB>(&self, transcript: &Transcript<D>) -> RunningCost {
+    pub(crate) fn stack_setup_cost_for_effects<D: DB>(&self, eff: &Effects<D>) -> RunningCost {
         // There's an additional cost of processing a transcript coming from initializing effects
         // and context stack variables. This accounts for them.
         // The bulk of this is MPT insertions to build up various sets that sit in these values.
@@ -1106,7 +1124,6 @@ impl TransactionCostModel {
         // they are constant by container, and then reduce that to a running cost using map
         // insert VM operations.
         const EXPECTED_COM_INDICES: usize = 16;
-        let eff = &transcript.effects;
         // (amount, key length)
         let maps = [
             (EXPECTED_COM_INDICES, PERSISTENT_HASH_BYTES),
@@ -1281,7 +1298,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v9]"]
+#[tag = "transaction[v10]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1526,7 +1543,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Transaction<S,
 where
     Transaction<S, P, B, D>: Serializable,
 {
-    pub fn segments(&self) -> Vec<u16> {
+    pub fn segments(&self) -> Vec<Segment> {
         match self {
             Self::Standard(stx) => stx.segments(),
             Self::ClaimRewards(_) => Vec::new(),
@@ -1556,15 +1573,21 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B
     }
 }
 
+/// Logical segment index used in standard transactions and ledger application order.
+pub type Segment = u16;
+
+/// Segment id for the guaranteed phase (fees, guaranteed coins, guaranteed transcripts).
+pub const GUARANTEED_SEGMENT: Segment = 0;
+
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v9]"]
+#[tag = "standard-transaction[v10]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
-    pub intents: HashMap<u16, Intent<S, P, B, D>, D>,
+    pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
     pub guaranteed_coins: Option<Sp<ZswapOffer<P::LatestProof, D>, D>>,
-    pub fallible_coins: HashMap<u16, ZswapOffer<P::LatestProof, D>, D>,
+    pub fallible_coins: HashMap<Segment, ZswapOffer<P::LatestProof, D>, D>,
     pub binding_randomness: PedersenRandomness,
 }
 tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
@@ -1572,7 +1595,7 @@ tag_enforcement_test!(StandardTransaction<(), (), Pedersen, InMemoryDB>);
 impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: Storable<D>, D: DB>
     StandardTransaction<S, P, B, D>
 {
-    pub fn actions(&self) -> impl Iterator<Item = (u16, ContractAction<P, D>)> {
+    pub fn actions(&self) -> impl Iterator<Item = (Segment, ContractAction<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1583,7 +1606,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn deploys(&self) -> impl Iterator<Item = (u16, ContractDeploy<D>)> {
+    pub fn deploys(&self) -> impl Iterator<Item = (Segment, ContractDeploy<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1598,7 +1621,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn updates(&self) -> impl Iterator<Item = (u16, MaintenanceUpdate<D>)> {
+    pub fn updates(&self) -> impl Iterator<Item = (Segment, MaintenanceUpdate<D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1613,7 +1636,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn calls(&self) -> impl Iterator<Item = (u16, ContractCall<P, D>)> {
+    pub fn calls(&self) -> impl Iterator<Item = (Segment, ContractCall<P, D>)> {
         self.intents
             .clone()
             .into_iter()
@@ -1630,7 +1653,7 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             })
     }
 
-    pub fn intents(&'_ self) -> impl Iterator<Item = (u16, Intent<S, P, B, D>)> {
+    pub fn intents(&'_ self) -> impl Iterator<Item = (Segment, Intent<S, P, B, D>)> {
         self.intents.clone().into_iter()
     }
 
@@ -1708,10 +1731,22 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
             .flat_map(|offer| Vec::from(&offer.1.transient).into_iter())
     }
 
-    pub fn segments(&self) -> Vec<u16> {
-        let mut segments = once(0)
-            .chain(self.intents.iter().map(|seg_intent| *seg_intent.0))
-            .chain(self.fallible_coins.iter().map(|seg_offer| *seg_offer.0))
+    pub fn segments(&self) -> Vec<Segment> {
+        let mut segments = once(GUARANTEED_SEGMENT)
+            .chain(self.intents.keys())
+            .chain(self.fallible_coins.keys())
+            .collect::<Vec<_>>();
+        segments.sort();
+        segments.dedup();
+        segments
+    }
+
+    pub fn fallible_segments(&self) -> Vec<Segment> {
+        let mut segments = self
+            .intents
+            .keys()
+            .chain(self.fallible_coins.keys())
+            .filter(|&s| s != GUARANTEED_SEGMENT)
             .collect::<Vec<_>>();
         segments.sort();
         segments.dedup();
@@ -1724,11 +1759,11 @@ type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; S)]
 #[storable(db = D)]
-#[tag = "claim-rewards-transaction[v1]"]
+#[tag = "claim-rewards-transaction[v2]"]
 pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub network_id: String,
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub nonce: Nonce,
     pub signature: S::Signature<ErasedClaimRewardsTransaction<D>>,
     pub kind: ClaimKind,
@@ -2059,7 +2094,7 @@ where
                             // VM stack setup / destroy cost
                             // Left out of scope here to avoid going to deep into
                             // stack structure.
-                            *cost += model.stack_setup_cost(transcript);
+                            *cost += model.stack_setup_cost_for_effects(&transcript.effects);
                         }
                     }
                     ContractAction::Deploy(deploy) => {
@@ -2107,7 +2142,7 @@ where
                 let offers = stx
                     .guaranteed_coins
                     .iter()
-                    .map(|o| (0, (**o).clone()))
+                    .map(|o| (GUARANTEED_SEGMENT, (**o).clone()))
                     .chain(
                         stx.fallible_coins
                             .iter()
@@ -2134,7 +2169,7 @@ where
                     // Merkle tree insertion
                     offer_cost +=
                         model.merkle_tree_insert_amortized(EXPECTED_UTXO_DEPTH, false) * outputs;
-                    if segment == 0 {
+                    if segment == GUARANTEED_SEGMENT {
                         g_cost += offer_cost;
                     } else {
                         f_cost += offer_cost;
@@ -2197,17 +2232,17 @@ impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D
     Transaction<S, P, B, D>
 {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 }
 
 impl SystemTransaction {
     pub fn transaction_hash(&self) -> TransactionHash {
-        let mut hasher = Sha256::new();
+        let mut hasher = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut hasher).expect("In-memory serialization must succeed");
-        TransactionHash(HashOutput(hasher.finalize().into()))
+        TransactionHash(HashOutput(hasher.0.finalize().into()))
     }
 
     pub fn cost(&self, params: &LedgerParameters) -> SyntheticCost {
@@ -2238,7 +2273,7 @@ impl SystemTransaction {
                 // n offers
                 cost * outputs.len()
             }
-            PayBlockRewardsToTreasury { .. } => {
+            PayBlockRewardsToTreasury { .. } | UnlockToTreasury { .. } => {
                 let mut cost = RunningCost::ZERO;
                 cost += model.cell_read(16) + model.cell_write(16, true);
                 cost += model.map_index(EXPECTED_TOKEN_TYPE_DEPTH);
@@ -2287,7 +2322,7 @@ impl SystemTransaction {
                 );
                 cost
             }
-            DistributeReserve(..) => {
+            DistributeReserve { .. } | UnlockToReserve { .. } => {
                 // changing two pool balances
                 let cost = model.cell_read(16) + model.cell_write(16, true);
                 cost * 2u64
@@ -2498,7 +2533,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v4]"]
+#[tag = "contract-deploy[v5]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2514,9 +2549,9 @@ impl<D: DB> Debug for ContractDeploy<D> {
 
 impl<D: DB> ContractDeploy<D> {
     pub fn address(&self) -> ContractAddress {
-        let mut writer = Sha256::new();
+        let mut writer = digest_io::IoWrapper(Sha256::new());
         tagged_serialize(self, &mut writer).expect("In-memory serialization should succeed");
-        ContractAddress(HashOutput(writer.finalize().into()))
+        ContractAddress(HashOutput(writer.0.finalize().into()))
     }
 }
 
@@ -2662,7 +2697,7 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "maintenance-update-single-update[v1]"]
+#[tag = "maintenance-update-single-update[v2]"]
 pub enum SingleUpdate {
     /// Replaces the authority for this contract.
     /// Any subsequent updates in this update sequence are still carried out.
@@ -2678,7 +2713,7 @@ tag_enforcement_test!(SingleUpdate);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable, Debug)]
 #[storable(base)]
-#[tag = "maintenance-update-signatures-value[v1]"]
+#[tag = "maintenance-update-signatures-value[v2]"]
 // This type exists solely to work nicely with storage. It's the tuple of `(index, signature)` for the elements of `MaintenanceUpdate::signatures`
 pub struct SignaturesValue(pub u32, pub Signature);
 tag_enforcement_test!(SignaturesValue);
@@ -2691,7 +2726,7 @@ impl SignaturesValue {
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[tag = "contract-maintenance-update[v1]"]
+#[tag = "contract-maintenance-update[v2]"]
 #[storable(db = D)]
 pub struct MaintenanceUpdate<D: DB> {
     pub address: ContractAddress,
@@ -2728,7 +2763,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v6]"]
+#[tag = "contract-action[v7]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -2830,6 +2865,96 @@ impl<'de> Deserialize<'de> for TransactionIdentifier {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serializable,
+    Storable,
+    Serialize,
+    Deserialize,
+)]
+#[storable(base)]
+#[tag = "signature-verifying-key[v2]"]
+pub enum SignatureVerifyingKey {
+    Schnorr(base_crypto::schnorr::VerifyingKey),
+    ECDSA(base_crypto::ecdsa::VerifyingKey),
+}
+
+impl Default for SignatureVerifyingKey {
+    fn default() -> Self {
+        SignatureVerifyingKey::Schnorr(Default::default())
+    }
+}
+
+impl From<SignatureVerifyingKey> for UserAddress {
+    fn from(value: SignatureVerifyingKey) -> Self {
+        match value {
+            SignatureVerifyingKey::Schnorr(vk) => UserAddress::from(vk),
+            SignatureVerifyingKey::ECDSA(vk) => UserAddress::from(vk),
+        }
+    }
+}
+
+tag_enforcement_test!(SignatureVerifyingKey);
+
+impl SignatureVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (SignatureVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::Schnorr(_), _) => false,
+            (SignatureVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::ECDSA(_), _) => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signature[v2]"]
+pub enum Signature {
+    Schnorr(base_crypto::schnorr::Signature),
+    ECDSA(base_crypto::ecdsa::Signature),
+}
+
+impl Default for Signature {
+    fn default() -> Self {
+        Signature::Schnorr(Default::default())
+    }
+}
+
+tag_enforcement_test!(Signature);
+
+#[derive(Clone, Debug, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signing-key[v2]"]
+pub enum SigningKey {
+    Schnorr(base_crypto::schnorr::SigningKey),
+    ECDSA(base_crypto::ecdsa::SigningKey),
+}
+
+tag_enforcement_test!(SigningKey);
+
+impl SigningKey {
+    pub fn sign(&self, rng: &mut (impl Rng + CryptoRng), msg: &[u8]) -> Signature {
+        match self {
+            SigningKey::Schnorr(sk) => Signature::Schnorr(sk.sign(rng, msg)),
+            SigningKey::ECDSA(sk) => Signature::ECDSA(sk.sign(msg)),
+        }
+    }
+
+    pub fn verifying_key(&self) -> SignatureVerifyingKey {
+        match self {
+            SigningKey::Schnorr(sk) => SignatureVerifyingKey::Schnorr(sk.verifying_key()),
+            SigningKey::ECDSA(sk) => SignatureVerifyingKey::ECDSA(sk.verifying_key()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[tag = "unshielded-utxo[v1]"]
 #[storable(base)]
@@ -2878,10 +3003,10 @@ impl From<Utxo> for UtxoOutput {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable)]
 #[storable(base)]
-#[tag = "unshielded-utxo-spend"]
+#[tag = "unshielded-utxo-spend[v2]"]
 pub struct UtxoSpend {
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub type_: UnshieldedTokenType,
     pub intent_hash: IntentHash,
     pub output_no: u32,
@@ -2974,7 +3099,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v15]"]
+#[tag = "ledger-state[v16]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,

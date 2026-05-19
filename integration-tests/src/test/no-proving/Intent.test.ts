@@ -22,12 +22,17 @@ import {
   MaintenanceUpdate,
   type PreBinding,
   sampleIntentHash,
+  sampleSigningKey,
   sampleUserAddress,
+  type SegmentSpecifier,
+  SignatureEnabled,
+  signatureVerifyingKey,
+  signData,
   Transaction,
   UnshieldedOffer,
-  VerifierKeyRemove,
-  type SegmentSpecifier
+  VerifierKeyRemove
 } from '@midnight-ntwrk/ledger';
+import { SignatureKindMarker } from '@/test/utils/Markers';
 import { getNewUnshieldedOffer, LOCAL_TEST_NETWORK_ID, Random, Static } from '@/test-objects';
 
 describe('Ledger API - Intent', () => {
@@ -1022,4 +1027,48 @@ describe('Ledger API - Intent', () => {
       }
     }
   );
+
+  /**
+   * `Intent.eraseSignatures()` drops every signature from the contained
+   * unshielded offer, regardless of kind. Cover the cross-kind path
+   * explicitly (mixed schnorr + ecdsa) so a regression that only handled one
+   * kind would surface here. Inputs and outputs survive - only the signature
+   * payload is removed.
+   *
+   * @given An Intent whose guaranteed offer carries one schnorr and one ecdsa
+   *   signature in declaration order
+   * @when Calling `eraseSignatures()`
+   * @then The resulting offer reports zero signatures while preserving the
+   *   inputs and outputs
+   */
+  test('eraseSignatures drops mixed schnorr + ecdsa signatures from an Intent', () => {
+    const intentHash = sampleIntentHash();
+    const token = Random.unshieldedTokenType();
+    const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+    const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+    const schnorrVk = signatureVerifyingKey(schnorrSk);
+    const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+
+    const intent = Intent.new(TTL);
+    intent.guaranteedUnshieldedOffer = UnshieldedOffer.new(
+      [
+        { value: 1n, owner: schnorrVk, type: token.raw, intentHash, outputNo: 0 },
+        { value: 1n, owner: ecdsaVk, type: token.raw, intentHash, outputNo: 1 }
+      ],
+      [{ value: 2n, owner: sampleUserAddress(), type: token.raw }],
+      [
+        new SignatureEnabled(signData(schnorrSk, new Uint8Array(32))),
+        new SignatureEnabled(signData(ecdsaSk, new Uint8Array(32)))
+      ]
+    );
+
+    const erased = intent.eraseSignatures();
+    const erasedOffer = erased.guaranteedUnshieldedOffer!;
+
+    expect(erasedOffer.signatures).toEqual([]);
+    expect(erasedOffer.inputs.length).toEqual(2);
+    expect(erasedOffer.outputs.length).toEqual(1);
+    expect(erasedOffer.inputs.at(0)?.owner.tag).toEqual(SignatureKindMarker.schnorr);
+    expect(erasedOffer.inputs.at(1)?.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+  });
 });

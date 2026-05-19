@@ -134,17 +134,24 @@ export class CoinSecretKey {
  */
 export type Nonce = string;
 /**
- * A hex-encoded signature BIP-340 verifying key, with a 3-byte version prefix
+ * The algorithm used for a particular signature.
+ *
+ * - `schnorr` corresponds to BIP-340 Schnorr signatures
+ * - `ecdsa` corresponds to ECDSA signatures over secp256k1
  */
-export type SignatureVerifyingKey = string;
+export type SignatureKind = 'schnorr' | 'ecdsa';
 /**
- * A hex-encoded signature BIP-340 signing key, with a 3-byte version prefix
+ * A hex-encoded signature verifying key annotated with its kind
  */
-export type SigningKey = string;
+export type SignatureVerifyingKey = { tag: SignatureKind, value: string };
 /**
- * A hex-encoded signature BIP-340 signature, with a 3-byte version prefix
+ * A hex-encoded signing key annotated with its kind
  */
-export type Signature = string;
+export type SigningKey = { tag: SignatureKind, value: string };
+/**
+ * A hex-encoded signature annotated with its kind
+ */
+export type Signature = { tag: SignatureKind, value: string };
 /**
  * An internal encoding of a value of the proof systems scalar field
  */
@@ -235,11 +242,25 @@ export type Op<R> = { noop: { n: number } } |
   { ins: { cached: boolean, n: number } } |
   'ckpt';
 /**
+ * The type of a log event embedded in {@link GatherResult}.
+ */
+export type LogEventType = 'shielded-spend' |
+  'shielded-receive' |
+  'shielded-mint' |
+  'shielded-burn' |
+  'unshielded-spend' |
+  'unshielded-receive' |
+  'unshielded-mint' |
+  'unshielded-burn' |
+  'paused' |
+  'unpaused' |
+  'misc';
+/**
  * An individual result of observing the results of a non-verifying VM program
  * execution
  */
 export type GatherResult = { tag: 'read', content: AlignedValue } |
-  { tag: 'log', content: EncodedStateValue };
+  { tag: 'log', content: { version: number, eventType: LogEventType, data: EncodedStateValue} };
 /**
  * An alternative encoding of {@link StateValue} for use in {@link Op} for
  * technical reasons
@@ -407,9 +428,10 @@ export function communicationCommitment(input: AlignedValue, output: AlignedValu
 export function entryPointHash(entryPoint: string | Uint8Array): string;
 
 /**
- * Randomly samples a {@link SigningKey}.
+ * Randomly samples a {@link SigningKey}. If `kind` is not supplied, assumes
+ * `schnorr`.
  */
-export function sampleSigningKey(): SigningKey;
+export function sampleSigningKey(kind?: SignatureKind): SigningKey;
 
 /**
  * Creates a {@link SigningKey} from provided Bip340 private key.
@@ -599,6 +621,27 @@ export function proofDataIntoSerializedPreimage(
 export function bigIntModFr(x: bigint): bigint;
 
 /**
+ * Returns the largest representable JubJub scalar (i.e. the JubJub scalar field modulus minus one).
+ */
+export function maxJubjubScalar(): bigint;
+
+/**
+ * Samples a random JubJub scalar, returned as a native field element.
+ */
+export function jubjubSampleScalar(): Value;
+
+/**
+ * Converts a native field element (BLS12-381 scalar) to a JubJub scalar field
+ * element, reducing modulo the JubJub scalar field modulus.
+ */
+export function jubjubScalarFromNative(native: Value): Value;
+
+/**
+ * Converts a JubJub scalar field element to a native field element (BLS12-381 scalar).
+ */
+export function nativeFromJubjubScalar(jubjub: Value): Value;
+
+/**
  * Internal conversion between field-aligned binary values and bigints within
  * the scalar field
  * @internal
@@ -750,7 +793,7 @@ export class ContractMaintenanceAuthority {
 
   serialize(): Uint8Array;
 
-  static deserialize(raw: Uint8Array): ContractState;
+  static deserialize(raw: Uint8Array): ContractMaintenanceAuthority;
 
   toString(compact?: boolean): string;
 }

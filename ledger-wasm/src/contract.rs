@@ -12,10 +12,10 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures;
 use js_sys::{Array, BigInt, JsString, Uint8Array};
-use ledger::structure::{ProofMarker, ProofPreimageMarker, SingleUpdate};
+use ledger::structure::{ProofMarker, ProofPreimageMarker, Signature, SingleUpdate};
 use onchain_runtime::state::EntryPointBuf;
+use onchain_runtime_wasm::conversions::PreSignature;
 use onchain_runtime_wasm::state::{
     ContractMaintenanceAuthority, ContractOperation, ContractState, from_maybe_string, maybe_string,
 };
@@ -502,8 +502,15 @@ impl MaintenanceUpdate {
     }
 
     #[wasm_bindgen(js_name = "addSignature")]
-    pub fn add_signature(&self, idx: u64, signature: &str) -> Result<MaintenanceUpdate, JsError> {
-        let signature: signatures::Signature = from_hex_ser(signature)?;
+    pub fn add_signature(
+        &self,
+        idx: u64,
+        signature: JsValue,
+    ) -> Result<MaintenanceUpdate, JsError> {
+        let signature = match from_value::<PreSignature>(signature)? {
+            PreSignature::Schnorr(raw) => Signature::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => Signature::ECDSA(from_hex_ser(&raw)?),
+        };
         if idx > u32::MAX as u64 {
             return Err(JsError::new("idx exceeded u32 max"));
         }
@@ -563,8 +570,11 @@ impl MaintenanceUpdate {
                 let idx = sig_value.0;
                 let tuple = Array::new();
                 tuple.push(&BigInt::from(idx));
-                let signature = to_hex_ser(&sig_value.1)?;
-                tuple.push(&JsValue::from_str(&signature));
+                let signature = to_value(&match &sig_value.1 {
+                    Signature::Schnorr(sig) => PreSignature::Schnorr(to_hex_ser(&sig)?),
+                    Signature::ECDSA(sig) => PreSignature::ECDSA(to_hex_ser(&sig)?),
+                })?;
+                tuple.push(&signature);
                 Ok(tuple.into())
             })
             .collect()

@@ -19,7 +19,6 @@ use actix_web::web::{self, Bytes, BytesMut, Data, Payload};
 use actix_web::{Error, HttpResponse, HttpResponseBuilder, Responder, get, post};
 use base_crypto::data_provider::{self, MidnightDataProvider};
 use base_crypto::data_provider::{FetchMode, OutputMode};
-use base_crypto::signatures::Signature;
 use futures_util::stream::StreamExt;
 use hex::ToHex;
 use introspection::Introspection;
@@ -28,7 +27,7 @@ use ledger::dust::DustResolver;
 use ledger::prove::Resolver;
 use ledger::structure::{
     INITIAL_TRANSACTION_COST_MODEL, ProofPreimageMarker, ProofPreimageVersioned, ProofVersioned,
-    Transaction,
+    Signature, Transaction,
 };
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize, tagged_serialize};

@@ -15,10 +15,9 @@
 #![cfg(feature = "proving")]
 
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
 use coin_structure::coin::Info as CoinInfo;
 use lazy_static::lazy_static;
-use midnight_ledger::structure::{ContractDeploy, ProofPreimageMarker, Transaction};
+use midnight_ledger::structure::{ContractDeploy, ProofPreimageMarker, Signature, Transaction};
 use midnight_ledger::test_utilities::{Resolver, TestState, test_intents, test_resolver, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger_v9 as midnight_ledger;

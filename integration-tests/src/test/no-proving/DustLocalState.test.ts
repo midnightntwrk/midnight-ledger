@@ -14,6 +14,7 @@
 import {
   addressFromKey,
   DustActions,
+  DustGenerationTreeInsertionPath,
   DustLocalState,
   type DustPublicKey,
   DustRegistration,
@@ -38,6 +39,7 @@ import {
   dustCommitment,
   dustInitialNonce,
   dustNonce,
+  dustFirstNonce,
   dustNullifier
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
@@ -101,6 +103,91 @@ describe('Ledger API - DustLocalState', () => {
     expect(localState.params.nightDustRatio).toEqual(NIGHT_DUST_RATIO);
     expect(localState.params.generationDecayRate).toEqual(GENERATION_DECAY_RATE);
     expect(localState.params.dustGracePeriodSeconds).toEqual(DUST_GRACE_PERIOD_IN_SECONDS);
+  });
+
+  /**
+   * Test generatingTreeFirstFree getter on a new DustLocalState.
+   *
+   * @given A new DustLocalState instance
+   * @when Accessing the generatingTreeFirstFree property
+   * @then Should return 0 as no entries have been inserted
+   */
+  test('should return 0 for generatingTreeFirstFree on empty state', () => {
+    const localState = new DustLocalState(initialParameters);
+    expect(localState.generatingTreeFirstFree).toEqual(0n);
+  });
+
+  /**
+   * Test commitmentTreeFirstFree getter on a new DustLocalState.
+   *
+   * @given A new DustLocalState instance
+   * @when Accessing the commitmentTreeFirstFree property
+   * @then Should return 0 as no entries have been inserted
+   */
+  test('should return 0 for commitmentTreeFirstFree on empty state', () => {
+    const localState = new DustLocalState(initialParameters);
+    expect(localState.commitmentTreeFirstFree).toEqual(0n);
+  });
+
+  /**
+   * Test generatingTreeFirstFree increments after dust generation.
+   *
+   * @given A DustLocalState with one registered dust UTXO
+   * @when Accessing generatingTreeFirstFree
+   * @then Should return 1 reflecting the single inserted generation entry
+   */
+  test('should increment generatingTreeFirstFree after dust generation', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    expect(state.dust.generatingTreeFirstFree).toEqual(1n);
+  });
+
+  /**
+   * Test commitmentTreeFirstFree increments after dust generation.
+   *
+   * @given A DustLocalState with one registered dust UTXO
+   * @when Accessing commitmentTreeFirstFree
+   * @then Should return 1 reflecting the single inserted commitment
+   */
+  test('should increment commitmentTreeFirstFree after dust generation', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    expect(state.dust.commitmentTreeFirstFree).toEqual(1n);
+  });
+
+  /**
+   * Test generatingTreeFirstFree increments after manual insertGenerationInfo.
+   *
+   * @given A new DustLocalState and an existing generation info
+   * @when Calling insertGenerationInfo at index 0
+   * @then generatingTreeFirstFree should become 1
+   */
+  test('should increment generatingTreeFirstFree after insertGenerationInfo', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const qdo = state.dust.utxos[0];
+    const generationInfo = state.dust.generationInfo(qdo)!;
+
+    const newLocalState = new DustLocalState(initialParameters);
+    expect(newLocalState.generatingTreeFirstFree).toEqual(0n);
+
+    const updatedState = newLocalState.insertGenerationInfo(0n, generationInfo, qdo.backingNight);
+    expect(updatedState.generatingTreeFirstFree).toEqual(1n);
+  });
+
+  /**
+   * Test commitmentTreeFirstFree increments after manual insertCommitment.
+   *
+   * @given A new DustLocalState and an existing UTXO
+   * @when Calling insertCommitment at index 0
+   * @then commitmentTreeFirstFree should become 1
+   */
+  test('should increment commitmentTreeFirstFree after insertCommitment', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const qdo = state.dust.utxos[0];
+
+    const newLocalState = new DustLocalState(initialParameters);
+    expect(newLocalState.commitmentTreeFirstFree).toEqual(0n);
+
+    const updatedState = newLocalState.insertCommitment(0n, qdo, true);
+    expect(updatedState.commitmentTreeFirstFree).toEqual(1n);
   });
 
   /**
@@ -1010,6 +1097,46 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
+   * Test updateGenerationTreeFromEvidence
+   *
+   * @given A DustGenerationState with an entry and a DustLocalState with that entry collapsed
+   * @when Calling new DustGenerationTreeInsertionPath() to obtain the insertion path and updateGenerationTreeFromEvidence
+   * @then Should update the tree and produce the same root as the full local state
+   */
+  test('should update generation tree from evidence and maintain correct tree root', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const localState = state.dust;
+    const generationState = state.ledger.dust.generation;
+
+    const qdo = localState.utxos[0];
+    const generationInfo = localState.generationInfo(qdo)!;
+    expect(generationInfo).toBeDefined();
+
+    // Obtain insertion path from the server's generation state for entry at index 0
+    const insertionPath = new DustGenerationTreeInsertionPath(generationState, 0n);
+    expect(insertionPath).toBeDefined();
+
+    // Verify serialize/deserialize round-trip
+    assertSerializationSuccess(insertionPath);
+
+    // Build a new local state with a collapsed generation entry at index 0
+    // (simulates a client who has the entry collapsed, without retaining the full leaf data)
+    const newLocalState = new DustLocalState(initialParameters);
+    const collapsedState = newLocalState.insertGenerationInfo(0n, generationInfo);
+    expect(collapsedState.toString()).toMatch(/0..=0: <collapsed>/);
+
+    // Apply the update evidence to the collapsed local state
+    const updatedState = collapsedState.updateGenerationTreeFromEvidence(insertionPath);
+    expect(updatedState).toBeDefined();
+
+    // The tree root should match the full local state's root
+    const expectedRoot = localState.generatingTreeRoot();
+    expect(updatedState.generatingTreeRoot()).toEqual(expectedRoot);
+
+    assertSerializationSuccess(updatedState);
+  });
+
+  /**
    * Test commitment tree methods - insertCommitment and commitmentTreeRoot
    *
    * @given A DustLocalState with UTXOs
@@ -1033,6 +1160,7 @@ describe('Ledger API - DustLocalState', () => {
     expect(emptyRoot).toEqual(0n);
 
     const updatedState = newLocalState.insertCommitment(0n, qdo, true);
+    expect(updatedState.commitmentTreeFirstFree).toEqual(1n);
 
     // Tree root should now be defined and match the original
     const newRoot = updatedState.commitmentTreeRoot();
@@ -1043,6 +1171,7 @@ describe('Ledger API - DustLocalState', () => {
     // When we set `own_qdo` to false, it should collapse the tree after insertion
     const collapsedState = newLocalState.insertCommitment(0n, qdo, false);
     expect(collapsedState.toString()).toMatch(/0..=0: <collapsed>.*/);
+    expect(collapsedState.commitmentTreeFirstFree).toEqual(1n);
 
     assertSerializationSuccess(updatedState);
   });
@@ -1098,7 +1227,6 @@ describe('Ledger API - DustLocalState', () => {
     const stateWithUpdate = newLocalState.applyCommitmentCollapsedUpdate(collapsedUpdate);
     expect(stateWithUpdate).toBeDefined();
     expect(stateWithUpdate.toString()).toMatch(/0..=1: <collapsed>.*/);
-    console.log(stateWithUpdate.toString());
     expect(stateWithUpdate.generationInfo(qdo)).toBeUndefined();
 
     assertSerializationSuccess(stateWithUpdate);
@@ -1160,12 +1288,16 @@ describe('Ledger API - DustLocalState', () => {
       .insertGenerationInfo(0n, genInfo, qdo.backingNight)
       .addUtxo(nullifier, qdo, pendingUntil);
     expect(updatedState.findUtxoByNullifier(nullifier)).toBeUndefined();
+    expect(updatedState.generatingTreeFirstFree).toEqual(1n);
+    expect(updatedState.commitmentTreeFirstFree).toEqual(0n);
 
     const matured = updatedState.processTtls(new Date(pendingUntil.getTime() + 10000));
     expect(matured.findUtxoByNullifier(nullifier)).toEqual(qdo);
+    expect(matured.generatingTreeFirstFree).toEqual(1n);
 
     const removed = matured.removeUtxo(nullifier);
     expect(removed.findUtxoByNullifier(nullifier)).toBeUndefined();
+    expect(removed.generatingTreeFirstFree).toEqual(1n);
 
     assertSerializationSuccess(updatedState);
   });
@@ -1213,6 +1345,7 @@ describe('Ledger API - DustLocalState', () => {
   test('should get UTXO commitment', () => {
     const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
     const localState = state.dust;
+    expect(localState.commitmentTreeFirstFree).toEqual(1n);
 
     const qdo = localState.utxos[0];
     const commitment = dustCommitment(qdo);
@@ -1289,6 +1422,8 @@ describe('Ledger API - DustLocalState', () => {
     // we can't calculate the nonce for seq=0
     expect(qdo.seq).toEqual(0);
     expect(() => dustNonce(qdo.backingNight, BigInt(qdo.seq), secretKey)).toThrow();
+    const firstNonce = dustFirstNonce(qdo.backingNight, qdo.owner);
+    expect(firstNonce).toEqual(qdo.nonce);
 
     const newCommitmentIndex = qdo.mtIndex + 1n;
     const fee = 1000n;

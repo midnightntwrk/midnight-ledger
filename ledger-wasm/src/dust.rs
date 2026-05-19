@@ -14,21 +14,23 @@
 use crate::conversions::*;
 use crate::events::Event;
 use crate::state_changes::DustStateChanges;
-use base_crypto::signatures;
-use base_crypto::signatures::Signature;
 use base_crypto::time::{Duration, Timestamp};
 use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
-    DustActions as LedgerDustActions, DustGenerationState as LedgerDustGenerationState,
-    DustLocalState as LedgerDustLocalState, DustNullifier as LedgerDustNullifier,
-    DustOutput as LedgerDustOutput, DustParameters as LedgerDustParameters, DustPublicKey,
+    DustActions as LedgerDustActions, DustGenerationInfo as LedgerDustGenerationInfo,
+    DustGenerationState as LedgerDustGenerationState, DustLocalState as LedgerDustLocalState,
+    DustNullifier as LedgerDustNullifier, DustOutput as LedgerDustOutput,
+    DustParameters as LedgerDustParameters, DustPublicKey,
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
     WithDustStateChanges as LedgerWithDustStateChanges,
 };
-use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
-use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
+use ledger::structure::{
+    ProofMarker, ProofPreimageMarker, Signature, SignatureVerifyingKey, UtxoMeta as LedgerUtxoMeta,
+};
+use onchain_runtime_wasm::conversions::PreSignature;
+use onchain_runtime_wasm::from_value_ser;
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize_sequence, tagged_serialize};
 use std::cell::RefCell;
@@ -229,14 +231,17 @@ impl DustRegistration {
     #[wasm_bindgen(constructor)]
     pub fn new(
         signature_marker: &str,
-        night_key: &str,
+        night_key: JsValue,
         dust_address: Option<BigInt>,
         allow_fee_payment: BigInt,
         signature: JsValue,
     ) -> Result<DustRegistration, JsError> {
         let allow_fee_payment = u128::try_from(allow_fee_payment)
             .map_err(|_| JsError::new("allow_fee_payment is out of range"))?;
-        let night_key: signatures::VerifyingKey = from_value_hex_ser(night_key)?;
+        let night_key = match from_value::<PreSignature>(night_key)? {
+            PreSignature::Schnorr(vk) => SignatureVerifyingKey::Schnorr(from_hex_ser(&vk)?),
+            PreSignature::ECDSA(vk) => SignatureVerifyingKey::ECDSA(from_hex_ser(&vk)?),
+        };
         let dust_address = dust_address
             .map(bigint_to_fr)
             .transpose()?
@@ -323,16 +328,25 @@ impl DustRegistration {
     }
 
     #[wasm_bindgen(getter, js_name = "nightKey")]
-    pub fn night_key(&self) -> Result<String, JsError> {
-        match &self.0 {
-            DustRegistrationTypes::Signature(val) => to_value_hex_ser(&val.night_key),
-            DustRegistrationTypes::SignatureErased(val) => to_value_hex_ser(&val.night_key),
-        }
+    pub fn night_key(&self) -> Result<JsValue, JsError> {
+        let key = match &self.0 {
+            DustRegistrationTypes::Signature(val) => &val.night_key,
+            DustRegistrationTypes::SignatureErased(val) => &val.night_key,
+        };
+        let encoded = match key {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(vk)?),
+        };
+        Ok(to_value(&encoded)?)
     }
 
     #[wasm_bindgen(setter, js_name = "nightKey")]
-    pub fn set_night_key(&mut self, night_key: &str) -> Result<(), JsError> {
-        let night_key: signatures::VerifyingKey = from_value_hex_ser(night_key)?;
+    pub fn set_night_key(&mut self, night_key: JsValue) -> Result<(), JsError> {
+        let encoded: PreSignature = from_value(night_key)?;
+        let night_key = match encoded {
+            PreSignature::Schnorr(raw) => SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?),
+        };
         match &mut self.0 {
             DustRegistrationTypes::Signature(val) => val.night_key = night_key,
             DustRegistrationTypes::SignatureErased(val) => val.night_key = night_key,
@@ -1337,6 +1351,20 @@ impl DustLocalState {
         ))
     }
 
+    #[wasm_bindgen(js_name = "updateGenerationTreeFromEvidence")]
+    pub fn update_generation_tree_from_evidence(
+        &self,
+        insertion: &DustGenerationTreeInsertionPath,
+    ) -> Result<DustLocalState, JsError> {
+        let mut state = self.0.clone();
+        state.generating_tree = state
+            .generating_tree
+            .update_from_evidence(insertion.0.clone())
+            .map_err(|_| JsError::new("Unable to update generation tree from evidence"))?
+            .rehash();
+        Ok(DustLocalState(state))
+    }
+
     #[wasm_bindgen(js_name = "generatingTreeRoot")]
     pub fn generating_tree_root(&self) -> Result<JsValue, JsError> {
         Ok(self
@@ -1544,6 +1572,16 @@ impl DustLocalState {
         }
     }
 
+    #[wasm_bindgen(getter, js_name = "commitmentTreeFirstFree")]
+    pub fn commitment_tree_first_free(&self) -> u64 {
+        self.0.commitment_tree_first_free
+    }
+
+    #[wasm_bindgen(getter, js_name = "generatingTreeFirstFree")]
+    pub fn generating_tree_first_free(&self) -> u64 {
+        self.0.generating_tree_first_free
+    }
+
     #[wasm_bindgen(getter)]
     pub fn utxos(&self) -> Result<Vec<JsValue>, JsError> {
         self.0
@@ -1560,6 +1598,13 @@ impl DustLocalState {
     #[wasm_bindgen(getter, js_name = "syncTime")]
     pub fn sync_time(&self) -> Date {
         seconds_to_js_date(self.0.sync_time.to_secs())
+    }
+
+    #[wasm_bindgen(setter, js_name = "syncTime")]
+    pub fn set_sync_time(&mut self, sync_time: &Date) -> Result<(), JsError> {
+        let sync_time = Timestamp::from_secs(js_date_to_seconds(sync_time));
+        self.0.sync_time = sync_time;
+        Ok(())
     }
 }
 
@@ -1615,6 +1660,49 @@ pub fn updated_value(
 #[wasm_bindgen(js_name = "sampleDustSecretKey")]
 pub fn sample_dust_secret_key() -> DustSecretKey {
     DustSecretKey::wrap(LedgerDustSecretKey::sample(&mut OsRng))
+}
+
+#[wasm_bindgen]
+pub struct DustGenerationTreeInsertionPath(
+    pub(crate) merkle_tree::TreeInsertionPath<LedgerDustGenerationInfo>,
+);
+
+#[wasm_bindgen]
+impl DustGenerationTreeInsertionPath {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        state: &DustGenerationState,
+        index: u64,
+    ) -> Result<DustGenerationTreeInsertionPath, JsError> {
+        state
+            .0
+            .generating_tree
+            .insertion_evidence(index)
+            .map(DustGenerationTreeInsertionPath)
+            .map_err(|_| JsError::new("invalid index into sparse merkle tree"))
+    }
+
+    pub fn serialize(&self) -> Result<Uint8Array, JsError> {
+        let mut res = Vec::new();
+        tagged_serialize(&self.0, &mut res)?;
+        Ok(Uint8Array::from(&res[..]))
+    }
+
+    pub fn deserialize(raw: Uint8Array) -> Result<DustGenerationTreeInsertionPath, JsError> {
+        Ok(DustGenerationTreeInsertionPath(from_value_ser(
+            raw,
+            "DustGenerationTreeInsertionPath",
+        )?))
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.0)
+        } else {
+            format!("{:#?}", &self.0)
+        }
+    }
 }
 
 #[wasm_bindgen]

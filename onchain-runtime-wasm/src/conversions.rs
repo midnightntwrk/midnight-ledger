@@ -24,6 +24,19 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
 
 #[derive(Serialize, Deserialize)]
+#[serde(tag = "tag", content = "value")]
+#[serde(rename_all = "kebab-case")]
+// Common container type for signatures, signature verifying keys, and signing keys.
+// This is largely a serialization intermediary for the
+// `{ tag: 'schnorr' | 'ecdsa, value: string }` TS type, shared for these types, with the value
+// string being a hex-encoding of the raw underlying data.
+pub enum PreSignature {
+    Schnorr(String),
+    #[serde(rename = "ecdsa")]
+    ECDSA(String),
+}
+
+#[derive(Serialize, Deserialize)]
 struct ShieldedCoinInfoEncoded {
     #[serde(with = "serde_bytes")]
     color: Vec<u8>,

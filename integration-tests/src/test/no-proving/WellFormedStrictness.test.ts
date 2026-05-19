@@ -20,6 +20,7 @@ import {
   ZswapChainState,
   Transaction,
   Intent,
+  SignatureEnabled,
   UnshieldedOffer
 } from '@midnight-ntwrk/ledger';
 import { BindingMarker, ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -37,9 +38,9 @@ describe('Ledger API - WellFormedStrictness', () => {
   describe('verifySignatures', () => {
     test('should pass when verifySignatures is false with invalid signature', () => {
       const unshieldedOffer = getNewUnshieldedOffer();
-      const corruptedSignature = corruptSignature(unshieldedOffer.signatures[0]);
+      const corruptedSignature = corruptSignature(unshieldedOffer.signatures[0].value);
       const invalidSignatureOffer = UnshieldedOffer.new(unshieldedOffer.inputs, unshieldedOffer.outputs, [
-        corruptedSignature
+        new SignatureEnabled(corruptedSignature)
       ]);
 
       const intent = Intent.new(Static.calcBlockTime(date, 50));

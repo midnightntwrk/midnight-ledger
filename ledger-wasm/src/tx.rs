@@ -21,8 +21,6 @@ use crate::zswap_wasm::{
     LedgerParameters, ZswapInput, ZswapInputTypes, ZswapOffer, ZswapOfferTypes, ZswapOutput,
     ZswapOutputTypes, ZswapTransient, ZswapTransientTypes,
 };
-use base_crypto::signatures;
-use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Nonce;
 use hex::ToHex;
@@ -30,13 +28,13 @@ use js_sys::{Array, BigInt, Date, Function, JsString, Map, Promise, Uint8Array};
 use ledger::construct::SegmentSpecifier;
 use ledger::structure::{
     BindingKind, PedersenDowngradeable, ProofKind, ProofMarker, ProofPreimageMarker,
-    ProofVersioned, SignatureKind,
+    ProofVersioned, Signature, SignatureKind, SignatureVerifyingKey,
 };
 use onchain_runtime::state::EntryPointBuf;
 use onchain_runtime_wasm::context::CostModel;
-use onchain_runtime_wasm::conversions::token_type_to_value;
+use onchain_runtime_wasm::conversions::{PreSignature, token_type_to_value};
+use onchain_runtime_wasm::from_value_ser;
 use onchain_runtime_wasm::state::{ContractOperation, from_maybe_string};
-use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serialize::{Tagged, tagged_deserialize, tagged_serialize};
@@ -1476,12 +1474,19 @@ impl ClaimRewardsTransaction {
         signature_marker: &str,
         network_id: String,
         value: BigInt,
-        owner: &str,
+        owner: JsValue,
         nonce: &str,
         signature: JsValue,
         kind: JsValue,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner = match from_value::<PreSignature>(owner)? {
+            PreSignature::Schnorr(raw) => {
+                ledger::structure::SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?)
+            }
+            PreSignature::ECDSA(raw) => {
+                ledger::structure::SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?)
+            }
+        };
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = if kind.is_null() || kind.is_undefined() {
@@ -1527,11 +1532,18 @@ impl ClaimRewardsTransaction {
     pub fn new(
         network_id: String,
         value: BigInt,
-        owner: &str,
+        owner: JsValue,
         nonce: &str,
         kind: &str,
     ) -> Result<ClaimRewardsTransaction, JsError> {
-        let owner: signatures::VerifyingKey = from_value_hex_ser(owner)?;
+        let owner = match from_value::<PreSignature>(owner)? {
+            PreSignature::Schnorr(raw) => {
+                ledger::structure::SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?)
+            }
+            PreSignature::ECDSA(raw) => {
+                ledger::structure::SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?)
+            }
+        };
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = text_to_claim_kind(kind)?;
@@ -1549,8 +1561,11 @@ impl ClaimRewardsTransaction {
     }
 
     #[wasm_bindgen(js_name = "addSignature")]
-    pub fn add_signature(&self, signature: &str) -> Result<ClaimRewardsTransaction, JsError> {
-        let signature: Signature = from_hex_ser(signature)?;
+    pub fn add_signature(&self, signature: JsValue) -> Result<ClaimRewardsTransaction, JsError> {
+        let signature = match from_value::<PreSignature>(signature)? {
+            PreSignature::Schnorr(raw) => Signature::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => Signature::ECDSA(from_hex_ser(&raw)?),
+        };
         use ClaimRewardsTransactionTypes::*;
         Ok(ClaimRewardsTransaction(SignatureClaimRewards(
             match &self.0 {
@@ -1641,12 +1656,16 @@ impl ClaimRewardsTransaction {
     }
 
     #[wasm_bindgen(getter)]
-    pub fn owner(&self) -> Result<String, JsError> {
+    pub fn owner(&self) -> Result<JsValue, JsError> {
         use ClaimRewardsTransactionTypes::*;
-        match &self.0 {
-            SignatureClaimRewards(val) => to_hex_ser(&val.owner),
-            SignatureErasedClaimRewards(val) => to_hex_ser(&val.owner),
-        }
+        let owner = match &self.0 {
+            SignatureClaimRewards(val) => &val.owner,
+            SignatureErasedClaimRewards(val) => &val.owner,
+        };
+        Ok(to_value(&match owner {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(vk)?),
+        })?)
     }
 
     #[wasm_bindgen(getter)]

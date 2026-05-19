@@ -13,14 +13,13 @@
 
 use std::borrow::Cow;
 
-use crate::state::from_maybe_string;
-use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 use base_crypto::fab::{AlignedValue, Alignment, Value};
 use base_crypto::hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter};
 use base_crypto::repr::BinaryHashRepr;
-use base_crypto::{hash, signatures};
+use base_crypto::{ecdsa, hash, schnorr};
 use coin_structure::coin::{ShieldedTokenType, UserAddress};
 use coin_structure::contract::ContractAddress;
+
 use hex::{FromHex, ToHex};
 use js_sys::{BigInt, JsString, Uint8Array};
 use onchain_runtime::ops::Op;
@@ -28,14 +27,19 @@ use onchain_runtime::result_mode::ResultModeVerify;
 use onchain_runtime::state::EntryPointBuf;
 use rand::Rng;
 use rand::rngs::OsRng;
+
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
 use transient_crypto;
-use transient_crypto::curve;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{self, EmbeddedFr, Fr, embedded, outer};
 use transient_crypto::fab::{AlignedValueExt, AlignmentExt, ValueReprAlignedValue};
 use transient_crypto::repr::FieldRepr;
+
 use wasm_bindgen::prelude::*;
+
+use crate::conversions::PreSignature;
+use crate::state::from_maybe_string;
+use crate::{ensure_ops_valid, from_value, from_value_hex_ser, to_value, to_value_hex_ser};
 
 #[wasm_bindgen(js_name = "entryPointHash")]
 pub fn entry_point_hash(entry_point: JsValue) -> Result<String, JsError> {
@@ -63,35 +67,74 @@ pub fn communication_commitment(
 }
 
 #[wasm_bindgen(js_name = "sampleSigningKey")]
-pub fn sample_signing_key() -> Result<String, JsError> {
-    to_value_hex_ser(&signatures::SigningKey::sample(OsRng))
+pub fn sample_signing_key(kind: Option<String>) -> Result<JsValue, JsError> {
+    Ok(match kind.as_deref() {
+        None | Some("schnorr") => to_value(&PreSignature::Schnorr(to_value_hex_ser(
+            &schnorr::SigningKey::sample(OsRng),
+        )?))?,
+        Some("ecdsa") => to_value(&PreSignature::ECDSA(to_value_hex_ser(
+            &ecdsa::SigningKey::sample(OsRng),
+        )?))?,
+        Some(kind) => return Err(JsError::new(&format!("Unknown signature kind: {kind}"))),
+    })
 }
 
 #[wasm_bindgen(js_name = "signingKeyFromBip340")]
-pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<String, JsError> {
-    to_value_hex_ser(
-        &signatures::SigningKey::from_bytes(&bytes.to_vec())
+pub fn signing_key_from_bip_340(bytes: Uint8Array) -> Result<JsValue, JsError> {
+    Ok(to_value(&PreSignature::Schnorr(to_value_hex_ser(
+        &schnorr::SigningKey::from_bytes(&bytes.to_vec())
             .map_err(|err| JsError::new(&err.to_string()))?,
-    )
+    )?))?)
 }
 
 #[wasm_bindgen(js_name = "signData")]
-pub fn sign_data(key: &str, data: Uint8Array) -> Result<String, JsError> {
-    let key: signatures::SigningKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&key.sign(&mut OsRng, &data.to_vec()))
+pub fn sign_data(key: JsValue, data: Uint8Array) -> Result<JsValue, JsError> {
+    let key: PreSignature = from_value(key)?;
+    let sig = match key {
+        PreSignature::Schnorr(raw) => PreSignature::Schnorr(to_value_hex_ser(
+            &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.sign(&mut OsRng, &data.to_vec()),
+        )?),
+        PreSignature::ECDSA(raw) => PreSignature::ECDSA(to_value_hex_ser(
+            &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.sign(&data.to_vec()),
+        )?),
+    };
+    Ok(to_value(&sig)?)
 }
 
 #[wasm_bindgen(js_name = "signatureVerifyingKey")]
-pub fn signature_verifying_key(key: &str) -> Result<String, JsError> {
-    let key: signatures::SigningKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&key.verifying_key())
+pub fn signature_verifying_key(sk: JsValue) -> Result<JsValue, JsError> {
+    let sk: PreSignature = from_value(sk)?;
+    let vk = match sk {
+        PreSignature::Schnorr(raw) => PreSignature::Schnorr(to_value_hex_ser(
+            &from_value_hex_ser::<schnorr::SigningKey>(&raw)?.verifying_key(),
+        )?),
+        PreSignature::ECDSA(raw) => PreSignature::ECDSA(to_value_hex_ser(
+            &from_value_hex_ser::<ecdsa::SigningKey>(&raw)?.verifying_key(),
+        )?),
+    };
+    Ok(to_value(&vk)?)
 }
 
 #[wasm_bindgen(js_name = "verifySignature")]
-pub fn verify_signature(key: &str, data: Uint8Array, signature: &str) -> Result<bool, JsError> {
-    let key: signatures::VerifyingKey = from_value_hex_ser(key)?;
-    let signature: signatures::Signature = from_value_hex_ser(signature)?;
-    Ok(key.verify(&data.to_vec(), &signature))
+pub fn verify_signature(
+    key: JsValue,
+    data: Uint8Array,
+    signature: JsValue,
+) -> Result<bool, JsError> {
+    let key: PreSignature = from_value(key)?;
+    let signature: PreSignature = from_value(signature)?;
+    let data = data.to_vec();
+    Ok(match (key, signature) {
+        (PreSignature::Schnorr(key), PreSignature::Schnorr(sig)) => {
+            from_value_hex_ser::<schnorr::VerifyingKey>(&key)?
+                .verify(&data, &from_value_hex_ser(&sig)?)
+        }
+        (PreSignature::ECDSA(key), PreSignature::ECDSA(sig)) => {
+            from_value_hex_ser::<ecdsa::VerifyingKey>(&key)?
+                .verify(&data, &from_value_hex_ser(&sig)?)
+        }
+        _ => false,
+    })
 }
 
 #[wasm_bindgen(js_name = "rawTokenType")]
@@ -235,6 +278,19 @@ pub fn proof_data_into_serialized_preimage(
 // funciton bigIntModFr(x: BigInt): BigInt
 pub fn bigint_mod_fr(x: BigInt) -> Result<BigInt, JsError> {
     value_to_bigint(bigint_to_value(x)?)
+}
+
+#[wasm_bindgen(js_name = "maxJubjubScalar")]
+/// Returns the largest representable JubJub scalar (i.e. the JubJub scalar field modulus minus one).
+pub fn max_jubjub_scalar() -> Result<BigInt, JsError> {
+    // -1 is the largest representable value in the JubJub scalar field
+    let mut bytes = (-EmbeddedFr::from(1u64)).as_le_bytes();
+    bytes.reverse();
+    BigInt::new(&JsString::from(format!(
+        "0x{}",
+        bytes.encode_hex::<String>()
+    )))
+    .map_err(|err| JsError::new(&String::from(err.to_string())))
 }
 
 #[wasm_bindgen(js_name = "valueToBigInt")]
@@ -398,4 +454,36 @@ pub fn ec_mul_generator(val: JsValue) -> Result<JsValue, JsError> {
     let val: Value = from_value(val)?;
     let res = curve::EmbeddedGroupAffine::generator() * curve::EmbeddedFr::try_from(&*val)?;
     Ok(to_value(&Value::from(res))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubSampleScalar")]
+/// Sample a random JubJub scalar, returned as a native field element.
+pub fn jubjub_sample_scalar() -> Result<JsValue, JsError> {
+    let native = OsRng.r#gen::<Fr>();
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&native.0.to_bytes_le());
+    let embedded = embedded::Scalar::from_bytes_wide(&wide);
+    Ok(to_value(&Value::from(EmbeddedFr(embedded)))?)
+}
+
+#[wasm_bindgen(js_name = "jubjubScalarFromNative")]
+/// Converts a native field element (BLS12-381 scalar) to a JubJub scalar field element,
+/// reducing modulo the JubJub scalar field modulus.
+pub fn jubjub_scalar_from_native(native: JsValue) -> Result<JsValue, JsError> {
+    let val: Value = from_value(native)?;
+    let fr = curve::Fr::try_from(&*val)?;
+    let mut wide = [0u8; 64];
+    wide[..32].copy_from_slice(&fr.0.to_bytes_le());
+    let embedded = embedded::Scalar::from_bytes_wide(&wide);
+    Ok(to_value(&Value::from(EmbeddedFr(embedded)))?)
+}
+
+#[wasm_bindgen(js_name = "nativeFromJubjubScalar")]
+/// Converts a JubJub scalar field element to a native field element (BLS12-381 scalar).
+pub fn native_from_jubjub_scalar(jubjub: JsValue) -> Result<JsValue, JsError> {
+    let val: Value = from_value(jubjub)?;
+    let embedded = curve::EmbeddedFr::try_from(&*val)?;
+    let native = outer::Scalar::from_bytes_le(&embedded.0.to_bytes())
+        .expect("Jubjub scalar always fits as a native field element");
+    Ok(to_value(&Value::from(Fr(native)))?)
 }

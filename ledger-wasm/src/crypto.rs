@@ -12,9 +12,9 @@
 // limitations under the License.
 
 use crate::conversions::*;
-use base_crypto::signatures::Signature;
 use js_sys::Uint8Array;
-use ledger::structure::{ProofKind, ProofMarker, ProofPreimageMarker};
+use ledger::structure::{ProofKind, ProofMarker, ProofPreimageMarker, Signature};
+use onchain_runtime_wasm::conversions::PreSignature;
 use onchain_runtime_wasm::from_value_ser;
 use serialize::tagged_serialize;
 use storage::db::InMemoryDB;
@@ -31,8 +31,13 @@ try_ref_for_exported!(SignatureEnabled);
 #[wasm_bindgen]
 impl SignatureEnabled {
     #[wasm_bindgen(constructor)]
-    pub fn new(signature: String) -> Result<SignatureEnabled, JsError> {
-        Ok(SignatureEnabled(from_hex_ser(&signature)?))
+    pub fn new(signature: JsValue) -> Result<SignatureEnabled, JsError> {
+        let signature: PreSignature = from_value(signature)?;
+        let signature = match signature {
+            PreSignature::Schnorr(raw) => Signature::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => Signature::ECDSA(from_hex_ser(&raw)?),
+        };
+        Ok(SignatureEnabled(signature))
     }
 
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
@@ -57,6 +62,14 @@ impl SignatureEnabled {
     #[wasm_bindgen(getter)]
     pub fn instance(&self) -> String {
         String::from("signature")
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn value(&self) -> Result<JsValue, JsError> {
+        Ok(to_value(&match &self.0 {
+            Signature::Schnorr(sig) => PreSignature::Schnorr(to_hex_ser(sig)?),
+            Signature::ECDSA(sig) => PreSignature::ECDSA(to_hex_ser(sig)?),
+        })?)
     }
 }
 

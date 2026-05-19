@@ -20,23 +20,22 @@ use crate::error::{
 use crate::primitive::MultiSet;
 use crate::structure::{
     BindingKind, ClaimRewardsTransaction, ContractAction, ContractCall, ContractDeploy,
-    ErasedIntent, FEE_TOKEN, Intent, LedgerParameters, LedgerState, MaintenanceUpdate,
-    PedersenDowngradeable, ProofKind, SingleUpdate, StandardTransaction, Transaction,
-    UnshieldedOffer,
+    ErasedIntent, FEE_TOKEN, GUARANTEED_SEGMENT, Intent, LedgerParameters, LedgerState,
+    MaintenanceUpdate, PedersenDowngradeable, ProofKind, Signature, SignatureVerifyingKey,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
 use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures::VerifyingKey;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::PublicAddress;
 use coin_structure::coin::{Commitment, Nullifier, TokenType};
 use coin_structure::contract::ContractAddress;
 use onchain_runtime::ops::Op;
 use onchain_runtime::state::{
-    ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState, EntryPoint,
-    EntryPointBuf,
+    ChargedState, ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey, ContractOperation,
+    ContractState, EntryPoint, EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
 use serialize::{Serializable, Tagged};
@@ -84,7 +83,7 @@ pub trait StateReference<D: DB> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn dust_spend_check(
@@ -155,7 +154,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.dust.generationless_fee_availability(
@@ -270,7 +269,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.new_state.dust.generationless_fee_availability(
@@ -493,7 +492,7 @@ impl<
     where
         UnshieldedOffer<S, D>: Clone,
     {
-        if segment_id == SEGMENT_GUARANTEED {
+        if segment_id == GUARANTEED_SEGMENT {
             return Err(MalformedTransaction::IntentAtGuaranteedSegmentId);
         }
 
@@ -529,8 +528,6 @@ impl<
         Ok(())
     }
 }
-
-const SEGMENT_GUARANTEED: u16 = 0;
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
     fn well_formed(&self) -> Result<(), MalformedTransaction<D>> {
@@ -591,11 +588,12 @@ where
                     stx.guaranteed_coins
                         .as_ref()
                         .map(|x| {
-                            P::zswap_well_formed(x, 0).map_err(MalformedTransaction::<D>::from)
+                            P::zswap_well_formed(x, GUARANTEED_SEGMENT)
+                                .map_err(MalformedTransaction::<D>::from)
                         })
                         .transpose()?;
                     for seg_x_offer in stx.fallible_coins.iter() {
-                        if *seg_x_offer.0 == 0 {
+                        if *seg_x_offer.0 == GUARANTEED_SEGMENT {
                             return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                         }
                         P::zswap_well_formed(&seg_x_offer.1.clone(), *seg_x_offer.0.deref())
@@ -625,7 +623,7 @@ where
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
-                    if *segment_intent.0 == 0 {
+                    if *segment_intent.0 == GUARANTEED_SEGMENT {
                         return Err(MalformedTransaction::IllegallyDeclaredGuaranteed);
                     }
                     segment_intent.1.well_formed(
@@ -1931,6 +1929,25 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         hasher.update(&binding_input[..]);
         Fr::from_le_bytes(&hasher.finalize()[..31])
             .expect("Trimmed persistent hash should fall in Fr")
+    }
+}
+
+trait ContractMaintenanceVerifyingKeyExt {
+    fn verify(&self, data: &[u8], sig: &Signature) -> bool;
+}
+
+impl ContractMaintenanceVerifyingKeyExt for ContractMaintenanceVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (ContractMaintenanceVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::Schnorr(_), _) => false,
+            (ContractMaintenanceVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::ECDSA(_), _) => false,
+        }
     }
 }
 

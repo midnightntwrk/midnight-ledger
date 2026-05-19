@@ -15,12 +15,14 @@ import {
   ContractOperationVersion,
   ContractOperationVersionedVerifierKey,
   MaintenanceUpdate,
+  sampleContractAddress,
   sampleSigningKey,
   signData,
   VerifierKeyInsert,
   VerifierKeyRemove
 } from '@midnight-ntwrk/ledger';
 import { Random } from '@/test-objects';
+import { SignatureKindMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - MaintenanceUpdate', () => {
   /**
@@ -141,5 +143,87 @@ describe('Ledger API - MaintenanceUpdate', () => {
     );
 
     expect(maintenanceUpdate).not.toBeNull();
+  });
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test addSignature with an ECDSA signature.
+     *
+     * @given A MaintenanceUpdate and an ECDSA signature
+     * @when Calling addSignature with the ECDSA signature at index 0
+     * @then The getter should report the ECDSA signature with tag intact
+     */
+    test('addSignature accepts an ECDSA-tagged signature and round-trips through the getter', () => {
+      const contractAddress = Random.contractAddress();
+      const ecdsaSig = signData(sampleSigningKey(SignatureKindMarker.ecdsa), new Uint8Array(32));
+
+      let update = new MaintenanceUpdate(
+        contractAddress,
+        [new VerifierKeyRemove('op', new ContractOperationVersion('v3'))],
+        0n
+      );
+      update = update.addSignature(0n, ecdsaSig);
+
+      expect(update.signatures).toHaveLength(1);
+      expect(update.signatures[0]?.at(1)).toEqual(ecdsaSig);
+      expect((update.signatures[0]?.at(1) as { tag: string }).tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Pin: signature kinds at different indices are independent of each
+     * other; mixing them is allowed.
+     *
+     * @given A MaintenanceUpdate with a schnorr sig at index 0 and an ecdsa sig at index 1
+     * @when Reading the signatures back via the getter
+     * @then Each index must report its original tag
+     */
+    test('preserves mixed schnorr/ecdsa signatures across indices', () => {
+      const contractAddress = sampleContractAddress();
+      const schnorrSig = signData(sampleSigningKey(SignatureKindMarker.schnorr), new Uint8Array(32));
+      const ecdsaSig = signData(sampleSigningKey(SignatureKindMarker.ecdsa), new Uint8Array(32));
+
+      let update = new MaintenanceUpdate(
+        contractAddress,
+        [new VerifierKeyRemove('op', new ContractOperationVersion('v3'))],
+        0n
+      );
+      update = update.addSignature(0n, schnorrSig);
+      update = update.addSignature(1n, ecdsaSig);
+
+      expect(update.signatures).toHaveLength(2);
+      expect((update.signatures[0]?.at(1) as { tag: string }).tag).toEqual(SignatureKindMarker.schnorr);
+      expect((update.signatures[1]?.at(1) as { tag: string }).tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * MaintenanceUpdate has no direct serialize() - use toString as a structural-equality proxy.
+     *
+     * @given Two MaintenanceUpdates built identically with the same mixed schnorr+ecdsa signatures at the same indices
+     * @when Comparing their toString outputs
+     * @then They must be byte-equal
+     */
+    test('toString stable for a maintenance update carrying both signature kinds', () => {
+      const contractAddress = sampleContractAddress();
+      const schnorrSig = signData(sampleSigningKey(SignatureKindMarker.schnorr), new Uint8Array(32));
+      const ecdsaSig = signData(sampleSigningKey(SignatureKindMarker.ecdsa), new Uint8Array(32));
+
+      let update = new MaintenanceUpdate(
+        contractAddress,
+        [new VerifierKeyRemove('op', new ContractOperationVersion('v3'))],
+        0n
+      );
+      update = update.addSignature(0n, schnorrSig);
+      update = update.addSignature(1n, ecdsaSig);
+
+      let rebuilt = new MaintenanceUpdate(
+        contractAddress,
+        [new VerifierKeyRemove('op', new ContractOperationVersion('v3'))],
+        0n
+      );
+      rebuilt = rebuilt.addSignature(0n, schnorrSig);
+      rebuilt = rebuilt.addSignature(1n, ecdsaSig);
+
+      expect(rebuilt.toString()).toEqual(update.toString());
+    });
   });
 });

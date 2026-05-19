@@ -2,7 +2,6 @@
 #![allow(unused_imports)]
 #![allow(unused)]
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -12,8 +11,8 @@ use midnight_ledger::prove::Resolver;
 use midnight_ledger::semantics::{TransactionContext, TransactionResult};
 use midnight_ledger::structure::{
     CNightGeneratesDustActionType, CNightGeneratesDustEvent, Intent, LedgerState,
-    OutputInstructionUnshielded, ProofMarker, SystemTransaction, UnshieldedOffer, UtxoOutput,
-    UtxoSpend,
+    OutputInstructionUnshielded, ProofMarker, Signature, SystemTransaction, UnshieldedOffer,
+    UtxoOutput, UtxoSpend,
 };
 use midnight_ledger::structure::{ClaimKind, Transaction};
 #[cfg(feature = "proving")]
@@ -133,7 +132,9 @@ pub fn rewards(c: &mut Criterion) {
     let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
     ledger_state = ledger_state
         .apply_system_tx(
-            &SystemTransaction::DistributeReserve(ledger_state.reserve_pool),
+            &SystemTransaction::DistributeReserve {
+                amount: ledger_state.reserve_pool,
+            },
             Timestamp::from_secs(0),
         )
         .unwrap()

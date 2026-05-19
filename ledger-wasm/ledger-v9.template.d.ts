@@ -92,6 +92,7 @@ export class SignatureEnabled {
   toString(compact?: boolean): string;
   readonly instance: 'signature';
   private type_: 'signature';
+  readonly value: Signature;
 }
 
 export class SignatureErased {
@@ -433,6 +434,13 @@ export class DustGenerationState {
   toString(compact?: boolean): string;
 }
 
+export class DustGenerationTreeInsertionPath {
+  constructor(state: DustGenerationState, index: bigint);
+  serialize(): Uint8Array;
+  static deserialize(raw: Uint8Array): DustGenerationTreeInsertionPath;
+  toString(compact?: boolean): string;
+}
+
 export class DustStateMerkleTreeCollapsedUpdate {
   private constructor();
   static newFromGenerationTree(state: DustGenerationState, start: bigint, end: bigint): DustStateMerkleTreeCollapsedUpdate;
@@ -452,11 +460,12 @@ export class DustState {
 }
 
 export class DustStateChanges {
-  private constructor();
+  constructor(source: TransactionHash, receivedUtxos: QualifiedDustOutput[], spentUtxos: QualifiedDustOutput[]);
+  toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The UTXOs that were received in this state change
    */
@@ -487,6 +496,7 @@ export class DustLocalState {
   removeGenerationInfo(generationIndex: bigint, generation: DustGenerationInfo): DustLocalState;
   collapseGenerationTree(generationIndexStart: bigint, generationIndexEnd: bigint): DustLocalState;
   applyGenerationCollapsedUpdate(update: DustStateMerkleTreeCollapsedUpdate): DustLocalState;
+  updateGenerationTreeFromEvidence(evidence: DustGenerationTreeInsertionPath): DustLocalState;
   generatingTreeRoot(): bigint | undefined;
   insertCommitment(commitmentIndex: bigint, qdo: QualifiedDustOutput, own_qdo: boolean): DustLocalState;
   removeCommitment(commitmentIndex: bigint): DustLocalState;
@@ -513,7 +523,9 @@ export class DustLocalState {
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
   readonly params: DustParameters;
-  readonly syncTime: Date;
+  syncTime: Date;
+  readonly generatingTreeFirstFree: bigint;
+  readonly commitmentTreeFirstFree: bigint;
 }
 
 /**
@@ -970,9 +982,9 @@ export class Intent<S extends Signaturish, P extends Proofish, B extends Binding
 export class UnshieldedOffer<S extends Signaturish> {
   private constructor();
 
-  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: Signature[]): UnshieldedOffer<SignatureEnabled>;
+  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: SignatureEnabled[]): UnshieldedOffer<SignatureEnabled>;
 
-  addSignatures(signatures: Signature[]): UnshieldedOffer<S>;
+  addSignatures(signatures: S[]): UnshieldedOffer<S>;
 
   eraseSignatures(): UnshieldedOffer<SignatureErased>;
 
@@ -980,7 +992,7 @@ export class UnshieldedOffer<S extends Signaturish> {
 
   readonly inputs: UtxoSpend[];
   readonly outputs: UtxoOutput[];
-  readonly signatures: Signature[];
+  readonly signatures: S[];
 }
 
 /**
@@ -1506,6 +1518,11 @@ export function dustNullifier(qdo: QualifiedDustOutput, sk: DustSecretKey): Dust
 export function dustNonce(initialNonce: DustInitialNonce, seq: bigint, sk: DustSecretKey): DustNonce;
 
 /**
+ * Calculate Dust first nonce (when seq=0)
+ */
+export function dustFirstNonce(backingNight: DustInitialNonce, dustAddress: DustPublicKey): DustNonce;
+
+/**
  * Calculate Dust initial nonce (a backing night hash)
  */
 export function dustInitialNonce(outputNo: bigint, intentHash: IntentHash): DustInitialNonce;
@@ -1720,11 +1737,12 @@ export class ZswapChainState {
 }
 
 export class ZswapStateChanges {
-  private constructor();
+  constructor(source: TransactionHash, receivedCoins: QualifiedShieldedCoinInfo[], spentCoins: QualifiedShieldedCoinInfo[]);
+  toString(compact?: boolean): string;
   /**
    * The source of the state change, as a hex-encoded string
    */
-  readonly source: string;
+  readonly source: TransactionHash;
   /**
    * The coins that were received in this state change
    */

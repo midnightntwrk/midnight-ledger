@@ -12,65 +12,65 @@
 // limitations under the License.
 
 import {
+  addressFromKey,
+  type AlignedValue,
+  type Alignment,
+  bigIntModFr,
+  bigIntToValue,
+  ChargedState,
+  coinCommitment,
+  coinNullifier,
   communicationCommitment,
   communicationCommitmentRandomness,
   CostModel,
   createShieldedCoinInfo,
-  decodeShieldedCoinInfo,
   decodeCoinPublicKey,
   decodeContractAddress,
   decodeQualifiedShieldedCoinInfo,
-  encodeShieldedCoinInfo,
-  encodeRawTokenType,
   decodeRawTokenType,
+  decodeShieldedCoinInfo,
   decodeUserAddress,
+  degradeToTransient,
+  ecAdd,
+  ecMul,
+  ecMulGenerator,
   encodeCoinPublicKey,
   encodeContractAddress,
   encodeQualifiedShieldedCoinInfo,
+  encodeRawTokenType,
+  encodeShieldedCoinInfo,
   encodeUserAddress,
+  entryPointHash,
+  hashToCurve,
+  leafHash,
   LedgerParameters,
+  maxAlignedSize,
+  maxField,
   partitionTranscripts,
+  persistentCommit,
+  persistentHash,
   PreTranscript,
   QueryContext,
+  rawTokenType,
   runProgram,
+  runtimeCoinCommitment,
   sampleCoinPublicKey,
-  sampleSigningKey,
+  sampleContractAddress,
   sampleRawTokenType,
+  sampleSigningKey,
+  sampleUserAddress,
   signatureVerifyingKey,
   signData,
   signingKeyFromBip340,
   StateValue,
-  rawTokenType,
+  transientCommit,
+  transientHash,
+  upgradeFromTransient,
+  type Value,
+  valueToBigInt,
   verifySignature,
   VmStack,
-  ZswapSecretKeys,
-  coinNullifier,
-  coinCommitment,
-  addressFromKey,
-  maxField,
-  bigIntModFr,
-  entryPointHash,
-  leafHash,
-  maxAlignedSize,
-  valueToBigInt,
-  bigIntToValue,
-  transientHash,
-  transientCommit,
-  persistentHash,
-  persistentCommit,
-  degradeToTransient,
-  upgradeFromTransient,
-  hashToCurve,
-  ecAdd,
-  ecMul,
-  ecMulGenerator,
-  sampleUserAddress,
-  ChargedState,
-  type Value,
-  type Alignment,
-  type AlignedValue,
-  sampleContractAddress,
-  runtimeCoinCommitment
+  ZswapSecretKeys
 } from '@midnight-ntwrk/ledger';
 import {
   BOOLEAN_HASH_BYTES,
@@ -83,6 +83,7 @@ import {
 } from '@/test-objects';
 import { expect } from 'vitest';
 import { RuntimeCoinCommitmentUtils } from '@/test/utils/RuntimeCoinCommitmentUtils';
+import { SignatureKindMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - functions', () => {
   /**
@@ -270,8 +271,8 @@ describe('Ledger API - functions', () => {
     expect(transcripts).toHaveLength(2);
     expect(transcripts.at(0)).toBeDefined();
     expect(transcripts.at(1)).toBeDefined();
-    expect(transcripts.at(0)?.at(1)?.program).toEqual([{ noop: { n: 0 } }]);
-    expect(transcripts.at(0)?.at(1)?.effects).toEqual({
+    expect(transcripts.at(0)?.at(0)?.program).toEqual([{ noop: { n: 0 } }]);
+    expect(transcripts.at(0)?.at(0)?.effects).toEqual({
       claimedContractCalls: [],
       claimedNullifiers: [],
       claimedShieldedReceives: [],
@@ -282,9 +283,9 @@ describe('Ledger API - functions', () => {
       unshieldedOutputs: new Map(),
       claimedUnshieldedSpends: new Map()
     });
-    expect(transcripts.at(0)?.at(1)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
-    expect(transcripts.at(1)?.at(1)?.program).toEqual([{ noop: { n: 1 } }]);
-    expect(transcripts.at(1)?.at(1)?.effects).toEqual({
+    expect(transcripts.at(0)?.at(0)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
+    expect(transcripts.at(1)?.at(0)?.program).toEqual([{ noop: { n: 1 } }]);
+    expect(transcripts.at(1)?.at(0)?.effects).toEqual({
       claimedContractCalls: [],
       claimedNullifiers: [],
       claimedShieldedReceives: [],
@@ -295,7 +296,7 @@ describe('Ledger API - functions', () => {
       unshieldedOutputs: new Map(),
       claimedUnshieldedSpends: new Map()
     });
-    expect(transcripts.at(1)?.at(1)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
+    expect(transcripts.at(1)?.at(0)?.gas.computeTime).toBeGreaterThanOrEqual(1n);
   });
 
   /**
@@ -683,8 +684,9 @@ describe('Ledger API - functions', () => {
     const verifyingKey = signatureVerifyingKey(signingKey);
 
     expect(verifySignature(verifyingKey, testData, signature)).toBe(true);
-    expect(typeof signingKey).toBe('string');
-    expect(signingKey.length).toBeGreaterThan(0);
+    expect(typeof signingKey.value).toBe('string');
+    expect(signingKey.value.length).toBeGreaterThan(0);
+    expect(signingKey.tag).toEqual(SignatureKindMarker.schnorr);
   });
 
   test('signingKeyFromBip340 with different inputs produces different keys', () => {
@@ -704,6 +706,15 @@ describe('Ledger API - functions', () => {
     const signingKey2 = signingKeyFromBip340(privateKey);
 
     expect(signingKey1).toEqual(signingKey2);
+  });
+
+  test('signingKeyFromBip340 is just validation and hex-encoding', () => {
+    const privateKey = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) privateKey[i] = i + 1;
+    const signingKey = signingKeyFromBip340(privateKey);
+
+    const expectedHex = Buffer.from(privateKey).toString('hex');
+    expect(signingKey).toEqual({ tag: 'schnorr', value: expectedHex });
   });
 
   test('signingKeyFromBip340 with invalid key size should throw', () => {
@@ -907,4 +918,269 @@ describe('Ledger API - functions', () => {
   });
 
   test.todo('createZswapInput');
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test default behaviour of sampleSigningKey().
+     *
+     * @given No arguments passed to sampleSigningKey
+     * @when Calling sampleSigningKey()
+     * @then Should return a schnorr-tagged key with a 32-byte (64 hex char) value
+     */
+    test('sampleSigningKey() defaults to schnorr', () => {
+      const sk = sampleSigningKey();
+
+      expect(sk.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(sk.value).toMatch(/^[0-9a-fA-F]+$/);
+      expect(sk.value.length).toEqual(64);
+    });
+
+    /**
+     * Test explicit schnorr argument to sampleSigningKey.
+     *
+     * @given The string 'schnorr' as the kind argument
+     * @when Calling sampleSigningKey(SignatureKindMarker.schnorr)
+     * @then Should return a schnorr-tagged 32-byte signing key
+     */
+    test('sampleSigningKey("schnorr") returns a schnorr-tagged key', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+
+      expect(sk.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(sk.value.length).toEqual(64);
+    });
+
+    /**
+     * Test explicit ecdsa argument to sampleSigningKey.
+     *
+     * @given The string 'ecdsa' as the kind argument
+     * @when Calling sampleSigningKey(SignatureKindMarker.ecdsa)
+     * @then Should return an ecdsa-tagged 32-byte signing key
+     */
+    test('sampleSigningKey("ecdsa") returns an ecdsa-tagged key', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+
+      expect(sk.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(sk.value.length).toEqual(64);
+    });
+
+    /**
+     * Test rejection of unrecognised kind.
+     *
+     * @given An unsupported kind string
+     * @when Calling sampleSigningKey('rsa')
+     * @then Should throw 'Unknown signature kind' error
+     */
+    test('sampleSigningKey with unknown kind throws', () => {
+      // @ts-expect-error - intentional misuse for negative test
+      expect(() => sampleSigningKey('rsa')).toThrow(/Unknown signature kind/);
+    });
+
+    /**
+     * Test that signatureVerifyingKey preserves the schnorr tag.
+     *
+     * @given A schnorr signing key
+     * @when Deriving the verifying key
+     * @then Should be a schnorr-tagged 32-byte (BIP340 x-only) verifying key
+     */
+    test('signatureVerifyingKey preserves the signing-key tag (schnorr)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const vk = signatureVerifyingKey(sk);
+
+      expect(vk.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(vk.value.length).toEqual(64);
+    });
+
+    /**
+     * Test that signatureVerifyingKey preserves the ecdsa tag.
+     *
+     * @given An ecdsa signing key
+     * @when Deriving the verifying key
+     * @then Should be an ecdsa-tagged 33-byte (SEC1 compressed) verifying key
+     */
+    test('signatureVerifyingKey preserves the signing-key tag (ecdsa)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+
+      expect(vk.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(vk.value.length).toEqual(66);
+    });
+
+    /**
+     * Test that signData preserves the schnorr tag.
+     *
+     * @given A schnorr signing key and arbitrary data
+     * @when Signing the data
+     * @then Should produce a schnorr-tagged 64-byte signature
+     */
+    test('signData preserves the signing-key tag (schnorr)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const sig = signData(sk, new TextEncoder().encode('hello'));
+
+      expect(sig.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(sig.value.length).toEqual(128);
+    });
+
+    /**
+     * Test that signData preserves the ecdsa tag.
+     *
+     * @given An ecdsa signing key and arbitrary data
+     * @when Signing the data
+     * @then Should produce an ecdsa-tagged 64-byte (r||s) signature
+     */
+    test('signData preserves the signing-key tag (ecdsa)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const sig = signData(sk, new TextEncoder().encode('test'));
+
+      expect(sig.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(sig.value.length).toEqual(128);
+    });
+
+    /**
+     * Test ECDSA sign/verify round-trip.
+     *
+     * @given An ecdsa signing key
+     * @when Signing data and verifying with the derived verifying key
+     * @then Verification should succeed
+     */
+    test('ECDSA sign/verify round-trip succeeds', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const vk = signatureVerifyingKey(sk);
+      const data = new TextEncoder().encode('round-trip test');
+      const sig = signData(sk, data);
+
+      expect(verifySignature(vk, data, sig)).toBe(true);
+    });
+
+    /**
+     * Test Schnorr sign/verify round-trip.
+     *
+     * @given A schnorr signing key
+     * @when Signing data and verifying with the derived verifying key
+     * @then Verification should succeed
+     */
+    test('Schnorr sign/verify round-trip succeeds', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const vk = signatureVerifyingKey(sk);
+      const data = new TextEncoder().encode('round-trip test');
+      const sig = signData(sk, data);
+
+      expect(verifySignature(vk, data, sig)).toBe(true);
+    });
+
+    /**
+     * Test ECDSA RFC-6979 determinism.
+     *
+     * @given An ecdsa signing key and a fixed message
+     * @when Signing the same message twice
+     * @then Both signatures should be byte-for-byte identical
+     */
+    test('ECDSA signing is deterministic for a fixed (key, message)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const data = new TextEncoder().encode('test');
+      const sig1 = signData(sk, data);
+      const sig2 = signData(sk, data);
+
+      expect(sig1).toEqual(sig2);
+    });
+
+    /**
+     * Test Schnorr randomized signing.
+     *
+     * @given A schnorr signing key and a fixed message
+     * @when Signing the same message twice
+     * @then Resulting signatures should differ (BIP340 uses fresh randomness)
+     */
+    test('Schnorr signing is non-deterministic for a fixed (key, message)', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const data = new TextEncoder().encode('same input');
+      const sig1 = signData(sk, data);
+      const sig2 = signData(sk, data);
+
+      expect(sig1.value).not.toEqual(sig2.value);
+    });
+
+    /**
+     * Test rejection of schnorr signature against an ecdsa key.
+     *
+     * @given A schnorr-signed message and an unrelated ecdsa verifying key
+     * @when Verifying the schnorr signature with the ecdsa key
+     * @then Verification should return false (algorithm mismatch)
+     */
+    test('verifySignature rejects schnorr signature against an ecdsa key', () => {
+      const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const ecdsaVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const data = new TextEncoder().encode('mixed');
+      const sig = signData(schnorrSk, data);
+
+      expect(verifySignature(ecdsaVk, data, sig)).toBe(false);
+    });
+
+    /**
+     * Test rejection of ecdsa signature against a schnorr key.
+     *
+     * @given An ecdsa-signed message and an unrelated schnorr verifying key
+     * @when Verifying the ecdsa signature with the schnorr key
+     * @then Verification should return false (algorithm mismatch)
+     */
+    test('verifySignature rejects ecdsa signature against a schnorr key', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const schnorrVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.schnorr));
+      const data = new TextEncoder().encode('mixed');
+      const sig = signData(ecdsaSk, data);
+
+      expect(verifySignature(schnorrVk, data, sig)).toBe(false);
+    });
+
+    /**
+     * Test rejection of tag-spoofed signature bytes. Both Schnorr and ECDSA
+     * signatures are 64 raw bytes, so the only thing distinguishing them on
+     * the wire is the `tag` field. A bug ignoring `tag` could misroute the
+     * verifier.
+     *
+     * @given A valid schnorr signature whose tag has been swapped to 'ecdsa'
+     * @when Verifying the spoofed signature against the real (schnorr) key
+     * @then Verification should return false
+     */
+    test('verifySignature rejects schnorr bytes labelled as ecdsa', () => {
+      const sk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const vk = signatureVerifyingKey(sk);
+      const data = new TextEncoder().encode('label-spoof');
+      const realSig = signData(sk, data);
+      const spoofed = { tag: SignatureKindMarker.ecdsa, value: realSig.value };
+
+      expect(verifySignature(vk, data, spoofed)).toBe(false);
+    });
+
+    /**
+     * Test that addressFromKey is domain-separated across algorithms.
+     *
+     * @given Freshly-sampled schnorr and ecdsa verifying keys
+     * @when Deriving a UserAddress from each
+     * @then Addresses should differ (ecdsa derivation uses an "mn:ecdsa:"
+     *   domain-separator prefix that schnorr derivation lacks)
+     */
+    test('addressFromKey produces different addresses for schnorr vs ecdsa', () => {
+      const schnorrVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.schnorr));
+      const ecdsaVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const a1 = addressFromKey(schnorrVk);
+      const a2 = addressFromKey(ecdsaVk);
+
+      expect(a1).not.toEqual(a2);
+      expect(a1).toMatch(HEX_64_REGEX);
+      expect(a2).toMatch(HEX_64_REGEX);
+    });
+
+    /**
+     * Test that signingKeyFromBip340 only emits Schnorr keys.
+     *
+     * @given Any valid 32-byte input
+     * @when Calling signingKeyFromBip340
+     * @then The result should always be a schnorr-tagged signing key
+     */
+    test('signingKeyFromBip340 always returns a schnorr-tagged key', () => {
+      const sk = signingKeyFromBip340(new Uint8Array(32).fill(7));
+
+      expect(sk.tag).toEqual(SignatureKindMarker.schnorr);
+    });
+  });
 });

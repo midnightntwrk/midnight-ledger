@@ -4,11 +4,23 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased
+## Unreleased (9.0)
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
   ledger parameters.
+- feat: add support for ECDSA signatures
+- feat: add `UnlockToTreasury` system transaction, moving funds from the locked
+  pool to the treasury.
 - fix: correctly exclude the identity point during coin ciphertext decryption
+
+## Unreleased (8.2)
+
+- feat: add `apply_guaranteed_only` and `GuaranteedApplyResult` for split-phase transaction execution with deferred event generation.
+- feat: proof-server support for ZKIR 2.1
+- fix: fix potential panic in MPT path removal, unlikely to be currently triggerable.
+- fix: fix potential panic in bridge fee processing
+- fix: address non-associativity of Dust event processing.
+- fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
 
 ## 8.1.0
 

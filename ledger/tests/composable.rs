@@ -14,7 +14,6 @@
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Info as CoinInfo;
 use coin_structure::transfer::{Recipient, SenderEvidence};
@@ -25,7 +24,7 @@ use midnight_ledger::error::{
 };
 use midnight_ledger::semantics::TransactionResult;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Transaction,
+    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Signature, Transaction,
 };
 use midnight_ledger::test_utilities::PUBLIC_PARAMS;
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
@@ -534,15 +533,12 @@ async fn composable() {
         tx.well_formed(&state.ledger, strictness, state.time)
             .unwrap()
     };
-    match state.ledger.apply(&tx, &state.context()).1 {
-        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
-            res.get(&1),
-            Some(Err(TransactionInvalid::Transcript(
-                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-            )))
-        )),
-        r => panic!("unexpected transaction result: {r:?}"),
-    }
+    assert!(matches!(
+        state.ledger.apply(&tx, &state.context()).1,
+        TransactionResult::Failure(TransactionInvalid::Transcript(
+            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+        ))
+    ));
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -608,13 +604,13 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         dbg!(&transcripts);
-        // Manually move things to the guaranteed section.
+        // Manually move things to the fallible section.
         let call_outer = ContractCallPrototype {
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
-            guaranteed_public_transcript: transcripts[1].1.clone(),
-            fallible_public_transcript: None,
+            guaranteed_public_transcript: None,
+            fallible_public_transcript: transcripts[1].0.clone(),
             private_transcript_outputs: vec![b"malicious".to_vec().into(), cc_rand.into()],
             input: ().into(),
             output: ().into(),
@@ -635,7 +631,7 @@ async fn composable() {
 
         match tx.well_formed(&state.ledger, strictness, state.time) {
             Err(MalformedTransaction::SequencingCheckFailure(
-                SequencingCheckError::FallibleInGuaranteedContextViolation { .. },
+                SequencingCheckError::GuaranteedInFallibleContextViolation { .. },
             )) => (),
             Err(e) => panic!("{e:?}"),
             Ok(_) => panic!("succeeded unexpectedly"),
@@ -1074,15 +1070,12 @@ async fn guaranteed_in_fallible() {
         tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0))
             .unwrap()
     };
-    match ledger_state.ledger.apply(&tx, &ledger_state.context()).1 {
-        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
-            res.get(&1),
-            Some(Err(TransactionInvalid::Transcript(
-                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-            )))
-        )),
-        r => panic!("unexpected transaction result: {r:?}"),
-    }
+    assert!(matches!(
+        ledger_state.ledger.apply(&tx, &ledger_state.context()).1,
+        TransactionResult::Failure(TransactionInvalid::Transcript(
+            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+        ))
+    ));
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -1174,7 +1167,7 @@ async fn guaranteed_in_fallible() {
 
         match tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0)) {
             Err(MalformedTransaction::SequencingCheckFailure(
-                SequencingCheckError::FallibleInGuaranteedContextViolation { .. },
+                SequencingCheckError::GuaranteedInFallibleContextViolation { .. },
             )) => (),
             Err(e) => panic!("{e:?}"),
             Ok(_) => panic!("succeeded unexpectedly"),
@@ -1418,8 +1411,8 @@ async fn composable_funded() {
                     Vec::new(),
                     state.time,
                 ),
-                None,
-                [(1, offer)].into_iter().collect(),
+                Some(offer),
+                HashMap::new(),
             );
         dbg!(&pre_tx);
         tx_prove(rng.split(), &pre_tx, &RESOLVER).await.unwrap()
