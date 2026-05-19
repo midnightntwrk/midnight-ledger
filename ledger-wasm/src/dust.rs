@@ -1586,6 +1586,13 @@ impl DustLocalState {
     pub fn sync_time(&self) -> Date {
         seconds_to_js_date(self.0.sync_time.to_secs())
     }
+
+    #[wasm_bindgen(setter, js_name = "syncTime")]
+    pub fn set_sync_time(&mut self, sync_time: &Date) -> Result<(), JsError> {
+        let sync_time = Timestamp::from_secs(js_date_to_seconds(sync_time));
+        self.0.sync_time = sync_time;
+        Ok(())
+    }
 }
 
 #[wasm_bindgen]
