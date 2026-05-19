@@ -9,7 +9,11 @@ query ContractState($address: HexEncoded!) {
       hash
       block {
         height
+        ledgerParameters
       }
+    }
+    ... on ContractCall {
+      zswapState
     }
   }
 }

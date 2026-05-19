@@ -28,6 +28,8 @@ async fn call_prepare_unproven(
     circuit_args: serde_json::Value,
     contract_state_hex: String,
     contract_address_hex: String,
+    zswap_chain_state_hex: Option<String>,
+    ledger_parameters_hex: Option<String>,
     controller_sk: [u8; 32],
     coin_public_key_hex: String,
     encryption_public_key_hex: String,
@@ -42,8 +44,8 @@ async fn call_prepare_unproven(
                 "circuitArgs": circuit_args,
                 "contractStateHex": contract_state_hex,
                 "contractAddressHex": contract_address_hex,
-                "zswapChainStateHex": serde_json::Value::Null,
-                "ledgerParametersHex": serde_json::Value::Null,
+                "zswapChainStateHex": zswap_chain_state_hex,
+                "ledgerParametersHex": ledger_parameters_hex,
                 "controllerSecretHex": hex::encode(controller_sk),
                 "coinPublicKeyHex": coin_public_key_hex,
                 "encryptionPublicKeyHex": encryption_public_key_hex,
@@ -826,6 +828,16 @@ impl Wallet {
                 Ok(b) => b,
                 Err(e) => { yield crate::WizardStage::Failed(format!("spawn harness: {e}")); return; }
             };
+            // Plumb the live chain Zswap state + LedgerParameters
+            // from the indexer (mirrors upstream
+            // `publicDataProvider.queryZSwapAndContractState`). Both
+            // are needed for `createUnprovenCallTxFromInitialStates`
+            // to route the call's transcript to `guaranteed_transcript`
+            // — passing `LedgerParameters.initialParameters()`
+            // produces `fallible_transcript` only, which the chain
+            // rejects with `Invalid Transaction (1010)` BadProof. See
+            // `preprod_decode_diff` for the byte-level diff that
+            // surfaced this.
             let unproven_hex = match call_prepare_unproven(
                 &bridge,
                 did_id.to_did_string(),
@@ -833,6 +845,8 @@ impl Wallet {
                 args_json,
                 info.state_hex,
                 addr_hex.clone(),
+                info.zswap_state_hex,
+                info.ledger_parameters_hex,
                 controller_sk,
                 coin_pk_hex,
                 enc_pk_hex,

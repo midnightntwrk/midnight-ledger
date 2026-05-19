@@ -54,12 +54,29 @@ pub struct ChainTipInfo {
 /// indexer. `state_hex` is the SCALE/serialize-encoded
 /// `onchain_state::ContractState` payload — DID-specific decoding
 /// happens in `wallet_core::did::contract`.
+///
+/// `zswap_state_hex` and `ledger_parameters_hex` mirror what
+/// upstream's `publicDataProvider.queryZSwapAndContractState`
+/// returns (see midnight-js-indexer-public-data-provider line 727+):
+/// the live chain Zswap commitment-tree snapshot at the call's
+/// block, and the block-local `LedgerParameters`. Both are needed
+/// to construct an UnprovenCallTx whose proof partition matches
+/// what the chain expects on submit — passing
+/// `LedgerParameters::initialParameters()` instead causes the
+/// runtime to route the transcript to `fallible_transcript`,
+/// which the chain rejects with `Invalid Transaction (1010)`.
+///
+/// Both are `None` for `ContractDeploy` actions (only `ContractCall`
+/// has a `zswapState`); falling back to empty / initial values is
+/// the caller's choice.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContractStateInfo {
     pub address_hex: String,
     pub state_hex: String,
     pub last_tx_hash: String,
     pub last_block_height: Option<i64>,
+    pub zswap_state_hex: Option<String>,
+    pub ledger_parameters_hex: Option<String>,
 }
 
 #[derive(Clone)]
@@ -126,11 +143,23 @@ impl IndexerClient {
         }
 
         let data = resp.data.ok_or(IndexerError::EmptyResponse)?;
-        Ok(data.contract_action.map(|a| ContractStateInfo {
-            address_hex: a.address,
-            state_hex: a.state,
-            last_tx_hash: a.transaction.hash,
-            last_block_height: Some(a.transaction.block.height),
+        Ok(data.contract_action.map(|a| {
+            // `on ContractCall` inline fragment populates this only
+            // for call actions; deploys leave it None.
+            let zswap_state_hex = match &a.on {
+                contract_state::ContractStateContractActionOn::ContractCall(c) => {
+                    Some(c.zswap_state.clone())
+                }
+                _ => None,
+            };
+            ContractStateInfo {
+                address_hex: a.address,
+                state_hex: a.state,
+                last_tx_hash: a.transaction.hash,
+                last_block_height: Some(a.transaction.block.height),
+                zswap_state_hex,
+                ledger_parameters_hex: Some(a.transaction.block.ledger_parameters),
+            }
         }))
     }
 }
