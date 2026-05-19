@@ -399,11 +399,92 @@ struct CostRun {
     succeeded: bool,
 }
 
+/// PreProd-live demo configuration. Compiled in only when
+/// `--features preprod-live` is on. The seed + DIDs come from
+/// the operator's local
+/// `~/.midnight-did/profiles/preprod/preproad-default`
+/// manager profile, checked into source per operator
+/// instruction. Off by default — vanilla builds keep the
+/// shared `app_wallet_for(PreProd)` seed.
+#[cfg(feature = "preprod-live")]
+mod preprod_live {
+    pub const SEED_HEX: &str =
+        "c1e8d986d10a2aff5d5f6fbf3d568f447b1cd46ccb190f838e0cf2707f5622a2";
+    /// Contract addresses for the three DIDs in the manager
+    /// profile. Pre-populated into the wallet's persistent
+    /// inventory at unlock so the operator sees them
+    /// immediately without typing DID strings into the
+    /// Resolve panel.
+    pub const DIDS: &[&str] = &[
+        "6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801",
+        "5914d2622abfb6f793c4b15c82692593500ecc481ae9b99a1655ad5e766dca4f",
+        "ce785669eac7048652d239bd40286240bbe09f9f9c5d614631a3b256a2fec68a",
+    ];
+}
+
+/// Build the wallet handle this App uses for a given network.
+/// Vanilla builds delegate to `Wallet::demo` — same shared
+/// test seed everyone else uses. `preprod-live` builds swap
+/// in the operator's manager-profile seed when `net` is
+/// PreProd; all other networks stay on `Wallet::demo`.
+///
+/// One place to centralise the swap so the rest of the App
+/// doesn't need to know which build it's running under.
+fn app_wallet_for(net: Network) -> Wallet {
+    #[cfg(feature = "preprod-live")]
+    if matches!(net, Network::PreProd) {
+        let bytes = hex::decode(preprod_live::SEED_HEX).expect("preprod_live::SEED_HEX is hex");
+        let seed: [u8; 32] = bytes
+            .as_slice()
+            .try_into()
+            .expect("preprod_live::SEED_HEX is 32 bytes");
+        return Wallet::from_seed(seed, Network::PreProd);
+    }
+    wallet_core::Wallet::demo(net)
+}
+
+/// `preprod-live` only: stamp the operator's three DIDs into
+/// the wallet's persistent inventory as `Pending`, and seed
+/// the matching controller secrets so the Sign tab + write
+/// flows are usable immediately. Auto-resolve at unlock then
+/// promotes the rows to `Active` with real counters.
+///
+/// Idempotent across runs:
+/// - `WalletStore::put_did_inventory` preserves
+///   `created_at` on an existing row and just bumps
+///   `updated_at`.
+/// - `remember_controller_secret` overwrites in-place; same
+///   value on every call.
+#[cfg(feature = "preprod-live")]
+fn seed_preprod_live_state(state: &BridgeState, store: &wallet_core::store::WalletStore) {
+    use wallet_core::store::{DidInventoryEntry, InventoryStatus};
+
+    let sk = wallet_core::upstream_demo_controller_secret();
+    for addr in preprod_live::DIDS {
+        let did = format!("did:midnight:preprod:{addr}");
+        if let Err(e) = store.put_did_inventory(DidInventoryEntry {
+            did: did.clone(),
+            network: Network::PreProd,
+            status: InventoryStatus::Pending,
+            counter: None,
+            vm_count: None,
+            service_count: None,
+            last_block_height: None,
+            created_at: 0,
+            updated_at: 0,
+        }) {
+            tracing::warn!(error=%e, did=%did, "preprod-live: seed inventory failed");
+        }
+        state.remember_controller_secret(Network::PreProd, did, sk);
+    }
+    tracing::info!(count = preprod_live::DIDS.len(), "preprod-live: seeded inventory + secrets");
+}
+
 #[component]
 pub fn App() -> Element {
     let mut network = use_signal(|| Network::PreProd);
     let mut wallet = use_signal::<Option<WalletInfo>>(|| {
-        Some(WalletInfo::from_wallet(&Wallet::demo(Network::PreProd)))
+        Some(WalletInfo::from_wallet(&app_wallet_for(Network::PreProd)))
     });
     let mut phase = use_signal(|| SyncPhase::Idle);
     let mut chain = use_signal::<ChainSnapshot>(ChainSnapshot::default);
@@ -531,6 +612,18 @@ pub fn App() -> Element {
                     );
                     state.set_active_wallet_id(wallet_id);
 
+                    // PreProd-live demo: stamp the operator's
+                    // three manager-profile DIDs into the
+                    // inventory + seed their controller
+                    // secrets so the Sign tab + Update DID
+                    // flows are immediately usable. Idempotent
+                    // — re-running just refreshes the
+                    // timestamps.
+                    #[cfg(feature = "preprod-live")]
+                    if matches!(net, Network::PreProd) {
+                        seed_preprod_live_state(&state, &store);
+                    }
+
                     let n = state.hydrate_controller_secrets(net);
                     let inv_map = load_inventory_for_network(&store, net);
                     let inv_count = inv_map.len();
@@ -592,7 +685,7 @@ pub fn App() -> Element {
                         let net = net;
                         let bridge = state.clone();
                         spawn(async move {
-                            let w = wallet_core::Wallet::demo(net);
+                            let w = app_wallet_for(net);
                             match w.resolve_did_full(&did_str).await {
                                 Ok(resolved) => {
                                     let did_string =
@@ -708,7 +801,7 @@ pub fn App() -> Element {
     });
 
     let mut load_demo = move || {
-        let w = Wallet::demo(*network.read());
+        let w = app_wallet_for(*network.read());
         wallet.set(Some(WalletInfo::from_wallet(&w)));
     };
     let mut generate = move || {
@@ -780,13 +873,13 @@ pub fn App() -> Element {
 
             // After a successful Connect, snapshot the unshielded
             // UTXO set so BalancesCard can render the real NIGHT
-            // total. We deliberately use `Wallet::demo(net)` to
+            // total. We deliberately use `app_wallet_for(net)` to
             // match the seed shown in the address card; the
             // generate flow currently shares the same demo path.
             // A snapshot failure is non-fatal — the UI stays on
             // "—" rather than reverting the Synced phase.
             if errs.is_empty() {
-                let w = Wallet::demo(net);
+                let w = app_wallet_for(net);
                 match w.sync_unshielded().await {
                     Ok(set) => {
                         // NIGHT's raw 64-char token type is 32 zero bytes
@@ -913,7 +1006,7 @@ pub fn App() -> Element {
                             // user previously loaded a random
                             // wallet, the next sync needs the
                             // network-correct keys.
-                            let new_wallet = Wallet::demo(n);
+                            let new_wallet = app_wallet_for(n);
                             let seed_hex = new_wallet.seed_hex();
                             if was_demo || wallet.read().is_none() {
                                 wallet.set(Some(WalletInfo::from_wallet(&new_wallet)));
@@ -1367,7 +1460,7 @@ fn CreateDidWizard(
         let on_cost = on_cost.clone();
         spawn(async move {
             use futures::StreamExt;
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             // Bracket the pipeline with balance snapshots so
             // we can compute the dust + NIGHT cost. A failure
             // to take the pre-snapshot disables cost
@@ -1491,7 +1584,7 @@ fn BalancePanel(network: Network) -> Element {
         pending.set(true);
         result.set(None);
         spawn(async move {
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             let r = match w.sync_unshielded().await {
                 Ok(set) => {
                     let mut lines = Vec::new();
@@ -1580,7 +1673,7 @@ fn ResolveDidPanel(
         let on_resolved = on_resolved.clone();
         let on_seen = on_seen.clone();
         spawn(async move {
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             let r: Result<ResolveView, String> = match w.resolve_did_full(&did_str).await {
                 Ok(resolved) => {
                     let did_string = resolved.document.id.to_did_string();
@@ -1789,7 +1882,7 @@ fn LoadCircuitPanel(
         let cost_label = timing_label.clone();
         spawn(async move {
             use futures::StreamExt;
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             let cost_start = std::time::Instant::now();
             let before = w.balance_snapshot().await.ok();
             let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name.clone(), counter));
@@ -2530,7 +2623,7 @@ fn DidOperationBuilder(
         spawn(async move {
             use futures::StreamExt;
             use wallet_core::WizardStage;
-            let wallet = Wallet::demo(network);
+            let wallet = app_wallet_for(network);
             let total = queue.read().len();
             // Bracket the whole batch (loads + calls) with
             // one cost snapshot pair. Per-op snapshots would
@@ -4437,7 +4530,7 @@ fn DidDetailView(
         let did_str = did_for_resolve.clone();
         let on_resolved = on_resolved.clone();
         spawn(async move {
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             match w.resolve_did_full(&did_str).await {
                 Ok(r) => on_resolved.call(r),
                 Err(e) => resolve_error.set(Some(e.to_string())),
@@ -4474,7 +4567,7 @@ fn DidDetailView(
         let on_cost = on_cost.clone();
         spawn(async move {
             use futures::StreamExt;
-            let w = Wallet::demo(network);
+            let w = app_wallet_for(network);
             let did_id = match wallet_core::DidId::parse(&did_str) {
                 Ok(d) => d,
                 Err(e) => {
@@ -4540,7 +4633,7 @@ fn DidDetailView(
                 let did_str = did_for_auto.clone();
                 resolving.set(true);
                 spawn(async move {
-                    let w = Wallet::demo(network);
+                    let w = app_wallet_for(network);
                     match w.resolve_did_full(&did_str).await {
                         Ok(r) => on_resolved.call(r),
                         Err(e) => resolve_error.set(Some(e.to_string())),
@@ -6099,6 +6192,14 @@ async fn rehydrate_for_network(
         find_or_create_wallet_for_network(&store, new_net, seed_hex.as_deref());
     bridge_state.set_active_wallet_id(wallet_id);
 
+    // Re-seed the PreProd-live demo state when switching INTO
+    // PreProd (matches the unlock-time seeding). No-op on
+    // other networks or in vanilla builds.
+    #[cfg(feature = "preprod-live")]
+    if matches!(new_net, Network::PreProd) {
+        seed_preprod_live_state(&bridge_state, &store);
+    }
+
     let secrets_count = bridge_state.hydrate_controller_secrets(new_net);
     let inv_map = load_inventory_for_network(&store, new_net);
     let inv_count = inv_map.len();
@@ -6127,7 +6228,7 @@ async fn rehydrate_for_network(
     for did_str in dids_to_refresh {
         let bridge = bridge_state.clone();
         spawn(async move {
-            let w = wallet_core::Wallet::demo(new_net);
+            let w = app_wallet_for(new_net);
             if let Ok(resolved) = w.resolve_did_full(&did_str).await {
                 let did_string = resolved.document.id.to_did_string();
                 let entry = DidInventoryEntry {

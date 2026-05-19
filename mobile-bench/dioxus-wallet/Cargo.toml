@@ -25,6 +25,21 @@ default = []
 # upstream TS package directly inside the WebView.
 js-bridge = ["prover-core/proof-server-http"]
 
+# Boots the App with the operator's PreProd manager profile:
+# - `Wallet::demo(Network::PreProd)` is swapped to use the
+#   profile's seed (operator-supplied; checked into source per
+#   instruction).
+# - The three DIDs from that profile are pre-populated into the
+#   wallet's persistent inventory on first launch.
+# - The upstream-derived controller secret
+#   (`SHA-256(addVerificationMethod.prover)`) is seeded into
+#   `BridgeState.controller_secrets` for each so the Sign tab
+#   can derive keys + Deactivate/Update buttons are unlocked.
+#
+# Off by default — vanilla builds keep the shared
+# `DEMO_SEED_HEX` for PreProd. Flip on for the live demo.
+preprod-live = []
+
 [dependencies]
 wallet-core = { path = "../wallet-core" }
 tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync"] }

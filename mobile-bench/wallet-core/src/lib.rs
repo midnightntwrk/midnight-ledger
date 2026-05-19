@@ -38,6 +38,23 @@ pub fn did_circuit_names() -> &'static [&'static str] {
     did::artifacts::CIRCUIT_NAMES
 }
 
+/// The 32-byte controller secret upstream
+/// `midnight-did-manager-service` uses for every DID it
+/// mints. Derivation matches `midnight-did/api/src/lib.ts::initPrivateState`:
+/// `SHA-256(addVerificationMethod.prover_key_bytes)`. Because
+/// the prover key is deterministic per circuit version, every
+/// DID created by the manager shares this one constant.
+///
+/// Use this when the wallet wants to drive write circuits
+/// against DIDs minted elsewhere — e.g. the PreProd live demo
+/// where the manager created the DIDs, not the prototype.
+pub fn upstream_demo_controller_secret() -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(did::artifacts::ADD_VERIFICATION_METHOD.prover_key);
+    h.finalize().into()
+}
+
 pub use address::{AddressError, truncate_middle, unshielded_bech32m, unshielded_hrp};
 pub use hd::{HdError, Role};
 pub use indexer::{ChainTipInfo, ContractStateInfo, IndexerClient, IndexerError};
