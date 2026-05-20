@@ -2327,8 +2327,34 @@ fn ResolveDidPanel(
                                     span { class: "value", "{block}" }
                                 }
                             }
-                            div { class: "row label", "Last tx" }
-                            div { class: "seed-blob", "0x{view.last_tx_hash}" }
+                            // "Last tx" gets its own card-style
+                            // panel with a Copy button so the user
+                            // can grab the hash for the explorer
+                            // without selecting + copying by hand.
+                            // Same `<pre>` styling the Document /
+                            // Raw State tabs use so the long hex
+                            // wraps cleanly inside the row.
+                            div { class: "did-meta-cell",
+                                style: "flex-direction: column; align-items: stretch; gap: 4px; margin-top: 8px;",
+                                div { class: "row",
+                                    style: "justify-content: space-between; align-items: center;",
+                                    span { class: "label", "Last tx" }
+                                    {copy_btn(format!("0x{}", view.last_tx_hash), "Copy")}
+                                }
+                                pre {
+                                    style: "font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;\
+                                            font-size: 11px;\
+                                            color: var(--mono-tint, var(--text));\
+                                            background: var(--surface-2);\
+                                            border: 1px solid var(--border-faint);\
+                                            border-radius: 8px;\
+                                            padding: 8px 10px;\
+                                            margin: 0;\
+                                            white-space: pre-wrap;\
+                                            word-break: break-all;",
+                                    "0x{view.last_tx_hash}"
+                                }
+                            }
                             div { class: "row",
                                 button {
                                     onclick: move |_| {
@@ -2339,7 +2365,26 @@ fn ResolveDidPanel(
                                 }
                             }
                             if *show_json.read() {
-                                div { class: "seed-blob", "{view.document_json}" }
+                                // Same `<pre>` formatting as the
+                                // Detail-view Document tab — the
+                                // `<div class="seed-blob">` was
+                                // collapsing all whitespace, so the
+                                // pretty-printed JSON came out as
+                                // one wrapped line.
+                                pre {
+                                    style: "font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;\
+                                            font-size: 11px;\
+                                            color: var(--mono-tint, var(--text));\
+                                            background: var(--surface-2);\
+                                            border: 1px solid var(--border-faint);\
+                                            border-radius: 8px;\
+                                            padding: 12px;\
+                                            margin: 8px 0 0 0;\
+                                            white-space: pre-wrap;\
+                                            word-break: break-word;\
+                                            overflow-x: auto;",
+                                    "{view.document_json}"
+                                }
                             }
                         }
                     }
@@ -6357,17 +6402,22 @@ fn DidInventoryPanel(
             }
         };
     }
+    // Trimmed inventory layout per user feedback: dropped the
+    // `Network` column (the active network is shown in the header
+    // already), the `Counter` column (raw maintenance counter is
+    // a developer detail, not something the operator needs to see
+    // at-a-glance) and the `VMs` column (verification-method count
+    // is visible inside the DID detail view). Kept Status / short
+    // DID / Services and added the `Open` button right next to
+    // `Status` so the action is no longer shifted across columns.
     rsx! {
         div { class: "wizard-header", "DIDs ({entries.len()})" }
         div { class: "did-inventory",
             div { class: "did-inventory-row did-inventory-header",
                 span { class: "did-inventory-cell status", "Status" }
-                span { class: "did-inventory-cell network", "Network" }
-                span { class: "did-inventory-cell did", "DID" }
-                span { class: "did-inventory-cell counter", "Counter" }
-                span { class: "did-inventory-cell vms", "VMs" }
-                span { class: "did-inventory-cell services", "Services" }
                 span { class: "did-inventory-cell action", "" }
+                span { class: "did-inventory-cell did", "DID" }
+                span { class: "did-inventory-cell services", "Services" }
             }
             for entry in entries.iter() {
                 {render_inventory_row(entry, on_select.clone())}
@@ -6379,14 +6429,6 @@ fn DidInventoryPanel(
 fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<String>) -> Element {
     let did_short = truncate_did(&entry.did);
     let did_full = entry.did.clone();
-    let counter = entry
-        .counter
-        .map(|c| c.to_string())
-        .unwrap_or_else(|| "—".into());
-    let vms = entry
-        .vm_count
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "—".into());
     let services = entry
         .service_count
         .map(|n| n.to_string())
@@ -6401,21 +6443,18 @@ fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<Strin
             span { class: "did-inventory-cell status",
                 span { class: "{badge_class}", "{status_label}" }
             }
-            span { class: "did-inventory-cell network", "{entry.network_label}" }
-            span {
-                class: "did-inventory-cell did",
-                title: "{did_full}",
-                "{did_short}"
-            }
-            span { class: "did-inventory-cell counter", "{counter}" }
-            span { class: "did-inventory-cell vms", "{vms}" }
-            span { class: "did-inventory-cell services", "{services}" }
             span { class: "did-inventory-cell action",
                 button {
                     onclick: move |_| on_select.call(did_for_click.clone()),
                     "Open"
                 }
             }
+            span {
+                class: "did-inventory-cell did",
+                title: "{did_full}",
+                "{did_short}"
+            }
+            span { class: "did-inventory-cell services", "{services}" }
         }
     }
 }

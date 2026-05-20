@@ -489,9 +489,13 @@ details .panel .row {
 }
 .did-inventory-row {
   display: grid;
-  grid-template-columns: 92px 100px 1fr 70px 50px 70px 70px;
+  /* Trimmed layout (commit-time): status | Open btn | DID short
+   * | services. Was 7 columns previously (status, network, did,
+   * counter, vms, services, action) before the user asked to
+   * drop Network / Counter / VMs from the inventory. */
+  grid-template-columns: 92px 64px 1fr 80px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-faint);
 }
@@ -510,8 +514,6 @@ details .panel .row {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.did-inventory-cell.counter,
-.did-inventory-cell.vms,
 .did-inventory-cell.services {
   font-family: ui-monospace, monospace;
   color: var(--text-soft);
