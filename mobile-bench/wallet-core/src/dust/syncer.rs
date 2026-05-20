@@ -53,7 +53,14 @@ const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// kHz rates during cold replay. Persisting every N events caps
 /// the worst-case "lost work" window on a crash to N events
 /// (each is cheap to re-fetch from the indexer anyway).
-const PERSIST_EVERY_N_EVENTS: usize = 1024;
+///
+/// 128 is empirically the sweet spot for the Dioxus desktop
+/// executor: small enough that one batch's `replay_events` call
+/// completes inside a frame budget (~80 ms on a debug build),
+/// large enough that redb txn overhead doesn't dominate. The
+/// previous value of 1024 was a UX-freeze grenade — each batch
+/// blocked the renderer for half a second.
+const PERSIST_EVERY_N_EVENTS: usize = 128;
 
 /// Progress event the UI binds to. Emitted at each persist
 /// boundary so the progress bar updates without flickering.
@@ -102,6 +109,24 @@ impl DustSyncer {
             params,
             ws_url,
         }
+    }
+
+    /// Convenience: return the wallet's current DUST balance in
+    /// atomic units (`10^-15 DUST`), evaluated against
+    /// wall-clock "now". Returns `Ok(None)` if no snapshot has
+    /// been persisted yet. Avoids forcing the UI to import
+    /// `base_crypto::time::Timestamp` just to call
+    /// `DustLocalState::wallet_balance`.
+    pub fn current_balance_atomic(&self) -> Result<Option<u128>, DustError> {
+        let Some((state, _)) = self.cached_state()? else {
+            return Ok(None);
+        };
+        let now_secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let now = base_crypto::time::Timestamp::from_secs(now_secs);
+        Ok(Some(state.wallet_balance(now)))
     }
 
     /// Read the most recent persisted state for this network.
@@ -201,6 +226,13 @@ impl DustSyncer {
                                 max_id: decoded.max_id,
                                 events_processed,
                             };
+                            // Give the Dioxus renderer + other
+                            // tokio tasks a tick before the next
+                            // batch's CPU-heavy `replay_events`.
+                            // Without this the UI freezes for the
+                            // whole sync because the executor is
+                            // wedged inside the sync function.
+                            tokio::task::yield_now().await;
                             if caught_up {
                                 break 'outer;
                             }

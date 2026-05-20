@@ -585,6 +585,11 @@ pub fn App() -> Element {
     // funds. The `unshielded_balance` future kicks off after a
     // successful Connect (see below).
     let mut night_subunits = use_signal::<Option<u128>>(|| None);
+    // Same shape for DUST — synced by `WalletSyncPane`'s
+    // auto-triggered fold + cached snapshot. `None` until the
+    // first DUST sync completes; `Some(0)` is a real "zero
+    // balance" reading.
+    let dust_subunits = use_signal::<Option<u128>>(|| None);
     // Last DID id this session deployed via CreateDidWizard.
     // ResolveDidPanel pre-populates its input from this so the
     // user can immediately verify their freshly-created DID.
@@ -1095,6 +1100,7 @@ pub fn App() -> Element {
                 BalancesCard {
                     connected: matches!(*phase.read(), SyncPhase::Synced),
                     night_subunits: *night_subunits.read(),
+                    dust_subunits: *dust_subunits.read(),
                 }
 
                 button {
@@ -1175,8 +1181,11 @@ pub fn App() -> Element {
                     button { onclick: move |_| generate(), "Random wallet" }
                 }
 
-                BalancePanel { network: *network.read() }
-                DustSyncPanel { network: *network.read() }
+                WalletSyncPane {
+                    network: *network.read(),
+                    night_subunits,
+                    dust_subunits,
+                }
             },
             Tab::Dids => rsx! {
                 CreateDidWizard {
@@ -1749,22 +1758,245 @@ fn BalancePanel(network: Network) -> Element {
     }
 }
 
-/// Phase 4 of Path B: the "Sync DUST" button + progress bar.
+/// Status of one row inside `WalletSyncPane`. Three terminal
+/// states + a "running with optional progress" middle state so
+/// the UI can render a progress bar when one is available
+/// (DUST) and a generic spinner when one isn't (NIGHT / UTXO
+/// snapshot — fast enough that progress would flicker).
+#[derive(Clone, Debug)]
+enum SyncRow {
+    Idle,
+    /// Optional `(current, max)` for rows with a progress bar.
+    Running {
+        progress: Option<(i64, i64)>,
+        note: String,
+    },
+    Done {
+        summary: String,
+    },
+    Failed {
+        err: String,
+    },
+}
+
+/// Unified wallet-initialisation pane. Replaces the previous
+/// separate "Sync balance" / "Sync DUST" buttons.
 ///
-/// Mirrors `BalancePanel`'s pattern. The button kicks the
-/// process-wide `DustSyncer` registered for this network at App
-/// startup (see `set_dust_syncer_for` in `app::app_wallet_for`'s
-/// neighbourhood). Progress is consumed off the syncer's stream
-/// and projected into a horizontal bar; the running state +
-/// `last_id` are surfaced as text so the user can see the
-/// checkpoint advance.
+/// On mount it auto-kicks both syncs concurrently:
+/// - **NIGHT** — `Wallet::sync_unshielded` (the indexer's
+///   `unshieldedUtxoEvents` stream for the wallet's address).
+///   Usually completes in < 1 s.
+/// - **DUST** — `DustSyncer::sync()` (the Path-B persisted
+///   snapshot + delta-resume from `5f7df14f → a7a10c5d`).
+///   First run pays the full cold-replay cost (~10–15 min on
+///   PreProd); subsequent runs are seconds.
 ///
-/// Pre-warming via this button is optional — the wallet will
-/// also drive the syncer transparently on the first CRUD action
-/// (see `Wallet::sync_dust` after `1f1574ec`). The button just
-/// lets the user pay the cold-sync cost at a known good time
-/// instead of inside their first submit.
+/// Each row shows `name → status pill → progress bar (DUST only)`.
+/// When a row reaches `Done`, the parent's `night_subunits` /
+/// `dust_subunits` signal lands, which makes `BalancesCard`
+/// switch from `"syncing…"` to the actual atomic-unit value.
+///
+/// Behaviour notes:
+/// - The auto-trigger uses a `started` guard so re-renders
+///   don't restart in-flight syncs. The button at the bottom
+///   forces a re-sync (useful after a known on-chain change).
+/// - The DUST sync runs on the same tokio executor as the
+///   renderer; we yield every 128 events (see
+///   `dust::syncer::PERSIST_EVERY_N_EVENTS`) so the UI stays
+///   responsive even during the cold replay.
 #[component]
+fn WalletSyncPane(
+    network: Network,
+    night_subunits: Signal<Option<u128>>,
+    dust_subunits: Signal<Option<u128>>,
+) -> Element {
+    let night_row = use_signal::<SyncRow>(|| SyncRow::Idle);
+    let dust_row = use_signal::<SyncRow>(|| SyncRow::Idle);
+    let mut started = use_signal(|| false);
+
+    // Closure that re-fires both syncs from scratch.
+    let kick = move || {
+        let mut night_row = night_row;
+        let mut dust_row = dust_row;
+        let mut night_subunits = night_subunits;
+        let mut dust_subunits = dust_subunits;
+
+        // NIGHT — fast, no progress bar.
+        night_row.set(SyncRow::Running {
+            progress: None,
+            note: "snapshotting UTXOs…".to_string(),
+        });
+        night_subunits.set(None);
+        spawn(async move {
+            let w = app_wallet_for(network);
+            match w.sync_unshielded().await {
+                Ok(set) => {
+                    let total: u128 = set
+                        .iter()
+                        .fold(0u128, |a, u| a.saturating_add(u.value));
+                    night_subunits.set(Some(total));
+                    night_row.set(SyncRow::Done {
+                        summary: format!(
+                            "{} ({} UTXO{})",
+                            format_subunits(total),
+                            set.len(),
+                            if set.len() == 1 { "" } else { "s" },
+                        ),
+                    });
+                }
+                Err(e) => {
+                    night_row.set(SyncRow::Failed { err: e.to_string() });
+                }
+            }
+        });
+
+        // DUST — slow, has a progress stream.
+        dust_row.set(SyncRow::Running {
+            progress: None,
+            note: "subscribing to dustLedgerEvents…".to_string(),
+        });
+        dust_subunits.set(None);
+        let Some(syncer) = dust_syncer_for(network) else {
+            dust_row.set(SyncRow::Failed {
+                err: "syncer not initialised (unlock the wallet first)"
+                    .to_string(),
+            });
+            return;
+        };
+        spawn(async move {
+            use futures::StreamExt;
+            let mut stream = std::pin::pin!(syncer.clone().sync());
+            while let Some(p) = stream.next().await {
+                match p {
+                    Ok(prog) => dust_row.set(SyncRow::Running {
+                        progress: Some((prog.current_id, prog.max_id)),
+                        note: format!(
+                            "indexing event {} / {} ({} processed)",
+                            prog.current_id, prog.max_id, prog.events_processed,
+                        ),
+                    }),
+                    Err(e) => {
+                        dust_row.set(SyncRow::Failed { err: e.to_string() });
+                        return;
+                    }
+                }
+            }
+            // Pull the freshly-persisted state to report the
+            // current balance.
+            let last_id = syncer
+                .cached_state()
+                .ok()
+                .flatten()
+                .map(|(_, id)| id);
+            match syncer.current_balance_atomic() {
+                Ok(Some(bal)) => {
+                    dust_subunits.set(Some(bal));
+                    dust_row.set(SyncRow::Done {
+                        summary: format!(
+                            "{} (checkpoint event id {})",
+                            format_subunits(bal),
+                            last_id.unwrap_or(-1),
+                        ),
+                    });
+                }
+                Ok(None) => {
+                    dust_row.set(SyncRow::Failed {
+                        err: "sync completed without persisting state".into(),
+                    });
+                }
+                Err(e) => {
+                    dust_row.set(SyncRow::Failed { err: e.to_string() });
+                }
+            }
+        });
+    };
+
+    // Auto-trigger once per mount. The `started` guard prevents
+    // re-renders from kicking duplicate syncs.
+    use_effect(move || {
+        if !*started.read() {
+            started.set(true);
+            kick();
+        }
+    });
+
+    let any_running = matches!(*night_row.read(), SyncRow::Running { .. })
+        || matches!(*dust_row.read(), SyncRow::Running { .. });
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Wallet sync" }
+            {render_sync_row("NIGHT", &night_row.read())}
+            {render_sync_row("DUST", &dust_row.read())}
+            div { class: "row",
+                button {
+                    disabled: any_running,
+                    onclick: move |_| kick(),
+                    {if any_running { "Syncing…" } else { "Resync" }}
+                }
+            }
+        }
+    }
+}
+
+/// One sync row: a status pill + an optional progress bar.
+/// Pulled out so both NIGHT and DUST render identically.
+fn render_sync_row(label: &'static str, row: &SyncRow) -> Element {
+    let (icon, color, status_text) = match row {
+        SyncRow::Idle => ("○", "var(--text-faint)", "queued".to_string()),
+        SyncRow::Running { note, .. } => {
+            ("◌", "var(--accent, #6ea8f8)", note.clone())
+        }
+        SyncRow::Done { summary } => {
+            ("✓", "var(--success)", summary.clone())
+        }
+        SyncRow::Failed { err } => ("✗", "var(--error)", err.clone()),
+    };
+    let progress_pct: Option<f64> = match row {
+        SyncRow::Running {
+            progress: Some((cur, max)),
+            ..
+        } if *max > 0 => Some(
+            ((*cur as f64 / *max as f64) * 100.0).clamp(0.0, 100.0),
+        ),
+        _ => None,
+    };
+    rsx! {
+        div { class: "balance-row",
+            span { class: "label",
+                span { style: "display: inline-block; width: 1.2em; color: {color};",
+                    "{icon}"
+                }
+                "{label}"
+            }
+            span { class: "value",
+                style: "font-size: 12px; color: {color}; text-align: right;",
+                "{status_text}"
+            }
+        }
+        if let Some(pct) = progress_pct {
+            div { class: "balance-row",
+                div {
+                    style: "width: 100%; height: 4px; background: var(--surface-2);\
+                            border-radius: 2px; overflow: hidden;\
+                            border: 1px solid var(--border-faint);",
+                    div {
+                        style: format!(
+                            "width: {pct:.1}%; height: 100%;\
+                             background: var(--accent, #6ea8f8);\
+                             transition: width 200ms ease-out;"
+                        ),
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// (Replaced by `WalletSyncPane`; kept until callers migrate —
+/// referenced from older code paths still in flight.)
+#[component]
+#[allow(dead_code)]
 fn DustSyncPanel(network: Network) -> Element {
     let mut progress = use_signal::<Option<wallet_core::SyncProgress>>(|| None);
     let mut running = use_signal(|| false);
@@ -6219,14 +6451,21 @@ fn format_subunits(n: u128) -> String {
 }
 
 #[component]
-fn BalancesCard(connected: bool, night_subunits: Option<u128>) -> Element {
-    // Three display states for NIGHT:
+fn BalancesCard(
+    connected: bool,
+    night_subunits: Option<u128>,
+    dust_subunits: Option<u128>,
+) -> Element {
+    // Three display states each:
     //   • not connected           → "—"
     //   • connected, sync pending → "syncing…"
     //   • connected, sync done    → "<grouped subunit count>"
-    // DUST stays on "—" with a hint — the dustGenerations
-    // subscription is Phase B and not wired yet.
     let night_text = match (connected, night_subunits) {
+        (false, _) => "—".to_string(),
+        (true, None) => "syncing…".to_string(),
+        (true, Some(n)) => format_subunits(n),
+    };
+    let dust_text = match (connected, dust_subunits) {
         (false, _) => "—".to_string(),
         (true, None) => "syncing…".to_string(),
         (true, Some(n)) => format_subunits(n),
@@ -6245,22 +6484,17 @@ fn BalancesCard(connected: bool, night_subunits: Option<u128>) -> Element {
             div { class: "balance-row",
                 span { class: "label", "Dust" }
                 span { class: "value",
-                    // DUST stays on "—" — the dustGenerations
-                    // subscription is Phase B. The hint row below
-                    // tells the user why.
-                    "—"
+                    "{dust_text}"
                     span { class: "unit", " DUST" }
                 }
             }
-            // Hint row replaces the `dust-progress` bar that will land in
-            // Phase B (dustGenerations subscription + registered NIGHT UTXOs).
             div { class: "balance-row",
                 span { class: "hint",
-                    {match (connected, night_subunits) {
-                        (false, _) => "Connect to the network to see live balances.",
-                        (true, None) => "Snapshotting unshielded UTXOs from the indexer…",
-                        (true, Some(0)) => "No NIGHT yet. Send NIGHT to the address above.",
-                        (true, Some(_)) => "DUST tracking lands in Phase B — register NIGHT UTXOs to accrue.",
+                    {match (connected, night_subunits, dust_subunits) {
+                        (false, _, _) => "Connect to the network to see live balances.",
+                        (true, None, _) | (true, _, None) => "Syncing wallet state from the indexer…",
+                        (true, Some(0), _) => "No NIGHT yet. Send NIGHT to the address above.",
+                        (true, Some(_), Some(_)) => "DUST accrues from registered NIGHT UTXOs.",
                     }}
                 }
             }
