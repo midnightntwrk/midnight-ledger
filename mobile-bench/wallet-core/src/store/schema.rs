@@ -22,7 +22,7 @@ use crate::store::envelope::SecretEnvelope;
 
 /// The on-disk schema this binary expects. Migration runs
 /// `0..SCHEMA_VERSION` closures at `open()`.
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 
 // ── Wallet identity ────────────────────────────────────────────
 
@@ -144,6 +144,15 @@ pub(crate) const SESSION_CURRENT_KEY: &str = "current";
 /// `tracing_subscriber::Layer`) writes here in batches; the
 /// Logs tab reads back with `list_logs_recent`.
 pub(crate) const LOGS: TableDefinition<i64, &'static [u8]> = TableDefinition::new("logs");
+
+/// Persisted DUST sync snapshot — keyed by network tag. Value is
+/// a bincoded `DustSyncRowV1`. The `WalletSyncer` writes here
+/// continuously as it folds `dustLedgerEvents` from the indexer;
+/// the next App launch hydrates this row and resumes the
+/// subscription from `last_id + 1`, avoiding the multi-minute
+/// cold-replay that PreProd's ~534k-event history requires.
+pub(crate) const DUST_SYNC: TableDefinition<u8, &'static [u8]> =
+    TableDefinition::new("dust_sync");
 
 // ── Row types ─────────────────────────────────────────────────
 
@@ -333,6 +342,25 @@ pub(crate) struct SessionRowV1 {
 pub(crate) struct ResolvedCacheRowV1 {
     pub resolved_json: String,
     pub cached_at: i64,
+}
+
+/// Persisted DUST sync snapshot, version 1.
+///
+/// `state_bytes` is the tagged-serialised `DustLocalState<DefaultDB>`
+/// — same format the JS upstream's `dust.json` writes. `last_id`
+/// is the indexer event id we've consumed up to; the next sync
+/// re-subscribes from `last_id + 1` and folds only the delta.
+///
+/// `updated_at` is unix-ms of the last write; surfaced in the
+/// UI's "last synced" hint and used by the `WalletSyncer` to
+/// rate-limit persistence (we don't need to write on every
+/// event, but we don't want to lose more than ~5 s of progress
+/// on a crash).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct DustSyncRowV1 {
+    pub last_id: i64,
+    pub state_bytes: Vec<u8>,
+    pub updated_at: i64,
 }
 
 /// Key row, version 1. Carries metadata + derivation; never

@@ -53,9 +53,9 @@ pub use envelope::{SecretEnvelope, decrypt_secret, encrypt_secret};
 pub(crate) use envelope::encrypt_secret as wrap_secret;
 pub use schema::{InventoryStatus, KeyDerivation, LogLevel};
 use schema::{
-    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DidInventoryRowV1, KEYS, KEYS_BY_WALLET,
-    KeyRowV1, LOGS, LogRowV1, META, RESOLVED_CACHE, ResolvedCacheRowV1, SESSION_CURRENT_KEY,
-    SESSIONS, SessionRowV1, WALLETS, WalletRowV1,
+    CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DUST_SYNC, DidInventoryRowV1,
+    DustSyncRowV1, KEYS, KEYS_BY_WALLET, KeyRowV1, LOGS, LogRowV1, META, RESOLVED_CACHE,
+    ResolvedCacheRowV1, SESSION_CURRENT_KEY, SESSIONS, SessionRowV1, WALLETS, WalletRowV1,
 };
 
 use crate::secret_storage::{
@@ -887,6 +887,90 @@ impl WalletStore {
         Ok(())
     }
 
+    /// Persisted DUST sync snapshot for `network`. `None` if no
+    /// row has been written yet (first launch, or sync table
+    /// cleared). The bytes are the tagged-serialised
+    /// `DustLocalState<DefaultDB>` — the `WalletSyncer` rehydrates
+    /// this and resumes from `last_id + 1`. Cheap read txn,
+    /// safe to call on every wallet operation.
+    pub fn get_dust_sync(
+        &self,
+        network: crate::Network,
+    ) -> Result<Option<DustSyncSnapshot>, StoreError> {
+        let tag: NetworkTag = network.into();
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(DUST_SYNC)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let v = table
+            .get(tag.0)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(g) = v else { return Ok(None) };
+        let row: DustSyncRowV1 = Bincoded::decode(g.value())?;
+        Ok(Some(DustSyncSnapshot {
+            last_id: row.last_id,
+            state_bytes: row.state_bytes,
+            updated_at: row.updated_at,
+        }))
+    }
+
+    /// Persist a DUST sync snapshot. Replaces the existing row
+    /// (single row per network); idempotent. Caller wraps with
+    /// rate-limiting — every call is one write txn.
+    pub fn put_dust_sync(
+        &self,
+        network: crate::Network,
+        snapshot: &DustSyncSnapshot,
+    ) -> Result<(), StoreError> {
+        let tag: NetworkTag = network.into();
+        let row = DustSyncRowV1 {
+            last_id: snapshot.last_id,
+            state_bytes: snapshot.state_bytes.clone(),
+            updated_at: snapshot.updated_at,
+        };
+        let bincoded = Bincoded::encode(&row)?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(DUST_SYNC)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert(tag.0, bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Drop the DUST sync snapshot for `network`. Useful for a
+    /// "Reset sync" affordance in the UI; the next call falls
+    /// back to a full cold replay from `last_id = 0`.
+    pub fn clear_dust_sync(&self, network: crate::Network) -> Result<(), StoreError> {
+        let tag: NetworkTag = network.into();
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(DUST_SYNC)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .remove(tag.0)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
     /// One-shot stats snapshot — table row counts + schema
     /// version. Lets the UI render a Settings card without
     /// holding the file open.
@@ -972,6 +1056,22 @@ pub struct StoreStats {
     pub resolved_cache: u64,
     pub sessions: u64,
     pub logs: u64,
+}
+
+/// DUST sync snapshot exposed to callers. Mirrors `DustSyncRowV1`
+/// 1:1 — kept separate so the on-disk row type can grow new
+/// fields without changing the caller-visible struct.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DustSyncSnapshot {
+    /// Indexer event id we've consumed up to. Next sync
+    /// re-subscribes from `last_id + 1`.
+    pub last_id: i64,
+    /// Tagged-serialised `DustLocalState<DefaultDB>`. Rehydrate
+    /// via `serialize::tagged_deserialize`.
+    pub state_bytes: Vec<u8>,
+    /// Unix-ms of the last write. Surface in the UI's
+    /// "last synced" hint.
+    pub updated_at: i64,
 }
 
 /// One persisted log row, as the UI surfaces it. Identical
