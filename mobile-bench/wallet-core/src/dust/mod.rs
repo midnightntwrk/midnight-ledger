@@ -7,6 +7,7 @@
 //! `crate::tx::balance`.
 
 pub(crate) mod snapshot;
+pub(crate) mod syncer;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DustError {

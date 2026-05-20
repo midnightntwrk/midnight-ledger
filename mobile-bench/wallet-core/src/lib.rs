@@ -70,6 +70,7 @@ pub use unshielded::{
     TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet,
 };
 pub use crypto::ensure_default_crypto_provider;
+pub use dust::syncer::{DustSyncer, SyncProgress};
 #[doc(hidden)]
 pub use did::deploy::{testing_deploy_state_with_circuits_hex, testing_initial_deploy_state_hex};
 pub use dust::DustError;
