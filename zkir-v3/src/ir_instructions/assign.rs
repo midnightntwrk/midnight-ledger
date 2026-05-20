@@ -76,5 +76,15 @@ pub fn assign_incircuit(
             .jubjub()
             .assign_many(layouter, &convert_values::<JubjubFr>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::JubjubScalar).collect()),
+
+        IrType::Opaque => {
+            // In-circuit, an Opaque input is just its commit witness.
+            let fr_values = convert_values::<Fr>(values)?;
+            let field_values: Vec<Value<_>> =
+                fr_values.into_iter().map(|v| v.map(|fr| fr.0)).collect();
+            std_lib
+                .assign_many(layouter, &field_values)
+                .map(|xs| xs.into_iter().map(|commit| CircuitValue::Opaque { commit }).collect())
+        }
     }
 }

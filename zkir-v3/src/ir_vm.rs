@@ -15,10 +15,15 @@ use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
-use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::encode::{
+    encode_incircuit, encode_incircuit_for_commit, encode_offcircuit, encode_offcircuit_for_commit,
+};
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
+use crate::zkir_mode::{
+    ZkirKey, ZkirOp, ZkirStateValue, u128_to_fr, zkir_ops_to_field_elements_with_sizes,
+};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
@@ -64,6 +69,64 @@ pub struct Preprocessed {
     pub pi_skips: Vec<Option<usize>>,
     pub binding_input: outer::Scalar,
     pub comm_comm: Option<(outer::Scalar, outer::Scalar)>,
+}
+
+/// Compute the width (in `Fr`s) of a transcript-stream slot for a
+/// declared `IrType`, peeking at the leading `byte_len` Fr for
+/// `IrType::Opaque`.
+///
+/// Used by the `I::PublicInput` and `I::PrivateInput` arms to slice a
+/// `[byte_len, packed_preimage_frs ...]` Opaque entry out of
+/// `preimage.public_transcript_outputs` or `preimage.private_transcript`.
+/// The WASM bridge emits each Compress-aligned popeq result and witness
+/// AV in this layout (see
+/// `zkir-v3-wasm/src/lib.rs:flatten_av_with_opaque_preimages`); the
+/// IR-side decoder handles other types via the standard
+/// fixed-width `IrType::encoded_len()` path.
+fn transcript_slot_width(
+    val_t: &IrType,
+    transcript: &[Fr],
+    idx: usize,
+    transcript_name: &'static str,
+    output: &Identifier,
+) -> Result<usize, anyhow::Error> {
+    match val_t {
+        IrType::Opaque => {
+            if idx >= transcript.len() {
+                bail!(
+                    "Opaque {output:?}: ran out of {transcript_name} at offset {idx} \
+                     (need at least the byte_len Fr)"
+                );
+            }
+            let byte_len = u32::try_from(transcript[idx]).map_err(|_| {
+                anyhow!(
+                    "Opaque {output:?}: byte_len Fr at {transcript_name}[{idx}] out of \
+                     u32 range"
+                )
+            })? as usize;
+            let w = 1 + byte_len.div_ceil(FR_BYTES_STORED);
+            if idx + w > transcript.len() {
+                bail!(
+                    "Opaque {output:?}: {transcript_name} truncated; need {} Frs from \
+                     offset {idx} but only {} are available",
+                    w,
+                    transcript.len() - idx
+                );
+            }
+            Ok(w)
+        }
+        _ => {
+            let w = val_t.encoded_len();
+            if idx + w > transcript.len() {
+                bail!(
+                    "{output:?}: {transcript_name} truncated; need {w} Frs of {val_t:?} \
+                     from offset {idx} but only {} are available",
+                    transcript.len() - idx
+                );
+            }
+            Ok(w)
+        }
+    }
 }
 
 fn fab_decode_to_bytes(
@@ -202,7 +265,27 @@ impl IrSource {
 
         let mut idx = 0;
         for input_id in self.inputs.iter() {
-            let w = input_id.val_t.encoded_len();
+            let w = match &input_id.val_t {
+                IrType::Opaque => {
+                    if idx >= preimage.inputs.len() {
+                        bail!(
+                            "Not enough raw inputs: ran out at index {} while \
+                             decoding Opaque {:?} (need at least the byte_len Fr)",
+                            idx,
+                            input_id.name
+                        );
+                    }
+                    let byte_len = u32::try_from(preimage.inputs[idx]).map_err(|_| {
+                        anyhow!(
+                            "Opaque {:?}: byte_len Fr at offset {} out of u32 range",
+                            input_id.name,
+                            idx
+                        )
+                    })? as usize;
+                    1 + byte_len.div_ceil(FR_BYTES_STORED)
+                }
+                _ => input_id.val_t.encoded_len(),
+            };
             if idx + w > preimage.inputs.len() {
                 bail!(
                     "Not enough raw inputs: ran out at index {} while decoding {:?}",
@@ -373,7 +456,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = transcript_slot_width(
+                                val_t,
+                                &preimage.public_transcript_outputs,
+                                public_transcript_outputs_idx,
+                                "public_transcript_outputs",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.public_transcript_outputs
                                 [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
                             public_transcript_outputs_idx += w;
@@ -392,7 +481,13 @@ impl IrSource {
                             IrValue::default(val_t)
                         }
                         _ => {
-                            let w = val_t.encoded_len();
+                            let w = transcript_slot_width(
+                                val_t,
+                                &preimage.private_transcript,
+                                private_transcript_outputs_idx,
+                                "private_transcript",
+                                output,
+                            )?;
                             let raw_outputs = &preimage.private_transcript
                                 [private_transcript_outputs_idx
                                     ..private_transcript_outputs_idx + w];
@@ -526,25 +621,36 @@ impl IrSource {
                         bail!("PersistentHash did not produce expected output");
                     }
                 }
-                I::Impact { guard, inputs } => {
-                    let count = inputs.len();
-                    for input in inputs {
-                        let x: Fr = resolve_operand(&memory, input)?.try_into()?;
-                        pis.push(x);
-                        public_transcript_inputs_idx += 1;
-                    }
+                I::Impact { guard, ops } => {
+                    // prove.rs needs one pi_skips entry per op
+                    let (field_elements, per_op_sizes) =
+                        zkir_ops_to_field_elements_with_sizes(ops.clone(), &memory)?;
+                    let count = field_elements.len();
                     if !resolve_operand_bool(&memory, guard)? {
-                        pi_skips.push(Some(count));
-                        public_transcript_inputs_idx -= count;
+                        // guard=false: emit zeros (matches in-circuit
+                        // select(guard, val, 0) = 0) and mark all slots skipped
+                        for _ in 0..count {
+                            pis.push(Fr::from(0u64));
+                        }
+                        for &op_size in &per_op_sizes {
+                            pi_skips.push(Some(op_size));
+                        }
                     } else {
-                        pi_skips.push(None);
+                        for x in &field_elements {
+                            pis.push(*x);
+                        }
+                        for _ in 0..per_op_sizes.len() {
+                            pi_skips.push(None);
+                        }
                         for i in 0..count {
-                            let idx = public_transcript_inputs_idx - count + i;
-                            let expected = preimage.public_transcript_inputs.get(idx).copied();
+                            let expected = preimage
+                                .public_transcript_inputs
+                                .get(public_transcript_inputs_idx + i)
+                                .copied();
                             let computed = Some(pis[pis.len() - count + i]);
                             if expected != computed {
                                 error!(
-                                    ?idx,
+                                    idx = public_transcript_inputs_idx + i,
                                     ?expected,
                                     ?computed,
                                     ?memory,
@@ -552,13 +658,14 @@ impl IrSource {
                                     "Public transcript input mismatch"
                                 );
                                 bail!(
-                                    "Public transcript input mismatch for input {idx}; expected: {expected:?}, computed: {computed:?}"
+                                    "Public transcript input mismatch for input {}; expected: {expected:?}, computed: {computed:?}",
+                                    public_transcript_inputs_idx + i
                                 );
                             }
                         }
+                        public_transcript_inputs_idx += count;
                     }
                 }
-                I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
                 I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
@@ -578,6 +685,26 @@ impl IrSource {
                     let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
                     let p = JubjubSubgroup::generator() * s;
                     memory.insert(output.clone(), IrValue::JubjubPoint(p));
+                }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        bail!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        );
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(&memory, val)?;
+                        if value.get_type() != *expected_t {
+                            bail!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            );
+                        }
+                        outputs.push(value);
+                    }
                 }
             }
         }
@@ -600,10 +727,26 @@ impl IrSource {
             let comm_comm = preimage
                 .communications_commitment
                 .ok_or(anyhow!("Expected communications randomness"))?;
+            // We must rebuild the comm_comm preimage in commit-bearing
+            // form to match what the JS bridge fed into `transient_hash`
+            // for the commitment.
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
-            comm_comm_inputs.extend(preimage.inputs.iter());
-            for output in outputs.iter() {
-                comm_comm_inputs.push(output.clone().try_into()?);
+            for input_id in self.inputs.iter() {
+                let value = memory.get(&input_id.name).ok_or_else(|| {
+                    anyhow!(
+                        "comm_comm: declared input {:?} missing from memory after preprocess",
+                        input_id.name
+                    )
+                })?;
+                for ir_val in encode_offcircuit_for_commit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
+            }
+            for value in outputs.iter() {
+                for ir_val in encode_offcircuit(value) {
+                    for ir_val in encode_offcircuit_for_commit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
             }
             if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
                 error!(
@@ -697,20 +840,13 @@ impl Relation for IrSource {
                           cell: CircuitValue,
                           mem: &mut HashMap<Identifier, CircuitValue>|
          -> Result<(), Error> {
-            // If id exists in the witness memory, make sure the value that
-            // we are inserting is the same.
-            // Miguel: This seems unnecessary to me. I would fail when calling
-            // `mem_insert` with an id that exists in the witness memory.
-            witness.as_ref()
-                .zip(cell.value())
-                .error_if_known_and(|(preproc, v)| {
-                    if let Some(expected) = preproc.memory.get(&id) && *expected != *v  {
-                        error!(id = ?id, expected = ?expected, actual = ?v, "Misalignment between `prepare` and `synthesize` runs. This is a bug.");
-                        return true;
-                    }
-                    false
-                })?;
-
+            if mem.contains_key(&id) {
+                error!(id = ?id, "Identifier bound twice during synthesize. This is a bug.");
+                return Err(Error::Synthesis(format!(
+                    "Identifier {id:?} bound twice during synthesize; \
+                     each IR variable must be assigned at most once."
+                )));
+            }
             mem.insert(id, cell);
             Ok(())
         };
@@ -813,23 +949,279 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard, inputs } => {
-                    let zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
-                    let guard: AssignedBit<_> = {
-                        let guard = resolve_operand(std, layouter, &memory, guard)?;
-                        let guard: AssignedNative<_> = guard.try_into()?;
-                        std.convert(layouter, &guard)?
+                I::Impact { guard, ops } => {
+                    // In-circuit mirror of zkir_ops_to_field_elements; each Fr
+                    // is gated by select(guard, val, 0).
+                    let impact_zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
+                    let impact_guard: AssignedBit<_> = {
+                        let guard_val = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard_native: AssignedNative<_> = guard_val.try_into()?;
+                        std.convert(layouter, &guard_native)?
                     };
-                    for input in inputs {
-                        let val_assigned = resolve_operand(std, layouter, &memory, input)?;
-                        let x: AssignedNative<_> = val_assigned.try_into()?;
-                        let guarded_x = std.select(layouter, &guard, &x, &zero)?;
-                        pi_push(guarded_x, &mut public_inputs)?;
+
+                    macro_rules! push_const_pi {
+                        ($val:expr) => {{
+                            let assigned =
+                                std.assign_fixed(layouter, outer::Scalar::from($val as u64))?;
+                            let guarded =
+                                std.select(layouter, &impact_guard, &assigned, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
                     }
-                }
-                I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, val)?;
-                    outputs.push(val);
+
+                    macro_rules! push_operand_pi {
+                        ($operand:expr) => {{
+                            let val = resolve_operand(std, layouter, &memory, $operand)?;
+                            let x: AssignedNative<_> = val.try_into()?;
+                            let guarded = std.select(layouter, &impact_guard, &x, &impact_zero)?;
+                            pi_push(guarded, &mut public_inputs)?;
+                        }};
+                    }
+
+                    macro_rules! push_alignment_pi {
+                        ($alignment:expr) => {{
+                            let mut fields: Vec<Fr> = Vec::new();
+                            $alignment.field_repr(&mut fields);
+                            for fr_val in &fields {
+                                let assigned = std.assign_fixed(layouter, fr_val.0)?;
+                                let guarded =
+                                    std.select(layouter, &impact_guard, &assigned, &impact_zero)?;
+                                pi_push(guarded, &mut public_inputs)?;
+                            }
+                        }};
+                    }
+
+                    for op in ops {
+                        match op {
+                            ZkirOp::Noop { n } => {
+                                for _ in 0..*n {
+                                    push_const_pi!(0);
+                                }
+                            }
+                            ZkirOp::Lt => push_const_pi!(0x01),
+                            ZkirOp::Eq => push_const_pi!(0x02),
+                            ZkirOp::Type => push_const_pi!(0x03),
+                            ZkirOp::Size => push_const_pi!(0x04),
+                            ZkirOp::New => push_const_pi!(0x05),
+                            ZkirOp::And => push_const_pi!(0x06),
+                            ZkirOp::Or => push_const_pi!(0x07),
+                            ZkirOp::Neg => push_const_pi!(0x08),
+                            ZkirOp::Log => push_const_pi!(0x09),
+                            ZkirOp::Root => push_const_pi!(0x0a),
+                            ZkirOp::Pop => push_const_pi!(0x0b),
+                            ZkirOp::Add => push_const_pi!(0x14),
+                            ZkirOp::Sub => push_const_pi!(0x15),
+                            ZkirOp::Member => push_const_pi!(0x18),
+                            ZkirOp::Ckpt => push_const_pi!(0xff),
+
+                            ZkirOp::Popeq { cached, result } => {
+                                push_const_pi!((0x0cu8 + *cached as u8));
+                                push_alignment_pi!(&result.alignment);
+                                for operand in &result.operands {
+                                    push_operand_pi!(operand);
+                                }
+                            }
+
+                            ZkirOp::Addi { immediate } => {
+                                push_const_pi!(0x0e);
+                                push_operand_pi!(immediate);
+                            }
+                            ZkirOp::Subi { immediate } => {
+                                push_const_pi!(0x0f);
+                                push_operand_pi!(immediate);
+                            }
+
+                            // Push: opcode | recursive ZkirStateValue encoding.
+                            // The recursive walk mirrors encode_state_value
+                            // in zkir_mode.rs. We use an explicit todo
+                            // queue to avoid Rust closure-recursion
+                            // headaches; each `ZkEncTodo` represents one
+                            // unit of work (a constant push, an alignment
+                            // push, an operand push, or "expand this
+                            // ZkirStateValue into its sub-actions").
+                            ZkirOp::Push { storage, value } => {
+                                push_const_pi!((0x10u8 + *storage as u8));
+
+                                // Action queue: process front-to-back. Map
+                                // and Array variants expand into a flat
+                                // sequence of nested actions when reached,
+                                // preserving declaration order.
+                                enum ZkEncTodo<'a> {
+                                    Const(u64),
+                                    ConstFr(Fr),
+                                    Alignment(&'a Alignment),
+                                    Operand(&'a Operand),
+                                    State(&'a ZkirStateValue),
+                                }
+
+                                use std::collections::VecDeque;
+                                let mut todo: VecDeque<ZkEncTodo> = VecDeque::new();
+                                todo.push_back(ZkEncTodo::State(value));
+
+                                while let Some(item) = todo.pop_front() {
+                                    match item {
+                                        ZkEncTodo::Const(c) => push_const_pi!(c),
+                                        ZkEncTodo::ConstFr(fr) => {
+                                            let assigned = std.assign_fixed(layouter, fr.0)?;
+                                            let guarded = std.select(
+                                                layouter,
+                                                &impact_guard,
+                                                &assigned,
+                                                &impact_zero,
+                                            )?;
+                                            pi_push(guarded, &mut public_inputs)?;
+                                        }
+                                        ZkEncTodo::Alignment(a) => push_alignment_pi!(a),
+                                        ZkEncTodo::Operand(op) => push_operand_pi!(op),
+                                        ZkEncTodo::State(sv) => match sv {
+                                            ZkirStateValue::Null => {
+                                                push_const_pi!(0u64);
+                                            }
+                                            ZkirStateValue::Cell(av) => {
+                                                push_const_pi!(1u64);
+                                                push_alignment_pi!(&av.alignment);
+                                                for op in &av.operands {
+                                                    push_operand_pi!(op);
+                                                }
+                                            }
+                                            ZkirStateValue::Map(entries) => {
+                                                let tag =
+                                                    2u128 | ((entries.len() as u128) << 4);
+                                                let tag_fr = u128_to_fr(tag);
+                                                // Front-load: this tag goes
+                                                // first, then per entry the
+                                                // (alignment, operands,
+                                                // recursed value) actions —
+                                                // all in declaration order.
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::ConstFr(tag_fr));
+                                                for (k, v) in entries {
+                                                    nested.push_back(ZkEncTodo::Alignment(
+                                                        &k.alignment,
+                                                    ));
+                                                    for op in &k.operands {
+                                                        nested.push_back(ZkEncTodo::Operand(
+                                                            op,
+                                                        ));
+                                                    }
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                            ZkirStateValue::Array(entries) => {
+                                                let tag = 3u64
+                                                    | ((entries.len() as u64) << 4);
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::Const(tag));
+                                                for v in entries {
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                            ZkirStateValue::BoundedMerkleTree {
+                                                height,
+                                                entries,
+                                            } => {
+                                                let tag = 4u128
+                                                    | ((*height as u128) << 4)
+                                                    | ((entries.len() as u128) << 12);
+                                                let tag_fr = u128_to_fr(tag);
+                                                let mut nested = VecDeque::new();
+                                                nested.push_back(ZkEncTodo::ConstFr(tag_fr));
+                                                for (idx, v) in entries {
+                                                    // u64 idx encodes as
+                                                    // a single Fr atom in
+                                                    // u64.field_repr; for
+                                                    // values < 2^64 a
+                                                    // direct push works.
+                                                    nested
+                                                        .push_back(ZkEncTodo::Const(*idx));
+                                                    nested.push_back(ZkEncTodo::State(v));
+                                                }
+                                                while let Some(t) = nested.pop_back() {
+                                                    todo.push_front(t);
+                                                }
+                                            }
+                                        },
+                                    }
+                                }
+                            }
+
+                            ZkirOp::Branch { skip } => {
+                                push_const_pi!(0x12);
+                                push_const_pi!(*skip);
+                            }
+                            ZkirOp::Jmp { skip } => {
+                                push_const_pi!(0x13);
+                                push_const_pi!(*skip);
+                            }
+
+                            ZkirOp::Concat { cached, n } => {
+                                push_const_pi!((0x16u8 + *cached as u8));
+                                push_const_pi!(*n);
+                            }
+
+                            ZkirOp::Rem { cached } => {
+                                push_const_pi!((0x19u8 + *cached as u8));
+                            }
+
+                            ZkirOp::Dup { n } => push_const_pi!((0x30u8 | *n)),
+                            ZkirOp::Swap { n } => push_const_pi!((0x40u8 | *n)),
+
+                            ZkirOp::Idx {
+                                cached,
+                                push_path,
+                                path,
+                            } => {
+                                if !path.is_empty() {
+                                    let base: u8 = match (*cached, *push_path) {
+                                        (false, false) => 0x50,
+                                        (true, false) => 0x60,
+                                        (false, true) => 0x70,
+                                        (true, true) => 0x80,
+                                    };
+                                    let opcode = base | (path.len() as u8 - 1);
+                                    push_const_pi!(opcode);
+                                    for key in path {
+                                        match key {
+                                            ZkirKey::Stack => {
+                                                // Stack -> -1
+                                                let neg_one = std.assign_fixed(
+                                                    layouter,
+                                                    -outer::Scalar::from(1),
+                                                )?;
+                                                let guarded = std.select(
+                                                    layouter,
+                                                    &impact_guard,
+                                                    &neg_one,
+                                                    &impact_zero,
+                                                )?;
+                                                pi_push(guarded, &mut public_inputs)?;
+                                            }
+                                            ZkirKey::Value {
+                                                alignment,
+                                                operands,
+                                            } => {
+                                                push_alignment_pi!(alignment);
+                                                for operand in operands {
+                                                    push_operand_pi!(operand);
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            ZkirOp::Ins { cached, n } => {
+                                let base: u8 = if *cached { 0xa0 } else { 0x90 };
+                                push_const_pi!((base | *n));
+                            }
+                        }
+                    }
                 }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
@@ -1037,6 +1429,26 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        )));
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(std, layouter, &memory, val)?;
+                        if value.get_type() != *expected_t {
+                            return Err(Error::Synthesis(format!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            )));
+                        }
+                        outputs.push(value);
+                    }
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1053,14 +1465,22 @@ impl Relation for IrSource {
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
                 if let Some(val) = memory.get(&id.name) {
-                    let x: AssignedNative<_> = val.clone().try_into()?;
-                    preimage.push(x);
+                    for cv in encode_incircuit(std, layouter, val)? {
+                        let x: AssignedNative<_> = cv.try_into()?;
+                        preimage.push(x);
+                    }
                 }
             }
 
-            for output in &outputs {
-                let x: AssignedNative<_> = output.clone().try_into()?;
-                preimage.push(x);
+            for value in &outputs {
+                for cv in encode_incircuit(std, layouter, value)? {
+                    // Outputs MUST go through the commit-form encoder so
+                // that an `Opaque` output emits its single cached
+                // `commit` AssignedNative.
+                for cv in encode_incircuit_for_commit(std, layouter, value)? {
+                    let x: AssignedNative<_> = cv.try_into()?;
+                    preimage.push(x);
+                }
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;

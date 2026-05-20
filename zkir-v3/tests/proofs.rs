@@ -11,66 +11,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod proof_tests {
+    use super::common::{TestParams, TestResolver};
     use group::Group;
     use midnight_curves::JubjubSubgroup;
-    use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
+    use midnight_zkir_v3::{
+        Identifier, Instruction, IrSource, Operand, Preprocessed, TypedIdentifier, ZkirOp,
+        ir_types::{IrType, IrValue},
+    };
     use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
-    use serialize::{Deserializable, Serializable, tagged_serialize};
+    use serialize::{Deserializable, Serializable};
     use std::borrow::Cow;
     use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::BufReader;
-    use transient_crypto::curve::EmbeddedGroupAffine;
+    use std::sync::Arc;
+    use transient_crypto::curve::{EmbeddedGroupAffine, Fr};
     use transient_crypto::hash::transient_hash;
     use transient_crypto::proofs::Proof;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::{
-        KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
-        ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
+        KeyLocation, PARAMS_VERIFIER, ProofPreimage, VerifierKey, Zkir,
     };
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
-
-    struct TestResolver {
-        pk: ProverKey,
-        vk: VerifierKey,
-        ir: IrSource,
-    }
-
-    impl Resolver for TestResolver {
-        async fn resolve_key(
-            &self,
-            _key: KeyLocation,
-        ) -> std::io::Result<Option<ProvingKeyMaterial>> {
-            let mut pk = Vec::new();
-            tagged_serialize(&self.pk, &mut pk)?;
-            let mut vk = Vec::new();
-            tagged_serialize(&self.vk, &mut vk)?;
-            let mut ir = Vec::new();
-            tagged_serialize(&self.ir, &mut ir)?;
-            Ok(Some(ProvingKeyMaterial {
-                prover_key: pk,
-                verifier_key: vk,
-                ir_source: ir,
-            }))
-        }
-    }
-
-    struct TestParams;
-
-    impl ParamsProverProvider for TestParams {
-        async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-            const DIR: &str = env!("MIDNIGHT_PP");
-            ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_midnight_2p{k}"
-            ))?))
-        }
-    }
 
     #[actix_rt::test]
     async fn test_extension_attack() {
@@ -79,6 +48,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -118,6 +88,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -176,6 +147,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%p_0" }
@@ -217,10 +189,6 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: The impact instruction here doesn't correspond to real Impact VM bytecode.
-    // Real impact instructions contain encoded opcodes (0x10 for push, 0x30 for dup, etc.).
-    // We're keeping this simplified form for historical reasons - it still exercises the
-    // prover's public input handling even if it's not a semantically valid Impact program.
     #[actix_rt::test]
     async fn test_hash_proof() {
         let ir_raw = r#"{
@@ -230,14 +198,41 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
-               { "op": "impact", "guard": "0x01", "inputs": ["%v_3"] }
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_3"]
+                               }
+                           }
+                       }
+                   ]
+               }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
         let x = transient_hash(&[1.into(), 2.into(), 3.into()]);
+
+        // Push of Cell([Field], %v_3): [opcode, Cell tag, 1 seg, Field tag, value]
+        let impact_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            x,
+        ];
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let mut pk_data = Vec::new();
@@ -253,7 +248,7 @@ mod proof_tests {
             communications_commitment: None,
             inputs: vec![1.into(), 2.into(), 3.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![x],
+            public_transcript_inputs: impact_pis.clone(),
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -269,7 +264,10 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), x].into_iter())
+
+        let mut verifier_pis = vec![Fr::from(42u64)];
+        verifier_pis.extend(impact_pis);
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
             .unwrap();
     }
 
@@ -280,6 +278,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] },
@@ -331,6 +330,7 @@ mod proof_tests {
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<Jubjub>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%s0"], "output": "%s0d" },
@@ -395,6 +395,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
@@ -453,6 +454,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -482,6 +484,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
@@ -527,6 +530,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
@@ -573,6 +577,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
@@ -609,8 +614,11 @@ mod proof_tests {
             .unwrap();
     }
 
-    // Note: Same as test_hash_proof - the impact instruction here is not real Impact VM
-    // bytecode, just a simplified test case kept for historical reasons.
+    // Immediate operand inside a structured Impact { Push }.
+    //
+    // Alignment serde shape:
+    //   AlignmentSegment is {tag,content} -> {"tag":"atom","value":{..atom..}}
+    //   AlignmentAtom is tag-only         -> {"tag":"field"}
     #[actix_rt::test]
     async fn test_immediate_with_public_inputs() {
         let ir_raw = r#"{
@@ -619,16 +627,44 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
                { "op": "constrain_bits", "val": "%v_1", "bits": 248 },
                { "op": "cond_select", "bit": "%v_0", "a": "0x00", "b": "0x01", "output": "%v_2" },
                { "op": "assert", "cond": "%v_2" },
-               { "op": "impact", "guard": "0x01", "inputs": ["0x30"] }
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["0x30"]
+                               }
+                           }
+                       }
+                   ]
+               }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        // Push of Cell([Field], 0x30): [opcode, Cell tag, 1 seg, Field tag, 0x30].
+        // Cross-encoder agreement is pinned by zkir_mode::tests.
+        let impact_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            Fr::from(0x30u64),
+        ];
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
 
@@ -637,7 +673,7 @@ mod proof_tests {
             communications_commitment: None,
             inputs: vec![0.into(), 42.into()],
             private_transcript: vec![],
-            public_transcript_inputs: vec![48.into()],
+            public_transcript_inputs: impact_pis.clone(),
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
@@ -653,7 +689,10 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        vk.verify(&PARAMS_VERIFIER, &proof, [48.into(), 48.into()].into_iter())
+
+        let mut verifier_pis = vec![Fr::from(48u64)];
+        verifier_pis.extend(impact_pis);
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
             .unwrap();
     }
 
@@ -664,6 +703,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
@@ -704,6 +744,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
@@ -748,6 +789,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" },
               { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -803,6 +846,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" }
            ],
+           "outputs": [
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
@@ -853,6 +898,8 @@ mod proof_tests {
            "inputs": [
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -905,6 +952,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" },
               { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -960,6 +1009,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "v_0" }
@@ -991,6 +1041,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
@@ -1014,6 +1065,7 @@ mod proof_tests {
            "inputs": [
               { "name": "foo", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "foo" }
@@ -1026,6 +1078,332 @@ mod proof_tests {
             err.contains("Invalid operand format"),
             "Error message: {}",
             err
+        );
+    }
+
+    // guard=false Impact: ops are zeroed out instead of executed. Verifier
+    // sees a Noop{1} where the Dup{0} would've been. Impact has proptest(skip)
+    // so this is the deterministic exercise of the inactive path.
+    #[actix_rt::test]
+    async fn test_inactive_guard_impact() {
+        let ir = IrSource {
+            inputs: vec![TypedIdentifier::new(
+                Identifier("%v_0".to_string()),
+                IrType::Native,
+            )],
+            do_communications_commitment: false,
+            instructions: Arc::new(vec![
+                // guard=0, so the Dup{0} (encoded as 0x30) gets zeroed.
+                Instruction::Impact {
+                    guard: Operand::Immediate(0.into()),
+                    ops: vec![ZkirOp::Dup { n: 0 }],
+                },
+                // keeps the circuit non-trivial
+                Instruction::Assert {
+                    cond: Operand::Variable(Identifier("%v_0".to_string())),
+                },
+            ]),
+            ..Default::default()
+        };
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // verifier sees [binding, 0]
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), 0.into()].into_iter())
+            .unwrap();
+    }
+
+    /// Active + inactive Impact in one circuit. Checks the transcript
+    /// cursor and pi_skips bookkeeping when guards differ.
+    #[actix_rt::test]
+    async fn test_two_impacts_active_then_inactive() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_0"]
+                               }
+                           }
+                       }
+                   ]
+               },
+               {
+                   "op": "impact",
+                   "guard": "0x00",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["0x07"]
+                               }
+                           }
+                       }
+                   ]
+               }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let v0 = Fr::from(0x55u64);
+        let active_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            v0,
+        ];
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 7.into(),
+            communications_commitment: None,
+            inputs: vec![v0],
+            private_transcript: vec![],
+            // The inactive Impact's zeros are verified via pi_skips, not
+            // against this vector.
+            public_transcript_inputs: active_pis.clone(),
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        // verifier sees: [binding, active reals, inactive zeros]
+        let mut verifier_pis = vec![Fr::from(7u64)];
+        verifier_pis.extend(active_pis);
+        verifier_pis.extend(std::iter::repeat_n(Fr::from(0u64), 5));
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
+            .unwrap();
+    }
+
+    /// Six ops in one Impact, with mixed per-op encoded sizes
+    /// (1, 5, 1, 2, 2, 4 = 15 Fr). The unit tests in zkir_mode.rs only
+    /// compare byte streams between encoders; this one actually runs
+    /// keygen + prove + verify, so it catches in-circuit synthesis bugs
+    /// for Idx and Popeq that the unit tests can't see.
+    #[actix_rt::test]
+    async fn test_active_impact_multi_op_varied_sizes() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       { "dup": { "n": 0 } },
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_0"]
+                               }
+                           }
+                       },
+                       "add",
+                       { "concat": { "cached": false, "n": 3 } },
+                       {
+                           "idx": {
+                               "cached": true,
+                               "pushPath": false,
+                               "path": [ { "key_type": "stack" } ]
+                           }
+                       },
+                       {
+                           "popeq": {
+                               "cached": false,
+                               "result": {
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_0"]
+                               }
+                           }
+                       }
+                   ]
+               }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let v0 = Fr::from(0xdeadu64);
+        let impact_pis: Vec<Fr> = vec![
+            Fr::from(0x30u64), // Dup{0}
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            v0,                // Push %v_0
+            Fr::from(0x14u64), // Add
+            Fr::from(0x16u64),
+            Fr::from(3u64), // Concat{n:3}
+            Fr::from(0x60u64),
+            -Fr::from(1u64), // Idx{cached, [Stack]}
+            Fr::from(0x0cu64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            v0, // Popeq Field-aligned %v_0
+        ];
+        assert_eq!(impact_pis.len(), 15, "self-check on encoded Fr count");
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 5.into(),
+            communications_commitment: None,
+            inputs: vec![v0],
+            private_transcript: vec![],
+            public_transcript_inputs: impact_pis.clone(),
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut verifier_pis = vec![Fr::from(5u64)];
+        verifier_pis.extend(impact_pis);
+        vk.verify(&PARAMS_VERIFIER, &proof, verifier_pis.into_iter())
+            .unwrap();
+    }
+
+    /// A wrong public_transcript_inputs should be rejected by preprocess
+    /// before a proof is generated.
+    #[actix_rt::test]
+    async fn test_active_impact_rejects_wrong_transcript() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v_0", "type": "Scalar<BLS12-381>" }
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               {
+                   "op": "impact",
+                   "guard": "0x01",
+                   "ops": [
+                       {
+                           "push": {
+                               "storage": false,
+                               "value": {
+                                   "storage": false,
+                                   "alignment": [
+                                       { "tag": "atom", "value": { "tag": "field" } }
+                                   ],
+                                   "operands": ["%v_0"]
+                               }
+                           }
+                       }
+                   ]
+               }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        // Real PIs would be [0x10, 1, 1, -2, 42]; we corrupt the last slot.
+        let v0 = Fr::from(42u64);
+        let bad_pis: Vec<Fr> = vec![
+            Fr::from(0x10u64),
+            Fr::from(1u64),
+            Fr::from(1u64),
+            -Fr::from(2u64),
+            Fr::from(99u64), // wrong (should be 42)
+        ];
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 1.into(),
+            communications_commitment: None,
+            inputs: vec![v0],
+            private_transcript: vec![],
+            public_transcript_inputs: bad_pis,
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+
+        let err = result.expect_err("prove must reject mismatched transcript");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("Public transcript input mismatch"),
+            "expected transcript-mismatch error, got: {msg}"
         );
     }
 }
