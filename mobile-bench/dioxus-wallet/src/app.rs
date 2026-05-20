@@ -468,7 +468,62 @@ fn app_wallet_for(net: Network) -> Wallet {
         tracing::info!(target: "dioxuswalletmain", "app_wallet_for: PROOF_SERVER_URL not set yet — will use LocalProvingProvider");
         base
     };
-    with_url
+    // Layer 2 / Phase 3: attach the persisted DUST syncer if the
+    // store has been opened. `Wallet::sync_dust` will then resume
+    // from `last_id + 1` instead of replaying ~534k events on
+    // every call. The static is populated by
+    // `set_dust_syncer_for(network, syncer)` once per network
+    // after the store opens; we look up the matching one here.
+    if let Some(syncer) = dust_syncer_for(net) {
+        with_url.with_dust_syncer(syncer)
+    } else {
+        with_url
+    }
+}
+
+/// Process-wide map of `Network → Arc<DustSyncer>`. Populated by
+/// `set_dust_syncer_for` from the App's "wallet store opened"
+/// path. Read by `app_wallet_for` on every wallet construction.
+static DUST_SYNCERS: std::sync::OnceLock<
+    std::sync::Mutex<
+        std::collections::HashMap<
+            wallet_core::Network,
+            std::sync::Arc<wallet_core::DustSyncer>,
+        >,
+    >,
+> = std::sync::OnceLock::new();
+
+fn dust_syncers_map() -> &'static std::sync::Mutex<
+    std::collections::HashMap<
+        wallet_core::Network,
+        std::sync::Arc<wallet_core::DustSyncer>,
+    >,
+> {
+    DUST_SYNCERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+
+/// Look up the DUST syncer for `network`, if one has been
+/// registered.
+pub fn dust_syncer_for(
+    network: wallet_core::Network,
+) -> Option<std::sync::Arc<wallet_core::DustSyncer>> {
+    dust_syncers_map()
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&network).cloned())
+}
+
+/// Register a `DustSyncer` for `network`. Called once at App
+/// startup after the wallet store opens; idempotent (later
+/// registrations replace the previous entry, which is fine
+/// because all consumers just look up the current one).
+pub fn set_dust_syncer_for(
+    network: wallet_core::Network,
+    syncer: std::sync::Arc<wallet_core::DustSyncer>,
+) {
+    if let Ok(mut m) = dust_syncers_map().lock() {
+        m.insert(network, syncer);
+    }
 }
 
 /// Set the embedded proof-server URL. Called once at App startup
@@ -647,6 +702,44 @@ pub fn App() -> Element {
                         seed_for_wallet.as_deref(),
                     );
                     state.set_active_wallet_id(wallet_id);
+
+                    // Layer 2 / Phase 3: register a DustSyncer
+                    // for this network so every subsequent
+                    // `app_wallet_for(net)` returns a wallet that
+                    // resumes DUST sync from the persisted
+                    // checkpoint instead of doing a full event
+                    // replay. The syncer reads `DUST_SYNC` rows
+                    // from the same store we just opened.
+                    {
+                        // The dust secret key is derived from
+                        // the wallet seed; we need to build a
+                        // temporary wallet to get it. This
+                        // wallet itself doesn't need a syncer —
+                        // we're constructing the syncer it'd use.
+                        let tmp = app_wallet_for(net);
+                        match tmp.dust_secret_key() {
+                            Ok(sk) => {
+                                let syncer = std::sync::Arc::new(
+                                    wallet_core::DustSyncer::new(
+                                        net,
+                                        std::sync::Arc::new(store.clone()),
+                                        sk,
+                                    ),
+                                );
+                                set_dust_syncer_for(net, syncer);
+                                tracing::info!(
+                                    network=?net,
+                                    "dust syncer registered (path B / phase 3)"
+                                );
+                            }
+                            Err(e) => {
+                                tracing::warn!(
+                                    error = %e,
+                                    "dust secret key derivation failed; DustSyncer not registered"
+                                );
+                            }
+                        }
+                    }
 
                     // PreProd-live demo: stamp the operator's
                     // three manager-profile DIDs into the

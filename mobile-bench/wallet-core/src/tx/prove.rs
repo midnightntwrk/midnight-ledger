@@ -123,7 +123,11 @@ pub(crate) async fn prove_via_http<R: Rng + CryptoRng + SplittableRng>(
     mut rng: R,
     base_url: String,
 ) -> Result<ProvenTx, TxError> {
-    tracing::info!(target: "wallet-core", url = %base_url, "proving via HTTP proof-server");
+    // Drop the custom target so this log matches the `wallet_core=debug`
+    // EnvFilter set in dioxus-wallet's `lib.rs`. With `target: "wallet-core"`
+    // (hyphen) the line gets filtered out — the filter's first segment is
+    // parsed as a crate name and Rust crates use underscores.
+    tracing::info!(url = %base_url, "proving via HTTP proof-server");
     let resolver = build_resolver()?;
     let provider = super::prove_http::HttpProvingProvider {
         rng: rng.split(),

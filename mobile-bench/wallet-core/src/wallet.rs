@@ -130,6 +130,16 @@ pub struct Wallet {
     /// fine for standalone tests, much slower for PreProd writes
     /// from a debug-built wallet.
     proof_server_url: Option<String>,
+    /// Optional persisted DUST snapshot + indexer-resume bridge.
+    /// When attached, `sync_dust()` consults the cached state
+    /// (loaded from redb's `DUST_SYNC` table) and only catches
+    /// up the delta from `last_id + 1`; full replay of PreProd's
+    /// ~534k events only happens once, on the first cold sync.
+    /// When `None`, `sync_dust` falls back to the original full-
+    /// replay path — fine for tests, prohibitively slow for
+    /// PreProd repeat operations. See `BACKLOG.md` Path B for
+    /// the design.
+    dust_syncer: Option<std::sync::Arc<crate::dust::syncer::DustSyncer>>,
 }
 
 impl Wallet {
@@ -142,6 +152,7 @@ impl Wallet {
             keys,
             seed_bytes: seed,
             proof_server_url: None,
+            dust_syncer: None,
         }
     }
 
@@ -155,9 +166,30 @@ impl Wallet {
         self
     }
 
+    /// Builder: attach a persisted DUST syncer. `sync_dust()` will
+    /// then consult the cache + delta-sync instead of doing a full
+    /// indexer replay every call. The App constructs the syncer
+    /// (it has the `WalletStore`) and attaches it here. Tests
+    /// without a store leave this `None` and pay the full-replay
+    /// cost — fine because the standalone stack has few events.
+    pub fn with_dust_syncer(
+        mut self,
+        syncer: std::sync::Arc<crate::dust::syncer::DustSyncer>,
+    ) -> Self {
+        self.dust_syncer = Some(syncer);
+        self
+    }
+
     /// Currently-configured proof-server URL, if any.
     pub fn proof_server_url(&self) -> Option<&str> {
         self.proof_server_url.as_deref()
+    }
+
+    /// Currently-configured DUST syncer, if any.
+    pub fn dust_syncer(
+        &self,
+    ) -> Option<&std::sync::Arc<crate::dust::syncer::DustSyncer>> {
+        self.dust_syncer.as_ref()
     }
 
     /// Demo wallet — uses [`UNDEPLOYED_GENESIS_SEED_HEX`] when the
@@ -287,13 +319,40 @@ impl Wallet {
         Ok(BalanceSnapshot { dust_atomic, night_atomic })
     }
 
-    /// Snapshot the wallet's DUST state by replaying the
-    /// indexer's `dustLedgerEvents` stream into a fresh
-    /// `DustLocalState`. The returned state is consumed by
-    /// `tx::balance` to cover deploy/call fees.
+    /// Snapshot the wallet's DUST state. When a `DustSyncer` is
+    /// attached (App build), drives it to completion — that's
+    /// "load persisted cache + sync delta from `last_id + 1` +
+    /// persist updated snapshot". When no syncer is attached
+    /// (standalone tests), falls back to the original full-replay
+    /// path. The returned state is consumed by `tx::balance` to
+    /// cover deploy/call fees.
+    ///
+    /// First call against a fresh cache pays the full-replay
+    /// cost once (~10–15 min for PreProd's ~534k events); every
+    /// subsequent call is a few-seconds delta sync.
     pub async fn sync_dust(
         &self,
     ) -> Result<crate::DustLocalState<storage::DefaultDB>, crate::DustError> {
+        use futures::StreamExt;
+        if let Some(syncer) = self.dust_syncer.clone() {
+            // Drive the syncer to completion. Drops the progress
+            // updates — callers wanting a progress bar drive the
+            // syncer directly via `DustSyncer::sync()`.
+            let mut stream = std::pin::pin!(syncer.clone().sync());
+            while let Some(progress) = stream.next().await {
+                progress?;
+            }
+            // Pull the freshly-persisted state.
+            return syncer
+                .cached_state()?
+                .map(|(state, _)| state)
+                .ok_or_else(|| {
+                    crate::DustError::Replay(
+                        "syncer completed without persisting any state".into(),
+                    )
+                });
+        }
+        // Fallback for standalone / no-store builds.
         let sk = self
             .dust_secret_key()
             .map_err(|e| crate::DustError::InvalidPublicKey(e.to_string()))?;
@@ -472,11 +531,13 @@ impl Wallet {
         let network = self.network;
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
+        let dust_syncer = self.dust_syncer.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
+            if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -654,11 +715,13 @@ impl Wallet {
         let network = self.network;
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
+        let dust_syncer = self.dust_syncer.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
+            if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -820,10 +883,12 @@ impl Wallet {
         let network = self.network;
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
+        let dust_syncer = self.dust_syncer.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
+            if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
