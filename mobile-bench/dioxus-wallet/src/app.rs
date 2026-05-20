@@ -1176,6 +1176,7 @@ pub fn App() -> Element {
                 }
 
                 BalancePanel { network: *network.read() }
+                DustSyncPanel { network: *network.read() }
             },
             Tab::Dids => rsx! {
                 CreateDidWizard {
@@ -1744,6 +1745,135 @@ fn BalancePanel(network: Network) -> Element {
                 Ok(text) => rsx! { div { class: "seed-blob", "{text}" } },
                 Err(e) => rsx! { div { class: "seed-blob", style: "color: var(--error);", "{e}" } },
             }
+        }
+    }
+}
+
+/// Phase 4 of Path B: the "Sync DUST" button + progress bar.
+///
+/// Mirrors `BalancePanel`'s pattern. The button kicks the
+/// process-wide `DustSyncer` registered for this network at App
+/// startup (see `set_dust_syncer_for` in `app::app_wallet_for`'s
+/// neighbourhood). Progress is consumed off the syncer's stream
+/// and projected into a horizontal bar; the running state +
+/// `last_id` are surfaced as text so the user can see the
+/// checkpoint advance.
+///
+/// Pre-warming via this button is optional — the wallet will
+/// also drive the syncer transparently on the first CRUD action
+/// (see `Wallet::sync_dust` after `1f1574ec`). The button just
+/// lets the user pay the cold-sync cost at a known good time
+/// instead of inside their first submit.
+#[component]
+fn DustSyncPanel(network: Network) -> Element {
+    let mut progress = use_signal::<Option<wallet_core::SyncProgress>>(|| None);
+    let mut running = use_signal(|| false);
+    let mut error = use_signal::<Option<String>>(|| None);
+    let mut last_id = use_signal::<Option<i64>>(|| None);
+
+    // Hydrate the initial "last synced" hint from the persisted
+    // snapshot if any. Reads from redb — cheap. Re-runs whenever
+    // `network` changes (different cache row).
+    use_effect(move || {
+        let cur = network;
+        if let Some(syncer) = dust_syncer_for(cur) {
+            if let Ok(Some((_, id))) = syncer.cached_state() {
+                last_id.set(Some(id));
+            } else {
+                last_id.set(None);
+            }
+        } else {
+            last_id.set(None);
+        }
+    });
+
+    let on_click = move |_| {
+        if *running.read() {
+            return;
+        }
+        let Some(syncer) = dust_syncer_for(network) else {
+            error.set(Some(
+                "DUST syncer not yet initialised — unlock the wallet first."
+                    .into(),
+            ));
+            return;
+        };
+        running.set(true);
+        error.set(None);
+        progress.set(None);
+        spawn(async move {
+            use futures::StreamExt;
+            let mut stream = std::pin::pin!(syncer.clone().sync());
+            while let Some(p) = stream.next().await {
+                match p {
+                    Ok(prog) => progress.set(Some(prog)),
+                    Err(e) => {
+                        error.set(Some(e.to_string()));
+                        running.set(false);
+                        return;
+                    }
+                }
+            }
+            // Pick up the final checkpoint.
+            if let Ok(Some((_, id))) = syncer.cached_state() {
+                last_id.set(Some(id));
+            }
+            running.set(false);
+        });
+    };
+
+    // `SyncProgress` is `Copy`, so we can deref the read guard into
+    // a plain `Option<SyncProgress>` here. That lets us pattern-match
+    // and run `.map`/`.filter` without juggling lifetimes inside the
+    // rsx! arms below.
+    let progress_val: Option<wallet_core::SyncProgress> = *progress.read();
+    let progress_text = progress_val.map(|p| {
+        format!(
+            "Indexing… event {} / {} ({} processed this run)",
+            p.current_id, p.max_id, p.events_processed,
+        )
+    });
+    let progress_pct = progress_val.filter(|p| p.max_id > 0).map(|p| {
+        ((p.current_id as f64 / p.max_id as f64) * 100.0).clamp(0.0, 100.0)
+    });
+
+    rsx! {
+        div { class: "row", "DUST sync" }
+        if let Some(text) = progress_text {
+            div { class: "row", style: "font-size: 12px; color: var(--text-muted);",
+                "{text}"
+            }
+            if let Some(pct) = progress_pct {
+                div {
+                    style: "width: 100%; height: 6px; background: var(--surface-2);\
+                            border-radius: 3px; overflow: hidden;\
+                            border: 1px solid var(--border-faint);",
+                    div {
+                        style: format!(
+                            "width: {pct:.1}%; height: 100%; background: var(--accent, #6ea8f8);\
+                             transition: width 200ms ease-out;"
+                        ),
+                    }
+                }
+            }
+        } else if let Some(id) = *last_id.read() {
+            div { class: "row", style: "font-size: 11px; color: var(--text-muted);",
+                "Last synced: event id {id}"
+            }
+        } else {
+            div { class: "row", style: "font-size: 11px; color: var(--text-faint);",
+                "Not yet synced — first sync replays the full chain history (~10–15 min on PreProd)."
+            }
+        }
+        div { class: "row",
+            button {
+                disabled: *running.read(),
+                onclick: on_click,
+                {if *running.read() { "Syncing…" } else { "Sync DUST" }}
+            }
+        }
+        if let Some(e) = error.read().as_ref() {
+            div { class: "seed-blob", style: "color: var(--error);", "{e}" }
         }
     }
 }
