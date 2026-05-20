@@ -461,11 +461,14 @@ fn app_wallet_for(net: Network) -> Wallet {
     // startup and read here on every wallet construction, so all
     // ~15 call sites of `app_wallet_for` transparently get the
     // proof-server-backed wallet without parameter threading.
-    if let Some(url) = PROOF_SERVER_URL.get() {
+    let with_url = if let Some(url) = PROOF_SERVER_URL.get() {
+        tracing::info!(target: "dioxuswalletmain", proof_server_url = %url, "app_wallet_for: attaching proof-server URL");
         base.with_proof_server_url(url.clone())
     } else {
+        tracing::info!(target: "dioxuswalletmain", "app_wallet_for: PROOF_SERVER_URL not set yet — will use LocalProvingProvider");
         base
-    }
+    };
+    with_url
 }
 
 /// Set the embedded proof-server URL. Called once at App startup
@@ -2482,6 +2485,12 @@ fn DidOperationBuilder(
     on_event: EventHandler<SessionEvent>,
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
     on_cost: EventHandler<CostRun>,
+    /// Lifted from the parent `DidDetailView` so the queue
+    /// survives "Back to detail" → "Update DID" round trips.
+    /// Previously a component-local `use_signal` here, which got
+    /// dropped on unmount — the user lost any pending or
+    /// completed-but-unsubmitted rows on every navigation.
+    queue: Signal<Vec<(DidOperation, QueueStatus)>>,
 ) -> Element {
     let mut op_idx = use_signal(|| 0usize);
 
@@ -2500,8 +2509,10 @@ fn DidOperationBuilder(
     let mut f_endpoint = use_signal(String::new);
     let mut form_error = use_signal::<Option<String>>(|| None);
 
-    // Queue + execution state.
-    let mut queue = use_signal::<Vec<(DidOperation, QueueStatus)>>(Vec::new);
+    // Queue + execution state. `queue` is the lifted Signal from
+    // DidDetailView; rebind as mutable here to match the existing
+    // call sites (`queue.set(...)` etc.).
+    let mut queue = queue;
     let mut running = use_signal(|| false);
     let mut batch_error = use_signal::<Option<String>>(|| None);
 
@@ -4550,6 +4561,12 @@ fn DidDetailView(
     // — write circuits need it for the `localSecretKey()`
     // witness).
     let mut builder_mode = use_signal(|| false);
+    // Queue lives here (not inside `DidOperationBuilder`) so it
+    // survives the "Back to detail" → "Update DID" round trip.
+    // Otherwise the user's pending + done rows are wiped every
+    // time they navigate back to the detail view.
+    let builder_queue =
+        use_signal::<Vec<(DidOperation, QueueStatus)>>(Vec::new);
     let controller_known = controller_secret.is_some();
 
     // Click handler for "Resolve latest".
@@ -4734,6 +4751,7 @@ fn DidDetailView(
                     on_event,
                     on_resolved,
                     on_cost,
+                    queue: builder_queue,
                 }
             };
         }
