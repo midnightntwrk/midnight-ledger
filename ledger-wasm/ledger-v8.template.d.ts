@@ -516,7 +516,7 @@ export class DustLocalState {
   /**
    * Returns a new UTXO with a reduced value and the sequential nonce
    */
-  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
+  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtractFee: bigint, newCommitmentIndex: bigint, genInfo: DustGenerationInfo, sk: DustSecretKey): QualifiedDustOutput;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;

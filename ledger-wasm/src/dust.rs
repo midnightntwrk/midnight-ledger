@@ -1525,6 +1525,7 @@ impl DustLocalState {
         now: &Date,
         subtract_fee: BigInt,
         new_commitment_index: BigInt,
+        gen_info: JsValue,
         sk: &DustSecretKey,
     ) -> Result<JsValue, JsError> {
         let qdo = value_to_qdo(utxo)?;
@@ -1533,10 +1534,16 @@ impl DustLocalState {
             .map_err(|_| JsError::new("subtract_fee is out of range"))?;
         let new_commitment_index = u64::try_from(new_commitment_index)
             .map_err(|_| JsError::new("new_commitment_index is out of range"))?;
+        let gen_info = value_to_dust_gen_info(gen_info)?;
         let sk = sk.try_unwrap()?;
-        let new_utxo =
-            self.0
-                .successor_utxo(&qdo, &now, subtract_fee, new_commitment_index, &sk)?;
+        let new_utxo = self.0.successor_utxo(
+            &qdo,
+            &now,
+            subtract_fee,
+            new_commitment_index,
+            &gen_info,
+            &sk,
+        );
         qdo_to_value(&new_utxo)
     }
 
