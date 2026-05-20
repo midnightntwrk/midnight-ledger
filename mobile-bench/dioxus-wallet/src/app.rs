@@ -5053,11 +5053,32 @@ fn render_overview_tab(r: &wallet_core::ResolvedDid) -> Element {
 }
 
 fn render_document_tab(r: &wallet_core::ResolvedDid) -> Element {
+    // `to_string_pretty` writes proper 2-space-indented JSON
+    // with real newlines; render it inside `<pre>` so the
+    // browser doesn't collapse whitespace. The previous version
+    // used `.seed-blob` on a plain `<div>` which (a) didn't pick
+    // up the styled rule (that's scoped to
+    // `details .panel .seed-blob`) and (b) wouldn't preserve
+    // newlines anyway — the result on screen was one wrapped
+    // line of JSON with no indentation.
     let json = serde_json::to_string_pretty(&r.document)
         .unwrap_or_else(|e| format!("serialise: {e}"));
     rsx! {
         h3 { "DID Document" }
-        div { class: "seed-blob", "{json}" }
+        pre {
+            style: "font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;\
+                    font-size: 11px;\
+                    color: var(--mono-tint, var(--text));\
+                    background: var(--surface-2);\
+                    border: 1px solid var(--border-faint);\
+                    border-radius: 8px;\
+                    padding: 12px;\
+                    margin: 0;\
+                    white-space: pre-wrap;\
+                    word-break: break-word;\
+                    overflow-x: auto;",
+            "{json}"
+        }
     }
 }
 
