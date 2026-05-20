@@ -251,6 +251,10 @@ pub async fn spawn_proof_server(state: &BridgeState) -> Result<String, String> {
         .proof_server_url
         .set(url.clone())
         .map_err(|_| "proof_server_url already set".to_string())?;
+    // Also expose the URL to `app::app_wallet_for` via the
+    // process-wide static so every wallet constructed during this
+    // App session routes proving through the embedded server.
+    crate::app::set_proof_server_url(url.clone());
     tracing::info!(%url, "embedded proof-server ready");
     Ok(url)
 }

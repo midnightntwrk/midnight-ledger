@@ -431,17 +431,50 @@ mod preprod_live {
 /// One place to centralise the swap so the rest of the App
 /// doesn't need to know which build it's running under.
 fn app_wallet_for(net: Network) -> Wallet {
-    #[cfg(feature = "preprod-live")]
-    if matches!(net, Network::PreProd) {
-        let bytes = hex::decode(preprod_live::SEED_HEX).expect("preprod_live::SEED_HEX is hex");
-        let seed: [u8; 32] = bytes
-            .as_slice()
-            .try_into()
-            .expect("preprod_live::SEED_HEX is 32 bytes");
-        return Wallet::from_seed(seed, Network::PreProd);
+    let base = {
+        #[cfg(feature = "preprod-live")]
+        {
+            if matches!(net, Network::PreProd) {
+                let bytes = hex::decode(preprod_live::SEED_HEX)
+                    .expect("preprod_live::SEED_HEX is hex");
+                let seed: [u8; 32] = bytes
+                    .as_slice()
+                    .try_into()
+                    .expect("preprod_live::SEED_HEX is 32 bytes");
+                Wallet::from_seed(seed, Network::PreProd)
+            } else {
+                wallet_core::Wallet::demo(net)
+            }
+        }
+        #[cfg(not(feature = "preprod-live"))]
+        {
+            wallet_core::Wallet::demo(net)
+        }
+    };
+    // If the App has booted an embedded proof-server (see
+    // `BridgeState::spawn_proof_server`), thread the URL into the
+    // wallet so `Wallet::call_did_circuit` / `create_did` /
+    // `load_did_circuit` route per-preimage proving through the
+    // release-built proof-server's `/prove` endpoint instead of
+    // running the in-process zkir prover (slow on debug builds).
+    // The static below is set by `set_proof_server_url` once at App
+    // startup and read here on every wallet construction, so all
+    // ~15 call sites of `app_wallet_for` transparently get the
+    // proof-server-backed wallet without parameter threading.
+    if let Some(url) = PROOF_SERVER_URL.get() {
+        base.with_proof_server_url(url.clone())
+    } else {
+        base
     }
-    wallet_core::Wallet::demo(net)
 }
+
+/// Set the embedded proof-server URL. Called once at App startup
+/// from `BridgeState::spawn_proof_server`; idempotent.
+pub fn set_proof_server_url(url: String) {
+    let _ = PROOF_SERVER_URL.set(url);
+}
+
+static PROOF_SERVER_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
 
 /// `preprod-live` only: stamp the operator's three DIDs into
 /// the wallet's persistent inventory as `Pending`, and seed

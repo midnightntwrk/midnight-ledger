@@ -121,6 +121,15 @@ pub struct Wallet {
     network: Network,
     keys: SecretKeys,
     seed_bytes: [u8; 32],
+    /// Optional `midnight-proof-server` base URL (e.g.
+    /// `http://127.0.0.1:57610`). When set, `call_did_circuit`,
+    /// `create_did`, and `load_did_circuit` route per-preimage
+    /// proving through that server's `/prove` endpoint via
+    /// `HttpProvingProvider`. When `None`, the in-process
+    /// `zkir_v2::LocalProvingProvider` runs the proofs locally —
+    /// fine for standalone tests, much slower for PreProd writes
+    /// from a debug-built wallet.
+    proof_server_url: Option<String>,
 }
 
 impl Wallet {
@@ -128,7 +137,27 @@ impl Wallet {
     /// (the seed *is* the wallet identity; no BIP39 yet).
     pub fn from_seed(seed: [u8; 32], network: Network) -> Self {
         let keys = SecretKeys::from(Seed::from(seed));
-        Self { network, keys, seed_bytes: seed }
+        Self {
+            network,
+            keys,
+            seed_bytes: seed,
+            proof_server_url: None,
+        }
+    }
+
+    /// Builder: attach a `midnight-proof-server` base URL. Subsequent
+    /// `create_did` / `call_did_circuit` / `load_did_circuit` calls
+    /// will route proving through that server instead of running the
+    /// in-process zkir prover. See [`Self::proof_server_url`] for the
+    /// rationale.
+    pub fn with_proof_server_url(mut self, url: impl Into<String>) -> Self {
+        self.proof_server_url = Some(url.into());
+        self
+    }
+
+    /// Currently-configured proof-server URL, if any.
+    pub fn proof_server_url(&self) -> Option<&str> {
+        self.proof_server_url.as_deref()
     }
 
     /// Demo wallet — uses [`UNDEPLOYED_GENESIS_SEED_HEX`] when the
@@ -442,10 +471,12 @@ impl Wallet {
     ) -> impl futures::Stream<Item = crate::WizardStage> + Send + 'static {
         let network = self.network;
         let seed_bytes = self.seed_bytes;
+        let proof_server_url = self.proof_server_url.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
-            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut wallet = Wallet::from_seed(seed_bytes, network);
+            if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -558,7 +589,10 @@ impl Wallet {
             // 4. Proving
             yield crate::WizardStage::Proving;
             let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+            let proven = match match proof_server_url.clone() {
+                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
+                None => crate::tx::prove::prove(balanced, prove_rng).await,
+            } {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };
@@ -619,10 +653,12 @@ impl Wallet {
 
         let network = self.network;
         let seed_bytes = self.seed_bytes;
+        let proof_server_url = self.proof_server_url.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
-            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut wallet = Wallet::from_seed(seed_bytes, network);
+            if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -715,7 +751,10 @@ impl Wallet {
             // 4. Proving
             yield crate::WizardStage::Proving;
             let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+            let proven = match match proof_server_url.clone() {
+                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
+                None => crate::tx::prove::prove(balanced, prove_rng).await,
+            } {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };
@@ -780,9 +819,11 @@ impl Wallet {
 
         let network = self.network;
         let seed_bytes = self.seed_bytes;
+        let proof_server_url = self.proof_server_url.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
-            let wallet = Wallet::from_seed(seed_bytes, network);
+            let mut wallet = Wallet::from_seed(seed_bytes, network);
+            if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -933,7 +974,10 @@ impl Wallet {
             // 4. Proving
             yield crate::WizardStage::Proving;
             let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match crate::tx::prove::prove(balanced, prove_rng).await {
+            let proven = match match proof_server_url.clone() {
+                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
+                None => crate::tx::prove::prove(balanced, prove_rng).await,
+            } {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };

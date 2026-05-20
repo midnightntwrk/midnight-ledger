@@ -21,10 +21,22 @@ pub fn run() {
     let (capture, rx) = logs::LogCapture::new();
     let _ = logs::LOG_CAPTURE.set(capture.clone());
     let _ = logs::LOG_RX.set(std::sync::Mutex::new(Some(rx)));
+    use tracing_subscriber::filter::EnvFilter;
     use tracing_subscriber::layer::SubscriberExt as _;
     use tracing_subscriber::util::SubscriberInitExt as _;
+    use tracing_subscriber::Layer as _;
+    // Honour `RUST_LOG` for stderr, defaulting to a sensible filter
+    // that mutes dioxus_core's TRACE deluge (which previously
+    // produced multi-GB log files in minutes and burned the App's
+    // CPU on rendering trace messages). The UI's Logs tab still
+    // captures everything via `WalletLogLayer` — that one is
+    // unfiltered so the in-app archive is complete regardless of
+    // what stderr shows.
+    let stderr_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        EnvFilter::new("warn,wallet_core=debug,dioxuswalletmain=info,bundle=info")
+    });
     let _ = tracing_subscriber::registry()
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_filter(stderr_filter))
         .with(logs::WalletLogLayer::new(capture))
         .try_init();
     // rustls 0.23 panics on first TLS use if no `CryptoProvider` is

@@ -105,6 +105,42 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
     Ok(proved.seal(rng))
 }
 
+/// Same as [`prove`], but routes each per-preimage `prove` call to
+/// a `midnight-proof-server` `/prove` endpoint instead of running
+/// the in-process zkir prover. Used by `Wallet::call_did_circuit`
+/// when the App has booted an embedded proof-server (see
+/// [bridge.rs:243](file:///Users/ysh/iohk/midnight-ledger/.claude/worktrees/thirsty-lovelace-092f50/mobile-bench/dioxus-wallet/src/bridge.rs:243)).
+/// Matches what upstream's `httpClientProofProvider` does in the
+/// `midnight-did-manager-service` flow — release-built server with
+/// a worker pool, so a debug-built wallet doesn't pay the
+/// multi-minute proving penalty per call.
+///
+/// `base_url` is e.g. `http://127.0.0.1:57610` — no trailing
+/// `/prove`, the provider appends that itself.
+#[allow(dead_code)]
+pub(crate) async fn prove_via_http<R: Rng + CryptoRng + SplittableRng>(
+    tx: UnprovenTx,
+    mut rng: R,
+    base_url: String,
+) -> Result<ProvenTx, TxError> {
+    tracing::info!(target: "wallet-core", url = %base_url, "proving via HTTP proof-server");
+    let resolver = build_resolver()?;
+    let provider = super::prove_http::HttpProvingProvider {
+        rng: rng.split(),
+        resolver: &resolver,
+        base_url,
+        client: reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .map_err(|e| TxError::Prove(format!("http client: {e}")))?,
+    };
+    let proved = tx
+        .prove(provider, &INITIAL_COST_MODEL)
+        .await
+        .map_err(|e| TxError::Prove(e.to_string()))?;
+    Ok(proved.seal(rng))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

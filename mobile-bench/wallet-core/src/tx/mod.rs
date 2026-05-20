@@ -13,6 +13,7 @@ pub(crate) mod balance;
 pub(crate) mod build;
 pub(crate) mod maintain;
 pub(crate) mod prove;
+pub(crate) mod prove_http;
 pub(crate) mod scale;
 
 use crate::DidId;
