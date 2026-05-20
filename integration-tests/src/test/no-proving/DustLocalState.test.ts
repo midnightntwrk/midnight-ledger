@@ -40,7 +40,8 @@ import {
   dustInitialNonce,
   dustNonce,
   dustFirstNonce,
-  dustNullifier
+  dustNullifier,
+  successorDustUtxo
 } from '@midnight-ntwrk/ledger';
 import { expect } from 'vitest';
 import { ProofMarker, SignatureMarker } from '@/test/utils/Markers';
@@ -1377,7 +1378,7 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
-   * Test utility methods - successorUtxo
+   * Test utility methods - successorDustUtxo
    *
    * @given A DustLocalState with a UTXO
    * @when Calling successorUtxo to get the next UTXO with a reduced value
@@ -1394,7 +1395,7 @@ describe('Ledger API - DustLocalState', () => {
     const now = state.time;
     const fee = 1000n;
     const expectedValue = updatedValue(qdo.ctime, qdo.initialValue, genInfo, state.time, initialParameters) - fee;
-    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey);
+    const newUtxo = successorDustUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey, initialParameters);
 
     expect(newUtxo.seq).toEqual(qdo.seq + 1);
     expect(newUtxo.ctime).toEqual(now);
@@ -1432,7 +1433,7 @@ describe('Ledger API - DustLocalState', () => {
     const newCommitmentIndex = qdo.mtIndex + 1n;
     const fee = 1000n;
 
-    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey);
+    const newUtxo = successorDustUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey, initialParameters);
     const calculatedNonce = dustNonce(qdo.backingNight, BigInt(newUtxo.seq), secretKey);
 
     expect(calculatedNonce).toEqual(newUtxo.nonce);

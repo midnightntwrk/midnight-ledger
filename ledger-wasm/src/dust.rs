@@ -26,7 +26,7 @@ use ledger::dust::{
     DustRegistration as LedgerDustRegistration, DustSecretKey as LedgerDustSecretKey,
     DustSpend as LedgerDustSpend, DustState as LedgerDustState,
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
-    WithDustStateChanges as LedgerWithDustStateChanges,
+    WithDustStateChanges as LedgerWithDustStateChanges, successor_utxo,
 };
 use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
 use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
@@ -1518,35 +1518,6 @@ impl DustLocalState {
         Ok(DustLocalState(new_state))
     }
 
-    #[wasm_bindgen(js_name = "successorUtxo")]
-    pub fn successor_utxo(
-        &self,
-        utxo: JsValue,
-        now: &Date,
-        subtract_fee: BigInt,
-        new_commitment_index: BigInt,
-        gen_info: JsValue,
-        sk: &DustSecretKey,
-    ) -> Result<JsValue, JsError> {
-        let qdo = value_to_qdo(utxo)?;
-        let now = Timestamp::from_secs(js_date_to_seconds(now));
-        let subtract_fee = u128::try_from(subtract_fee)
-            .map_err(|_| JsError::new("subtract_fee is out of range"))?;
-        let new_commitment_index = u64::try_from(new_commitment_index)
-            .map_err(|_| JsError::new("new_commitment_index is out of range"))?;
-        let gen_info = value_to_dust_gen_info(gen_info)?;
-        let sk = sk.try_unwrap()?;
-        let new_utxo = self.0.successor_utxo(
-            &qdo,
-            &now,
-            subtract_fee,
-            new_commitment_index,
-            &gen_info,
-            &sk,
-        );
-        qdo_to_value(&new_utxo)
-    }
-
     pub fn serialize(&self) -> Result<Uint8Array, JsError> {
         let mut res = Vec::new();
         tagged_serialize(&self.0, &mut res)?;
@@ -1624,6 +1595,36 @@ impl UtxoMeta {
         self.0.ctime = ctime;
         Ok(())
     }
+}
+
+#[wasm_bindgen(js_name = "successorDustUtxo")]
+pub fn successor_dust_utxo(
+    utxo: JsValue,
+    now: &Date,
+    subtract_fee: BigInt,
+    new_commitment_index: BigInt,
+    gen_info: JsValue,
+    sk: &DustSecretKey,
+    dust_parameters: &DustParameters,
+) -> Result<JsValue, JsError> {
+    let qdo = value_to_qdo(utxo)?;
+    let now = Timestamp::from_secs(js_date_to_seconds(now));
+    let subtract_fee =
+        u128::try_from(subtract_fee).map_err(|_| JsError::new("subtract_fee is out of range"))?;
+    let new_commitment_index = u64::try_from(new_commitment_index)
+        .map_err(|_| JsError::new("new_commitment_index is out of range"))?;
+    let gen_info = value_to_dust_gen_info(gen_info)?;
+    let sk = sk.try_unwrap()?;
+    let new_utxo = successor_utxo(
+        &qdo,
+        &now,
+        subtract_fee,
+        new_commitment_index,
+        &gen_info,
+        &sk,
+        &dust_parameters.0,
+    );
+    qdo_to_value(&new_utxo)
 }
 
 #[wasm_bindgen(js_name = "updatedValue")]
