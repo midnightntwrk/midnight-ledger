@@ -167,6 +167,17 @@ impl DustSyncer {
                 Some(t) => t,
                 None => (DustLocalState::new(self.params), -1),
             };
+            // Remember whether we resumed from a populated cache.
+            // If yes and the indexer sends zero events (because we
+            // were already at tip), the silent stream is a
+            // "you're caught up" signal, not a connection error.
+            // Without this, every call to `sync()` on an
+            // already-up-to-date wallet would surface as
+            // `StreamClosedEarly` — exactly the bug the user hit on
+            // first Submit batch after the App pre-warmed via the
+            // WalletSyncPane.
+            let started_with_cache = last_id >= 0;
+            let starting_last_id = last_id;
 
             tracing::info!(
                 network = %self.network.config().network_id,
@@ -238,8 +249,9 @@ impl DustSyncer {
                             }
                         }
                     }
-                    Ok(None) => {
-                        // Stream ended. Flush whatever's pending.
+                    Ok(None) | Err(_) => {
+                        // Stream ended OR went idle. Flush
+                        // anything pending in the current batch.
                         if !batch.is_empty() {
                             state = state
                                 .replay_events(&self.dust_key, batch.iter())
@@ -249,6 +261,16 @@ impl DustSyncer {
                             events_processed += batch.len();
                             self.persist(&state, last_id).await?;
                         }
+                        // Three exit cases:
+                        //  (a) we saw at least one event during
+                        //      this run → normal completion;
+                        //  (b) we resumed from a populated cache
+                        //      and the indexer is silent → that's
+                        //      the "you're already at tip"
+                        //      signal, not an error;
+                        //  (c) fresh wallet, no cache, and the
+                        //      indexer never sent anything →
+                        //      genuinely bad, surface it.
                         if target_max.is_some() {
                             yield SyncProgress {
                                 current_id: last_id,
@@ -257,26 +279,12 @@ impl DustSyncer {
                             };
                             break 'outer;
                         }
-                        Err(DustError::StreamClosedEarly)?;
-                    }
-                    Err(_) => {
-                        // Idle timeout. If we've seen any events
-                        // we're done; otherwise the indexer never
-                        // sent us anything → surface that.
-                        if !batch.is_empty() {
-                            state = state
-                                .replay_events(&self.dust_key, batch.iter())
-                                .map_err(|e| {
-                                    DustError::Replay(format!("replay: {e}"))
-                                })?;
-                            events_processed += batch.len();
-                            self.persist(&state, last_id).await?;
-                        }
-                        if target_max.is_some() {
+                        if started_with_cache {
+                            // No new events; cached state is current.
                             yield SyncProgress {
-                                current_id: last_id,
-                                max_id: target_max.unwrap_or(-1),
-                                events_processed,
+                                current_id: starting_last_id,
+                                max_id: starting_last_id,
+                                events_processed: 0,
                             };
                             break 'outer;
                         }
