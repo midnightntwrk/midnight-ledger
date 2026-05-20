@@ -1506,18 +1506,12 @@ impl<D: DB> DustLocalState<D> {
         now: &Timestamp,
         subtract_fee: u128,
         new_commitment_index: u64,
+        gen_info: &DustGenerationInfo,
         sk: &DustSecretKey,
-    ) -> Result<QualifiedDustOutput, DustLocalStateError> {
-        let gen_idx = self.night_indices.get(&utxo.backing_night).ok_or(
-            DustLocalStateError::BackingNightNotFound {
-                backing_night: utxo.backing_night,
-            },
-        )?;
-
-        let gen_info = self.generating_tree.index(*gen_idx).unwrap().1;
+    ) -> QualifiedDustOutput {
         let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, &self.params);
         let v_now = v_pre_spend.saturating_sub(subtract_fee);
-        let qdo_new = QualifiedDustOutput {
+        QualifiedDustOutput {
             backing_night: utxo.backing_night,
             ctime: *now,
             initial_value: v_now,
@@ -1525,8 +1519,7 @@ impl<D: DB> DustLocalState<D> {
             nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
             owner: utxo.owner,
             mt_index: new_commitment_index,
-        };
-        Ok(qdo_new)
+        }
     }
 
     pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {

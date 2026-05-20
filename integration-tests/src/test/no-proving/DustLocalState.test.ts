@@ -1394,7 +1394,7 @@ describe('Ledger API - DustLocalState', () => {
     const now = state.time;
     const fee = 1000n;
     const expectedValue = updatedValue(qdo.ctime, qdo.initialValue, genInfo, state.time, initialParameters) - fee;
-    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, secretKey);
+    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey);
 
     expect(newUtxo.seq).toEqual(qdo.seq + 1);
     expect(newUtxo.ctime).toEqual(now);
