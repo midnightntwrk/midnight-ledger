@@ -8,12 +8,17 @@ that a future session can act on it without re-doing the investigation.
 
 ## Path B — Full wallet sync to redb
 
-**Status:** Deferred. Path A (per-call live fetch of `LedgerParameters`
-+ `ZswapChainState` from the indexer) is in place via the
-`contract_state.graphql` query extended in commit `57068c39` and the
-plumbing through `Wallet::call_did_circuit` that followed it. That
-unblocks the PreProd write demo. Path B is the long-term direction
-when we outgrow per-call fetches.
+**Status:** Phase 1 LANDED in commit `5f7df14f` (schema v6 +
+`DUST_SYNC` table + `WalletStore` get/put/clear methods).
+Phase 2/3/4 still to do — sketched at the bottom of this section.
+
+Background on Path A: per-call live fetch of `LedgerParameters` +
+`ZswapChainState` from the indexer landed via commit `57068c39` +
+follow-ups, plus the HTTP-proof-server route in `0875368c`. That
+unblocked the PreProd write demo but each write still pays a full
+DUST event replay (~534k events on PreProd → 30–50 min per click).
+Path B persists that snapshot so subsequent launches resume from
+`last_id + 1`.
 
 **Why this is the natural next step:**
 Upstream `midnight-did-manager-service` persists 5 JSON files in
@@ -56,7 +61,7 @@ first run; subsequent launches are fast.
 
 ---
 
-### Phase 1 — Schema v6 snapshot tables (~200 LOC)
+### Phase 1 — Schema v6 snapshot tables (~150 LOC) — DONE `5f7df14f`
 
 Mirror upstream's 5 JSON files 1-to-1 in redb. One row per "state kind"
 keeps it small and all-or-nothing replaceable.
@@ -90,7 +95,74 @@ when we ask.
 
 ---
 
-### Phase 2 — Sync loop per state kind (~250 LOC)
+### Phase 2 — `WalletSyncer` module (~200 LOC) — TODO
+
+User wants:
+- A **"Sync DUST" button** on the wallet page that triggers a full
+  catch-up with a visible progress bar (initial cold sync UX).
+- Subsequent CRUD operations do a **quick incremental resync** of
+  the delta since the last persist — transparent, no spinner.
+
+Sketch:
+
+```rust
+// mobile-bench/wallet-core/src/dust/syncer.rs (new)
+pub struct DustSyncer {
+    network: Network,
+    store: Arc<WalletStore>,
+    dust_key: Arc<DustSecretKey>,
+}
+
+pub struct SyncProgress {
+    pub current_id: i64,
+    pub max_id: i64,
+}
+
+impl DustSyncer {
+    /// Load the persisted snapshot if any, subscribe from
+    /// `last_id + 1`, fold events, persist on a debounce window.
+    /// Returns a stream that emits progress updates so the UI
+    /// can render a progress bar.
+    pub fn sync(&self) -> impl Stream<Item = SyncProgress>;
+
+    /// Read the current cached state without going to the network.
+    /// Returns the most recent persisted snapshot. Pairs with
+    /// `Wallet::call_did_circuit` which then needs only a tiny
+    /// delta sync (current_id..tip).
+    pub fn cached_state(&self) -> Option<DustLocalState<DefaultDB>>;
+}
+```
+
+Reuse the `fold_events` pattern from
+`mobile-bench/wallet-core/src/dust/snapshot.rs:64-112` — same
+indexer subscription, just persists every N events / M seconds.
+
+### Phase 3 — Wallet integration (~100 LOC) — TODO
+
+Current `Wallet::sync_dust()` does a full replay every call. Make
+it consult the cache first via the `DustSyncer`:
+
+1. `Wallet` grows an `Option<Arc<DustSyncer>>` field (clean: trait
+   abstraction so wallet-core doesn't bind to the store concretely).
+2. `with_dust_syncer(syncer)` builder, called by the App at wallet
+   construction.
+3. `sync_dust()` checks the syncer's cached state; if missing,
+   falls back to today's full-replay path.
+4. Internal `Wallet::from_seed(seed_bytes, network)` calls inside
+   `call_did_circuit` / `create_did` / `load_did_circuit` thread
+   the syncer Arc the same way they currently propagate
+   `proof_server_url`.
+
+### Phase 4 — UI sync button + progress (~100 LOC) — TODO
+
+- New row on the wallet page: "DUST sync: last synced 2026-05-20 16:30, last_id=534,302"
+- "Sync now" button → kicks `DustSyncer::sync()`, renders progress
+  bar driven by the `SyncProgress` stream.
+- Progress format: `Indexing… 234,567 / 534,302 (43%)`.
+- Auto-trigger an incremental sync on every CRUD submit (small,
+  fast).
+
+### Original Phase 2 — Sync loop per state kind (~250 LOC, deferred)
 
 Reuse the exact `fold_events` pattern from
 `mobile-bench/wallet-core/src/dust/snapshot.rs:64-112`. That code
