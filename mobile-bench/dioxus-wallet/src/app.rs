@@ -590,6 +590,9 @@ pub fn App() -> Element {
     // first DUST sync completes; `Some(0)` is a real "zero
     // balance" reading.
     let dust_subunits = use_signal::<Option<u128>>(|| None);
+    // Top-right menu dropdown open/closed. Toggled by the `≡`
+    // button; closed automatically when the user picks a tab.
+    let mut menu_open = use_signal(|| false);
     // Last DID id this session deployed via CreateDidWizard.
     // ResolveDidPanel pre-populates its input from this so the
     // user can immediately verify their freshly-created DID.
@@ -1066,9 +1069,37 @@ pub fn App() -> Element {
         // (see lib.rs::desktop_or_mobile_launch) so it runs at
         // page-parse time and ahead of the bridge JS shim.
 
+        // Mobile-friendly nav: the `≡` button in the top-right
+        // toggles a dropdown listing every tab. The horizontal
+        // tab-strip is still rendered below as a fallback for
+        // wider viewports — CSS hides it on mobile (`@media
+        // (max-width: 480px)` rule). Both surfaces share the
+        // `active_tab` signal so they stay in sync.
         div { class: "header",
-            h1 { "Midnight Wallet" }
-            button { class: "menu-btn", title: "Advanced", "≡" }
+            h1 { "{active_tab.read().label()}" }
+            button {
+                class: "menu-btn",
+                title: "Menu",
+                onclick: move |_| {
+                    let cur = *menu_open.read();
+                    menu_open.set(!cur);
+                },
+                "≡"
+            }
+        }
+        if *menu_open.read() {
+            div { class: "menu-dropdown",
+                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {
+                    button {
+                        class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
+                        onclick: move |_| {
+                            active_tab.set(t);
+                            menu_open.set(false);
+                        },
+                        "{t.label()}"
+                    }
+                }
+            }
         }
 
         StatusLine {
@@ -1080,7 +1111,8 @@ pub fn App() -> Element {
         WalletStoreBadge { state: bridge_state.read().clone() }
 
         // Tab navigation. Each button sets active_tab; rendering
-        // below is a single match on the current value.
+        // below is a single match on the current value. CSS hides
+        // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
             for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {
                 button {
@@ -1411,26 +1443,32 @@ pub fn App() -> Element {
                 TimingsPanel { runs: timing_log.read().clone() }
                 TxCostPanel { runs: cost_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
-                    div { class: "row", "Seed (hex):" }
-                    div { class: "seed-blob", "{w.seed_hex}" }
-                    div { class: "row", "Coin PK:" }
-                    div { class: "seed-blob", "{w.coin_pk_hex}" }
-                    div { class: "row", "Encryption PK:" }
-                    div { class: "seed-blob", "{w.enc_pk_hex}" }
+                    div { class: "card",
+                        div { class: "card-header", "Wallet identity" }
+                        {kv_blob_row("Seed (hex)", &w.seed_hex)}
+                        {kv_blob_row("Coin PK", &w.coin_pk_hex)}
+                        {kv_blob_row("Encryption PK", &w.enc_pk_hex)}
+                    }
                 }
                 if let Some(p) = probe.read().as_ref() {
-                    div { class: "row", "Last probe — {p.network.label()}" }
-                    ProbeRowCompact { name: "indexer http", url: p.indexer_http.url.clone(), reachable: p.indexer_http.reachable, latency: p.indexer_http.latency_ms, detail: p.indexer_http.detail.clone() }
-                    ProbeRowCompact { name: "indexer ws",   url: p.indexer_ws.url.clone(),   reachable: p.indexer_ws.reachable,   latency: p.indexer_ws.latency_ms,   detail: p.indexer_ws.detail.clone() }
-                    ProbeRowCompact { name: "node ws",      url: p.node_ws.url.clone(),      reachable: p.node_ws.reachable,      latency: p.node_ws.latency_ms,      detail: p.node_ws.detail.clone() }
+                    div { class: "card",
+                        div { class: "card-header", "Last probe — {p.network.label()}" }
+                        ProbeRowCompact { name: "indexer http", url: p.indexer_http.url.clone(), reachable: p.indexer_http.reachable, latency: p.indexer_http.latency_ms, detail: p.indexer_http.detail.clone() }
+                        ProbeRowCompact { name: "indexer ws",   url: p.indexer_ws.url.clone(),   reachable: p.indexer_ws.reachable,   latency: p.indexer_ws.latency_ms,   detail: p.indexer_ws.detail.clone() }
+                        ProbeRowCompact { name: "node ws",      url: p.node_ws.url.clone(),      reachable: p.node_ws.reachable,      latency: p.node_ws.latency_ms,      detail: p.node_ws.detail.clone() }
+                    }
                 }
                 if let Some(s) = chain.read().node.as_ref() {
-                    div { class: "row", "Node finalized head:" }
-                    div { class: "seed-blob", "{s.finalized_head_hash}" }
+                    div { class: "card",
+                        div { class: "card-header", "Node" }
+                        {kv_blob_row("Finalized head", &s.finalized_head_hash)}
+                    }
                 }
                 if let Some(url) = proof_server.read().as_ref() {
-                    div { class: "row", "Embedded proof-server:" }
-                    div { class: "seed-blob", "{url}" }
+                    div { class: "card",
+                        div { class: "card-header", "Embedded proof-server" }
+                        {kv_blob_row("URL", url)}
+                    }
                 }
             },
             Tab::Keys => rsx! {
@@ -1653,8 +1691,12 @@ fn CreateDidWizard(
         (false, None) => "Create DID",
     };
 
+    // The button itself carries the "Create DID" label so the
+    // older `<div class="wizard-header">Create DID</div>` above
+    // was redundant — two elements competing for the same row.
+    // Dropped the header; the button-as-CTA is the single
+    // affordance now.
     rsx! {
-        div { class: "wizard-header", "Create DID" }
         div { class: "row",
             button {
                 disabled: *running.read(),
@@ -5871,9 +5913,38 @@ fn short_hex_or_dash(hex: &str) -> String {
     }
 }
 
+/// Helper: render a `label → value` row inside a card. The
+/// value is a hex / opaque blob shown in mono with proper
+/// wrapping (same `<pre>` pattern the Document tab uses, scaled
+/// down for tight rows). Used by the Diagnostics tab to render
+/// Seed / Coin PK / Encryption PK / Finalized head / proof-server
+/// URL in consistent panels.
+fn kv_blob_row(label: &str, value: &str) -> Element {
+    rsx! {
+        div { class: "balance-row",
+            span { class: "label", "{label}" }
+            pre {
+                style: "flex: 1; margin: 0 0 0 12px;\
+                        font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;\
+                        font-size: 11px; color: var(--mono-tint, var(--text));\
+                        white-space: pre-wrap; word-break: break-all;\
+                        text-align: right;",
+                "{value}"
+            }
+        }
+    }
+}
+
 fn render_raw_state_tab(r: &wallet_core::ResolvedDid) -> Element {
     let n = r.raw_state_hex.len() / 2;
     let full_hex = format!("0x{}", r.raw_state_hex);
+    // Same `<pre>` + inline-style pattern the Document tab uses
+    // (see `render_document_tab`). The previous `<div class="seed-blob">`
+    // didn't pick up the scoped `.seed-blob` rule outside a
+    // `details .panel` container, so the hex string overflowed the
+    // tab's container. `white-space: pre-wrap` + `word-break:
+    // break-all` keeps the dump inside the panel and lets it wrap
+    // at byte boundaries.
     rsx! {
         h3 { "Raw ledger state ({n} bytes)" }
         div { class: "row",
@@ -5882,7 +5953,20 @@ fn render_raw_state_tab(r: &wallet_core::ResolvedDid) -> Element {
                 "fingerprint {state_fingerprint(&r.raw_state_hex)}"
             }
         }
-        div { class: "seed-blob", "{full_hex}" }
+        pre {
+            style: "font-family: ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, monospace;\
+                    font-size: 11px;\
+                    color: var(--mono-tint, var(--text));\
+                    background: var(--surface-2);\
+                    border: 1px solid var(--border-faint);\
+                    border-radius: 8px;\
+                    padding: 12px;\
+                    margin: 8px 0 0 0;\
+                    white-space: pre-wrap;\
+                    word-break: break-all;\
+                    overflow-x: auto;",
+            "{full_hex}"
+        }
     }
 }
 

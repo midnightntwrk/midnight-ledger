@@ -2,6 +2,13 @@
  * Spec: mobile-bench/MOBILE_WALLET.md "Dark theme" section.
  * Phone-first; responsive cap at 560 px on desktop. */
 
+/* Outfit — the typeface Midnight uses across their brand
+ * (see https://fonts.google.com/specimen/Outfit). We pull
+ * weights 400/500/600/700; the WebView caches per session.
+ * Falls through to the previous stack if Google Fonts can't
+ * be reached (e.g. offline). */
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap");
+
 :root {
   /* Tells the WebView to use dark-mode native scrollbars + form
    * default rendering, so the system controls don't flash white. */
@@ -42,7 +49,7 @@ html, body {
   background: var(--bg);
   color: var(--text);
   font-family:
-    -apple-system, BlinkMacSystemFont,
+    "Outfit", -apple-system, BlinkMacSystemFont,
     "Inter", "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   font-feature-settings: "tnum" on, "lnum" on;
@@ -527,6 +534,50 @@ details .panel .row {
   background: var(--surface);
   border-color: var(--border);
   border-bottom-color: var(--surface);
+}
+
+/* ─────────────── Mobile menu (≡ dropdown) ─────────────── */
+/* The `≡` button in the header opens a vertical list of tabs.
+ * Lives outside `.header` so it pushes the rest of the page
+ * down rather than overlapping. On wide viewports we keep
+ * showing the horizontal `.tab-nav` strip too; on phones we
+ * collapse it so the dropdown is the only tab affordance. */
+.menu-dropdown {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 6px 16px 8px;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+}
+.menu-item {
+  appearance: none;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: var(--text-soft);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+.menu-item:hover {
+  background: var(--surface-2);
+  color: var(--text);
+}
+.menu-item.active {
+  background: var(--accent-soft);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+@media (max-width: 480px) {
+  /* On phones: hide the horizontal tab strip; the dropdown is
+   * the only navigation surface. */
+  .tab-nav { display: none; }
 }
 
 .session-log {
