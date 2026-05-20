@@ -24,7 +24,7 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightCircuit, MidnightPK, MidnightVK, Relation};
+use midnight_zk_stdlib::{MidnightPK, MidnightVK, Relation, optimal_k};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -180,7 +180,7 @@ pub trait Zkir: Relation + Any + Send + Sync + Debug {
 
     /// Returns the k value for this circuit
     fn k(&self) -> u8 {
-        MidnightCircuit::from_relation(self).min_k() as u8
+        optimal_k(self) as u8
     }
 
     /// Performs key generation on this circuit, outputting the verifier key
@@ -449,6 +449,7 @@ struct DummyRelation;
 // in the verifier key, and use that for deserializing, but those API endpoints
 // do not currently exist in midnight-circuits.
 impl Relation for DummyRelation {
+    type Error = midnight_proofs::plonk::Error;
     type Instance = Vec<outer::Scalar>;
     type Witness = ();
     fn format_instance(
