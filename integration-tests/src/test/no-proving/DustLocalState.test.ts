@@ -1421,6 +1421,7 @@ describe('Ledger API - DustLocalState', () => {
     const localState = state.dust;
     const { secretKey } = state.dustKey;
     const qdo = localState.utxos[0];
+    const genInfo = localState.generationInfo(qdo)!;
 
     // we can't calculate the nonce for seq=0
     expect(qdo.seq).toEqual(0);
@@ -1431,7 +1432,7 @@ describe('Ledger API - DustLocalState', () => {
     const newCommitmentIndex = qdo.mtIndex + 1n;
     const fee = 1000n;
 
-    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, secretKey);
+    const newUtxo = localState.successorUtxo(qdo, state.time, fee, newCommitmentIndex, genInfo, secretKey);
     const calculatedNonce = dustNonce(qdo.backingNight, BigInt(newUtxo.seq), secretKey);
 
     expect(calculatedNonce).toEqual(newUtxo.nonce);
