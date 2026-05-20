@@ -12,6 +12,20 @@ use crate::bridge::{BridgeState, run_bridge_loop, spawn_proof_server};
 /// where Android packaging still finds it.
 const STYLES: &str = include_str!("../assets/styles.css");
 
+/// Midnight wordmark — rendered in the App header in place of
+/// the previous `<h1>Midnight Wallet</h1>`. Inlined via
+/// `include_str!` so it ships in the binary with no extra fetch.
+pub(crate) const LOGO_SVG: &str = include_str!("../assets/logo.svg");
+
+/// Stacked variant — used as the splash-screen content for the
+/// first ~1.5 s after launch.
+pub(crate) const LOGO_SPLASH_SVG: &str = include_str!("../assets/logo-splash.svg");
+
+/// Compact monogram — used as the platform window icon. The
+/// rasterisation to RGBA bytes happens in `lib.rs` via `resvg`
+/// before the window is built.
+pub(crate) const LOGO_ICON_SVG: &str = include_str!("../assets/logo-icon.svg");
+
 // `MIDNIGHT_DID_JS` is consumed by `lib.rs::desktop_or_mobile_launch`
 // via `with_custom_head` so the bundle runs at page-parse time. We
 // keep the include_str! reference in lib.rs only; importing it here
@@ -573,6 +587,24 @@ fn seed_preprod_live_state(state: &BridgeState, store: &wallet_core::store::Wall
 
 #[component]
 pub fn App() -> Element {
+    // Splash screen — shown for the first ~1.5 s of every launch.
+    // Renders the stacked Midnight logo against a full-screen
+    // dark backdrop; auto-hides via a tokio sleep timer the
+    // moment the App component first mounts.
+    let mut splash_visible = use_signal(|| true);
+    use_future(move || async move {
+        tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
+        splash_visible.set(false);
+    });
+    if *splash_visible.read() {
+        return rsx! {
+            style { "{STYLES}" }
+            div { class: "splash",
+                div { class: "splash-logo", dangerous_inner_html: "{LOGO_SPLASH_SVG}" }
+            }
+        };
+    }
+
     let mut network = use_signal(|| Network::PreProd);
     let mut wallet = use_signal::<Option<WalletInfo>>(|| {
         Some(WalletInfo::from_wallet(&app_wallet_for(Network::PreProd)))
@@ -1049,7 +1081,7 @@ pub fn App() -> Element {
         return rsx! {
             style { "{STYLES}" }
             div { class: "header",
-                h1 { "Midnight Wallet" }
+                div { class: "logo", dangerous_inner_html: "{LOGO_SVG}" }
             }
             UnlockCard {
                 state: cur_unlock,
@@ -1075,8 +1107,12 @@ pub fn App() -> Element {
         // wider viewports — CSS hides it on mobile (`@media
         // (max-width: 480px)` rule). Both surfaces share the
         // `active_tab` signal so they stay in sync.
+        //
+        // The Midnight wordmark goes where the `<h1>` title used
+        // to live. The current tab name lives on a thin line
+        // below so the active state is still visible.
         div { class: "header",
-            h1 { "{active_tab.read().label()}" }
+            div { class: "logo", dangerous_inner_html: "{LOGO_SVG}" }
             button {
                 class: "menu-btn",
                 title: "Menu",
@@ -1087,6 +1123,7 @@ pub fn App() -> Element {
                 "≡"
             }
         }
+        div { class: "header-subtitle", "{active_tab.read().label()}" }
         if *menu_open.read() {
             div { class: "menu-dropdown",
                 for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {

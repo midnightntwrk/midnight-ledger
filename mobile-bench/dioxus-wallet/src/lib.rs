@@ -56,10 +56,19 @@ fn desktop_or_mobile_launch() {
     // gsd-wallet's popup renders inside). Lets us iterate on the
     // mobile layout without needing an emulator on the desk. The
     // user can still resize freely; we only set the *initial* size.
-    let window = WindowBuilder::new()
+    // Rasterise the compact Midnight monogram (a 69×69 SVG) to a
+    // 128×128 RGBA buffer for the platform window icon. `resvg`
+    // handles SVG → pixmap; `tao::Icon::from_rgba` accepts the
+    // exact buffer shape. If anything fails (malformed SVG, OOM,
+    // etc.) we fall back to no icon — the App still launches.
+    let icon = build_window_icon();
+    let mut window = WindowBuilder::new()
         .with_title("Midnight Wallet")
         .with_inner_size(LogicalSize::new(390.0, 844.0))
         .with_resizable(true);
+    if let Some(i) = icon {
+        window = window.with_window_icon(Some(i));
+    }
     // Default config: no head injection beyond what Dioxus adds.
     // The `js-bridge` feature opts into vendored TS package loading
     // via `<head>` import map + Wry custom protocol — see
@@ -75,6 +84,35 @@ fn desktop_or_mobile_launch() {
     dioxus::LaunchBuilder::desktop()
         .with_cfg(cfg)
         .launch(app::App);
+}
+
+/// Rasterise the compact Midnight monogram SVG to a 128×128 RGBA
+/// window icon. `resvg` parses + renders; `tiny_skia::Pixmap`
+/// owns the RGBA buffer. Returns `None` on any failure (malformed
+/// SVG, allocator returned `None`, dioxus version skew) — the
+/// App still launches, just without a custom icon.
+#[cfg(not(target_os = "android"))]
+fn build_window_icon() -> Option<dioxus::desktop::tao::window::Icon> {
+    const ICON_SIZE: u32 = 128;
+    let opt = resvg::usvg::Options::default();
+    let tree = resvg::usvg::Tree::from_str(app::LOGO_ICON_SVG, &opt).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(ICON_SIZE, ICON_SIZE)?;
+    // Fit the SVG into the pixmap. `from_scale` keeps the aspect
+    // ratio if we feed equal x/y factors derived from the SVG's
+    // intrinsic size.
+    let svg_size = tree.size();
+    let scale = ICON_SIZE as f32 / svg_size.width().max(svg_size.height());
+    resvg::render(
+        &tree,
+        tiny_skia::Transform::from_scale(scale, scale),
+        &mut pixmap.as_mut(),
+    );
+    dioxus::desktop::tao::window::Icon::from_rgba(
+        pixmap.take(),
+        ICON_SIZE,
+        ICON_SIZE,
+    )
+    .ok()
 }
 
 /// Inject the mn-pkg:// custom protocol + ESM bundle + import map

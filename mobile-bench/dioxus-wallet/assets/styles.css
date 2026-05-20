@@ -78,10 +78,52 @@ body {
 /* ─────────────── Header ─────────────── */
 .header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
   margin-bottom: 4px;
 }
+/* Midnight wordmark inside the header. The SVG is intrinsically
+ * 251×55, we cap the height so it sits with the menu button. */
+.header .logo svg {
+  display: block;
+  height: 28px;
+  width: auto;
+}
+/* Current-tab label that lives just under the wordmark — keeps
+ * the active-tab affordance visible when the inline `.tab-nav`
+ * is hidden on phones. */
+.header-subtitle {
+  margin: 2px 0 8px;
+  font-size: 12px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+/* ─────────────── Splash ─────────────── */
+/* Fixed-position overlay so it sits above the rest of the
+ * (already-mounted) App tree. Auto-hidden by `splash_visible`
+ * after ~1.5 s. */
+.splash {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+  animation: splash-fade-in 200ms ease-out;
+}
+.splash-logo svg {
+  display: block;
+  width: 220px;
+  height: auto;
+}
+@keyframes splash-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 .header h1 {
   font-size: 20px;
   font-weight: 600;

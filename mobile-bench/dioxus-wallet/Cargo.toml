@@ -69,3 +69,8 @@ arboard = "3"
 # behind the `js-bridge` feature so it only spins up when the JS
 # pipeline is enabled.
 prover-core = { path = "../prover-core", default-features = false }
+# SVG → RGBA rasterisation for the window icon. `resvg` does the
+# parse + render via `tiny-skia`; the rasterised buffer feeds
+# `tao::Icon::from_rgba` at App startup.
+resvg = "0.45"
+tiny-skia = "0.11"
