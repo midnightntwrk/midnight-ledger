@@ -1,4 +1,4 @@
-#![cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+#![cfg(feature = "proof-server-http")]
 
 use std::sync::mpsc;
 use std::time::Duration;

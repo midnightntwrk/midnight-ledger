@@ -25,12 +25,17 @@ mod params;
 mod resolver;
 mod zkir_example;
 
-#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+// The HTTP wrapper is purely feature-gated now. The earlier
+// `not(target_os = "android")` guard reflected an outdated belief
+// that `actix-web` doesn't cross-compile to Android — the current
+// `actix-web ^4.13` pinning with `default-features = false` does
+// (see architecture-doc §4.3 + §7.3a). Same for iOS.
+#[cfg(feature = "proof-server-http")]
 mod http;
-#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+#[cfg(feature = "proof-server-http")]
 mod server;
 
-#[cfg(all(feature = "proof-server-http", not(target_os = "android")))]
+#[cfg(feature = "proof-server-http")]
 pub use server::{LocalServer, spawn_local_server};
 
 #[derive(Debug, Clone)]

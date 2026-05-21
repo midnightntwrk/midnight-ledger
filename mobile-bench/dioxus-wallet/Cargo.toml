@@ -58,6 +58,11 @@ preprod-live = []
 
 [dependencies]
 wallet-core = { path = "../wallet-core" }
+# `prover-core` is a global dep so its `proof-server-http` feature is
+# reachable on Android / iOS as well as desktop (architecture-doc §4.3,
+# §7.3a). The crate itself compiles on every target; actix-web only
+# pulls in when `proof-server-http` is on.
+prover-core = { path = "../prover-core", default-features = false }
 # Parameterised dummy-contract proving for the Benchmark tab. Library-only,
 # so it compiles for both desktop (cargo run) and arm64-v8a Android (cargo
 # ndk -- see DEPLOY_TO_DEVICE.md).
@@ -110,11 +115,6 @@ dirs = "5"
 # Cross-platform clipboard for desktop (macOS / Linux / Windows).
 # Android uses ClipboardManager via JNI, which we wire up in Phase D.
 arboard = "3"
-# Local proof-server (in-process). The Rust DID code calls into it
-# directly via prover-core's library API; we keep the HTTP server
-# behind the `js-bridge` feature so it only spins up when the JS
-# pipeline is enabled.
-prover-core = { path = "../prover-core", default-features = false }
 # SVG → RGBA rasterisation for the window icon. `resvg` does the
 # parse + render via `tiny-skia`; the rasterised buffer feeds
 # `tao::Icon::from_rgba` at App startup.
@@ -126,9 +126,9 @@ tiny-skia = "0.11"
 # - `rustls-platform-verifier` is required for HTTPS — on iOS it
 #   auto-detects the platform and uses `SecTrust` natively, so we
 #   *don't* need the JNI-style `init_with_env` dance Android does.
-# - No `prover-core` / actix (same constraint as Android — actix
-#   doesn't cross-compile to iOS cleanly either, and the JS bridge
-#   path proves in-process).
+# - `prover-core` itself is now a global dep (see top of this file)
+#   so `--features proof-server-http` is reachable on iOS too; the
+#   build only pulls actix when that feature is on.
 # - No `arboard` / `dirs` / `resvg` / `tiny-skia`. iOS has its own
 #   clipboard via UIPasteboard (TODO), the sandbox path is reached
 #   through `$HOME`, and there's no window icon to rasterise.
