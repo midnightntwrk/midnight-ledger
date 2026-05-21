@@ -17,17 +17,28 @@ import { build, context } from "esbuild";
 import { nodeModulesPolyfillPlugin } from "esbuild-plugins-node-modules-polyfill";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
-import { argv } from "node:process";
+import { argv, env } from "node:process";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outdir = resolve(__dirname, "..", "assets", "web");
 
 // Keep in lockstep with `vendor.mjs::PACKAGES` and the import map in
 // `dioxus-wallet/src/lib.rs::head_html`.
+// Only the WASM-bearing packages stay external — their `.wasm`
+// loaders rely on native module-URL resolution that the bundler
+// can't reproduce. Pure-JS dependencies (`compact-js`,
+// `midnight-js-contracts`, `midnight-js-network-id`, `effect`,
+// `platform-js`, `wallet-sdk-address-format`, ...) are bundled
+// into `midnight-did.js` so the import map only needs entries
+// for the WASM-bearing packages below. Marking pure-JS packages
+// external lets their bare sub-path imports (`effect/Function`,
+// `compact-js/effect/Contract`, `platform-js/effect/Configuration`)
+// leak into the runtime where the WebView's loader has no way to
+// resolve them — bundling those packages forces esbuild to walk
+// the dep graph and inline everything.
 const VENDORED_EXTERNALS = [
   "@midnight-ntwrk/midnight-did-contract",
   "@midnight-ntwrk/compact-runtime",
-  "@midnight-ntwrk/compact-js",
   "@midnight-ntwrk/onchain-runtime-v3",
   "@midnight-ntwrk/ledger-v8",
 ];
@@ -66,6 +77,16 @@ const config = {
         os: "empty",
       },
     }),
+  ],
+  // Look in the upstream midnight-did repo's resolved tree for
+  // packages the entry imports but `web/package.json` doesn't list
+  // directly (e.g. `@midnight-ntwrk/midnight-js-contracts`,
+  // `@midnight-ntwrk/midnight-js-network-id`, `effect`, ...).
+  // Override path lives in `$MIDNIGHT_DID_NODE_MODULES`; otherwise we
+  // default to the standard location operators use for the harness.
+  nodePaths: [
+    env.MIDNIGHT_DID_NODE_MODULES ||
+      resolve(env.HOME ?? "", "iohk", "midnight-did", "node_modules"),
   ],
   outfile: resolve(outdir, "midnight-did.js"),
   loader: { ".wasm": "file" }, // not really used now (externals handle WASM)

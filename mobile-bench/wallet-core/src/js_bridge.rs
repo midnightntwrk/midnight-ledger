@@ -46,18 +46,51 @@ pub enum JsBridgeError {
 /// Asynchronous Rust → JS call channel. Implementors marshal
 /// `{ method, params }` to JS, await `{ result }` or `{ error }`,
 /// and return the structured payload.
+///
+/// The core method takes already-serialised JSON in/out so the
+/// trait stays dyn-compatible (a generic `T` on the trait method
+/// would block `Arc<dyn JsBridge>`). The [`call`](JsBridge::call)
+/// helper is provided as a separate inherent method on the
+/// blanket extension trait below so callers can keep writing
+/// `bridge.call::<T, _>(...)` exactly like before.
 #[async_trait::async_trait]
 pub trait JsBridge: Send + Sync {
-    /// Invoke a JS method by name with structured params and
-    /// deserialise the result into `T`. Errors propagate either
-    /// the transport (process died, channel closed) or the JS
+    /// Invoke a JS method by name with a pre-encoded JSON params
+    /// payload and return the JSON `result` value. Errors propagate
+    /// either the transport (process died, channel closed) or the JS
     /// side (`{ error: "..." }` reply).
+    async fn call_json(
+        &self,
+        method: &str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, JsBridgeError>;
+}
+
+/// Extension trait that adds the typed `call::<T, P>(...)` API every
+/// existing caller relies on. Implemented for every `T: JsBridge +
+/// ?Sized`, so it works through both owned types and
+/// `Arc<dyn JsBridge>`. The trait is sealed behind the `JsBridge`
+/// supertrait; nothing else can implement it.
+#[async_trait::async_trait]
+pub trait JsBridgeExt: JsBridge {
+    /// Encode `params` to JSON, dispatch through [`JsBridge::call_json`],
+    /// and decode the result into `T`. Convenience over [`call_json`](
+    /// JsBridge::call_json) for callers that have concrete payload
+    /// types.
     async fn call<P: Serialize + Send + Sync, T: DeserializeOwned + Send>(
         &self,
         method: &str,
         params: P,
-    ) -> Result<T, JsBridgeError>;
+    ) -> Result<T, JsBridgeError> {
+        let value = serde_json::to_value(&params)
+            .map_err(|e| JsBridgeError::Codec(format!("encode params: {e}")))?;
+        let raw = self.call_json(method, value).await?;
+        serde_json::from_value::<T>(raw)
+            .map_err(|e| JsBridgeError::Codec(format!("decode result: {e}")))
+    }
 }
+
+impl<T: JsBridge + ?Sized> JsBridgeExt for T {}
 
 /// Subprocess-based bridge backed by `node` running the harness at
 /// `tests/js-harness/harness.mjs`. Owns the child's stdin/stdout
@@ -94,6 +127,28 @@ impl NodeChildBridge {
     /// symlink's real path (the upstream tree where `effect-ts`
     /// etc. live), not the symlink path (our harness, which only
     /// has the direct deps).
+    #[cfg(target_os = "android")]
+    pub fn spawn(_harness_script: &std::path::Path) -> Result<Self, JsBridgeError> {
+        // Android cannot spawn the harness — there's no Node.js
+        // runtime in the APK and the app sandbox can't exec a sibling
+        // binary. Fail fast with a clear message instead of letting
+        // the user hit a confusing `spawn node: No such file or
+        // directory` from deep inside `Command::spawn`. The DID write
+        // path (`create_did` / `call_did_circuit` /
+        // `load_did_circuit` / `deactivate`) is currently
+        // desktop-only; on-device DID writes need either a Rust port
+        // of the harness or routing the calls through the
+        // `--features js-bridge` WebView's JS context.
+        Err(JsBridgeError::Transport(
+            "DID write operations aren't supported on Android yet — \
+             the wallet's JS harness needs a Node.js runtime that \
+             isn't shipped in the APK. Read-only flows (resolve, \
+             inventory, DUST sync) still work."
+                .to_string(),
+        ))
+    }
+
+    #[cfg(not(target_os = "android"))]
     pub fn spawn(harness_script: &std::path::Path) -> Result<Self, JsBridgeError> {
         use std::process::Stdio;
         // Surface a clear error if the harness hasn't been
@@ -148,11 +203,11 @@ impl NodeChildBridge {
 
 #[async_trait::async_trait]
 impl JsBridge for NodeChildBridge {
-    async fn call<P: Serialize + Send + Sync, T: DeserializeOwned + Send>(
+    async fn call_json(
         &self,
         method: &str,
-        params: P,
-    ) -> Result<T, JsBridgeError> {
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value, JsBridgeError> {
         let id = {
             let mut g = self.inner.next_id.lock().await;
             let v = *g;
@@ -206,7 +261,6 @@ impl JsBridge for NodeChildBridge {
         let result = resp.get("result").cloned().ok_or_else(|| {
             JsBridgeError::Codec(format!("response missing `result`: {resp}"))
         })?;
-        serde_json::from_value::<T>(result)
-            .map_err(|e| JsBridgeError::Codec(format!("decode result: {e}")))
+        Ok(result)
     }
 }

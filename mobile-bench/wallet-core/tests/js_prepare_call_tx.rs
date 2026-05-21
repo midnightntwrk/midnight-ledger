@@ -11,7 +11,7 @@ use base_crypto::signatures::Signature;
 use ledger::structure::{ProofPreimageMarker, Transaction};
 use storage::DefaultDB;
 use transient_crypto::commitment::PedersenRandomness;
-use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
+use wallet_core::js_bridge::{JsBridgeExt, NodeChildBridge};
 use wallet_core::{Network, Wallet};
 
 /// Same shape as `wallet_core::tx::build::UnprovenTx`. Repeated

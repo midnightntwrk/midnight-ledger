@@ -1,12 +1,13 @@
 //! Wry custom-protocol handler for `mn-pkg://`.
 //!
-//! Maps `mn-pkg://<package>/<rest...>` to
-//! `<assets_root>/web/pkg/<package>/<rest...>` on disk and serves the
-//! file with the right `Content-Type`. Combined with the import map
-//! injected into `<head>` (see `lib.rs`), this lets the WebView's
-//! native ES-module + WebAssembly machinery resolve and instantiate
-//! upstream packages that bring `.wasm` along (compact-runtime,
-//! onchain-runtime-wasm, midnight-did-contract, ledger-v8).
+//! Maps `mn-pkg://<package>/<rest...>` to a file inside an embedded
+//! `assets/web/pkg/` tree (compiled in via [`include_dir!`]) and
+//! serves it with the right `Content-Type`. Combined with the
+//! import map injected into `<head>` (see `lib.rs`), this lets the
+//! WebView's native ES-module + WebAssembly machinery resolve and
+//! instantiate upstream packages that bring `.wasm` along
+//! (compact-runtime, onchain-runtime-wasm, midnight-did-contract,
+//! ledger-v8).
 //!
 //! Dynamic `import("@midnight-ntwrk/midnight-did-contract")` in the
 //! WebView resolves through the import map → `mn-pkg://...` →
@@ -15,33 +16,47 @@
 //! protocol → native `WebAssembly.instantiate` happens in the engine.
 //! No esbuild WASM plugin, no synthetic wrappers.
 //!
-//! **Path-traversal guard.** We reject any URL whose normalized path
-//! escapes `<assets_root>/web/pkg/`. Without this, a JS bundle could
-//! exfiltrate arbitrary files via `mn-pkg://x/../../etc/passwd`.
+//! Using `include_dir!` (rather than reading from `CARGO_MANIFEST_DIR`
+//! at runtime) is what lets the same handler work on Android — the
+//! app sandbox has no filesystem access to the host's source tree.
 
 use std::borrow::Cow;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+// `dioxus::desktop` is only re-exported when the `desktop` feature
+// is on; on Android + iOS the same types are reachable via
+// `dioxus::mobile` (which itself re-exports `dioxus_desktop::*`).
+// Pick the right path under cfg so this module compiles on every
+// platform.
+#[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
 use dioxus::desktop::wry::http::{HeaderValue, Request, Response, StatusCode};
+#[cfg(any(target_os = "android", target_os = "ios"))]
+use dioxus::mobile::wry::http::{HeaderValue, Request, Response, StatusCode};
+use include_dir::{Dir, include_dir};
 
-/// Build the protocol handler for the given assets root. The
-/// returned closure is `'static + Fn` and matches the signature
-/// Dioxus 0.6's `Config::with_custom_protocol` expects.
-pub fn build_handler(
-    assets_root: PathBuf,
-) -> impl Fn(Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> + 'static {
-    let pkg_root = assets_root.join("web").join("pkg");
-    move |req: Request<Vec<u8>>| handle(&pkg_root, req)
+/// Compile-time embed of `mobile-bench/dioxus-wallet/assets/web/pkg/`.
+/// ~30 MB on disk (mostly `midnight-did-contract/dist`). Costs
+/// binary size but means the JS bundle's `import()` calls resolve
+/// without filesystem reads — same code path on desktop and Android.
+static PKG_TREE: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/assets/web/pkg");
+
+/// Build the protocol handler. The returned closure is
+/// `'static + Fn` and matches the signature Dioxus 0.6's
+/// `Config::with_custom_protocol` expects.
+pub fn build_handler()
+-> impl Fn(Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> + 'static {
+    |req: Request<Vec<u8>>| handle(req)
 }
 
-fn handle(pkg_root: &Path, req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
+fn handle(req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>> {
     let uri = req.uri();
     tracing::info!(target: "mn-pkg", url = %uri, "request");
     // The authority (`localhost` in the import map) is just a
     // placeholder so URL parsers don't choke; ignore it. We map the
-    // *path* directly under `pkg_root`, so a request like
+    // *path* directly under `PKG_TREE`, so a request like
     // `mn-pkg://localhost/midnight-did-contract/dist/index.js`
-    // resolves to `<pkg_root>/midnight-did-contract/dist/index.js`.
+    // resolves to `midnight-did-contract/dist/index.js` inside the
+    // embedded tree.
     let rel = uri.path().trim_start_matches('/').to_string();
 
     if !is_safe(&rel) {
@@ -49,25 +64,18 @@ fn handle(pkg_root: &Path, req: Request<Vec<u8>>) -> Response<Cow<'static, [u8]>
         return error(StatusCode::FORBIDDEN, "unsafe path");
     }
 
-    let file_path = pkg_root.join(&rel);
-    let bytes = match std::fs::read(&file_path) {
-        Ok(b) => b,
-        Err(e) => {
-            tracing::warn!(
-                target: "mn-pkg",
-                rel = %rel,
-                file = %file_path.display(),
-                error = %e,
-                "asset not found"
-            );
-            return error(StatusCode::NOT_FOUND, &e.to_string());
-        }
+    let Some(file) = PKG_TREE.get_file(&rel) else {
+        tracing::warn!(target: "mn-pkg", %rel, "asset not found in embedded tree");
+        return error(StatusCode::NOT_FOUND, "asset not found");
     };
+    let bytes = file.contents();
+    let content_type = mime_for(Path::new(&rel));
+    tracing::debug!(
+        target: "mn-pkg",
+        rel = %rel, len = bytes.len(), %content_type, "served"
+    );
 
-    let content_type = mime_for(&file_path);
-    tracing::debug!(target: "mn-pkg", rel = %rel, len = bytes.len(), %content_type, "served");
-
-    let mut resp = Response::new(Cow::Owned(bytes));
+    let mut resp = Response::new(Cow::Borrowed(bytes));
     *resp.status_mut() = StatusCode::OK;
     resp.headers_mut().insert(
         "content-type",

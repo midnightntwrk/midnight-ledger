@@ -22,7 +22,7 @@
 
 use transient_crypto::curve::{EmbeddedFr, EmbeddedGroupAffine, Fr};
 use transient_crypto::hash::transient_hash;
-use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
+use wallet_core::js_bridge::{JsBridgeExt, NodeChildBridge};
 use wallet_core::secret_storage::jubjub_schnorr::{
     derive_public_key_from_seed, encode_upstream, payload_to_digest, sign_payload_from_seed,
 };

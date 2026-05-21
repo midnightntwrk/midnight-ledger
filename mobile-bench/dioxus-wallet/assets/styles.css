@@ -255,10 +255,26 @@ body {
   color: var(--text-soft);
   font-variant-numeric: tabular-nums;
 }
+.balance-row .value-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+.balance-row .value-line {
+  display: flex;
+  align-items: baseline;
+}
 .balance-row .unit {
   color: var(--text-faint);
   font-size: 12px;
   margin-left: 4px;
+}
+.balance-row .precise {
+  font-family: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
 }
 .balance-row .hint {
   display: block;
@@ -279,6 +295,21 @@ body {
   height: 100%;
   background: var(--accent);
   transition: width 600ms ease;
+}
+
+/* Wallet-sync footer — Resync button on the left, latest DUST
+ * checkpoint event id on the right. Kept on the same row so the
+ * meta line doesn't add vertical weight. */
+.sync-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.sync-foot .sync-meta {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
 }
 
 /* ─────────────── Primary CTA ─────────────── */
@@ -304,6 +335,178 @@ body {
   background: var(--surface-4);
   color: var(--text-faint);
   cursor: not-allowed;
+}
+
+/* ─────────────── Buttons (Material 3 inspired) ───────────────
+ * Applied as the default for every <button> so we don't have to
+ * tag each call site. Pill shape, accent-soft tonal fill, accent
+ * label — matches m3.material.io/components/buttons "Tonal" at
+ * 40dp height. Variants:
+ *   .btn-primary → Filled (high emphasis)
+ *   .btn-text    → Text (low emphasis, no fill)
+ * Existing per-component overrides (`.cta`,
+ * `.did-inventory-cell.action button`) still win via specificity.
+ */
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 18px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  user-select: none;
+  /* Suppress the grey flash Android WebView paints on tap. */
+  -webkit-tap-highlight-color: transparent;
+  transition: background 140ms ease,
+              color 140ms ease,
+              transform 220ms cubic-bezier(.34, 1.56, .64, 1),
+              box-shadow 140ms ease;
+}
+button:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent) 30%);
+}
+button:active:not(:disabled) {
+  transform: scale(.97);
+}
+button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button:disabled {
+  background: var(--surface-3);
+  color: var(--text-faint);
+  cursor: not-allowed;
+}
+
+/* Filled — primary action emphasis. */
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  /* M3 "elevation 1" — subtle shadow so the filled button reads
+   * as raised above tonal/text siblings. */
+  box-shadow:
+    0 1px 3px rgb(0 0 0 / 0.35),
+    0 1px 2px rgb(0 0 0 / 0.20);
+}
+.btn-primary:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent) 88%, white 12%);
+  box-shadow:
+    0 2px 6px rgb(0 0 0 / 0.40),
+    0 1px 3px rgb(0 0 0 / 0.25);
+}
+.btn-primary:disabled {
+  background: color-mix(in oklab, var(--surface-3) 80%, var(--accent) 20%);
+  color: var(--text-faint);
+  box-shadow: none;
+}
+
+/* Text — low-emphasis chrome-less. */
+.btn-text {
+  background: transparent;
+  color: var(--accent);
+  padding: 0 10px;
+}
+.btn-text:hover:not(:disabled) {
+  background: color-mix(in oklab, transparent 70%, var(--accent) 12%);
+}
+
+/* Danger / destructive — outlined with error-tinted accents. */
+.btn-danger {
+  background: transparent;
+  color: var(--error, #ff5c7a);
+  border: 1px solid color-mix(in oklab, var(--error, #ff5c7a) 50%, transparent);
+}
+.btn-danger:hover:not(:disabled) {
+  background: color-mix(in oklab, transparent 88%, var(--error, #ff5c7a) 12%);
+}
+
+/* Segmented buttons — a row of related options where one or more
+ * are selected. Material 3 spec: pill-shaped capsule, internal
+ * dividers, selected segment fills with secondary-container.
+ * Apply by wrapping a row of <button> in a `.segmented`. Each
+ * inner button keeps its own classes for additional styling.
+ */
+.segmented {
+  display: inline-flex;
+  align-items: stretch;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.segmented > button {
+  height: 32px;
+  padding: 0 14px;
+  background: transparent;
+  color: var(--text-muted);
+  border-radius: var(--radius-pill);
+  font-weight: 500;
+  box-shadow: none;
+}
+.segmented > button:hover:not(:disabled) {
+  background: color-mix(in oklab, transparent 84%, var(--accent) 16%);
+  color: var(--text);
+}
+.segmented > button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.segmented > button.active:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent) 30%);
+}
+
+/* Divider — M3 "full-width divider" + "inset divider" variants.
+ * Use `<hr class="divider" />` or `<hr class="divider inset" />`.
+ * Bare `<hr>` falls into the same style so we don't have to tag
+ * every use. */
+hr, .divider {
+  appearance: none;
+  border: 0;
+  height: 1px;
+  background: var(--border-faint);
+  margin: 12px 0;
+}
+.divider.inset {
+  margin-left: 16px;
+  margin-right: 16px;
+}
+.divider.strong {
+  background: var(--border);
+}
+
+/* Cards (M3 Elevated). The existing `.card` already covers the
+ * "Filled" variant — same surface, outlined edge. These additions
+ * give it a subtle drop shadow so cards read as raised above the
+ * page background (M3 Elevation 1). Cards do not lift on hover by
+ * default — opt in via `.card.interactive`.
+ */
+.card {
+  /* Inherits background + border-radius from earlier definition. */
+  background: var(--surface);
+  box-shadow:
+    0 1px 2px rgb(0 0 0 / 0.20),
+    0 1px 3px rgb(0 0 0 / 0.12);
+  transition: box-shadow 160ms ease, transform 160ms ease;
+}
+.card.interactive {
+  cursor: pointer;
+}
+.card.interactive:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 2px 4px rgb(0 0 0 / 0.25),
+    0 4px 10px rgb(0 0 0 / 0.18);
 }
 
 /* ─────────────── Network select ─────────────── */
@@ -336,6 +539,111 @@ select {
   background-position: right 10px center;
 }
 select:focus { outline: 1px solid var(--accent); outline-offset: 1px; }
+
+/* ─────────────── Text fields (M3 Outlined) ───────────────
+ * Default `<input type="text">` / `<textarea>` styling. M3
+ * "outlined" variant: persistent 1dp border, accent border on
+ * focus, 16dp horizontal padding. Most existing call sites already
+ * carry inline styles — these set the unstyled baseline plus a
+ * `.text-field` opt-in class with the canonical look.
+ */
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input[type="search"],
+textarea {
+  appearance: none;
+  -webkit-appearance: none;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 14px;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.4;
+  caret-color: var(--accent);
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+input[type="text"]:hover:not(:disabled),
+input[type="password"]:hover:not(:disabled),
+input[type="number"]:hover:not(:disabled),
+input[type="search"]:hover:not(:disabled),
+textarea:hover:not(:disabled) {
+  border-color: var(--text-muted);
+}
+input[type="text"]:focus,
+input[type="password"]:focus,
+input[type="number"]:focus,
+input[type="search"]:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+input::placeholder, textarea::placeholder {
+  color: var(--text-faint);
+}
+
+/* `.text-field` — explicit class for forms that want a taller
+ * input with a small floating-style label sitting on top. */
+.text-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.text-field > label {
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+}
+.text-field > input,
+.text-field > textarea {
+  padding: 12px 14px;
+  font-size: 14px;
+}
+
+/* M3 Search bar / search view — pill-shaped, surface-container
+ * background, leading magnifier icon on the left, no border by
+ * default. Apply `.search-field` to a wrapping div with the icon
+ * + input inside. */
+.search-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: var(--radius-pill);
+  padding: 0 14px;
+  height: 40px;
+  transition: border-color 140ms ease, box-shadow 140ms ease;
+}
+.search-field:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.search-field::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  background-color: var(--text-muted);
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z' fill='black'/></svg>") center / contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M15.5 14h-.79l-.28-.27a6.5 6.5 0 1 0-.7.7l.27.28v.79l5 4.99L20.49 19zm-6 0A4.5 4.5 0 1 1 14 9.5 4.5 4.5 0 0 1 9.5 14z' fill='black'/></svg>") center / contain no-repeat;
+}
+.search-field > input {
+  flex: 1;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font-size: 14px;
+  color: var(--text);
+}
+.search-field > input:focus {
+  outline: none;
+  box-shadow: none;
+}
 
 /* ─────────────── Disclosure ─────────────── */
 details {
@@ -489,11 +797,8 @@ details .panel .row {
 }
 .did-inventory-row {
   display: grid;
-  /* Trimmed layout (commit-time): status | Open btn | DID short
-   * | services. Was 7 columns previously (status, network, did,
-   * counter, vms, services, action) before the user asked to
-   * drop Network / Counter / VMs from the inventory. */
-  grid-template-columns: 92px 64px 1fr 80px;
+  /* Compact layout: status pill | Open button | short DID. */
+  grid-template-columns: 64px 52px 1fr;
   align-items: center;
   gap: 8px;
   padding: 6px 10px;
@@ -514,14 +819,13 @@ details .panel .row {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.did-inventory-cell.services {
-  font-family: ui-monospace, monospace;
-  color: var(--text-soft);
-  text-align: right;
-}
 .did-inventory-cell.action button {
-  padding: 3px 10px;
+  padding: 2px 8px;
   font-size: 10px;
+}
+.did-inventory-row .did-badge {
+  padding: 1px 6px;
+  font-size: 9px;
 }
 
 /* Status badges. Mirror the bundle's
@@ -560,24 +864,46 @@ details .panel .row {
   border-bottom: 1px solid var(--border);
   margin: 8px 16px 0;
 }
+/* M3 "secondary tabs" — text-only labels, full-width pill
+ * indicator on the active tab, hover state layer at 8% accent.
+ * The override on `<button>` keeps the dimensions ours while
+ * adopting the M3 visual cues. */
 .tab-btn {
   appearance: none;
   background: transparent;
-  border: 1px solid transparent;
-  border-bottom: none;
-  border-radius: 6px 6px 0 0;
-  padding: 6px 14px;
+  border: 0;
+  border-radius: 0;
+  padding: 12px 16px;
+  height: auto;
   color: var(--text-muted);
   font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.01em;
   cursor: pointer;
+  position: relative;
   margin-bottom: -1px;
+  box-shadow: none;
+  transition: color 140ms ease, background 140ms ease;
 }
-.tab-btn:hover { color: var(--text); }
-.tab-btn.active {
+.tab-btn:hover:not(:disabled) {
   color: var(--text);
-  background: var(--surface);
-  border-color: var(--border);
-  border-bottom-color: var(--surface);
+  background: color-mix(in oklab, transparent 92%, var(--accent) 8%);
+}
+.tab-btn.active {
+  color: var(--accent);
+  background: transparent;
+}
+/* Active indicator: 2px accent pill below the label, drawn via
+ * pseudo-element so it sits on the bottom border of `.tab-nav`. */
+.tab-btn.active::after {
+  content: "";
+  position: absolute;
+  left: 12px;
+  right: 12px;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
 }
 
 /* ─────────────── Mobile menu (≡ dropdown) ─────────────── */
@@ -586,36 +912,49 @@ details .panel .row {
  * down rather than overlapping. On wide viewports we keep
  * showing the horizontal `.tab-nav` strip too; on phones we
  * collapse it so the dropdown is the only tab affordance. */
+/* M3 Menu — "Dropdown menu" container. Filled with a slightly
+ * elevated surface (surface-container-low), rounded 12dp, elevation
+ * level 2 shadow. Items get a hover state layer at 8% accent. */
 .menu-dropdown {
   display: flex;
   flex-direction: column;
   gap: 2px;
   margin: 6px 16px 8px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.45);
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+  box-shadow:
+    0 4px 8px rgb(0 0 0 / 0.30),
+    0 8px 24px rgb(0 0 0 / 0.20);
 }
 .menu-item {
   appearance: none;
   background: transparent;
-  border: 1px solid transparent;
+  border: 0;
   border-radius: 8px;
-  padding: 8px 12px;
+  padding: 10px 14px;
+  height: auto;
   color: var(--text-soft);
   text-align: left;
+  justify-content: flex-start;
   font: inherit;
+  font-size: 14px;
+  font-weight: 500;
   cursor: pointer;
+  box-shadow: none;
+  transition: background 140ms ease, color 140ms ease;
 }
-.menu-item:hover {
-  background: var(--surface-2);
+.menu-item:hover:not(:disabled) {
+  background: color-mix(in oklab, transparent 88%, var(--accent) 12%);
   color: var(--text);
 }
 .menu-item.active {
   background: var(--accent-soft);
-  color: var(--text);
-  border-color: var(--accent);
+  color: var(--accent);
+}
+.menu-item.active:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--accent-soft) 70%, var(--accent) 30%);
 }
 
 @media (max-width: 480px) {
@@ -783,22 +1122,44 @@ details .panel .row {
   margin: 10px 16px 0;
   border-bottom: 1px solid var(--border);
 }
+/* DID-detail tabs — same M3 secondary-tab treatment as the
+ * top-level `.tab-btn`, scaled down for the smaller label
+ * size. The override on the global `<button>` selector resets the
+ * pill background; we apply a hover state layer + 3px pill
+ * indicator via ::after. */
 .detail-tab {
-  padding: 8px 12px;
+  padding: 10px 14px;
+  height: auto;
   font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
   color: var(--text-muted);
   background: transparent;
   border: 0;
-  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  box-shadow: none;
   cursor: pointer;
+  position: relative;
   margin-bottom: -1px;
+  transition: color 140ms ease, background 140ms ease;
 }
-.detail-tab:hover {
+.detail-tab:hover:not(:disabled) {
   color: var(--text);
+  background: color-mix(in oklab, transparent 92%, var(--accent) 8%);
 }
 .detail-tab.active {
-  color: var(--text);
-  border-bottom-color: var(--accent);
+  color: var(--accent);
+  background: transparent;
+}
+.detail-tab.active::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -1px;
+  height: 3px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
 }
 
 .detail-pane {
@@ -875,6 +1236,85 @@ details .panel .row {
 .detail-table td.muted {
   color: var(--text-muted);
 }
+.detail-table th.num,
+.detail-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Metrics tab — session totals shown as pills, per-operation
+ * table reuses .detail-table with right-aligned numeric cells. */
+.metrics-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+  padding: 12px 16px 14px;
+}
+.metric-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 8px;
+}
+.metric-pill .k {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.metric-pill .v {
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.metrics-table {
+  margin: 0 16px 14px;
+}
+
+/* Benchmark table — compact action column on the right and a
+ * tighter Run button so each row reads as one band of data
+ * instead of the button + note pair dominating the row. The data
+ * columns get tighter padding + a right-aligned narrow k column
+ * so the numbers cluster instead of drifting apart. */
+.bench-table th,
+.bench-table td {
+  padding: 6px 6px;
+}
+.bench-table th:first-child,
+.bench-table td:first-child {
+  width: 36px;
+  text-align: right;
+  padding-right: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.bench-table th.action,
+.bench-table td.action {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+.bench-run-btn {
+  height: 28px;
+  padding: 0 14px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* Error-detail row spans the full width of the bench table when a
+ * given k fails (params missing, params not found, etc.). Drops
+ * the cell directly under the failing row at the same hatched
+ * tone Diagnostics uses for warning surfaces. */
+.bench-err-row > td {
+  padding: 6px 12px 10px;
+  font-size: 11px;
+  color: var(--error, #ff5c7a);
+  border-bottom: 1px solid var(--border-faint);
+}
 .detail-empty {
   padding: 14px;
   border: 1px dashed var(--border);
@@ -903,8 +1343,12 @@ details .panel .row {
 
 /* Operation Builder — 3-pane palette / form / preview adopted
  * from midnight-did-uiux-bundle/06-wireframes.md "Operation
- * Builder" sketch. Below 720px the panes stack vertically
- * (phone-first); above that they sit side-by-side.
+ * Builder" sketch. Below 960px the panes stack vertically
+ * (phone + foldable inner display); above that they sit
+ * side-by-side. The previous 720px breakpoint triggered the
+ * 3-col layout on phone-class viewports where the Operations
+ * column wasn't wide enough to render circuit names like
+ * `addVerificationMethodRelation` without truncation.
  */
 
 .op-builder {
@@ -913,9 +1357,9 @@ details .panel .row {
   gap: 10px;
   margin: 10px 16px;
 }
-@media (min-width: 720px) {
+@media (min-width: 960px) {
   .op-builder {
-    grid-template-columns: 200px minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-columns: 240px minmax(0, 1fr) minmax(0, 1fr);
   }
 }
 
@@ -951,6 +1395,11 @@ details .panel .row {
   border-radius: 6px;
   cursor: pointer;
   border: 1px solid transparent;
+  /* Wrap long circuit names instead of clipping with ellipsis —
+   * `addVerificationMethodRelation` would otherwise be truncated
+   * in narrow palettes. */
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 .op-item:hover {
   background: var(--surface-2);

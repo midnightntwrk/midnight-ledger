@@ -8,7 +8,7 @@
 //! Run with:
 //!   cargo test -p wallet-core --test js_bridge_smoke -- --nocapture
 
-use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
+use wallet_core::js_bridge::{JsBridgeExt, NodeChildBridge};
 
 #[derive(serde::Deserialize, Debug)]
 #[serde(rename_all = "camelCase")]

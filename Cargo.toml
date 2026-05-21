@@ -30,6 +30,7 @@ members = [
     "mobile-bench/dioxus-bench",
     "mobile-bench/wallet-core",
     "mobile-bench/dioxus-wallet",
+    "mobile-bench/contract-benchmark",
 ]
 default-members = [
     "zswap",

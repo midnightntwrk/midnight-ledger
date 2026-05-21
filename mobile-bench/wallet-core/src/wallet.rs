@@ -3,7 +3,7 @@ use rand_chacha::ChaCha20Rng;
 use serialize::Serializable;
 use zswap::keys::{Seed, SecretKeys};
 
-use crate::js_bridge::JsBridge;
+use crate::js_bridge::{JsBridge, JsBridgeExt};
 use crate::network::Network;
 
 /// Shape of the `prepareUnprovenCallTx` harness response. Lives
@@ -17,12 +17,15 @@ struct PrepareUnprovenCallTxResult {
     elapsed_ms: i64,
 }
 
-/// Drive the harness's `prepareUnprovenCallTx` and return the hex
+/// Drive the bridge's `prepareUnprovenCallTx` and return the hex
 /// blob. Pulled out so `call_did_circuit` reads top-down without
-/// the JSON-ferrying noise.
+/// the JSON-ferrying noise. Accepts any `JsBridge` impl —
+/// `NodeChildBridge` for desktop tests, the WebView eval bridge
+/// installed by `dioxus-wallet` for Android (and production
+/// desktop) builds.
 #[allow(clippy::too_many_arguments)]
 async fn call_prepare_unproven(
-    bridge: &crate::js_bridge::NodeChildBridge,
+    bridge: &dyn JsBridge,
     did: String,
     circuit: String,
     circuit_args: serde_json::Value,
@@ -140,6 +143,16 @@ pub struct Wallet {
     /// PreProd repeat operations. See `BACKLOG.md` Path B for
     /// the design.
     dust_syncer: Option<std::sync::Arc<crate::dust::syncer::DustSyncer>>,
+    /// Optional WebView-side JS bridge handle. When present,
+    /// `call_did_circuit` routes `prepareUnprovenCallTx` through
+    /// this bridge instead of spawning a `NodeChildBridge` child
+    /// process. The dioxus-wallet App installs a
+    /// `DioxusEvalBridge` here at startup so DID write flows work
+    /// on Android (no Node.js in the APK) and on desktop without
+    /// the harness-installation prerequisite. `None` falls back to
+    /// the `NodeChildBridge::spawn` path — fine for desktop
+    /// `cargo test`, fails fast on Android.
+    js_bridge: Option<std::sync::Arc<dyn JsBridge>>,
 }
 
 impl Wallet {
@@ -153,7 +166,28 @@ impl Wallet {
             seed_bytes: seed,
             proof_server_url: None,
             dust_syncer: None,
+            js_bridge: None,
         }
+    }
+
+    /// Builder: attach a WebView-side JS bridge. Subsequent
+    /// `call_did_circuit` invocations will route the JS half of the
+    /// pipeline (`prepareUnprovenCallTx`) through this handle
+    /// instead of spawning a `NodeChildBridge`. The dioxus-wallet
+    /// App constructs a `DioxusEvalBridge`, wraps it in `Arc`, and
+    /// attaches it to every wallet it builds.
+    pub fn with_js_bridge(
+        mut self,
+        bridge: std::sync::Arc<dyn JsBridge>,
+    ) -> Self {
+        self.js_bridge = Some(bridge);
+        self
+    }
+
+    /// Currently-configured JS bridge handle, if any. Cheap
+    /// `Arc::clone` — multiple wallets can share the same bridge.
+    pub fn js_bridge(&self) -> Option<std::sync::Arc<dyn JsBridge>> {
+        self.js_bridge.clone()
     }
 
     /// Builder: attach a `midnight-proof-server` base URL. Subsequent
@@ -884,11 +918,13 @@ impl Wallet {
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
+        let js_bridge_handle = self.js_bridge.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
+            if let Some(b) = js_bridge_handle.clone() { wallet = wallet.with_js_bridge(b); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -926,13 +962,38 @@ impl Wallet {
                 Err(e) => { yield crate::WizardStage::Failed(format!("indexer: {e}")); return; }
             };
 
-            // Spawn the harness + ask it to build an UnprovenTransaction
-            // for this circuit call.
-            let bridge = match crate::js_bridge::NodeChildBridge::spawn(
-                &crate::js_bridge::NodeChildBridge::default_harness_path(),
-            ) {
-                Ok(b) => b,
-                Err(e) => { yield crate::WizardStage::Failed(format!("spawn harness: {e}")); return; }
+            // Prefer the in-process JS bridge (the WebView eval bridge
+            // installed by `dioxus-wallet` at app startup). Falls back
+            // to spawning a Node child for the harness — fine for
+            // desktop `cargo test`, fails fast on Android per the gate
+            // in `NodeChildBridge::spawn`. Both implement the same
+            // trait so the rest of the flow doesn't branch.
+            //
+            // `owned_node_bridge` keeps the spawned child alive until
+            // the end of the stream — without it, the `&dyn JsBridge`
+            // we hand to `call_prepare_unproven` would dangle the
+            // moment the `match` block finished.
+            let owned_node_bridge: Option<crate::js_bridge::NodeChildBridge> =
+                if wallet.js_bridge.is_some() {
+                    None
+                } else {
+                    match crate::js_bridge::NodeChildBridge::spawn(
+                        &crate::js_bridge::NodeChildBridge::default_harness_path(),
+                    ) {
+                        Ok(b) => Some(b),
+                        Err(e) => {
+                            yield crate::WizardStage::Failed(format!("spawn harness: {e}"));
+                            return;
+                        }
+                    }
+                };
+            let bridge: &dyn JsBridge = match (wallet.js_bridge.as_ref(), owned_node_bridge.as_ref()) {
+                (Some(b), _) => b.as_ref(),
+                (None, Some(b)) => b,
+                (None, None) => unreachable!(
+                    "neither attached JS bridge nor spawned NodeChildBridge — \
+                     the spawn-failure branch above bails first",
+                ),
             };
             // Plumb the live chain Zswap state + LedgerParameters
             // into the harness AND the Rust balance step. For
@@ -956,7 +1017,7 @@ impl Wallet {
             };
             let ledger_params_hex = tip_params_hex.or(info.ledger_parameters_hex);
             let unproven_hex = match call_prepare_unproven(
-                &bridge,
+                bridge,
                 did_id.to_did_string(),
                 circuit.clone(),
                 args_json,

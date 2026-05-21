@@ -1,0 +1,74 @@
+# XcodeGen spec for the iOS Simulator build of dioxus-wallet.
+#
+# The Rust library (`libdioxuswalletmain.dylib`) is built by
+# `cargo build --target aarch64-apple-ios-sim --release` upstream and
+# vendored into `App/`; we just need Xcode to embed it and tell the
+# Mach-O loader where to find it (via `LD_RUNPATH_SEARCH_PATHS`).
+#
+# The Swift `@main` calls `start_app()` (exported by the Rust cdylib)
+# which hands control off to Dioxus + Wry.
+name: DioxusWallet
+options:
+  bundleIdPrefix: io.iohk.midnight
+  deploymentTarget:
+    iOS: "15.0"
+targets:
+  DioxusWallet:
+    type: application
+    platform: iOS
+    deploymentTarget: "15.0"
+    sources:
+      - path: App
+        excludes:
+          - "libdioxuswalletmain.dylib"
+    info:
+      path: App/Info.plist
+      properties:
+        LSRequiresIPhoneOS: true
+        UILaunchScreen:
+          {}
+        UIRequiredDeviceCapabilities:
+          - arm64
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.iohk.midnight.wallet
+        TARGETED_DEVICE_FAMILY: "1,2"
+        IPHONEOS_DEPLOYMENT_TARGET: "15.0"
+        # Without these the scheme defaults to iphoneos-only (a real
+        # iPhone), and xcodebuild refuses any iOS Simulator destination
+        # with "iOS <ver> is not installed" referring to the *device*
+        # platform. We want both so simulator builds work without a
+        # paid developer signing certificate.
+        SUPPORTED_PLATFORMS: "iphoneos iphonesimulator"
+        SDKROOT: iphoneos
+        VALID_ARCHS: "arm64 x86_64"
+        # Skip code signing for simulator builds — the simulator
+        # doesn't enforce signatures and we don't have a paid Apple
+        # developer cert wired into this host.
+        CODE_SIGN_IDENTITY[sdk=iphonesimulator*]: ""
+        CODE_SIGNING_REQUIRED[sdk=iphonesimulator*]: "NO"
+        CODE_SIGNING_ALLOWED[sdk=iphonesimulator*]: "NO"
+        # Tell the linker to find the dylib in App/, and the
+        # runtime loader to look in @executable_path/Frameworks/
+        # (where Xcode will have copied it via the Embed phase).
+        LIBRARY_SEARCH_PATHS:
+          - "$(SRCROOT)/App"
+        LD_RUNPATH_SEARCH_PATHS:
+          - "@executable_path"
+          - "@executable_path/Frameworks"
+        # The dylib doesn't have a bridging header but the symbol is
+        # plain C, so `@_silgen_name` in Swift is all we need.
+        OTHER_LDFLAGS:
+          - "-ldioxuswalletmain"
+        # Don't strip the dylib (it has Rust panic / unwind info we
+        # may want in case the app crashes on launch).
+        STRIP_INSTALLED_PRODUCT: "NO"
+        ENABLE_BITCODE: "NO"
+    dependencies:
+      - framework: App/libdioxuswalletmain.dylib
+        embed: true
+        codeSign: true

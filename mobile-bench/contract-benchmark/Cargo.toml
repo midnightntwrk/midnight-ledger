@@ -1,0 +1,37 @@
+[package]
+name = "contract-benchmark"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+# Library only — consumers (dioxus-wallet's Benchmark tab, ad-hoc CLI bins)
+# pull `run_proof(k)` directly. Same crate layout as `prover-core`.
+[lib]
+name = "contract_benchmark"
+crate-type = ["rlib"]
+
+[dependencies]
+# Existing workspace members. Mirror `prover-core` so the proving
+# pipeline behaves identically and we share the params cache.
+zkir = { path = "../../zkir", package = "midnight-zkir" }
+transient-crypto = { path = "../../transient-crypto", package = "midnight-transient-crypto" }
+base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
+zswap = { path = "../../zswap", package = "midnight-zswap" }
+serialize = { path = "../../serialize", package = "midnight-serialize" }
+
+# Async + RNG.
+tokio = { version = "1.46.1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+rand = { version = "0.8.4", features = ["getrandom"] }
+rand_chacha = "0.3.1"
+
+# Errors / serde / utility.
+thiserror = "2.0"
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1.46.1", features = ["full"] }
+tempfile = "3"

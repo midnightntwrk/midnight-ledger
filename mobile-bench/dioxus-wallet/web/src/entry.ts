@@ -5,6 +5,16 @@
 
 import * as midnightDid from "@midnight-ntwrk/midnight-did";
 import * as midnightDidDomain from "@midnight-ntwrk/midnight-did-domain";
+import {
+  createUnprovenCallTxFromInitialStates,
+} from "@midnight-ntwrk/midnight-js-contracts";
+import { setNetworkId } from "@midnight-ntwrk/midnight-js-network-id";
+import {
+  ZKConfigProvider,
+  createProverKey,
+  createVerifierKey,
+  createZKIR,
+} from "@midnight-ntwrk/midnight-js-types";
 
 declare global {
   interface Window {
@@ -48,10 +58,45 @@ declare global {
         secretHexFirst8: string;
         elapsedMs: number;
       }>;
+      /** Produce a SCALE-serialised `UnprovenTransaction` that calls
+       *  a DID circuit on a deployed contract. Mirrors the
+       *  `prepareUnprovenCallTx` handler in
+       *  `mobile-bench/wallet-core/tests/js-harness/harness.mjs` but
+       *  runs entirely inside the embedded WebView so Android (no
+       *  Node) can drive `Wallet::call_did_circuit`.
+       *  Returns `{ unprovenTxHex, elapsedMs }` for the Rust side to
+       *  deserialise, balance, prove, and submit. */
+      prepareUnprovenCallTx(params: PrepareUnprovenCallTxParams):
+        Promise<PrepareUnprovenCallTxResult>;
     };
     MIDNIGHT_PROOF_SERVER?: string;
     MIDNIGHT_NETWORK?: string;
   }
+}
+
+/** Mirrors the params the `wallet-core::wallet::call_prepare_unproven`
+ *  shim builds. Hex values are SCALE-tagged blobs; bigint placeholders
+ *  inside `circuitArgs` use `{ $bigint: "<decimal>" }` per
+ *  `reviveBigints`. */
+export interface PrepareUnprovenCallTxParams {
+  did: string;
+  circuit: string;
+  circuitArgs: unknown[];
+  contractStateHex: string;
+  contractAddressHex: string;
+  zswapChainStateHex?: string | null;
+  ledgerParametersHex?: string | null;
+  controllerSecretHex: string;
+  coinPublicKeyHex: string;
+  encryptionPublicKeyHex: string;
+  networkId: string;
+}
+
+export interface PrepareUnprovenCallTxResult {
+  circuit: string;
+  unprovenTxHex: string;
+  unprovenTxBytes: number;
+  elapsedMs: number;
 }
 
 let contractLayerPromise:
@@ -130,6 +175,200 @@ async function bridgeProbe(params: { message: string }) {
   };
 }
 
+/**
+ * `ZKConfigProvider` that fetches the per-circuit prover key, verifier
+ * key, and zkIR over the `mn-pkg://` custom protocol (rewritten to
+ * `http://mn-pkg.localhost/...` on Android) instead of via Node's
+ * `fs`. Mirrors upstream `NodeZkConfigProvider` byte-for-byte except
+ * for the transport. The blobs come from the embedded
+ * `assets/web/pkg/midnight-did-contract/dist/managed/did/{keys,zkir}/`
+ * tree so the prover/verifier/zkir layout is identical to what the
+ * Node harness reads.
+ */
+class WebViewZkConfigProvider extends ZKConfigProvider<string> {
+  readonly baseUrl: string;
+  constructor(baseUrl: string) {
+    super();
+    this.baseUrl = baseUrl.replace(/\/+$/, "");
+  }
+  private async fetchBytes(subDir: string, circuitId: string, ext: string):
+    Promise<Uint8Array> {
+    const url = `${this.baseUrl}/${subDir}/${circuitId}${ext}`;
+    const resp = await fetch(url);
+    if (!resp.ok) {
+      throw new Error(
+        `fetch ${url} failed: ${resp.status} ${resp.statusText}`,
+      );
+    }
+    return new Uint8Array(await resp.arrayBuffer());
+  }
+  async getProverKey(circuitId: string) {
+    return createProverKey(await this.fetchBytes("keys", circuitId, ".prover"));
+  }
+  async getVerifierKey(circuitId: string) {
+    return createVerifierKey(
+      await this.fetchBytes("keys", circuitId, ".verifier"),
+    );
+  }
+  async getZKIR(circuitId: string) {
+    return createZKIR(await this.fetchBytes("zkir", circuitId, ".bzkir"));
+  }
+}
+
+/** Pick the right scheme for the current host. Wry-Android rewrites
+ *  custom-protocol URLs to `http://{name}.{authority}/...` so the
+ *  Chromium WebView's intercept callback can match them; desktop
+ *  Wry registers the custom scheme directly with the platform
+ *  WebView. We mirror the import-map heuristic from `lib.rs`. */
+function pkgBaseUrlFor(packagePath: string): string {
+  const isAndroidHost = (typeof location !== "undefined")
+    && location.protocol.startsWith("http")
+    && location.host.endsWith(".localhost");
+  if (isAndroidHost) {
+    return `http://mn-pkg.localhost/${packagePath}`;
+  }
+  // Desktop: dioxus-desktop loads the page over the custom `dioxus://`
+  // scheme, which is opaque to URL parsing. Use the mn-pkg:// form
+  // that's registered as a custom protocol.
+  return `mn-pkg://localhost/${packagePath}`;
+}
+
+/** Walk a JSON value, replacing `{ $bigint: "<dec>" }` objects with
+ *  the corresponding JS bigint. Mirrors the harness convention so
+ *  Rust serialises bigint args the same way for both transports. */
+function reviveBigints(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(reviveBigints);
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.$bigint === "string") return BigInt(obj.$bigint);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) out[k] = reviveBigints(v);
+  return out;
+}
+
+function hexToBytes(hex: string): Uint8Array {
+  const clean = hex.startsWith("0x") ? hex.slice(2) : hex;
+  if (clean.length % 2 !== 0) {
+    throw new Error(`hex length must be even, got ${clean.length}`);
+  }
+  const out = new Uint8Array(clean.length / 2);
+  for (let i = 0; i < out.length; i++) {
+    const byte = parseInt(clean.slice(i * 2, i * 2 + 2), 16);
+    if (Number.isNaN(byte)) throw new Error(`bad hex at offset ${i * 2}`);
+    out[i] = byte;
+  }
+  return out;
+}
+
+function bytesToHex(b: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < b.length; i++) {
+    s += b[i].toString(16).padStart(2, "0");
+  }
+  return s;
+}
+
+/**
+ * Port of `methods.prepareUnprovenCallTx` from the Node harness
+ * (`mobile-bench/wallet-core/tests/js-harness/harness.mjs`). Runs the
+ * upstream `createUnprovenCallTxFromInitialStates` pipeline inside the
+ * WebView with a `fetch`-backed `ZKConfigProvider`. Mirrors the same
+ * input/output shape so the Rust side of the bridge doesn't care
+ * which transport executed it.
+ */
+async function prepareUnprovenCallTx(
+  params: PrepareUnprovenCallTxParams,
+): Promise<PrepareUnprovenCallTxResult> {
+  const t0 = Date.now();
+  const { contract: c, compactRuntime: cr } = await loadContractLayer();
+  // Dynamic import of `ledger-v8` so the WASM module is only fetched
+  // when actually exercised (the bundle's other code paths already
+  // pull `compact-runtime` and `midnight-did-contract` on the cold
+  // path; ledger-v8 is an extra ~MB of WASM only this flow needs).
+  const ledgerV8 = await import("@midnight-ntwrk/ledger-v8");
+  const compactJs = await import("@midnight-ntwrk/compact-js");
+
+  setNetworkId((params.networkId ?? "undeployed") as Parameters<typeof setNetworkId>[0]);
+
+  const skBytes = hexToBytes(params.controllerSecretHex);
+  if (skBytes.length !== 32) {
+    throw new Error(
+      `controllerSecretHex must be 32 bytes, got ${skBytes.length}`,
+    );
+  }
+
+  // Witnesses for the DID contract. Identical to the harness — Rust
+  // already supplies `controllerSecretHex` for the DID we're calling.
+  const witnesses = {
+    localSecretKey: (ctx: { privateState: unknown }) => [ctx.privateState, skBytes],
+    currentTimestamp: (ctx: { privateState: unknown }) => [ctx.privateState, BigInt(Date.now())],
+    getSchnorrReduction: (ctx: { privateState: unknown }) => [ctx.privateState, [0n, 0n]],
+  };
+
+  const compiledContract = (compactJs as any).CompiledContract.make(
+    "did",
+    (c as any).DIDContract.Contract,
+  ).pipe(
+    (compactJs as any).CompiledContract.withWitnesses(witnesses),
+    // Path is consumed only by API surfaces that build their own
+    // zkConfigProvider from disk; `createUnprovenCallTxFromInitialStates`
+    // uses the provider we pass explicitly so the value is a marker.
+    (compactJs as any).CompiledContract.withCompiledFileAssets("did"),
+  );
+
+  const zkConfigProvider = new WebViewZkConfigProvider(
+    pkgBaseUrlFor("midnight-did-contract/dist/managed/did"),
+  );
+
+  const contractState = (cr as any).ContractState.deserialize(
+    hexToBytes(params.contractStateHex),
+  );
+  let zswapChainState: unknown;
+  if (params.zswapChainStateHex) {
+    zswapChainState = (ledgerV8 as any).ZswapChainState.deserialize(
+      hexToBytes(params.zswapChainStateHex),
+    );
+  } else {
+    zswapChainState = new (ledgerV8 as any).ZswapChainState();
+  }
+  let ledgerParameters: unknown;
+  if (params.ledgerParametersHex) {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.deserialize(
+      hexToBytes(params.ledgerParametersHex),
+    );
+  } else {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.initialParameters();
+  }
+
+  const args = Array.isArray(params.circuitArgs)
+    ? params.circuitArgs.map(reviveBigints)
+    : [];
+
+  const callTxData = await (createUnprovenCallTxFromInitialStates as any)(
+    zkConfigProvider,
+    {
+      compiledContract,
+      circuitId: params.circuit,
+      contractAddress: params.contractAddressHex,
+      args,
+      coinPublicKey: params.coinPublicKeyHex,
+      initialContractState: contractState,
+      initialZswapChainState: zswapChainState,
+      ledgerParameters,
+      initialPrivateState: { secretKey: skBytes },
+    },
+    params.encryptionPublicKeyHex,
+  );
+
+  const unprovenBytes: Uint8Array = callTxData.private.unprovenTx.serialize();
+  return {
+    circuit: params.circuit,
+    unprovenTxHex: bytesToHex(unprovenBytes),
+    unprovenTxBytes: unprovenBytes.length,
+    elapsedMs: Date.now() - t0,
+  };
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
@@ -138,6 +377,7 @@ window.midnightDidBundle = {
   loadContractLayer,
   bridgeProbe,
   bridgeWitnessTest,
+  prepareUnprovenCallTx,
 };
 
 console.log(

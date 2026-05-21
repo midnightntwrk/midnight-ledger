@@ -1568,6 +1568,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3d52eff69cd5e647efe296129160853a42795992097e8af39800e1060caeea9b"
 
 [[package]]
+name = "contract-benchmark"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "midnight-base-crypto",
+ "midnight-serialize",
+ "midnight-transient-crypto",
+ "midnight-zkir",
+ "midnight-zswap",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2742,14 +2762,20 @@ name = "dioxus-wallet"
 version = "0.1.0"
 dependencies = [
  "arboard",
+ "async-trait",
+ "contract-benchmark",
  "dioxus",
  "dirs 5.0.1",
  "futures",
  "hex",
+ "include_dir",
  "jni",
+ "libc",
  "ndk-context",
  "prover-core",
  "resvg",
+ "rustls-platform-verifier 0.5.3",
+ "rustls-platform-verifier 0.6.2",
  "serde",
  "serde_json",
  "tiny-skia",
@@ -4660,6 +4686,25 @@ dependencies = [
  "proc-macro2",
  "quote 1.0.45",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "include_dir"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "923d117408f1e49d914f1a379a309cffe4f18c05cf4e3d12e613a15fc81bd0dd"
+dependencies = [
+ "include_dir_macros",
+]
+
+[[package]]
+name = "include_dir_macros"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7cab85a7ed0bd5f0e76d93846e0147172bed2e2d3f859bcc33a8d9699cad1a75"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
 ]
 
 [[package]]

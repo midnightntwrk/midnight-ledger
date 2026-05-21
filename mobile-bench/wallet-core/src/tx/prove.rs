@@ -94,10 +94,25 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
         params: &resolver,
         resolver: &resolver,
     };
-    let proved = tx
-        .prove(provider, &INITIAL_COST_MODEL)
-        .await
-        .map_err(|e| TxError::Prove(e.to_string()))?;
+    // `tx.prove` is `async fn` but its body is CPU-bound halo2-kzg
+    // work that polls `Ready` immediately — there are no genuine
+    // suspension points. Polling that future directly stalls the
+    // executor's worker thread for the full prove time (seconds on
+    // desktop, tens of seconds on ARM emulator), starving the
+    // Dioxus render loop and the `DioxusEvalBridge` driver, so the
+    // UI freezes. `block_in_place` keeps us on the same thread but
+    // signals to tokio's multi-thread runtime that the current
+    // worker is about to block, letting it spin up an extra worker
+    // for the other tasks. The `Handle::current().block_on(...)` is
+    // the documented escape hatch when the work has lifetime ties
+    // to local state — here `provider` borrows `resolver`, so
+    // `spawn_blocking` (which requires `'static + Send`) wouldn't
+    // fit without a heavier refactor.
+    let proved = tokio::task::block_in_place(|| {
+        tokio::runtime::Handle::current()
+            .block_on(tx.prove(provider, &INITIAL_COST_MODEL))
+    })
+    .map_err(|e| TxError::Prove(e.to_string()))?;
     // Seal: PedersenRandomness → PureGeneratorPedersen so the
     // serialized tx carries the `pedersen-schnorr[v1]` header tag
     // the chain's deserializer expects. Without this, the node

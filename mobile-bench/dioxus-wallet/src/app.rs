@@ -21,9 +21,13 @@ pub(crate) const LOGO_SVG: &str = include_str!("../assets/logo.svg");
 /// first ~1.5 s after launch.
 pub(crate) const LOGO_SPLASH_SVG: &str = include_str!("../assets/logo-splash.svg");
 
-/// Compact monogram — used as the platform window icon. The
-/// rasterisation to RGBA bytes happens in `lib.rs` via `resvg`
-/// before the window is built.
+/// Compact monogram — used as the platform window icon on
+/// desktop. The rasterisation to RGBA bytes happens in `lib.rs`
+/// via `resvg` before the window is built; Android has no
+/// concept of a per-process window icon (the launcher uses the
+/// APK's `mipmap-*` resources instead), so the const is gated to
+/// non-Android targets to keep `#![deny(warnings)]` quiet.
+#[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
 pub(crate) const LOGO_ICON_SVG: &str = include_str!("../assets/logo-icon.svg");
 
 // `MIDNIGHT_DID_JS` is consumed by `lib.rs::desktop_or_mobile_launch`
@@ -78,13 +82,22 @@ struct ChainSnapshot {
 /// Top-level tabs. Wallet shows identity + balance; DIDs holds the
 /// create/resolve/load flow plus session activity; Diagnostics
 /// surfaces probes + proof-server URL + raw seed/keys for power
-/// users.
+/// users. `Test` holds the dev-only probes (JS bridge spike,
+/// per-stage timings) so they don't clutter the main flow.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Wallet,
     Dids,
     Keys,
     Diagnostics,
+    Metrics,
+    /// `Benchmark` runs the `contract-benchmark` crate's parameterised
+    /// dummy contract at varying `k` and reports prove timings per row.
+    /// Inserted between `Metrics` and `Test` so the menu ordering reads
+    /// Wallet → DIDs → Keys → Diagnostics → Metrics → Benchmark → Test
+    /// → Logs → Settings.
+    Benchmark,
+    Test,
     Logs,
     Settings,
 }
@@ -96,6 +109,9 @@ impl Tab {
             Tab::Dids => "DIDs",
             Tab::Keys => "Keys",
             Tab::Diagnostics => "Diagnostics",
+            Tab::Metrics => "Metrics",
+            Tab::Benchmark => "Benchmark",
+            Tab::Test => "Test",
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
         }
@@ -112,6 +128,9 @@ impl Tab {
             Tab::Settings => 3,
             Tab::Keys => 4,
             Tab::Logs => 5,
+            Tab::Test => 6,
+            Tab::Metrics => 7,
+            Tab::Benchmark => 8,
         }
     }
 
@@ -127,6 +146,9 @@ impl Tab {
             3 => Tab::Settings,
             4 => Tab::Keys,
             5 => Tab::Logs,
+            6 => Tab::Test,
+            7 => Tab::Metrics,
+            8 => Tab::Benchmark,
             _ => Tab::Wallet,
         }
     }
@@ -137,6 +159,14 @@ impl Tab {
 /// a glance plus copy-paste-able hashes.
 #[derive(Clone, PartialEq, Eq)]
 enum SessionEvent {
+    /// Emitted by `CreateDidWizard` when a deploy completes. The
+    /// wizard is currently unmounted (preprod-live ships with three
+    /// pre-seeded DIDs and Create DID is redundant alongside the
+    /// inventory `Open` + detail-view `Update`), so this variant
+    /// has no live producer. The component is still defined and can
+    /// be re-mounted; kept on the enum so older session-log
+    /// snapshots still deserialise.
+    #[allow(dead_code)]
     Deploy {
         did: String,
         tx_hash: [u8; 32],
@@ -152,11 +182,12 @@ enum SessionEvent {
         tx_hash: [u8; 32],
         block_hash: [u8; 32],
     },
-    /// A DID circuit invocation the user prepared in the UI. The
-    /// wallet does NOT submit these yet — see DidOperationsPanel
-    /// for the local-only flow. Once the Compact-runtime bridge
-    /// lands, the same operation will be turned into a real
-    /// `ContractCall` transaction.
+    /// A DID circuit invocation the user prepared in the UI.
+    /// Emitted by the now-removed `DidOperationsPanel` (the
+    /// "draft only" pre-submit-was-wired UI). Kept on the enum
+    /// so older `SessionLogPanel` snapshots still deserialise;
+    /// no live producer.
+    #[allow(dead_code)]
     OperationDrafted {
         did: String,
         operation: DidOperation,
@@ -178,6 +209,11 @@ enum DidOperation {
     AddService(ServiceInput),
     UpdateService(ServiceInput),
     RemoveService { id: String },
+    /// `deactivate` circuit. The dedicated "Deactivate" button on
+    /// the DID detail view drives this; not used inside the
+    /// batch Operation Builder (which would only ever queue one
+    /// of these as the LAST entry, by design).
+    #[allow(dead_code)]
     Deactivate,
 }
 
@@ -488,10 +524,36 @@ fn app_wallet_for(net: Network) -> Wallet {
     // every call. The static is populated by
     // `set_dust_syncer_for(network, syncer)` once per network
     // after the store opens; we look up the matching one here.
-    if let Some(syncer) = dust_syncer_for(net) {
+    let with_dust = if let Some(syncer) = dust_syncer_for(net) {
         with_url.with_dust_syncer(syncer)
     } else {
         with_url
+    };
+    // Phase D: under `--features js-bridge`, attach the
+    // process-wide `DioxusEvalBridge` so `Wallet::call_did_circuit`
+    // can drive `window.midnightDidBundle.prepareUnprovenCallTx` in
+    // the embedded WebView instead of trying to spawn a Node child
+    // (which fails fast on Android per `NodeChildBridge::spawn`).
+    // The bridge handle is `None` until the App's `use_future`
+    // driver runs `install_global` on first render; if a wallet is
+    // constructed before that point it just falls back to the
+    // legacy path. In practice the driver mounts on the first
+    // frame, well before any UI button can fire a DID write.
+    #[cfg(feature = "js-bridge")]
+    {
+        if let Some(bridge) = crate::eval_bridge::global_bridge() {
+            with_dust.with_js_bridge(bridge)
+        } else {
+            tracing::info!(
+                target: "dioxuswalletmain",
+                "app_wallet_for: DioxusEvalBridge not yet installed — will fall back to NodeChildBridge",
+            );
+            with_dust
+        }
+    }
+    #[cfg(not(feature = "js-bridge"))]
+    {
+        with_dust
     }
 }
 
@@ -541,7 +603,11 @@ pub fn set_dust_syncer_for(
 }
 
 /// Set the embedded proof-server URL. Called once at App startup
-/// from `BridgeState::spawn_proof_server`; idempotent.
+/// from `BridgeState::spawn_proof_server`; idempotent. Only used
+/// when the `proof-server-http` feature spins up the embedded HTTP
+/// proof-server (desktop-only) — every other build path proves
+/// in-process.
+#[cfg(feature = "proof-server-http")]
 pub fn set_proof_server_url(url: String) {
     let _ = PROOF_SERVER_URL.set(url);
 }
@@ -595,6 +661,33 @@ pub fn App() -> Element {
     use_future(move || async move {
         tokio::time::sleep(std::time::Duration::from_millis(1500)).await;
         splash_visible.set(false);
+    });
+
+    // Android-only: bring up the rustls platform-verifier once
+    // `ndk-context` has been seeded by dioxus-mobile. We can't do
+    // this from `lib.rs::main` because that runs before dioxus
+    // initialises the JNI bridge. Poll-then-init: a short loop
+    // (max ~3s) handles the seed delay; once `try_init_android_tls`
+    // returns `Ok(true)` the future stops. Without this every
+    // HTTPS call hits the panic in
+    // `rustls-platform-verifier/src/android.rs:94`.
+    #[cfg(target_os = "android")]
+    use_future(|| async move {
+        for _ in 0..30 {
+            match crate::try_init_android_tls() {
+                Ok(true) => {
+                    tracing::info!("rustls-platform-verifier ready");
+                    return;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(error = %e, "rustls init failed");
+                    return;
+                }
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        tracing::warn!("rustls-platform-verifier: gave up waiting for ndk-context");
     });
     if *splash_visible.read() {
         return rsx! {
@@ -969,6 +1062,29 @@ pub fn App() -> Element {
         }
     });
 
+    // Long-lived driver task for the WebView-side JS bridge. The
+    // `JsBridge` handle installed in `app_wallet_for` is just a
+    // channel sender; **this** task is what owns the receiver and
+    // calls `document::eval` on every request. Spawning it from a
+    // `use_future` guarantees we're inside the Dioxus runtime so
+    // `document::eval` has the `Eval` machinery to bind against.
+    //
+    // First caller wins via `install_global` — subsequent calls
+    // (e.g. when the App re-runs on a network swap) drop their
+    // receiver and bail. The bridge handle in the global slot stays
+    // valid for the life of the process.
+    #[cfg(feature = "js-bridge")]
+    use_future(|| async move {
+        if let Some(rx) = crate::eval_bridge::install_global() {
+            crate::eval_bridge::run_driver(rx).await;
+        } else {
+            tracing::debug!(
+                target: "eval-bridge",
+                "global bridge already installed; this App instance skips spawning a driver",
+            );
+        }
+    });
+
     let mut load_demo = move || {
         let w = app_wallet_for(*network.read());
         wallet.set(Some(WalletInfo::from_wallet(&w)));
@@ -1126,7 +1242,7 @@ pub fn App() -> Element {
         div { class: "header-subtitle", "{active_tab.read().label()}" }
         if *menu_open.read() {
             div { class: "menu-dropdown",
-                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {
+                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1145,13 +1261,16 @@ pub fn App() -> Element {
             tip_height: chain.read().tip.as_ref().map(|t| t.height),
         }
 
-        WalletStoreBadge { state: bridge_state.read().clone() }
+        // `WalletStoreBadge` now lives only on the Settings tab —
+        // it added a permanent strip across every screen that the
+        // operator doesn't need to see during normal use. The
+        // component is mounted at the top of `SettingsTab` below.
 
         // Tab navigation. Each button sets active_tab; rendering
         // below is a single match on the current value. CSS hides
         // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Logs, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -1257,59 +1376,13 @@ pub fn App() -> Element {
                 }
             },
             Tab::Dids => rsx! {
-                CreateDidWizard {
-                    network: *network.read(),
-                    on_done: move |o: wallet_core::DeployOutcome| {
-                        let did = o.did_id.to_did_string();
-                        // Stash the per-DID random controller secret in
-                        // the shared bridge store so subsequent JS-driven
-                        // circuit calls can look it up via the
-                        // `getControllerSecretKey` RPC.
-                        bridge_state.read().remember_controller_secret(
-                            *network.read(),
-                            did.clone(),
-                            o.controller_sk,
-                        );
-                        last_did_id.set(Some(did.clone()));
-                        // Drop into the inventory as Pending — the next
-                        // Resolve flips it to Active/Deactivated and
-                        // populates the counters.
-                        let entry = DidInventoryEntry {
-                            did: did.clone(),
-                            network_label: o.did_id.network.label().to_string(),
-                            status: DidInventoryStatus::Pending,
-                            counter: None,
-                            vm_count: None,
-                            service_count: None,
-                            last_block_height: None,
-                        };
-                        let mut inv = did_inventory.read().clone();
-                        inv.insert(did.clone(), entry.clone());
-                        did_inventory.set(inv);
-                        persist_inventory_entry(
-                            &bridge_state.read(),
-                            *network.read(),
-                            &entry,
-                        );
-                        let mut log = session_log.read().clone();
-                        log.push(SessionEvent::Deploy {
-                            did,
-                            tx_hash: o.tx_hash,
-                            block_hash: o.block_hash,
-                        });
-                        session_log.set(log);
-                    },
-                    on_timing: move |run: TimingRun| {
-                        let mut log = timing_log.read().clone();
-                        log.push(run);
-                        timing_log.set(log);
-                    },
-                    on_cost: move |cost: CostRun| {
-                        let mut log = cost_log.read().clone();
-                        log.push(cost);
-                        cost_log.set(log);
-                    },
-                }
+                // `CreateDidWizard` was removed from this tab —
+                // operator demos run against the 3 pre-seeded
+                // preprod-live DIDs and the wizard was redundant
+                // alongside the per-row `Open` + the detail-view
+                // `Update DID` button. Wizard component still lives
+                // in this file and can be re-mounted here in one
+                // line if we need it back.
                 if let Some(did_open) = open_did.read().clone() {
                     // Detail mode: full 8-tab view of one DID.
                     DidDetailView {
@@ -1439,45 +1512,19 @@ pub fn App() -> Element {
                             );
                         },
                     }
-                    LoadCircuitPanel {
-                        network: *network.read(),
-                        seed_did: last_did_id.read().clone(),
-                        seed_counter: last_resolved.read().as_ref().map(|(_, c)| *c),
-                        on_done: move |(did, circuit, o): (String, String, wallet_core::DeployOutcome)| {
-                            let mut log = session_log.read().clone();
-                            log.push(SessionEvent::LoadCircuit {
-                                did,
-                                circuit,
-                                tx_hash: o.tx_hash,
-                                block_hash: o.block_hash,
-                            });
-                            session_log.set(log);
-                        },
-                        on_timing: move |run: TimingRun| {
-                            let mut log = timing_log.read().clone();
-                            log.push(run);
-                            timing_log.set(log);
-                        },
-                        on_cost: move |cost: CostRun| {
-                            let mut log = cost_log.read().clone();
-                            log.push(cost);
-                            cost_log.set(log);
-                        },
-                    }
-                    DidOperationsPanel {
-                        seed_did: last_did_id.read().clone(),
-                        on_drafted: move |(did, op): (String, DidOperation)| {
-                            let mut log = session_log.read().clone();
-                            log.push(SessionEvent::OperationDrafted { did, operation: op });
-                            session_log.set(log);
-                        },
-                    }
+                    // `LoadCircuitPanel` (manual VK reload via
+                    // MaintenanceUpdate) and `DidOperationsPanel`
+                    // (offline draft-only) were placeholders from
+                    // before the Operation Builder shipped. The
+                    // batch flow now auto-loads any missing
+                    // circuit's VK before the call, and submission
+                    // is wired end-to-end — both panels are
+                    // obsolete. Components left in source for
+                    // reference but no longer rendered.
                     SessionLogPanel { events: session_log.read().clone() }
                 }
             },
             Tab::Diagnostics => rsx! {
-                JsBridgePanel { seed_did: last_did_id.read().clone() }
-                TimingsPanel { runs: timing_log.read().clone() }
                 TxCostPanel { runs: cost_log.read().clone() }
                 if let Some(w) = wallet.read().as_ref() {
                     div { class: "card",
@@ -1510,6 +1557,19 @@ pub fn App() -> Element {
             },
             Tab::Keys => rsx! {
                 KeysTab { bridge_state: bridge_state.read().clone() }
+            },
+            Tab::Metrics => rsx! {
+                MetricsTab {
+                    timings: timing_log.read().clone(),
+                    costs: cost_log.read().clone(),
+                }
+            },
+            Tab::Benchmark => rsx! {
+                BenchmarkTab {}
+            },
+            Tab::Test => rsx! {
+                JsBridgePanel { seed_did: last_did_id.read().clone() }
+                TimingsPanel { runs: timing_log.read().clone() }
             },
             Tab::Logs => rsx! {
                 LogsTab { bridge_state: bridge_state.read().clone() }
@@ -1647,10 +1707,23 @@ fn terminal(stages: &[wallet_core::WizardStage]) -> Option<TerminalView<'_>> {
 }
 
 enum TerminalView<'a> {
+    /// Used by `CreateDidWizard`'s success panel. The wizard is
+    /// currently unmounted (Create DID is hidden from the DIDs
+    /// tab) so this variant is consulted only by the wizard's
+    /// internal renderer if it gets remounted.
+    #[allow(dead_code)]
     Done(&'a wallet_core::DeployOutcome),
     Failed(&'a str),
 }
 
+// Currently unmounted — removed from the DIDs tab on operator
+// builds because the 3 pre-seeded preprod-live DIDs make Create DID
+// redundant alongside Open + Update DID. Component is kept in place
+// so the flow can be re-instated with a one-line mount in the
+// Tab::Dids arm. The `dead_code` allow covers the cascade: with no
+// live caller, the dead-code lint trips on the inner `Failed(msg)`
+// pattern and the dependent enum variants.
+#[allow(dead_code)]
 #[component]
 fn CreateDidWizard(
     network: Network,
@@ -1891,6 +1964,11 @@ fn WalletSyncPane(
 ) -> Element {
     let night_row = use_signal::<SyncRow>(|| SyncRow::Idle);
     let dust_row = use_signal::<SyncRow>(|| SyncRow::Idle);
+    // Latest DUST checkpoint event id surfaced under the rows. Held
+    // outside `SyncRow::Done` so it survives across resyncs as a
+    // standalone status line and isn't repeated inside the row's
+    // summary.
+    let dust_event_id = use_signal::<Option<i64>>(|| None);
     let mut started = use_signal(|| false);
 
     // Closure that re-fires both syncs from scratch.
@@ -1899,6 +1977,7 @@ fn WalletSyncPane(
         let mut dust_row = dust_row;
         let mut night_subunits = night_subunits;
         let mut dust_subunits = dust_subunits;
+        let mut dust_event_id = dust_event_id;
 
         // NIGHT — fast, no progress bar.
         night_row.set(SyncRow::Running {
@@ -1914,10 +1993,11 @@ fn WalletSyncPane(
                         .iter()
                         .fold(0u128, |a, u| a.saturating_add(u.value));
                     night_subunits.set(Some(total));
+                    let (compact, _) = format_balance(total, NIGHT_DECIMALS);
                     night_row.set(SyncRow::Done {
                         summary: format!(
-                            "{} ({} UTXO{})",
-                            format_subunits(total),
+                            "{} NIGHT ({} UTXO{})",
+                            compact,
                             set.len(),
                             if set.len() == 1 { "" } else { "s" },
                         ),
@@ -1970,12 +2050,10 @@ fn WalletSyncPane(
             match syncer.current_balance_atomic() {
                 Ok(Some(bal)) => {
                     dust_subunits.set(Some(bal));
+                    dust_event_id.set(last_id);
+                    let (compact, _) = format_balance(bal, DUST_DECIMALS);
                     dust_row.set(SyncRow::Done {
-                        summary: format!(
-                            "{} (checkpoint event id {})",
-                            format_subunits(bal),
-                            last_id.unwrap_or(-1),
-                        ),
+                        summary: format!("{} DUST", compact),
                     });
                 }
                 Ok(None) => {
@@ -2002,16 +2080,22 @@ fn WalletSyncPane(
     let any_running = matches!(*night_row.read(), SyncRow::Running { .. })
         || matches!(*dust_row.read(), SyncRow::Running { .. });
 
+    let dust_event_id_val = *dust_event_id.read();
     rsx! {
         div { class: "card",
             div { class: "card-header", "Wallet sync" }
             {render_sync_row("NIGHT", &night_row.read())}
             {render_sync_row("DUST", &dust_row.read())}
-            div { class: "row",
+            div { class: "row sync-foot",
                 button {
                     disabled: any_running,
                     onclick: move |_| kick(),
                     {if any_running { "Syncing…" } else { "Resync" }}
+                }
+                if let Some(id) = dust_event_id_val {
+                    span { class: "sync-meta",
+                        "event id: {id}"
+                    }
                 }
             }
         }
@@ -2400,233 +2484,6 @@ fn ResolveDidPanel(
     }
 }
 
-#[component]
-fn LoadCircuitPanel(
-    network: Network,
-    seed_did: Option<String>,
-    seed_counter: Option<u32>,
-    on_done: EventHandler<(String, String, wallet_core::DeployOutcome)>,
-    on_timing: EventHandler<TimingRun>,
-    on_cost: EventHandler<CostRun>,
-) -> Element {
-    use wallet_core::WizardStage;
-
-    // DID input — auto-seeded from the most recent deploy.
-    let mut input = use_signal(|| seed_did.clone().unwrap_or_default());
-    use_effect(move || {
-        if let Some(seed) = seed_did.clone() {
-            if *input.read() != seed {
-                input.set(seed);
-            }
-        }
-    });
-
-    let circuit_names = wallet_core::did_circuit_names();
-    // Default to `addVerificationMethod` — the most common first
-    // step after a fresh deploy. Sits at a known position in the
-    // registry; we look it up so a reordering doesn't silently
-    // change the default.
-    let default_idx = circuit_names
-        .iter()
-        .position(|n| *n == "addVerificationMethod")
-        .unwrap_or(0);
-    let mut circuit_idx = use_signal(|| default_idx);
-    // Initial counter: whatever the parent resolved most recently,
-    // or 0 (first maintenance after a fresh deploy).
-    let mut counter_str = use_signal(|| seed_counter.map(|c| c.to_string()).unwrap_or_else(|| "0".to_string()));
-    // Re-seed the counter whenever a new resolve completes, but
-    // only if the user hasn't manually edited away from the prior
-    // seed.
-    let mut last_seed = use_signal::<Option<u32>>(|| seed_counter);
-    use_effect(move || {
-        if let Some(c) = seed_counter {
-            let last = *last_seed.read();
-            let current_text = counter_str.read().clone();
-            let current_matches_last = last
-                .map(|p| current_text == p.to_string())
-                .unwrap_or(true);
-            if Some(c) != last && current_matches_last {
-                counter_str.set(c.to_string());
-                last_seed.set(Some(c));
-            } else if Some(c) != last {
-                last_seed.set(Some(c));
-            }
-        }
-    });
-
-    let mut stages = use_signal::<Vec<WizardStage>>(Vec::new);
-    let mut running = use_signal(|| false);
-    // Parse error from invalid DID / counter input — surfaced as a
-    // local failure without going through the wizard's terminal
-    // state, since we don't even attempt the network if inputs are
-    // malformed.
-    let mut input_error = use_signal::<Option<String>>(|| None);
-
-    let start = move |_| {
-        if *running.read() {
-            return;
-        }
-        let did_str = input.read().clone();
-        if did_str.is_empty() {
-            input_error.set(Some("enter a did:midnight:… string".into()));
-            return;
-        }
-        let did_id = match wallet_core::DidId::parse(&did_str) {
-            Ok(d) => d,
-            Err(e) => {
-                input_error.set(Some(format!("parse DID: {e}")));
-                return;
-            }
-        };
-        let counter: u32 = match counter_str.read().trim().parse() {
-            Ok(c) => c,
-            Err(e) => {
-                input_error.set(Some(format!("counter must be a u32: {e}")));
-                return;
-            }
-        };
-        let name = circuit_names[*circuit_idx.read()].to_string();
-        let did_for_log = did_str.clone();
-        input_error.set(None);
-        running.set(true);
-        stages.set(Vec::new());
-        let on_done = on_done.clone();
-        let on_timing = on_timing.clone();
-        let on_cost = on_cost.clone();
-        let timing_label = format!("load_did_circuit:{name}");
-        let cost_label = timing_label.clone();
-        spawn(async move {
-            use futures::StreamExt;
-            let w = app_wallet_for(network);
-            let cost_start = std::time::Instant::now();
-            let before = w.balance_snapshot().await.ok();
-            let mut stream = std::pin::pin!(w.load_did_circuit(did_id, name.clone(), counter));
-            let mut observations: Vec<(usize, std::time::Instant)> = Vec::new();
-            let mut succeeded = false;
-            while let Some(stage) = stream.next().await {
-                let now = std::time::Instant::now();
-                if let Some(idx) = stage_pipeline_idx(&stage) {
-                    observations.push((idx, now));
-                } else {
-                    succeeded = matches!(&stage, WizardStage::Done(_));
-                    on_timing.call(build_timing(
-                        timing_label.clone(),
-                        &observations,
-                        now,
-                        succeeded,
-                    ));
-                }
-                let mut current = stages.read().clone();
-                if let WizardStage::Done(o) = &stage {
-                    on_done.call((did_for_log.clone(), name.clone(), o.clone()));
-                }
-                current.push(stage);
-                stages.set(current);
-            }
-            if let (Some(before), Ok(after)) = (before, w.balance_snapshot().await) {
-                on_cost.call(CostRun {
-                    label: cost_label,
-                    dust_consumed: before.dust_atomic.saturating_sub(after.dust_atomic),
-                    night_consumed: before.night_atomic.saturating_sub(after.night_atomic),
-                    duration_ms: cost_start.elapsed().as_millis() as u64,
-                    succeeded,
-                });
-            }
-            running.set(false);
-        });
-    };
-
-    let stages_snapshot = stages.read().clone();
-    let term = terminal(&stages_snapshot);
-    let has_started = !stages_snapshot.is_empty();
-    let button_label = match (*running.read(), &term) {
-        (true, _) => "Submitting…",
-        (false, Some(TerminalView::Failed(_))) => "Retry",
-        (false, Some(TerminalView::Done(_))) => "Load another",
-        (false, None) => "Load circuit",
-    };
-
-    let current_idx = *circuit_idx.read();
-    rsx! {
-        div { class: "wizard-header", "Load circuit verifier key" }
-        div { class: "row",
-            input {
-                r#type: "text",
-                placeholder: "did:midnight:undeployed:…",
-                value: "{input.read()}",
-                oninput: move |e| input.set(e.value()),
-                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
-            }
-        }
-        div { class: "row",
-            label { style: "min-width: 80px;", "Circuit" }
-            select {
-                onchange: move |e| {
-                    if let Ok(idx) = e.value().parse::<usize>() {
-                        circuit_idx.set(idx);
-                    }
-                },
-                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
-                for (idx , name) in circuit_names.iter().enumerate() {
-                    option {
-                        value: "{idx}",
-                        selected: idx == current_idx,
-                        "{name}"
-                    }
-                }
-            }
-        }
-        div { class: "row",
-            label { style: "min-width: 80px;", "Counter" }
-            input {
-                r#type: "number",
-                min: "0",
-                value: "{counter_str.read()}",
-                oninput: move |e| counter_str.set(e.value()),
-                style: "width: 120px; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
-            }
-            span { style: "font-size: 11px; color: var(--text-muted);",
-                "Defaults to 0 (first maintenance after deploy)."
-            }
-        }
-        div { class: "row",
-            button {
-                disabled: *running.read(),
-                onclick: start,
-                "{button_label}"
-            }
-        }
-
-        if let Some(msg) = input_error.read().as_ref() {
-            div { class: "wizard-outcome err",
-                div { class: "row label", "Input" }
-                div { class: "seed-blob", "{msg}" }
-            }
-        }
-
-        if has_started {
-            ul { class: "wizard-steps",
-                for (idx , label) in PIPELINE.iter().enumerate() {
-                    {render_step_row(idx, label, step_status(idx, &stages_snapshot))}
-                }
-            }
-        }
-
-        if let Some(TerminalView::Done(outcome)) = &term {
-            div { class: "wizard-outcome ok",
-                div { class: "row label", "Tx hash" }
-                div { class: "seed-blob", "0x{hex::encode(outcome.tx_hash)}" }
-                div { class: "row label", "Block hash" }
-                div { class: "seed-blob", "0x{hex::encode(outcome.block_hash)}" }
-            }
-        } else if let Some(TerminalView::Failed(msg)) = &term {
-            div { class: "wizard-outcome err",
-                div { class: "row label", "Failed" }
-                div { class: "seed-blob", "{msg}" }
-            }
-        }
-    }
-}
 
 /// Variants of the 11-circuit dropdown. Order matches the
 /// dropdown's display order; numeric tag is the `<select>` value
@@ -2643,24 +2500,16 @@ enum OpKind {
     AddService,
     UpdateService,
     RemoveService,
+    /// `deactivate` circuit. Kept on the enum so exhaustive
+    /// `match` arms in `DidOperationBuilder` still typecheck — the
+    /// Operation Builder excludes it from `BUILDABLE_OPS`; the
+    /// dedicated "Deactivate" button on the DID detail view is the
+    /// only path that constructs the corresponding `DidOperation`.
+    #[allow(dead_code)]
     Deactivate,
 }
 
 impl OpKind {
-    const ALL: &'static [OpKind] = &[
-        OpKind::AddAlsoKnownAs,
-        OpKind::RemoveAlsoKnownAs,
-        OpKind::AddVerificationMethod,
-        OpKind::UpdateVerificationMethod,
-        OpKind::RemoveVerificationMethod,
-        OpKind::AddVerificationMethodRelation,
-        OpKind::RemoveVerificationMethodRelation,
-        OpKind::AddService,
-        OpKind::UpdateService,
-        OpKind::RemoveService,
-        OpKind::Deactivate,
-    ];
-
     fn circuit_name(&self) -> &'static str {
         match self {
             Self::AddAlsoKnownAs => "addAlsoKnownAs",
@@ -2688,296 +2537,6 @@ const RELATIONS: &[&str] = &[
     "CapabilityDelegation",
 ];
 
-#[component]
-fn DidOperationsPanel(
-    seed_did: Option<String>,
-    on_drafted: EventHandler<(String, DidOperation)>,
-) -> Element {
-    let mut did_input = use_signal(|| seed_did.clone().unwrap_or_default());
-    use_effect(move || {
-        if let Some(seed) = seed_did.clone() {
-            if *did_input.read() != seed {
-                did_input.set(seed);
-            }
-        }
-    });
-
-    let mut op_idx = use_signal(|| 0usize);
-
-    // All circuit-specific fields share one signal each. A
-    // single panel surfaces fields conditionally on `op_idx`; the
-    // ones not visible carry stale state but are inert.
-    let mut f_value = use_signal(String::new);
-    let mut f_id = use_signal(String::new);
-    let mut f_key_type_idx = use_signal(|| 0usize);
-    let mut f_curve_idx = use_signal(|| 0usize);
-    let mut f_pk_x = use_signal(String::new);
-    let mut f_pk_y = use_signal(String::new);
-    let mut f_relation_idx = use_signal(|| 0usize);
-    let mut f_method_id = use_signal(String::new);
-    let mut f_typ = use_signal(String::new);
-    let mut f_endpoint = use_signal(String::new);
-    let mut error = use_signal::<Option<String>>(|| None);
-    let mut last_drafted = use_signal::<Option<DidOperation>>(|| None);
-
-    let on_draft = move |_| {
-        let did_str = did_input.read().trim().to_string();
-        if did_str.is_empty() {
-            error.set(Some("enter a did:midnight:… string".into()));
-            return;
-        }
-        if wallet_core::DidId::parse(&did_str).is_err() {
-            error.set(Some(format!("not a valid DID: {did_str}")));
-            return;
-        }
-        let op = OpKind::ALL[*op_idx.read()];
-        let drafted = match op {
-            OpKind::AddAlsoKnownAs => {
-                let v = f_value.read().trim().to_string();
-                if v.is_empty() {
-                    error.set(Some("value is required".into()));
-                    return;
-                }
-                DidOperation::AddAlsoKnownAs { value: v }
-            }
-            OpKind::RemoveAlsoKnownAs => {
-                let v = f_value.read().trim().to_string();
-                if v.is_empty() {
-                    error.set(Some("value is required".into()));
-                    return;
-                }
-                DidOperation::RemoveAlsoKnownAs { value: v }
-            }
-            OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => {
-                let id = f_id.read().trim().to_string();
-                let pk_x = f_pk_x.read().trim().to_string();
-                let pk_y = f_pk_y.read().trim().to_string();
-                if id.is_empty() || pk_x.is_empty() || pk_y.is_empty() {
-                    error.set(Some("id, pk_x, pk_y are required".into()));
-                    return;
-                }
-                let vm = VerificationMethodInput {
-                    id,
-                    key_type: KEY_TYPES[*f_key_type_idx.read()].to_string(),
-                    curve: CURVE_TYPES[*f_curve_idx.read()].to_string(),
-                    pk_x,
-                    pk_y,
-                };
-                match op {
-                    OpKind::AddVerificationMethod => DidOperation::AddVerificationMethod(vm),
-                    OpKind::UpdateVerificationMethod => DidOperation::UpdateVerificationMethod(vm),
-                    _ => unreachable!(),
-                }
-            }
-            OpKind::RemoveVerificationMethod => {
-                let id = f_id.read().trim().to_string();
-                if id.is_empty() {
-                    error.set(Some("id is required".into()));
-                    return;
-                }
-                DidOperation::RemoveVerificationMethod { id }
-            }
-            OpKind::AddVerificationMethodRelation => {
-                let method_id = f_method_id.read().trim().to_string();
-                if method_id.is_empty() {
-                    error.set(Some("method_id is required".into()));
-                    return;
-                }
-                DidOperation::AddVerificationMethodRelation {
-                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
-                    method_id,
-                }
-            }
-            OpKind::RemoveVerificationMethodRelation => {
-                let method_id = f_method_id.read().trim().to_string();
-                if method_id.is_empty() {
-                    error.set(Some("method_id is required".into()));
-                    return;
-                }
-                DidOperation::RemoveVerificationMethodRelation {
-                    relation: RELATIONS[*f_relation_idx.read()].to_string(),
-                    method_id,
-                }
-            }
-            OpKind::AddService | OpKind::UpdateService => {
-                let id = f_id.read().trim().to_string();
-                let typ = f_typ.read().trim().to_string();
-                let endpoint = f_endpoint.read().trim().to_string();
-                if id.is_empty() || typ.is_empty() || endpoint.is_empty() {
-                    error.set(Some("id, type, endpoint are required".into()));
-                    return;
-                }
-                let s = ServiceInput { id, typ, endpoint };
-                match op {
-                    OpKind::AddService => DidOperation::AddService(s),
-                    OpKind::UpdateService => DidOperation::UpdateService(s),
-                    _ => unreachable!(),
-                }
-            }
-            OpKind::RemoveService => {
-                let id = f_id.read().trim().to_string();
-                if id.is_empty() {
-                    error.set(Some("id is required".into()));
-                    return;
-                }
-                DidOperation::RemoveService { id }
-            }
-            OpKind::Deactivate => DidOperation::Deactivate,
-        };
-        error.set(None);
-        last_drafted.set(Some(drafted.clone()));
-        on_drafted.call((did_str, drafted));
-    };
-
-    let op = OpKind::ALL[*op_idx.read()];
-    let cur_idx = *op_idx.read();
-    let cur_kt = *f_key_type_idx.read();
-    let cur_cv = *f_curve_idx.read();
-    let cur_rel = *f_relation_idx.read();
-    rsx! {
-        div { class: "wizard-header", "DID operation (draft only)" }
-        div { class: "session-log-empty",
-            "Drafts capture intent locally. On-chain submission lands once the Compact-runtime JS bridge is wired (see bridge.rs TODOs)."
-        }
-        div { class: "row",
-            input {
-                r#type: "text",
-                placeholder: "did:midnight:undeployed:…",
-                value: "{did_input.read()}",
-                oninput: move |e| did_input.set(e.value()),
-                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
-            }
-        }
-        div { class: "row",
-            label { style: "min-width: 80px;", "Circuit" }
-            select {
-                onchange: move |e| {
-                    if let Ok(idx) = e.value().parse::<usize>() {
-                        op_idx.set(idx);
-                    }
-                },
-                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
-                for (i , kind) in OpKind::ALL.iter().enumerate() {
-                    option {
-                        value: "{i}",
-                        selected: i == cur_idx,
-                        "{kind.circuit_name()}"
-                    }
-                }
-            }
-        }
-
-        // Per-circuit form fields. The ones not matching `op` are
-        // simply skipped — their signal state is irrelevant.
-        match op {
-            OpKind::AddAlsoKnownAs | OpKind::RemoveAlsoKnownAs => rsx! {
-                FormRow {
-                    label: "value",
-                    value: f_value.read().clone(),
-                    on_change: move |s: String| f_value.set(s),
-                    placeholder: "https://alias.example.com or arbitrary identifier",
-                }
-            },
-            OpKind::AddVerificationMethod | OpKind::UpdateVerificationMethod => rsx! {
-                FormRow {
-                    label: "id",
-                    value: f_id.read().clone(),
-                    on_change: move |s: String| f_id.set(s),
-                    placeholder: "key-0 / authkey-2025-05",
-                }
-                FormSelect {
-                    label: "key_type",
-                    options: KEY_TYPES,
-                    selected_idx: cur_kt,
-                    on_select: move |i: usize| f_key_type_idx.set(i),
-                }
-                FormSelect {
-                    label: "curve",
-                    options: CURVE_TYPES,
-                    selected_idx: cur_cv,
-                    on_select: move |i: usize| f_curve_idx.set(i),
-                }
-                FormRow {
-                    label: "pk.x",
-                    value: f_pk_x.read().clone(),
-                    on_change: move |s: String| f_pk_x.set(s),
-                    placeholder: "field element (hex or decimal)",
-                }
-                FormRow {
-                    label: "pk.y",
-                    value: f_pk_y.read().clone(),
-                    on_change: move |s: String| f_pk_y.set(s),
-                    placeholder: "field element (hex or decimal)",
-                }
-            },
-            OpKind::RemoveVerificationMethod | OpKind::RemoveService => rsx! {
-                FormRow {
-                    label: "id",
-                    value: f_id.read().clone(),
-                    on_change: move |s: String| f_id.set(s),
-                    placeholder: "fragment id to remove",
-                }
-            },
-            OpKind::AddVerificationMethodRelation | OpKind::RemoveVerificationMethodRelation => rsx! {
-                FormSelect {
-                    label: "relation",
-                    options: RELATIONS,
-                    selected_idx: cur_rel,
-                    on_select: move |i: usize| f_relation_idx.set(i),
-                }
-                FormRow {
-                    label: "method_id",
-                    value: f_method_id.read().clone(),
-                    on_change: move |s: String| f_method_id.set(s),
-                    placeholder: "existing verification-method fragment id",
-                }
-            },
-            OpKind::AddService | OpKind::UpdateService => rsx! {
-                FormRow {
-                    label: "id",
-                    value: f_id.read().clone(),
-                    on_change: move |s: String| f_id.set(s),
-                    placeholder: "service fragment id",
-                }
-                FormRow {
-                    label: "type",
-                    value: f_typ.read().clone(),
-                    on_change: move |s: String| f_typ.set(s),
-                    placeholder: "e.g. LinkedDomains",
-                }
-                FormRow {
-                    label: "endpoint",
-                    value: f_endpoint.read().clone(),
-                    on_change: move |s: String| f_endpoint.set(s),
-                    placeholder: "https://example.com/.well-known/did-config",
-                }
-            },
-            OpKind::Deactivate => rsx! {
-                div { class: "row",
-                    span { style: "color: var(--text-muted); font-size: 11px;",
-                        "No input. Sets the DID inactive and prevents further updates."
-                    }
-                }
-            },
-        }
-
-        div { class: "row",
-            button { onclick: on_draft, "Draft operation" }
-        }
-
-        if let Some(msg) = error.read().as_ref() {
-            div { class: "wizard-outcome err",
-                div { class: "row label", "Validation" }
-                div { class: "seed-blob", "{msg}" }
-            }
-        } else if let Some(op) = last_drafted.read().as_ref() {
-            div { class: "wizard-outcome ok",
-                div { class: "row label", "Drafted (logged)" }
-                div { class: "seed-blob", "{op.circuit()} · {op.summary()}" }
-            }
-        }
-    }
-}
 
 /// Buildable circuit kinds — every variant except `Deactivate`,
 /// which has its own dedicated button in the detail header (it
@@ -3023,12 +2582,15 @@ enum QueueStatus {
     Skipped,
 }
 
-/// 3-pane Operation Builder (palette / form / preview) adopted
-/// from `midnight-did-uiux-bundle`. Drafts ride one batch queue;
-/// `Submit batch` iterates them through `Wallet::call_did_circuit`
-/// sequentially, awaiting each call's terminal `WizardStage`
-/// before starting the next. State changes between maintenance
-/// updates so we must serialize.
+/// 3-pane Operation Builder (palette / form / commands history).
+/// Adopted from `midnight-did-uiux-bundle`, with the original
+/// "Add to batch / Submit batch" flow collapsed into a single
+/// `Update DID` action: each click validates the form, appends
+/// the op to the commands queue, and immediately drives the
+/// submission pipeline (auto-load VK → ContractCall). The queue
+/// surfaces history; clicking `Update DID` while a previous run
+/// is in flight is a no-op, so the user can compose multiple
+/// updates by issuing them one at a time.
 ///
 /// `Deactivate` is intentionally NOT buildable here — the detail
 /// header has its own button for it. The builder is for
@@ -3102,14 +2664,18 @@ fn DidOperationBuilder(
     // stored — the picker hides itself in those cases.
     let stored_vm_keys: Vec<StoredKeyForVm> = list_stored_vm_keys(&bridge_state);
 
-    let on_add_to_batch = move |_| {
+    // Validate the current form into a `DidOperation`. Returns
+    // `None` on validation failure (after pushing the message to
+    // `form_error`). Shared between the per-click "Update DID"
+    // path — there's no separate "Add to batch" stage any more.
+    let mut draft_from_form = move || -> Option<DidOperation> {
         let op = BUILDABLE_OPS[*op_idx.read()];
         let drafted = match op {
             OpKind::AddAlsoKnownAs => {
                 let v = f_value.read().trim().to_string();
                 if v.is_empty() {
                     form_error.set(Some("value is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::AddAlsoKnownAs { value: v }
             }
@@ -3117,7 +2683,7 @@ fn DidOperationBuilder(
                 let v = f_value.read().trim().to_string();
                 if v.is_empty() {
                     form_error.set(Some("value is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::RemoveAlsoKnownAs { value: v }
             }
@@ -3127,7 +2693,7 @@ fn DidOperationBuilder(
                 let pk_y = f_pk_y.read().trim().to_string();
                 if id.is_empty() || pk_x.is_empty() || pk_y.is_empty() {
                     form_error.set(Some("id, pk.x, pk.y are required".into()));
-                    return;
+                    return None;
                 }
                 let vm = VerificationMethodInput {
                     id,
@@ -3146,7 +2712,7 @@ fn DidOperationBuilder(
                 let id = f_id.read().trim().to_string();
                 if id.is_empty() {
                     form_error.set(Some("id is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::RemoveVerificationMethod { id }
             }
@@ -3154,7 +2720,7 @@ fn DidOperationBuilder(
                 let method_id = f_method_id.read().trim().to_string();
                 if method_id.is_empty() {
                     form_error.set(Some("method_id is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::AddVerificationMethodRelation {
                     relation: RELATIONS[*f_relation_idx.read()].to_string(),
@@ -3165,7 +2731,7 @@ fn DidOperationBuilder(
                 let method_id = f_method_id.read().trim().to_string();
                 if method_id.is_empty() {
                     form_error.set(Some("method_id is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::RemoveVerificationMethodRelation {
                     relation: RELATIONS[*f_relation_idx.read()].to_string(),
@@ -3178,7 +2744,7 @@ fn DidOperationBuilder(
                 let endpoint = f_endpoint.read().trim().to_string();
                 if id.is_empty() || typ.is_empty() || endpoint.is_empty() {
                     form_error.set(Some("id, type, endpoint are required".into()));
-                    return;
+                    return None;
                 }
                 let s = ServiceInput { id, typ, endpoint };
                 match op {
@@ -3191,29 +2757,47 @@ fn DidOperationBuilder(
                 let id = f_id.read().trim().to_string();
                 if id.is_empty() {
                     form_error.set(Some("id is required".into()));
-                    return;
+                    return None;
                 }
                 DidOperation::RemoveService { id }
             }
             OpKind::Deactivate => unreachable!("Deactivate not buildable here"),
         };
         form_error.set(None);
-        let mut q = queue.read().clone();
-        q.push((drafted, QueueStatus::Pending));
-        queue.set(q);
+        Some(drafted)
     };
 
     let did_for_submit = did.clone();
     let sk_for_submit = controller_secret;
-    let on_submit_batch = move |_| {
+    // Single "Update DID" handler — validates the form, appends
+    // the drafted op to the Commands queue, and kicks off the
+    // submission pipeline (auto-load VK → ContractCall) for any
+    // Pending / Failed rows. The two-step "Add to batch → Submit
+    // batch" flow was confusing; the queue is now a history of
+    // submitted commands, not a staging buffer.
+    let on_update_did = move |_| {
         if *running.read() {
             return;
         }
+        let Some(drafted) = draft_from_form() else { return };
+        {
+            let mut q = queue.read().clone();
+            q.push((drafted, QueueStatus::Pending));
+            queue.set(q);
+        }
+
+        // Only Pending rows participate in this submit. Failed rows
+        // stay Failed (they need an explicit retry from the user —
+        // re-running a duplicate `addAlsoKnownAs` for example would
+        // hit the same `value already exists` chain rejection); Done
+        // rows stay Done (their tx already landed). The previous
+        // behaviour re-ran Failed alongside Pending which caused
+        // double-submits after every chain-side rejection.
         let snapshot: Vec<DidOperation> = queue
             .read()
             .iter()
             .filter_map(|(op, st)| match st {
-                QueueStatus::Pending | QueueStatus::Failed { .. } => Some(op.clone()),
+                QueueStatus::Pending => Some(op.clone()),
                 _ => None,
             })
             .collect();
@@ -3225,12 +2809,21 @@ fn DidOperationBuilder(
             batch_error.set(Some(format!("parse DID: {}", did_for_submit)));
             return;
         };
-        // Reset queue to all-pending so we don't carry stale ✓
-        // markers from a previous run.
+        // Preserve `Done` + `Failed` rows from earlier submits; only
+        // reset rows that are about to participate in this run so we
+        // don't leave stale `Running`/`Skipped` markers around.
         let reset: Vec<(DidOperation, QueueStatus)> = queue
             .read()
             .iter()
-            .map(|(op, _)| (op.clone(), QueueStatus::Pending))
+            .map(|(op, st)| {
+                let new_status = match st {
+                    QueueStatus::Pending
+                    | QueueStatus::Running { .. }
+                    | QueueStatus::Skipped => QueueStatus::Pending,
+                    QueueStatus::Done { .. } | QueueStatus::Failed { .. } => st.clone(),
+                };
+                (op.clone(), new_status)
+            })
             .collect();
         queue.set(reset);
         batch_error.set(None);
@@ -3257,6 +2850,16 @@ fn DidOperationBuilder(
             let before = wallet.balance_snapshot().await.ok();
             let mut all_succeeded = true;
             for i in 0..total {
+                // Skip rows already terminal from earlier submits.
+                // Done = already on-chain; Failed = waiting on
+                // explicit user retry (see filter in `on_update_did`).
+                let row_status = queue.read()[i].1.clone();
+                if matches!(
+                    row_status,
+                    QueueStatus::Done { .. } | QueueStatus::Failed { .. }
+                ) {
+                    continue;
+                }
                 let op = {
                     let q = queue.read();
                     q[i].0.clone()
@@ -3348,6 +2951,28 @@ fn DidOperationBuilder(
                 ));
                 let mut terminal: Option<WizardStage> = None;
                 while let Some(stage) = stream.next().await {
+                    // Push every intermediate stage into the row's
+                    // `phase` so the operator sees real progress.
+                    // Without this update the row sits frozen on
+                    // "Calling <circuit>" until the pipeline ends
+                    // — that hid a 4-minute Update DID round trip
+                    // on real S24 Ultra hardware as "stuck".
+                    let label = match &stage {
+                        WizardStage::SyncingDust => Some("Syncing DUST"),
+                        WizardStage::Composing => Some("Composing tx"),
+                        WizardStage::Balancing => Some("Balancing"),
+                        WizardStage::Proving => Some("Proving"),
+                        WizardStage::Submitting => Some("Submitting"),
+                        WizardStage::Confirming => Some("Confirming on chain"),
+                        _ => None,
+                    };
+                    if let Some(phase) = label {
+                        let mut q = queue.read().clone();
+                        q[i].1 = QueueStatus::Running {
+                            phase: format!("{phase} ({circuit})"),
+                        };
+                        queue.set(q);
+                    }
                     if matches!(&stage, WizardStage::Done(_) | WizardStage::Failed(_)) {
                         terminal = Some(stage);
                         break;
@@ -3601,9 +3226,10 @@ fn DidOperationBuilder(
 
                 div { class: "row",
                     button {
+                        class: "btn-primary",
                         disabled: is_running,
-                        onclick: on_add_to_batch,
-                        "Add to batch"
+                        onclick: on_update_did,
+                        {if is_running { "Submitting…" } else { "Update DID" }}
                     }
                 }
                 if let Some(msg) = form_error.read().as_ref() {
@@ -3614,12 +3240,12 @@ fn DidOperationBuilder(
                 }
             }
 
-            // ── Pane 3 : preview / queue ──────────────────────
+            // ── Pane 3 : commands history ─────────────────────
             div { class: "op-pane preview",
-                h3 { "Batch ({queue_len})" }
+                h3 { "Commands ({queue_len})" }
                 if queue_len == 0 {
                     div { class: "detail-empty",
-                        "Nothing queued yet. Configure an op on the left, then \"Add to batch\"."
+                        "No commands yet. Configure an op on the left, then \"Update DID\"."
                     }
                 } else {
                     ol { class: "op-queue",
@@ -3648,12 +3274,6 @@ fn DidOperationBuilder(
                         }
                     }
                     div { class: "row",
-                        button {
-                            class: "btn-primary",
-                            disabled: is_running,
-                            onclick: on_submit_batch,
-                            {if is_running { "Submitting…" } else { "Submit batch" }}
-                        }
                         button {
                             disabled: is_running,
                             onclick: on_clear_batch,
@@ -4362,14 +3982,12 @@ fn LogsTab(bridge_state: BridgeState) -> Element {
                 LogLevelToggle { label: "Trace", value: want_trace,
                     on_toggle: move |v: bool| show_trace.set(v) }
             }
-            div { class: "row",
-                label { style: "min-width: 80px;", "Search" }
+            div { class: "search-field",
                 input {
-                    r#type: "text",
+                    r#type: "search",
                     value: "{search.read()}",
-                    placeholder: "substring of message or target",
+                    placeholder: "Search messages or targets",
                     oninput: move |e| search.set(e.value()),
-                    style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
                 }
             }
             div { class: "row",
@@ -4566,6 +4184,12 @@ fn SettingsTab(bridge_state: BridgeState) -> Element {
 
     let snap = stats.read().clone();
     rsx! {
+        // Moved here from the global header — gives at-a-glance store
+        // health to operators who actually want it (Settings is where
+        // you go to check on persistence) without painting the
+        // wallet/DIDs/Benchmark screens with a permanent strip.
+        WalletStoreBadge { state: bridge_state.clone() }
+
         div { class: "card",
             div { class: "card-header", "Persistent wallet store" }
             div { class: "detail-kv",
@@ -4647,14 +4271,6 @@ fn SettingsTab(bridge_state: BridgeState) -> Element {
             }
         }
 
-        div { class: "card",
-            div { class: "card-header", "Dev passphrase" }
-            div { style: "color: var(--text-muted); font-size: 11px;",
-                "The store is unlocked with a fixed development passphrase "
-                code { "midnight-did-wallet-dev:v1" }
-                " — a future slice will surface an unlock prompt and let you set / rotate it."
-            }
-        }
     }
 }
 
@@ -4964,6 +4580,229 @@ fn group_thousands(n: u128) -> String {
     out.chars().rev().collect()
 }
 
+/// Aggregated metrics for one operation kind across the
+/// session. Built from `TimingRun` / `CostRun` entries grouped by
+/// their label prefix — e.g. `"load_did_circuit:addAlsoKnownAs"`
+/// and `"load_did_circuit:addService"` collapse into one row.
+struct MetricRow {
+    /// Human-readable label, e.g. "Create DID" or "Load circuit".
+    label: String,
+    runs: u32,
+    failures: u32,
+    /// Wall-clock duration totals (ms). `total` doubles as the
+    /// numerator for the average; `min`/`max` are over all runs.
+    total_ms: u64,
+    min_ms: u64,
+    max_ms: u64,
+    /// Cost totals. `dust` may be zero when only `TimingRun`
+    /// rows exist for this kind (no cost snapshot was taken).
+    total_dust: u128,
+    total_night: u128,
+    /// Number of cost samples — used to average DUST / NIGHT
+    /// separately from the timing-run count.
+    cost_samples: u32,
+}
+
+impl MetricRow {
+    fn new(label: String) -> Self {
+        Self {
+            label,
+            runs: 0,
+            failures: 0,
+            total_ms: 0,
+            min_ms: u64::MAX,
+            max_ms: 0,
+            total_dust: 0,
+            total_night: 0,
+            cost_samples: 0,
+        }
+    }
+
+    fn record_timing(&mut self, ms: u64, ok: bool) {
+        self.runs += 1;
+        if !ok {
+            self.failures += 1;
+        }
+        self.total_ms += ms;
+        self.min_ms = self.min_ms.min(ms);
+        self.max_ms = self.max_ms.max(ms);
+    }
+
+    fn record_cost(&mut self, dust: u128, night: u128) {
+        self.total_dust = self.total_dust.saturating_add(dust);
+        self.total_night = self.total_night.saturating_add(night);
+        self.cost_samples += 1;
+    }
+
+    fn avg_ms(&self) -> u64 {
+        if self.runs == 0 { 0 } else { self.total_ms / self.runs as u64 }
+    }
+
+    fn avg_dust(&self) -> u128 {
+        if self.cost_samples == 0 {
+            0
+        } else {
+            self.total_dust / self.cost_samples as u128
+        }
+    }
+
+    fn avg_night(&self) -> u128 {
+        if self.cost_samples == 0 {
+            0
+        } else {
+            self.total_night / self.cost_samples as u128
+        }
+    }
+}
+
+/// Map a `TimingRun.label` / `CostRun.label` to its display
+/// category. Labels are colon-prefixed by convention
+/// (`"load_did_circuit:addService"`), so the part before `:` is
+/// what we group on. Unknown prefixes fall through as-is.
+fn metrics_label(raw: &str) -> &'static str {
+    let prefix = raw.split(':').next().unwrap_or(raw);
+    match prefix {
+        "create_did" => "Create DID",
+        "load_did_circuit" => "Load circuit",
+        "call_did_circuit" => "Call circuit",
+        "batch" => "Batch submit",
+        "deactivate_did" => "Deactivate DID",
+        _ => "Other",
+    }
+}
+
+/// Aggregate `timings` + `costs` into one row per operation
+/// kind. Rows are sorted by total wall-clock time descending so
+/// the most expensive kind floats to the top.
+fn aggregate_metrics(timings: &[TimingRun], costs: &[CostRun]) -> Vec<MetricRow> {
+    use std::collections::BTreeMap;
+    let mut by_kind: BTreeMap<&'static str, MetricRow> = BTreeMap::new();
+    for t in timings {
+        let key = metrics_label(&t.label);
+        by_kind
+            .entry(key)
+            .or_insert_with(|| MetricRow::new(key.to_string()))
+            .record_timing(t.total_ms, t.succeeded);
+    }
+    for c in costs {
+        let key = metrics_label(&c.label);
+        by_kind
+            .entry(key)
+            .or_insert_with(|| MetricRow::new(key.to_string()))
+            .record_cost(c.dust_consumed, c.night_consumed);
+    }
+    let mut rows: Vec<MetricRow> = by_kind.into_values().collect();
+    rows.sort_by(|a, b| b.total_ms.cmp(&a.total_ms));
+    rows
+}
+
+/// Metrics tab — session totals + per-operation aggregates for
+/// time-consuming flows (Create DID, Load circuit, Call circuit,
+/// Batch submit, …). Empty until at least one timing or cost
+/// run has been recorded.
+#[component]
+fn MetricsTab(timings: Vec<TimingRun>, costs: Vec<CostRun>) -> Element {
+    if timings.is_empty() && costs.is_empty() {
+        return rsx! {
+            div { class: "session-log-empty",
+                "No metrics yet. Drive a Create DID, Load circuit, or batch \
+                 submit to populate aggregated timings + cost."
+            }
+        };
+    }
+
+    let rows = aggregate_metrics(&timings, &costs);
+    let total_runs: u32 = rows.iter().map(|r| r.runs).sum();
+    let total_failures: u32 = rows.iter().map(|r| r.failures).sum();
+    let total_dust: u128 = rows.iter().map(|r| r.total_dust).sum();
+    let total_night: u128 = rows.iter().map(|r| r.total_night).sum();
+    let total_ms: u64 = rows.iter().map(|r| r.total_ms).sum();
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Session totals" }
+            div { class: "metrics-summary",
+                div { class: "metric-pill",
+                    span { class: "k", "Runs" }
+                    span { class: "v", "{total_runs}" }
+                }
+                div { class: "metric-pill",
+                    span { class: "k", "Failed" }
+                    span { class: "v", "{total_failures}" }
+                }
+                div { class: "metric-pill",
+                    span { class: "k", "Wall-clock" }
+                    span { class: "v", "{format_ms(total_ms)}" }
+                }
+                div { class: "metric-pill",
+                    span { class: "k", "Σ DUST" }
+                    span { class: "v", "{format_atomic_dust(total_dust)}" }
+                }
+                div { class: "metric-pill",
+                    span { class: "k", "Σ NIGHT" }
+                    span { class: "v", "{format_atomic_night(total_night)}" }
+                }
+            }
+        }
+
+        div { class: "card",
+            div { class: "card-header", "Per operation" }
+            table { class: "detail-table metrics-table",
+                thead {
+                    tr {
+                        th { "Operation" }
+                        th { class: "num", "Runs" }
+                        th { class: "num", "Avg" }
+                        th { class: "num", "Min" }
+                        th { class: "num", "Max" }
+                        th { class: "num", "Avg DUST" }
+                        th { class: "num", "Avg NIGHT" }
+                    }
+                }
+                tbody {
+                    for row in rows.iter() {
+                        {render_metric_row(row)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_metric_row(row: &MetricRow) -> Element {
+    let runs_text = if row.failures == 0 {
+        row.runs.to_string()
+    } else {
+        format!("{} ({} fail)", row.runs, row.failures)
+    };
+    let min_text = if row.min_ms == u64::MAX {
+        "—".to_string()
+    } else {
+        format_ms(row.min_ms)
+    };
+    let avg_dust = if row.cost_samples == 0 {
+        "—".to_string()
+    } else {
+        format_atomic_dust(row.avg_dust())
+    };
+    let avg_night = if row.cost_samples == 0 {
+        "—".to_string()
+    } else {
+        format_atomic_night(row.avg_night())
+    };
+    rsx! {
+        tr { key: "{row.label}",
+            td { "{row.label}" }
+            td { class: "num", "{runs_text}" }
+            td { class: "num", "{format_ms(row.avg_ms())}" }
+            td { class: "num", "{min_text}" }
+            td { class: "num", "{format_ms(row.max_ms)}" }
+            td { class: "num", "{avg_dust}" }
+            td { class: "num", "{avg_night}" }
+        }
+    }
+}
+
 #[component]
 fn TimingsPanel(runs: Vec<TimingRun>) -> Element {
     if runs.is_empty() {
@@ -5035,6 +4874,324 @@ fn format_ms(ms: u64) -> String {
         let m = ms / 60_000;
         let s = (ms % 60_000) / 1_000;
         format!("{m}m {s:02}s")
+    }
+}
+
+// ───────────────────────────────────────────────────────────────────
+// Benchmark tab
+// ───────────────────────────────────────────────────────────────────
+
+/// One row in the Benchmark tab — the `k` value, its run state, and (if
+/// finished) the captured timings from `contract_benchmark::RunStats`.
+#[derive(Clone, Default, PartialEq)]
+struct BenchRow {
+    /// Last terminal state for this row. `None` while idle / pending.
+    last: Option<BenchOutcome>,
+    /// True while a `run_proof(k)` invocation is in flight.
+    running: bool,
+}
+
+#[derive(Clone, PartialEq)]
+enum BenchOutcome {
+    Ok {
+        realized_k: u32,
+        prove_ms: u64,
+        keygen_ms: u64,
+        verify_ms: Option<u64>,
+        verified: Option<bool>,
+        rows: u64,
+        chain: u32,
+        proof_bytes: usize,
+    },
+    Err(String),
+}
+
+/// Number of rows the Benchmark tab renders. Matches the public
+/// `contract_benchmark::MAX_K`. We hard-code rather than re-export so the
+/// UI can render before the user clicks `Run` (no need to consult the
+/// crate at startup).
+const BENCH_MAX_K: u32 = contract_benchmark::MAX_K;
+const BENCH_MIN_K: u32 = contract_benchmark::MIN_K;
+const BENCH_MAX_VERIFIABLE_K: u32 = contract_benchmark::MAX_VERIFIABLE_K;
+
+/// Benchmark tab — runs `contract-benchmark::run_proof(k)` for
+/// `k ∈ MIN_K..=MAX_K` and shows per-row prove timings.
+///
+/// Implementation notes:
+/// - Proving is CPU-heavy and would block the UI thread if invoked
+///   synchronously. We push each run onto Dioxus' executor via
+///   `spawn(...)`, which on desktop hands off to the same tokio runtime
+///   the rest of the app uses.
+/// - `Run All` chains rows sequentially (one `spawn` that awaits each
+///   `k` in order). The spec is explicit: don't parallelise — parallel
+///   proving on a desktop CPU skews wall-clock per row.
+/// - The cache dir resolves via `MidnightDataProvider`'s defaults
+///   (env `MIDNIGHT_PP`, then `XDG_CACHE_HOME`, then `$HOME/.cache`).
+///   Higher `k` values fetch SRS from `srs.midnight.network` on
+///   first invocation; this can take several seconds (`bls_midnight_2p14`
+///   alone is ~100 MB) and dominates the first-call timing for that `k`.
+/// - For `k > MAX_VERIFIABLE_K` (14), the embedded `PARAMS_VERIFIER`
+///   cannot check the proof. The crate skips verification gracefully
+///   and we surface that as `verified: None` in the row label.
+#[component]
+fn BenchmarkTab() -> Element {
+    let mut rows = use_signal::<std::collections::BTreeMap<u32, BenchRow>>(|| {
+        (BENCH_MIN_K..=BENCH_MAX_K)
+            .map(|k| (k, BenchRow::default()))
+            .collect()
+    });
+    // True while the "Run all" sweep is in flight. Prevents the user
+    // from kicking off a second sweep on top — and disables individual
+    // Run buttons while the sweep is running for the same reason.
+    let mut sweeping = use_signal(|| false);
+
+    // Helper: run `contract_benchmark::run_proof(k)` on the tokio
+    // blocking thread pool. `run_proof` is `async fn`-shaped but the
+    // halo2 prove inside is multi-second CPU work that never yields
+    // — calling `.await` directly on the executor's worker threads
+    // starves Dioxus' render loop and the eval bridge driver, so the
+    // UI freezes for the duration. `spawn_blocking` parks the work
+    // on the dedicated blocking pool, which has its own threads and
+    // can absorb the load without blocking the runtime.
+    async fn run_bench(k: u32) -> Result<contract_benchmark::RunStats, String> {
+        tokio::task::spawn_blocking(move || {
+            tokio::runtime::Handle::current()
+                .block_on(contract_benchmark::run_proof(k))
+        })
+        .await
+        .map_err(|e| format!("join: {e}"))
+        .and_then(|r| r.map_err(|e| format!("{e}")))
+    }
+
+    fn stats_to_outcome(s: contract_benchmark::RunStats) -> BenchOutcome {
+        BenchOutcome::Ok {
+            realized_k: s.realized_k,
+            prove_ms: s.prove.as_millis() as u64,
+            keygen_ms: s.keygen.as_millis() as u64,
+            verify_ms: s.verify.map(|d| d.as_millis() as u64),
+            verified: s.verified,
+            rows: s.rows,
+            chain: s.hash_chain_len,
+            proof_bytes: s.proof_bytes,
+        }
+    }
+
+    // Helper closure: kicks off a single-k run and updates the row state
+    // on completion. Used by both the per-row Run button and the
+    // Run-all sweep.
+    let run_one = move |k: u32| {
+        // Mark the row as running synchronously so the spinner shows.
+        rows.with_mut(|m| {
+            if let Some(r) = m.get_mut(&k) {
+                r.running = true;
+            }
+        });
+        spawn(async move {
+            let outcome = match run_bench(k).await {
+                Ok(s) => stats_to_outcome(s),
+                Err(e) => BenchOutcome::Err(e),
+            };
+            rows.with_mut(|m| {
+                if let Some(r) = m.get_mut(&k) {
+                    r.running = false;
+                    r.last = Some(outcome);
+                }
+            });
+        });
+    };
+
+    let run_all = move |_| {
+        if *sweeping.read() {
+            return;
+        }
+        sweeping.set(true);
+        // Mark every row as pending up front so the user sees the queue.
+        rows.with_mut(|m| {
+            for r in m.values_mut() {
+                r.running = true;
+                r.last = None;
+            }
+        });
+        spawn(async move {
+            for k in BENCH_MIN_K..=BENCH_MAX_K {
+                let outcome = match run_bench(k).await {
+                    Ok(s) => stats_to_outcome(s),
+                    Err(e) => BenchOutcome::Err(e),
+                };
+                rows.with_mut(|m| {
+                    if let Some(r) = m.get_mut(&k) {
+                        r.running = false;
+                        r.last = Some(outcome);
+                    }
+                });
+                // Yield between rows so the UI gets a chance to repaint.
+                tokio::task::yield_now().await;
+            }
+            sweeping.set(false);
+        });
+    };
+
+    // Compute summary (min / max / sum prove ms) over successful rows.
+    let snapshot = rows.read().clone();
+    let mut prove_times_ms: Vec<u64> = Vec::new();
+    let mut total_prove_ms: u64 = 0;
+    let mut succeeded: u32 = 0;
+    let mut failed: u32 = 0;
+    for r in snapshot.values() {
+        if let Some(BenchOutcome::Ok { prove_ms, .. }) = &r.last {
+            prove_times_ms.push(*prove_ms);
+            total_prove_ms += *prove_ms;
+            succeeded += 1;
+        } else if matches!(&r.last, Some(BenchOutcome::Err(_))) {
+            failed += 1;
+        }
+    }
+    let min_ms = prove_times_ms.iter().copied().min();
+    let max_ms = prove_times_ms.iter().copied().max();
+    let is_sweeping = *sweeping.read();
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Contract benchmark" }
+            p { class: "wizard-subtitle",
+                "Runs the parameterised dummy contract at increasing circuit \
+                 size (k = {BENCH_MIN_K}..={BENCH_MAX_K}). For k > {BENCH_MAX_VERIFIABLE_K} \
+                 the embedded verifier cannot check the proof so verification \
+                 is skipped. First call at a given k may stall on SRS \
+                 download (srs.midnight.network)."
+            }
+            div { class: "row",
+                button {
+                    class: "cta",
+                    disabled: is_sweeping,
+                    onclick: run_all,
+                    if is_sweeping { "Running…" } else { "Run all" }
+                }
+            }
+
+            if succeeded > 0 || failed > 0 {
+                div { class: "metrics-summary",
+                    div { class: "metric-pill",
+                        span { class: "k", "Done" }
+                        span { class: "v", "{succeeded}" }
+                    }
+                    div { class: "metric-pill",
+                        span { class: "k", "Failed" }
+                        span { class: "v", "{failed}" }
+                    }
+                    div { class: "metric-pill",
+                        span { class: "k", "Σ prove" }
+                        span { class: "v", "{format_ms(total_prove_ms)}" }
+                    }
+                    if let Some(m) = min_ms {
+                        div { class: "metric-pill",
+                            span { class: "k", "Min" }
+                            span { class: "v", "{format_ms(m)}" }
+                        }
+                    }
+                    if let Some(m) = max_ms {
+                        div { class: "metric-pill",
+                            span { class: "k", "Max" }
+                            span { class: "v", "{format_ms(m)}" }
+                        }
+                    }
+                }
+            }
+        }
+
+        div { class: "card",
+            table { class: "detail-table metrics-table bench-table",
+                thead {
+                    tr {
+                        // `Realised k` and `Rows` were dropped per
+                        // user request — for k ≥ 5 realised == k, and
+                        // for k < 5 the floor (5/24 rows) is in the
+                        // footnote in the architecture doc rather
+                        // than the table. The remaining columns
+                        // (Hashes, Keygen, Prove, Verify, Proof) are
+                        // what actually moves between runs.
+                        th { "k" }
+                        th { class: "num", "Hashes" }
+                        th { class: "num", "Keygen" }
+                        th { class: "num", "Prove" }
+                        th { class: "num", "Verify" }
+                        th { class: "num", "Proof" }
+                        th { class: "action", "" }
+                    }
+                }
+                tbody {
+                    for k in BENCH_MIN_K..=BENCH_MAX_K {
+                        {render_bench_row(k, snapshot.get(&k).cloned().unwrap_or_default(), is_sweeping, run_one)}
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn render_bench_row(
+    k: u32,
+    row: BenchRow,
+    sweeping: bool,
+    mut run_one: impl FnMut(u32) + 'static + Copy,
+) -> Element {
+    let running = row.running;
+    let busy = sweeping || running;
+    // Realised k + rows columns removed per UX feedback; for k ≥ 5
+    // realised always equals k, and the row count just tracks
+    // hashes × constant. `error` survives as a row-spanning note
+    // shown below the row on failure.
+    let (chain, keygen, prove, verify, proof_cell, error_note) = match &row.last {
+        None => (
+            String::from("—"), String::from("—"), String::from("—"),
+            String::from("—"), String::from("—"), String::new(),
+        ),
+        Some(BenchOutcome::Ok { realized_k: _, rows: _, chain, keygen_ms, prove_ms, verify_ms, verified, proof_bytes }) => {
+            let verify_cell = match (verify_ms, verified) {
+                (Some(v), Some(true))  => format!("{} ✓", format_ms(*v)),
+                (Some(v), Some(false)) => format!("{} ✗", format_ms(v.clone())),
+                _ => "skipped".to_string(),
+            };
+            (
+                chain.to_string(),
+                format_ms(*keygen_ms),
+                format_ms(*prove_ms),
+                verify_cell,
+                format!("{} B", proof_bytes),
+                String::new(),
+            )
+        }
+        Some(BenchOutcome::Err(e)) => (
+            String::from("—"), String::from("—"), String::from("—"),
+            String::from("—"), String::from("—"),
+            format!("error: {e}"),
+        ),
+    };
+
+    let status_label = if running { "Running…" } else { "Run" };
+
+    rsx! {
+        tr { key: "bench-{k}",
+            td { "{k}" }
+            td { class: "num", "{chain}" }
+            td { class: "num", "{keygen}" }
+            td { class: "num", "{prove}" }
+            td { class: "num", "{verify}" }
+            td { class: "num", "{proof_cell}" }
+            td { class: "action",
+                button {
+                    class: "bench-run-btn",
+                    disabled: busy,
+                    onclick: move |_| { run_one(k); },
+                    "{status_label}"
+                }
+            }
+        }
+        if !error_note.is_empty() {
+            tr { key: "bench-err-{k}", class: "bench-err-row",
+                td { colspan: "7", "{error_note}" }
+            }
+        }
     }
 }
 
@@ -6360,7 +6517,7 @@ async fn call_bridge_verify(
     req: &serde_json::Value,
     method: &str,
 ) -> Result<bool, String> {
-    use wallet_core::js_bridge::{JsBridge, NodeChildBridge};
+    use wallet_core::js_bridge::{JsBridgeExt, NodeChildBridge};
     #[derive(serde::Deserialize)]
     #[serde(rename_all = "camelCase")]
     struct VerifyOut {
@@ -6402,14 +6559,10 @@ fn DidInventoryPanel(
             }
         };
     }
-    // Trimmed inventory layout per user feedback: dropped the
-    // `Network` column (the active network is shown in the header
-    // already), the `Counter` column (raw maintenance counter is
-    // a developer detail, not something the operator needs to see
-    // at-a-glance) and the `VMs` column (verification-method count
-    // is visible inside the DID detail view). Kept Status / short
-    // DID / Services and added the `Open` button right next to
-    // `Status` so the action is no longer shifted across columns.
+    // Compact inventory layout: status badge | Open button | short
+    // DID. Network / Counter / VMs / Services columns removed —
+    // the active network lives in the header, and the rest is
+    // visible inside the DID detail view itself.
     rsx! {
         div { class: "wizard-header", "DIDs ({entries.len()})" }
         div { class: "did-inventory",
@@ -6417,7 +6570,6 @@ fn DidInventoryPanel(
                 span { class: "did-inventory-cell status", "Status" }
                 span { class: "did-inventory-cell action", "" }
                 span { class: "did-inventory-cell did", "DID" }
-                span { class: "did-inventory-cell services", "Services" }
             }
             for entry in entries.iter() {
                 {render_inventory_row(entry, on_select.clone())}
@@ -6429,10 +6581,6 @@ fn DidInventoryPanel(
 fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<String>) -> Element {
     let did_short = truncate_did(&entry.did);
     let did_full = entry.did.clone();
-    let services = entry
-        .service_count
-        .map(|n| n.to_string())
-        .unwrap_or_else(|| "—".into());
     let badge_class = entry.status.badge_class();
     let status_label = entry.status.label();
     let did_for_click = did_full.clone();
@@ -6454,7 +6602,6 @@ fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<Strin
                 title: "{did_full}",
                 "{did_short}"
             }
-            span { class: "did-inventory-cell services", "{services}" }
         }
     }
 }
@@ -6610,6 +6757,69 @@ fn format_subunits(n: u128) -> String {
     out.chars().rev().collect()
 }
 
+/// NIGHT subunit precision: 1 NIGHT = 10^6 atomic units.
+const NIGHT_DECIMALS: u32 = 6;
+/// DUST subunit precision: 1 DUST = 10^15 atomic units.
+const DUST_DECIMALS: u32 = 15;
+
+/// Convert a u128 subunit count to whole-unit representations.
+///
+/// Returns `(compact, exact)` where:
+/// - `compact` collapses large whole-unit values to K/M/B/T notation
+///   (e.g. `1,000` → `"1K"`, `5,234,000` → `"5.23M"`); whole values
+///   under 1,000 render as a comma-grouped integer with up to two
+///   significant fractional digits when meaningful.
+/// - `exact` is the full whole.fractional value with comma-grouped
+///   thousands and trailing zeros trimmed from the fraction.
+///
+/// Both strings are unit-less; callers append " NIGHT" / " DUST".
+fn format_balance(subunits: u128, decimals: u32) -> (String, String) {
+    let scale = 10u128.pow(decimals);
+    let whole = subunits / scale;
+    let frac = subunits % scale;
+
+    let frac_padded = format!("{:0>width$}", frac, width = decimals as usize);
+    let frac_trimmed = frac_padded.trim_end_matches('0');
+    let whole_str = format_subunits(whole);
+    let exact = if frac_trimmed.is_empty() {
+        whole_str.clone()
+    } else {
+        format!("{}.{}", whole_str, frac_trimmed)
+    };
+
+    let compact = if whole >= 1_000 {
+        let (divisor, suffix) = if whole >= 1_000_000_000_000 {
+            (1_000_000_000_000u128, "T")
+        } else if whole >= 1_000_000_000 {
+            (1_000_000_000u128, "B")
+        } else if whole >= 1_000_000 {
+            (1_000_000u128, "M")
+        } else {
+            (1_000u128, "K")
+        };
+        // Two decimal digits of precision (e.g. 1234 → "1.23K").
+        let scaled = whole * 100 / divisor;
+        let int_part = scaled / 100;
+        let frac_part = scaled % 100;
+        if frac_part == 0 {
+            format!("{}{}", int_part, suffix)
+        } else if frac_part % 10 == 0 {
+            format!("{}.{}{}", int_part, frac_part / 10, suffix)
+        } else {
+            format!("{}.{:02}{}", int_part, frac_part, suffix)
+        }
+    } else if frac_trimmed.is_empty() {
+        whole_str
+    } else {
+        // Sub-unit balance: show up to four significant fractional
+        // digits so tiny accruals are visible without dumping all 15.
+        let frac_short: String = frac_trimmed.chars().take(4).collect();
+        format!("{}.{}", whole_str, frac_short)
+    };
+
+    (compact, exact)
+}
+
 #[component]
 fn BalancesCard(
     connected: bool,
@@ -6619,35 +6829,30 @@ fn BalancesCard(
     // Three display states each:
     //   • not connected           → "—"
     //   • connected, sync pending → "syncing…"
-    //   • connected, sync done    → "<grouped subunit count>"
-    let night_text = match (connected, night_subunits) {
-        (false, _) => "—".to_string(),
-        (true, None) => "syncing…".to_string(),
-        (true, Some(n)) => format_subunits(n),
+    //   • connected, sync done    → compact whole-unit value
+    //                               with the precise value below.
+    let night = match (connected, night_subunits) {
+        (false, _) => None,
+        (true, None) => Some(BalanceCell::Syncing),
+        (true, Some(n)) => {
+            let (compact, exact) = format_balance(n, NIGHT_DECIMALS);
+            Some(BalanceCell::Value { compact, exact })
+        }
     };
-    let dust_text = match (connected, dust_subunits) {
-        (false, _) => "—".to_string(),
-        (true, None) => "syncing…".to_string(),
-        (true, Some(n)) => format_subunits(n),
+    let dust = match (connected, dust_subunits) {
+        (false, _) => None,
+        (true, None) => Some(BalanceCell::Syncing),
+        (true, Some(n)) => {
+            let (compact, exact) = format_balance(n, DUST_DECIMALS);
+            Some(BalanceCell::Value { compact, exact })
+        }
     };
 
     rsx! {
         div { class: "card",
             div { class: "card-header", "Balances" }
-            div { class: "balance-row",
-                span { class: "label", "NIGHT" }
-                span { class: "value",
-                    "{night_text}"
-                    span { class: "unit", " NIGHT" }
-                }
-            }
-            div { class: "balance-row",
-                span { class: "label", "Dust" }
-                span { class: "value",
-                    "{dust_text}"
-                    span { class: "unit", " DUST" }
-                }
-            }
+            {render_balance_row("NIGHT", &night)}
+            {render_balance_row("DUST", &dust)}
             div { class: "balance-row",
                 span { class: "hint",
                     {match (connected, night_subunits, dust_subunits) {
@@ -6656,6 +6861,42 @@ fn BalancesCard(
                         (true, Some(0), _) => "No NIGHT yet. Send NIGHT to the address above.",
                         (true, Some(_), Some(_)) => "DUST accrues from registered NIGHT UTXOs.",
                     }}
+                }
+            }
+        }
+    }
+}
+
+/// Display state for one currency row in the Balances card.
+enum BalanceCell {
+    Syncing,
+    Value { compact: String, exact: String },
+}
+
+/// Render one Balances-card row. Layout: `<label>` on the left,
+/// stacked compact value + precise value on the right. The unit
+/// suffix lives only with the compact value so we don't repeat
+/// "NIGHT NIGHT" / "DUST DUST" between the row label and the value.
+fn render_balance_row(unit: &str, cell: &Option<BalanceCell>) -> Element {
+    let (primary, precise) = match cell {
+        None => ("—".to_string(), None),
+        Some(BalanceCell::Syncing) => ("syncing…".to_string(), None),
+        Some(BalanceCell::Value { compact, exact }) => {
+            (compact.clone(), Some(exact.clone()))
+        }
+    };
+    let label = unit.to_string();
+    let unit = unit.to_string();
+    rsx! {
+        div { class: "balance-row",
+            span { class: "label", "{label}" }
+            div { class: "value-stack",
+                div { class: "value-line",
+                    span { class: "value", "{primary}" }
+                    span { class: "unit", " {unit}" }
+                }
+                if let Some(p) = precise {
+                    div { class: "precise", "{p}" }
                 }
             }
         }
@@ -6696,15 +6937,17 @@ fn format_int(n: i64) -> String {
     out.chars().rev().collect()
 }
 
-/// Cross-platform clipboard write. Desktop uses `arboard`; Android
-/// wires up `ClipboardManager` via JNI in Phase D.
-#[cfg(not(target_os = "android"))]
+/// Cross-platform clipboard write. Desktop (macOS / Linux /
+/// Windows) uses `arboard`; Android + iOS no-op for now —
+/// platform-native paths (`ClipboardManager` via JNI on Android,
+/// `UIPasteboard` via objc on iOS) land in a follow-up.
+#[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
 fn copy_to_clipboard(s: &str) -> Result<(), String> {
     let mut cb = arboard::Clipboard::new().map_err(|e| e.to_string())?;
     cb.set_text(s.to_string()).map_err(|e| e.to_string())
 }
 
-#[cfg(target_os = "android")]
+#[cfg(any(target_os = "android", target_os = "ios"))]
 fn copy_to_clipboard(_s: &str) -> Result<(), String> {
     Ok(())
 }
@@ -7053,12 +7296,69 @@ enum UnlockState {
 /// home dir can't be resolved (unlikely on macOS / Linux /
 /// Windows but defensive).
 fn wallet_store_path() -> std::path::PathBuf {
-    if let Some(home) = dirs::home_dir() {
-        let dir = home.join(".midnight").join("wallet-prototype");
-        let _ = std::fs::create_dir_all(&dir);
-        return dir.join("wallet.redb");
+    #[cfg(target_os = "android")]
+    {
+        // Android: the app sandbox can write to its own private
+        // `files/` dir but not to `/data/local/tmp` (owned by the
+        // shell user). Resolve the running app's package name from
+        // `/proc/self/cmdline` (Android writes the package id there
+        // for every app process) and write under
+        // `/data/data/<package>/files/midnight-dx-wallet/`. Falls
+        // back to a relative path if we can't read the package id —
+        // the binary still launches even if persistence is broken.
+        if let Some(pkg) = read_android_package_name() {
+            let dir = std::path::PathBuf::from("/data/data")
+                .join(&pkg)
+                .join("files")
+                .join("midnight-dx-wallet");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join("wallet.redb");
+        }
+        return std::path::PathBuf::from("wallet.redb");
     }
-    std::path::PathBuf::from("wallet.redb")
+    #[cfg(target_os = "ios")]
+    {
+        // iOS: the per-app sandbox is reachable via `$HOME` (which
+        // the system points at the app's container root). Put
+        // persistent user-visible data under `Documents/` so iCloud
+        // backup picks it up if the app opts in. `dirs` isn't on
+        // the iOS dep set — we resolve `$HOME` directly via
+        // `std::env`.
+        if let Some(home) = std::env::var_os("HOME") {
+            let dir = std::path::PathBuf::from(home)
+                .join("Documents")
+                .join("midnight-dx-wallet");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join("wallet.redb");
+        }
+        return std::path::PathBuf::from("wallet.redb");
+    }
+    #[cfg(all(not(target_os = "android"), not(target_os = "ios")))]
+    {
+        if let Some(home) = dirs::home_dir() {
+            let dir = home.join(".midnight").join("wallet-prototype");
+            let _ = std::fs::create_dir_all(&dir);
+            return dir.join("wallet.redb");
+        }
+        std::path::PathBuf::from("wallet.redb")
+    }
+}
+
+/// Read the running app's package name from `/proc/self/cmdline`.
+/// Android writes the package id there for every app process. This
+/// avoids pulling JNI just to ask Android for `getPackageName()`.
+#[cfg(target_os = "android")]
+fn read_android_package_name() -> Option<String> {
+    let raw = std::fs::read("/proc/self/cmdline").ok()?;
+    // cmdline is NUL-separated; the first slot is the executable
+    // (the package id, e.g. "io.iohk.midnight.wallet").
+    let first = raw.split(|b| *b == 0).next()?;
+    let s = std::str::from_utf8(first).ok()?.trim();
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 /// Small inline ⧉ button that copies `value` to the system
