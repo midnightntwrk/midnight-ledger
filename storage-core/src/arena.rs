@@ -976,14 +976,9 @@ impl<D: DB> Loader<D> for BackendLoader<'_, D> {
             let sp = {
                 let metadata_lock = self.arena.lock_metadata();
                 if let ArenaKey::Ref(key) = child {
-                    self.arena
-                        .track_lazy(&metadata_lock, key.clone(), child);
+                    self.arena.track_lazy(&metadata_lock, key.clone(), child);
                 }
-                Sp::lazy(
-                    self.arena.clone(),
-                    child.hash().clone(),
-                    child.clone(),
-                )
+                Sp::lazy(self.arena.clone(), child.hash().clone(), child.clone())
             };
             return Ok(sp);
         }
@@ -1637,18 +1632,12 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
     fn force_as_arc(&self) -> &Arc<T> {
         // Initialize `OnceLock` if necessary.
         if self.data.get().is_none() {
-            // Acquire metadata before sp_cache to respect the documented lock
-            // ordering (metadata → sp_cache → backend; see Arena struct).
-            // from_arena and its callees (track_lazy, increment_ref) also
-            // acquire metadata, but that is safe because the locks are
-            // reentrant. Acquiring sp_cache first would invert the ordering
-            // and deadlock against new_sp_locked (which holds metadata, then
-            // acquires sp_cache).
-            let _metadata_lock = self.arena.lock_metadata();
-            let cache_lock = self.arena.lock_sp_cache();
-            let maybe_arc = self
-                .arena
-                .read_sp_cache_locked::<T>(&cache_lock, &self.root);
+            let maybe_arc = {
+                let _metadata_lock = self.arena.lock_metadata();
+                let cache_lock = self.arena.lock_sp_cache();
+                self.arena
+                    .read_sp_cache_locked::<T>(&cache_lock, &self.root)
+            };
             let arc: Arc<T> = match maybe_arc {
                 Some(arc) => arc,
                 None => {
@@ -1665,23 +1654,20 @@ impl<T: Storable<D>, D: DB> Sp<T, D> {
                                 std::any::type_name::<T>()
                             ),
                         };
-                    let arc = sp
-                        .data
+                    sp.data
                         .take()
-                        .expect("result of Sp::from_arena should be initialized");
-                    if let ArenaKey::Ref(_) = &self.child_repr {
-                        self.arena.write_sp_cache_locked(
-                            &cache_lock,
-                            self.root.clone(),
-                            arc.clone(),
-                        );
-                    }
-                    arc
+                        .expect("result of Sp::from_arena should be initialized")
                 }
             };
             // We don't care if this succeeds: failure just means
             // someone else set the same value in another thread.
             let _ = self.data.set(arc);
+            if let (ArenaKey::Ref(_), Some(arc)) = (&self.child_repr, self.data.get()) {
+                let _metadata_lock = self.arena.lock_metadata();
+                let cache_lock = self.arena.lock_sp_cache();
+                self.arena
+                    .write_sp_cache_locked(&cache_lock, self.root.clone(), arc.clone());
+            }
         }
         self.data.get().unwrap()
     }

@@ -11,6 +11,7 @@
 - fix: remove pending Update from memory before cache_insert_new_key in get()
 - fix: Respect lock ordering in `force_as_arc`
 - fix: hold metadata lock across `track_lazy` and `Sp::lazy` in `BackendLoader::get` lazy path to prevent a panic when a concurrent drop removes the ref-counted entry between the two calls
+- fix: avoid holding arena metadata and `Sp` cache locks while `force_as_arc` loads from the backend
 
 ## Version `1.1.0`
 
