@@ -7,6 +7,7 @@ pub(crate) mod eval_bridge;
 mod format;
 mod logs;
 mod platform;
+mod proc_stats;
 #[cfg(feature = "js-bridge")]
 mod protocol;
 

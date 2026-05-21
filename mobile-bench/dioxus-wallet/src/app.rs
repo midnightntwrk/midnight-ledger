@@ -3,6 +3,7 @@ use crate::format::{
     DUST_DECIMALS, NIGHT_DECIMALS, format_atomic_dust, format_atomic_night,
     format_balance, format_int, format_log_timestamp, format_ms, short_keyref,
 };
+use crate::proc_stats::{CLK_TCK, proc_self_stats};
 use wallet_core::{
     ChainTipInfo, IndexerClient, Network, NodeClient, NodeStatus, ProbeResult, Wallet,
     probe_connectivity,
@@ -5153,41 +5154,10 @@ const BENCH_MAX_VERIFIABLE_K: u32 = contract_benchmark::MAX_VERIFIABLE_K;
 /// runs can override via the number input next to the Run button.
 const BENCH_DEFAULT_MAX_K: u32 = 17;
 
-/// Read live RSS (in KiB) and total CPU jiffies for the current process
-/// from `/proc/self/{status,stat}`. Returns `None` on parse failure or
-/// on platforms without `/proc` (macOS / iOS). Cheap enough to poll a
-/// few times a second.
-#[cfg(any(target_os = "android", target_os = "linux"))]
-fn proc_self_stats() -> Option<(u64, u64)> {
-    let status = std::fs::read_to_string("/proc/self/status").ok()?;
-    let rss_kb: u64 = status
-        .lines()
-        .find(|l| l.starts_with("VmRSS:"))?
-        .split_whitespace()
-        .nth(1)?
-        .parse()
-        .ok()?;
-    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
-    // `comm` is in parens and may contain spaces — split after the
-    // last `)` to land at field 2 (state). Then utime is field 13
-    // (index 11 after that split) and stime is field 14 (index 12).
-    let after = &stat[stat.rfind(')')? + 2..];
-    let fields: Vec<&str> = after.split_whitespace().collect();
-    let utime: u64 = fields.get(11)?.parse().ok()?;
-    let stime: u64 = fields.get(12)?.parse().ok()?;
-    Some((rss_kb, utime + stime))
-}
-
-#[cfg(not(any(target_os = "android", target_os = "linux")))]
-fn proc_self_stats() -> Option<(u64, u64)> {
-    None
-}
-
-/// Linux/Android scheduler clock tick — `sysconf(_SC_CLK_TCK)`.
-/// Hard-coded so we don't pay a libc dep on non-Android hosts; this
-/// value is `100` on every Android device and effectively every Linux
-/// distro built in the last decade.
-const CLK_TCK: u64 = 100;
+// `proc_self_stats` + `CLK_TCK` moved to `src/proc_stats.rs`
+// where they ship with a parser-level unit-test suite. See
+// the `use crate::proc_stats::{…}` import at the top of this
+// file.
 
 /// Benchmark tab — runs `contract-benchmark::run_proof(k)` for
 /// `k ∈ MIN_K..=MAX_K` and shows per-row prove timings.
