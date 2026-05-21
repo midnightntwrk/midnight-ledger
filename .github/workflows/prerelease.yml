@@ -100,10 +100,11 @@ jobs:
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "LEDGER_VERSION")
+          # Use wasm version, as this will include pre-release tags
+          VAR_NAME=$(echo "LEDGER_WASM_VERSION")
           VERSION=${!VAR_NAME}
           EPOCH_VERSION=$(grep '^name =' ledger/Cargo.toml | awk -F '"' '{print $2}' | grep -- -v | awk -F -v '{print $2}')
-          TAG_NAME="ledger-v${EPOCH_VERSION}-${VERSION}"
+          TAG_NAME="ledger-${EPOCH_VERSION}.${VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
@@ -142,7 +143,8 @@ jobs:
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ONCHAIN_RUNTIME_VERSION")
+          # Use wasm version, as this will include pre-release tags
+          VAR_NAME=$(echo "ONCHAIN_RUNTIME_WASM_VERSION")
           VERSION=${!VAR_NAME}
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"

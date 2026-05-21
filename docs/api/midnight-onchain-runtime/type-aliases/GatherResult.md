@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0-rc.1**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -11,7 +11,11 @@ type GatherResult: {
   content: AlignedValue;
   tag: "read";
  } | {
-  content: EncodedStateValue;
+  content: {
+     data: EncodedStateValue;
+     eventType: LogEventType;
+     version: number;
+    };
   tag: "log";
 };
 ```
