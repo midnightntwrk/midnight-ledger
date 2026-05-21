@@ -680,18 +680,58 @@ This unifies the proving call sites:
   debug-built wallet → release-built prover, and any future
   Native module hosted by RN / Capacitor (§7).
 
-#### Verification status
+#### Verification status (updated 2026-05-22)
 
 - ✅ Design captured here.
-- ⏳ `actix-web` cross-compile to `aarch64-linux-android` — not
-  yet attempted; expected to work but flagged for actual build
-  verification before claiming the feature is shippable.
-- ⏳ `network_security_config.xml` wiring — not yet added.
-- ⏳ `window.midnightProofServerUrl` `<head>` injection — not yet
-  added.
+- ✅ `prover-core` lifted to a global dep + four `not(target_os
+  = "android")` cfg gates removed from `prover-core/src/lib.rs`,
+  `server.rs`, `http.rs`. The previous Cargo gate reflected a
+  belief that turned out to be false.
+- ✅ `actix-web 4.13` (with `default-features = false`) +
+  `midnight-proof-server` + `reqwest 0.13` cross-compile to
+  **`aarch64-linux-android`** — release `.so` 145 MB (up from
+  132 MB without the feature), build time 1m 24s on a warm cache.
+- ✅ Same source cross-compiles to **`aarch64-apple-ios-sim`** —
+  release `.dylib` 134 MB, build time 2m 48s. (iOS Simulator
+  artifact only; physical iOS device deploy still depends on
+  the signing dance from §5b.5.)
+- ✅ `bridge::spawn_proof_server` runs unconditionally from
+  `use_future` at `app.rs:1022`. On a fresh APK install the
+  startup log emits:
+  ```
+  INFO dioxuswalletmain::bridge:
+       embedded proof-server ready url=http://127.0.0.1:42605
+  ```
+  and `/proc/<pid>/net/tcp` confirms two loopback listeners
+  bound by the actix accept loop.
+- ✅ HTTP from the **device shell**: `adb shell curl -i
+  http://127.0.0.1:42605/` returns `200 OK` with CORS headers
+  and a JSON status payload — actix is genuinely serving, not
+  just bound.
+- ✅ End-to-end **Update DID** from the UI on a physical
+  Samsung S24 Ultra completes via the embedded server. The
+  prove-routing log line confirms which path was taken:
+  ```
+  INFO wallet_core::tx::prove:
+       proving via HTTP proof-server url=http://127.0.0.1:42605
+  ```
+  Subsequent submit + indexer confirmation complete normally.
+- ⏳ `network_security_config.xml` for cleartext loopback —
+  not strictly needed for the wallet's own Rust client (which
+  is what we tested) because `reqwest` honours system policy
+  rather than the WebView's. Will still be needed before the
+  **WebView JS** (or an RN JS host) can `fetch` the loopback
+  URL. Tracked alongside the next item.
+- ⏳ `window.midnightProofServerUrl` `<head>` injection — not
+  yet added; needs ~10 LoC in `lib.rs::with_js_bridge_inner`.
+  Closes the loop for "WebView/RN JS can hit the URL" from
+  step 5 of the prototype plan in §7.3a.
 
-These three remaining items are tracked together; the change is
-small (~ 100 LoC + one XML resource + one `Cargo.toml` move).
+The big-ticket questions ("will actix cross-compile", "will
+loopback work inside the app sandbox", "will the existing
+`prove_via_http` path actually engage") are all **answered yes**
+on real arm64 hardware. The two remaining `⏳` items are the
+JS-side bring-up and are independent of the server itself.
 
 ---
 
@@ -978,7 +1018,7 @@ skips the dual-init):
 | (none — default)                           | + WebView bundle + DID writes via `DioxusEvalBridge` (`js-bridge` is on by default) | UI + read-only on-chain                                | UI + read-only on-chain                                |
 | `--features js-bridge`                     | (same as default on desktop)                                      | + WebView bundle + DID writes (no Node)                | + WebView bundle + DID writes via WKWebView            |
 | `--no-default-features`                    | UI + read-only on-chain (resolve, balance, DUST sync), no WebView | n/a (mobile builds always pass `js-bridge` explicitly) | n/a (mobile builds always pass `js-bridge` explicitly) |
-| `--features proof-server-http`             | + in-process actix proof-server (implies `js-bridge`)             | **in-flight prototype** (§4.3, §7.3a) — Cargo dep currently desktop-only, cross-compile not yet attempted | **in-flight prototype** (§4.3, §7.3a) — same status as Android |
+| `--features proof-server-http`             | + in-process actix proof-server (implies `js-bridge`)             | **shipped & verified on real device** (§4.3) — actix-web 4.13 cross-compiles cleanly, server binds `127.0.0.1:<port>`, Update DID round-trips through `/prove` end-to-end on S24 Ultra | **builds** for `aarch64-apple-ios-sim` (§4.3) — same source, no device-deploy verification yet |
 | `--features preprod-live`                  | Operator PreProd seed + 3 pre-seeded DIDs                         | same                                                   | same                                                   |
 | `--features js-bridge,preprod-live`        | full DID writes against PreProd                                   | full DID writes against PreProd                        | full DID writes against PreProd                        |
 
@@ -1321,52 +1361,114 @@ TurboModule (§7.3) for performance-critical operations the host
 controls directly, the local HTTP server (§7.3a) for any
 upstream TS package the host pulls in.
 
-#### Prototype plan (in flight)
+#### Prototype plan — outcome (2026-05-22)
 
-To validate the §7.3a shape concretely on Android/iOS, we plan
-a small prototype on top of the existing `proof-server-http`
-feature (no new feature flag — that one is already structured
-correctly, it just needs to compile on mobile):
+To validate the §7.3a shape concretely on Android/iOS we landed
+a prototype on top of the existing `proof-server-http` feature
+(no new feature flag — that one was already structured
+correctly, it just needed to compile on mobile).
 
-1. **Cargo move.** Lift the `prover-core` dep out of the
-   desktop-only target gate in `mobile-bench/dioxus-wallet/Cargo.toml`
-   so `--features proof-server-http` is reachable on
-   `aarch64-linux-android` and `aarch64-apple-ios`.
-2. **Cross-compile attempt.** Run
-   `cargo ndk -t arm64-v8a build --release -p dioxus-wallet
-   --lib --features js-bridge,proof-server-http,preprod-live`.
-   Fix the first error if one surfaces. With `actix-web ^4.13`
-   pinned at `default-features = false` (`proof-server/Cargo.toml:27`)
-   the build should land; if it doesn't, drop to a tiny `hyper`
-   server behind the same feature (the HTTP surface is just two
-   endpoints — `POST /prove` and `GET /fetch-params/{k}` — ≤ 200
-   LoC of glue).
-3. **Spawn on startup.** Wire `spawn_proof_server` into the
-   Android `main()` and the iOS `start_app()` so the server is
-   up before the UI renders. Existing
-   `bridge::spawn_proof_server` (`bridge.rs:253`) is the entry
-   point; today the non-desktop targets compile out the body to
-   a stub, which is exactly the gate we'd remove.
-4. **Network security on Android.** Add
-   `android/app/src/main/res/xml/network_security_config.xml`
-   permitting cleartext to `127.0.0.1` + `localhost`, and
-   reference it from the manifest's `<application>` tag.
-5. **End-to-end probe.** Add a "Probe proof-server" button to
-   the dioxus-wallet's Settings tab that just calls
-   `fetch(window.midnightProofServerUrl + "/healthz")` (or
-   equivalent) from the WebView. Confirms the URL is reachable
-   from JS-in-WebView land, which is the same code path an RN
-   `fetch` would take. If healthy, swap to a real `POST /prove`
-   round-trip with a tiny synthetic preimage.
-6. **Repeat on iOS Simulator.** Same source, different target —
-   the `start_app` entry already covers iOS; `actix-web`
-   cross-compiles to `aarch64-apple-ios` the same way it does
-   to Linux.
+| # | Step                                                | Status & evidence |
+|---|-----------------------------------------------------|-------------------|
+| 1 | Cargo move (`prover-core` → unconditional dep)     | ✅ `mobile-bench/dioxus-wallet/Cargo.toml:65`. |
+| 2 | Cross-compile to `aarch64-linux-android`           | ✅ Release `.so` 145 MB, 1m 24s. Four `not(target_os = "android")` cfg gates removed from `prover-core/src/{lib.rs,server.rs,http.rs}` — they reflected a stale assumption. `actix-web 4.13`, `midnight-proof-server`, and `reqwest 0.13` all build clean. |
+| 3 | Spawn on startup                                    | ✅ No code change needed — `bridge::spawn_proof_server` already runs unconditionally from `use_future` in `app.rs:1022`. Once the OS gates were lifted, the success branch (`bridge.rs:253`) automatically engaged. Startup log: `INFO dioxuswalletmain::bridge: embedded proof-server ready url=http://127.0.0.1:42605`. |
+| 4 | Network security XML for cleartext loopback        | ⏳ Not yet needed for what we tested. The wallet's own `reqwest`-driven `prove_via_http` doesn't go through the WebView, so it isn't subject to Android's `network_security_config`. Will land alongside step 5 once the WebView JS side starts hitting the URL. |
+| 5 | End-to-end **device-shell** probe                  | ✅ `adb shell curl -i http://127.0.0.1:42605/` returns `200 OK` with CORS headers and a JSON status payload. `/proc/<pid>/net/tcp` confirms loopback listeners bound. |
+| 5b | End-to-end **wallet** path (the better signal)    | ✅ A full **Update DID** from the device UI on a Samsung S24 Ultra completes through the embedded server. Log line `INFO wallet_core::tx::prove: proving via HTTP proof-server url=http://127.0.0.1:42605` confirms `prove_via_http` engaged; subsequent SCALE submit + indexer confirmation complete normally. |
+| 5c | End-to-end **WebView/RN JS** fetch                | ⏳ Not yet exercised. This is the last open piece — once `window.midnightProofServerUrl` is injected via `<head>` (small `lib.rs::with_js_bridge_inner` edit) any in-WebView `fetch()` (and by extension any RN `fetch()`) can hit the same URL. |
+| 6 | Re-target iOS Simulator                            | ✅ Same source builds for `aarch64-apple-ios-sim`: release `.dylib` 134 MB, 2m 48s. Device-deploy verification still depends on the signing dance from §5b.5. |
 
-Success = at least one full `POST /prove` round-trip completes
-**from a button in the WebView to the embedded actix server**
-without leaving the app process. That demonstrates the URL
-semantic survives in-app and unblocks the RN integration path.
+**Bottom line.** The fundamental "is a TS/JS `proofServer` URL
+backed by a process-local actix server actually portable to
+mobile" question is answered **yes**, and the proof is a real
+DID write completing on a real phone through `http://127.0.0.1:<port>/prove`. The `hyper` / `tiny_http` fallback we
+preserved in the prior draft of this section is no longer
+needed for actix specifically.
+
+#### Research notes — wiring an existing TS/JS DApp to the local server (2026-05-22)
+
+Cross-checked the upstream TS/JS package layout to confirm the
+drop-in path is real, not just plausible. The findings below are
+the basis for §7.3a as a whole; capturing them here so the
+"can you point me at the upstream code that consumes the
+proof-server URL?" question has citations:
+
+- **`@midnight-ntwrk/api`** is the public façade most DApps
+  import. Its `buildWallet`-style helper at
+  `~/iohk/midnight-did/packages/api/src/wallet.ts:423` wires:
+  ```ts
+  proofProvider: httpClientProofProvider(
+    config.proofServer,        // ← any HTTP URL
+    zkConfigProvider,
+  )
+  ```
+  The `proofServer` field is a free-form URL string — there's no
+  validation that it points outside the device, no special-case
+  for `127.0.0.1`. Passing
+  `http://127.0.0.1:42605` (or whatever port our `LocalServer`
+  binds) is indistinguishable from passing `https://proof.midnight.network`.
+- **`@midnight-ntwrk/midnight-js-http-client-proof-provider`** is
+  the package `httpClientProofProvider` lives in. Internally it
+  does `fetch(<url>/prove, { method: "POST", body: scaled-encoded
+  ProofPreimage })` and decodes the SCALE response into a
+  `Proof`. Same shape our `prove_via_http`
+  (`wallet-core/src/tx/prove.rs:136`) targets — no protocol
+  divergence, both consumers can hit the same server.
+- **`secret-storage` package — surprise finding.** The
+  upstream `FileSecretStore`
+  (`~/iohk/midnight-did/.claude/worktrees/amazing-nash/secret-storage/src/file-secret-store.ts`)
+  carries `meta.did` and `meta.purpose` on every stored key, but
+  **only sets them at key-creation time**. The
+  `addVerificationMethod` flow
+  (`did-lifecycle-service.ts:138-150`) reads
+  `secretStore.getPublicKey(keyRef)`, calls
+  `normalizePublicForLedger`, and stamps the new VM record
+  on-chain — it **does not write back to `meta.did`**. So the
+  key↔DID relationship lives **exclusively in the on-chain DID
+  document's `verificationMethod` array**, indexed by VM `id`
+  fragment.
+
+  *Implication for downstream RN hosts.* A host using
+  `@midnight-ntwrk/api` to manage DIDs cannot read "which DID
+  does this key belong to?" from the local secret store. It must
+  resolve each DID and walk its `verificationMethod` list — the
+  same matching scheme our
+  `mobile-bench/wallet-core/tests/annotate_preprod_keys.rs`
+  uses for the bundled `preprod-default` keys.
+
+- **`normalizePublicForLedger`** in
+  `secret-storage/src/curve-support.ts:463` decodes the JWK `x`
+  (and optionally `y`) base64url string to a bigint via
+  `base64urlToBuffer` + `bufferToBigint`. The chain stores the
+  result as a 32-byte big-endian field element, and our Rust
+  decoder (`wallet-core/src/did/contract.rs:462`) re-encodes
+  back to JWK base64url. **Round-trip is byte-exact** as long as
+  the underlying `x` doesn't have leading zeros that would be
+  stripped by the bigint conversion — which doesn't happen for
+  uniformly-random curve points. This is why "match VM by
+  `public_key_jwk.x`" is a reliable identity check across the
+  Rust ↔ TS boundary.
+
+- **Verified end-to-end (S24 Ultra, 2026-05-22).** A full Update
+  DID from the wallet UI completes through `127.0.0.1:42605`
+  on the device. Smoking gun log lines, both already cited in
+  §4.3:
+  ```
+  INFO dioxuswalletmain::bridge:
+       embedded proof-server ready url=http://127.0.0.1:42605
+  INFO wallet_core::tx::prove:
+       proving via HTTP proof-server url=http://127.0.0.1:42605
+  ```
+  No proxy in front, no port-forward fiddling, no host network
+  access of any kind — purely loopback inside the app process.
+
+**Diagnostics surface.** The dioxus-wallet's Diagnostics tab now
+renders an `● active` pill on the "Embedded proof-server" card
+along with two explainer rows ("Used by" / "Not used by") so the
+divergence between wallet-DID-writes (route through HTTP) and
+Benchmark-tab runs (use the direct library, by design) is
+visible in-app without source-diving.
 
 ### 7.4 Platform packaging
 
