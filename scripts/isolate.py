@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Isolate a single workspace package, tag it, push the tag, and revert.
 
-Usage: scripts/isolate.py <pkg>-<version>   e.g. ledger-9.0.1.0-alpha.1
+Usage: scripts/isolate.py [-f] <pkg>-<version>   e.g. ledger-9.0.1.0-alpha.1
 """
 
+import argparse
 import pathlib
 import re
 import subprocess
@@ -15,9 +16,13 @@ def run(*cmd):
 
 
 def main():
-    if len(sys.argv) != 2:
-        sys.exit(f"usage: {sys.argv[0]} <pkg>-<version>")
-    tag = sys.argv[1]
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("tag", help="<pkg>-<version>, e.g. ledger-9.0.1.0-alpha.1")
+    parser.add_argument(
+        "-f", "--force", action="store_true", help="overwrite an existing tag locally and on origin"
+    )
+    args = parser.parse_args()
+    tag = args.tag
 
     m = re.match(r"^(.+?)-(\d.*)$", tag)
     if not m:
@@ -61,15 +66,19 @@ def main():
     text = filter_list(text, "default-members")
     root.write_text(text)
 
-    # 2. Strip path = "..." from [dependencies] and [dev-dependencies] in foo/Cargo.toml.
-    targets = {"[dependencies]", "[dev-dependencies]"}
-    in_target = False
+    # 2. In foo/Cargo.toml: strip `path = "..."` from [dependencies], and drop
+    # [dev-dependencies] entirely. Override consumers (`[patch]` git deps) never
+    # read dev-deps, so dropping the section avoids needing to mirror local-only
+    # crate versions here.
+    section = None
     out_lines = []
     for line in sub_cargo.read_text().splitlines(keepends=True):
         stripped = line.strip()
         if stripped.startswith("[") and stripped.endswith("]"):
-            in_target = stripped in targets
-        if in_target:
+            section = stripped
+        if section == "[dev-dependencies]":
+            continue
+        if section == "[dependencies]":
             line = re.sub(r'path\s*=\s*"[^"]*"\s*,\s*', "", line)
             line = re.sub(r',\s*path\s*=\s*"[^"]*"', "", line)
         out_lines.append(line)
@@ -81,11 +90,16 @@ def main():
     # `crate-` prefix to disambiguate.
     git_tag = f"crate-{tag}" if name == "ledger" else tag
     msg = f"isolate {git_tag}"
+    tag_cmd = ["git", "-C", str(repo), "tag", "-a", git_tag, "-m", msg]
+    push_cmd = ["git", "-C", str(repo), "push", "origin", git_tag]
+    if args.force:
+        tag_cmd.insert(-2, "-f")
+        push_cmd.insert(-2, "--force")
     try:
         run("git", "-C", str(repo), "add", "Cargo.toml", f"{name}/Cargo.toml")
         run("git", "-C", str(repo), "commit", "-m", msg)
-        run("git", "-C", str(repo), "tag", "-a", git_tag, "-m", msg)
-        run("git", "-C", str(repo), "push", "origin", git_tag)
+        run(*tag_cmd)
+        run(*push_cmd)
     finally:
         run("git", "-C", str(repo), "reset", "--hard", start)
 
