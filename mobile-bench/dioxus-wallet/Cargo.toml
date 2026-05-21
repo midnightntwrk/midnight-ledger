@@ -12,18 +12,34 @@ name = "dioxuswalletmain"
 crate-type = ["cdylib", "rlib"]
 
 [features]
-default = []
-# Gates the WebView-side JS pipeline:
+# `js-bridge` is on by default so a plain
+# `cargo run -p dioxus-wallet` boots the production WebView path —
+# the same `DioxusEvalBridge` transport Android + iOS use for DID
+# writes. The Node child harness only ships inside `cargo test`
+# (see `wallet-core::js_bridge::NodeChildBridge`); the App binary
+# never spawns it.
+default = ["js-bridge"]
+# Gates the WebView-side JS pipeline. Works on both desktop and
+# Android since Dioxus mobile re-exports `dioxus_desktop`'s `Config`
+# and Wry's custom-protocol API:
 #   * mobile-bench/dioxus-wallet/web/ esbuild bundle + vendored
-#     mn-pkg:// asset tree
+#     mn-pkg:// asset tree (embedded into the binary via
+#     `include_dir!` so the same path works on every target)
 #   * src/protocol.rs custom-protocol handler
 #   * head injection of import map + module bundle
-#   * the embedded HTTP proof-server (from prover-core)
 #
-# Off by default — the mainline DID work happens in Rust
-# (see DID_PLAN.md). Flip on if you ever need to load an unported
-# upstream TS package directly inside the WebView.
-js-bridge = ["prover-core/proof-server-http"]
+# Default-on so production runs on every supported target take the
+# `DioxusEvalBridge` path. Turn off (`--no-default-features`) only
+# for the read-only UI / Rust-only smoke profile.
+js-bridge = ["dep:include_dir"]
+
+# Spins up the in-process HTTP proof-server (actix-web) from
+# `prover-core`. Desktop-only — actix doesn't cross-compile to
+# Android, and we don't need the HTTP wrapper there because the
+# wallet falls back to the in-process LocalProvingProvider when
+# `proof_server_url` is unset. Implies `js-bridge` because the only
+# consumer of the HTTP server is the JS harness flow.
+proof-server-http = ["js-bridge", "prover-core/proof-server-http"]
 
 # Boots the App with the operator's PreProd manager profile:
 # - `Wallet::demo(Network::PreProd)` is swapped to use the
@@ -42,6 +58,10 @@ preprod-live = []
 
 [dependencies]
 wallet-core = { path = "../wallet-core" }
+# Parameterised dummy-contract proving for the Benchmark tab. Library-only,
+# so it compiles for both desktop (cargo run) and arm64-v8a Android (cargo
+# ndk -- see DEPLOY_TO_DEVICE.md).
+contract-benchmark = { path = "../contract-benchmark" }
 tokio = { version = "1.46.1", features = ["rt-multi-thread", "macros", "sync"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -49,6 +69,14 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
 futures = "0.3"
+# Drives the `#[async_trait]` macro on `DioxusEvalBridge`'s
+# `JsBridge` impl. Same version family wallet-core pulls so the
+# `dyn JsBridge` ABI matches between crates.
+async-trait = "0.1"
+# Embeds `assets/web/pkg/` into the binary so the mn-pkg:// protocol
+# handler can serve the vendored npm packages without filesystem
+# access. Only pulled in when `js-bridge` is on (see `src/protocol.rs`).
+include_dir = { version = "0.7", optional = true }
 
 # Same per-target dioxus split as `dioxus-bench`. See its Cargo.toml for
 # the rationale (`mobile` and `desktop` are mutually exclusive — Android
@@ -57,8 +85,26 @@ futures = "0.3"
 dioxus = { version = "0.6", features = ["mobile"] }
 ndk-context = "0.1"
 jni = "0.21"
+# Initialise the Android-side certificate verifier before any HTTPS
+# call. Without this, every TLS handshake panics with
+# "Expect rustls-platform-verifier to be initialized" — the indexer
+# / SRS fetch / proof-server probe all hit `*.midnight.network` over
+# HTTPS.
+#
+# Two versions coexist in the dep tree: `0.6` is pulled by reqwest /
+# our direct path, `0.5` by subxt's TLS stack. Each has its OWN
+# global init slot so we must call both initialisers. We pull `0.5`
+# under a renamed alias so both can be addressed.
+rustls-platform-verifier = "0.6"
+rustls-platform-verifier-v05 = { package = "rustls-platform-verifier", version = "0.5" }
+# Raw POSIX bindings so we can call `setrlimit(RLIMIT_AS, …)` at
+# process start. ActivityManager applies a tighter-than-default
+# address-space ceiling to Android apps; raising it ourselves lets
+# the proving stack's mmaps for k >= 19 succeed where the default
+# cap would have ENOMEM'd.
+libc = "0.2"
 
-[target.'cfg(not(target_os = "android"))'.dependencies]
+[target.'cfg(all(not(target_os = "android"), not(target_os = "ios")))'.dependencies]
 dioxus = { version = "0.6", features = ["desktop"] }
 dirs = "5"
 # Cross-platform clipboard for desktop (macOS / Linux / Windows).
@@ -74,3 +120,19 @@ prover-core = { path = "../prover-core", default-features = false }
 # `tao::Icon::from_rgba` at App startup.
 resvg = "0.45"
 tiny-skia = "0.11"
+
+# iOS Simulator + device. Mirrors the Android shape:
+# - dioxus uses the `mobile` feature (same as Android).
+# - `rustls-platform-verifier` is required for HTTPS — on iOS it
+#   auto-detects the platform and uses `SecTrust` natively, so we
+#   *don't* need the JNI-style `init_with_env` dance Android does.
+# - No `prover-core` / actix (same constraint as Android — actix
+#   doesn't cross-compile to iOS cleanly either, and the JS bridge
+#   path proves in-process).
+# - No `arboard` / `dirs` / `resvg` / `tiny-skia`. iOS has its own
+#   clipboard via UIPasteboard (TODO), the sandbox path is reached
+#   through `$HOME`, and there's no window icon to rasterise.
+[target.'cfg(target_os = "ios")'.dependencies]
+dioxus = { version = "0.6", features = ["mobile"] }
+rustls-platform-verifier = "0.6"
+rustls-platform-verifier-v05 = { package = "rustls-platform-verifier", version = "0.5" }

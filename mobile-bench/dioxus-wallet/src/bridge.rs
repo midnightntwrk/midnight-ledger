@@ -152,6 +152,15 @@ impl BridgeState {
     /// `(network, did)`; a write failure is logged and the
     /// in-memory cache is still populated so the current session
     /// is uninterrupted.
+    ///
+    /// Today the only live caller sits under
+    /// `#[cfg(feature = "preprod-live")]` (`seed_preprod_live_state`
+    /// in `app.rs`); the in-app Create-DID wizard is currently
+    /// unmounted (see `SessionEvent::Deploy`'s doc-comment). The
+    /// method stays on the public API so re-enabling the wizard
+    /// is a one-liner — silence dead-code for the
+    /// non-`preprod-live` profile rather than hiding the method.
+    #[cfg_attr(not(feature = "preprod-live"), allow(dead_code))]
     pub fn remember_controller_secret(&self, network: Network, did: String, sk: [u8; 32]) {
         if let Ok(mut g) = self.controller_secrets.lock() {
             g.insert(did.clone(), sk);
@@ -236,10 +245,12 @@ impl BridgeState {
 }
 
 /// Spawn the embedded proof-server. Only built when the
-/// `js-bridge` feature is on (the JS pipeline talks to it via
-/// loopback HTTP). The Rust DID code calls `prover-core` directly
-/// via its library API and doesn't need this server at all.
-#[cfg(all(feature = "js-bridge", not(target_os = "android")))]
+/// `proof-server-http` feature is on (desktop-only — the actix
+/// stack doesn't cross-compile to Android). On Android the wallet
+/// always uses the in-process `LocalProvingProvider`; the JS
+/// pipeline still works there, it just routes proving directly
+/// through Rust without the HTTP wrapper.
+#[cfg(feature = "proof-server-http")]
 pub async fn spawn_proof_server(state: &BridgeState) -> Result<String, String> {
     use prover_core::spawn_local_server;
     let server = spawn_local_server().await.map_err(|e| e.to_string())?;
@@ -259,11 +270,13 @@ pub async fn spawn_proof_server(state: &BridgeState) -> Result<String, String> {
     Ok(url)
 }
 
-#[cfg(not(all(feature = "js-bridge", not(target_os = "android"))))]
+#[cfg(not(feature = "proof-server-http"))]
 pub async fn spawn_proof_server(_state: &BridgeState) -> Result<String, String> {
     // No-op stub: the Rust DID path uses `prover_core::ProverCore`
-    // directly, no in-process HTTP server needed.
-    Err("local proof-server only spawned when --features js-bridge is enabled".into())
+    // directly, no in-process HTTP server needed. Reached on
+    // Android (no actix) and on desktop builds without
+    // `--features proof-server-http`.
+    Err("local proof-server only spawned when --features proof-server-http is enabled".into())
 }
 
 // ─── JSON-RPC payloads ─────────────────────────────────────────────
