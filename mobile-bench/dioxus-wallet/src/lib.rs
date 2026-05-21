@@ -4,6 +4,7 @@ mod app;
 mod bridge;
 #[cfg(feature = "js-bridge")]
 pub(crate) mod eval_bridge;
+mod format;
 mod logs;
 mod platform;
 #[cfg(feature = "js-bridge")]

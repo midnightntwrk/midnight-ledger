@@ -1,4 +1,8 @@
 use dioxus::prelude::*;
+use crate::format::{
+    DUST_DECIMALS, NIGHT_DECIMALS, format_atomic_dust, format_atomic_night,
+    format_balance, format_int, format_log_timestamp, format_ms, short_keyref,
+};
 use wallet_core::{
     ChainTipInfo, IndexerClient, Network, NodeClient, NodeStatus, ProbeResult, Wallet,
     probe_connectivity,
@@ -4383,24 +4387,6 @@ fn log_level_label(level: wallet_core::store::LogLevel) -> &'static str {
 
 /// Render a unix-ms timestamp as `HH:MM:SS.mmm` (UTC). Cheap
 /// to compute, plenty of precision for tail-following.
-fn format_log_timestamp(ts_ms: i64) -> String {
-    let total_secs = ts_ms.div_euclid(1000);
-    let millis = ts_ms.rem_euclid(1000) as u32;
-    let secs = total_secs.rem_euclid(86_400);
-    let h = (secs / 3600) as u32;
-    let m = ((secs % 3600) / 60) as u32;
-    let s = (secs % 60) as u32;
-    format!("{h:02}:{m:02}:{s:02}.{millis:03}")
-}
-
-fn short_keyref(k: &str) -> String {
-    if k.len() <= 12 {
-        k.to_string()
-    } else {
-        format!("{}…{}", &k[..8], &k[k.len() - 4..])
-    }
-}
-
 /// Thin status badge that lives between the StatusLine and
 /// the tab strip. Reports whether the persistent wallet store
 /// is attached + the current row counts at a glance —
@@ -4844,46 +4830,6 @@ fn render_cost_entry(idx: usize, run: &CostRun) -> Element {
     }
 }
 
-/// Render a DUST atomic-unit count with comma grouping and the
-/// "atomic" suffix. Dust is `10^-15 DUST` per atomic so even
-/// small transactions show 11+ digits; we leave the unit
-/// decimal-grouped for readability rather than converting.
-fn format_atomic_dust(n: u128) -> String {
-    if n == 0 {
-        "0 atomic".to_string()
-    } else {
-        format!("{} atomic", group_thousands(n))
-    }
-}
-
-/// Render a NIGHT atomic-unit count. NIGHT is `10^-6 NIGHT` so
-/// 1_000_000 atomic = 1 NIGHT. For values ≥ 10^6 we render a
-/// short suffix; smaller values stay as raw atomic units.
-fn format_atomic_night(n: u128) -> String {
-    if n == 0 {
-        "0 atomic".to_string()
-    } else if n >= 1_000_000 {
-        let whole = n / 1_000_000;
-        let frac = n % 1_000_000;
-        format!("{}.{:06} NIGHT", group_thousands(whole), frac)
-    } else {
-        format!("{} atomic", group_thousands(n))
-    }
-}
-
-/// Comma-group an integer for readability — `12345678 → "12,345,678"`.
-fn group_thousands(n: u128) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out.chars().rev().collect()
-}
-
 /// Aggregated metrics for one operation kind across the
 /// session. Built from `TimingRun` / `CostRun` entries grouped by
 /// their label prefix — e.g. `"load_did_circuit:addAlsoKnownAs"`
@@ -5165,22 +5111,6 @@ fn render_timing_bar(label: &str, ms: u64, max_ms: u64) -> Element {
 }
 
 /// Compact human-readable duration: 850ms / 1.2s / 41.8s / 2m 03s.
-fn format_ms(ms: u64) -> String {
-    if ms < 1_000 {
-        format!("{ms}ms")
-    } else if ms < 10_000 {
-        let s = ms as f64 / 1000.0;
-        format!("{s:.2}s")
-    } else if ms < 60_000 {
-        let s = ms as f64 / 1000.0;
-        format!("{s:.1}s")
-    } else {
-        let m = ms / 60_000;
-        let s = (ms % 60_000) / 1_000;
-        format!("{m}m {s:02}s")
-    }
-}
-
 // ───────────────────────────────────────────────────────────────────
 // Benchmark tab
 // ───────────────────────────────────────────────────────────────────
@@ -7214,84 +7144,9 @@ fn AddressCard(address: String) -> Element {
     }
 }
 
-/// Render a u128 subunit count as a comma-grouped decimal string —
-/// e.g. `250000000000000` → `"250,000,000,000,000"`. Matches
-/// example-counter's `formatBalance` (`BigInt.toLocaleString()`)
-/// so the displayed values agree between wallets.
-fn format_subunits(n: u128) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out.chars().rev().collect()
-}
-
-/// NIGHT subunit precision: 1 NIGHT = 10^6 atomic units.
-const NIGHT_DECIMALS: u32 = 6;
-/// DUST subunit precision: 1 DUST = 10^15 atomic units.
-const DUST_DECIMALS: u32 = 15;
-
-/// Convert a u128 subunit count to whole-unit representations.
-///
-/// Returns `(compact, exact)` where:
-/// - `compact` collapses large whole-unit values to K/M/B/T notation
-///   (e.g. `1,000` → `"1K"`, `5,234,000` → `"5.23M"`); whole values
-///   under 1,000 render as a comma-grouped integer with up to two
-///   significant fractional digits when meaningful.
-/// - `exact` is the full whole.fractional value with comma-grouped
-///   thousands and trailing zeros trimmed from the fraction.
-///
-/// Both strings are unit-less; callers append " NIGHT" / " DUST".
-fn format_balance(subunits: u128, decimals: u32) -> (String, String) {
-    let scale = 10u128.pow(decimals);
-    let whole = subunits / scale;
-    let frac = subunits % scale;
-
-    let frac_padded = format!("{:0>width$}", frac, width = decimals as usize);
-    let frac_trimmed = frac_padded.trim_end_matches('0');
-    let whole_str = format_subunits(whole);
-    let exact = if frac_trimmed.is_empty() {
-        whole_str.clone()
-    } else {
-        format!("{}.{}", whole_str, frac_trimmed)
-    };
-
-    let compact = if whole >= 1_000 {
-        let (divisor, suffix) = if whole >= 1_000_000_000_000 {
-            (1_000_000_000_000u128, "T")
-        } else if whole >= 1_000_000_000 {
-            (1_000_000_000u128, "B")
-        } else if whole >= 1_000_000 {
-            (1_000_000u128, "M")
-        } else {
-            (1_000u128, "K")
-        };
-        // Two decimal digits of precision (e.g. 1234 → "1.23K").
-        let scaled = whole * 100 / divisor;
-        let int_part = scaled / 100;
-        let frac_part = scaled % 100;
-        if frac_part == 0 {
-            format!("{}{}", int_part, suffix)
-        } else if frac_part % 10 == 0 {
-            format!("{}.{}{}", int_part, frac_part / 10, suffix)
-        } else {
-            format!("{}.{:02}{}", int_part, frac_part, suffix)
-        }
-    } else if frac_trimmed.is_empty() {
-        whole_str
-    } else {
-        // Sub-unit balance: show up to four significant fractional
-        // digits so tiny accruals are visible without dumping all 15.
-        let frac_short: String = frac_trimmed.chars().take(4).collect();
-        format!("{}.{}", whole_str, frac_short)
-    };
-
-    (compact, exact)
-}
+// Pure formatting helpers were moved to `src/format.rs` so they
+// can be unit-tested in isolation; see the top-of-file
+// `use crate::format::{…}` import.
 
 #[component]
 fn BalancesCard(
@@ -7410,18 +7265,6 @@ fn ProbeRowCompact(
             }
         }
     }
-}
-
-fn format_int(n: i64) -> String {
-    let s = n.to_string();
-    let mut out = String::with_capacity(s.len() + s.len() / 3);
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            out.push(' ');
-        }
-        out.push(c);
-    }
-    out.chars().rev().collect()
 }
 
 /// Cross-platform clipboard write. Desktop (macOS / Linux /
@@ -7891,44 +7734,7 @@ fn parse_network(s: &str) -> Option<Network> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn group_thousands_handles_boundaries() {
-        assert_eq!(group_thousands(0), "0");
-        assert_eq!(group_thousands(999), "999");
-        assert_eq!(group_thousands(1_000), "1,000");
-        assert_eq!(group_thousands(12_345_678), "12,345,678");
-        // u128 max: well beyond u64; sanity-check the loop terminates.
-        let max = u128::MAX;
-        let s = group_thousands(max);
-        assert!(s.len() > 30);
-        assert!(s.starts_with("340,"));
-    }
-
-    #[test]
-    fn format_atomic_dust_groups_and_suffixes() {
-        assert_eq!(format_atomic_dust(0), "0 atomic");
-        assert_eq!(format_atomic_dust(7), "7 atomic");
-        assert_eq!(format_atomic_dust(1_234_567), "1,234,567 atomic");
-    }
-
-    #[test]
-    fn format_atomic_night_switches_unit_at_one_million() {
-        // < 10^6 stays as raw atomic units.
-        assert_eq!(format_atomic_night(0), "0 atomic");
-        assert_eq!(format_atomic_night(999_999), "999,999 atomic");
-        // ≥ 10^6 renders as "X.YYYYYY NIGHT" with 6-digit fraction.
-        assert_eq!(format_atomic_night(1_000_000), "1.000000 NIGHT");
-        assert_eq!(format_atomic_night(1_500_000), "1.500000 NIGHT");
-        // Larger: comma-grouped whole part.
-        assert_eq!(
-            format_atomic_night(1_234_567_000_000),
-            "1,234,567.000000 NIGHT",
-        );
-        // Fractional part preserves leading zeros.
-        assert_eq!(format_atomic_night(1_000_001), "1.000001 NIGHT");
-    }
-}
+// Tests for the pure formatting helpers moved with them to
+// `src/format.rs`. The remaining surface in this file is
+// Dioxus-component-heavy and exercised via the integration
+// tests in `tests/`.
