@@ -145,10 +145,12 @@ impl Tab {
             2 => Tab::Diagnostics,
             3 => Tab::Settings,
             4 => Tab::Keys,
-            5 => Tab::Logs,
-            6 => Tab::Test,
-            7 => Tab::Metrics,
-            8 => Tab::Benchmark,
+            // Logs / Test / Metrics / Benchmark used to be top-level
+            // tabs (codes 5/6/7/8 in older builds). They have moved
+            // inside the Diagnostics carousel — redirect there so a
+            // user resuming from an older session doesn't land on an
+            // unreachable variant.
+            5 | 6 | 7 | 8 => Tab::Diagnostics,
             _ => Tab::Wallet,
         }
     }
@@ -470,6 +472,15 @@ mod preprod_live {
         "5914d2622abfb6f793c4b15c82692593500ecc481ae9b99a1655ad5e766dca4f",
         "ce785669eac7048652d239bd40286240bbe09f9f9c5d614631a3b256a2fec68a",
     ];
+    /// Verification-method keys decrypted from the manager
+    /// profile's `manager-secrets.json` via
+    /// `scripts/dump-manager-keys.mjs`. Baked into the binary so
+    /// the mobile build seeds its own wallet store on first
+    /// unlock — `cargo test` can't reach the on-device redb
+    /// like it can on desktop. These are dev/preprod material
+    /// (hardcoded `midnight-dev-passphrase` upstream); not
+    /// production-sensitive.
+    pub const KEYS_JSON: &str = include_str!("../preprod_keys.json");
 }
 
 /// Build the wallet handle this App uses for a given network.
@@ -651,6 +662,151 @@ fn seed_preprod_live_state(state: &BridgeState, store: &wallet_core::store::Wall
     tracing::info!(count = preprod_live::DIDS.len(), "preprod-live: seeded inventory + secrets");
 }
 
+/// `preprod-live` only: import the operator's verification-method
+/// keys from `preprod_live::KEYS_JSON` into the active wallet's
+/// secret store. Idempotent — keys whose `id` already exists in
+/// the store are skipped, so re-running on every unlock is safe
+/// and cheap.
+///
+/// On desktop the user can do the same via
+/// `cargo test -p wallet-core --test import_manager_keys`. On
+/// mobile that round-trip isn't possible (the redb lives in the
+/// Android app sandbox), so we bake the keys into the binary
+/// and import at unlock instead.
+#[cfg(feature = "preprod-live")]
+fn seed_preprod_live_keys(
+    store: &wallet_core::store::WalletStore,
+    wallet_id: wallet_core::store::WalletId,
+) {
+    use wallet_core::secret_storage::{
+        ImportKeyInput, MidnightCurve, MidnightKeyType, SecretStorage,
+        redb_secret_store::RedbSecretStore,
+    };
+
+    #[derive(serde::Deserialize)]
+    struct PreprodKey {
+        id: String,
+        kty: String,
+        crv: String,
+        private_key_hex: String,
+        /// Optional DID this key serves. Missing in the raw
+        /// dumper output (the manager-secrets store doesn't
+        /// encode this association), so the JSON ships with the
+        /// field absent. Annotate by hand if you want the key to
+        /// land in the secret store tagged with a DID — useful
+        /// for the Keys-tab filter and for matching at sign time.
+        /// A follow-up patch can auto-fill this by walking each
+        /// resolved DID's `verificationMethod` array and
+        /// matching `publicKeyJwk.x` against `public_jwk.x`.
+        #[serde(default)]
+        did: Option<String>,
+        /// Optional purpose hint (`authentication`,
+        /// `assertionMethod`, etc.) — same lifecycle as `did`,
+        /// stays None until manually filled.
+        #[serde(default)]
+        purpose: Option<String>,
+    }
+
+    let keys: Vec<PreprodKey> = match serde_json::from_str(preprod_live::KEYS_JSON) {
+        Ok(k) => k,
+        Err(e) => {
+            tracing::warn!(error=%e, "preprod-live: parse keys JSON failed");
+            return;
+        }
+    };
+
+    let mut store_handle = RedbSecretStore::new(store.clone(), wallet_id);
+    let existing_rows: Vec<wallet_core::secret_storage::StoredKeyMeta> =
+        match futures::executor::block_on(store_handle.list_keys(None)) {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::warn!(error=%e, "preprod-live: list existing keys failed");
+                return;
+            }
+        };
+    // id → (key_ref, current did) — lets us decide whether to
+    // skip, re-tag, or import each JSON entry.
+    let existing: std::collections::HashMap<String, (String, Option<String>)> =
+        existing_rows
+            .iter()
+            .map(|r| (r.id.clone(), (r.key_ref.clone(), r.did.clone())))
+            .collect();
+
+    let mut imported = 0u32;
+    let mut retagged = 0u32;
+    let mut skipped = 0u32;
+    for k in keys {
+        // If the same id already exists, two cases:
+        //   1. existing.did == k.did              → skip (idempotent).
+        //   2. existing.did differs from k.did    → delete + reimport
+        //      so the stored meta picks up the new DID tag (the
+        //      SecretStorage trait has no `update_did` hook, so
+        //      delete-and-reimport is the only way to mutate the
+        //      `did` field of an existing key).
+        if let Some((key_ref, current_did)) = existing.get(&k.id) {
+            if *current_did == k.did {
+                skipped += 1;
+                continue;
+            }
+            if let Err(e) = futures::executor::block_on(
+                store_handle.delete_key(key_ref.as_str()),
+            ) {
+                tracing::warn!(
+                    error=%e, id=%k.id,
+                    "preprod-live: delete-for-retag failed; skipping"
+                );
+                skipped += 1;
+                continue;
+            }
+            retagged += 1;
+            // Fall through to import below with the new did set.
+        }
+        let kty = match k.kty.as_str() {
+            "OKP" => MidnightKeyType::OKP,
+            "EC" => MidnightKeyType::EC,
+            other => {
+                tracing::warn!(id = %k.id, kty = other, "preprod-live: unknown kty, skipping");
+                continue;
+            }
+        };
+        let crv = match k.crv.as_str() {
+            "Ed25519" => MidnightCurve::Ed25519,
+            "Jubjub" => MidnightCurve::Jubjub,
+            "P-256" => MidnightCurve::P256,
+            other => {
+                tracing::warn!(id = %k.id, crv = other, "preprod-live: unknown crv, skipping");
+                continue;
+            }
+        };
+        let private_key = match hex::decode(&k.private_key_hex) {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::warn!(error=%e, id=%k.id, "preprod-live: hex decode failed");
+                continue;
+            }
+        };
+        // Fall back to "preprod-default" for the purpose tag so
+        // every imported key carries provenance; per-key
+        // overrides (if the JSON annotated them) win.
+        let purpose = k.purpose.clone().unwrap_or_else(|| "preprod-default".into());
+        match futures::executor::block_on(store_handle.import_key(ImportKeyInput {
+            id: k.id.clone(),
+            private_key,
+            kty,
+            crv,
+            did: k.did.clone(),
+            purpose: Some(purpose),
+        })) {
+            Ok(_) => imported += 1,
+            Err(e) => tracing::warn!(error=%e, id=%k.id, "preprod-live: import key failed"),
+        }
+    }
+    tracing::info!(
+        imported, retagged, skipped,
+        "preprod-live: keys import done",
+    );
+}
+
 #[component]
 pub fn App() -> Element {
     // Splash screen — shown for the first ~1.5 s of every launch.
@@ -718,6 +874,11 @@ pub fn App() -> Element {
     // Top-right menu dropdown open/closed. Toggled by the `≡`
     // button; closed automatically when the user picks a tab.
     let mut menu_open = use_signal(|| false);
+    // Active sub-view inside the merged Diagnostics carousel
+    // (0=Probes, 1=Metrics, 2=Benchmark, 3=Test, 4=Logs). Lives
+    // at App scope so Dioxus's hook ordering stays consistent
+    // across renders regardless of which tab is showing.
+    let mut diag_view = use_signal::<u8>(|| 0);
     // Last DID id this session deployed via CreateDidWizard.
     // ResolveDidPanel pre-populates its input from this so the
     // user can immediately verify their freshly-created DID.
@@ -884,6 +1045,13 @@ pub fn App() -> Element {
                     #[cfg(feature = "preprod-live")]
                     if matches!(net, Network::PreProd) {
                         seed_preprod_live_state(&state, &store);
+                        if let Some(wid) = wallet_id {
+                            seed_preprod_live_keys(&store, wid);
+                        } else {
+                            tracing::warn!(
+                                "preprod-live: no active wallet_id, skipping key import"
+                            );
+                        }
                     }
 
                     let n = state.hydrate_controller_secrets(net);
@@ -1242,7 +1410,10 @@ pub fn App() -> Element {
         div { class: "header-subtitle", "{active_tab.read().label()}" }
         if *menu_open.read() {
             div { class: "menu-dropdown",
-                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
+                // Metrics / Benchmark / Test / Logs were collapsed
+                // into a carousel under Diagnostics — the top-level
+                // tab bar no longer lists them.
+                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1524,34 +1695,142 @@ pub fn App() -> Element {
                     SessionLogPanel { events: session_log.read().clone() }
                 }
             },
+            // Diagnostics is now a 5-page horizontal carousel
+            // (M3 swipe-and-snap pattern). Page 0 is the original
+            // Probes content; pages 1–4 are the Metrics / Benchmark
+            // / Test / Logs views that used to be top-level tabs.
+            // Sub-nav chips above the carousel jump to a page;
+            // touch-swipe also works because the container has
+            // `scroll-snap-type: x mandatory`.
             Tab::Diagnostics => rsx! {
-                TxCostPanel { runs: cost_log.read().clone() }
-                if let Some(w) = wallet.read().as_ref() {
-                    div { class: "card",
-                        div { class: "card-header", "Wallet identity" }
-                        {kv_blob_row("Seed (hex)", &w.seed_hex)}
-                        {kv_blob_row("Coin PK", &w.coin_pk_hex)}
-                        {kv_blob_row("Encryption PK", &w.enc_pk_hex)}
+                div { class: "carousel-nav",
+                    for (idx , label) in [
+                        "Probes", "Metrics", "Benchmark", "Test", "Logs"
+                    ].iter().enumerate() {
+                        button {
+                            class: if *diag_view.read() as usize == idx {
+                                "carousel-nav-item active"
+                            } else {
+                                "carousel-nav-item"
+                            },
+                            onclick: move |_| {
+                                diag_view.set(idx as u8);
+                                // Smooth-scroll the carousel to
+                                // the matching page. document::eval
+                                // is the cross-platform handle Wry
+                                // exposes; same call works on
+                                // desktop / Android / iOS.
+                                let snippet = format!(
+                                    "document.getElementById('diag-page-{idx}')\
+                                        ?.scrollIntoView({{behavior:'smooth',inline:'start',block:'nearest'}});"
+                                );
+                                let _ = dioxus::document::eval(&snippet);
+                            },
+                            "{label}"
+                        }
                     }
                 }
-                if let Some(p) = probe.read().as_ref() {
-                    div { class: "card",
-                        div { class: "card-header", "Last probe — {p.network.label()}" }
-                        ProbeRowCompact { name: "indexer http", url: p.indexer_http.url.clone(), reachable: p.indexer_http.reachable, latency: p.indexer_http.latency_ms, detail: p.indexer_http.detail.clone() }
-                        ProbeRowCompact { name: "indexer ws",   url: p.indexer_ws.url.clone(),   reachable: p.indexer_ws.reachable,   latency: p.indexer_ws.latency_ms,   detail: p.indexer_ws.detail.clone() }
-                        ProbeRowCompact { name: "node ws",      url: p.node_ws.url.clone(),      reachable: p.node_ws.reachable,      latency: p.node_ws.latency_ms,      detail: p.node_ws.detail.clone() }
+                div { class: "carousel", id: "diag-carousel",
+                    // Swipe-driven sync: when the user swipes the
+                    // carousel by hand the scroll-snap settles on a
+                    // new page; this handler reads the resulting
+                    // `scrollLeft / clientWidth` from JS and lifts
+                    // it back into `diag_view` so the sub-nav chip
+                    // highlight follows the gesture. Click-driven
+                    // navigation (the chips) sets `diag_view`
+                    // directly and `scrollIntoView`s; the resulting
+                    // scroll fires this same handler, which just
+                    // re-sets the signal to the same value — cheap
+                    // and idempotent.
+                    onscroll: move |_| {
+                        spawn(async move {
+                            let snippet = "\
+                                const el = document.getElementById('diag-carousel');\
+                                return Math.round(el.scrollLeft / Math.max(el.clientWidth, 1));\
+                            ";
+                            if let Ok(v) = dioxus::document::eval(snippet).await {
+                                // Math.round returns an integer-shaped
+                                // JS number; serde_json may decode it
+                                // as either u64 or f64 depending on
+                                // serialisation. Try both shapes.
+                                let idx = v
+                                    .as_u64()
+                                    .map(|n| n as u8)
+                                    .or_else(|| v.as_f64().map(|f| f as u8));
+                                if let Some(i) = idx {
+                                    if i <= 4 {
+                                        diag_view.set(i);
+                                    }
+                                }
+                            }
+                        });
+                    },
+                    // Page 0 — Probes (the original Diagnostics content)
+                    div { class: "carousel-page", id: "diag-page-0",
+                        TxCostPanel { runs: cost_log.read().clone() }
+                        if let Some(w) = wallet.read().as_ref() {
+                            div { class: "card",
+                                div { class: "card-header", "Wallet identity" }
+                                {kv_blob_row("Seed (hex)", &w.seed_hex)}
+                                {kv_blob_row("Coin PK", &w.coin_pk_hex)}
+                                {kv_blob_row("Encryption PK", &w.enc_pk_hex)}
+                            }
+                        }
+                        if let Some(p) = probe.read().as_ref() {
+                            div { class: "card",
+                                div { class: "card-header", "Last probe — {p.network.label()}" }
+                                ProbeRowCompact { name: "indexer http", url: p.indexer_http.url.clone(), reachable: p.indexer_http.reachable, latency: p.indexer_http.latency_ms, detail: p.indexer_http.detail.clone() }
+                                ProbeRowCompact { name: "indexer ws",   url: p.indexer_ws.url.clone(),   reachable: p.indexer_ws.reachable,   latency: p.indexer_ws.latency_ms,   detail: p.indexer_ws.detail.clone() }
+                                ProbeRowCompact { name: "node ws",      url: p.node_ws.url.clone(),      reachable: p.node_ws.reachable,      latency: p.node_ws.latency_ms,      detail: p.node_ws.detail.clone() }
+                            }
+                        }
+                        if let Some(s) = chain.read().node.as_ref() {
+                            div { class: "card",
+                                div { class: "card-header", "Node" }
+                                {kv_blob_row("Finalized head", &s.finalized_head_hash)}
+                            }
+                        }
+                        if let Some(url) = proof_server.read().as_ref() {
+                            div { class: "card",
+                                div { class: "card-header",
+                                    style: "display: flex; align-items: center; gap: 8px;",
+                                    "Embedded proof-server"
+                                    span { class: "status-pill success",
+                                        span { class: "dot" }
+                                        "active"
+                                    }
+                                }
+                                {kv_blob_row("URL", url)}
+                                {kv_blob_row(
+                                    "Used by",
+                                    "Wallet DID writes (Update / Deactivate / addAlsoKnownAs / removeAlsoKnownAs) — via tx::prove::prove_via_http"
+                                )}
+                                {kv_blob_row(
+                                    "Not used by",
+                                    "Benchmark tab — calls contract_benchmark::run_proof(k) directly through the halo2 library"
+                                )}
+                            }
+                        }
                     }
-                }
-                if let Some(s) = chain.read().node.as_ref() {
-                    div { class: "card",
-                        div { class: "card-header", "Node" }
-                        {kv_blob_row("Finalized head", &s.finalized_head_hash)}
+                    // Page 1 — Metrics
+                    div { class: "carousel-page", id: "diag-page-1",
+                        MetricsTab {
+                            timings: timing_log.read().clone(),
+                            costs: cost_log.read().clone(),
+                        }
                     }
-                }
-                if let Some(url) = proof_server.read().as_ref() {
-                    div { class: "card",
-                        div { class: "card-header", "Embedded proof-server" }
-                        {kv_blob_row("URL", url)}
+                    // Page 2 — Benchmark
+                    div { class: "carousel-page", id: "diag-page-2",
+                        BenchmarkTab {}
+                    }
+                    // Page 3 — Test / dev probes
+                    div { class: "carousel-page", id: "diag-page-3",
+                        JsBridgePanel { seed_did: last_did_id.read().clone() }
+                        TimingsPanel { runs: timing_log.read().clone() }
+                    }
+                    // Page 4 — Logs
+                    div { class: "carousel-page", id: "diag-page-4",
+                        LogsTab { bridge_state: bridge_state.read().clone() }
                     }
                 }
             },
@@ -1992,6 +2271,15 @@ fn WalletSyncPane(
                     let total: u128 = set
                         .iter()
                         .fold(0u128, |a, u| a.saturating_add(u.value));
+                    // Surface the raw atomic count in logs so the
+                    // formatter (lossy by design) can be sanity-checked
+                    // against ground truth without re-reading source.
+                    tracing::info!(
+                        target: "balance",
+                        atomic = %total,
+                        utxos = set.len(),
+                        "NIGHT balance synced",
+                    );
                     night_subunits.set(Some(total));
                     let (compact, _) = format_balance(total, NIGHT_DECIMALS);
                     night_row.set(SyncRow::Done {
@@ -2049,6 +2337,11 @@ fn WalletSyncPane(
                 .map(|(_, id)| id);
             match syncer.current_balance_atomic() {
                 Ok(Some(bal)) => {
+                    tracing::info!(
+                        target: "balance",
+                        atomic = %bal,
+                        "DUST balance synced",
+                    );
                     dust_subunits.set(Some(bal));
                     dust_event_id.set(last_id);
                     let (compact, _) = format_balance(bal, DUST_DECIMALS);
@@ -3577,34 +3870,45 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
                     style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; font-family: ui-monospace, monospace; font-size: 11px;"
                 }
             }
-            div { class: "row",
-                button {
-                    onclick: {
-                        let g = generate.clone();
-                        move |_| (g.clone())((MidnightKeyType::OKP, MidnightCurve::Ed25519))
-                    },
-                    "Generate Ed25519"
+            // Three curve choices grouped as a segmented capsule
+            // (M3 single-select-shaped action group). The verb
+            // "Generate" was redundant — the section header above
+            // already says "Generate key". Refresh becomes a
+            // dedicated icon button to free horizontal space so
+            // the row never overflows on phone widths.
+            div { class: "row", style: "align-items: center; gap: 8px;",
+                div { class: "segmented", style: "flex: 1;",
+                    button {
+                        onclick: {
+                            let g = generate.clone();
+                            move |_| (g.clone())((MidnightKeyType::OKP, MidnightCurve::Ed25519))
+                        },
+                        "Ed25519"
+                    }
+                    button {
+                        onclick: {
+                            let g = generate.clone();
+                            move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::P256))
+                        },
+                        "P-256"
+                    }
+                    button {
+                        onclick: {
+                            let g = generate.clone();
+                            move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::Jubjub))
+                        },
+                        "Jubjub"
+                    }
                 }
                 button {
-                    onclick: {
-                        let g = generate.clone();
-                        move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::P256))
-                    },
-                    "Generate P-256"
-                }
-                button {
-                    onclick: {
-                        let g = generate.clone();
-                        move |_| (g.clone())((MidnightKeyType::EC, MidnightCurve::Jubjub))
-                    },
-                    "Generate Jubjub"
-                }
-                button {
+                    class: "icon-btn",
+                    title: "Refresh key list",
+                    "aria-label": "Refresh key list",
                     onclick: {
                         let refresh_keys = refresh_keys.clone();
                         move |_| (refresh_keys.borrow_mut())()
                     },
-                    "Refresh"
+                    "↻"
                 }
             }
             if let Some(msg) = error.read().as_ref() {
@@ -5406,6 +5710,12 @@ fn DidDetailView(
     let mut resolve_error = use_signal::<Option<String>>(|| None);
     let mut deactivating = use_signal::<Vec<WizardStage>>(Vec::new);
     let mut deactivate_error = use_signal::<Option<String>>(|| None);
+    // Modal-confirm gate for Deactivate. The Deactivate button
+    // flips this to `true`; the actual deactivate flow only runs
+    // when the user confirms in the dialog. Deactivate is
+    // irreversible — the contract has no reactivation circuit —
+    // so a confirm step is warranted.
+    let mut confirm_deactivate = use_signal(|| false);
     // When true, render `DidOperationBuilder` instead of the
     // 8-tab view. Toggled by the "Update DID" button (which is
     // disabled unless we have the controller secret for this DID
@@ -5445,7 +5755,7 @@ fn DidDetailView(
     // each WizardStage so the user sees the progress.
     let did_for_deactivate = did.clone();
     let sk_for_deactivate = controller_secret;
-    let deactivate = move |_| {
+    let mut deactivate = move |_| {
         let Some(sk) = sk_for_deactivate else {
             deactivate_error.set(Some(
                 "controller secret not in session — was this DID created here?".into(),
@@ -5637,29 +5947,43 @@ fn DidDetailView(
                     "{did_short}"
                 }
             }
-            div { class: "actions",
+            // M3-style segmented capsule. Three related actions on
+            // the same DID grouped into one pill-shaped container:
+            // Update (primary fill), Resolve (neutral), Deactivate
+            // (danger). The per-button colour rules under
+            // `.detail-header .actions .btn-primary` / `.btn-danger`
+            // are more specific than `.segmented > button`, so they
+            // keep their semantic cues inside the capsule. Labels
+            // are short ("Update", "Resolve", "Deactivate") — the
+            // context (DID detail header) makes the noun obvious.
+            div { class: "actions segmented",
                 button {
                     class: "btn-primary",
                     disabled: update_disabled,
                     title: "{update_title}",
                     onclick: move |_| builder_mode.set(true),
-                    "Update DID"
+                    "Update"
                 }
                 button {
                     disabled: *resolving.read(),
                     onclick: resolve_latest,
-                    {if *resolving.read() { "Resolving…" } else { "Resolve latest" }}
+                    {if *resolving.read() { "Resolving…" } else { "Resolve" }}
                 }
                 button {
                     class: "btn-danger",
                     disabled: !controller_known
                         || cached.as_ref().map(|r| r.document.deactivated).unwrap_or(false),
                     title: if controller_known {
-                        "Submit a deactivate ContractCall via the JS bridge"
+                        "Deactivate this DID — irreversible"
                     } else {
                         "Controller secret unknown — was this DID created in another session?"
                     },
-                    onclick: deactivate,
+                    // The Deactivate button now opens a confirm
+                    // dialog instead of running deactivate inline.
+                    // The dialog's Confirm action is the only place
+                    // the `deactivate` closure is invoked from, so
+                    // there's no ownership conflict.
+                    onclick: move |_| confirm_deactivate.set(true),
                     "Deactivate"
                 }
             }
@@ -5718,6 +6042,40 @@ fn DidDetailView(
                 bridge_state.clone(),
                 &session_log,
             )}
+        }
+        // Modal confirm for Deactivate. Renders only while the
+        // Deactivate button has flipped `confirm_deactivate` to
+        // `true`. The scrim click + Cancel button restore the
+        // gate; the Confirm button runs `deactivate(evt)` then
+        // closes the dialog. `evt.stop_propagation()` on the
+        // dialog card prevents an inside-card click from bubbling
+        // up to the scrim and dismissing the dialog by accident.
+        if *confirm_deactivate.read() {
+            div { class: "dialog-scrim",
+                onclick: move |_| confirm_deactivate.set(false),
+                div { class: "dialog",
+                    onclick: move |evt: Event<MouseData>| evt.stop_propagation(),
+                    div { class: "dialog-title", "Deactivate DID?" }
+                    div { class: "dialog-body",
+                        "This action is permanent. Once a DID is deactivated it ",
+                        b { "cannot be reactivated" }
+                        " — the contract has no reactivation circuit, and the chain will reject any future update from this controller."
+                    }
+                    div { class: "dialog-actions",
+                        button { class: "btn-text",
+                            onclick: move |_| confirm_deactivate.set(false),
+                            "Cancel"
+                        }
+                        button { class: "btn-danger",
+                            onclick: move |evt| {
+                                confirm_deactivate.set(false);
+                                deactivate(evt);
+                            },
+                            "Deactivate"
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -6989,15 +7347,29 @@ enum BalanceCell {
 }
 
 /// Render one Balances-card row. Layout: `<label>` on the left,
-/// stacked compact value + precise value on the right. The unit
-/// suffix lives only with the compact value so we don't repeat
-/// "NIGHT NIGHT" / "DUST DUST" between the row label and the value.
+/// stacked **exact** value + optional compact tag on the right.
+///
+/// Previously the compact form (e.g. "5K") was the prominent
+/// number and the exact value sat in a 11 px gray line beneath.
+/// In a wallet, users want to see the actual amount — the
+/// compact form is now a small secondary tag (e.g. "≈ 5K") shown
+/// only when the whole-unit part is large enough that the
+/// abbreviation is informative (≥ 1,000). Below 1,000 the exact
+/// value alone is shown.
 fn render_balance_row(unit: &str, cell: &Option<BalanceCell>) -> Element {
-    let (primary, precise) = match cell {
+    let (primary, secondary) = match cell {
         None => ("—".to_string(), None),
         Some(BalanceCell::Syncing) => ("syncing…".to_string(), None),
         Some(BalanceCell::Value { compact, exact }) => {
-            (compact.clone(), Some(exact.clone()))
+            // Only surface the compact tag when it differs from
+            // the exact (i.e. abbreviation actually kicked in —
+            // it suffixes K/M/B/T, exact never does).
+            let tag = if compact != exact {
+                Some(format!("≈ {compact}"))
+            } else {
+                None
+            };
+            (exact.clone(), tag)
         }
     };
     let label = unit.to_string();
@@ -7010,8 +7382,8 @@ fn render_balance_row(unit: &str, cell: &Option<BalanceCell>) -> Element {
                     span { class: "value", "{primary}" }
                     span { class: "unit", " {unit}" }
                 }
-                if let Some(p) = precise {
-                    div { class: "precise", "{p}" }
+                if let Some(s) = secondary {
+                    div { class: "precise", "{s}" }
                 }
             }
         }

@@ -117,6 +117,14 @@ for (const [keyRef, entry] of Object.entries(store.keys ?? {})) {
     crv: priv.crv ?? publicJwk.crv,
     private_key_hex: raw.toString("hex"),
     public_jwk: publicJwk,
+    // Pass through every other field on `meta` so callers can
+    // pick up DID associations, purpose tags, etc. without
+    // touching this script. Drops `id` since it's already
+    // hoisted, and avoids overwriting the canonical fields
+    // above.
+    meta: Object.fromEntries(
+      Object.entries(meta).filter(([k]) => k !== "id"),
+    ),
   });
 }
 

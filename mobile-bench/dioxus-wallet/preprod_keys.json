@@ -1,0 +1,121 @@
+[
+  {
+    "crv": "Ed25519",
+    "id": "key-1",
+    "key_ref": "06323caf-c779-4827-a0d4-8636a8ab6bca",
+    "kty": "OKP",
+    "private_key_hex": "32d9ca8dfade9e78f9a6736eb4492c0312e8c05b7c5ac3b069b9f17e06cae0a4",
+    "public_jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "Brt-otBkC2eWHcsNq7vZqk17-uuR86-Jwv3GWTf1eTE"
+    }
+  },
+  {
+    "crv": "P-256",
+    "did": "did:midnight:preprod:6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801",
+    "id": "passkey-1",
+    "key_ref": "b94a92cb-badc-460e-9e2e-78f72b90b3a8",
+    "kty": "EC",
+    "private_key_hex": "0df8143ab222a9d128f24bec6275cc8c03f46fdda3129fbb947a0cf835b5588d",
+    "public_jwk": {
+      "crv": "P-256",
+      "kty": "EC",
+      "x": "P8-GBzZPLFz9DZ-Prqxf1fxPrplwvLddmrrgHOKUKsg",
+      "y": "A-ooTs8zAWKGaWDR_L2y5lmUoK80HksSrI_ZpnP8yqw"
+    }
+  },
+  {
+    "crv": "Jubjub",
+    "id": "assertion-1",
+    "key_ref": "16290765-bb1f-4e12-be66-99fd362b956d",
+    "kty": "EC",
+    "private_key_hex": "05f4ed60728313c1582a1bcbe89b468ddaa5d3b0fc9bf40b4a8e433ebdd17ca4",
+    "public_jwk": {
+      "crv": "Jubjub",
+      "kty": "EC",
+      "x": "WlRVzVDOnuCX1IkVTYN4i4ixVh3LdhHoT_AOhkY1NxY",
+      "y": "bA7trAsprb8oeKcpSSLItNqs23dGyPnflnPTGkK5NxU"
+    }
+  },
+  {
+    "crv": "Ed25519",
+    "did": "did:midnight:preprod:6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801",
+    "id": "preprod-auth-main",
+    "key_ref": "a25f2fb8-64e1-4878-925d-9fc876111322",
+    "kty": "OKP",
+    "private_key_hex": "f5f882d0ea4096977ed7acc699782afac759dd153d599ac14b050bba94136947",
+    "public_jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "F7BMlwibMklvvrYBt-JSr99uU-6rvmNS7bXwwdGROzA"
+    }
+  },
+  {
+    "crv": "P-256",
+    "id": "passkey",
+    "key_ref": "053ada13-d15a-4565-ae60-1b089ca55791",
+    "kty": "EC",
+    "private_key_hex": "ca6ec68210a4de59398d7dd3f0c8914f14cd746106ad2275b872da0dee60a441",
+    "public_jwk": {
+      "crv": "P-256",
+      "kty": "EC",
+      "x": "CsCp3sjEVVN30748EzpxtzauvUaNxK9RXKhtaaLIc9s",
+      "y": "KYJcq8mkNq32aFGnfiYF0i5b9LgAFUdQFHbjvyJpgKY"
+    }
+  },
+  {
+    "crv": "Jubjub",
+    "did": "did:midnight:preprod:6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801",
+    "id": "one-more-key-1",
+    "key_ref": "b9700776-907a-4a80-8de9-e2783e7ab83f",
+    "kty": "EC",
+    "private_key_hex": "ded0423fcf43efece709d662b78cdcea99b9ea28d31fe89bf0382130bc99d61d",
+    "public_jwk": {
+      "crv": "Jubjub",
+      "kty": "EC",
+      "x": "FlicN1MPidM8zGQoDNo1ZkxvBBeANh0YmTeIwOG-fq8",
+      "y": "VobEz7KtTx7yCesJ2hta75iHvxV_U1bMLCL0dHYNBGA"
+    }
+  },
+  {
+    "crv": "Jubjub",
+    "did": "did:midnight:preprod:ce785669eac7048652d239bd40286240bbe09f9f9c5d614631a3b256a2fec68a",
+    "id": "demo-key-1",
+    "key_ref": "a5fe9d7d-6921-4b05-997b-aaefdbb8f903",
+    "kty": "EC",
+    "private_key_hex": "4989c69a1af9373f0f377875c2419bbdc2064feccde86e635f4d0c2acb2390fb",
+    "public_jwk": {
+      "crv": "Jubjub",
+      "kty": "EC",
+      "x": "RY-eI_Nv90HUoUuGuhOZ2m_SunX59uxoeOnHK-kTrJc",
+      "y": "ZpVKnUbRyN_6aStnI3wf6K4duw5nZd0JLprlaHIsFQg"
+    }
+  },
+  {
+    "crv": "Ed25519",
+    "did": "did:midnight:preprod:5914d2622abfb6f793c4b15c82692593500ecc481ae9b99a1655ad5e766dca4f",
+    "id": "demo-key-2",
+    "key_ref": "a49dcffc-95b7-4e0a-97ae-1b4a076de8da",
+    "kty": "OKP",
+    "private_key_hex": "32e424fb22913c8550e464d8dff305cb930f2244d614d996efab55522993debc",
+    "public_jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "LSG8-GqsO3QLoxzwJAC76SVx9W3IM7vuETZJM2nZwmc"
+    }
+  },
+  {
+    "crv": "Ed25519",
+    "did": "did:midnight:preprod:6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801",
+    "id": "demo-key-3",
+    "key_ref": "6e28977c-3c28-45bf-a5a2-69b10bfb42d7",
+    "kty": "OKP",
+    "private_key_hex": "bc1476ad08cb609066a7c35d18fbbf72d1ff074d9b01c83ad95f3e911faee4c4",
+    "public_jwk": {
+      "crv": "Ed25519",
+      "kty": "OKP",
+      "x": "UwYlsiiJb_jm05yg0QARlIrm75ZsVXNTE990P2NU7JI"
+    }
+  }
+]
