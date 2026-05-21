@@ -1577,6 +1577,15 @@ impl<D: DB> LedgerState<D> {
                                 }
                             }
                         }
+                        let metadata_size = crate::verify::contract_metadata_size(&cstate);
+                        let limit = self.parameters.max_contract_metadata_size;
+                        if metadata_size > limit {
+                            return Err(TransactionInvalid::ContractMetadataTooLarge {
+                                address: addr,
+                                size: metadata_size,
+                                limit,
+                            });
+                        }
                         res.contract = res.contract.insert(addr, cstate);
                     }
                 }

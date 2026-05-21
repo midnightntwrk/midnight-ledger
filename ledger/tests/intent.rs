@@ -28,7 +28,9 @@ use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Signature, SigningKey, Transaction,
     UnshieldedOffer, UtxoOutput, UtxoSpend,
 };
-use midnight_ledger::test_utilities::{test_intents, test_resolver, tx_prove, verifier_key};
+use midnight_ledger::test_utilities::{
+    dbg_fees_with_state, test_intents, test_resolver, tx_prove, verifier_key,
+};
 use midnight_ledger::verify::WellFormedStrictness;
 use midnight_ledger::{structure::StandardTransaction, test_utilities::TestState};
 use midnight_ledger_v9 as midnight_ledger;
@@ -702,9 +704,13 @@ async fn balanced_utxos_1_intent() {
     let res_unbalanced: Result<_, midnight_ledger::error::MalformedTransaction<InMemoryDB>> =
         proven_unbalanced_tx.well_formed(&state.ledger, strictness, state.time);
 
-    let fees = proven_unbalanced_tx
-        .fees_with_state(&state.ledger.parameters, &state.ledger, false)
-        .unwrap();
+    let fees = dbg_fees_with_state(
+        &proven_unbalanced_tx,
+        &state.ledger.parameters,
+        &state.ledger,
+        false,
+    )
+    .unwrap();
 
     match res_unbalanced {
         Ok(_) => panic!(

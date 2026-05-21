@@ -21,7 +21,7 @@ use midnight_ledger::{
         CNightGeneratesDustEvent, Intent, Signature, SigningKey, SystemTransaction, Transaction,
         UnshieldedOffer, UtxoOutput, UtxoSpend,
     },
-    test_utilities::{Resolver, TestState, test_resolver, tx_prove_bind},
+    test_utilities::{Resolver, TestState, dbg_fees_with_state, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
 };
 use midnight_ledger_v9 as midnight_ledger;
@@ -95,10 +95,13 @@ async fn test_registration_dust_payment() {
     // Erase for fees due to technicality of the runtime fees calculation being slightly inaccurate
     // due to only having the proof-erased tx to hand.
     let dust_fee = dbg!(
-        tx.erase_proofs()
-            .erase_signatures()
-            .fees_with_state(&state.ledger.parameters, &state.ledger, true)
-            .unwrap()
+        dbg_fees_with_state(
+            &tx.erase_proofs().erase_signatures(),
+            &state.ledger.parameters,
+            &state.ledger,
+            true,
+        )
+        .unwrap()
     );
     let result = state.apply(&tx, strictness).unwrap();
     assert!(matches!(result, TransactionResult::Success(_)));

@@ -230,6 +230,11 @@ pub enum TransactionInvalid<D: DB> {
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
+    ContractMetadataTooLarge {
+        address: ContractAddress,
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -310,6 +315,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
             MerkleTreeError(err) => err.fmt(formatter),
+            ContractMetadataTooLarge {
+                address,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
         }
     }
 }
@@ -395,6 +408,7 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
+    MetadataTooLarge { size: u64, limit: u64 },
 }
 
 impl Display for MalformedContractDeploy {
@@ -413,6 +427,10 @@ impl Display for MalformedContractDeploy {
             IncorrectChargedState => write!(
                 formatter,
                 "contract deployment contained an incorrectly computed map of charged keys"
+            ),
+            MetadataTooLarge { size, limit } => write!(
+                formatter,
+                "contract metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
