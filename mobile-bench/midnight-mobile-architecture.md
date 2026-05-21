@@ -1681,3 +1681,100 @@ consistent with the real-DID timings: iOS Simulator runs proving
 Android-stack overhead); the real S24 Ultra sits between them,
 closer to the iOS Simulator side because real silicon avoids the
 emulator's nested-virt cost.
+
+### Real-device sweep (Samsung S24 Ultra, 2026-05-21)
+
+Captured directly from the Benchmark tab on a physical S24 Ultra
+(12 GB RAM, Android 16, One UI) after landing four patches:
+
+- App-private SRS cache (`/data/data/<app-id>/cache/midnight-pp/`,
+  app-writable), which makes `MidnightDataProvider::OnDemand` fetches
+  from `srs.midnight.network` work without `adb push`.
+- `prove-timing` tracing span around `tx::prove::prove` (separates
+  `build_resolver` cost from the halo2 prove for DID writes — does
+  *not* fire on the Benchmark tab, which has its own per-phase
+  timings from `RunStats`).
+- Benchmark tab: user-settable upper bound for "Run all"
+  (`BENCH_DEFAULT_MAX_K = 17`, accepts 1..20), and a
+  `/proc/self/{status,stat}` sampler showing live `RSS MiB` and
+  `CPU %` pills (Android/Linux only).
+- `BENCH_DEFAULT_MAX_K = 17` based on the OOM characterisation
+  below.
+
+| k  | hashes | keygen   | prove    | verify    | proof bytes |
+|----|-------:|---------:|---------:|----------:|------------:|
+| 4  | 1      | 73 ms    | 66 ms    | 5 ms ✓    | 2 933 B     |
+| 5  | 1      | 58 ms    | 73 ms    | 5 ms ✓    | 2 933 B     |
+| 6  | 2      | 64 ms    | 81 ms    | 5 ms ✓    | 2 933 B     |
+| 7  | 3      | 86 ms    | 102 ms   | 5 ms ✓    | 2 933 B     |
+| 8  | 6      | 85 ms    | 142 ms   | 4 ms ✓    | 2 933 B     |
+| 9  | 12     | 119 ms   | 233 ms   | 5 ms ✓    | 2 933 B     |
+| 10 | 24     | 160 ms   | 369 ms   | 5 ms ✓    | 2 933 B     |
+| 11 | 49     | 251 ms   | 584 ms   | 5 ms ✓    | 2 933 B     |
+| 12 | 98     | 432 ms   | 954 ms   | 8 ms ✓    | 2 933 B     |
+| 13 | 195    | 682 ms   | 1.65 s   | 5 ms ✓    | 2 933 B     |
+| 14 | 390    | 1.25 s   | 3.01 s   | 6 ms ✓    | 2 933 B     |
+| 15 | 780    | 2.29 s   | 5.80 s   | skipped   | 2 933 B     |
+| 16 | 1 560  | 4.57 s   | 11.3 s   | skipped   | 2 933 B     |
+| 17 | 3 121  | 9.73 s   | 22.3 s   | skipped   | 2 933 B     |
+| 18 | 6 242  | 19.8 s   | 45.2 s   | skipped   | 2 933 B     |
+| 19 | —      | —        | OOM ‖    | —         | —           |
+| 20 | —      | —        | OOM ‖    | —         | —           |
+
+#### Cross-check vs. the emulator table
+
+- For k ≥ 9, the S24 Ultra is **roughly 1.5–2× faster than the
+  Pixel Fold emulator** at the same k (e.g. k=14 prove: 3.01 s vs.
+  4.71 s; k=16 prove: 11.3 s vs. 23.2 s). The gap narrows at low k
+  where fixed costs dominate.
+- The k=6 and k=12 `EACCES` failures from the emulator sweep
+  (footnote †) **did not recur** — the app-private cache patch
+  resolved the OnDemand-fetch-into-shell-owned-dir issue. Every
+  k from 4 to 18 ran without manual `adb push`, and the missing
+  files (`bls_midnight_2p6`, `bls_midnight_2p12`, …) were
+  streamed from `srs.midnight.network` on first use.
+
+#### OOM characterisation (supersedes earlier ‡ note)
+
+The earlier ‡ note in this section guessed that a 12 GB-class device
+would have enough headroom for the full k=1..20 sweep to land
+cleanly. **Today's runs disprove that.** With the WebView resident
+in the same process (DID contract WASM + `compact-runtime` WASM +
+`onchain-runtime-v3` + `ledger-v8` + V8 + Chromium WebView itself),
+the practical ceiling is **two k-levels lower** than the bare
+proving stack would suggest:
+
+| k       | Behaviour                                                                                            |
+|---------|------------------------------------------------------------------------------------------------------|
+| ≤ 17    | Safe — every run completes without memory pressure.                                                  |
+| 18      | Marginal. Passes in a clean process state; OOMs when the device is already under memory pressure (lmkd actively killing other apps before our run). |
+| 19      | **Always OOMs.** Two failure signatures observed: (a) Rust allocator → `memory allocation of 8456 bytes failed` (Rust's default `alloc_error_handler` aborts); (b) Chromium WebView allocator → `[FATAL:guarded_page_allocator_posix.cc] Check failed: mprotect: Out of memory (12)` during a WebView allocation while halo2 keygen is holding the bulk of working memory. Both point at the same root cause — the kernel cannot satisfy the next allocation — but signature (b) is direct evidence the WebView is competing for pages, not idle. |
+| ≥ 20    | Always OOMs (not separately retried).                                                                |
+
+`setrlimit(RLIMIT_AS / RLIMIT_DATA, RLIM_INFINITY)` is already
+applied at process start — `/proc/<pid>/limits` confirms
+`unlimited` — so the ceiling is **not** rlimit-enforced. With the
+WebView accounted for, the residual cap on this device matches
+"how many large mmaps + working buffers can coexist with a fully
+loaded Chromium + V8 in one Android process."
+
+#### Implications
+
+‖ Two patches in our backlog would move the ceiling. Both are on
+the "Android optimisation punch list" produced 2026-05-21:
+
+1. **Suspend / destroy the WebView during a Benchmark sweep**
+   (~ 1 h work). The benchmark crate doesn't talk to JS at all;
+   keeping the WebView alive only costs us ~ 200–400 MB of
+   resident pages. Pausing or freeing the WebView before each
+   row should move k=19 from "always OOMs" to "passes" and k=20
+   from "always OOMs" to "marginal".
+2. **Process-wide `Resolver` `OnceLock`** (~ 30 min work). Caches
+   the parsed halo2 params across proves so subsequent rows
+   don't pay keygen + SRS-deserialise per row. Doesn't move the
+   peak as much as (1) but reduces per-row working-set churn.
+
+The durable fix is the "remove the JS / JSBridge layer" research
+thread (separate report, 2026-05-21): without the WebView at all,
+the same arm64 process should land k=20 comfortably and free up
+the disk + binary-size cost of the bundled npm packages too.

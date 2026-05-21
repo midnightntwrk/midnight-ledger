@@ -88,7 +88,14 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
     tx: UnprovenTx,
     mut rng: R,
 ) -> Result<ProvenTx, TxError> {
+    // Coarse timing split — useful for diagnosing cold-start latency
+    // on mobile. The first prove on a fresh device pays for SRS file
+    // I/O (or download from `srs.midnight.network`) + halo2 keygen on
+    // top of the proof itself. Logging at `info` so the line shows up
+    // in the Logs tab without changing `RUST_LOG`.
+    let t_resolver = std::time::Instant::now();
     let resolver = build_resolver()?;
+    let resolver_ms = t_resolver.elapsed().as_millis();
     let provider = LocalProvingProvider {
         rng: rng.split(),
         params: &resolver,
@@ -108,11 +115,20 @@ pub(crate) async fn prove<R: Rng + CryptoRng + SplittableRng>(
     // to local state — here `provider` borrows `resolver`, so
     // `spawn_blocking` (which requires `'static + Send`) wouldn't
     // fit without a heavier refactor.
+    let t_prove = std::time::Instant::now();
     let proved = tokio::task::block_in_place(|| {
         tokio::runtime::Handle::current()
             .block_on(tx.prove(provider, &INITIAL_COST_MODEL))
     })
     .map_err(|e| TxError::Prove(e.to_string()))?;
+    let prove_ms = t_prove.elapsed().as_millis();
+    tracing::info!(
+        target: "prove-timing",
+        resolver_ms,
+        prove_ms,
+        total_ms = resolver_ms + prove_ms,
+        "prove split: resolver+params load vs halo2 prove",
+    );
     // Seal: PedersenRandomness → PureGeneratorPedersen so the
     // serialized tx carries the `pedersen-schnorr[v1]` header tag
     // the chain's deserializer expects. Without this, the node

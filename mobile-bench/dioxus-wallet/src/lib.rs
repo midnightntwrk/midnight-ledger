@@ -272,15 +272,31 @@ fn desktop_or_mobile_launch() {
 /// at a known cache directory by setting `$MIDNIGHT_PP`. Android's
 /// process environment has no `$HOME`, so without this the provider
 /// fails with "Could not determine $HOME, $XDG_CACHE_HOME, or
-/// $MIDNIGHT_PP". `/data/local/tmp/midnight-pp` matches the
-/// `dioxus-bench` convention and is readable by the app sandbox on
-/// emulator + debuggable builds. SRS params can be pre-pushed there
-/// via `adb push` — see [DEPLOY_TO_DEVICE.md](../../DEPLOY_TO_DEVICE.md).
+/// $MIDNIGHT_PP". We prefer the app-private cache dir
+/// (`/data/data/<applicationId>/cache/midnight-pp/`) because it is
+/// writable by the app process — `MidnightDataProvider` can then
+/// stream missing `bls_midnight_2pN` files down from
+/// `https://srs.midnight.network/` on first prove, instead of
+/// silently failing with EACCES against `/data/local/tmp/`. Fall back
+/// to the legacy `adb push` path if creation fails (e.g. system image
+/// quirks); existing pre-pushed files still get picked up.
 #[cfg(target_os = "android")]
 #[unsafe(no_mangle)]
 pub extern "C" fn main() -> i32 {
-    let pp = "/data/local/tmp/midnight-pp";
-    let _ = std::fs::create_dir_all(pp);
+    // Keep this in lockstep with `applicationId` in
+    // `android/app/build.gradle.kts`. If the rename happens, both
+    // must change together.
+    const APP_ID: &str = "io.iohk.midnight.wallet";
+    let private_pp = format!("/data/data/{APP_ID}/cache/midnight-pp");
+    let pp: &str = if std::fs::create_dir_all(&private_pp).is_ok() {
+        // Leak to get a `&'static str` — runs once at startup, the
+        // leaked bytes live for the lifetime of the process anyway.
+        Box::leak(private_pp.into_boxed_str())
+    } else {
+        let legacy = "/data/local/tmp/midnight-pp";
+        let _ = std::fs::create_dir_all(legacy);
+        legacy
+    };
     // SAFETY: This runs once at process start, before any Tokio /
     // thread spawn — no other thread is racing on the environment.
     unsafe {

@@ -4913,6 +4913,47 @@ enum BenchOutcome {
 const BENCH_MAX_K: u32 = contract_benchmark::MAX_K;
 const BENCH_MIN_K: u32 = contract_benchmark::MIN_K;
 const BENCH_MAX_VERIFIABLE_K: u32 = contract_benchmark::MAX_VERIFIABLE_K;
+/// Empirically-safe default for the "Run all" upper bound on real
+/// mobile hardware. S24 Ultra OOMs on k=18 with the WebView resident
+/// (see `mobile-bench/midnight-mobile-architecture.md` §9). Desktop
+/// runs can override via the number input next to the Run button.
+const BENCH_DEFAULT_MAX_K: u32 = 17;
+
+/// Read live RSS (in KiB) and total CPU jiffies for the current process
+/// from `/proc/self/{status,stat}`. Returns `None` on parse failure or
+/// on platforms without `/proc` (macOS / iOS). Cheap enough to poll a
+/// few times a second.
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn proc_self_stats() -> Option<(u64, u64)> {
+    let status = std::fs::read_to_string("/proc/self/status").ok()?;
+    let rss_kb: u64 = status
+        .lines()
+        .find(|l| l.starts_with("VmRSS:"))?
+        .split_whitespace()
+        .nth(1)?
+        .parse()
+        .ok()?;
+    let stat = std::fs::read_to_string("/proc/self/stat").ok()?;
+    // `comm` is in parens and may contain spaces — split after the
+    // last `)` to land at field 2 (state). Then utime is field 13
+    // (index 11 after that split) and stime is field 14 (index 12).
+    let after = &stat[stat.rfind(')')? + 2..];
+    let fields: Vec<&str> = after.split_whitespace().collect();
+    let utime: u64 = fields.get(11)?.parse().ok()?;
+    let stime: u64 = fields.get(12)?.parse().ok()?;
+    Some((rss_kb, utime + stime))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn proc_self_stats() -> Option<(u64, u64)> {
+    None
+}
+
+/// Linux/Android scheduler clock tick — `sysconf(_SC_CLK_TCK)`.
+/// Hard-coded so we don't pay a libc dep on non-Android hosts; this
+/// value is `100` on every Android device and effectively every Linux
+/// distro built in the last decade.
+const CLK_TCK: u64 = 100;
 
 /// Benchmark tab — runs `contract-benchmark::run_proof(k)` for
 /// `k ∈ MIN_K..=MAX_K` and shows per-row prove timings.
@@ -4944,6 +4985,40 @@ fn BenchmarkTab() -> Element {
     // from kicking off a second sweep on top — and disables individual
     // Run buttons while the sweep is running for the same reason.
     let mut sweeping = use_signal(|| false);
+    // Upper bound for the "Run all" sweep — user-settable so the
+    // empirically-safe `BENCH_DEFAULT_MAX_K` (=17 on S24 Ultra) can
+    // be raised on roomier desktops or lowered on tighter devices
+    // without rebuilding. Per-row Run buttons ignore this cap, so
+    // the user can still attempt k > max manually if they want to
+    // measure where it OOMs.
+    let mut max_k = use_signal(|| BENCH_DEFAULT_MAX_K);
+    // Live process stats sampled from `/proc/self/{status,stat}` on
+    // Android/Linux. macOS/iOS leave these as `None` (no `/proc`).
+    let mut rss_kb = use_signal::<Option<u64>>(|| None);
+    let mut cpu_pct = use_signal::<Option<f32>>(|| None);
+    // Long-running sampler — ticks every 500 ms regardless of bench
+    // state so the user sees background drift, not just spikes
+    // during a sweep. The future lives for the component's lifetime;
+    // Dioxus tears it down when the tab unmounts.
+    use_future(move || async move {
+        let mut prev: Option<(u64, std::time::Instant)> = None;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+            let Some((rss, jiffies)) = proc_self_stats() else {
+                continue;
+            };
+            rss_kb.set(Some(rss));
+            let now = std::time::Instant::now();
+            if let Some((prev_jiff, prev_t)) = prev {
+                let dt = (now - prev_t).as_secs_f32();
+                if dt > 0.0 {
+                    let djiff = jiffies.saturating_sub(prev_jiff) as f32;
+                    cpu_pct.set(Some(djiff / (CLK_TCK as f32 * dt) * 100.0));
+                }
+            }
+            prev = Some((jiffies, now));
+        }
+    });
 
     // Helper: run `contract_benchmark::run_proof(k)` on the tokio
     // blocking thread pool. `run_proof` is `async fn`-shaped but the
@@ -5004,16 +5079,21 @@ fn BenchmarkTab() -> Element {
         if *sweeping.read() {
             return;
         }
+        let cap = (*max_k.read()).clamp(BENCH_MIN_K, BENCH_MAX_K);
         sweeping.set(true);
-        // Mark every row as pending up front so the user sees the queue.
+        // Mark every queued row (≤ cap) as pending up front so the
+        // user sees the queue. Rows above the cap stay in whatever
+        // state they were in — the sweep simply doesn't touch them.
         rows.with_mut(|m| {
-            for r in m.values_mut() {
-                r.running = true;
-                r.last = None;
+            for (k, r) in m.iter_mut() {
+                if *k <= cap {
+                    r.running = true;
+                    r.last = None;
+                }
             }
         });
         spawn(async move {
-            for k in BENCH_MIN_K..=BENCH_MAX_K {
+            for k in BENCH_MIN_K..=cap {
                 let outcome = match run_bench(k).await {
                     Ok(s) => stats_to_outcome(s),
                     Err(e) => BenchOutcome::Err(e),
@@ -5060,12 +5140,47 @@ fn BenchmarkTab() -> Element {
                  is skipped. First call at a given k may stall on SRS \
                  download (srs.midnight.network)."
             }
-            div { class: "row",
+            div { class: "row", style: "align-items: center; gap: 12px; flex-wrap: wrap;",
                 button {
                     class: "cta",
                     disabled: is_sweeping,
                     onclick: run_all,
                     if is_sweeping { "Running…" } else { "Run all" }
+                }
+                label { style: "display: inline-flex; align-items: center; gap: 6px;",
+                    "up to k ="
+                    input {
+                        r#type: "number",
+                        min: "{BENCH_MIN_K}",
+                        max: "{BENCH_MAX_K}",
+                        value: "{max_k}",
+                        disabled: is_sweeping,
+                        style: "width: 4.5em;",
+                        oninput: move |evt| {
+                            if let Ok(v) = evt.value().parse::<u32>() {
+                                max_k.set(v.clamp(BENCH_MIN_K, BENCH_MAX_K));
+                            }
+                        },
+                    }
+                }
+            }
+
+            // Live process stats. Always visible on Android/Linux so
+            // the user sees baseline RSS before a sweep starts and the
+            // spike during it. On macOS/iOS `proc_self_stats` returns
+            // `None` and the pills stay hidden.
+            if let Some(rss) = *rss_kb.read() {
+                div { class: "metrics-summary",
+                    div { class: "metric-pill",
+                        span { class: "k", "RSS" }
+                        span { class: "v", "{rss / 1024} MiB" }
+                    }
+                    if let Some(pct) = *cpu_pct.read() {
+                        div { class: "metric-pill",
+                            span { class: "k", "CPU" }
+                            span { class: "v", "{pct:.0}%" }
+                        }
+                    }
                 }
             }
 
