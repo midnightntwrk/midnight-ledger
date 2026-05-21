@@ -98,7 +98,7 @@
         rust-build = self.packages.${system}.rust-build-toolchain;
         ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
-        proof-server-version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+        proof-server-version = (builtins.fromTOML (builtins.readFile ./proof-server/Cargo.toml)).package.version;
         mkWasm = { name, crate-name, package-name, require-artifacts ? false, features ? [], experimental ? false }:
           self.lib.${system}.bagel-wasm {
             inherit name crate-name package-name features;
