@@ -539,7 +539,7 @@ pub extern "C" fn main() -> i32 {
 The matching SRS files are pre-pushed via `adb push` (see DEPLOY guide
 §2.2 below).
 
-### 4.2 `proof-server-http` — desktop-only HTTP wrapper
+### 4.2 `proof-server-http` — in-process HTTP wrapper (desktop today)
 
 `mobile-bench/dioxus-wallet/Cargo.toml:37` gates `proof-server-http`,
 which spins up `prover-core`'s actix-web server in-process at startup.
@@ -556,12 +556,142 @@ run the *wallet* in debug for fast iteration while still proving through
 a release-built binary. Same intra-process address space, no IPC cost
 beyond the local `fetch`.
 
-It's desktop-only because actix doesn't cross-compile to Android, and we
-don't need the wrapper there — the APK is release-mode by default and
-proves at the same speed as a desktop release build. `js-bridge` and
-`proof-server-http` are otherwise orthogonal; `proof-server-http`
-implies `js-bridge` only because the JS pipeline is the original
-consumer.
+**Today it is desktop-only by configuration** (`prover-core` is gated to
+`cfg(all(not(target_os = "android"), not(target_os = "ios")))` in
+`Cargo.toml:117`), not by design. `js-bridge` and `proof-server-http`
+are otherwise orthogonal; `proof-server-http` implies `js-bridge` only
+because the JS pipeline is the original consumer. §4.3 below covers
+why we want to lift the desktop-only gate and what it takes.
+
+### 4.3 Local proof-server on mobile (target architecture)
+
+The goal is to run **the same `127.0.0.1:<port>/prove` HTTP wrapper
+inside the Android / iOS app**, so that *any* consumer — the wallet's
+own Rust path, the WebView JS bundle, or upstream Midnight TS/JS DApp
+packages embedded in a future host app — can use the standard
+`proofServerUrl` configuration shape the upstream SDK already expects.
+This unifies the proving call sites:
+
+```
+                                ┌──────────────────────────┐
+                  POST /prove   │                          │
+   Rust  ──────────────────────►│                          │
+                                │   in-process actix-web   │
+                                │   on 127.0.0.1:<port>    │
+   WebView JS  ────────────────►│   = prover-core release  │
+   (fetch via window.fetch)     │                          │
+                                └──────────────────────────┘
+   Upstream Midnight TS         ▲
+   (configured with             │
+   `proofServerUrl =            │
+   "http://127.0.0.1:<port>"`)  │
+   ─────────────────────────────┘
+```
+
+#### Why the loopback URL works inside the app
+
+- **Android.** The WebView (Chromium) runs inside the same Linux
+  process as the Rust code. Loopback (`127.0.0.1`) is in-namespace
+  and needs no permission. Cleartext loopback is allowed by default
+  on Android 9+ when targeting older API levels; for Android 9+
+  with target SDK ≥ 28 we'll add a `network_security_config.xml`
+  that explicitly opts loopback in:
+  ```xml
+  <network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+      <domain includeSubdomains="true">127.0.0.1</domain>
+      <domain includeSubdomains="true">localhost</domain>
+    </domain-config>
+  </network-security-config>
+  ```
+  and reference it from `AndroidManifest.xml` via
+  `android:networkSecurityConfig="@xml/network_security_config"`.
+- **iOS.** `WKWebView` likewise reaches `127.0.0.1` inside the app
+  sandbox. ATS is already relaxed via `NSAllowsArbitraryLoads: true`
+  in `Info.plist` (§5b.1) so cleartext loopback isn't blocked.
+- **JS-side configuration.** The upstream Midnight SDK reads its
+  proof-server URL from a config object (typically
+  `{ proofServerUrl: "http://..." }`). The Rust App already exposes
+  the chosen URL via `set_proof_server_url`; we inject it into the
+  WebView at boot the same way `<head>` injection currently
+  delivers the `<importmap>`:
+  ```rust
+  let cfg = cfg.with_custom_head(format!(
+      "<script>window.midnightProofServerUrl = {url:?};</script>{rest}",
+      url = chosen_url, rest = existing_head));
+  ```
+  JS bundle reads `window.midnightProofServerUrl` and plugs it into
+  whichever SDK factory it uses. No native bridge call needed.
+
+#### What needs to change
+
+1. **Cargo wiring.** Move the `prover-core` dependency out of the
+   desktop-only `[target.…]` block in
+   `mobile-bench/dioxus-wallet/Cargo.toml`. The `proof-server-http`
+   feature already names `prover-core/proof-server-http` as its
+   transitive dep; we just need that target to be reachable on
+   Android and iOS too. `proof-server-http` is opt-in, so this
+   doesn't bloat the default mobile build.
+2. **Verify actix-web cross-compiles to `aarch64-linux-android` /
+   `aarch64-apple-ios`.** The doc previously claimed actix doesn't
+   cross-compile to Android. Re-checking against the current
+   pinning (`actix-web ^4.13`, `default-features = false`, features
+   `["macros", "compress-brotli", "compress-gzip", "cookies",
+   "http2"]` in `proof-server/Cargo.toml:27`), this should compile
+   cleanly — actix-web 4.x is pure-Rust except for compression
+   crates which themselves cross-compile cleanly. Plan: try
+   `cargo ndk -t arm64-v8a build --release -p dioxus-wallet --lib
+   --features js-bridge,proof-server-http,preprod-live` and fix the
+   first error if it surfaces.
+3. **Fallback if actix is too heavy.** If actix-web 4.x trips a
+   build error we can't resolve in <1 day, drop to a minimal
+   `hyper` or `tiny_http` server inside `prover-core` behind the
+   same feature flag. The HTTP surface is just `POST /prove` and
+   `GET /fetch-params/{k}` (≤ 200 lines of glue); we don't need
+   actix's middleware / extractors for this in-process use case.
+   The `POST /prove` contract — `application/octet-stream` body
+   containing SCALE-encoded `ProofPreimageVersioned` plus optional
+   `ProvingKeyMaterial`, returning SCALE-encoded `Proof` — is
+   framework-independent.
+4. **WebView `<head>` injection of `window.midnightProofServerUrl`.**
+   See snippet above. One-line addition to `lib.rs::with_js_bridge_inner`.
+5. **`network_security_config.xml`** as shown above. One new file
+   in `android/app/src/main/res/xml/`, one attribute in the
+   manifest's `<application>` tag.
+
+#### Why this is worth doing
+
+- **Symmetry with desktop.** Today the wallet's own Rust path uses
+  `prove_via_http` when `PROOF_SERVER_URL` is set, but the WebView
+  JS bundle does composition only — proving is delegated back to
+  native Rust via the `DioxusEvalBridge`. Once the mobile
+  proof-server is up, the JS bundle can call `fetch(<local
+  url>/prove, …)` and the architecture stops having two parallel
+  proof-routing mechanisms in one process.
+- **Drop-in for upstream DApp consumers.** Any team taking the
+  upstream Midnight TS/JS DApp stack and embedding it inside an
+  Android / iOS host app gets a proof-server "for free" — they
+  configure their SDK with the URL we surface and don't have to
+  ship their own.
+- **It is *not* a replacement** for the in-process Rust path. The
+  Rust path (§4.1) stays the production default for the wallet's
+  own DID writes — it skips the HTTP round-trip entirely. The
+  HTTP wrapper exists for the cases that need it: JS consumers,
+  debug-built wallet → release-built prover, and any future
+  Native module hosted by RN / Capacitor (§7).
+
+#### Verification status
+
+- ✅ Design captured here.
+- ⏳ `actix-web` cross-compile to `aarch64-linux-android` — not
+  yet attempted; expected to work but flagged for actual build
+  verification before claiming the feature is shippable.
+- ⏳ `network_security_config.xml` wiring — not yet added.
+- ⏳ `window.midnightProofServerUrl` `<head>` injection — not yet
+  added.
+
+These three remaining items are tracked together; the change is
+small (~ 100 LoC + one XML resource + one `Cargo.toml` move).
 
 ---
 
@@ -848,7 +978,7 @@ skips the dual-init):
 | (none — default)                           | + WebView bundle + DID writes via `DioxusEvalBridge` (`js-bridge` is on by default) | UI + read-only on-chain                                | UI + read-only on-chain                                |
 | `--features js-bridge`                     | (same as default on desktop)                                      | + WebView bundle + DID writes (no Node)                | + WebView bundle + DID writes via WKWebView            |
 | `--no-default-features`                    | UI + read-only on-chain (resolve, balance, DUST sync), no WebView | n/a (mobile builds always pass `js-bridge` explicitly) | n/a (mobile builds always pass `js-bridge` explicitly) |
-| `--features proof-server-http`             | + in-process actix proof-server (implies `js-bridge`)             | not supported (actix does not cross-compile)           | not supported (same actix constraint as Android)       |
+| `--features proof-server-http`             | + in-process actix proof-server (implies `js-bridge`)             | **in-flight prototype** (§4.3, §7.3a) — Cargo dep currently desktop-only, cross-compile not yet attempted | **in-flight prototype** (§4.3, §7.3a) — same status as Android |
 | `--features preprod-live`                  | Operator PreProd seed + 3 pre-seeded DIDs                         | same                                                   | same                                                   |
 | `--features js-bridge,preprod-live`        | full DID writes against PreProd                                   | full DID writes against PreProd                        | full DID writes against PreProd                        |
 
@@ -1045,6 +1175,198 @@ The semantics the TurboModule on the JS side would expose:
 Threading: the Rust functions block on the calling (native) thread.
 The TurboModule wrapper is responsible for taking that off the JS
 thread — see §7.6.
+
+### 7.3a Alternative integration: embedded HTTP proof-server
+
+The native-bindings shape above (§7.3) is the deepest integration
+— the RN app drives proving via a thin C ABI and the WASM-in-JS
+problem is bypassed because no Compact-runtime WASM ever loads
+in the JS engine.
+
+An **alternative, lighter-touch shape** lets the host keep using
+upstream Midnight TS/JS packages (including
+`@midnight-ntwrk/api`) **unmodified**. Those packages are built
+around a single config knob — `proofServer` — that points at an
+HTTP `/prove` endpoint. As long as we surface such a URL, the
+packages don't care whether the server is on the public internet,
+on a desktop next door, or **inside the same Android/iOS process**.
+
+This is the same `prover-core`-as-actix-server pattern already
+running on desktop (§4.2), exposed to the mobile host:
+
+```
+┌──────────────────────── React Native app (Android or iOS) ────────────────────────┐
+│                                                                                   │
+│  1. App starts. A small native module                                             │
+│     (Rust ↔ RN bridge via NAPI / JSI / TurboModule)                               │
+│     spawns the embedded proof-server:                                             │
+│                                                                                   │
+│         let url = prover_core::spawn_proof_server();        // 127.0.0.1:57610   │
+│         NativeModules.MidnightProver.url() === url          // exposed to JS     │
+│                                                                                   │
+│  2. RN JS imports the upstream packages **unmodified**:                           │
+│                                                                                   │
+│         import { buildWallet } from "@midnight-ntwrk/api";                        │
+│         import { httpClientProofProvider }                                        │
+│             from "@midnight-ntwrk/midnight-js-http-client-proof-provider";        │
+│                                                                                   │
+│  3. Wire them with the URL from step 1:                                           │
+│                                                                                   │
+│         const proofServerUrl = await NativeModules.MidnightProver.url();          │
+│         const config = {                                                          │
+│           proofServer: proofServerUrl,            // ← loopback URL               │
+│           indexer:     "https://indexer.preprod.midnight.network/...",            │
+│           node:        "wss://rpc.preprod.midnight.network/...",                  │
+│           networkId:   "preprod",                                                 │
+│         };                                                                        │
+│         const wallet = await buildWallet(config, ...);                            │
+│                                                                                   │
+│  4. RN JS calls `wallet.addAlsoKnownAs(...)`. Internally:                         │
+│                                                                                   │
+│         httpClientProofProvider(config.proofServer, zk)                           │
+│             .proveTx(unprovenTx)                                                  │
+│         → fetch("http://127.0.0.1:57610/prove", { body: scaled })                 │
+│         → lands at our Rust thread, halo2-kzg proves natively, response back.     │
+│                                                                                   │
+│     From the `api` package's perspective it's an ordinary HTTP proof-server.      │
+│                                                                                   │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Why the loopback URL works inside an RN app
+
+- **Android.** RN's `fetch` is OkHttp under the hood. `127.0.0.1`
+  resolves to the **app's own loopback**, not the emulator host —
+  exactly the address actix is binding to. No permission needed;
+  cleartext-to-loopback is allowed if the manifest opts loopback
+  in via a `network_security_config.xml` referencing
+  `127.0.0.1` and `localhost` (one new file, one attribute on the
+  manifest's `<application>` tag — same XML shown in §4.3).
+- **iOS.** RN's `fetch` is `NSURLSession`. Loopback is allowed by
+  default; the `NSAllowsLocalNetworking` plist key (or the
+  existing `NSAllowsArbitraryLoads` we use today) handles
+  cleartext.
+- **The URL is "real" enough.** From the TS code's perspective
+  there's no difference between `http://127.0.0.1:57610` and
+  `https://proof.midnight.network`. `httpClientProofProvider`
+  doesn't care.
+
+#### What this shape buys
+
+- **Zero changes to the upstream TS packages.** The RN host
+  imports `@midnight-ntwrk/api` exactly as a browser DApp would.
+- **One Rust artifact serves everyone.** The same in-process
+  actix server can also be hit by:
+  - the wallet's own Rust path (via `prove_via_http` at
+    `wallet-core/src/tx/prove.rs:136`),
+  - an embedded WebView running upstream JS (the dioxus-wallet
+    pattern, §4.3),
+  - the RN host's JS (this pattern).
+- **No JNI / cbindgen / TurboModule for proving itself.** The
+  only Native Module the host needs is a tiny one that exposes
+  `MidnightProver.url()`. Everything else is plain `fetch`.
+
+#### What this shape does **not** solve
+
+Surfacing the proof-server URL is the easy part. The wider `api`
+package brings several other concerns that don't trivially map
+onto RN even with the URL in hand:
+
+1. **WASM dependencies in the JS engine.**
+   `@midnight-ntwrk/api` transitively imports
+   `@midnight-ntwrk/compact-runtime`, `onchain-runtime-v3`,
+   `ledger-v8` — all are WASM-bearing.
+   **Hermes (RN's default JS engine since 0.70) does not execute
+   WebAssembly.** Three workarounds:
+   - Switch RN to JSC (still supported but no longer default;
+     JSC does support WASM). Cost: larger binary, no
+     Hermes-specific perf wins.
+   - Host the WASM-using parts inside a hidden `WebView`
+     component within the RN screen and bridge to it from RN
+     JS. **This is essentially what `dioxus-wallet` does
+     internally** — the WebView is just an "execution sandbox
+     for the Compact-runtime WASMs."
+   - Replace the WASM modules with native ports exposed via a
+     Native Module (the longest path; converges with §7.3).
+2. **`zkConfigProvider`.** Upstream's provider expects to fetch
+   verifier keys from a filesystem path (Node fs) or HTTP. On
+   RN you'd point this at either (a) a Native-Module-exposed
+   reader pulling keys from an `assets` bundle, or (b) an HTTP
+   endpoint the **same** embedded actix server already serves
+   (`/fetch-params/{k}` exists today in
+   `proof-server/src/endpoints.rs:78–86`). Approach (b) keeps
+   the URL pattern uniform.
+3. **`walletProvider` / `midnightProvider`.** The `api` package
+   expects these to be supplied by the host — they're the
+   wallet's signing + UTxO-coin-key interface. On RN that's a
+   Native Module (Kotlin/Swift, or Rust + JSI).
+4. **`indexerPublicDataProvider`.** Pure HTTP, works on RN
+   unchanged.
+5. **Transaction submission.** Upstream's TS api ultimately
+   uses Rust (via `subxt`) for chain submission. Cleanest path
+   on RN: a Native Module call rather than reimplementing in JS.
+
+#### When to pick §7.3 vs §7.3a
+
+| Concern                          | §7.3 (native bindings)       | §7.3a (embedded HTTP server)             |
+|----------------------------------|------------------------------|------------------------------------------|
+| Surface a host integrates with   | C ABI / TurboModule          | `fetch` to a localhost URL + tiny module |
+| WASM-in-JS-engine                | Avoided — no WASM in JS      | Still a problem (mitigations above)      |
+| Reuse of upstream TS DApp stack  | Low (rewrite call sites)     | High (drop-in)                           |
+| Build artifacts shipped          | One `.so` / `.dylib`         | Same `.so` / `.dylib` + minimal Native Module + optional WebView |
+| Apt for                          | Apps purpose-built for mobile, ground-up | Apps that already speak the upstream TS shape and want to keep it |
+
+These aren't mutually exclusive. A host can ship both: the
+TurboModule (§7.3) for performance-critical operations the host
+controls directly, the local HTTP server (§7.3a) for any
+upstream TS package the host pulls in.
+
+#### Prototype plan (in flight)
+
+To validate the §7.3a shape concretely on Android/iOS, we plan
+a small prototype on top of the existing `proof-server-http`
+feature (no new feature flag — that one is already structured
+correctly, it just needs to compile on mobile):
+
+1. **Cargo move.** Lift the `prover-core` dep out of the
+   desktop-only target gate in `mobile-bench/dioxus-wallet/Cargo.toml`
+   so `--features proof-server-http` is reachable on
+   `aarch64-linux-android` and `aarch64-apple-ios`.
+2. **Cross-compile attempt.** Run
+   `cargo ndk -t arm64-v8a build --release -p dioxus-wallet
+   --lib --features js-bridge,proof-server-http,preprod-live`.
+   Fix the first error if one surfaces. With `actix-web ^4.13`
+   pinned at `default-features = false` (`proof-server/Cargo.toml:27`)
+   the build should land; if it doesn't, drop to a tiny `hyper`
+   server behind the same feature (the HTTP surface is just two
+   endpoints — `POST /prove` and `GET /fetch-params/{k}` — ≤ 200
+   LoC of glue).
+3. **Spawn on startup.** Wire `spawn_proof_server` into the
+   Android `main()` and the iOS `start_app()` so the server is
+   up before the UI renders. Existing
+   `bridge::spawn_proof_server` (`bridge.rs:253`) is the entry
+   point; today the non-desktop targets compile out the body to
+   a stub, which is exactly the gate we'd remove.
+4. **Network security on Android.** Add
+   `android/app/src/main/res/xml/network_security_config.xml`
+   permitting cleartext to `127.0.0.1` + `localhost`, and
+   reference it from the manifest's `<application>` tag.
+5. **End-to-end probe.** Add a "Probe proof-server" button to
+   the dioxus-wallet's Settings tab that just calls
+   `fetch(window.midnightProofServerUrl + "/healthz")` (or
+   equivalent) from the WebView. Confirms the URL is reachable
+   from JS-in-WebView land, which is the same code path an RN
+   `fetch` would take. If healthy, swap to a real `POST /prove`
+   round-trip with a tiny synthetic preimage.
+6. **Repeat on iOS Simulator.** Same source, different target —
+   the `start_app` entry already covers iOS; `actix-web`
+   cross-compiles to `aarch64-apple-ios` the same way it does
+   to Linux.
+
+Success = at least one full `POST /prove` round-trip completes
+**from a button in the WebView to the embedded actix server**
+without leaving the app process. That demonstrates the URL
+semantic survives in-app and unblocks the RN integration path.
 
 ### 7.4 Platform packaging
 
