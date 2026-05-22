@@ -2264,3 +2264,117 @@ The durable fix is the "remove the JS / JSBridge layer" research
 thread (separate report, 2026-05-21): without the WebView at all,
 the same arm64 process should land k=20 comfortably and free up
 the disk + binary-size cost of the bundled npm packages too.
+
+### Web (wasm32-unknown-unknown) sweep — 2026-05-22
+
+Same `contract_benchmark::run_proof(k)` cross-compiled to
+wasm32 via the new `mobile-bench/contract-benchmark-wasm`
+wrapper (path A in §6.1a; mirrors `zkir-wasm`'s shape). Runs
+inside a desktop browser; SRS params fetched on demand via a
+local `/srs/<file>` proxy (CORS workaround for
+`srs.midnight.network`) and cached in IndexedDB. **Single
+desktop browser tab; default wasm-pack release profile; no
+`SharedArrayBuffer` threads; no `simd128`.**
+
+The table below is the **warm-cache** sweep (every SRS file
+already in IndexedDB on the second pass). Cold-cache fetch
+times scale with file size: 807 ms for `bls_midnight_2p4`
+(3 KiB), ~5.8 s for `bls_midnight_2p18` (48 MiB) — fetch cost
+is small relative to keygen + prove past k = 10.
+
+| k  | hashes | keygen   | prove    | proof bytes |
+|----|-------:|---------:|---------:|------------:|
+| 1  | 0      | 118 ms   | 111 ms   | 2 549 B     |
+| 2  | 1      | 95 ms    | 150 ms   | 2 933 B     |
+| 3  | 1      | 92 ms    | 145 ms   | 2 933 B     |
+| 4  | 1      | 93 ms    | 145 ms   | 2 933 B     |
+| 5  | 1      | 93 ms    | 144 ms   | 2 933 B     |
+| 6  | 2      | 137 ms   | 211 ms   | 2 933 B     |
+| 7  | 3      | 206 ms   | 311 ms   | 2 933 B     |
+| 8  | 6      | 336 ms   | 500 ms   | 2 933 B     |
+| 9  | 12     | 553 ms   | 822 ms   | 2 933 B     |
+| 10 | 24     | 963 ms   | 1.46 s   | 2 933 B     |
+| 11 | 49     | 1.77 s   | 2.68 s   | 2 933 B     |
+| 12 | 98     | 3.29 s   | 5.04 s   | 2 933 B     |
+| 13 | 195    | 6.04 s   | 9.27 s   | 2 933 B     |
+| 14 | 390    | 11.4 s   | 17.9 s   | 2 933 B     |
+| 15 | 780    | 24.1 s   | 34.9 s   | 2 933 B     |
+| 16 | 1 560  | 44.9 s   | 1 m 08 s | 2 933 B     |
+| 17 | 3 121  | 1 m 28 s | 2 m 13 s | 2 933 B     |
+| 18 | 6 242  | (sweep in flight at capture time) |
+
+#### Cross-target comparison
+
+Same circuit, same k, four targets — all wasm and arm64 figures
+read off the warm-cache run; macOS figures are from the historical
+emulator table (host M2 Max release):
+
+| k  | macOS M2 release | iOS Simulator (M2) | S24 Ultra (arm64-v8a) | Web (wasm32, single-thread) |
+|----|-----------------:|-------------------:|----------------------:|----------------------------:|
+| 10 | ≈ 200 ms         | ~ 250 ms           | 369 ms                | 1 460 ms                    |
+| 12 | ≈ 432 ms         | —                  | 954 ms                | 5 040 ms                    |
+| 14 | ≈ 1.25 s         | —                  | 3.01 s                | 17.9 s                      |
+| 17 | —                | —                  | 22.3 s                | 2 m 13 s (133 s)            |
+
+Web wasm is **roughly 5–9× slower than native arm64 on the
+same circuit**, holding fairly constant across the range. The
+gap is unsurprising: single-threaded wasm vs. multi-core native
+AOT, no SIMD-128, JIT'd LLVM IR vs. ahead-of-time compiled
+arm64. The doubling cadence per `k` step matches every other
+target — keygen and prove both scale roughly as 2ᵏ once the
+fixed-cost floor is amortised (around k ≥ 6).
+
+#### Memory ceiling
+
+Unlike Android (k = 18 marginal, k ≥ 19 always OOMs — the
+WebView competes for the same address space as the prover),
+**the web build sailed past k = 17 without any allocation
+failure**. Desktop browsers running on a host with ≥ 16 GiB
+RAM have enough virtual-address-space headroom that the high-k
+SRS mmaps + halo2 working buffers fit. k = 18 was still
+running at capture time; if anything trips, expect it to be
+the **browser's per-tab memory cap** (≈ 4 GiB on Chrome,
+configurable) rather than the OS.
+
+#### Known inefficiency (visible in the log)
+
+Each `runProof(k)` produces **2–3 `cache hit` lines** for the
+same SRS file, because both `IrSource::keygen` and
+`ProofPreimage::prove` call `get_params(k)` independently, and
+one further internal call comes from the resolver chain. Each
+hit returns the bytes from IndexedDB in microseconds, but the
+Rust side runs `ParamsProver::read` on every call — and the
+larger-k params take real time to deserialise (the
+`bls_midnight_2p17` round of `read()` is responsible for a
+non-trivial fraction of the 1m 28s keygen). **Cheap fix:
+memoise `ParamsProver` per k on the JS side, hand the wasm an
+already-parsed handle.** Not done yet; flagged for the perf
+patch series.
+
+#### Recommended optimisation path (research in flight)
+
+A separate agent is auditing the proof stack for wasm-specific
+tunings (see follow-up commit). Early leads worth flagging
+here in advance:
+
+1. **`wasm-bindgen-rayon` + `SharedArrayBuffer` threads.** Halo2's
+   FFT and MSM are embarrassingly parallel via rayon natively;
+   default wasm32 has no rayon backend so we're stuck at one
+   core. With a wasm-threads build, a 4-core desktop browser
+   would plausibly close 60–80 % of the gap to native arm64.
+   The workspace already has `wasm-proving-demos/zkir-mt` (the
+   "mt" suffix reads as multi-threaded) — this is the
+   highest-priority lead to copy from.
+2. **`RUSTFLAGS='-C target-feature=+simd128'`** at build time —
+   BLS12-381 field arithmetic benefits significantly from the
+   wasm SIMD-128 instruction set in Chrome 91+ / Safari 16.4+ /
+   Firefox 89+. Pure compile-flag change.
+3. **`wasm-opt -O4`** with `--enable-simd --enable-bulk-memory`
+   beyond what `zkir-wasm`'s `Cargo.toml` metadata currently
+   sets (just `-O --enable-reference-types`).
+4. **Parsed-`ParamsProver` memoisation** — see "Known
+   inefficiency" above.
+
+The full punch list lands in the next commit when the agent
+finishes; this section will be expanded with measured impact
+once any of the four are applied.
