@@ -53,6 +53,15 @@ fn main() {
 // Linux/Android it tracks libc-malloc closely. Drop-in test for
 // whether allocator pooling is masking real heap drops between
 // phases. wasm target keeps the default allocator.
+//
+// Mimalloc env tuning honoured at runtime — particularly
+// `MIMALLOC_PURGE_DELAY=0` which forces immediate page-purge to
+// the OS instead of pooling. Empirically (Pixel Fold emulator,
+// arm64-android, k=18) this drops peak HWM by ~60 MiB (-2.7%)
+// and post-prove RSS by ~290 MiB. Recommended for memory-
+// pressured scenarios; set `MIMALLOC_PURGE_DELAY=10000`
+// (default) to restore the pooling behaviour if CPU cost is
+// preferred over RAM.
 #[cfg(not(target_arch = "wasm32"))]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
