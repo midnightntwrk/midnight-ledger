@@ -74,6 +74,27 @@ pub const MIN_K: u32 = 1;
 /// without the matching verifying SRS.
 pub const MAX_VERIFIABLE_K: u32 = 14;
 
+/// Highest `k` at which we still call `ir.model()` to verify the
+/// realised row count matches the target.
+///
+/// `ir.model()` invokes halo2's `cost_model_options`, which
+/// synthesises the circuit into a `DevAssembly` whose `assign_fixed`
+/// path stores every fixed-cell write in a `hashbrown::HashMap`.
+/// At k≥19 the rehash needs multi-GiB transient allocation and
+/// triggers `handle_alloc_error → SIGABRT` on a 12 GB S24 Ultra
+/// (tombstone evidence: `cost_model_options` → `DevAssembly::assign_fixed`
+/// → `hashbrown::Fallibility::alloc_err`).
+///
+/// The cost-model path is a *measurement* aid — the real prover
+/// (`ir.keygen` + `prove`) takes a different synthesis route that
+/// doesn't allocate this HashMap. So at `target_k > COST_MODEL_SAFE_K`
+/// we trust the precomputed `HASHES_FOR_K[k]` and skip the call.
+///
+/// Set to 17: empirically k=18 still completes the cost-model
+/// (~22 s on S24); k=19 dies. Conservative — bump if a future halo2
+/// release makes the cost-model cheaper.
+pub const COST_MODEL_SAFE_K: u32 = 17;
+
 /// Precomputed transient-hash chain length that realises each target
 /// `k` exactly. Lets `build_ir_for_k` skip the probe-and-double loop
 /// + binary shrink (typically 5–17 IR parses) and just build the
@@ -323,14 +344,31 @@ fn build_ir_for_k_uncached(target_k: u32) -> Result<(IrSource, u32)> {
 
     // Fast path: try the precomputed convergent `n` from
     // `HASHES_FOR_K`. Skips 5–17 redundant IR-build + halo2-load
-    // probes that the original convergence loop did. Re-verify the
-    // realised `k` matches so a future halo2 row-count change can
-    // never silently mis-target; on mismatch we fall through to
-    // the slow probing path below.
+    // probes that the original convergence loop did.
+    //
+    // For `target_k <= COST_MODEL_SAFE_K` we re-verify via
+    // `ir.model().k() == target_k` so a future halo2 row-count
+    // change can't silently mis-target; on mismatch we fall through
+    // to the slow probing path below.
+    //
+    // For `target_k > COST_MODEL_SAFE_K` we *skip* the verification.
+    // `ir.model()` calls `cost_model_options` which synthesises the
+    // circuit into a `DevAssembly` whose internal HashMap stores
+    // every fixed-cell assignment. At k=19+ that HashMap rehashes
+    // itself into a `handle_alloc_error` -> SIGABRT on mobile
+    // (~6+ GiB transient allocation observed in S24 Ultra tombstone,
+    // backtrace shows `hashbrown::rustc_entry` -> `assign_fixed` ->
+    // `poseidon_chip::partial_round` blowing up at k=19).
+    //
+    // The cost-model OOM is an artefact of the *measurement* path —
+    // the real prover uses `keygen` + `prove` which take a different
+    // synthesis route that doesn't materialise the row-count HashMap.
+    // We trust `HASHES_FOR_K` at high k (the desktop
+    // `every_k_builds` test validates the table up to MAX_K).
     let expected_n = HASHES_FOR_K[target_k as usize];
     if expected_n > 0 {
         if let Ok(ir) = build_hash_chain_ir(expected_n) {
-            if ir.model().k() as u32 == target_k {
+            if target_k > COST_MODEL_SAFE_K || ir.model().k() as u32 == target_k {
                 return Ok((ir, expected_n));
             }
         }
@@ -492,9 +530,22 @@ where
 
     // 1) Build IR matched to target k.
     let (ir, chain_len) = build_ir_for_k(k)?;
-    let model = ir.model();
-    let realized_k = model.k() as u32;
-    let rows = model.rows() as u64;
+    // `ir.model()` triggers `cost_model_options` which OOMs at
+    // k≥19 on mobile (see `COST_MODEL_SAFE_K` docs). Skip the
+    // measurement and report `realized_k = k` (we trust the IR
+    // built from `HASHES_FOR_K`) and a row-count approximation
+    // based on the chain length.
+    let (realized_k, rows) = if k > COST_MODEL_SAFE_K {
+        // Per the `every_k_builds` test, `HASHES_FOR_K` builds an
+        // IR whose realised k equals the target k for k in 1..=MAX_K.
+        // Approximate row count from the hash chain length —
+        // empirically ~5 halo2 rows per transient_hash op plus
+        // sub-2× overhead from the assertion / public-input cells.
+        (k, (chain_len as u64).saturating_mul(5).saturating_add(64))
+    } else {
+        let model = ir.model();
+        (model.k() as u32, model.rows() as u64)
+    };
 
     // 2) Keygen — cache by `k` so repeat proves at the same `k`
     //    skip the (deterministic in IR + SRS) keygen entirely.
