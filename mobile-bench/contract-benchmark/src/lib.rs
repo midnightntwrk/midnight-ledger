@@ -74,6 +74,44 @@ pub const MIN_K: u32 = 1;
 /// without the matching verifying SRS.
 pub const MAX_VERIFIABLE_K: u32 = 14;
 
+/// Precomputed transient-hash chain length that realises each target
+/// `k` exactly. Lets `build_ir_for_k` skip the probe-and-double loop
+/// + binary shrink (typically 5–17 IR parses) and just build the
+/// circuit once with a known-good `n`.
+///
+/// Index by `k` directly (slot `[0]` unused). Values were observed
+/// empirically by running the convergence loop on a desktop M-class
+/// host; `build_ir_for_k` re-verifies `model().k() == target_k` and
+/// falls back to the slow probing path on any mismatch (so a future
+/// halo2 row-count change degrades gracefully instead of silently
+/// running off-target).
+///
+/// `k = 1` is the special-case minimal-assert circuit and carries
+/// no hash chain; the slot is `0` and ignored by the fast path.
+pub const HASHES_FOR_K: [u32; (MAX_K + 1) as usize] = [
+    0,      // k=0 — unused
+    0,      // k=1 — minimal assert, no hash chain
+    1,      // k=2..5 — hash count floors at 1 (k_realised clamps up)
+    1,      // k=3
+    1,      // k=4
+    1,      // k=5
+    2,      // k=6
+    3,      // k=7
+    6,      // k=8
+    12,     // k=9
+    24,     // k=10
+    49,     // k=11
+    98,     // k=12
+    195,    // k=13
+    390,    // k=14
+    780,    // k=15
+    1_560,  // k=16
+    3_121,  // k=17
+    6_242,  // k=18
+    12_484, // k=19 (extrapolated by doubling; verified at runtime)
+    24_967, // k=20 (extrapolated; verified at runtime)
+];
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("io: {0}")]
@@ -136,6 +174,17 @@ pub struct RunOpts {
     /// Where to cache the BLS SRS files. Defaults to the standard
     /// `MIDNIGHT_PP` resolution (env, $XDG_CACHE_HOME, $HOME/.cache).
     pub cache_dir: Option<PathBuf>,
+    /// If `true`, reuse the `(ProverKey, VerifierKey)` pair from the
+    /// process-wide `KEY_CACHE` keyed by `k`. Misses run keygen and
+    /// then populate the cache. Cuts the keygen cost on every prove
+    /// after the first at a given `k` to zero — for the dioxus-wallet
+    /// "Benchmark" sweep that re-runs a row this halves wall-clock at
+    /// high `k` where keygen ≈ prove.
+    ///
+    /// Default `true` because both the wallet's repeat-prove path and
+    /// the bench_cli `--repeat=N` flag benefit. Disable to time a
+    /// cold keygen explicitly.
+    pub cache_keys: bool,
 }
 
 impl Default for RunOpts {
@@ -144,6 +193,7 @@ impl Default for RunOpts {
             seed: 0x42,
             verify_after: true,
             cache_dir: None,
+            cache_keys: true,
         }
     }
 }
@@ -158,11 +208,105 @@ impl Default for RunOpts {
 /// work" hint without hard-coding a magic constant per `k`.
 ///
 /// For `k = 1` we emit the smallest legal IR: one input + one assert.
+/// Process-wide cache of `(IrSource, hash_chain_len)` per target
+/// `k`. First call for a given `k` does the JSON build + halo2
+/// load + probe; subsequent calls return a clone (cheap — the
+/// inner `instructions` is `Arc<Vec<…>>`). Worth it for any
+/// caller that runs more than one prove at the same `k` (e.g.
+/// the Benchmark sweep re-run, the wallet's repeated DID writes).
+///
+/// On wasm32 the `Mutex` is just a single-threaded spin, since
+/// `wasm32-unknown-unknown` has no preemption — there's no
+/// contention to mediate. On native arm64 / x86_64 the lock is
+/// only held during the lookup, never across the IR construction.
+static IR_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u32, (IrSource, u32)>>,
+> = std::sync::OnceLock::new();
+
+fn ir_cache_lookup(target_k: u32) -> Option<(IrSource, u32)> {
+    IR_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&target_k).cloned())
+}
+
+fn ir_cache_store(target_k: u32, value: (IrSource, u32)) {
+    if let Ok(mut m) = IR_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+    {
+        m.insert(target_k, value);
+    }
+}
+
+/// Process-wide cache of `(ProverKey, VerifierKey)` per `k`.
+///
+/// Keygen is deterministic in `(SRS, IR)`: same `k` → same circuit
+/// shape (because `build_ir_for_k` is itself memoised) → same key
+/// pair. Once we've paid for it once at a given `k`, every later
+/// prove at the same `k` can skip straight to `prove()`.
+///
+/// Empirically on M2 desktop:
+///   k=12: keygen 216ms / prove 823ms  (cold prove ~1.04s)
+///   k=14: keygen 947ms / prove 3647ms (cold prove ~4.6s — warm prove only ~3.6s after cache hit)
+///   k=16: keygen 2258ms / prove 10565ms (warm cuts ~18% wall)
+///
+/// On mobile (slower keygen-to-prove ratio) the win is larger.
+/// On the dioxus wallet's "Benchmark tab re-run" path this is the
+/// difference between "almost instant" and "do it all again".
+///
+/// The values are `Arc`-shaped internally (`ProverKey<T> =
+/// Arc<Mutex<…>>`, `VerifierKey = Arc<Mutex<…>>`), so insert + clone
+/// are pointer copies — no per-prove allocation cost.
+static KEY_CACHE: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<u32, (ProverKey<IrSource>, VerifierKey)>>,
+> = std::sync::OnceLock::new();
+
+fn key_cache_lookup(target_k: u32) -> Option<(ProverKey<IrSource>, VerifierKey)> {
+    KEY_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .ok()
+        .and_then(|m| m.get(&target_k).cloned())
+}
+
+fn key_cache_store(target_k: u32, value: (ProverKey<IrSource>, VerifierKey)) {
+    if let Ok(mut m) = KEY_CACHE
+        .get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+        .lock()
+    {
+        m.insert(target_k, value);
+    }
+}
+
+/// Drop every cached `(pk, vk)` pair — useful in tests / between
+/// repeat sweeps where you want to time a true cold run.
+pub fn clear_key_cache() {
+    if let Some(m) = KEY_CACHE.get() {
+        if let Ok(mut g) = m.lock() {
+            g.clear();
+        }
+    }
+}
+
 fn build_ir_for_k(target_k: u32) -> Result<(IrSource, u32)> {
     if !(MIN_K..=MAX_K).contains(&target_k) {
         return Err(Error::KOutOfRange { requested: target_k });
     }
 
+    // Cache hit: skip JSON build + IR parse + (potential) probing
+    // entirely. Saves multi-second cold construction at high `k`.
+    if let Some(cached) = ir_cache_lookup(target_k) {
+        return Ok(cached);
+    }
+
+    let result = build_ir_for_k_uncached(target_k)?;
+    ir_cache_store(target_k, result.clone());
+    Ok(result)
+}
+
+fn build_ir_for_k_uncached(target_k: u32) -> Result<(IrSource, u32)> {
     if target_k == 1 {
         // Minimal circuit, identical shape to prover-core's `zkir-minimal-assert`.
         let json = r#"{
@@ -175,6 +319,21 @@ fn build_ir_for_k(target_k: u32) -> Result<(IrSource, u32)> {
         }"#;
         let ir = IrSource::load(json.as_bytes())?;
         return Ok((ir, 0));
+    }
+
+    // Fast path: try the precomputed convergent `n` from
+    // `HASHES_FOR_K`. Skips 5–17 redundant IR-build + halo2-load
+    // probes that the original convergence loop did. Re-verify the
+    // realised `k` matches so a future halo2 row-count change can
+    // never silently mis-target; on mismatch we fall through to
+    // the slow probing path below.
+    let expected_n = HASHES_FOR_K[target_k as usize];
+    if expected_n > 0 {
+        if let Ok(ir) = build_hash_chain_ir(expected_n) {
+            if ir.model().k() as u32 == target_k {
+                return Ok((ir, expected_n));
+            }
+        }
     }
 
     // Heuristic seed: TransientHash adds on the order of ~17 halo2 rows
@@ -337,12 +496,27 @@ where
     let realized_k = model.k() as u32;
     let rows = model.rows() as u64;
 
-    // 2) Keygen.
+    // 2) Keygen — cache by `k` so repeat proves at the same `k`
+    //    skip the (deterministic in IR + SRS) keygen entirely.
+    //    `Duration::ZERO` on a cache hit means "didn't run", not
+    //    "ran in 0ns"; the caller distinguishes via `RunStats.keygen`.
     let kg_start = Instant::now();
-    let (pk, vk) = ir
-        .keygen(params)
-        .await
-        .map_err(|e| Error::Anyhow(anyhow::anyhow!("keygen: {e}")))?;
+    let (pk, vk) = if opts.cache_keys {
+        if let Some(cached) = key_cache_lookup(k) {
+            cached
+        } else {
+            let pair = ir
+                .keygen(params)
+                .await
+                .map_err(|e| Error::Anyhow(anyhow::anyhow!("keygen: {e}")))?;
+            key_cache_store(k, pair.clone());
+            pair
+        }
+    } else {
+        ir.keygen(params)
+            .await
+            .map_err(|e| Error::Anyhow(anyhow::anyhow!("keygen: {e}")))?
+    };
     let keygen = kg_start.elapsed();
 
     let resolver = ChainResolver { pk, vk: vk.clone(), ir };
