@@ -48,6 +48,15 @@ fn main() {
     // `contract-benchmark-wasm` crate's wasm-bindgen wrapper.
 }
 
+// Mimalloc as global allocator on native targets. Returns freed
+// pages to the OS more aggressively than macOS libmalloc; on
+// Linux/Android it tracks libc-malloc closely. Drop-in test for
+// whether allocator pooling is masking real heap drops between
+// phases. wasm target keeps the default allocator.
+#[cfg(not(target_arch = "wasm32"))]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 #[cfg(not(target_arch = "wasm32"))]
 
 fn main() {

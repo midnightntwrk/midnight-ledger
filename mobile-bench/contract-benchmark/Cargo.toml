@@ -49,6 +49,14 @@ tracing = "0.1"
 # only by the binary, not the library — wasm/mobile callers get
 # their own subscriber via the dioxus-wallet's `WalletLogLayer`.
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+# `mimalloc` as global allocator candidate. Mimalloc returns
+# freed pages to the OS more aggressively than macOS's
+# libmalloc, and its arena layout is friendlier to large
+# allocations (less pool fragmentation between phases). On
+# Android it's a wash with bionic libc — the OS already paces
+# memory tightly. Worth measuring on desktop to see if peak
+# RSS drops.
+mimalloc = { version = "0.1", default-features = false }
 
 # Native targets: full tokio runtime with multi-thread support
 # (used by `#[tokio::test]` and consumers like dioxus-wallet).
