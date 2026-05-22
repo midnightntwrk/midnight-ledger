@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -10,5 +10,5 @@
 type CoinPublicKey: string;
 ```
 
-A user public key capable of receiving Zswap coins, as a hex-encoded 35-byte
+A user public key capable of receiving Zswap coins, as a hex-encoded 32-byte
 string

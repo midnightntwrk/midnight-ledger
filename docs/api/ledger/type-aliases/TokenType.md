@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -13,4 +13,4 @@ type TokenType =
   | DustTokenType;
 ```
 
-A token type (or color), as a hex-encoded 35-byte string, shielded, unshielded, or Dust
+A token type (or color), as a hex-encoded 32-byte string, shielded, unshielded, or Dust
