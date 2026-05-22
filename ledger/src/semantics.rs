@@ -1731,7 +1731,7 @@ fn claim_unshielded<D: DB>(
     .mk_intent_hash(NIGHT);
     let replay_protection = match state.replay_protection.clone().apply_member(
         hash,
-        context.tblock + state.parameters.global_ttl,
+        tx.ttl,
         context.tblock,
         state.parameters.global_ttl,
     ) {
@@ -2037,6 +2037,7 @@ mod tests {
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::CardanoBridge,
+            ttl: Timestamp::default(),
         };
         let context = BlockContext::default();
         match claim_unshielded(
@@ -2091,6 +2092,7 @@ mod tests {
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::CardanoBridge,
+            ttl: Timestamp::default(),
         };
         let context = BlockContext::default();
         match claim_unshielded(
@@ -2147,6 +2149,7 @@ mod tests {
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::Reward,
+            ttl: Timestamp::default(),
         };
         let context = BlockContext::default();
         match claim_unshielded(
@@ -2202,6 +2205,7 @@ mod tests {
             nonce: rng.r#gen(),
             signature: (),
             kind: ClaimKind::Reward,
+            ttl: Timestamp::default(),
         };
         let context = BlockContext::default();
         match claim_unshielded(

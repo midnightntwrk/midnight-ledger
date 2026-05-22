@@ -230,6 +230,7 @@ impl<D: DB> TestState<D> {
                 nonce,
                 signature: (),
                 kind: ClaimKind::Reward,
+                ttl: self.time,
             }),
             &test_resolver(""),
         )

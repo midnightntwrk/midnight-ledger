@@ -2029,9 +2029,9 @@ export type ClaimKind = "Reward" | "CardanoBridge";
  * A request to allocate rewards, authorized by the reward's recipient
  */
 export class ClaimRewardsTransaction<S extends Signaturish> {
-  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S, kind?: ClaimKind);
+  constructor(markerS: S['instance'], network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, signature: S, kind: ClaimKind, ttl: Date);
 
-  static new(network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, kind: ClaimKind): ClaimRewardsTransaction<SignatureErased>;
+  static new(network_id: string, value: bigint, owner: SignatureVerifyingKey, nonce: Nonce, kind: ClaimKind, ttl: Date): ClaimRewardsTransaction<SignatureErased>;
 
   addSignature(signature: Signature): ClaimRewardsTransaction<SignatureEnabled>;
 
@@ -2074,6 +2074,12 @@ export class ClaimRewardsTransaction<S extends Signaturish> {
    * The kind of claim being made, either a `Reward` or a `CardanoBridge` claim.
    */
   readonly kind: ClaimKind
+
+  /**
+   * The time this claim expires. Bounds the replay-protection window for the
+   * signed claim; after this time the transaction is no longer accepted.
+   */
+  readonly ttl: Date;
 }
 
 /**

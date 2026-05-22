@@ -1479,16 +1479,14 @@ impl ClaimRewardsTransaction {
         owner: &str,
         nonce: &str,
         signature: JsValue,
-        kind: JsValue,
+        kind: &str,
+        ttl: &Date,
     ) -> Result<ClaimRewardsTransaction, JsError> {
         let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
-        let kind = if kind.is_null() || kind.is_undefined() {
-            ledger::structure::ClaimKind::Reward
-        } else {
-            text_to_claim_kind(&String::from(JsString::from(kind)))?
-        };
+        let kind = text_to_claim_kind(kind)?;
+        let ttl = Timestamp::from_secs(js_date_to_seconds(ttl));
 
         use ClaimRewardsTransactionTypes::*;
         use Signaturish::*;
@@ -1506,6 +1504,7 @@ impl ClaimRewardsTransaction {
                     nonce,
                     signature: signature.deref().0.clone(),
                     kind,
+                    ttl,
                 })
             }
             SignatureErased => {
@@ -1519,6 +1518,7 @@ impl ClaimRewardsTransaction {
                     nonce,
                     signature: (),
                     kind,
+                    ttl,
                 })
             }
         }))
@@ -1530,11 +1530,13 @@ impl ClaimRewardsTransaction {
         owner: &str,
         nonce: &str,
         kind: &str,
+        ttl: &Date,
     ) -> Result<ClaimRewardsTransaction, JsError> {
         let owner: schnorr::VerifyingKey = from_value_hex_ser(owner)?;
         let value = u128::try_from(value).map_err(|_| JsError::new("value is out of range"))?;
         let nonce = Nonce(from_hex_ser(nonce)?);
         let kind = text_to_claim_kind(kind)?;
+        let ttl = Timestamp::from_secs(js_date_to_seconds(ttl));
         use ClaimRewardsTransactionTypes::*;
         Ok(ClaimRewardsTransaction(SignatureErasedClaimRewards(
             ledger::structure::ClaimRewardsTransaction {
@@ -1544,6 +1546,7 @@ impl ClaimRewardsTransaction {
                 nonce,
                 signature: (),
                 kind,
+                ttl,
             },
         )))
     }
@@ -1675,6 +1678,15 @@ impl ClaimRewardsTransaction {
             SignatureClaimRewards(val) => JsValue::from(SignatureEnabled(val.signature.clone())),
             SignatureErasedClaimRewards(_) => JsValue::from(SignatureErased()),
         })
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn ttl(&self) -> Date {
+        use ClaimRewardsTransactionTypes::*;
+        match &self.0 {
+            SignatureClaimRewards(val) => seconds_to_js_date(val.ttl.to_secs()),
+            SignatureErasedClaimRewards(val) => seconds_to_js_date(val.ttl.to_secs()),
+        }
     }
 }
 

@@ -11,6 +11,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add `UnlockToTreasury` system transaction, moving funds from the locked
   pool to the treasury.
 - fix: correctly exclude the identity point during coin ciphertext decryption
+- fix: correct signing envelope for `ClaimRewardsTransaction`, and add TTL to it.
 
 ## Unreleased (8.2)
 

@@ -1254,6 +1254,7 @@ impl LedgerParameters {
                     nonce: Default::default(),
                     signature: Default::default(),
                     kind: ClaimKind::Reward,
+                    ttl: Timestamp::default(),
                 },
             )
             .cost(self, true)
@@ -1296,7 +1297,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v9]"]
+#[tag = "transaction[v10]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1757,7 +1758,7 @@ type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; S)]
 #[storable(db = D)]
-#[tag = "claim-rewards-transaction[v1]"]
+#[tag = "claim-rewards-transaction[v2]"]
 pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub network_id: String,
     pub value: u128,
@@ -1765,6 +1766,7 @@ pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub nonce: Nonce,
     pub signature: S::Signature<ErasedClaimRewardsTransaction<D>>,
     pub kind: ClaimKind,
+    pub ttl: Timestamp,
 }
 tag_enforcement_test!(ClaimRewardsTransaction<(), InMemoryDB>);
 
@@ -1777,6 +1779,7 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
             nonce: self.nonce,
             signature,
             kind: self.kind,
+            ttl: self.ttl,
         }
     }
 
@@ -1788,6 +1791,7 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
             nonce: self.nonce,
             signature: (),
             kind: self.kind,
+            ttl: self.ttl,
         }
     }
 }
@@ -1807,6 +1811,8 @@ impl<D: DB> ClaimRewardsTransaction<(), D> {
         Serializable::serialize(&rewards.nonce, &mut data)
             .expect("In-memory serialization should succeed");
         Serializable::serialize(&rewards.kind, &mut data)
+            .expect("In-memory serialization should succeed");
+        Serializable::serialize(&rewards.ttl, &mut data)
             .expect("In-memory serialization should succeed");
         data
     }

@@ -77,6 +77,7 @@ async fn system_tx_pay_from_unshielded() {
             nonce,
             signature: (),
             kind: ClaimKind::Reward,
+            ttl: state.time,
         }),
         &RESOLVER,
     )

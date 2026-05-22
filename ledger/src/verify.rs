@@ -540,6 +540,25 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
         .then_some(())
         .ok_or(IntentSignatureVerificationFailure)
     }
+
+    fn ttl_check_weak(
+        &self,
+        tblock: Timestamp,
+        global_ttl: Duration,
+    ) -> Result<(), TransactionApplicationError> {
+        if self.ttl < tblock {
+            Err(TransactionApplicationError::IntentTtlExpired(
+                self.ttl, tblock,
+            ))?;
+        }
+        if self.ttl > tblock + global_ttl {
+            Err(TransactionApplicationError::IntentTtlTooFarInFuture(
+                self.ttl,
+                tblock + global_ttl,
+            ))?;
+        }
+        Ok(())
+    }
 }
 
 impl<
@@ -644,6 +663,10 @@ where
             }
             Transaction::ClaimRewards(mtx) => {
                 ref_state.network_check(&mtx.network_id)?;
+                ref_state.param_check(true, |params| {
+                    mtx.ttl_check_weak(tblock, params.global_ttl)
+                        .map_err(MalformedTransaction::TransactionApplicationError)
+                })?;
                 ref_state.stateless_check(|| {
                     B::when_sealed(Ok(
                         // There's no point in checking this unless we actually care about signature verification
