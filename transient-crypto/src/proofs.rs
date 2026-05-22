@@ -66,24 +66,66 @@ pub type TranscriptHash = blake2b_simd::State;
 impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
     async fn get_params(&self, k: u8) -> io::Result<ParamsProver> {
         let name = Self::name_k(k);
+
+        // Path A — mmap companion if present. The companion is a
+        // `bls_midnight_2pN.mmap` file produced by
+        // `ParamsProver::write_mmap_companion` (typically built once
+        // on a roomy desktop and pushed to the device). When found
+        // we go zero-copy: `ParamsKZG.g`/`g_lagrange` become slice
+        // views into the file mapping and the OS pages handle
+        // eviction under memory pressure. Trigger is file presence,
+        // not an env var, so the optimisation lights up
+        // automatically wherever the companion is shipped.
+        let mmap_path = self.dir.join(format!("{name}.mmap"));
+        if mmap_path.exists() {
+            tracing::info!(
+                target: "midnight_bench",
+                stage = "load_mmap",
+                k = k as u64,
+            );
+            return ParamsProver::read_mmap_path(&mmap_path);
+        }
+
+        // Path A' — build the companion on first miss. Opt-in via
+        // `MIDNIGHT_MMAP_BUILD=1` because the build step briefly
+        // pays the 2× eager-load peak (we hold the just-parsed
+        // `ParamsProver` AND write its bytes out). Useful as a
+        // one-shot precompute on a desktop; the device should just
+        // ship the resulting `.mmap` files.
+        let want_build =
+            matches!(std::env::var("MIDNIGHT_MMAP_BUILD").as_deref(), Ok("1") | Ok("true"));
+        if want_build {
+            tracing::info!(
+                target: "midnight_bench",
+                stage = "build_mmap_companion",
+                k = k as u64,
+            );
+            let reader = self
+                .get_file(
+                    &name,
+                    &format!("public parameters for k={k} not found in cache"),
+                )
+                .await?;
+            let eager = ParamsProver::read(reader)?;
+            eager.write_mmap_companion(&mmap_path)?;
+            drop(eager);
+            return ParamsProver::read_mmap_path(&mmap_path);
+        }
+
+        // Path B — eager `read_custom` (default) or seekable
+        // skip-g_lagrange `read_custom_lazy` when
+        // `MIDNIGHT_LAZY_PARAMS=1`. The lazy variant trades CPU
+        // (one inverse-NTT recompute per first commit_lagrange) for
+        // peak RAM during file parse.
         let reader = self
             .get_file(
                 &name,
                 &format!("public parameters for k={k} not found in cache"),
             )
             .await?;
-        // Opt-in: `MIDNIGHT_LAZY_PARAMS=1` switches to the seekable
-        // skip-g_lagrange reader from the patched midnight-proofs fork.
-        //
-        // Why opt-in: empirically (M2 desktop, k=14) the FFT recompute
-        // adds ~2.5s keygen + 2s prove per session, while the
-        // post-prove RSS is unchanged (g_lagrange is resident either
-        // way once it has been used). The win is **peak heap during
-        // file load** (1× SRS instead of 2× — ~96 MiB at k=20,
-        // ~384 MiB at k=22). That matters only where the OS may kill
-        // the process for a momentary peak (mobile, wasm); on desktop
-        // it's pure regression.
-        if matches!(std::env::var("MIDNIGHT_LAZY_PARAMS").as_deref(), Ok("1") | Ok("true")) {
+        let want_lazy =
+            matches!(std::env::var("MIDNIGHT_LAZY_PARAMS").as_deref(), Ok("1") | Ok("true"));
+        if want_lazy {
             ParamsProver::read_lazy(reader)
         } else {
             ParamsProver::read(reader)
@@ -111,6 +153,40 @@ impl ParamsProver {
             &mut reader,
             SerdeFormat::RawBytesUnchecked,
         )?)))
+    }
+
+    /// Constructs prover parameters by memory-mapping a companion
+    /// SRS file laid out by [`write_mmap_companion`](Self::write_mmap_companion).
+    ///
+    /// The returned `ParamsProver` holds an `Arc<Mmap>` internally;
+    /// `g` and `g_lagrange` are slice views into the mapping, so
+    /// the SRS contributes **zero heap allocation**. Touched pages
+    /// count against RSS but the OS evicts cold pages under
+    /// memory pressure — the win is during the heavy prove phases
+    /// when FFT scratch dominates and the SRS is referenced only
+    /// at the MSM call sites.
+    ///
+    /// Available only against the patched `midnight-proofs` fork.
+    pub fn read_mmap_path<P: AsRef<std::path::Path>>(path: P) -> io::Result<Self> {
+        let file = std::fs::File::open(path)?;
+        // SAFETY: read-only mmap of a file we just opened. memmap2's
+        // `Mmap::map` is safe under POSIX assuming the file isn't
+        // concurrently modified by another process; the wallet
+        // owns the companion file under `/data/data/<app>/cache`,
+        // not user-modifiable.
+        #[allow(unsafe_code)]
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
+        let mmap = Arc::new(mmap);
+        Ok(ParamsProver(Arc::new(ParamsKZG::read_mmap_arc(mmap)?)))
+    }
+
+    /// Write the current params out to a companion file ready for
+    /// `read_mmap_path`. Use after a one-time eager `read` to
+    /// produce the file we then mmap on every subsequent run.
+    pub fn write_mmap_companion<P: AsRef<std::path::Path>>(&self, path: P) -> io::Result<()> {
+        let mut file = std::fs::File::create(path)?;
+        self.0.write_mmap_companion(&mut file)?;
+        Ok(())
     }
 
     /// Reads the prover parameters from a seekable data stream,

@@ -64,6 +64,71 @@ pub(crate) fn proc_self_stats() -> Option<(u64, u64)> {
     None
 }
 
+/// Parse a `/proc/stat` body into per-core `(busy_jiffies,
+/// total_jiffies)` cumulative counters. Each entry corresponds to
+/// one CPU; index 0 = `cpu0`, etc. The aggregate `cpu` line at the
+/// top is skipped — callers compute aggregate from the sum or use
+/// `proc_self_stats` for self-only.
+///
+/// `/proc/stat` cpu lines:
+///   `cpuN user nice system idle iowait irq softirq steal guest guest_nice`
+///
+/// We treat `busy = user + nice + system + irq + softirq` and
+/// `total = busy + idle + iowait` (consistent with how `top` and
+/// `htop` colour their bars on Android). `steal` and the `guest*`
+/// columns are ignored — they're always 0 on bare-metal Android.
+///
+/// Returns an empty Vec on parse failure rather than `None` so
+/// the poller doesn't constantly drop samples on a partial read.
+#[allow(dead_code)]
+pub(crate) fn parse_proc_stat_per_core(stat_all: &str) -> Vec<(u64, u64)> {
+    let mut out = Vec::new();
+    for line in stat_all.lines() {
+        let mut fields = line.split_whitespace();
+        let Some(label) = fields.next() else { continue };
+        if !label.starts_with("cpu") {
+            // cpu* lines are at the top of /proc/stat. Once we hit
+            // `intr` / `ctxt` / `btime` / etc, we're done.
+            break;
+        }
+        if label == "cpu" {
+            // Aggregate line — skip.
+            continue;
+        }
+        // Per-core line. Need at least 7 numeric fields to compute busy/total.
+        let nums: Vec<u64> = fields
+            .filter_map(|s| s.parse::<u64>().ok())
+            .collect();
+        if nums.len() < 7 {
+            continue;
+        }
+        let user = nums[0];
+        let nice = nums[1];
+        let system = nums[2];
+        let idle = nums[3];
+        let iowait = nums[4];
+        let irq = nums[5];
+        let softirq = nums[6];
+        let busy = user + nice + system + irq + softirq;
+        let total = busy + idle + iowait;
+        out.push((busy, total));
+    }
+    out
+}
+
+/// Read `/proc/stat` and return per-core cumulative
+/// `(busy, total)` jiffies. None on platforms without `/proc`.
+#[cfg(any(target_os = "android", target_os = "linux"))]
+pub(crate) fn proc_per_core_stats() -> Option<Vec<(u64, u64)>> {
+    let stat = std::fs::read_to_string("/proc/stat").ok()?;
+    Some(parse_proc_stat_per_core(&stat))
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+pub(crate) fn proc_per_core_stats() -> Option<Vec<(u64, u64)>> {
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +211,51 @@ RssFile:\t  304312 kB
         // bails before unwrap.
         let stat = "1 noparens 2 3 4 5 6 7 8 9 10 11 12 13 14";
         assert!(parse_proc_stats(STATUS_FIXTURE, stat).is_none());
+    }
+
+    // Realistic `/proc/stat` excerpt with 4 cores. The header
+    // `cpu` line is the aggregate; we want to skip it. After the
+    // cpu lines come intr / ctxt / btime / etc, which we also
+    // ignore.
+    const STAT_PER_CORE_FIXTURE: &str = "\
+cpu  1000 0 500 8000 10 20 5 0 0 0
+cpu0 250 0 125 2000 2 5 1 0 0 0
+cpu1 250 0 125 2000 3 5 2 0 0 0
+cpu2 250 0 125 2000 2 5 1 0 0 0
+cpu3 250 0 125 2000 3 5 1 0 0 0
+intr 12345 ...
+ctxt 67890
+btime 1700000000
+processes 4242
+procs_running 1
+procs_blocked 0
+";
+
+    #[test]
+    fn parses_per_core_stat() {
+        let cores = parse_proc_stat_per_core(STAT_PER_CORE_FIXTURE);
+        assert_eq!(cores.len(), 4, "should skip the aggregate cpu line");
+        // cpu0: busy = 250 + 0 + 125 + 5 + 1 = 381
+        //       total = 381 + 2000 + 2 = 2383
+        assert_eq!(cores[0], (381, 2383));
+        // cpu1 has slightly different iowait/softirq.
+        assert_eq!(cores[1], (382, 2385));
+    }
+
+    #[test]
+    fn per_core_rejects_short_line() {
+        // Line with fewer than 7 numeric fields — silently skipped.
+        let stat = "cpu0 100 0 50\nintr 99\n";
+        assert!(parse_proc_stat_per_core(stat).is_empty());
+    }
+
+    #[test]
+    fn per_core_stops_at_intr() {
+        // Ensures we don't mistake `intr ...` as a CPU line just because
+        // it doesn't start with `cpu`. Defensive: the `break` triggers.
+        let stat = "cpu0 1 2 3 4 5 6 7\nintr fake fake fake\n";
+        let cores = parse_proc_stat_per_core(stat);
+        assert_eq!(cores.len(), 1);
     }
 
     #[test]

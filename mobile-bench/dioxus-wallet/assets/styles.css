@@ -1468,6 +1468,48 @@ details .panel .row {
   margin: 0 16px 14px;
 }
 
+/* Per-core CPU load bar grid. Each `.cpu-core` is one bar with a
+ * `.cpu-core-fill` whose `height: N%` mirrors the core's busy
+ * fraction over the last 500 ms. On the S24 Ultra there are 10
+ * cores; the grid auto-fits but tries to keep them on one row. */
+.cpu-cores {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(28px, 1fr));
+  gap: 4px;
+  padding: 6px 16px 14px;
+}
+.cpu-core {
+  position: relative;
+  height: 48px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 4px;
+  overflow: hidden;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.cpu-core-fill {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(to top, var(--accent, #6cf), color-mix(in srgb, var(--accent, #6cf) 70%, transparent));
+  transition: height 200ms ease-out;
+}
+.cpu-core-label {
+  position: relative;
+  z-index: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 9px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+  padding: 2px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  border-radius: 2px;
+  margin: 2px;
+}
+
 /* Benchmark table — compact action column on the right and a
  * tighter Run button so each row reads as one band of data
  * instead of the button + note pair dominating the row. The data

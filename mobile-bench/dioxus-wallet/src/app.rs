@@ -3,7 +3,8 @@ use crate::format::{
     DUST_DECIMALS, NIGHT_DECIMALS, format_atomic_dust, format_atomic_night,
     format_balance, format_int, format_log_timestamp, format_ms, short_keyref,
 };
-use crate::proc_stats::{CLK_TCK, proc_self_stats};
+use crate::bench_stage;
+use crate::proc_stats::{CLK_TCK, proc_per_core_stats, proc_self_stats};
 use wallet_core::{
     ChainTipInfo, IndexerClient, Network, NodeClient, NodeStatus, ProbeResult, Wallet,
     probe_connectivity,
@@ -5200,27 +5201,51 @@ fn BenchmarkTab() -> Element {
     // Android/Linux. macOS/iOS leave these as `None` (no `/proc`).
     let mut rss_kb = use_signal::<Option<u64>>(|| None);
     let mut cpu_pct = use_signal::<Option<f32>>(|| None);
+    // Per-core CPU load read from `/proc/stat`. Each entry is the
+    // 0.0..=1.0 utilisation since the previous 500 ms tick. Empty
+    // on platforms without `/proc`. Used by the per-core bar grid
+    // at the bottom of the tab.
+    let mut per_core_pct = use_signal::<Vec<f32>>(Vec::new);
     // Long-running sampler — ticks every 500 ms regardless of bench
     // state so the user sees background drift, not just spikes
     // during a sweep. The future lives for the component's lifetime;
     // Dioxus tears it down when the tab unmounts.
     use_future(move || async move {
         let mut prev: Option<(u64, std::time::Instant)> = None;
+        let mut prev_per_core: Vec<(u64, u64)> = Vec::new();
         loop {
             tokio::time::sleep(std::time::Duration::from_millis(500)).await;
-            let Some((rss, jiffies)) = proc_self_stats() else {
-                continue;
-            };
-            rss_kb.set(Some(rss));
-            let now = std::time::Instant::now();
-            if let Some((prev_jiff, prev_t)) = prev {
-                let dt = (now - prev_t).as_secs_f32();
-                if dt > 0.0 {
-                    let djiff = jiffies.saturating_sub(prev_jiff) as f32;
-                    cpu_pct.set(Some(djiff / (CLK_TCK as f32 * dt) * 100.0));
+            if let Some((rss, jiffies)) = proc_self_stats() {
+                rss_kb.set(Some(rss));
+                let now = std::time::Instant::now();
+                if let Some((prev_jiff, prev_t)) = prev {
+                    let dt = (now - prev_t).as_secs_f32();
+                    if dt > 0.0 {
+                        let djiff = jiffies.saturating_sub(prev_jiff) as f32;
+                        cpu_pct.set(Some(djiff / (CLK_TCK as f32 * dt) * 100.0));
+                    }
                 }
+                prev = Some((jiffies, now));
             }
-            prev = Some((jiffies, now));
+            // Per-core sample. /proc/stat is system-wide so we need
+            // a separate read. The diff vs the previous sample gives
+            // the busy fraction over the last 500 ms — that's what
+            // the bar grid renders.
+            if let Some(cores) = proc_per_core_stats() {
+                if prev_per_core.len() == cores.len() && !cores.is_empty() {
+                    let pct: Vec<f32> = cores
+                        .iter()
+                        .zip(prev_per_core.iter())
+                        .map(|((b, t), (pb, pt))| {
+                            let db = b.saturating_sub(*pb) as f32;
+                            let dt = t.saturating_sub(*pt) as f32;
+                            if dt > 0.0 { (db / dt * 100.0).min(100.0) } else { 0.0 }
+                        })
+                        .collect();
+                    per_core_pct.set(pct);
+                }
+                prev_per_core = cores;
+            }
         }
     });
 
@@ -5385,6 +5410,40 @@ fn BenchmarkTab() -> Element {
                             span { class: "v", "{pct:.0}%" }
                         }
                     }
+                    if let Some(stage) = bench_stage::current_stage() {
+                        div { class: "metric-pill",
+                            span { class: "k", "Stage" }
+                            span { class: "v", "{stage}" }
+                        }
+                    }
+                }
+            }
+
+            // Per-core CPU load bar grid. Each bar represents one
+            // core's busy fraction over the last 500 ms sample. On
+            // the S24 Ultra this is a row of 10 bars (1 prime + 5
+            // performance + 4 efficiency cores). On platforms
+            // without `/proc/stat` the vector stays empty and the
+            // block renders nothing.
+            {
+                let cores = per_core_pct.read();
+                if !cores.is_empty() {
+                    rsx! {
+                        div { class: "cpu-cores",
+                            for (i, pct) in cores.iter().enumerate() {
+                                div { class: "cpu-core",
+                                    title: "Core {i}: {pct:.0}%",
+                                    div {
+                                        class: "cpu-core-fill",
+                                        style: "height: {pct.min(100.0)}%;",
+                                    }
+                                    span { class: "cpu-core-label", "C{i}" }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    rsx!()
                 }
             }
 

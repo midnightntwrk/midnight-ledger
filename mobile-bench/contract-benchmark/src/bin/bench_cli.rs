@@ -16,6 +16,13 @@
 //!                      the cold-path floor.
 //!     --json           emit one JSON line per row instead of a table
 //!     --skip-verify    pass through to RunOpts (default: verify_after = true for k ≤ 14)
+//!     --build-mmap     for each k in --min-k..=--max-k, build the
+//!                      `bls_midnight_2pN.mmap` companion file from the
+//!                      original SRS and exit. Skips proving entirely.
+//!                      Use on a roomy desktop, then push the resulting
+//!                      `.mmap` files to the device's params cache dir
+//!                      next to the originals — the mmap path activates
+//!                      automatically when the companion is found.
 //!
 //! Reads SRS files from `$MIDNIGHT_PP` / `$XDG_CACHE_HOME` /
 //! `$HOME/.cache/midnight/zk-params/` — matches the wallet's
@@ -51,6 +58,7 @@ fn main() {
     let mut skip_verify = false;
     let mut repeat: u32 = 1;
     let mut cache_keys = true;
+    let mut build_mmap = false;
     for a in &args[1..] {
         if let Some(v) = a.strip_prefix("--min-k=") {
             min_k = v.parse().expect("--min-k expects an integer");
@@ -64,6 +72,8 @@ fn main() {
             }
         } else if a == "--no-cache-keys" {
             cache_keys = false;
+        } else if a == "--build-mmap" {
+            build_mmap = true;
         } else if a == "--json" {
             emit_json = true;
         } else if a == "--skip-verify" {
@@ -97,6 +107,37 @@ fn main() {
         .enable_all()
         .build()
         .expect("tokio runtime");
+
+    // --build-mmap: precompute `.mmap` companion files for each k
+    // in the range, then exit without proving. We set
+    // `MIDNIGHT_MMAP_BUILD=1` so the very first `get_params(k)`
+    // call inside `run_proof_with_opts` writes the companion as a
+    // side effect of the eager load. A skip-verify prove with
+    // chain_len=0 keeps the actual work negligible — the per-k
+    // wall time is dominated by the file read + serialise.
+    if build_mmap {
+        // SAFETY: single-threaded, set before any other code touches env.
+        unsafe {
+            std::env::set_var("MIDNIGHT_MMAP_BUILD", "1");
+        }
+        for k in min_k..=max_k {
+            let started = Instant::now();
+            let result = rt.block_on(run_proof_with_opts(
+                k,
+                RunOpts {
+                    verify_after: false,
+                    cache_keys: false,
+                    ..RunOpts::default()
+                },
+            ));
+            let elapsed = started.elapsed().as_secs_f32();
+            match result {
+                Ok(_) => println!("k={k:>2}  built  {:.1}s", elapsed),
+                Err(e) => eprintln!("k={k:>2}  ERROR: {e}"),
+            }
+        }
+        return;
+    }
 
     for k in min_k..=max_k {
       for iter in 0..repeat {

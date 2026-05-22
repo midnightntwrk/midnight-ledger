@@ -528,6 +528,12 @@ where
         return Err(Error::KOutOfRange { requested: k });
     }
 
+    // Stage events flow into the dioxus-wallet's `BenchStageLayer`
+    // (target prefix `midnight_` → captured) so the UI can pin the
+    // current phase to a pill on the Benchmark tab. Cheap when no
+    // subscriber is attached — `tracing::info!` is a noop without
+    // a layer.
+    tracing::info!(target: "midnight_bench", stage = "build_ir", k = k as u64);
     // 1) Build IR matched to target k.
     let (ir, chain_len) = build_ir_for_k(k)?;
     // `ir.model()` triggers `cost_model_options` which OOMs at
@@ -551,6 +557,7 @@ where
     //    skip the (deterministic in IR + SRS) keygen entirely.
     //    `Duration::ZERO` on a cache hit means "didn't run", not
     //    "ran in 0ns"; the caller distinguishes via `RunStats.keygen`.
+    tracing::info!(target: "midnight_bench", stage = "keygen", k = k as u64);
     let kg_start = Instant::now();
     let (pk, vk) = if opts.cache_keys {
         if let Some(cached) = key_cache_lookup(k) {
@@ -573,6 +580,7 @@ where
     let resolver = ChainResolver { pk, vk: vk.clone(), ir };
 
     // 3) Prove.
+    tracing::info!(target: "midnight_bench", stage = "prove", k = k as u64);
     let mut rng = ChaCha20Rng::seed_from_u64(opts.seed);
     let preimage = make_preimage();
     let binding_input = preimage.binding_input;
@@ -592,6 +600,9 @@ where
     };
 
     // 4) Verify (if eligible).
+    if opts.verify_after && realized_k <= MAX_VERIFIABLE_K {
+        tracing::info!(target: "midnight_bench", stage = "verify", k = k as u64);
+    }
     let (verified, verify_dur) = if opts.verify_after && realized_k <= MAX_VERIFIABLE_K {
         let v_start = Instant::now();
         let ok = vk

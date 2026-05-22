@@ -33,6 +33,13 @@ midnight-circuits = { version = "^6.0.0" }
 midnight-zk-stdlib = { version = "^1.0.0" }
 anyhow = { version = "^1.0.102" }
 lru = "0.17.0"
+# `read_mmap_path` opens the companion SRS file via `memmap2` and
+# hands the `Arc<Mmap>` to the patched midnight-proofs'
+# `read_mmap_arc`. The companion file lives in the app cache dir
+# and the mapping is read-only. Available only against the patched
+# fork; the unmodified upstream 0.7.1 lacks `read_mmap_arc` and
+# this method won't compile.
+memmap2 = "0.9"
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.

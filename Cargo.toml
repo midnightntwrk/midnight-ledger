@@ -76,13 +76,21 @@ config = ".spellcheck/cargo-spellcheck.toml"
 #
 # Points at `~/iohk/midnight-zk` (a clone of
 # github.com/midnightntwrk/midnight-zk) checked out at the
-# `feat/v0.7-mmap-affine-lazy` branch. The branch carries one
-# patch on top of the `midnight-proofs-v0.7.0` tag:
+# `feat/v0.7-mmap-srs` branch. The branch carries four patches
+# on top of the `midnight-proofs-v0.7.0` tag:
 #
-#   feat(proofs): lazy g_lagrange via OnceLock + drop_lazy_bases
+#   1. lazy g_lagrange via OnceLock + drop_lazy_bases
+#   2. version bump to 0.7.99 (so [patch.crates-io] wins over 0.7.1)
+#   3. read_custom_lazy<R: Read + Seek> (skip g_lagrange parse)
+#   4. mmap-backed ParamsKZG via BasesStorage
 #
-# which makes `ParamsKZG.g_lagrange` a `OnceLock<Vec<E::G1>>` and
-# exposes `ParamsKZG::drop_lazy_bases(&mut self)`.
+# Patch (4) is the main event: `ParamsKZG::read_mmap_arc` constructs
+# the prover params with `g`/`g_lagrange` as slice views into a
+# memory-mapped companion file (`bls_midnight_2pN.mmap`). Zero
+# heap allocation for the SRS; the OS pages handle eviction under
+# memory pressure. Companions are built once via
+# `bench_cli --build-mmap` (or `MIDNIGHT_MMAP_BUILD=1`) and shipped
+# to the device.
 #
 # Empirical evaluation (M2 desktop, contract-benchmark k=4..14,
 # `bench_cli --no-cache-keys`, 2026-05-22):

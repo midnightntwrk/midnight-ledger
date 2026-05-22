@@ -1,6 +1,7 @@
 #![deny(warnings)]
 
 mod app;
+mod bench_stage;
 mod bridge;
 #[cfg(feature = "js-bridge")]
 pub(crate) mod eval_bridge;
@@ -44,6 +45,11 @@ pub fn run() {
     let _ = tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_filter(stderr_filter))
         .with(logs::WalletLogLayer::new(capture))
+        // BenchStageLayer captures `midnight_bench` target events
+        // emitted by `contract-benchmark` and pins the latest stage
+        // to a static the Benchmark tab polls. See
+        // `bench_stage::current_stage`.
+        .with(bench_stage::BenchStageLayer::new())
         .try_init();
     // rustls 0.23 panics on first TLS use if no `CryptoProvider` is
     // marked default — dioxus-desktop pulls in `aws-lc-rs` while
