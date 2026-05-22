@@ -87,8 +87,9 @@ fn main() {
         // Header row when we're rendering a table.
         let iter_col = if repeat > 1 { "iter" } else { " " };
         println!(
-            "{:>3}  {:>4}  {:>8}  {:>9}  {:>9}  {:>9}  {:>10}  {:>10}",
+            "{:>3}  {:>4}  {:>8}  {:>9}  {:>9}  {:>9}  {:>10}  {:>10}  {:>10}",
             "k", iter_col, "hashes", "keygen", "prove", "verify", "proof_b", "rss_mb",
+            "peak_mb",
         );
     }
 
@@ -110,9 +111,10 @@ fn main() {
         match result {
             Ok(s) => {
                 let rss_mb = proc_rss_mb().unwrap_or(0);
+                let peak_mb = proc_peak_rss_mb().unwrap_or(0);
                 if emit_json {
                     println!(
-                        "{{\"k\":{},\"iter\":{},\"hashes\":{},\"keygen_ms\":{},\"prove_ms\":{},\"verify_ms\":{},\"verified\":{},\"proof_bytes\":{},\"wall_ms\":{},\"rss_mb\":{}}}",
+                        "{{\"k\":{},\"iter\":{},\"hashes\":{},\"keygen_ms\":{},\"prove_ms\":{},\"verify_ms\":{},\"verified\":{},\"proof_bytes\":{},\"wall_ms\":{},\"rss_mb\":{},\"peak_mb\":{}}}",
                         k,
                         iter,
                         s.hash_chain_len,
@@ -123,10 +125,11 @@ fn main() {
                         s.proof_bytes,
                         wall_ms,
                         rss_mb,
+                        peak_mb,
                     );
                 } else {
                     println!(
-                        "{:>3}  {:>4}  {:>8}  {:>7}ms  {:>7}ms  {:>7}  {:>10}  {:>9}",
+                        "{:>3}  {:>4}  {:>8}  {:>7}ms  {:>7}ms  {:>7}  {:>10}  {:>9}  {:>9}",
                         k,
                         iter,
                         s.hash_chain_len,
@@ -137,6 +140,7 @@ fn main() {
                             .unwrap_or_else(|| "—".into()),
                         s.proof_bytes,
                         format!("{rss_mb} MiB"),
+                        format!("{peak_mb} MiB"),
                     );
                 }
             }
@@ -187,5 +191,45 @@ fn proc_rss_mb() -> Option<u64> {
 #[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
 #[allow(dead_code)] // wasm stub main never calls this
 fn proc_rss_mb() -> Option<u64> {
+    None
+}
+
+/// Peak RSS over the process lifetime in MiB. Uses
+/// `getrusage(RUSAGE_SELF).ru_maxrss` on Unix — the high-water
+/// mark of resident pages.
+///
+/// On Linux/Android `ru_maxrss` is **kilobytes**. On macOS / iOS
+/// it's **bytes** (deviation from POSIX; documented behaviour).
+/// We normalise to MiB.
+///
+/// Why this matters: `proc_rss_mb()` is sampled *after* each
+/// prove returns, by which point the heap has typically settled
+/// to its steady state. The transient parse-window spike that
+/// `MIDNIGHT_LAZY_PARAMS=1` is designed to reduce
+/// (`g_lagrange` briefly resident alongside `g`) is invisible
+/// to that sample. `proc_peak_rss_mb()` captures the high-water
+/// mark across the whole run, so the optimisation's effect is
+/// observable as a smaller terminal-row peak.
+#[cfg(any(target_os = "linux", target_os = "android", target_os = "macos"))]
+fn proc_peak_rss_mb() -> Option<u64> {
+    // SAFETY: getrusage with RUSAGE_SELF + zero-init struct is
+    // defined POSIX behaviour; we ignore the return value's
+    // semantic checks and only read ru_maxrss on success.
+    let mut usage: libc::rusage = unsafe { std::mem::zeroed() };
+    let rc = unsafe { libc::getrusage(libc::RUSAGE_SELF, &mut usage) };
+    if rc != 0 {
+        return None;
+    }
+    // ru_maxrss is bytes on macOS, kilobytes on Linux.
+    #[cfg(target_os = "macos")]
+    let bytes = usage.ru_maxrss as u64;
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    let bytes = (usage.ru_maxrss as u64) * 1024;
+    Some(bytes / (1024 * 1024))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "android", target_os = "macos")))]
+#[allow(dead_code)]
+fn proc_peak_rss_mb() -> Option<u64> {
     None
 }

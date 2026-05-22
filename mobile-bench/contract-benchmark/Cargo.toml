@@ -48,8 +48,13 @@ tracing = "0.1"
 
 # Native targets: full tokio runtime with multi-thread support
 # (used by `#[tokio::test]` and consumers like dioxus-wallet).
+# `libc` provides `getrusage` so `bench_cli` can capture peak RSS
+# (`ru_maxrss`) — the bench's current-RSS samples miss the brief
+# parse-time spike that `MIDNIGHT_LAZY_PARAMS=1` was designed to
+# reduce. wasm targets get a fallback that returns `None`.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 tokio = { version = "1.46.1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+libc = "0.2"
 
 # `wasm32-unknown-unknown`: tokio is restricted to the
 # single-threaded feature set; multi-thread runtime + `net` /

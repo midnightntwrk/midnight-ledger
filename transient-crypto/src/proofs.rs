@@ -40,7 +40,7 @@ use serialize::{NoStrategy, simple_arbitrary};
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::io::Write;
-use std::io::{self, Read};
+use std::io::{self, Read, Seek};
 #[cfg(feature = "proptest")]
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
@@ -72,7 +72,22 @@ impl ParamsProverProvider for base_crypto::data_provider::MidnightDataProvider {
                 &format!("public parameters for k={k} not found in cache"),
             )
             .await?;
-        ParamsProver::read(reader)
+        // Opt-in: `MIDNIGHT_LAZY_PARAMS=1` switches to the seekable
+        // skip-g_lagrange reader from the patched midnight-proofs fork.
+        //
+        // Why opt-in: empirically (M2 desktop, k=14) the FFT recompute
+        // adds ~2.5s keygen + 2s prove per session, while the
+        // post-prove RSS is unchanged (g_lagrange is resident either
+        // way once it has been used). The win is **peak heap during
+        // file load** (1× SRS instead of 2× — ~96 MiB at k=20,
+        // ~384 MiB at k=22). That matters only where the OS may kill
+        // the process for a momentary peak (mobile, wasm); on desktop
+        // it's pure regression.
+        if matches!(std::env::var("MIDNIGHT_LAZY_PARAMS").as_deref(), Ok("1") | Ok("true")) {
+            ParamsProver::read_lazy(reader)
+        } else {
+            ParamsProver::read(reader)
+        }
     }
 }
 
@@ -87,9 +102,30 @@ impl AsRef<ParamsKZG<Bls12>> for ParamsProver {
 }
 
 impl ParamsProver {
-    /// Reads the prover parameters from a data stream
+    /// Reads the prover parameters from a data stream.
+    ///
+    /// Eager — parses both `g` and `g_lagrange` from the file. Peak
+    /// resident heap during the parse is 2× the SRS size.
     pub fn read<R: Read>(mut reader: R) -> io::Result<Self> {
         Ok(ParamsProver(Arc::new(ParamsKZG::read_custom(
+            &mut reader,
+            SerdeFormat::RawBytesUnchecked,
+        )?)))
+    }
+
+    /// Reads the prover parameters from a seekable data stream,
+    /// skipping the on-disk `g_lagrange` block. The Lagrange basis is
+    /// recomputed via inverse-NTT of `g` on first use and cached
+    /// thereafter.
+    ///
+    /// Peak resident heap during the parse stays at 1× the SRS size
+    /// (no second `Vec` is allocated). The first `commit_lagrange`
+    /// in any subsequent prove pays one FFT to populate the cache.
+    ///
+    /// Available only against the patched `midnight-proofs` fork at
+    /// `[patch.crates-io]`. Falls back to `read` if absent.
+    pub fn read_lazy<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
+        Ok(ParamsProver(Arc::new(ParamsKZG::read_custom_lazy(
             &mut reader,
             SerdeFormat::RawBytesUnchecked,
         )?)))
