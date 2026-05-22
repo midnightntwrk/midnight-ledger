@@ -1,5 +1,9 @@
 # `midnight-onchain-runtime` Changelog
 
+## Unreleased
+
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
+
 ## Version `3.1.0`
 
 - feat: add more flexibility to `findPathForLeaf`, allowing it to scan index
