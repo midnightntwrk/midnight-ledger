@@ -5938,9 +5938,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proofs"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b48f199fa4707df5dc443238cd260344f2ad369897fbdc559dacce19b43d2119"
+version = "0.7.99"
 dependencies = [
  "blake2b_simd",
  "ff",
@@ -10566,7 +10564,7 @@ checksum = "97fee6b57c6a41524a810daee9286c02d7752c4253064d0b05472833a438f675"
 dependencies = [
  "cfg-if",
  "digest 0.10.7",
- "rand 0.8.6",
+ "rand 0.7.3",
  "static_assertions",
 ]
 

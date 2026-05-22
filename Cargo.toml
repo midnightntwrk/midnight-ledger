@@ -71,3 +71,46 @@ panic = "abort"
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
+
+# ---- Local fork of midnight-proofs (experimental) ----
+#
+# Points at `~/iohk/midnight-zk` (a clone of
+# github.com/midnightntwrk/midnight-zk) checked out at the
+# `feat/v0.7-mmap-affine-lazy` branch. The branch carries one
+# patch on top of the `midnight-proofs-v0.7.0` tag:
+#
+#   feat(proofs): lazy g_lagrange via OnceLock + drop_lazy_bases
+#
+# which makes `ParamsKZG.g_lagrange` a `OnceLock<Vec<E::G1>>` and
+# exposes `ParamsKZG::drop_lazy_bases(&mut self)`.
+#
+# Empirical evaluation (M2 desktop, contract-benchmark k=4..14,
+# `bench_cli --no-cache-keys`, 2026-05-22):
+#
+#   * Just the OnceLock wrapping is essentially free — RSS and
+#     timings match the crates.io 0.7.1 baseline within run-to-run
+#     jitter (≤15%).
+#   * Calling `drop_lazy_bases` immediately after `read_custom` is
+#     net-NEGATIVE at every observed k. At k=14 it 4-5x's keygen
+#     (from ~500 ms to ~2.8 s) and 2x's prove. Reasons:
+#       - `g_to_lagrange` is an inverse-NTT over 2^k group elements
+#         (curve adds, not just field ops) — heavy at k≥12.
+#       - `Vec::drop` keeps freed pages in the allocator pool, so
+#         the FFT recompute doesn't shrink RSS; we just churn.
+#
+# Conclusion: the patch ships the *primitive* but no consumer
+# inside this workspace exercises it usefully yet. It is the right
+# building block for "release the Lagrange basis between idle
+# proof sessions" (e.g. the wallet UI between user clicks), where
+# the FFT recompute amortises against minutes of idle time. It is
+# the wrong tool for tight in-loop calls.
+#
+# Pinned to v0.7.99 (a private hotfix-after-0.7.1 version) so the
+# patch is selected over the published 0.7.1. SemVer constraints
+# across the workspace (`^0.7.0`) accept both.
+#
+# Remove this block to fall back to `midnight-proofs = 0.7.1` and
+# lose `drop_lazy_bases` (no other consumer currently calls it,
+# so the only fallout is contract-benchmark losing the API hook).
+[patch.crates-io]
+midnight-proofs = { path = "/Users/ysh/iohk/midnight-zk/proofs" }
