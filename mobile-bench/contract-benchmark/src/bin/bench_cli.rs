@@ -51,6 +51,24 @@ fn main() {
 #[cfg(not(target_arch = "wasm32"))]
 
 fn main() {
+    // Wire a `tracing-subscriber::fmt` layer so the
+    // `midnight_bench` per-phase events emitted by the patched
+    // midnight-proofs + contract-benchmark print to stderr.
+    // The dioxus-wallet has its own subscribers; here we want
+    // the events visible in shell output for the autonomous
+    // profile-and-optimise loop. `BENCH_LOG` env var lets the
+    // caller override (default: only `midnight_bench=info`).
+    use tracing_subscriber::EnvFilter;
+    let filter = std::env::var("BENCH_LOG")
+        .unwrap_or_else(|_| "midnight_bench=info".to_string());
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::new(filter))
+        .with_target(false)
+        .with_writer(std::io::stderr)
+        .with_ansi(false)
+        .compact()
+        .try_init();
+
     let args: Vec<String> = std::env::args().collect();
     let mut min_k = MIN_K;
     let mut max_k = 14u32; // default to verifiable range so verify counts something
