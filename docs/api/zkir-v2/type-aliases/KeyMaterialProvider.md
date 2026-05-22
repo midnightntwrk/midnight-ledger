@@ -8,8 +8,8 @@
 
 ```ts
 type KeyMaterialProvider = {
-  getParams: Promise<Uint8Array<ArrayBuffer>>;
-  lookupKey: Promise<ProvingKeyMaterial>;
+  getParams: Promise<Uint8Array<ArrayBufferLike>>;
+  lookupKey: Promise<ProvingKeyMaterial | undefined>;
 };
 ```
 
@@ -18,7 +18,7 @@ type KeyMaterialProvider = {
 ### getParams()
 
 ```ts
-getParams(k): Promise<Uint8Array<ArrayBuffer>>;
+getParams(k): Promise<Uint8Array<ArrayBufferLike>>;
 ```
 
 #### Parameters
@@ -29,14 +29,14 @@ getParams(k): Promise<Uint8Array<ArrayBuffer>>;
 
 #### Returns
 
-`Promise`\<`Uint8Array`\<`ArrayBuffer`\>\>
+`Promise`\<`Uint8Array`\<`ArrayBufferLike`\>\>
 
 ***
 
 ### lookupKey()
 
 ```ts
-lookupKey(keyLocation): Promise<ProvingKeyMaterial>;
+lookupKey(keyLocation): Promise<ProvingKeyMaterial | undefined>;
 ```
 
 #### Parameters
@@ -47,4 +47,4 @@ lookupKey(keyLocation): Promise<ProvingKeyMaterial>;
 
 #### Returns
 
-`Promise`\<[`ProvingKeyMaterial`](ProvingKeyMaterial.md)\>
+`Promise`\<[`ProvingKeyMaterial`](ProvingKeyMaterial.md) \| `undefined`\>

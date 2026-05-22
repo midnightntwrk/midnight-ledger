@@ -11,7 +11,7 @@ proptest = ["dep:proptest", "dep:proptest-derive", "storage-core/proptest", "bas
 sqlite = ["storage-core/sqlite"]
 parity-db = ["storage-core/parity-db"]
 stress-test = ["dep:serde_json", "dep:os_pipe", "storage-core/test-utilities"]
-bench = ["storage-core/bench", "dep:pprof", "dep:criterion"]
+bench = ["storage-core/bench", "dep:pprof", "dep:criterion", "dep:serde_json"]
 public-internal-structure = ["storage-core/public-internal-structure"]
 state-translation = ["storage-core/state-translation", "dep:hashbrown", "public-internal-structure"]
 
@@ -34,7 +34,7 @@ hashbrown = { version = "^0.17.0", optional = true }
 pprof = { version = "0.15", optional = true, features = ["criterion", "flamegraph"] }
 os_pipe = { version = "1.2.2", optional = true }
 criterion = { version = "^0.5.1", optional = true }
-sysinfo = "0.38.4"
+sysinfo = "0.39.1"
 
 [dev-dependencies]
 pastey = "0.2.1"
