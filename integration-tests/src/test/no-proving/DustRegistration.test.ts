@@ -20,9 +20,9 @@ import {
   signatureVerifyingKey,
   signData
 } from '@midnight-ntwrk/ledger';
-import { SignatureMarker } from '@/test/utils/Markers';
+import { SignatureKindMarker, SignatureMarker } from '@/test/utils/Markers';
 import { BALANCING_OVERHEAD } from '@/test-objects';
-import { assertSerializationSuccess } from '@/test-utils';
+import { assertSerializationSuccess, corruptSignature } from '@/test-utils';
 
 describe('Ledger API - DustRegistration', () => {
   /**
@@ -176,5 +176,96 @@ describe('Ledger API - DustRegistration', () => {
     expect(dustRegistrationSignature).toBeDefined();
     expect(dustRegistrationSignatureErased).toBeDefined();
     expect(dustRegistrationSignatureErased.signature).toBeUndefined();
+  });
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test construction with an ECDSA-keyed night key.
+     *
+     * @given An ECDSA signing key and a signature over arbitrary data
+     * @when Constructing a DustRegistration with the matching verifying key
+     * @then All getters should return the inputs with the 'ecdsa' tag intact
+     */
+    test('constructs with an ECDSA night key and ECDSA-signed signature', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const nightKey = signatureVerifyingKey(ecdsaSk);
+      const dustAddress = sampleDustSecretKey().publicKey;
+      const sig = signData(ecdsaSk, new Uint8Array(32));
+
+      const reg = new DustRegistration(
+        SignatureMarker.signature,
+        nightKey,
+        dustAddress,
+        BALANCING_OVERHEAD,
+        new SignatureEnabled(sig)
+      );
+
+      expect(reg.nightKey).toEqual(nightKey);
+      expect(reg.nightKey.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(reg.signature.value).toEqual(sig);
+      expect(reg.signature.value.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Test that the nightKey setter accepts an ECDSA verifying key.
+     *
+     * @given A DustRegistration initially built with a Schnorr night key
+     * @when Reassigning nightKey to an ECDSA verifying key
+     * @then Reading nightKey back should yield the new ECDSA key
+     */
+    test('setter assigns an ECDSA night key and reads back equal', () => {
+      const initialSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const initialVk = signatureVerifyingKey(initialSk);
+      const dustAddress = sampleDustSecretKey().publicKey;
+      const reg = new DustRegistration(
+        SignatureMarker.signature,
+        initialVk,
+        dustAddress,
+        BALANCING_OVERHEAD,
+        new SignatureEnabled(signData(initialSk, new Uint8Array(32)))
+      );
+
+      const ecdsaVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      reg.nightKey = ecdsaVk;
+
+      expect(reg.nightKey).toEqual(ecdsaVk);
+      expect(reg.nightKey.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Test wire-format round-trip preserves the ECDSA night key kind.
+     *
+     * @given A DustRegistration with an ECDSA night key and matching signature
+     * @when Serialising and deserialising it
+     * @then The decoded value should match the original
+     */
+    test('serialization round-trip preserves the ECDSA night key kind', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const nightKey = signatureVerifyingKey(ecdsaSk);
+      const reg = new DustRegistration(
+        SignatureMarker.signature,
+        nightKey,
+        sampleDustSecretKey().publicKey,
+        BALANCING_OVERHEAD,
+        new SignatureEnabled(signData(ecdsaSk, new Uint8Array(32)))
+      );
+
+      assertSerializationSuccess(reg, SignatureMarker.signature);
+    });
+
+    /**
+     * Test that corruptSignature (post-PR fix) preserves the kind tag.
+     *
+     * @given A valid ECDSA signature
+     * @when Mutating it via corruptSignature
+     * @then The tag must remain 'ecdsa' and the value must change
+     */
+    test('corruptSignature preserves the ECDSA tag', () => {
+      const sig = signData(sampleSigningKey(SignatureKindMarker.ecdsa), new Uint8Array(32));
+      const corrupted = corruptSignature(sig);
+
+      expect(corrupted.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(corrupted.value).not.toEqual(sig.value);
+    });
   });
 });

@@ -13,12 +13,11 @@
 
 use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend, InitialNonce};
 use crate::error::coin::UserAddress;
-use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
+use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{self, Commitment, Nullifier, PublicAddress, TokenType};
 use coin_structure::contract::ContractAddress;
@@ -485,7 +484,7 @@ pub enum MalformedTransaction<D: DB> {
         validity_end: Timestamp,
     },
     MultipleDustRegistrationsForKey {
-        key: VerifyingKey,
+        key: SignatureVerifyingKey,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -543,6 +542,7 @@ pub enum MalformedTransaction<D: DB> {
         inputs: Vec<UtxoSpend>,
         erased_signatures: Vec<()>,
     },
+    ZeroValueUtxo(UtxoOutput),
 }
 
 #[derive(Clone, Debug)]
@@ -1064,6 +1064,12 @@ impl<D: DB> Display for MalformedTransaction<D> {
                     "unshielded offer action validation error: mismatch between number of inputs ({}) and signatures ({})",
                     inputs.len(),
                     erased_signatures.len()
+                )
+            }
+            ZeroValueUtxo(utxo) => {
+                write!(
+                    formatter,
+                    "unshielded offer validation error: zero-value utxo output not permitted: {utxo:?}"
                 )
             }
         }

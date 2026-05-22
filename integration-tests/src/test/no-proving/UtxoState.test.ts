@@ -24,6 +24,7 @@ import {
   sampleUserAddress,
   sampleIntentHash,
   type Utxo,
+  SignatureEnabled,
   signatureVerifyingKey,
   sampleSigningKey,
   signData,
@@ -1076,7 +1077,7 @@ describe('Ledger API - UtxoState', () => {
             type: createdUtxo.type
           }
         ],
-        [signData(signingKey, new Uint8Array(32))]
+        [new SignatureEnabled(signData(signingKey, new Uint8Array(32)))]
       );
 
       const tx2 = Transaction.fromParts('local-test', undefined, undefined, intent2);
