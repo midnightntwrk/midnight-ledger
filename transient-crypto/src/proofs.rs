@@ -422,6 +422,54 @@ impl<T: Zkir> ProverKey<T> {
         }
     }
 
+    /// Pre-populate the process-wide `PK_CACHE` so that a subsequent
+    /// `tagged_deserialize::<ProverKey<T>>` of bytes produced by
+    /// serialising **this** key returns a `ProverKey` sharing the
+    /// same `Arc<MidnightPK<T>>` — no `MidnightPK::read` rebuild and
+    /// no extended-domain FFT recomputation.
+    ///
+    /// Designed for `Resolver::resolve_key` impls that hold an
+    /// initialised `ProverKey` in process memory and feed it into
+    /// the bytes-based prover pipeline. The bytes API at the prover
+    /// boundary is preserved; the consumer's `try_cache` hits the
+    /// freshly-inserted entry instead of paying the multi-GiB
+    /// `MidnightPK::read` cost.
+    ///
+    /// At BLS12-381 / k=18 the prover-side rebuild empirically
+    /// costs ~1.3 GiB; at k=20 it scales to ~5 GiB and is the main
+    /// reason `contract-benchmark`'s k=20 dies on mobile.
+    ///
+    /// Returns `Ok(true)` if the key was `Initialized` and the
+    /// cache was warmed; `Ok(false)` if the key was
+    /// `Uninitialized`/`Invalid` (nothing to share).
+    pub fn warm_pk_cache(&self) -> std::io::Result<bool> {
+        let arc_pk = {
+            let mutex = self.0.lock().expect("mutex not poisoned");
+            match &*mutex {
+                InnerProverKey::Initialized(key) => key.clone(),
+                _ => return Ok(false),
+            }
+        };
+
+        // Compute the exact bytes the consumer-side `try_cache` will
+        // hash: the gzip-compressed `MidnightPK::write` output.
+        let mut inner_buf = Vec::new();
+        {
+            let mut writer = flate2::write::GzEncoder::new(
+                &mut inner_buf,
+                flate2::Compression::new(PK_COMPRESSION_LEVEL),
+            );
+            arc_pk.write(&mut writer, SerdeFormat::RawBytesUnchecked)?;
+            writer.finish()?;
+        }
+
+        let hash = persistent_hash(&inner_buf);
+        if let Ok(mut c) = PK_CACHE.lock() {
+            c.put(hash, arc_pk as Arc<dyn Any + Send + Sync>);
+        }
+        Ok(true)
+    }
+
     fn inner_serialize<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
         match &*self.0.lock().expect("mutex is not poisoned") {
             InnerProverKey::Uninitialized(data) | InnerProverKey::Invalid(data) => {

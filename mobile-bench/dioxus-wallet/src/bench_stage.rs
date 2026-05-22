@@ -79,21 +79,33 @@ where
         let mut visitor = StageVisitor::default();
         event.record(&mut visitor);
         let Some(stage) = visitor.stage else { return };
-        let label = match visitor.k {
-            Some(k) => format!("{stage} (k={k})"),
-            None => stage,
-        };
+        // Build the label with whatever optional fields are present.
+        // Prover-instrumentation events have `rss_mb`+`hwm_mb`;
+        // high-level bench events have only `k`.
+        let mut label = stage;
+        if let Some(k) = visitor.k {
+            label.push_str(&format!(" (k={k})"));
+        }
+        if let (Some(rss), Some(hwm)) = (visitor.rss_mb, visitor.hwm_mb) {
+            label.push_str(&format!(" rss={rss} peak={hwm} MiB"));
+        }
         if let Ok(mut g) = CURRENT_STAGE.lock() {
             *g = Some(label);
         }
     }
 }
 
-/// Extracts the `stage` and optional `k` fields from a stage event.
+/// Extracts the `stage`, `k`, `rss_mb`, and `hwm_mb` fields from a
+/// stage event. Memory fields appear when emitted by the prover
+/// instrumentation (`midnight-proofs::plonk::prover::log_phase`);
+/// the `contract-benchmark` high-level stage events
+/// (`build_ir`/`keygen`/`prove`/`verify`) carry only `stage` + `k`.
 #[derive(Default)]
 struct StageVisitor {
     stage: Option<String>,
     k: Option<u64>,
+    rss_mb: Option<u64>,
+    hwm_mb: Option<u64>,
 }
 
 impl Visit for StageVisitor {
@@ -104,25 +116,28 @@ impl Visit for StageVisitor {
     }
 
     fn record_u64(&mut self, field: &Field, value: u64) {
-        if field.name() == "k" {
-            self.k = Some(value);
+        match field.name() {
+            "k" => self.k = Some(value),
+            "rss_mb" => self.rss_mb = Some(value),
+            "hwm_mb" => self.hwm_mb = Some(value),
+            _ => {}
         }
     }
 
     fn record_i64(&mut self, field: &Field, value: i64) {
-        if field.name() == "k" && value >= 0 {
-            self.k = Some(value as u64);
+        if value >= 0 {
+            match field.name() {
+                "k" => self.k = Some(value as u64),
+                "rss_mb" => self.rss_mb = Some(value as u64),
+                "hwm_mb" => self.hwm_mb = Some(value as u64),
+                _ => {}
+            }
         }
     }
 
     fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-        // Fallback: `tracing::info!(stage = "foo")` records via
-        // `record_str` on most field types, but if the macro
-        // dispatches via Debug for some reason we still want to
-        // capture the value.
         if field.name() == "stage" && self.stage.is_none() {
             let s = format!("{value:?}");
-            // Strip surrounding quotes that `Debug` for &str adds.
             let trimmed = s.trim_matches('"').to_string();
             self.stage = Some(trimmed);
         }

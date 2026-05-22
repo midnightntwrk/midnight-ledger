@@ -491,18 +491,80 @@ impl ResolverT for ChainResolver {
         &self,
         _key: KeyLocation,
     ) -> std::io::Result<Option<ProvingKeyMaterial>> {
+        bench_phase("resolver.resolve_key.start", 0);
+        // Pre-warm the process-wide PK_CACHE *before* serialising.
+        // The prover's `tagged_deserialize::<ProverKey<T>>` calls
+        // `try_cache` which hashes the inner gzip bytes. By inserting
+        // (hash, our Arc<MidnightPK>) into the cache now, the
+        // consumer-side deserialise + initialise step turns into a
+        // pointer copy — skipping ~1.3 GiB of `MidnightPK::read`
+        // reconstruction at k=18 (and the ~5 GiB equivalent at k=20
+        // that previously killed the wallet).
+        //
+        // Cost: one extra gzip compress of the same bytes we're about
+        // to serialise anyway. CPU-bounded (~hundreds of ms at k=18),
+        // does not push peak RSS. Honest trade per the user's brief:
+        // "we trade RAM for CPU".
+        let warmed = self.pk.warm_pk_cache()?;
+        tracing::info!(
+            target: "midnight_bench",
+            stage = "resolver.pk_cache_warmed",
+            warmed = warmed,
+        );
         let mut prover_key = Vec::new();
         tagged_serialize(&self.pk, &mut prover_key)?;
+        let prover_len = prover_key.len();
+        bench_phase("resolver.pk_serialised", 0);
+        tracing::info!(
+            target: "midnight_bench",
+            stage = "resolver.pk_bytes",
+            bytes = prover_len as u64,
+        );
         let mut verifier_key = Vec::new();
         tagged_serialize(&self.vk, &mut verifier_key)?;
+        bench_phase("resolver.vk_serialised", 0);
         let mut ir_source = Vec::new();
         tagged_serialize(&self.ir, &mut ir_source)?;
+        bench_phase("resolver.resolve_key.end", 0);
         Ok(Some(ProvingKeyMaterial {
             prover_key,
             verifier_key,
             ir_source,
         }))
     }
+}
+
+/// Reads `/proc/self/status::{VmRSS,VmHWM}` and emits a stage event.
+/// Same pattern as midnight-proofs's `log_phase` — kept duplicated
+/// here so this crate doesn't need a back-channel into the proofs
+/// crate's private helpers. On macOS/iOS (`/proc` absent) the event
+/// fires without memory fields.
+fn bench_phase(name: &'static str, k: u32) {
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/self/status") {
+            let mut rss: Option<u64> = None;
+            let mut hwm: Option<u64> = None;
+            for line in s.lines() {
+                if let Some(v) = line.strip_prefix("VmRSS:") {
+                    rss = v.split_whitespace().next().and_then(|n| n.parse().ok());
+                } else if let Some(v) = line.strip_prefix("VmHWM:") {
+                    hwm = v.split_whitespace().next().and_then(|n| n.parse().ok());
+                }
+            }
+            if let (Some(rss_kb), Some(hwm_kb)) = (rss, hwm) {
+                tracing::info!(
+                    target: "midnight_bench",
+                    stage = name,
+                    k = k as u64,
+                    rss_mb = rss_kb / 1024,
+                    hwm_mb = hwm_kb / 1024,
+                );
+                return;
+            }
+        }
+    }
+    tracing::info!(target: "midnight_bench", stage = name, k = k as u64);
 }
 
 /// Builds, keygens, proves, and (optionally) verifies a circuit needing
@@ -577,13 +639,16 @@ where
     };
     let keygen = kg_start.elapsed();
 
+    bench_phase("bench.keygen.end", k);
     let resolver = ChainResolver { pk, vk: vk.clone(), ir };
+    bench_phase("bench.resolver_built", k);
 
     // 3) Prove.
     tracing::info!(target: "midnight_bench", stage = "prove", k = k as u64);
     let mut rng = ChaCha20Rng::seed_from_u64(opts.seed);
     let preimage = make_preimage();
     let binding_input = preimage.binding_input;
+    bench_phase("bench.prove.start", k);
 
     let prove_start = Instant::now();
     let (proof, _pi_skips) = preimage
@@ -591,6 +656,7 @@ where
         .await
         .map_err(|e| Error::Anyhow(anyhow::anyhow!("prove: {e}")))?;
     let prove = prove_start.elapsed();
+    bench_phase("bench.prove.end", k);
 
     let proof_bytes = {
         let mut buf = Vec::new();
