@@ -11,6 +11,8 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add support for ECDSA signatures
 - feat: add `UnlockToTreasury` system transaction, moving funds from the locked
   pool to the treasury.
+- feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
+  matching the new on-chain event format.
 - fix: correctly exclude the identity point during coin ciphertext decryption
 
 ## Unreleased (8.2)
