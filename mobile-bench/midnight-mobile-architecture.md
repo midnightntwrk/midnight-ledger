@@ -1021,8 +1021,70 @@ skips the dual-init):
 | `--features proof-server-http`             | + in-process actix proof-server (implies `js-bridge`)             | **shipped & verified on real device** (§4.3) — actix-web 4.13 cross-compiles cleanly, server binds `127.0.0.1:<port>`, Update DID round-trips through `/prove` end-to-end on S24 Ultra | **builds** for `aarch64-apple-ios-sim` (§4.3) — same source, no device-deploy verification yet |
 | `--features preprod-live`                  | Operator PreProd seed + 3 pre-seeded DIDs                         | same                                                   | same                                                   |
 | `--features js-bridge,preprod-live`        | full DID writes against PreProd                                   | full DID writes against PreProd                        | full DID writes against PreProd                        |
+| `--target wasm32-unknown-unknown`          | **blocked** — see §6.1a                                           | n/a                                                    | n/a                                                    |
 
-### 6.2 Cross-compile + APK assemble
+### 6.1a Web target (`wasm32-unknown-unknown`) — feasibility probe (2026-05-22)
+
+Cargo-checking `dioxus-wallet --lib --target wasm32-unknown-unknown
+--no-default-features` was attempted as a "run the benchmark in
+a browser" experiment. **It does not compile** — and the
+fail-points fall in two tiers:
+
+**Tier 1 — toolchain configuration (resolvable):**
+
+- `getrandom` 0.3.x requires `--cfg wasm_js` for `wasm32-unknown-unknown`.
+  Already solved upstream in `zkir-wasm/Cargo.toml` by pulling
+  the two-version dance:
+  ```toml
+  getrandom_2 = { package = "getrandom", version = "^0.2.16", features = ["js"] }
+  getrandom_3 = { package = "getrandom", version = "^0.3.4", features = ["wasm_js"] }
+  ```
+- `mio` 1.2 doesn't compile on `wasm32-unknown-unknown`. Pulled
+  transitively by `tokio`'s `net` feature → reqwest / subxt /
+  tokio-tungstenite. Resolution: a wasm32-specific
+  `[target.'cfg(target_arch = "wasm32")'.dependencies]` block
+  with `tokio = { features = ["rt", "macros", "sync"] }` — no
+  `rt-multi-thread`, no transitive `net`.
+
+**Tier 2 — architectural conflicts (significant porting):**
+
+- `redb` (file-backed). The wallet store has no browser-side
+  analogue without a substantial port to IndexedDB / OPFS.
+- `actix-web` (`proof-server-http` feature). Won't compile to
+  wasm32 — but already feature-gated, so this is a non-issue
+  for an `--no-default-features` web build.
+- `subxt` chain client + `tokio-tungstenite` WebSocket — both
+  expect native sockets. Browser equivalent is `web-sys`
+  WebSocket; non-trivial swap.
+- `reqwest`. Has wasm32 support via the `fetch` backend, but
+  needs explicit feature gating.
+- `std::time::Instant::now()`. Panics on
+  `wasm32-unknown-unknown`. Used directly in
+  `contract-benchmark::run_proof`. Resolution: swap to the
+  `web-time` crate behind a `cfg(target_arch = "wasm32")` block.
+- `std::fs::*` (used by `MidnightDataProvider` and the
+  benchmark's SRS cache). Browser has no filesystem.
+  Resolution: switch the data provider to a fetch-only mode
+  that streams SRS files from `srs.midnight.network` directly
+  into memory, no on-disk cache (or use `IndexedDB` as a
+  cache backend).
+- `dioxus_desktop` (Wry + Tao). Doesn't target the web.
+  Resolution: swap to `dioxus_web` (already supported by
+  Dioxus 0.6) — but that needs a sibling crate or a third
+  cfg-arm in `lib.rs::desktop_or_mobile_launch`.
+
+**Two viable paths forward** (neither one explored further this
+session):
+
+| Path | Scope | Useful for |
+|---|---|---|
+| (A) **Benchmark-only wasm crate.** New crate `contract-benchmark-wasm` modelled on `zkir-wasm` (~30 LoC of wasm-bindgen glue). Exports `run_proof_k(k)` returning a JSON-stringified `RunStats`. Tiny static HTML page (~40 LoC) provides a "Run all" sweep UI. SRS files: pre-baked into the wasm via `include_bytes!` for k ≤ N (binary size cost ~tens of MB), or streamed from `srs.midnight.network` via JS `fetch` on demand. | Running the prover in a browser and getting per-k timings — directly addresses the original "run the benchmark here" ask. ~ 1 day of work. |
+| (B) **Full UI port (`dioxus_web` arm).** Wire a third platform branch in `lib.rs`, add wasm32-specific dependency block, replace `redb` with IndexedDB-backed store, replace `subxt` WS with `web-sys` WebSocket, swap `std::time::Instant` for `web_time::Instant`, swap reqwest backend to fetch. | Running the *full* wallet (with DID resolution + writes) in a browser. ~ 1–2 weeks of work. Likely yields a slower wallet than native arm64 due to single-threaded wasm. |
+
+For an actual prove-in-browser experiment, path (A) is the
+right scope — and the `zkir-wasm` crate already proves the
+core proving stack works on wasm32. Recommended next step
+when reopening this thread.
 
 From `mobile-bench/DEPLOY_TO_DEVICE.md`:
 
