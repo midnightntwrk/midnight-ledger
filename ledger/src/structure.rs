@@ -1808,6 +1808,8 @@ impl<D: DB> ClaimRewardsTransaction<(), D> {
             .expect("In-memory serialization should succeed");
         Serializable::serialize(&rewards.nonce, &mut data)
             .expect("In-memory serialization should succeed");
+        Serializable::serialize(&rewards.kind, &mut data)
+            .expect("In-memory serialization should succeed");
         data
     }
 }
