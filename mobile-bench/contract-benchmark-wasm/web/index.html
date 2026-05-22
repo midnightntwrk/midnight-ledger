@@ -38,82 +38,50 @@
         padding: 16px;
         margin-bottom: 16px;
       }
-      .row {
-        display: flex;
-        gap: 8px;
-        align-items: center;
-        flex-wrap: wrap;
-      }
+      .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
       button {
-        height: 36px;
-        padding: 0 16px;
-        background: var(--accent);
-        color: var(--bg);
-        border: none;
-        border-radius: 8px;
-        font-weight: 500;
-        cursor: pointer;
-        font-size: 13px;
+        height: 36px; padding: 0 16px; background: var(--accent);
+        color: var(--bg); border: none; border-radius: 8px;
+        font-weight: 500; cursor: pointer; font-size: 13px;
       }
       button:hover:not(:disabled) { filter: brightness(1.1); }
       button:disabled { opacity: 0.5; cursor: not-allowed; }
       button.secondary {
-        background: var(--surface-2);
-        color: var(--text);
+        background: var(--surface-2); color: var(--text);
         border: 1px solid var(--border);
       }
       input[type="number"] {
-        height: 32px;
-        padding: 0 10px;
-        background: var(--surface-2);
-        border: 1px solid var(--border);
-        border-radius: 6px;
-        color: var(--text);
-        width: 5em;
+        height: 32px; padding: 0 10px; background: var(--surface-2);
+        border: 1px solid var(--border); border-radius: 6px;
+        color: var(--text); width: 5em;
       }
       table {
-        width: 100%;
-        border-collapse: collapse;
+        width: 100%; border-collapse: collapse;
         font-variant-numeric: tabular-nums;
       }
       th, td {
-        padding: 8px 12px;
-        text-align: left;
-        border-bottom: 1px solid var(--border);
-        font-size: 13px;
+        padding: 8px 12px; text-align: left;
+        border-bottom: 1px solid var(--border); font-size: 13px;
       }
       th {
-        color: var(--text-muted);
-        font-weight: 500;
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.05em;
+        color: var(--text-muted); font-weight: 500; font-size: 11px;
+        text-transform: uppercase; letter-spacing: 0.05em;
       }
       td.num { text-align: right; font-family: ui-monospace, monospace; }
       tr.running { background: rgba(124, 92, 255, 0.08); }
       tr.failed td { color: var(--error); }
       .status {
-        display: inline-block;
-        padding: 2px 8px;
-        border-radius: 999px;
-        font-size: 11px;
-        font-weight: 600;
-        letter-spacing: 0.02em;
+        display: inline-block; padding: 2px 8px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; letter-spacing: 0.02em;
       }
       .status.idle { background: var(--surface-2); color: var(--text-muted); }
       .status.running { background: rgba(124, 92, 255, 0.18); color: var(--accent); }
       .status.done { background: rgba(46, 230, 166, 0.18); color: var(--success); }
       .status.failed { background: rgba(255, 92, 122, 0.18); color: var(--error); }
       .log {
-        max-height: 200px;
-        overflow-y: auto;
-        font-family: ui-monospace, monospace;
-        font-size: 11px;
-        white-space: pre-wrap;
-        background: var(--surface-2);
-        border-radius: 8px;
-        padding: 12px;
-        color: var(--text-muted);
+        max-height: 200px; overflow-y: auto; font-family: ui-monospace, monospace;
+        font-size: 11px; white-space: pre-wrap; background: var(--surface-2);
+        border-radius: 8px; padding: 12px; color: var(--text-muted);
       }
       .log .err { color: var(--error); }
     </style>
@@ -122,21 +90,24 @@
     <h1>Midnight contract-benchmark · web</h1>
     <p class="sub">
       Runs <code>contract_benchmark::run_proof(k)</code> compiled to
-      <code>wasm32-unknown-unknown</code>. SRS params are fetched
-      from <code>https://srs.midnight.network/</code> on demand and
-      cached in <code>IndexedDB</code>.
+      <code>wasm32-unknown-unknown</code> with
+      <code>wasm-bindgen-rayon</code> threads. The wasm itself
+      lives in a dedicated Worker — `SharedArrayBuffer`-backed
+      thread pools require the wasm to be hosted off the main
+      thread. SRS params are fetched on demand from
+      <code>/srs/&lt;file&gt;</code> (the local server proxies to
+      <code>srs.midnight.network</code>) and cached in
+      <code>IndexedDB</code>.
     </p>
 
     <div class="card">
       <div class="row">
-        <button id="run-all">Run all</button>
+        <button id="run-all" disabled>Run all</button>
         <label>up to k =
           <input type="number" id="max-k" min="1" max="20" value="14" />
         </label>
-        <button class="secondary" id="clear-cache">
-          Clear SRS cache
-        </button>
-        <span id="status" class="status idle">idle</span>
+        <button class="secondary" id="clear-cache">Clear SRS cache</button>
+        <span id="status" class="status idle">booting…</span>
       </div>
     </div>
 
@@ -163,102 +134,6 @@
     </div>
 
     <script type="module">
-      import init, {
-        runProof,
-        minK,
-        maxK,
-        initThreadPool,
-      } from "./pkg/contract_benchmark_wasm.js";
-
-      // ─── IndexedDB-backed SRS cache ─────────────────────────────
-      //
-      // SRS files are 8 KiB → 100+ MiB depending on k. We don't want
-      // to refetch them every page reload. IndexedDB gives a
-      // persistent key/value store that the browser garbage-collects
-      // under storage pressure, which is the right semantics for a
-      // cache.
-
-      const DB_NAME = "midnight-srs-cache";
-      const STORE = "params";
-
-      function openDb() {
-        return new Promise((resolve, reject) => {
-          const req = indexedDB.open(DB_NAME, 1);
-          req.onupgradeneeded = () => req.result.createObjectStore(STORE);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
-      }
-
-      async function cacheGet(key) {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE, "readonly");
-          const req = tx.objectStore(STORE).get(key);
-          req.onsuccess = () => resolve(req.result);
-          req.onerror = () => reject(req.error);
-        });
-      }
-
-      async function cachePut(key, value) {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE, "readwrite");
-          tx.objectStore(STORE).put(value, key);
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
-        });
-      }
-
-      async function cacheClear() {
-        const db = await openDb();
-        return new Promise((resolve, reject) => {
-          const tx = db.transaction(STORE, "readwrite");
-          tx.objectStore(STORE).clear();
-          tx.oncomplete = () => resolve();
-          tx.onerror = () => reject(tx.error);
-        });
-      }
-
-      // ─── ParamsProvider — passed into runProof(k, provider) ─────
-      //
-      // The wasm calls `getParams(k)` once per prove. We check
-      // IndexedDB first, then fall back to fetching
-      // `https://srs.midnight.network/bls_midnight_2pN`. Each file
-      // ranges from 3 KiB (k=4) to 100 MiB (k=19); high-k cold
-      // fetches are slow.
-
-      const provider = {
-        async getParams(k) {
-          const name = `bls_midnight_2p${k}`;
-          const cached = await cacheGet(name);
-          if (cached) {
-            log(`cache hit: ${name} (${(cached.byteLength / 1024).toFixed(1)} KiB)`);
-            return new Uint8Array(cached);
-          }
-          // Same-origin proxy via `serve.py`'s `/srs/<file>`
-          // handler. The upstream `srs.midnight.network` has no
-          // `Access-Control-Allow-Origin` header so direct
-          // cross-origin fetches get blocked by the browser.
-          const url = `/srs/${name}`;
-          log(`fetching ${url} (→ srs.midnight.network) …`);
-          const t0 = performance.now();
-          const res = await fetch(url);
-          if (!res.ok) {
-            throw new Error(`fetch ${name}: ${res.status} ${res.statusText}`);
-          }
-          const buf = await res.arrayBuffer();
-          const dt = performance.now() - t0;
-          log(`fetched ${name} (${(buf.byteLength / 1024 / 1024).toFixed(2)} MiB, ${dt.toFixed(0)} ms)`);
-          await cachePut(name, buf).catch((e) => {
-            log(`cache put failed (continuing): ${e}`, true);
-          });
-          return new Uint8Array(buf);
-        },
-      };
-
-      // ─── UI helpers ────────────────────────────────────────────
-
       const $ = (id) => document.getElementById(id);
       const rowsEl = $("rows");
       const logEl = $("log");
@@ -287,9 +162,6 @@
         return `${m}m ${String(s).padStart(2, "0")}s`;
       }
 
-      // Build a row via createElement / textContent — avoids
-      // innerHTML so we can't accidentally inject markup if a
-      // metric field ever carries operator-controlled strings.
       function makeRow(k) {
         const tr = document.createElement("tr");
         tr.id = `row-${k}`;
@@ -327,9 +199,6 @@
         }
       }
 
-      // Duration values in `RunStats` come over as
-      // `{ secs: u64, nanos: u32 }` from the serde serialisation —
-      // collapse to milliseconds.
       function durToMs(d) {
         if (d == null) return null;
         return d.secs * 1000 + d.nanos / 1_000_000;
@@ -366,46 +235,72 @@
         log(`k=${k} failed: ${err}`, true);
       }
 
-      // ─── Boot ──────────────────────────────────────────────────
+      // ─── Worker bootstrap ─────────────────────────────────────
+      //
+      // The wasm + rayon thread pool live inside `worker.js`.
+      // We post `{ type: "run", k, rid }` and await a
+      // matching `{ type: "result", rid, stats }` / `{ type:
+      // "error", rid, message }`. `rid` is a per-message uuid
+      // so the protocol is request/response even if we ever
+      // pipeline multiple proves.
 
-      await init();
-      log(`wasm loaded · k range ${minK()}–${maxK()}`);
+      const worker = new Worker("./worker.js", { type: "module" });
+      let pending = new Map();
+      let nextRid = 1;
 
-      // Bring up the rayon thread pool. Requires the page to be
-      // cross-origin-isolated (COOP/COEP headers from `serve.py`)
-      // — without that, `SharedArrayBuffer` is `undefined` and
-      // `initThreadPool` throws. We surface that case with a
-      // clear log line so the user knows perf will be 1-thread.
-      const threads = navigator.hardwareConcurrency || 4;
-      try {
-        if (typeof SharedArrayBuffer === "undefined") {
-          throw new Error("SharedArrayBuffer unavailable (COOP/COEP not active)");
+      worker.onmessage = (e) => {
+        const m = e.data;
+        if (m.type === "ready") {
+          log(`worker: thread pool = ${m.threads}`);
+          setStatus(`ready · ${m.threads} threads`, "done");
+          $("run-all").disabled = false;
+          makeRows(20);
+          return;
         }
-        await initThreadPool(threads);
-        log(`thread pool: ${threads} workers`);
-      } catch (e) {
-        log(`thread pool init failed (running single-threaded): ${e.message ?? e}`, true);
+        if (m.type === "log") { log(m.msg); return; }
+        if (m.type === "result" || m.type === "error") {
+          const cb = pending.get(m.rid);
+          if (cb) {
+            pending.delete(m.rid);
+            cb(m);
+          }
+          return;
+        }
+      };
+
+      worker.onerror = (e) => {
+        log(`worker error: ${e.message || "(unknown)"}`, true);
+        setStatus("worker failed", "failed");
+      };
+
+      function runProof(k) {
+        return new Promise((resolve, reject) => {
+          const rid = String(nextRid++);
+          pending.set(rid, (m) => {
+            if (m.type === "result") resolve(m.stats);
+            else reject(new Error(m.message));
+          });
+          worker.postMessage({ type: "run", k, rid });
+        });
       }
+
       makeRows(20);
 
       $("run-all").addEventListener("click", async () => {
-        const cap = Math.max(minK(), Math.min(maxK(), Number($("max-k").value)));
+        const cap = Math.max(1, Math.min(20, Number($("max-k").value)));
         $("run-all").disabled = true;
-        setStatus(`sweeping k = ${minK()}..${cap}`, "running");
+        setStatus(`sweeping k = 1..${cap}`, "running");
         makeRows(20);
-        for (let k = minK(); k <= cap; k++) {
+        for (let k = 1; k <= cap; k++) {
           setRowRunning(k);
           try {
-            const stats = await runProof(k, provider);
+            const stats = await runProof(k);
             log(
               `k=${k} ✓ keygen=${fmtMs(durToMs(stats.keygen))} prove=${fmtMs(durToMs(stats.prove))} bytes=${stats.proof_bytes}`,
             );
             setRowDone(k, stats);
           } catch (e) {
             setRowFailed(k, e.message ?? String(e));
-            // Stop on first failure — typically params fetch or
-            // browser memory exhaustion (k ≥ 17 is risky on
-            // mobile browsers).
             break;
           }
           await new Promise((r) => setTimeout(r, 0));
@@ -414,9 +309,8 @@
         $("run-all").disabled = false;
       });
 
-      $("clear-cache").addEventListener("click", async () => {
-        await cacheClear();
-        log("SRS cache cleared");
+      $("clear-cache").addEventListener("click", () => {
+        worker.postMessage({ type: "clearCache" });
       });
     </script>
   </body>

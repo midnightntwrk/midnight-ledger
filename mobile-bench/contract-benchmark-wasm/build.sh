@@ -32,9 +32,22 @@ cd "$(dirname "$0")"
 CC="$LLVM_PREFIX/bin/clang" \
 AR="$LLVM_PREFIX/bin/llvm-ar" \
 RUSTC_BOOTSTRAP=1 \
-RUSTFLAGS='-C target-feature=+atomics,+bulk-memory' \
+RUSTFLAGS='-C target-feature=+atomics,+bulk-memory,+mutable-globals -C link-arg=--shared-memory -C link-arg=--import-memory -C link-arg=--max-memory=4294967296 -C link-arg=--initial-memory=8388608 -C link-arg=--export=__wasm_init_tls -C link-arg=--export=__tls_size -C link-arg=--export=__tls_align -C link-arg=--export=__tls_base' \
   wasm-pack build --release --target web --out-dir web/pkg . \
     -- -Z build-std=panic_abort,std
+
+# Post-build patch: wasm-bindgen-rayon's `workerHelpers.js` does
+# `await import('../../..')` which assumes a bundler will
+# resolve that to `pkg/<crate>.js` via `package.json#main`. With
+# plain `--target web` (no bundler) the browser fetches the
+# directory itself and the server returns HTML, breaking the
+# module load. Rewrite the import to the explicit filename.
+HELPER=$(find web/pkg/snippets -name 'workerHelpers.js' -print -quit)
+if [[ -n "$HELPER" ]]; then
+  sed -i.bak "s|import('../../..')|import('../../../contract_benchmark_wasm.js')|" "$HELPER"
+  rm -f "$HELPER.bak"
+  echo "patched $HELPER to import the explicit JS path"
+fi
 
 echo
 echo "wasm pkg written to web/pkg/"
