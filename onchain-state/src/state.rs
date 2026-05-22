@@ -405,8 +405,14 @@ impl<D: DB> Debug for StateValue<D> {
 impl<D: DB> StateValue<D> {
     fn invariant(&self) -> std::io::Result<()> {
         match self {
-            StateValue::Null | StateValue::Map(_) => {}
+            StateValue::Null => {}
+            StateValue::Map(m) => {
+                for kv in m.iter() {
+                    kv.0.check_well_formed()?;
+                }
+            }
             StateValue::Cell(v) => {
+                v.check_well_formed()?;
                 if (**v).serialized_size() > CELL_BOUND {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
@@ -1069,5 +1075,58 @@ mod tests {
         for h in 0..16 {
             assert_eq!(s!({MT(h) {}}).log_size(), h as usize);
         }
+    }
+
+    fn misaligned_value() -> AlignedValue {
+        // 10-byte value with alignment that only permits up to 4 bytes — does not fit.
+        AlignedValue {
+            value: base_crypto::fab::Value(vec![base_crypto::fab::ValueAtom(vec![0xff; 10])]),
+            alignment: Alignment(vec![base_crypto::fab::AlignmentSegment::Atom(
+                AlignmentAtom::Bytes { length: 4 },
+            )]),
+        }
+    }
+
+    #[test]
+    fn test_statevalue_cell_wire_deser_rejects_misaligned() {
+        let bad = StateValue::<InMemoryDB>::Cell(Sp::new(misaligned_value()));
+        let mut bytes = Vec::new();
+        <StateValue<InMemoryDB> as Serializable>::serialize(&bad, &mut bytes).unwrap();
+        let err = <StateValue<InMemoryDB> as Deserializable>::deserialize(&mut bytes.as_slice(), 0)
+            .expect_err("Cell wire deserialization should reject misaligned AlignedValue");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_statevalue_map_key_wire_deser_rejects_misaligned() {
+        let bad = StateValue::<InMemoryDB>::Map(
+            HashMap::new().insert(misaligned_value(), StateValue::Null),
+        );
+        let mut bytes = Vec::new();
+        <StateValue<InMemoryDB> as Serializable>::serialize(&bad, &mut bytes).unwrap();
+        let err = <StateValue<InMemoryDB> as Deserializable>::deserialize(&mut bytes.as_slice(), 0)
+            .expect_err("Map wire deserialization should reject misaligned key");
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn test_statevalue_cell_backend_load_accepts_misaligned() {
+        // Confirms the backwards-compat carve-out: the storage loader (CHECK_INVARIANTS=false)
+        // must still be able to materialize misaligned cells that pre-date the invariant.
+        use storage::arena::BackendLoader;
+        use storage::storage::default_storage;
+
+        let arena = default_storage::<InMemoryDB>().arena.clone();
+        let bad = StateValue::<InMemoryDB>::Cell(Sp::new(misaligned_value()));
+        let sp = arena.alloc(bad.clone());
+        let mut data = Vec::new();
+        <StateValue<InMemoryDB> as Storable<InMemoryDB>>::to_binary_repr(&bad, &mut data).unwrap();
+        let loader = BackendLoader::new(&arena, None);
+        <StateValue<InMemoryDB> as Storable<InMemoryDB>>::from_binary_repr(
+            &mut data.as_slice(),
+            &mut sp.children().into_iter(),
+            &loader,
+        )
+        .expect("BackendLoader should not enforce the alignment invariant");
     }
 }
