@@ -14,8 +14,6 @@
 use crate::conversions::*;
 use crate::events::Event;
 use crate::state_changes::DustStateChanges;
-use base_crypto::schnorr;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::{Duration, Timestamp};
 use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
 use ledger::dust::{
@@ -28,8 +26,11 @@ use ledger::dust::{
     DustUtxoState as LedgerDustUtxoState, InitialNonce,
     WithDustStateChanges as LedgerWithDustStateChanges,
 };
-use ledger::structure::{ProofMarker, ProofPreimageMarker, UtxoMeta as LedgerUtxoMeta};
-use onchain_runtime_wasm::{from_value_hex_ser, from_value_ser, to_value_hex_ser};
+use ledger::structure::{
+    ProofMarker, ProofPreimageMarker, Signature, SignatureVerifyingKey, UtxoMeta as LedgerUtxoMeta,
+};
+use onchain_runtime_wasm::conversions::PreSignature;
+use onchain_runtime_wasm::from_value_ser;
 use rand::rngs::OsRng;
 use serialize::{tagged_deserialize_sequence, tagged_serialize};
 use std::cell::RefCell;
@@ -230,14 +231,17 @@ impl DustRegistration {
     #[wasm_bindgen(constructor)]
     pub fn new(
         signature_marker: &str,
-        night_key: &str,
+        night_key: JsValue,
         dust_address: Option<BigInt>,
         allow_fee_payment: BigInt,
         signature: JsValue,
     ) -> Result<DustRegistration, JsError> {
         let allow_fee_payment = u128::try_from(allow_fee_payment)
             .map_err(|_| JsError::new("allow_fee_payment is out of range"))?;
-        let night_key: schnorr::VerifyingKey = from_value_hex_ser(night_key)?;
+        let night_key = match from_value::<PreSignature>(night_key)? {
+            PreSignature::Schnorr(vk) => SignatureVerifyingKey::Schnorr(from_hex_ser(&vk)?),
+            PreSignature::ECDSA(vk) => SignatureVerifyingKey::ECDSA(from_hex_ser(&vk)?),
+        };
         let dust_address = dust_address
             .map(bigint_to_fr)
             .transpose()?
@@ -324,16 +328,25 @@ impl DustRegistration {
     }
 
     #[wasm_bindgen(getter, js_name = "nightKey")]
-    pub fn night_key(&self) -> Result<String, JsError> {
-        match &self.0 {
-            DustRegistrationTypes::Signature(val) => to_value_hex_ser(&val.night_key),
-            DustRegistrationTypes::SignatureErased(val) => to_value_hex_ser(&val.night_key),
-        }
+    pub fn night_key(&self) -> Result<JsValue, JsError> {
+        let key = match &self.0 {
+            DustRegistrationTypes::Signature(val) => &val.night_key,
+            DustRegistrationTypes::SignatureErased(val) => &val.night_key,
+        };
+        let encoded = match key {
+            SignatureVerifyingKey::Schnorr(vk) => PreSignature::Schnorr(to_hex_ser(vk)?),
+            SignatureVerifyingKey::ECDSA(vk) => PreSignature::ECDSA(to_hex_ser(vk)?),
+        };
+        Ok(to_value(&encoded)?)
     }
 
     #[wasm_bindgen(setter, js_name = "nightKey")]
-    pub fn set_night_key(&mut self, night_key: &str) -> Result<(), JsError> {
-        let night_key: schnorr::VerifyingKey = from_value_hex_ser(night_key)?;
+    pub fn set_night_key(&mut self, night_key: JsValue) -> Result<(), JsError> {
+        let encoded: PreSignature = from_value(night_key)?;
+        let night_key = match encoded {
+            PreSignature::Schnorr(raw) => SignatureVerifyingKey::Schnorr(from_hex_ser(&raw)?),
+            PreSignature::ECDSA(raw) => SignatureVerifyingKey::ECDSA(from_hex_ser(&raw)?),
+        };
         match &mut self.0 {
             DustRegistrationTypes::Signature(val) => val.night_key = night_key,
             DustRegistrationTypes::SignatureErased(val) => val.night_key = night_key,

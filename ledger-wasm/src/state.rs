@@ -231,7 +231,7 @@ impl LedgerState {
     ) -> Result<LedgerState, JsError> {
         let address: UserAddress = from_hex_ser(user_address)?;
         let amount = u128::try_from(amount).map_err(|_| JsError::new("amount is out of range"))?;
-        let sys_tx_distribute = ledger::structure::SystemTransaction::DistributeReserve(amount);
+        let sys_tx_distribute = ledger::structure::SystemTransaction::DistributeReserve { amount };
         let time = Timestamp::from_secs(js_date_to_seconds(tblock));
         let (ledger, _) = self.0.apply_system_tx(&sys_tx_distribute, time)?;
 

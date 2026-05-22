@@ -11,9 +11,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import { ContractMaintenanceAuthority, signatureVerifyingKey } from '@midnight-ntwrk/ledger';
+import { ContractMaintenanceAuthority, sampleSigningKey, signatureVerifyingKey } from '@midnight-ntwrk/ledger';
 import { Random } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
+import { SignatureKindMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - ContractMaintenanceAuthority', () => {
   /**
@@ -84,5 +85,72 @@ describe('Ledger API - ContractMaintenanceAuthority', () => {
     expect(ContractMaintenanceAuthority.deserialize(contractMaintenanceAuthority.serialize()).toString()).toEqual(
       contractMaintenanceAuthority.toString()
     );
+  });
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test construction with a homogeneous all-ECDSA committee.
+     *
+     * @given Two ECDSA verifying keys and a threshold of 2
+     * @when Constructing a ContractMaintenanceAuthority
+     * @then committee, threshold, and tags must round-trip through the getter
+     */
+    test('constructs with an all-ECDSA committee', () => {
+      const vk1 = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const vk2 = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const cma = new ContractMaintenanceAuthority([vk1, vk2], 2, 0n);
+
+      expect(cma.committee.length).toEqual(2);
+      expect(cma.committee.at(0)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(cma.committee.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(cma.committee.at(0)).toEqual(vk1);
+      expect(cma.committee.at(1)).toEqual(vk2);
+      expect(cma.threshold).toEqual(2);
+    });
+
+    /**
+     * Pin: the API doesn't enforce committee homogeneity. A CMA can mix
+     * Schnorr and ECDSA verifying keys; downstream signature verification
+     * is index-aligned and dispatches per member kind.
+     *
+     * @given A mixed [schnorr, ecdsa] committee
+     * @when Reading committee back via the getter
+     * @then Order and each member's tag must be preserved
+     */
+    test('preserves mixed schnorr/ecdsa committee order through the getter', () => {
+      const schnorrVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.schnorr));
+      const ecdsaVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+
+      const cma = new ContractMaintenanceAuthority([schnorrVk, ecdsaVk], 2, 0n);
+
+      expect(cma.committee.length).toEqual(2);
+      expect(cma.committee.at(0)?.tag).toEqual(SignatureKindMarker.schnorr);
+      expect(cma.committee.at(1)?.tag).toEqual(SignatureKindMarker.ecdsa);
+      expect(cma.committee.at(0)).toEqual(schnorrVk);
+      expect(cma.committee.at(1)).toEqual(ecdsaVk);
+    });
+
+    /**
+     * Test that the v2 wire format preserves committee kinds and order.
+     *
+     * @given A 3-member [schnorr, ecdsa, ecdsa] committee
+     * @when Serialising and deserialising the CMA
+     * @then The decoded committee must equal the original in order and kind
+     */
+    test('serialization round-trip preserves committee kinds and order', () => {
+      const schnorrVk = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.schnorr));
+      const ecdsaVk1 = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+      const ecdsaVk2 = signatureVerifyingKey(sampleSigningKey(SignatureKindMarker.ecdsa));
+
+      const cma = new ContractMaintenanceAuthority([schnorrVk, ecdsaVk1, ecdsaVk2], 2, 0n);
+      const round = ContractMaintenanceAuthority.deserialize(cma.serialize());
+
+      expect(round.committee.length).toEqual(3);
+      expect(round.committee.at(0)).toEqual(schnorrVk);
+      expect(round.committee.at(1)).toEqual(ecdsaVk1);
+      expect(round.committee.at(2)).toEqual(ecdsaVk2);
+      expect(round.toString()).toEqual(cma.toString());
+      assertSerializationSuccess(cma);
+    });
   });
 });

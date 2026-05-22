@@ -21,22 +21,21 @@ use crate::primitive::MultiSet;
 use crate::structure::{
     BindingKind, ClaimRewardsTransaction, ContractAction, ContractCall, ContractDeploy,
     ErasedIntent, FEE_TOKEN, GUARANTEED_SEGMENT, Intent, LedgerParameters, LedgerState,
-    MaintenanceUpdate, PedersenDowngradeable, ProofKind, SingleUpdate, StandardTransaction,
-    Transaction, UnshieldedOffer,
+    MaintenanceUpdate, PedersenDowngradeable, ProofKind, Signature, SignatureVerifyingKey,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
 use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::PublicAddress;
 use coin_structure::coin::{Commitment, Nullifier, TokenType};
 use coin_structure::contract::ContractAddress;
 use onchain_runtime::ops::Op;
 use onchain_runtime::state::{
-    ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState, EntryPoint,
-    EntryPointBuf,
+    ChargedState, ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey, ContractOperation,
+    ContractState, EntryPoint, EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
 use serialize::{Serializable, Tagged};
@@ -84,7 +83,7 @@ pub trait StateReference<D: DB> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn dust_spend_check(
@@ -155,7 +154,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.dust.generationless_fee_availability(
@@ -270,7 +269,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.new_state.dust.generationless_fee_availability(
@@ -1930,6 +1929,25 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         hasher.update(&binding_input[..]);
         Fr::from_le_bytes(&hasher.finalize()[..31])
             .expect("Trimmed persistent hash should fall in Fr")
+    }
+}
+
+trait ContractMaintenanceVerifyingKeyExt {
+    fn verify(&self, data: &[u8], sig: &Signature) -> bool;
+}
+
+impl ContractMaintenanceVerifyingKeyExt for ContractMaintenanceVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (ContractMaintenanceVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::Schnorr(_), _) => false,
+            (ContractMaintenanceVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::ECDSA(_), _) => false,
+        }
     }
 }
 

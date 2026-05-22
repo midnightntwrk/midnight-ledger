@@ -11,18 +11,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use base_crypto::{
-    rng::SplittableRng,
-    schnorr::{Signature, SigningKey},
-};
+use base_crypto::rng::SplittableRng;
 use coin_structure::coin::{NIGHT, UserAddress};
 use lazy_static::lazy_static;
 use midnight_ledger::{
     dust::{DustActions, DustPublicKey, DustRegistration, INITIAL_DUST_PARAMETERS, InitialNonce},
     semantics::TransactionResult,
     structure::{
-        CNightGeneratesDustEvent, Intent, SystemTransaction, Transaction, UnshieldedOffer,
-        UtxoOutput, UtxoSpend,
+        CNightGeneratesDustEvent, Intent, Signature, SigningKey, SystemTransaction, Transaction,
+        UnshieldedOffer, UtxoOutput, UtxoSpend,
     },
     test_utilities::{Resolver, TestState, test_resolver, tx_prove_bind},
     verify::WellFormedStrictness,
@@ -191,7 +188,7 @@ async fn test_cycle_transfers() {
 
     let mut cycle = vec![(alice_vk.clone(), alice_addr, alice_dust)];
     for _ in 1..CYCLE_LEN {
-        let sk = SigningKey::sample(&mut rng);
+        let sk = SigningKey::Schnorr(base_crypto::schnorr::SigningKey::sample(&mut rng));
         let vk = sk.verifying_key();
         let addr = UserAddress::from(vk.clone());
         let dust = DustPublicKey(rng.r#gen());

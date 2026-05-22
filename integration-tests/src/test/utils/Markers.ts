@@ -17,6 +17,7 @@ import type {
   NoProof,
   SignatureEnabled,
   SignatureErased,
+  SignatureKind,
   PreBinding,
   Binding,
   NoBinding
@@ -25,6 +26,11 @@ import type {
 export class SignatureMarker {
   static readonly signature: SignatureEnabled['instance'] = 'signature';
   static readonly signatureErased: SignatureErased['instance'] = 'signature-erased';
+}
+
+export class SignatureKindMarker {
+  static readonly schnorr: SignatureKind = 'schnorr';
+  static readonly ecdsa: SignatureKind = 'ecdsa';
 }
 
 export class ProofMarker {

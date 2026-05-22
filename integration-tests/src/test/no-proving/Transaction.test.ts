@@ -40,7 +40,7 @@ import {
   sampleUserAddress,
   type SegmentSpecifier,
   type ShieldedCoinInfo,
-  type SignatureEnabled,
+  SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
   type Signaturish,
@@ -360,7 +360,7 @@ describe('Ledger API - Transaction', () => {
             type: token.raw
           }
         ],
-        [signData(sampleSigningKey(), new Uint8Array(32))]
+        [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
       );
     const offer1 = newUnshieldedOffer(intentHash1);
     const offer2 = newUnshieldedOffer(intentHash2);
@@ -498,7 +498,7 @@ describe('Ledger API - Transaction', () => {
           type: token1.raw
         }
       ],
-      [signData(sampleSigningKey(), new Uint8Array(32))]
+      [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
     );
 
     const fallibleUnshieldedOffer = UnshieldedOffer.new(
@@ -530,7 +530,7 @@ describe('Ledger API - Transaction', () => {
           type: token2.raw
         }
       ],
-      [signData(sampleSigningKey(), new Uint8Array(32))]
+      [new SignatureEnabled(signData(sampleSigningKey(), new Uint8Array(32)))]
     );
 
     intent.guaranteedUnshieldedOffer = guaranteedUnshieldedOffer;

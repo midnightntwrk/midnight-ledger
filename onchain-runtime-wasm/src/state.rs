@@ -14,7 +14,7 @@
 use std::ops::Deref;
 
 use crate::context::CostModel;
-use crate::conversions::{token_type_to_value, value_to_token_type};
+use crate::conversions::{PreSignature, token_type_to_value, value_to_token_type};
 use crate::{
     ensure_ops_valid, from_value, from_value_hex_ser, from_value_ser, to_value, to_value_hex_ser,
     to_value_ser,
@@ -556,10 +556,15 @@ impl ContractMaintenanceAuthority {
         let committee = committee
             .iter()
             .map(|val| {
-                from_value_hex_ser(
-                    &val.as_string()
-                        .ok_or_else(|| JsError::new("expected string"))?,
-                )
+                let pre_vk: PreSignature = from_value(val)?;
+                Ok(match pre_vk {
+                    PreSignature::Schnorr(raw) => {
+                        state::ContractMaintenanceVerifyingKey::Schnorr(from_value_hex_ser(&raw)?)
+                    }
+                    PreSignature::ECDSA(raw) => {
+                        state::ContractMaintenanceVerifyingKey::ECDSA(from_value_hex_ser(&raw)?)
+                    }
+                })
             })
             .collect::<Result<Vec<_>, JsError>>()?;
         let counter = u32::try_from(
@@ -583,7 +588,14 @@ impl ContractMaintenanceAuthority {
     pub fn committee(&self) -> Result<Array, JsError> {
         let com_arr = Array::new();
         for member in self.0.committee.iter() {
-            com_arr.push(&to_value_hex_ser(member)?.into());
+            com_arr.push(&to_value(&match member {
+                state::ContractMaintenanceVerifyingKey::Schnorr(vk) => {
+                    PreSignature::Schnorr(to_value_hex_ser(vk)?)
+                }
+                state::ContractMaintenanceVerifyingKey::ECDSA(vk) => {
+                    PreSignature::ECDSA(to_value_hex_ser(vk)?)
+                }
+            })?);
         }
         Ok(com_arr)
     }

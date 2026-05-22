@@ -92,6 +92,7 @@ export class SignatureEnabled {
   toString(compact?: boolean): string;
   readonly instance: 'signature';
   private type_: 'signature';
+  readonly value: Signature;
 }
 
 export class SignatureErased {
@@ -981,9 +982,9 @@ export class Intent<S extends Signaturish, P extends Proofish, B extends Binding
 export class UnshieldedOffer<S extends Signaturish> {
   private constructor();
 
-  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: Signature[]): UnshieldedOffer<SignatureEnabled>;
+  static new(inputs: UtxoSpend[], outputs: UtxoOutput[], signatures: SignatureEnabled[]): UnshieldedOffer<SignatureEnabled>;
 
-  addSignatures(signatures: Signature[]): UnshieldedOffer<S>;
+  addSignatures(signatures: S[]): UnshieldedOffer<S>;
 
   eraseSignatures(): UnshieldedOffer<SignatureErased>;
 
@@ -991,7 +992,7 @@ export class UnshieldedOffer<S extends Signaturish> {
 
   readonly inputs: UtxoSpend[];
   readonly outputs: UtxoOutput[];
-  readonly signatures: Signature[];
+  readonly signatures: S[];
 }
 
 /**

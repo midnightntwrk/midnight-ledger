@@ -14,7 +14,6 @@
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Info as CoinInfo;
 use coin_structure::transfer::{Recipient, SenderEvidence};
@@ -25,7 +24,7 @@ use midnight_ledger::error::{
 };
 use midnight_ledger::semantics::TransactionResult;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Transaction,
+    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Signature, Transaction,
 };
 use midnight_ledger::test_utilities::PUBLIC_PARAMS;
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
