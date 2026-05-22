@@ -20,10 +20,16 @@ base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
 zswap = { path = "../../zswap", package = "midnight-zswap" }
 serialize = { path = "../../serialize", package = "midnight-serialize" }
 
-# Async + RNG.
-tokio = { version = "1.46.1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+# RNG common to every target. Tokio is split into per-target
+# blocks below — wasm32 doesn't support the multi-thread runtime.
 rand = { version = "0.8.4", features = ["getrandom"] }
 rand_chacha = "0.3.1"
+
+# `Instant::now()` panics on `wasm32-unknown-unknown` because
+# the std `Instant` backend has no JS hook. `web-time` provides
+# an API-compatible drop-in that uses `std::time::Instant` on
+# native and `js_sys::Date.now()` on wasm.
+web-time = "1.1"
 
 # Errors / serde / utility.
 thiserror = "2.0"
@@ -31,6 +37,26 @@ anyhow = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1"
+
+# Native targets: full tokio runtime with multi-thread support
+# (used by `#[tokio::test]` and consumers like dioxus-wallet).
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1.46.1", features = ["rt", "rt-multi-thread", "macros", "sync"] }
+
+# `wasm32-unknown-unknown`: tokio is restricted to the
+# single-threaded feature set; multi-thread runtime + `net` /
+# `mio` won't compile. The benchmark's `async fn` body only
+# needs `rt` (executor), `macros` (`#[tokio::test]`), and
+# `sync` (channels) — driver is supplied by
+# `wasm-bindgen-futures` in the wasm wrapper crate.
+#
+# We also need explicit JS-backed `getrandom` implementations
+# (0.2 + 0.3 — the dual-version dance from `zkir-wasm`) to
+# satisfy the random source halo2 / midnight-proofs pulls in.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+tokio = { version = "1.46.1", features = ["rt", "macros", "sync"] }
+getrandom_2 = { package = "getrandom", version = "^0.2.16", features = ["js"] }
+getrandom_3 = { package = "getrandom", version = "^0.3.4", features = ["wasm_js"] }
 
 [dev-dependencies]
 tokio = { version = "1.46.1", features = ["full"] }

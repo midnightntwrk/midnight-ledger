@@ -39,19 +39,29 @@
 #![deny(warnings)]
 
 use std::path::PathBuf;
+// `Arc<ZswapResolver>` is only constructed by the native
+// `make_zswap_resolver` helper. Gate the unused-on-wasm imports.
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// `std::time::Instant` panics on `wasm32-unknown-unknown` (no
+// JS hook in the std backend). `web_time::Instant` is an
+// API-compatible drop-in that uses `std::time::Instant` on
+// native and `js_sys::Date.now()` on wasm.
+use web_time::Instant;
 
+#[cfg(not(target_arch = "wasm32"))]
 use base_crypto::data_provider::{FetchMode, MidnightDataProvider, OutputMode};
 use rand::SeedableRng;
 use rand_chacha::ChaCha20Rng;
 use serialize::tagged_serialize;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
-    KeyLocation, PARAMS_VERIFIER, ProofPreimage, ProverKey, ProvingKeyMaterial,
-    Resolver as ResolverT, VerifierKey, Zkir,
+    KeyLocation, PARAMS_VERIFIER, ParamsProverProvider, ProofPreimage, ProverKey,
+    ProvingKeyMaterial, Resolver as ResolverT, VerifierKey, Zkir,
 };
 use zkir::IrSource;
+#[cfg(not(target_arch = "wasm32"))]
 use zswap::{ZSWAP_EXPECTED_FILES, prove::ZswapResolver};
 
 /// Inclusive upper bound on `k`. Spec asked for 1..=20.
@@ -299,12 +309,24 @@ impl ResolverT for ChainResolver {
 }
 
 /// Builds, keygens, proves, and (optionally) verifies a circuit needing
-/// the requested `k`. Returns a struct of wall-clock timings.
+/// the requested `k`, taking any `ParamsProverProvider` for the BLS
+/// SRS. Returns a struct of wall-clock timings.
 ///
-/// First-call latency at a given `k` is dominated by `keygen` + on-demand
-/// download of the matching `bls_midnight_2pN` SRS file. Subsequent
-/// calls with cached params see only the keygen + prove cost.
-pub async fn run_proof_with_opts(k: u32, opts: RunOpts) -> Result<RunStats> {
+/// This is the wasm-friendly core: it has no opinion on where params
+/// come from (filesystem cache, JS callback, embedded blob, …) — the
+/// caller hands in a provider. Native callers wrap this via
+/// [`run_proof_with_opts`] which constructs a `MidnightDataProvider`
+/// using the standard `$MIDNIGHT_PP` / `$XDG_CACHE_HOME` resolution.
+/// The browser-facing wrapper (`contract-benchmark-wasm`) passes a
+/// `JsKeyProvider` that fetches via the JS `getParams(k)` callback.
+pub async fn run_proof_with_params<P>(
+    k: u32,
+    opts: &RunOpts,
+    params: &P,
+) -> Result<RunStats>
+where
+    P: ParamsProverProvider,
+{
     if !(MIN_K..=MAX_K).contains(&k) {
         return Err(Error::KOutOfRange { requested: k });
     }
@@ -315,27 +337,24 @@ pub async fn run_proof_with_opts(k: u32, opts: RunOpts) -> Result<RunStats> {
     let realized_k = model.k() as u32;
     let rows = model.rows() as u64;
 
-    // 2) Params provider — same on-demand cache as the embedded examples.
-    let params = make_zswap_resolver(opts.cache_dir.as_deref())?;
-
-    // 3) Keygen.
+    // 2) Keygen.
     let kg_start = Instant::now();
     let (pk, vk) = ir
-        .keygen(&params.0)
+        .keygen(params)
         .await
         .map_err(|e| Error::Anyhow(anyhow::anyhow!("keygen: {e}")))?;
     let keygen = kg_start.elapsed();
 
     let resolver = ChainResolver { pk, vk: vk.clone(), ir };
 
-    // 4) Prove.
+    // 3) Prove.
     let mut rng = ChaCha20Rng::seed_from_u64(opts.seed);
     let preimage = make_preimage();
     let binding_input = preimage.binding_input;
 
     let prove_start = Instant::now();
     let (proof, _pi_skips) = preimage
-        .prove::<IrSource>(&mut rng, &params.0, &resolver)
+        .prove::<IrSource>(&mut rng, params, &resolver)
         .await
         .map_err(|e| Error::Anyhow(anyhow::anyhow!("prove: {e}")))?;
     let prove = prove_start.elapsed();
@@ -347,7 +366,7 @@ pub async fn run_proof_with_opts(k: u32, opts: RunOpts) -> Result<RunStats> {
         buf.len()
     };
 
-    // 5) Verify (if eligible).
+    // 4) Verify (if eligible).
     let (verified, verify_dur) = if opts.verify_after && realized_k <= MAX_VERIFIABLE_K {
         let v_start = Instant::now();
         let ok = vk
@@ -371,7 +390,20 @@ pub async fn run_proof_with_opts(k: u32, opts: RunOpts) -> Result<RunStats> {
     })
 }
 
+/// Native entry point: constructs the default
+/// `MidnightDataProvider` (filesystem-backed SRS cache, on-demand
+/// download from `srs.midnight.network`) and delegates to
+/// [`run_proof_with_params`]. Compiled out on wasm targets where
+/// there's no filesystem; the wasm wrapper crate calls
+/// `run_proof_with_params` directly.
+#[cfg(not(target_arch = "wasm32"))]
+pub async fn run_proof_with_opts(k: u32, opts: RunOpts) -> Result<RunStats> {
+    let params = make_zswap_resolver(opts.cache_dir.as_deref())?;
+    run_proof_with_params(k, &opts, &params.0).await
+}
+
 /// Convenience wrapper: `run_proof_with_opts(k, RunOpts::default())`.
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn run_proof(k: u32) -> Result<RunStats> {
     run_proof_with_opts(k, RunOpts::default()).await
 }
@@ -388,6 +420,10 @@ fn make_preimage() -> ProofPreimage {
     }
 }
 
+/// Filesystem-backed params resolver — uses the standard
+/// `MidnightDataProvider` on-demand fetch path. Native-only; the
+/// wasm crate constructs its own JS-backed provider.
+#[cfg(not(target_arch = "wasm32"))]
 fn make_zswap_resolver(cache_dir: Option<&std::path::Path>) -> Result<Arc<ZswapResolver>> {
     if let Some(dir) = cache_dir {
         std::fs::create_dir_all(dir)?;

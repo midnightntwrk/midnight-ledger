@@ -1,0 +1,72 @@
+[package]
+name = "contract-benchmark-wasm"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+# wasm-bindgen wrapper around `contract-benchmark::run_proof(k)`
+# — exposes the prover to a browser via a `getParams(k)`
+# callback that the JS side implements. Modelled on the
+# existing `zkir-wasm` crate's surface.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+contract-benchmark = { path = "../contract-benchmark" }
+# Re-pulled so the wasm crate carries the same dual-version
+# `getrandom` shim contract-benchmark relies on. cargo unifies
+# features across the workspace, but listing them here keeps
+# the dependency surface explicit when this crate is the
+# `wasm-pack build` entry point.
+getrandom_2 = { package = "getrandom", version = "^0.2.16", features = ["js"] }
+getrandom_3 = { package = "getrandom", version = "^0.3.4", features = ["wasm_js"] }
+
+# Workspace types we need to construct a custom
+# `ParamsProverProvider` that reads from a JS callback.
+base-crypto = { path = "../../base-crypto", package = "midnight-base-crypto" }
+transient-crypto = { path = "../../transient-crypto", package = "midnight-transient-crypto" }
+
+# JS interop.
+wasm-bindgen = "=0.2.104"
+wasm-bindgen-futures = "^0.4.50"
+js-sys = "^0.3.61"
+
+# Wasm thread pool. Same template `wasm-proving-demos/zkir-mt`
+# uses. Re-exporting `init_thread_pool` from `lib.rs` lets the
+# HTML page call `await initThreadPool(navigator.hardwareConcurrency)`
+# before any rayon-backed code runs. Halo2's FFT and MSM both use
+# rayon internally, so this is the single largest perf lever for
+# wasm — typically 2–5× speedup at high k.
+#
+# Build-time requirements (see `serve.py` for runtime headers):
+# - `RUSTC_BOOTSTRAP=1` (rebuilds std with atomics — a nightly-only
+#   feature, but `RUSTC_BOOTSTRAP=1` opens it on stable too).
+# - `RUSTFLAGS='-C target-feature=+atomics,+bulk-memory'`.
+# - `-Z build-std=panic_abort,std` passed through `wasm-pack -- …`.
+wasm-bindgen-rayon = "1.2"
+
+# Serde for the `RunStats → JsValue` round-trip.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde-wasm-bindgen = "0.6"
+
+# Browser-friendly Instant + console_error_panic_hook so panics
+# surface in the devtools console instead of an opaque trap.
+web-time = "1.1"
+console_error_panic_hook = "0.1"
+
+# Optional: better debug logging from inside the wasm.
+tracing = "0.1"
+tracing-wasm = "0.2"
+
+[package.metadata.wasm-pack.profile.dev]
+wasm-opt = ['-O', '--enable-reference-types', '-g']
+
+[package.metadata.wasm-pack.profile.release]
+# Aggressive: `-O4` enables every optimisation pass + cross-pass
+# inlining; `--enable-bulk-memory` lets the engine use vectorised
+# `memory.copy` / `memory.fill` for the many small allocations
+# halo2 does; `--strip-debug` drops DWARF and shrinks the binary
+# (faster JIT compilation on first load).
+wasm-opt = ['-O4', '--enable-reference-types', '--enable-bulk-memory', '--strip-debug']

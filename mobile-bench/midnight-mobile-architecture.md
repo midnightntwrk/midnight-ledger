@@ -2378,3 +2378,50 @@ here in advance:
 The full punch list lands in the next commit when the agent
 finishes; this section will be expanded with measured impact
 once any of the four are applied.
+
+### Optimisation punch list — research output (2026-05-22)
+
+Two research agents audited the proof stack: one for **CPU /
+parallelism** (web wasm focus), one for **memory** (mobile-arm64
+focus, k=20 ambition). Their combined findings, ranked by
+MB-saved-or-%-speedup per effort hour.
+
+#### CPU / parallelism (web wasm — applied to `contract-benchmark-wasm`)
+
+| # | Lever | Impact | Effort | Status |
+|---|---|---|---|---|
+| 1 | `wasm-bindgen-rayon` + `SharedArrayBuffer` threads. Template at `wasm-proving-demos/zkir-mt/{Cargo.toml,src/lib.rs}` + `wasm-proving-demos/run.sh` (the build recipe with `RUSTC_BOOTSTRAP=1 RUSTFLAGS='-C target-feature=+atomics,+bulk-memory' wasm-pack build … -- -Z build-std=panic_abort,std`). | 30–50 % (high confidence) | 10 min | **applied 2026-05-22** |
+| 2 | `wasm-opt` flags: `-O4 --enable-bulk-memory --strip-debug` (was `-O`). | 5–15 % (med) | 2 min | **applied 2026-05-22** |
+| 3 | COOP/COEP HTTP headers (`same-origin` / `require-corp`) on `serve.py` so `SharedArrayBuffer` is available — prerequisite for #1. | enables #1 | 5 min | **applied 2026-05-22** |
+| 4 | `RUSTFLAGS='-C target-feature=+simd128'`. **0 % unless `transient-crypto` / `midnight-proofs` have `#[cfg(target_feature = "simd128")]` paths — `grep` finds none today, so this is blocked on an upstream patch.** | 5–15 % (low/med) | 5 min once paths land | blocked on upstream |
+| 5 | Memoise `ParamsProver` per-k on the JS side. The current `JsParamsProvider` calls back to JS via `getParams(k)` once per `runProof`, and the Rust `ParamsProver::read` re-deserialises the bytes each time. At k=17 that costs ~2–3 s of redundant parse per `runProof`. Memoise on `Map<k, Uint8Array>` or pass an already-parsed handle. | 5–10 % at k ≥ 15 (med) | 30 min | not done |
+| 6 | Aligning `wasm-opt` metadata across all `*-wasm` crates (consistency). | same as #2 when applied | 5 min | not done |
+
+#### Memory / mobile-arm64 (transient-crypto + dioxus-wallet)
+
+| # | Lever | Saving | Effort | Notes |
+|---|---|---|---|---|
+| 7 | `PK_CACHE_SIZE` (`transient-crypto/src/proofs.rs:250`) 5 → 1 for memory-constrained targets. | **0 MB on first prove**, up to ~1.2 GB after 5 distinct circuits have been used. Useful for the wallet's long-running process (11 DID circuits in rotation) but a no-op for the Benchmark tab (each k = different hash, cache hit rate 0). The research agent's "saves 1.2 GB" headline only applies after cache saturation — flagged here so the table doesn't oversell it. | 2 min | gate behind `#[cfg(target_os = "android")]` so the wallet's hot DID-call path keeps its cache on roomy hosts |
+| 8 | Drop `ParamsProver` `Arc` after `setup_vk` in `transient-crypto/src/proofs.rs::keygen` (line 204). **On audit the Arc is already dropped at end-of-statement** — the agent's worry was unfounded for this path. Listed here so future researchers don't redo the trace. | 0 MB (no change needed) | n/a | clarified |
+| 9 | mmap-backed SRS via `memmap2` in `base_crypto::data_provider::MidnightDataProvider`. Native arm64 already has filesystem access; replacing the `read_to_end` → `Vec` path with a mmap slice would let the kernel manage page residency under pressure. | 200–400 MB at k = 20 | 1–2 days; requires `unsafe`, careful lifetime mgmt, and a midnight-proofs API surface that accepts a byte-slice (not a `Read`). | longest-pole but the cleanest "fits in 4 GB" lever |
+| 10 | Reuse FFT scratch buffers across columns. halo2's witness-FFT pass typically allocates a fresh `Vec<Fr>` per column; pool to one persistent ~32 MB buffer for k = 20. | 100–200 MB | 2–4 hr to audit `midnight-proofs` for existing pool feature flag; 1–3 days if a fork patch is needed | "low-hanging" only if upstream already exposes a flag |
+| 11 | Witness column streaming (column-at-a-time commit instead of building the full witness matrix). Peak drops from `M × 2^k × 32 B` to `1 × 2^k × 32 B`. | 300–500 MB at k = 20 | 3–5 days; deep halo2 fork patch | architectural; flag for a later iteration |
+| 12 | Chunked Pippenger MSM (process the column in slices). | 100–150 MB | 2–3 days; fork patch | secondary lever |
+| 13 | Suspend / destroy the dioxus-wallet's WebView during Benchmark sweeps on Android — saves the ~200–400 MB of Chromium-resident pages competing with halo2 keygen. Already flagged in the earlier "Implications" subsection above; restated here for completeness. | 200–400 MB | ~1 hr | should move S24 Ultra k = 19 from "always OOMs" to "passes" |
+| 14 | Allocator swap (`tikv-jemallocator`) on Android. Bionic's malloc has ~16 % overhead for small objects (witness slot metadata, FFT twiddle tables); jemalloc is ~5–8 %. | 5–20 MB | 2–3 hr | very low risk; small win |
+
+#### k = 20-on-mobile target — math
+
+S24 Ultra k = 19 currently OOMs at peak ≈ 5–6 GB working set
+against the 3–4 GB per-process Android cap. To land k = 20 (~ 2×
+k = 19's footprint) we'd need to roughly halve peak from
+today's number, i.e. **save ~600–800 MB.** The combination of
+items 9 + 10 + 13 lands in that range collectively (200–400 +
+100–200 + 200–400 = 500–1000 MB). #11 makes the headroom
+comfortable but is the deepest fork patch.
+
+The lighter combination 7 + 13 (PK cache cap + WebView
+suspend, both quick) saves ~200–400 MB end-to-end and is
+expected to move k = 19 from "always OOMs" to "passes",
+without quite reaching k = 20. That's the realistic
+short-term ceiling without touching the halo2 fork.
