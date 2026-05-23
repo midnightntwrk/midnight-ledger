@@ -1,0 +1,77 @@
+// UniFFI definition file for the Midnight RN prover bindings.
+//
+// Every type / function declared here gets auto-generated bindings
+// in Swift (for iOS) and Kotlin (for Android) via `ubrn build {ios,android}`,
+// plus TypeScript surface via `uniffi-bindgen-react-native`. Keep this
+// file in lockstep with the `#[uniffi::export]` annotations in `lib.rs`.
+
+namespace midnight_prover {
+    // Library version baked at build time. Lets the TS side log
+    // which Rust core it's actually loaded against (useful when
+    // a downstream RN app pins one version and a native module
+    // bundles a different one).
+    string library_version();
+
+    // Run a single bench prove at the requested `k`. Synchronous
+    // from the FFI side — the platform layer (Swift / Kotlin) is
+    // expected to call this from a background thread / Coroutine /
+    // Promise so the JS thread never blocks.
+    [Throws=ProverError]
+    ProveResult prove(u32 k, ProveOptions opts);
+};
+
+// Options for a benchmark prove call. Mirrors `RunOpts` from
+// `contract-benchmark` but flattened into UniFFI-friendly types
+// (no Option<PathBuf>; the TS side passes an empty string if it
+// doesn't want to override the SRS cache dir).
+dictionary ProveOptions {
+    // RNG seed. 0 = use the library default (a fixed value for
+    // reproducible runs across the same circuit shape).
+    u64 seed;
+
+    // Skip the verifier check after proving. The Bench tab's
+    // "skipped" cells at k > 14 happen because the embedded
+    // PARAMS_VERIFIER is only k=14; setting this to false lets
+    // the caller short-circuit verification at any k.
+    boolean verify_after;
+
+    // Where to cache BLS SRS files. Empty string = use the
+    // standard MIDNIGHT_PP / XDG_CACHE_HOME resolution. The
+    // mobile entry points (Android `main` + iOS `start_app`)
+    // already set MIDNIGHT_PP at process start so most callers
+    // can leave this empty.
+    string cache_dir;
+
+    // Whether to reuse cached (ProverKey, VerifierKey) pairs.
+    // Default `true` matches the wallet's hot-path behaviour;
+    // set `false` for the cold-keygen-per-row benchmark mode.
+    boolean cache_keys;
+};
+
+// Outcome of a benchmark prove call. Times are in milliseconds
+// because UniFFI's Duration support is platform-flaky and
+// integer milliseconds round-trip cleanly through JSI's
+// `Uint8Array` / `BigInt` plumbing.
+dictionary ProveResult {
+    u32 k;
+    u32 realized_k;
+    u32 hash_chain_len;
+    u64 rows;
+    u64 keygen_ms;
+    u64 prove_ms;
+    // None = skipped (k > MAX_VERIFIABLE_K) or verify_after=false.
+    u64? verify_ms;
+    boolean? verified;
+    u64 proof_bytes;
+};
+
+[Error]
+enum ProverError {
+    "OutOfRange",
+    "ParamsUnavailable",
+    "KeygenFailed",
+    "ProveFailed",
+    "VerifyFailed",
+    "Io",
+    "Internal",
+};

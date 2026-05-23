@@ -1,0 +1,49 @@
+[package]
+name = "midnight-prover-ffi"
+version = "0.1.0"
+# Pin to 2021 because the UniFFI 0.28 scaffolding generator emits
+# `#[no_mangle]` (not `#[unsafe(no_mangle)]`) which is a hard error
+# under 2024. Bumping to 2024 requires UniFFI ≥ 0.29 — bump the
+# FFI dep alongside the edition when that lands upstream.
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+description = "UniFFI Rust↔(Swift/Kotlin) bindings around the Midnight contract-benchmark prover. Consumed by the @midnight-ntwrk/react-native-prover npm package via uniffi-bindgen-react-native."
+
+# We need BOTH a cdylib (for the .dylib / .so / .xcframework
+# the platform layers link against) and a staticlib (for cases
+# where we want a single self-contained archive — iOS App Store
+# preference). `rlib` lets in-workspace consumers use the crate
+# as a normal Rust dep too.
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+name = "midnight_prover_ffi"
+
+[dependencies]
+# Re-export the prove path from the existing mobile-bench crate.
+# Same source as the dioxus-wallet uses, so the FFI here behaves
+# identically to the wallet's local prover.
+contract-benchmark = { path = "../../../mobile-bench/contract-benchmark" }
+
+# UniFFI scaffolding (proc-macro + runtime). Pinned to a known-
+# good 0.28 release; bump in lockstep with
+# `uniffi-bindgen-react-native` peer version.
+uniffi = { version = "0.28", features = ["build", "tokio"] }
+
+# Async runtime — uniffi's async support hands off blocking
+# work to a tokio executor. `rt-multi-thread` so the prove
+# call doesn't block the FFI poll loop.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
+
+# Logging shim — tracing is what the proofs crate uses; we
+# bridge it to whatever the platform consumer wires up (Swift
+# os.log / Android Logcat) via `tracing-subscriber` re-export.
+tracing = "0.1"
+
+# Error chain ergonomics — uniffi requires errors to be
+# `#[derive(uniffi::Error)]`, and `thiserror` is the natural
+# fit for the conversion-from-anyhow boilerplate.
+thiserror = "1"
+
+[build-dependencies]
+uniffi = { version = "0.28", features = ["build"] }

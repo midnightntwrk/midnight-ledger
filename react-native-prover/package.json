@@ -1,0 +1,50 @@
+{
+  "name": "@midnight-ntwrk/react-native-prover",
+  "version": "0.1.0-alpha.1",
+  "description": "React Native bindings for the Midnight ZK prover. Wraps the contract-benchmark Rust core via UniFFI Turbo Modules.",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/src/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "ios",
+    "android",
+    "cpp",
+    "*.podspec",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__"
+  ],
+  "scripts": {
+    "build:rust": "bash scripts/build-rust.sh",
+    "build:ios": "bash scripts/build-ios.sh",
+    "build:android": "bash scripts/build-android.sh",
+    "build:all": "yarn build:rust && yarn build:ios && yarn build:android",
+    "test": "cargo test --manifest-path crates/prover-ffi/Cargo.toml --lib",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "react-native",
+    "midnight",
+    "zk",
+    "prover",
+    "halo2",
+    "plonk",
+    "uniffi"
+  ],
+  "license": "Apache-2.0",
+  "peerDependencies": {
+    "react": "*",
+    "react-native": ">=0.71.0"
+  },
+  "devDependencies": {
+    "react-native": "^0.74.0",
+    "typescript": "~5.3.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

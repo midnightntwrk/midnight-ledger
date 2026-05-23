@@ -32,6 +32,12 @@ members = [
     "mobile-bench/dioxus-wallet",
     "mobile-bench/contract-benchmark",
     "mobile-bench/contract-benchmark-wasm",
+    # UniFFI FFI crate consumed by the React Native bindings
+    # in `react-native-prover/`. Lives outside `mobile-bench/`
+    # because the wider directory is its own npm-publishable
+    # subtree with platform-layer code (Swift/Kotlin/TS) not
+    # part of the Rust workspace.
+    "react-native-prover/crates/prover-ffi",
 ]
 default-members = [
     "zswap",
