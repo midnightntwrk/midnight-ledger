@@ -54,20 +54,47 @@ html, body {
   font-size: 15px;
   font-feature-settings: "tnum" on, "lnum" on;
   -webkit-font-smoothing: antialiased;
+  /* Lock horizontal page scroll so a too-wide bench-table
+   * (or any other oversized element) can't make the entire
+   * page scroll sideways. Tables/grids that genuinely need
+   * more width opt into a card-local scroll via `.scroll-x`. */
+  overflow-x: hidden;
+}
+
+/* Body needs `box-sizing: border-box` so the iOS safe-area
+ * padding pulls content INWARD instead of pushing the body
+ * wider than the viewport. Without this, body's `width: 100%`
+ * (implicit) + horizontal padding makes total occupied
+ * width > viewport, which on iOS WKWebView causes the page
+ * to overflow horizontally — the user would see content
+ * touching / past the screen edge. */
+body {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 body {
-  /* Respect iOS safe-area-insets on the iPhone notch / Dynamic
-   * Island / rounded-corner sides so the bench-table's "Run"
-   * action column (right-aligned) isn't clipped by the screen
-   * cutouts. `env(safe-area-inset-*)` resolves to non-zero only
-   * on iOS-Safari/WKWebView — desktop + Android keep the
-   * existing `var(--gutter)` flat padding because the `max()`
-   * shorthand selects the larger value. */
-  padding: max(var(--gutter), env(safe-area-inset-top))
-           max(var(--gutter), env(safe-area-inset-right))
-           max(var(--gutter), env(safe-area-inset-bottom))
-           max(var(--gutter), env(safe-area-inset-left));
+  /* iPhone-specific layout note: on portrait-mode iPhones (15
+   * Pro, 17 Pro, etc.) `env(safe-area-inset-right)` resolves to
+   * `0` even though the screen has rounded corners — Apple
+   * reserves the inset for hardware cutouts (Dynamic Island,
+   * home indicator) and treats rounded screen corners as
+   * "soft" boundaries that content can flow under. That
+   * makes right-aligned bench-table content like the Run /
+   * Running… button visually clip under the rounded corner.
+   *
+   * Compensate by floor-clamping each side to a wallet-
+   * specific minimum gutter (24 px) and *adding* the env-inset
+   * on top so hardware cutouts (notch, home indicator) still
+   * push content further in when present. Desktop + Android
+   * keep their existing flat-gutter rendering because env(...)
+   * resolves to 0 and the 24 px floor was the visual gutter
+   * anyway (`--gutter: 16px` was conservative; bench-tab
+   * action column wants more breathing room). */
+  padding: calc(max(var(--gutter), 24px) + env(safe-area-inset-top))
+           calc(max(var(--gutter), 24px) + env(safe-area-inset-right))
+           calc(max(var(--gutter), 24px) + env(safe-area-inset-bottom))
+           calc(max(var(--gutter), 24px) + env(safe-area-inset-left));
   min-height: 100vh;
 }
 
@@ -75,10 +102,10 @@ body {
   body {
     max-width: 560px;
     margin: 0 auto;
-    padding: max(32px, env(safe-area-inset-top))
-             max(32px, env(safe-area-inset-right))
-             max(32px, env(safe-area-inset-bottom))
-             max(32px, env(safe-area-inset-left));
+    padding: calc(32px + env(safe-area-inset-top))
+             calc(32px + env(safe-area-inset-right))
+             calc(32px + env(safe-area-inset-bottom))
+             calc(32px + env(safe-area-inset-left));
   }
 }
 
@@ -1478,7 +1505,31 @@ details .panel .row {
   font-variant-numeric: tabular-nums;
 }
 .metrics-table {
+  /* No explicit width — let the table take its natural width
+   * (sum of column intrinsic widths). On phone-class viewports
+   * the bench-table's 7 columns + 11 px font commonly exceed
+   * the card's content width; the `.card.scroll-x` rule below
+   * lets the table scroll horizontally inside the card while
+   * keeping the page itself locked to the viewport. */
   margin: 0 16px 14px;
+}
+
+/* Cards that contain wide content (bench-table specifically)
+ * opt-in to a horizontal-scroll viewport so the table can
+ * exceed the card's content width without clipping or pushing
+ * the page off-screen. The bench tab applies `.scroll-x` to
+ * the card that wraps the table. */
+.card.scroll-x {
+  overflow-x: auto;
+  /* Stop x-scroll snapping past the natural content edge in
+   * WebKit (the bench-table's content has a clear right end). */
+  overscroll-behavior-x: contain;
+}
+.card.scroll-x::-webkit-scrollbar {
+  /* Hide the inline scrollbar on iOS/macOS WKWebView so the
+   * scroll is felt as touch / trackpad gesture only. The
+   * vertical page scroll remains unaffected. */
+  display: none;
 }
 
 /* Per-core CPU load bar grid. Each `.cpu-core` is one bar with a
@@ -1541,18 +1592,29 @@ details .panel .row {
 }
 .bench-table th.action,
 .bench-table td.action {
-  width: 1%;
+  /* Narrow column so the whole 7-column table fits on a
+   * 390-pt-wide iPhone without horizontal scroll. Button is
+   * 60 px; column is 68 px to give 4 px breathing room each
+   * side of the cell's `padding: 6px`. */
+  width: 68px;
   white-space: nowrap;
   text-align: right;
 }
 .bench-run-btn {
-  /* Was 28 px — too short for comfortable tapping in the
-   * Benchmark table on a phone. Bumped to 36 px to match the
-   * global button baseline while keeping the row dense. */
-  height: 36px;
-  padding: 0 14px;
+  height: 32px;
+  /* Compact width: fits "Run" with margin and clips "Running…"
+   * with overflow:hidden + text-overflow:ellipsis so the
+   * column width never changes between idle and in-flight
+   * states (which previously pushed the whole table off the
+   * right edge of its card). */
+  width: 60px;
+  padding: 0 8px;
   font-size: 11px;
   font-weight: 500;
+  box-sizing: border-box;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* Error-detail row spans the full width of the bench table when a

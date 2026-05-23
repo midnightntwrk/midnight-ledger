@@ -5477,7 +5477,7 @@ fn BenchmarkTab() -> Element {
             }
         }
 
-        div { class: "card",
+        div { class: "card scroll-x",
             table { class: "detail-table metrics-table bench-table",
                 thead {
                     tr {
