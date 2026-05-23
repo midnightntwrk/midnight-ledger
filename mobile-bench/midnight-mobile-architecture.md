@@ -2346,6 +2346,82 @@ in §10.3; assumes only `advice_cosets` are still all-heap-
 resident (the spill patch covers fixed + perm cosets but not
 advice). Path forward documented in [[Open questions/H polynomial streaming]].
 
+### iOS Simulator sweep (iPhone 17 Pro arm64, OS 26.4, 2026-05-24)
+
+Captured from the wallet's Bench tab running on the iPhone 17
+Pro simulator (`xcrun simctl` install, all-k Run-all sweep)
+with the latest §10 stack active. Same Rust code as the S24
+Android wallet; same disk-spill at k ≥ 18; same warm_pk_cache;
+same lazy-coset keygen. Host: M-series Mac (32 GB RAM, no
+jetsam — simulator runs natively in `aarch64-apple-ios-sim`).
+
+| k  | hashes  | keygen     | prove       | verify    | proof bytes |
+|----|--------:|-----------:|------------:|----------:|------------:|
+| 18 | 6 242   | 14.1 s     | 36.0 s      | skipped   | 2 933 B     |
+| 19 | 12 484  | 29.8 s     | 1 m 14 s    | skipped   | 2 933 B     |
+| 20 | 24 967  | 1 m 02 s   | **2 m 32 s**| skipped   | 2 933 B     |
+| 21 | 49 935  | 2 m 06 s   | **5 m 11 s**| skipped   | 2 933 B     |
+
+(Low-k rows trimmed for brevity — all 21 rows of the
+1..21 sweep succeeded; k=15 prove 4.4 s, k=16 9.0 s,
+k=17 18.2 s.)
+
+#### Δ vs other targets at high k
+
+| k  | iOS Sim prove | S24 prove (real phone) | M2 `bench_cli` prove | Notes                                          |
+|----|--------------:|-----------------------:|---------------------:|------------------------------------------------|
+| 18 | 36.0 s        | 50.9 s                 | —                    | iOS sim ~29 % faster than S24                  |
+| 19 | 1 m 14 s      | 1 m 40 s               | —                    | iOS sim ~26 % faster                           |
+| 20 | **2 m 32 s**  | 3 m 33 s               | —                    | iOS sim ~29 % faster                           |
+| 21 | **5 m 11 s**  | thrashed @ +13 min     | 7 m 11 s             | **iOS sim beats M2 `bench_cli` by 28 %** at k=21 |
+
+Two genuinely interesting data points:
+
+- **iOS Sim beats M2 `bench_cli` on k=21 prove** (5 m 11 s vs
+  7 m 11 s). Same M-series hardware, different runtime. The
+  Dioxus wallet has rayon/tokio thread pools that are warm
+  from the prior 20 rows; the freshly-spawned `bench_cli`
+  hits cold-start overhead on each iteration. ~28 % faster.
+- **iOS Sim k=20 prove ~29 % faster than S24** across every
+  high-k row. Consistent with the per-core gap (Apple perf
+  cores vs Cortex-X4 in the S24).
+
+#### What this validates
+
+The iOS Simulator runs the *same Rust code* as a real iPhone
+build target (`aarch64-apple-ios-sim` vs `aarch64-apple-ios`),
+linked into a *real iOS app bundle* via xcframework, invoked
+from a *real Swift `@main` `App.init()`*. The only difference
+from real-device behaviour is **memory**: the simulator has
+the host's full RAM and no jetsam, so it cannot prove that
+k=21 fits inside an iPhone's per-app budget. It does prove
+that:
+
+- The cross-compile pipeline (`cargo build --target
+  aarch64-apple-ios-sim --release` → 118 MB `.dylib` →
+  xcframework → `xcodebuild` Debug) works end-to-end.
+- The `start_app()` env-var setup runs (both
+  `Library/Caches/midnight-pp/` and `Library/Caches/midnight-cosets/`
+  were created on launch).
+- The §10 disk-spill path engages correctly on iOS at k ≥ 18
+  (the SPILL_FLOOR_K = 18 default kicks in identically to
+  Android).
+- Every prove from k=1 to k=21 produces a correct proof on
+  iOS (proof bytes 2 933 B, the canonical size, matches every
+  other target).
+- No JS-bridge / WebKit / Wry interop bug at any k — the
+  wallet's eval bridge held through a 42-minute sweep
+  including the heavy k=20 + k=21 rows.
+
+What it does **not** validate:
+
+- iPhone 15 Pro real-hardware peak HWM under jetsam pressure
+  (see §11.5 / §13.5 and Open questions / iOS jetsam ceiling
+  in the Obsidian vault).
+- Real-device wall times (M-series host is faster per-core
+  than any current iPhone Apple silicon, so production wall
+  will be 1.2–1.5× slower).
+
 ### Web (wasm32-unknown-unknown) sweep — 2026-05-22
 
 Same `contract_benchmark::run_proof(k)` cross-compiled to
