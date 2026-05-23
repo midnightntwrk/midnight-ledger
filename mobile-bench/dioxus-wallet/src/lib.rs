@@ -251,7 +251,15 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
         "<script type=\"module\">\n{}\n</script>",
         include_str!("../assets/web/midnight-did.js"),
     );
-    let bundle_script = format!("{error_reporter}\n{import_map}\n{bundle_module}");
+    // `viewport-fit=cover` on iOS Safari / WKWebView is required
+    // for `env(safe-area-inset-*)` to resolve to non-zero values.
+    // Without it, the iPhone 17 Pro's rounded corners + Dynamic
+    // Island side bezels clip right-aligned action columns (e.g.
+    // the bench-table "Run" button). On desktop + Android the
+    // env() values resolve to 0, so the meta is harmless to
+    // include unconditionally.
+    let viewport_meta = r#"<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">"#;
+    let bundle_script = format!("{viewport_meta}\n{error_reporter}\n{import_map}\n{bundle_module}");
     cfg.with_custom_head(bundle_script).with_custom_protocol(
         "mn-pkg".to_string(),
         protocol::build_handler(),

@@ -57,7 +57,17 @@ html, body {
 }
 
 body {
-  padding: var(--gutter);
+  /* Respect iOS safe-area-insets on the iPhone notch / Dynamic
+   * Island / rounded-corner sides so the bench-table's "Run"
+   * action column (right-aligned) isn't clipped by the screen
+   * cutouts. `env(safe-area-inset-*)` resolves to non-zero only
+   * on iOS-Safari/WKWebView — desktop + Android keep the
+   * existing `var(--gutter)` flat padding because the `max()`
+   * shorthand selects the larger value. */
+  padding: max(var(--gutter), env(safe-area-inset-top))
+           max(var(--gutter), env(safe-area-inset-right))
+           max(var(--gutter), env(safe-area-inset-bottom))
+           max(var(--gutter), env(safe-area-inset-left));
   min-height: 100vh;
 }
 
@@ -65,7 +75,10 @@ body {
   body {
     max-width: 560px;
     margin: 0 auto;
-    padding: 32px;
+    padding: max(32px, env(safe-area-inset-top))
+             max(32px, env(safe-area-inset-right))
+             max(32px, env(safe-area-inset-bottom))
+             max(32px, env(safe-area-inset-left));
   }
 }
 
