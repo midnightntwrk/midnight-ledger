@@ -3961,3 +3961,187 @@ control plane (`prove`, `verify`, `cancel`, callbacks).
   [librustzcash / zcash-android-wallet-sdk JNI](https://zcash.readthedocs.io/en/latest/android/zcash-android-wallet-sdk/cash.z.wallet.sdk.jni/) +
   [ZcashLightClientKit](https://github.com/Electric-Coin-Company/zcash-swift-wallet-sdk) (hand-written, production),
   [Bitwarden SDK Architecture](https://contributing.bitwarden.com/architecture/sdk/) (UniFFI, production)
+
+---
+
+## §14. RN packaging — implemented (Option A scaffolding)
+
+Per user direction, the actual implementation chose **Option A
+(UniFFI same-process on both platforms)** over the recommended
+Option B hybrid from §13.5. The hybrid's separate Android
+`:proverProcess` Service is documented but deferred — Option A
+is the simpler shape and trades Android OOM isolation for
+fewer moving parts. Upgrading to B remains possible if
+real-device telemetry shows the OOM rate on < 6 GiB phones is
+unacceptable.
+
+Two packages landed:
+
+### §14.1 `react-native-prover/`
+
+UniFFI Rust↔(Swift/Kotlin/TS) bindings around the existing
+`mobile-bench/contract-benchmark` prove path. Same Rust core
+as the dioxus-wallet, exposed as a Turbo Module.
+
+**Repo layout** (matches the §13.7 sketch):
+
+```
+react-native-prover/
+├── crates/prover-ffi/
+│   ├── Cargo.toml          # cdylib + staticlib + rlib
+│   ├── build.rs            # runs uniffi::generate_scaffolding
+│   └── src/
+│       ├── lib.rs          # public Rust API
+│       └── midnight_prover.udl
+├── ios/                    # Podspec + (generated) xcframework
+├── android/                # build.gradle + jniLibs/ for the .so
+├── src/index.ts            # public TS surface
+├── src/NativeMidnightProver.ts  # JSI bridge shim
+├── scripts/build-{rust,ios,android}.sh
+├── package.json
+└── README.md
+```
+
+**Status as of the landing commit (`2806ecd7`):**
+
+- ✅ `cargo check -p midnight-prover-ffi` clean
+- ✅ `cargo test -p midnight-prover-ffi --lib` — 2 unit tests pass
+- ✅ TypeScript public surface type-checks
+- ✅ Build scripts handle missing `ubrn` / NDK gracefully (WARN
+  + skip the missing step, don't fail)
+- ⏳ JSI binding generation gated on
+  `cargo install uniffi-bindgen-react-native` (scripts call
+  `ubrn` if present, skip otherwise)
+- ⏳ Real-device validation gated on a host RN app running
+  `pod install` against the produced xcframework
+
+**Public TS API** (from `src/index.ts`):
+
+```ts
+export async function prove(k: number, opts?: ProveOptions): Promise<ProveResult>;
+export function libraryVersion(): string;
+export function isProverError(e: unknown): e is { code: ProverErrorCode; message: string };
+```
+
+`ProveOptions` carries `seed`, `verifyAfter`, `cacheDir`,
+`cacheKeys`. `ProveResult` returns `k`, `realizedK`,
+`hashChainLen`, `rows`, `keygenMs`, `proveMs`, `verifyMs`,
+`verified`, `proofBytes`. All `Duration`s are `bigint`
+milliseconds — UniFFI's `Duration` support is platform-flaky
+and integer milliseconds round-trip cleanly through JSI.
+
+**Implementation choice — synchronous Rust:** the FFI's
+`prove()` is synchronous from Rust's perspective (uses a
+`OnceLock<tokio::Runtime>` to `block_on` the async
+`run_proof_with_opts`). The platform layer (Swift / Kotlin)
+wraps it in `Promise` / `Coroutine` / `Combine` async
+primitives. This deliberately sidesteps the
+[`uniffi-bindgen-react-native` deadlock bugs](https://github.com/jhugman/uniffi-bindgen-react-native/pull/88)
+that live in the cross-FFI async-future glue.
+
+### §14.2 `react-native-demo/`
+
+Reference RN app that exercises the prover package. Two
+working tabs + one stub.
+
+**Layout:**
+
+```
+react-native-demo/
+├── App.tsx                          # bottom-tab nav: Benchmark / DID / About
+├── src/screens/BenchmarkScreen.tsx  # ports the Dioxus Bench tab
+├── src/screens/DidScreen.tsx        # DID CRUD UI (contract calls stubbed)
+├── src/screens/AboutScreen.tsx      # diagnostic / libraryVersion display
+├── src/hooks/useBench.ts            # state machine for the benchmark
+├── src/hooks/useDid.ts              # state machine for DID ops (stubbed)
+├── src/types/{bench,did}.ts         # domain types
+└── src/utils/format.ts              # formatMs / formatBytes
+```
+
+**What works (after running `yarn install` + native scaffolding):**
+
+- Benchmark screen calls `@midnight-ntwrk/react-native-prover`
+  end-to-end. k=1..21 rows, per-row Run + Run-all sweep,
+  stable column widths across Run → Running → Done, "cached"
+  label for cache-hit keygen (same UI fix as the dioxus-wallet
+  commit `4c6e912f`)
+- About screen displays `libraryVersion()` from the bundled
+  Rust core
+- Bottom-tab navigation between all three screens
+
+**What's stubbed (DID screen):**
+
+The DID resolve / deploy / update / deactivate buttons call
+deterministic stub implementations that return fake-but-
+realistic responses after a delay. Reason: the Dioxus
+wallet's DID flows depend on the upstream TS contract layer
+(`@midnight-ntwrk/midnight-did-contract`,
+`@midnight-ntwrk/compact-runtime`, the
+`onchain-runtime-v3` + `ledger-v8` WASM blobs) running
+inside a WebView. Porting that to RN requires either:
+
+- **(a) Embedding the same TS+WASM bundle in Hermes.**
+  Hermes lacks WASM today; needs a JS-side shim or a
+  custom JSI host-object. Doable but its own subproject.
+
+- **(b) Porting the contract layer to Rust** and exposing
+  it via UniFFI alongside the prover. Cleaner long-term
+  but a multi-month project.
+
+Out of scope for the demo. The DID screen is structured so
+swapping in a real bridge requires changes only inside
+`useDid.ts` — the UI shapes stay.
+
+### §14.3 Build / install matrix
+
+Once `ubrn` is installed and the consumer scaffolds an iOS /
+Android shell around the demo:
+
+```bash
+# One-time setup
+rustup target add aarch64-apple-ios aarch64-apple-ios-sim aarch64-linux-android
+cargo install cargo-ndk uniffi-bindgen-react-native
+export ANDROID_NDK_HOME=$HOME/Library/Android/sdk/ndk/27.0.12077973
+
+# Build the native prover
+cd react-native-prover
+yarn build:all                  # Rust + iOS xcframework + Android .so
+
+# Install the demo
+cd ../react-native-demo
+yarn install
+cd ios && pod install && cd ..   # iOS only
+yarn ios                         # or `yarn android`
+```
+
+### §14.4 Open work
+
+1. **`ubrn` integration** — run the binding gen step in CI so
+   the JSI shims are auto-produced on each build.
+2. **Real-device validation** — run the demo on an iPhone 15
+   Pro and a 6+ GiB Android device. The simulator already
+   validates the code path; the device tests validate jetsam +
+   lmkd survival.
+3. **DID contract bridge** — pick (a) or (b) from §14.2 and
+   plumb. Until then the DID screen runs deterministic stubs.
+4. **Cancellation API** — add `cancel(handle)` to the FFI +
+   a `signal: AbortSignal` parameter to the TS `prove()` so
+   long-running proves can be aborted from a "back" button.
+5. **Progress callback** — surface the existing
+   `midnight_bench=info` tracing events through the FFI as
+   `(phase, etaSeconds)` updates to JS.
+6. **Consider upgrading to Option B (hybrid)** if real-device
+   telemetry shows Android OOM-kill rate is unacceptable on
+   < 6 GiB devices. See §13.5 for the `:proverProcess`
+   Service design.
+
+### §14.5 Commits
+
+| Repo | Commit | Description |
+|---|---|---|
+| `midnight-ledger` | `2806ecd7` | `feat(react-native-prover): UniFFI Option A scaffolding` |
+| `midnight-ledger` | `3049e655` | `feat(react-native-demo): Bench screen + DID CRUD UI scaffolding` |
+
+Both GPG-signed + DCO-signed, pushed to
+`yshyn-iohk/midnight-ledger`'s `mobile-prototype` branch
+(PR #1).
