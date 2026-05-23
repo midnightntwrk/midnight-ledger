@@ -198,13 +198,31 @@ impl Wallet {
 
 // ─── DID surface ──────────────────────────────────────────────────
 
-pub fn did_resolve(_network: String, _did: String) -> Result<String, WalletError> {
-    Err(WalletError::NotImplemented(
-        "did_resolve via the FFI needs a full Wallet construction \
-         (seed + network + IndexerClient setup); pending the next \
-         iteration. The keys CRUD path works today."
-            .into(),
-    ))
+/// Resolve a Midnight DID via the network's indexer.
+///
+/// Goes through `wallet_core::Wallet::resolve_did` which:
+///   1. Parses the `did:midnight:<addr>` string into a `DidId`
+///   2. Validates the network matches the parsed DID
+///   3. Calls the indexer's `contract_state` GraphQL query
+///   4. Decodes the on-chain state into a `DidDocument`
+///
+/// The `Wallet` instance we use here is constructed from a
+/// throwaway zero-seed; resolve is purely read-only and never
+/// touches the wallet's secret keys.
+///
+/// Returns the resolved document as JSON. On failure, returns
+/// `WalletError::Network` with the indexer's error message.
+pub fn did_resolve(network: String, did: String) -> Result<String, WalletError> {
+    let net = parse_network(&network)?;
+    let doc = block_on(async {
+        // Read-only — seed not consulted by resolve_did.
+        let wallet = wallet_core::Wallet::from_seed([0u8; 32], net);
+        wallet
+            .resolve_did(&did)
+            .await
+            .map_err(|e| WalletError::Network(e.to_string()))
+    })?;
+    serde_json::to_string(&doc).map_err(|e| WalletError::Internal(e.to_string()))
 }
 
 pub fn did_deploy(_wallet: Arc<Wallet>, _label: String) -> Result<String, WalletError> {
