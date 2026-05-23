@@ -2425,3 +2425,202 @@ suspend, both quick) saves ~200–400 MB end-to-end and is
 expected to move k = 19 from "always OOMs" to "passes",
 without quite reaching k = 20. That's the realistic
 short-term ceiling without touching the halo2 fork.
+
+---
+
+## §10. Outcomes — what actually shipped (2026-05-23)
+
+The 2026-05-22 punch list above predicted that landing items 9 +
+10 + 13 would save 500–1000 MB and that **k = 20 was the
+"deepest fork patch" tier requiring 3–5 days**. The session that
+followed produced a different shape: we did patch the fork (the
+deeper levers turned out to be cheaper to implement than feared
+*and* the only ones that actually mattered for k = 20), and the
+"easy" levers (WebView suspend, PK cache cap) ended up being
+non-factors because the real bottlenecks were elsewhere.
+
+This section documents what landed, in landing order, with
+measured numbers from a physical Samsung S24 Ultra.
+
+### §10.1 The 30-second summary
+
+**Baseline (Cargo.toml deps unchanged, master `midnight-proofs`):**
+S24 Ultra OOM at k ≥ 19. Largest survivable workload was a
+~6 242-hash chain at k = 18.
+
+**Latest (this PR chain):** S24 Ultra **completes k = 20**
+(24 967 constraints, ~2× the constraints of k = 19) with
+4 393 MiB peak HWM and ~862 MiB end-of-prove RSS, well under
+the per-app budget.
+
+| Workload                                              | Before (master)   | After (this PR chain) | Δ                |
+|-------------------------------------------------------|------------------:|----------------------:|------------------|
+| k = 18 peak HWM (S24, real)                           | ~3 900 MiB        | ~2 580 MiB            | **−34 %**        |
+| k = 18 keygen-end HWM (emulator, instrumented)        | 1 502 MiB         | 601 MiB               | **−60 %**        |
+| k = 18 prove.end RSS (emulator)                       | 1 696 MiB         | 540 MiB               | **−68 %**        |
+| k = 18 wall (emulator; qemu-noisy, ballpark)          | ~326 s            | ~90 s                 | −72 % (incl. emulator variance) |
+| k = 19 outcome (S24)                                  | OOM at ~7+ GiB    | succeeded @ 5 300 MiB | **unlocked**     |
+| k = 20 outcome (S24)                                  | OOM at ~6.8 GiB   | succeeded @ 4 393 MiB | **unlocked**     |
+| k = 20 prove wall (S24, wallet UI)                    | n/a (died)        | 3 m 29 s              | first measurement|
+| Proof size at k = 20                                  | n/a               | 2 933 B               | unchanged shape  |
+
+CPU / threading was deliberately not the target axis (we already
+saturate cores via rayon during MSM + FFT; mobile cores were
+not the bottleneck). The wall-time improvements are a
+consequence of (a) skipping redundant work like the prover-side
+PK rebuild, and (b) not paging memory under pressure — not from
+any actual CPU optimization. Treat the wall-time column as a
+**by-product**, not the deliverable.
+
+### §10.2 Step-by-step changes, in landing order
+
+Each row is a single commit (or tight cluster) with its measured
+delta. The "delta" column is the marginal contribution **on top
+of all prior rows in the table** — same caveat as benchmark
+suites that include only the last patch's effect.
+
+| #   | Patch                                                                                                                              | Commit / PR                                                       | Layer            | Marginal delta                                                                       | Notes                                                                                                                                                                                                                                                                                       |
+|----:|------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------|------------------|--------------------------------------------------------------------------------------|----|
+| 1   | `cost-model OOM skip` — `ir.model()` HashMap walks every cell at k = 19+ regardless of proving                                     | `a474dd7a` (ledger)                                               | bench-side       | unblocks k = 19 even being attempted                                                 | Not a proving optimisation; an instrumentation bug that masqueraded as a proving OOM. Documented because the original "k = 19 always OOMs" finding included this red herring. |
+| 2   | `MIDNIGHT_LAZY_PARAMS` + peak RSS measurement                                                                                       | `2b8a9b0c` (ledger)                                               | bench-side       | measurement only                                                                     | Enabled the per-phase profiling that made every subsequent decision data-driven. |
+| 3   | `[patch.crates-io] midnight-proofs = { path = ../midnight-zk/proofs }`                                                              | `21a93efb` (ledger)                                               | workspace        | enables fork patches                                                                 | Lets the workspace consume the local midnight-zk fork. |
+| 4   | `IR + ProverKey caches + headless bench_cli`                                                                                        | `e022f2d5` (ledger)                                               | bench-side       | enables instrumented iteration                                                       | The `bench_cli` binary became the measurement workhorse for everything that follows. |
+| 5   | `lazy g_lagrange via OnceLock + drop_lazy_bases`                                                                                    | `45ea9f7` (midnight-zk)                                           | proofs (fork)    | enables next; ~100 MiB steady-state floor                                            | The Lagrange basis is rebuilt only when first used (zswap proves, etc.); off the prover hot path. |
+| 6   | `bump to 0.7.99 + drop path-dep on midnight-curves`                                                                                 | `30688ef` (midnight-zk)                                           | proofs (fork)    | enables `[patch.crates-io]` resolution                                               | Plumbing. |
+| 7   | `ParamsKZG::read_custom_lazy<R: Read + Seek>`                                                                                       | `a5f9cda` (midnight-zk)                                           | proofs (fork)    | enables #8                                                                           | API surface for streaming + mmap'd SRS reads. |
+| 8   | `mmap-backed ParamsKZG via BasesStorage`                                                                                            | `946b1f0` (midnight-zk)                                           | proofs (fork)    | ~300 MiB at k = 20 steady-state (SRS pages now file-backed, kernel-evictable)        | The SRS is the largest single allocation in `ParamsKZG`; this moves it out of heap into the page cache. **Peak-during-MSM unchanged** (SRS pages stay hot during the prover walk), the win is between proofs and during keygen. |
+| 9   | `per-phase memory instrumentation` (proofs side)                                                                                    | `3f0abef` (midnight-zk)                                           | proofs (fork)    | measurement only                                                                     | `tracing` markers at every keygen + prove phase, target `midnight_bench`. The trace fragments shown in this section are direct grep output from this layer. |
+| 10  | `sample_rss_hwm_kb` for macOS / iOS via `getrusage`                                                                                 | `49f9134` (midnight-zk)                                           | proofs (fork)    | measurement only                                                                     | Linux/Android already had `/proc/self/status`; this closed the gap on Apple platforms so the same tracing layer works there. (macOS's `ru_maxrss` is a lifetime high-water mark, not current — flagged in commit notes; iOS `/proc` is unavailable so this is the best we can do.) |
+| 11  | `warm_pk_cache` (ChainResolver pre-warms `PK_CACHE`)                                                                                | `4ecfcfe4` (ledger)                                               | workspace        | **k = 18 peak −1 300 MiB (3.9 GiB → 2.6 GiB on S24)** ; **k = 19 unlocked** (~7 + GiB → 5.3 GiB) | The single biggest user-visible win. Eliminates the 1.4 GiB "deserialise + rebuild" copy that lived between `ChainResolver::resolve_key` and `ProofPreimage::prove`. See [[Optimizations/PK_CACHE warm]] in the Obsidian vault for the full deep-dive. |
+| 12  | `wire mmap-backed SRS into ParamsProver`                                                                                            | `fb4e3208` (ledger)                                               | workspace        | enables wallet to honour `MIDNIGHT_MMAP_BUILD=1`                                     | The wallet writes a `.mmap` companion alongside each `bls_midnight_2pK` SRS file on first run; subsequent runs mmap directly. |
+| 13  | `mimalloc as global allocator + MIMALLOC_PURGE_DELAY=0` opt-in                                                                      | `afec4db7` + `31de1f78` (ledger)                                  | bench-side       | k = 18 peak −60 MiB (emulator); rough wash on desktop; **wins where it matters**     | Trades a small constant CPU overhead for aggressive page return to the OS. Bionic's malloc and macOS libmalloc both pool too greedily for the GiB-scale-and-drop pattern of `compute_h_poly`. |
+| 14  | `defer fixed_cosets construction to per-prove`                                                                                      | `d54c690` (midnight-zk)                                           | proofs (fork)    | **k = 18 keygen-end HWM −608 MiB** (1 502 → 894 emulator)                            | Stops paying the keygen-side extended-domain expansion until the one place that actually consumes it (`evaluate_h`). |
+| 15  | `defer permutation.cosets the same way as fixed_cosets`                                                                             | `6cec3e7` (midnight-zk)                                           | proofs (fork)    | **k = 18 keygen-end HWM −293 MiB** (894 → 601 emulator); total −60 % keygen vs base  | Same architectural pattern, applied to the permutation argument. |
+| 16  | **`disk-spill cosets path for k ≥ 20 unlock`** (the architectural unlock)                                                           | `66b43d1` (midnight-zk) + `6b70d7fe` (ledger; Android auto-enable) | proofs (fork) + wallet | **k = 20 unlocked** (~6.8 GiB OOM → 4 393 MiB peak); k = 18 peak unchanged | `compute_h_poly` writes each extended-domain coset to a tempfile one at a time, drops the in-memory poly, then mmaps the file for `evaluate_h`. The wallet auto-points `MIDNIGHT_SPILL_DIR` at `/data/data/<APP_ID>/cache/midnight-cosets` (the 93 GiB `/data` partition on S24). See [[Optimizations/Disk-spill cosets — the k=20 unlock]] for the deep-dive. |
+
+### §10.3 Per-phase k = 20 trace (S24 Ultra, all patches active)
+
+The trace below is direct grep output from the
+`midnight_bench=info` tracing layer (item #9 above), captured
+from `bench_cli` on the device. Both RSS and HWM are in MiB,
+sampled from `/proc/self/status`.
+
+```
+keygen_pk.start                              rss=12    hwm=2114
+keygen_pk.assembly_built                     rss=1274  hwm=2114
+keygen_pk.fixed_polys.end                    rss=1556  hwm=2114
+keygen_pk.fixed_cosets.end                   rss=1556  hwm=2114   ← lazy (empty Vec)
+keygen_pk.permutation_pk.end                 rss=1748  hwm=2708   ← polys only, no cosets
+keygen_pk.evaluator.end                      rss=2133  hwm=2708
+bench.keygen.end                             rss=2133  hwm=2708   ← keygen complete
+
+create_proof.compute_trace.start             rss=2681  hwm=2903
+trace.parse_advices.end                      rss=3058  hwm=3994   ← advice cosets built
+create_proof.compute_trace.end               rss=3314  hwm=3994
+
+finalise.compute_h_poly.start                rss=3314  hwm=3994
+spill_fixed_cosets.start                     rss=3729  hwm=4273   ← single coset transient (+415)
+spill_fixed_cosets.end                       rss=3095  hwm=4273   ← −634 (on disk now)
+spill_perm_cosets.start                      rss=3095  hwm=4273
+spill_perm_cosets.end                        rss=2022  hwm=4273   ← −1 073 (on disk)
+drop_cosets.end                              rss=3785  hwm=4393   ← evaluate_h peak (mmap warmed)
+finalise.compute_h_poly.end                  rss=576   hwm=4393   ← mmap evicted, RSS −3 209
+finalise.vanishing_construct.end             rss=748   hwm=4393
+finalise.multi_open.end                      rss=1384  hwm=4393
+bench.prove.end                              rss=862   hwm=4393   ← total: 285 s prove, 4 393 MiB peak
+```
+
+Reading the trace: the peak HWM (4 393 MiB) is hit at
+`drop_cosets.end`, when `evaluate_h` is mid-row-scan over the
+mmap'd cosets and the kernel hasn't decided yet that they can
+be evicted. As soon as `compute_h_poly` returns, the mmap'd
+pages become cold and the kernel reclaims them — RSS drops by
+3.2 GiB across a single phase boundary. This is the dynamic
+disk-spill was designed for.
+
+### §10.4 What the punch list got wrong, and why
+
+Cross-referencing §9's punch list with what landed:
+
+| Punch-list item                                            | Predicted impact            | What actually happened                                                                                                                                                                  |
+|------------------------------------------------------------|-----------------------------|------|
+| #5 Memoise `ParamsProver` per-k (web)                     | 5–10 % at k ≥ 15           | not done; web target deprioritised                                                                                                                                                       |
+| #7 `PK_CACHE_SIZE` 5 → 1                                  | 1.2 GB *after* cache saturation | **not done — wrong fix**. The waste was the prover-side **rebuild** of an already-cached PK, not the cache itself. `warm_pk_cache` (item #11 in §10.2) sidestepped the whole problem by pre-warming the cache that the prover boundary's `tagged_deserialize` consults. The PK cache cap is still 5 (untouched) and still healthy. |
+| #9 mmap-backed SRS via `memmap2`                          | 200–400 MB at k = 20       | **landed** as item #8 in §10.2. Saved ~300 MiB steady-state. **Peak-during-MSM unchanged** (the original prediction implicitly assumed mmap pages could be evicted during MSM — they can't, because the prover walks every element). The win is between proofs / during keygen, not during `compute_h_poly`. |
+| #10 Reuse FFT scratch buffers                             | 100–200 MB                  | not pursued. The lazy-cosets + disk-spill stack made the cosets themselves disappear from heap, which dominated the FFT scratch question. |
+| #11 Witness column streaming                              | 300–500 MB at k = 20        | **superseded by disk-spill**. The architectural pattern (build → commit → drop) is the same idea applied to witness instead of cosets; cosets were ~2× the size and unlocked k = 20 alone. Witness streaming is the path to **k = 21**, not k = 20 — see [[Open questions/H polynomial streaming]]. |
+| #13 Suspend / destroy WebView during sweeps               | 200–400 MB                  | **not done — turned out unnecessary**. The `bench_cli` measurements (no WebView) showed the OOM was in the proving heap itself, not WebView competition. Once `warm_pk_cache` + lazy cosets + disk-spill landed, the wallet (with WebView resident) also passes k = 20 — confirming the WebView was a noise factor, not the limit. |
+| #14 Allocator swap (jemalloc/mimalloc)                    | 5–20 MB                     | **landed** as item #13 in §10.2. Real impact: ~60 MiB at k = 18 (more than predicted) — the prediction was for "small object overhead", but the actual win is **page return cadence**, which matters for the GiB-scale temporary allocations in `compute_h_poly`. |
+
+**The big lesson:** every punch-list item that targeted "trim
+N MiB off the heap floor" was a 10–50× under-estimate of what
+*defer-then-disk-back* could do for the same effort. The
+keygen-end heap floor went from ~5 GiB (predicted "lower
+ceiling") to ~600 MiB — order-of-magnitude, not percent.
+
+### §10.5 Opt-in env vars (production wallet surface)
+
+The mobile build sets these automatically at process start
+(`mobile-bench/dioxus-wallet/src/lib.rs::main` on Android,
+`::start_app` on iOS). They are exposed as env vars rather than
+config flags so the headless `bench_cli` and the wallet share
+exactly the same code path.
+
+| Env var                            | Default in wallet              | Effect                                                                                              |
+|------------------------------------|--------------------------------|-----------------------------------------------------------------------------------------------------|
+| `MIDNIGHT_PP`                      | `/data/data/<APP_ID>/cache/midnight-pp` (Android), `Library/Caches/midnight-pp` (iOS) | SRS cache root                                                                                      |
+| `MIDNIGHT_MMAP_BUILD=1`            | set on first wallet run        | Writes `.mmap` companion alongside each SRS file the first time it loads; subsequent runs mmap     |
+| `MIDNIGHT_SPILL_COSETS=1`          | **set on Android** (Linux/iOS off by default) | Enables disk-spill in `compute_h_poly`                                                              |
+| `MIDNIGHT_SPILL_DIR=<path>`        | `/data/data/<APP_ID>/cache/midnight-cosets` (Android) | Where `compute_h_poly` writes coset tempfiles. Override if your `TMPDIR` partition is too small.   |
+| `MIMALLOC_PURGE_DELAY=0`           | not set by default             | mimalloc tuning; aggressively return freed pages to the OS. Set this via `adb shell` for the headless `bench_cli` when chasing the last 5 % of peak RSS. |
+| `BENCH_LOG=midnight_bench=info`    | not set                        | Emits the per-phase RSS / HWM tracing lines used to build the table in §10.3. Set for `bench_cli`; the wallet has its own log tab that consumes these without the env var. |
+
+### §10.6 What we deliberately did **not** do
+
+Listed so future readers don't re-investigate paths that were
+considered and explicitly skipped.
+
+| Lever                                                  | Why skipped                                                                                                                                                                                                                                                                                                                                                       |
+|--------------------------------------------------------|------|
+| **k = 21** (~50 k constraints)                         | k = 20 already overshoots the largest real-world workload by ~2×. The next limit (`advice_cosets`, ~7.6 GiB at k = 21) would require the same disk-spill treatment applied to a different (and bigger) collection — ~300 LOC of focused work, but no business reason on the current roadmap. |
+| **Row-streaming `evaluate_h`**                         | Cleanest long-term answer (constant memory regardless of k) but ~500 LOC of constraint-evaluator surgery, with hard-to-test invariants. Deferred. |
+| **`tikv-jemallocator`** (in favour of mimalloc)        | Both deliver similar page-return characteristics; mimalloc was already present in the wallet's transitive dep tree. No need to evaluate two. |
+| **WebView suspend during sweeps**                      | The proving heap was the bottleneck, not WebView competition. Verified via `bench_cli` (no WebView) hitting the same OOM at the same k. |
+| **`simd128` on web/wasm**                              | Blocked on upstream: `transient-crypto`/`midnight-proofs` have no `#[cfg(target_feature = "simd128")]` paths. Re-evaluate once that ships upstream. |
+| **Chunked Pippenger MSM**                              | Estimated 100–150 MiB savings, but ~3 days of work and would land *during* the prove peak which disk-spill has already brought well below the ceiling. Not worth it at k = 20. |
+
+### §10.7 Disk usage (the cost we pay for the RAM win)
+
+Disk-spill is the only optimisation that buys RAM with disk.
+The numbers, on a real S24 Ultra during k = 20:
+
+| Spill file                        | Size at k = 20 | Lifetime                          |
+|-----------------------------------|---------------:|-----------------------------------|
+| `midnight-cosets-XXXXXX` (fixed)  | ~3.2 GiB       | one `compute_h_poly` call         |
+| `midnight-cosets-YYYYYY` (perm)   | ~1.5 GiB       | one `compute_h_poly` call         |
+| `.mmap` companions in `MIDNIGHT_PP` | ~360 MiB at k = 20 (vs 240 MiB legacy format) | persistent (re-read each prove) |
+
+Total transient disk per k = 20 prove: ~4.7 GiB. Held only for
+the duration of `compute_h_poly` (~30 s of the 285 s prove
+wall); deleted automatically when `SpilledCosets` drops. The
+`/data` partition on the S24 has ~93 GiB free, so even worst-
+case concurrent runs are fine.
+
+If a downstream device has <10 GiB free `/data`, set
+`MIDNIGHT_SPILL_DIR` to a larger filesystem; if no filesystem
+has enough room, unset `MIDNIGHT_SPILL_COSETS=1` (the wallet
+will fall back to the in-heap path and OOM-or-not behaviour
+will match the pre-spill table in §9).
+
+### §10.8 PR map
+
+Both PRs are inside the personal workspace `yshyn-iohk/*`; no
+upstream `midnightntwrk/*` repos were touched.
+
+| Repo            | PR                                                              | Branch                            | Base       | Headline commit                                                          |
+|-----------------|-----------------------------------------------------------------|-----------------------------------|------------|--------------------------------------------------------------------------|
+| midnight-zk     | https://github.com/yshyn-iohk/midnight-zk/pull/1                | `feat/v0.7-h-poly-streaming`      | `main`     | `66b43d1 feat(proofs): disk-spill cosets path for k≥20 unlock`           |
+| midnight-ledger | https://github.com/yshyn-iohk/midnight-ledger/pull/1            | `mobile-prototype`                | `ledger-8` | `6b70d7fe feat(wallet): auto-enable MIDNIGHT_SPILL_COSETS on Android`    |
+
+All commits in both PRs are GPG-signed (key `38080D6E`,
+`yurii.shynbuiev@iohk.io`) and DCO-signed.
