@@ -1,0 +1,11 @@
+{
+  "extends": "@react-native/typescript-config/tsconfig.json",
+  "compilerOptions": {
+    "strict": true,
+    "noImplicitAny": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src/**/*", "*.ts", "*.tsx"],
+  "exclude": ["node_modules", "android", "ios"]
+}

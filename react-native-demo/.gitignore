@@ -1,0 +1,27 @@
+# React Native / Node
+node_modules/
+.expo/
+dist/
+*.tsbuildinfo
+
+# iOS
+ios/Pods/
+ios/build/
+ios/*.xcworkspace
+ios/*.xcuserdata/
+ios/.xcode.env.local
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/app/release/
+android/local.properties
+*.iml
+.idea/
+
+# Misc
+.DS_Store
+*.log
+.env
+.env.local
