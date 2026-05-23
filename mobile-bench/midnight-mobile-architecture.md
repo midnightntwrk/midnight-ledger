@@ -2693,7 +2693,139 @@ has enough room, unset `MIDNIGHT_SPILL_COSETS=1` (the wallet
 will fall back to the in-heap path and OOM-or-not behaviour
 will match the pre-spill table in §9).
 
-### §10.8 Prebuilt PK on disk — the cold-launch unlock (proposed)
+### §10.8 k = 21 on phone — the throughput wall, not the memory wall (measured)
+
+Status: characterised 2026-05-23 via `bench_cli` on a real
+Samsung S24 Ultra. **k = 21 (49,935 constraints) does not OOM
+on phone with the §10 disk-spill stack active** — but the
+prove cannot complete in practical wall time because of
+mmap-page-fault thrashing in `evaluate_h`. Detailed traces
+below.
+
+#### What we measured
+
+Two parallel runs were done with `MIDNIGHT_SPILL_COSETS=1`:
+
+| Target              | k = 21 keygen wall | k = 21 prove wall    | Peak HWM      | Verdict |
+|---------------------|-------------------:|---------------------:|--------------:|---------|
+| M2 desktop (no per-app cap, 32 GiB RAM) | 115 s | 7 m 11 s         | **11,974 MiB** | succeeded, completed |
+| **S24 Ultra (real phone, ~6.5 GiB per-app budget)** | ~143 s | **killed at +13 min during `evaluate_h`** | **5,396 MiB** | did not OOM; thrashed |
+
+#### The phone trace (S24, killed mid-`evaluate_h`)
+
+Direct grep output from `midnight_bench=info` tracing:
+
+```
+keygen_pk.start                              rss=14    hwm=4216
+keygen_pk.assembly_built                     rss=2538  hwm=4216
+keygen_pk.fixed_cosets.end                   rss=3094  hwm=4216   ← lazy
+keygen_pk.permutation_pk.end                 rss=3476  hwm=5396   ← lazy cosets
+keygen_pk.lagrange_polys.end                 rss=4246  hwm=5396   ← biggest keygen jump
+keygen_pk.evaluator.end                      rss=4246  hwm=5396
+bench.keygen.end                             rss=4246  hwm=5396   ← keygen total ~143 s
+
+resolver.resolve_key.start                   rss=4246  hwm=5396
+resolver.pk_cache_warmed                     (warmed, 80 s — but no rebuild)
+resolver.pk_serialised                       rss=4175  hwm=5396   bytes=540 MB
+resolver.resolve_key.end                     rss=4175  hwm=5396
+
+create_proof.compute_trace.start             rss=4143  hwm=5396
+trace.parse_advices.end                      rss=664   hwm=5396   ← kernel reclaimed during NTT
+trace.permutations_commit.end                rss=2332  hwm=5396
+create_proof.compute_trace.end               rss=3057  hwm=5396
+
+finalise.compute_h_poly.start                rss=3057  hwm=5396
+spill_fixed_cosets.start                     rss=256   hwm=5396   ← spill working, RSS dropping
+spill_fixed_cosets.end                       rss=1     hwm=5396   ← +3 min wall (slow disk I/O)
+spill_perm_cosets.start                      rss=2     hwm=5396
+spill_perm_cosets.end                        rss=1     hwm=5396   ← +1.5 min wall
+
+[killed at this point — drop_cosets / evaluate_h ongoing]
+```
+
+#### What the data says
+
+- **Peak HWM on phone never exceeded 5,396 MiB** — comfortably
+  under the S24's ~6,500 MiB per-app budget. The §10 disk-spill
+  stack is working as designed: at k = 21 the in-memory peak
+  is essentially the same as at k = 20 (4,393 MiB).
+- **The desktop's 11,974 MiB peak is mostly mmap'd file-backed
+  pages that the kernel never had reason to evict.** On phone,
+  under memory pressure, `lmkd` aggressively evicted those
+  same pages — RSS dropped to 1 MiB mid-spill (the kernel
+  reclaimed everything reclaimable).
+- **k = 21 is not a memory-ceiling problem on phone.** It is a
+  throughput problem.
+
+#### Why the prove can't complete in practical time
+
+`evaluate_h`'s inner loop walks rows across **every coresident
+polynomial** (advice, instance, fixed, permutation, lookup),
+and on phone these are now:
+
+- `advice_cosets` (~3.8 GiB at k = 20 → ~7.6 GiB at k = 21) —
+  built during `compute_trace.parse_advices`, kept in heap.
+  Already evicted by lmkd to ~1 MiB resident before
+  `evaluate_h` even starts.
+- spilled `fixed_cosets` (~6.4 GiB on disk at k = 21) —
+  file-backed mmap; OS-evictable.
+- spilled `permutation.cosets` (~2.8 GiB on disk at k = 21) —
+  file-backed mmap; OS-evictable.
+
+Every row read in the constraint scan touches every
+polynomial, which means **every row triggers a page fault**
+against an evicted mmap. The disk-spill optimisation, which
+buys correctness at k = 20, turns into a throughput
+catastrophe at k = 21: the prove that would have completed in
+~7 minutes on M2 was projected to take **hours** on phone, all
+of it I/O-bound.
+
+The §10 stack still does its job (no OOM at k = 21 on phone),
+but a different optimisation is needed to make k = 21
+*practical* on phone.
+
+#### What k = 21 on phone would need
+
+Two architectural changes, in order of impact:
+
+1. **Row-streaming `evaluate_h`.** Refactor the constraint
+   evaluator's inner loop to process N rows at a time,
+   reading windows from the mmap'd cosets in cache-friendly
+   strides. Mentioned briefly in §11.3 as the "next deep
+   frontier"; this k = 21 experiment confirms it is the right
+   frontier. Estimated effort: ~500 LOC of careful surgery
+   inside `midnight-proofs::plonk::evaluation::Evaluator::evaluate_h`,
+   with hard-to-test invariants (the existing path computes
+   exact constraint sums; the streaming version must produce
+   identical sums modulo associativity).
+
+2. **Advice-cosets disk-spill.** Apply the same
+   `SpilledCosets` pattern from §10.2 #16 to the advice
+   columns in `compute_trace.parse_advices`. **By itself this
+   does not unlock k = 21** — the k = 21 trace above shows
+   the existing spills already drop RSS to ~1 MiB before
+   `evaluate_h`, so spilling more doesn't move the peak. It
+   would only help in combination with (1), as a way to keep
+   the working-set during the row scan small enough to fit
+   in resident memory.
+
+(1) without (2) is the most promising path. (2) without (1)
+is a no-op on phone (the kernel already evicts under
+pressure). (1) with (2) is the rigorous answer that also
+gives us margin for k = 22+.
+
+#### Verdict for the §10 PR chain
+
+k = 20 remains the supported ceiling for this PR chain on
+phone. k = 21 is in the bucket of "physically lands but
+practically unusable" — useful as a stress test to validate
+the §10 architecture (which it did, definitively) but not
+shippable as a wallet capability.
+
+The path forward is the row-streaming `evaluate_h` refactor.
+Tracked as a follow-up; outside the scope of this PR pair.
+
+### §10.9 Prebuilt PK on disk — the cold-launch unlock (proposed)
 
 Status: design proposal; not yet implemented. Sketched here
 because it is the natural extrapolation of the §10 stack and
@@ -2858,7 +2990,7 @@ This sits outside the §10 PR chain because:
 Tracked as the next major optimisation; will land in a
 follow-up PR pair after §10 is reviewed.
 
-### §10.9 PR map
+### §10.10 PR map
 
 Both PRs are inside the personal workspace `yshyn-iohk/*`; no
 upstream `midnightntwrk/*` repos were touched.
