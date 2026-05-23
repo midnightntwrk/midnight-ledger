@@ -3062,93 +3062,287 @@ Dioxus 0.6 + WebView for UI, pure Rust for proving. A
 downstream team building a React Native wallet would like to
 embed *just the proof generator*, not the full Dioxus shell.
 This section is the research answer to "how should we ship
-this?", grounded in what comparable projects do today.
-References at the bottom; primary sources only.
+this?", grounded in primary-source evidence: Apple developer
+forums, Android source, the UniFFI changelog, and production
+projects (mopro, librustzcash, iden3/rapidsnark, Bitwarden).
 
-### §13.1 Survey of state of the art
+### §13.1 The right framing — process isolation, not background services
 
-| Project                             | Mechanism                                                       | Notes                                                                                                              |
-|-------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
-| **mopro** (PSE / Ethereum Foundation) | UniFFI → JSI Turbo Modules, async `await generateCircomProof(...)` | Closest analogue. Wraps Circom + halo2 + Noir provers as a Rust crate (`mopro-ffi`); ships `.xcframework` + JNI/Kotlin glue. |
-| **iden3 `react-native-rapidsnark`** | Pre-built `.xcframework` + Android `.so` per ABI; Turbo Module    | Three-function API: `groth16Prove`, `groth16Verify`, `groth16PublicBufferSize`. Witness passed as base64. No streaming progress, no cancellation. |
-| **Zashi / Nighthawk (Zcash)**       | UniFFI on iOS + JNI / cargo-ndk on Android (`librustzcash`)       | Production reference for "long-running Rust proving from native mobile." All in-process; no HTTP server.           |
-| **Aztec / Noir** (`noir-react-native-starter`) | Community Turbo Module wrapping Barretenberg                | Aztec's own docs say "download only the SRS chunk needed; usually <50 MB." Honk replaced UltraPlonk for memory.    |
-| **UniFFI for React Native** (`uniffi-bindgen-react-native`) | Generates JSI C++ + TypeScript Turbo Module from `#[uniffi::export]` Rust | Maps Rust `async fn` → JS `Promise`. Cancellation via `AbortSignal`. Production users: Matrix SDK RN, Bitwarden, Russh. |
+An earlier version of this section dismissed "embedded HTTP
+server" on the grounds that iOS doesn't allow long-running
+background processes. **That framing was wrong** and missed the
+real question. What we actually want from "Option B" is
+**process-level fault isolation**:
 
-**Universal pattern: nobody ships an HTTP server.** The two
-reasons recur across every project:
+- A 4.4 GiB proof OOM in the prover **must not kill the host
+  RN app.** With one process, an `abort()` in the proof code
+  tears down the entire UI; the user loses transaction state
+  and confidence. With two processes, the OS kills the prover
+  process only, the UI process sees a clean
+  `onServiceDisconnected` callback, the user retries.
 
-1. **iOS aggressively suspends background processes.** Apple
-   developer forums state plainly: "you can't run a network
-   server in the background." `URLSession` background
-   downloads are the only sanctioned long-running task. A
-   foreground-only HTTP server would still work, but adds zero
-   value over FFI.
-2. **FFI overhead is irrelevant when proves take minutes.** A
-   µs-scale boundary cost on top of a 5-minute compute is not
-   the variable to optimise.
+- The lifecycle is **on-demand**, not persistent:
+  - User taps "prove" → spin up isolated prover process →
+    stream witness in → stream proof out → tear it down.
+  - User backgrounds the app → tear down on transition.
+  - App relaunches → start with nothing running.
 
-### §13.2 Comparison — FFI vs HTTP server vs hybrid
+This is **not** "a long-running daemon." It is "a sacrificial
+worker spun up for a single prove call." Every isolation
+property we want comes from that one design choice, on the
+platforms where it's available.
 
-Re-using our existing in-process `LocalProvingProvider` shape
-(§4.1) with FFI bindings is **Option A**. Standing up a local
-HTTP server is **Option B**. Hybrid is **C**.
+The question for each platform is then narrower: **is on-demand
+process isolation available, and at what cost?**
 
-| Dimension                | A: FFI (UniFFI)                                            | B: Embedded HTTP server                                           | C: Hybrid                            |
-|--------------------------|------------------------------------------------------------|-------------------------------------------------------------------|--------------------------------------|
-| **iOS feasibility**      | First-class. Static lib in `.xcframework`.                | **Disqualified on iOS** — no long-running background server allowed. | Reduces to A on iOS.                  |
-| **Android feasibility**  | First-class. `.so` + JNI / UniFFI.                         | Possible via `ForegroundService` + sticky notification, but Doze + battery-optimisation will still kill it. | Same as A in practice. |
-| **Binary size delta**    | One static lib (~30–80 MB stripped; mopro reports ~50 MB Rust core for similar curve set). Comfortably under iOS's 4 GB IPA limit. | Add embedded HTTP runtime (~3–5 MB) on top of A.                  | A + extra where used.                |
-| **FFI / IPC overhead**   | µs per call; irrelevant for 6-min proves.                  | Localhost loopback ms per call + JSON ser/deser of MB-scale proof bytes. Wasteful. | Best of both, but only matters when B is viable. |
-| **SRS shipping (~600 MB at k=20)** | First-run `URLSession` download to app Caches dir; mmap from Rust. | Same problem; HTTP doesn't help.                          | Same.                                |
-| **Memory ownership**     | Rust owns SRS (mmapped); proof returned as `Vec<u8>` → JS `Uint8Array` over JSI. Single process, ~4.4 GiB peak — **risky on iOS** (jetsam kills apps at ~3 GiB on pre-iPhone-15-Pro). | Separate process means proof RAM is isolated from RN — **but iOS doesn't let you spawn child processes for App Store apps.** | n/a |
-| **OOM / crash isolation**| Rust panic → RN crash unless `catch_unwind`. UniFFI does this for `Result`-returning functions.        | True isolation only on Android.                                   | Same as A.                           |
-| **Threading**            | Rust spawns its own thread (tokio); UniFFI maps async to JS Promise. JS thread never blocks. | RN's `fetch` is already off the JS thread.                       | Same.                                |
-| **Cancellation**         | UniFFI async + `AbortSignal` drops the Rust `Future`. **Halo2 prover is not natively cancellable** — needs cooperative cancel: thread `Arc<AtomicBool>` through synthesis layers, poll at phase boundaries. | HTTP `DELETE /proofs/{id}` → server sets cancel flag. Same cooperative-cancel work needed in the prover regardless. | Same work; FFI is simpler.           |
-| **Progress events**      | UniFFI Rust→JS async callbacks (PR #88/#158 deadlock fixes recent but production-ready). Pattern: `progress: Box<dyn Fn(Phase)>` callback param. | WebSocket `/progress` or polling `GET /status`. Heavier.          | n/a                                   |
-| **Updateability post-ship**| Neither — App Store review required for native binary update on iOS. Android sideload OK.        | Same constraint.                                                  | Same.                                |
-| **Testing**              | `cargo test` + Jest + Detox.                                | All of A + HTTP integration tests + lifecycle tests for the server.| Most surface area.                   |
+### §13.2 Platform reality (research-backed)
 
-**Bottom line: A wins uniformly.** B is disqualified on iOS by
-the platform, and on Android it doesn't add enough to justify
-the surface-area cost. C reduces to A on iOS, which makes it
-strictly worse than A.
+#### iOS — process isolation is impossible, period
 
-### §13.3 Recommended packaging — `@midnight-ntwrk/react-native-prover`
+Apple's iOS sandbox enforces this at the kernel level, not as
+App Store policy. Citations:
 
-UniFFI-based FFI Turbo Module via `uniffi-bindgen-react-native`,
-distributed as a single npm package with embedded `.xcframework`
-(iOS) and prebuilt `.so` per ABI (Android — **arm64-v8a only**;
-drop x86_64 to save binary size, it's emulator-only and not
-shipped by the wallet). SRS is **not bundled** — downloaded by
-the host RN app on first run.
+- **`posix_spawn` / `fork` are blocked.** Apple DTS engineer
+  Quinn states explicitly: "iOS apps are not allowed to spawn
+  child processes." Enforced by the iOS sandbox (a different
+  mechanism from macOS App Sandbox). It is not a Review-only
+  rule — the syscall fails. ([Apple Developer Forums thread/747499](https://developer.apple.com/forums/thread/747499))
+- **App Extensions cannot be used as generic helpers.** Per
+  the App Extension Programming Guide, extensions launch
+  "when a user chooses [it] from an app's UI or from a
+  presented activity view controller" — programmatic
+  instantiation from the host is not exposed. Extensions
+  "terminate soon after [completing] the request" and have
+  *smaller* memory limits, not larger. ([App Extension Programming Guide](https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/ExtensionOverview.html))
+- **`NSXPCConnection` is macOS-only.** The C `libxpc`
+  primitives exist on iOS but are reserved for system
+  services / extension infrastructure; third-party app-to-app
+  XPC is not exposed. ([NSXPCConnection docs](https://developer.apple.com/documentation/foundation/nsxpcconnection))
+- **`WKWebView` *does* use multi-process** (UIProcess +
+  WebContent + Networking + Storage). It's the only
+  out-of-process compute model an iOS app gets for free. But
+  you can't piggyback your Rust prover into the WebContent
+  process — only JS/WASM inside the WebView benefits, which
+  routes the prover through WASM-in-WKWebView (a different
+  architecture; see §11). ([WKProcessPool](https://developer.apple.com/documentation/webkit/wkprocesspool))
+- **`BGContinuedProcessingTask` (iOS 26)** is the closest
+  legitimate "long-running" pattern. It lets work started in
+  the foreground continue through a brief backgrounding. But
+  it is **still the same process** — no OOM isolation. WWDC25
+  also flagged that backgrounded workloads run **4–5× slower**
+  than foreground. ([BGContinuedProcessingTask](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtask), [WWDC25 session 227](https://developer.apple.com/videos/play/wwdc2025/227/))
 
-#### Repo layout
+**Verdict for iOS: there is no way to OOM-isolate a 4 GiB+
+prover from the main app.** The mitigation has to be
+ahead-of-time: streaming/mmap'd SRS, chunked witness
+construction, aggressive memory-pressure handling. No
+production iOS app spawns a helper binary because the kernel
+won't let them.
+
+#### Android — on-demand isolation is first-class
+
+Citations:
+
+- **`<service android:process=":proverProcess">`** is a
+  documented, supported feature. Per [Android manifest docs](https://developer.android.com/guide/topics/manifest/service-element):
+  "If the name begins with a colon (`:`), a new process,
+  private to the application, is created when it's needed and
+  the service runs in that process." This is exactly the
+  on-demand pattern.
+- **Independent lmkd accounting.** Android's [low-memory
+  killer daemon](https://source.android.com/docs/core/perf/lmkd)
+  uses per-process `oom_score_adj` based on each process's
+  state (foreground / visible / service / cached).
+  `:proverProcess` and the main UI process get scored
+  **separately**. If the prover OOMs at 4 GiB, lmkd kills
+  *it*; the UI process survives; the user sees a clean
+  `onServiceDisconnected` callback. **This is exactly the
+  isolation we want.**
+- **Binder has a 1 MiB transaction limit** ([Android docs](https://developer.android.com/reference/android/os/TransactionTooLargeException),
+  [issuetracker 36999615](https://issuetracker.google.com/issues/36999615)).
+  MB-scale byte arrays (proof bytes, SRS chunks) must use
+  `android.os.SharedMemory` (API 27+) or `ParcelFileDescriptor`
+  — the Binder call carries only the fd, the bytes are mapped
+  via shared memory. **Effectively zero-copy IPC.**
+  ([SharedMemory / Ashmem](https://hujinhan.medium.com/implementing-ashmem-to-share-data-between-processes-4f707e0bfc7b))
+- **Cancellation** is clean: `unbindService()` after last
+  client unbinds tears down `:proverProcess`. For mid-prove
+  cancellation, send a Binder `oneway` cancel message that
+  the Rust side polls (same cooperative-cancel discipline we'd
+  need in any model). `Process.killProcess(remotePid)` is the
+  last-resort hammer.
+- **Doze** affects background scheduling (JobScheduler,
+  alarms, network) — a foreground prover service triggered by
+  user action is not gated by Doze.
+- **Real-world precedent:** Chrome's tab process model,
+  WebView's renderer process, [Microsoft's out-of-process
+  services guide](https://learn.microsoft.com/en-us/xamarin/android/app-fundamentals/services/out-of-process-services)
+  explicitly recommends this pattern when the service "has a
+  large memory footprint." Multi-process is standard Android
+  practice.
+
+**Verdict for Android: separate-process Service with
+`SharedMemory` IPC is the right architecture.** Free OOM
+isolation, zero-copy buffer transfer, clean lifecycle.
+
+### §13.3 The bindings question — UniFFI vs hand-written
+
+Orthogonal to the process-model question is *how* the Rust
+code is called from the platform layer. Three serious options:
+
+| Option | Bindings tool | Production users | Bridge LOC | API stability | Buffer-copy on hot path |
+|---|---|---|---|---|---|
+| **UniFFI** (`uniffi-bindgen-react-native`) | Codegen from `#[uniffi::export]` Rust | Mozilla (Firefox app-services), [Bitwarden SDK](https://contributing.bitwarden.com/architecture/sdk/), [mopro](https://github.com/zkmopro/mopro) | ~0 (generated) | **Breaking changes per minor**: 0.28→0.29 removed `UniffiCustomTypeConverter` + `extern` syntax; 0.30→0.31 changed method-checksum compat. Pin and treat upgrades as scheduled work. ([Upgrading](https://mozilla.github.io/uniffi-rs/next/Upgrading.html), [CHANGELOG](https://github.com/mozilla/uniffi-rs/blob/main/CHANGELOG.md)) | **Yes** — `Vec<u8>` → `Uint8Array`/`ArrayBuffer` still copies through JSI even after [PR #187](https://github.com/jhugman/uniffi-bindgen-react-native/pull/187); the Hermes no-copy `ArrayBuffer` constructor ([Hermes #564](https://github.com/facebook/hermes/issues/564)) is **not** wired into the UniFFI path. |
+| **Hand-written JNI + Swift bridge** | Manual | [librustzcash / ZcashLightClientKit](https://github.com/Electric-Coin-Company/zcash-swift-wallet-sdk) + [zcash-android-wallet-sdk JNI](https://zcash.readthedocs.io/en/latest/android/zcash-android-wallet-sdk/cash.z.wallet.sdk.jni/); Signal Rust libs | Thousands of LOC (librustzcash JNI spans many modules) | Stable — you own the surface | **No** — JNI direct ByteBuffer + Swift `Data.withUnsafeBytes` give zero-copy borrow |
+| **Hand-written JSI C++ module** (rapidsnark-style) | Manual JSI | [iden3/react-native-rapidsnark](https://github.com/iden3/react-native-rapidsnark) | Low hundreds for the JSI surface + build glue | Stable | **No** — JSI's no-copy `ArrayBuffer` constructor is available on Hermes; true zero-copy achievable |
+
+Two specific things to flag:
+
+- **UniFFI deadlock history is real but bounded.** PRs [#88](https://github.com/jhugman/uniffi-bindgen-react-native/pull/88)
+  and [#158](https://github.com/jhugman/uniffi-bindgen-react-native/pull/158)
+  in `uniffi-bindgen-react-native` traced to "polling next
+  future inside continuation callback while holding non-
+  reentrant mutex." The maintainer acknowledges the fixes
+  may not be complete ("I don't think this has fixed all
+  possible deadlocks"). **The risk lives in the cross-FFI
+  async-future glue**, not in core UniFFI. A synchronous
+  Rust `fn(witness) -> Vec<u8>` called from a JS Promise
+  wrapper on the platform side avoids this entire surface.
+
+- **JSI zero-copy buffer ingestion matters here.** For a
+  proof byte payload (~3 KiB) the copy is irrelevant. For
+  the **SRS** (~360 MiB mmap'd file, accessed from Rust
+  during keygen / prove) it would be catastrophic — UniFFI
+  would either copy the whole thing across JSI on every
+  prove, or you'd have to keep the SRS handle entirely
+  Rust-side and never pass bytes through the FFI boundary
+  (which is what we'd want anyway). The cleanest pattern:
+  **Rust owns the SRS via mmap on a known path; the FFI
+  never sees those bytes; the API surface is `prove(circuitId,
+  witness) -> proofBytes` and `witness` is the only thing
+  that crosses.**
+
+### §13.4 Updated A vs B vs D comparison
+
+Re-doing the matrix with the corrected understanding of
+on-demand isolation:
+
+| Dimension | A: UniFFI same-process (both platforms) | **B: Hybrid — Android isolated process + iOS in-process** | D: Hand-written bridges (both platforms) |
+|---|---|---|---|
+| **iOS process model** | In-process | In-process (no alternative exists) | In-process |
+| **Android process model** | In-process | **`:proverProcess` Service, on-demand** | In-process |
+| **iOS OOM isolation** | None | None (not achievable on iOS) | None |
+| **Android OOM isolation** | None — prover OOM kills RN app | **Yes — lmkd kills `:proverProcess` only** | None |
+| **iOS k = 20 viability** | Risky on pre-iPhone-15-Pro (3 GiB jetsam) | Same risk (iOS has no isolation lever) | Same risk |
+| **Android k = 20 viability** | Works on S24 today; risky on 4–6 GiB-RAM devices | **Robust** — bound by physical RAM, not by "must coreside with RN UI" | Works on S24, risky on smaller devices |
+| **Bindings stability** | UniFFI breaking changes per minor; pin and budget upgrade work | Same on iOS side; Android Service is via AIDL + Binder (stable) | Stable; you own the surface |
+| **Buffer-passing overhead** | Vec<u8> copies through JSI Uint8Array | Witness via UniFFI (small); proof bytes via `SharedMemory` on Android (zero-copy), via UniFFI on iOS (copy of ~3 KiB — negligible) | Zero-copy on both platforms (JSI no-copy ArrayBuffer + JNI ByteBuffer / Swift withUnsafeBytes) |
+| **Bridge LOC to maintain** | ~0 (generated) | UniFFI for the FFI seam + ~hundreds of LOC for the Android Service shell (AIDL + SharedMemory plumbing) | Thousands of LOC across iOS + Android |
+| **Async story** | UniFFI Rust → JS Promise; recent deadlock fixes; pin a version | Same on iOS; on Android the Service Binder dance is well-trodden | Custom; you choose the model |
+| **Engineering effort to first working `prove()`** | 4–6 PW | 6–9 PW (1–2 PW extra for the Android Service + AIDL + SharedMemory layer) | 10–14 PW |
+
+### §13.5 Recommendation — Option B (hybrid)
+
+**Pick UniFFI as the FFI seam on both platforms. On Android,
+host the UniFFI-generated Kotlin shim *inside a separate
+`:proverProcess` Service*; expose it to RN via AIDL + Binder
++ `SharedMemory`. On iOS, host the same UniFFI-generated
+Swift shim *inside the main app process* (no alternative
+exists); wrap long proves in a `BGContinuedProcessingTask` so
+a brief backgrounding doesn't kill the work.**
+
+Rationale:
+
+1. **Free Android OOM isolation** — the entire point of the
+   "Option B" framing the user pushed back on. We get this
+   *because* the user was right: on-demand isolation is
+   first-class on Android, and we should not pretend
+   otherwise.
+
+2. **Honest about iOS** — no amount of architectural rework
+   gives us OOM isolation on iOS. We mitigate ahead-of-time
+   (streaming SRS, chunked witness, careful memory-pressure
+   handling) and accept that pre-iPhone-15-Pro hardware may
+   not support k = 20. This is a *platform constraint*, not
+   a packaging mistake.
+
+3. **UniFFI for the FFI seam, on both** — keeps one bindings
+   surface to maintain. The deadlock risk is in cross-FFI
+   futures; we side-step it by making `prove()` a
+   synchronous-Rust call posted to a background thread, with
+   a completion callback over the platform-native async
+   primitive (Coroutine / Combine / Promise). The
+   [mopro](https://github.com/zkmopro/mopro) project uses
+   this exact pattern in production for ZK proving on mobile
+   — strongest precedent for this direction.
+
+4. **Hand-write the JSI buffer ingestion specifically** —
+   UniFFI's `Vec<u8>` → JSI `Uint8Array` copy is acceptable
+   for ~3 KiB proof bytes but unacceptable for any path that
+   exposes the SRS. The SRS stays entirely Rust-side
+   (mmapped from a known path); the FFI never sees those
+   bytes. The hand-written JSI surface is small and
+   purpose-built (a few dozen LOC).
+
+5. **No persistent server** — the Android Service lifecycle
+   is "bind on `prove`, unbind on `done` or app-background."
+   No daemon, no resident memory between proves, no
+   background restart contract. The `:proverProcess` is
+   killed by the OS as a cached process once we unbind; the
+   next prove spins a fresh one.
+
+### §13.6 What this gives us
+
+| Property | Android | iOS |
+|---|---|---|
+| OOM in prover kills RN app | **No** — process boundary catches it | Yes — mitigate ahead-of-time |
+| Cancellable mid-prove | Yes (Binder oneway + cooperative poll) | Yes (cooperative poll) |
+| Per-prove cold start cost | ~50–100 ms (Service bind + Binder setup) | ~0 (in-process) |
+| SRS shipping | First-run download to `getCacheDir()`; mmapped Rust-side | First-run download to `Library/Caches/`; mmapped Rust-side |
+| Proof byte transfer | `SharedMemory` (zero-copy) | JSI `Uint8Array` copy (~3 KiB — negligible) |
+| Witness transfer (KB-scale) | UniFFI `Vec<u8>` (acceptable) | UniFFI `Vec<u8>` (acceptable) |
+| App backgrounded mid-prove | `:proverProcess` may be lmkd-killed; we report cancelled to RN | `BGContinuedProcessingTask` extends; if still backgrounded long, work cancels |
+
+### §13.7 Concrete proposal — `@midnight-ntwrk/react-native-prover`
+
+**Repo layout** (revised for the hybrid model):
 
 ```
 midnight-react-native-prover/
 ├── crates/
-│   └── prover-ffi/                  # Thin UniFFI wrapper around contract-benchmark
-│       ├── Cargo.toml               # cdylib + staticlib
-│       ├── build.rs                 # uniffi-bindgen-react-native invocation
+│   └── prover-ffi/                       # UniFFI wrapper around contract-benchmark
+│       ├── Cargo.toml                    # cdylib + staticlib
+│       ├── build.rs                      # uniffi-bindgen-react-native invocation
 │       └── src/
-│           ├── lib.rs               # #[uniffi::export] entry points
-│           ├── srs.rs               # mmap SRS from path; verify SHA
-│           └── progress.rs          # cooperative-cancel + phase callback
+│           ├── lib.rs                    # #[uniffi::export] entry points
+│           │                             #   prove(circuit_id, witness, opts) -> Vec<u8>
+│           │                             #   verify(...)
+│           │                             #   srs_info(path) -> SrsInfo
+│           │                             #   cancel(handle)
+│           ├── srs.rs                    # mmap SRS from path; verify SHA
+│           └── progress.rs               # cooperative-cancel + phase callback
 ├── ios/
 │   ├── MidnightProver.podspec
-│   └── MidnightProver.xcframework/  # built artefact, checked in via Git LFS
+│   ├── MidnightProver.xcframework/       # UniFFI-generated + cargo-built; Git LFS
+│   └── jsi/
+│       └── MidnightProverJSI.cpp         # hand-written JSI buffer-borrow path
 ├── android/
 │   ├── build.gradle
-│   └── src/main/jniLibs/arm64-v8a/libmidnight_prover.so
-├── src/                             # TypeScript (generated + hand-written)
-│   ├── index.ts                     # public API re-export
-│   └── NativeMidnightProver.ts      # JSI spec for codegen
+│   ├── src/main/jniLibs/arm64-v8a/libmidnight_prover.so
+│   ├── src/main/AndroidManifest.xml      # declares <service android:process=":proverProcess">
+│   ├── src/main/java/.../ProverService.kt  # the isolated Service
+│   ├── src/main/aidl/.../IProver.aidl    # Binder interface
+│   └── src/main/cpp/MidnightProverJSI.cpp # hand-written JSI buffer-borrow path
+├── src/                                  # TypeScript (generated + hand-written)
+│   ├── index.ts                          # public API re-export
+│   └── NativeMidnightProver.ts           # JSI spec for codegen
 ├── package.json
-└── example/                         # RN test harness
+└── example/                              # RN test harness
 ```
 
-#### Public TypeScript API
+**Public TypeScript API** (the public surface deliberately
+doesn't reveal the process model — same `await prove(...)`
+shape on both platforms):
 
 ```ts
 export type ProveOptions = {
@@ -3169,7 +3363,7 @@ export type ProveResult = {
 };
 
 export function prove(
-  circuitId: string,                 // e.g. "contract-call-v1"
+  circuitId: string,
   witness: Uint8Array,
   opts: ProveOptions
 ): Promise<ProveResult>;
@@ -3180,21 +3374,60 @@ export function verify(
   publicInputs: Uint8Array,
   srsPath: string
 ): Promise<boolean>;
-
-export function srsInfo(srsPath: string): Promise<{
-  k: number;
-  sha256: string;
-  sizeBytes: number;
-}>;
-
-export const SUPPORTED_K_MAX: number;          // e.g. 20
-export const REQUIRED_SRS_SHA256: string;      // pin upstream
 ```
 
-#### Build recipe
+#### Android Service contract (concrete)
+
+```kotlin
+// AndroidManifest.xml
+<service
+    android:name=".ProverService"
+    android:process=":proverProcess"
+    android:exported="false" />
+
+// IProver.aidl
+interface IProver {
+    int beginProve(in String circuitId,
+                   in ParcelFileDescriptor witnessFd,
+                   in IProverCallback callback);
+    void cancel(int handle);
+}
+interface IProverCallback {
+    void onProgress(in ProverProgress p);
+    void onSuccess(in ParcelFileDescriptor proofFd);
+    void onError(int code, in String msg);
+}
+
+// ProverService.kt — runs in :proverProcess
+class ProverService : Service() {
+    private val binder = object : IProver.Stub() {
+        override fun beginProve(circuitId: String,
+                                witnessFd: ParcelFileDescriptor,
+                                cb: IProverCallback): Int {
+            // mmap witness from fd; call into UniFFI-generated Rust;
+            // write proof to a fresh SharedMemory; hand back the fd.
+        }
+    }
+    override fun onBind(intent: Intent): IBinder = binder
+}
+```
+
+Key points:
+
+- The Service's `onBind` callback is what triggers
+  `:proverProcess` to be created (or reused if a previous
+  prove from the same app instance hasn't been unbound yet).
+- Witness bytes flow in via `ParcelFileDescriptor` →
+  zero-copy mmap on the Rust side.
+- Proof bytes flow out via `SharedMemory` → zero-copy read
+  on the RN side.
+- Cancellation is a `oneway` Binder call setting a flag the
+  Rust prover polls at phase boundaries.
+
+#### Build recipe (revised for hybrid)
 
 ```bash
-# Rust → native artefacts
+# Rust → native artefacts (same for both platforms)
 cargo install cargo-ndk uniffi-bindgen-react-native
 cd crates/prover-ffi
 
@@ -3202,99 +3435,117 @@ cd crates/prover-ffi
 for tgt in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
   cargo build --release --target $tgt
 done
-ubrn build ios --release --and-generate                # → .xcframework + TS
+ubrn build ios --release --and-generate     # → .xcframework + Swift + TS
 
-# Android (arm64-v8a only — no x86_64 in shipped wallet)
+# Android (arm64-v8a — shipping ABI only)
 cargo ndk -t arm64-v8a build --release
-ubrn build android --release --and-generate
+ubrn build android --release --and-generate # → .so + Kotlin + TS
+
+# Build the hand-written JSI buffer-borrow C++ modules
+# (small; lives in the platform projects, not in Rust)
 
 # Wrap & publish
 yarn install && yarn prepack
-npm publish --access restricted     # or GH Packages
+npm publish --access restricted
 ```
 
-#### Distribution
+### §13.8 Effort estimate (revised)
 
-- **npm** package `@midnight-ntwrk/react-native-prover` (private scope or GH Packages)
-- **iOS**: package contains `.podspec`; consumer uses `pod install` automatically via RN autolinking
-- **Android**: package contains `build.gradle`; RN autolinking handles Gradle wiring
-- The `.xcframework` (~50 MB) is checked in via **Git LFS**; `.so` similarly. Alternative: postinstall hook downloads from a CDN.
-
-#### Testing strategy
-
-- **Rust:** `cargo test` + a `proptest` round-trip prove→verify against existing benchmark fixtures.
-- **FFI boundary:** a `cargo test --features ffi-smoke` that invokes the UniFFI-generated foreign code via a small Swift / Kotlin test runner (mopro does exactly this).
-- **TypeScript:** Jest against a mock native module + Detox e2e on iOS sim (arm64) + Android emulator (arm64) running a tiny k = 10 circuit (~30 s) so CI stays sane.
-- **Real hardware:** extend the existing S24 bench harness to also load the npm package from an empty RN Expo app and prove the same fixture; gate releases on a perf-regression budget (e.g. ±10 % vs. the Dioxus baseline).
-
-### §13.4 Effort estimate (single engineer familiar with the stack)
-
-| Option | Time to first working `prove()` from JS on both platforms     | Notes                                                                                          |
+| Option | Time to first working `prove()` from JS on both platforms | Notes |
 |---|---|---|
-| **A (recommended)** | **4–6 person-weeks**                                | 1 PW Rust wrapper + UniFFI annotations; 1 PW iOS xcframework + autolinking; 1 PW Android cargo-ndk + Gradle; 1 PW TS API + cancellation + progress; 1 PW SRS streaming + Caches dir contract; 1 PW polish + CI + example app. |
-| B (HTTP) | 6–9 PW + **disqualified on iOS**                           | Android-only ForegroundService is 2 PW extra; iOS would still need A as fallback. |
-| C (hybrid) | 7–10 PW                                                  | Strictly worse than A given iOS reduces it to A anyway.                                       |
+| A (UniFFI same-process everywhere) | **4–6 PW** | The easy path; ships the Android OOM-isolation risk |
+| **B (hybrid — recommended)** | **6–9 PW**                                          | A + 2–3 PW for the Android `:proverProcess` Service shell (AIDL + SharedMemory + lifecycle plumbing) |
+| D (hand-written bridges everywhere) | **10–14 PW**                                       | Strictly more LOC than B without giving anything B doesn't, on either platform |
 
-#### Gating items to a first usable version (A)
+### §13.9 Risks and unknowns (post-research)
 
-1. **UniFFI compatibility with our halo2 fork** — needs validation. mopro uses upstream halo2 + custom forks via macros, so probably OK, but unknown until tested. Risk: 2–3 days investigation.
-2. **Cooperative cancellation in our halo2 fork** — currently absent; needs phase-boundary `Arc<AtomicBool>` checks.
-3. **SRS first-run download UX** is the host app's responsibility, but we should ship a reference component to avoid each consumer re-implementing it.
-4. **Apple binary review:** BLS12-381 + halo2 trigger no export-control flags (already verified for the Dioxus app).
+**Known risks that the research nailed down:**
 
-### §13.5 Risks and unknowns
+- **iOS jetsam at ~3 GiB.** Confirmed. The 4.4 GiB k = 20
+  peak *will* OOM-kill on pre-iPhone-15-Pro hardware. **Not
+  solvable by switching to "Option B"** — Apple's kernel
+  forbids the helper process. Mitigation is ahead-of-time:
+  streaming SRS (yet to design), reducing default k, or
+  declaring iPhone 15 Pro as the floor.
+- **UniFFI breaking-change cadence.** Confirmed across the
+  changelog. Pin the version, treat upgrades as scheduled
+  quarterly work.
+- **UniFFI buffer copies for `Vec<u8>` across JSI.**
+  Confirmed by PR #187 status. Mitigation: keep the SRS
+  entirely Rust-side; only witness (KB) and proof (~KB)
+  bytes cross the FFI boundary; SharedMemory carries the
+  proof on Android.
 
-- **iOS jetsam at ~3 GiB.** Our 4.4 GiB peak heap at k = 20 on
-  Android *will* OOM-kill the app on most iPhones — only
-  iPhone 15 Pro and newer have 8 GB RAM; pre-15 caps at 6 GB
-  with ~3 GiB per-app jetsam. **This is the single biggest
-  unknown.** Needs a real-device test before we promise k = 20
-  on iOS. If it doesn't fit: either reduce k, stream the SRS
-  more aggressively, or accept "iPhone 15 Pro and newer" as
-  floor. Not solvable by switching from A to B (same physical
-  RAM in the same process).
-- **UniFFI async + long-running blocking work.** `uniffi-
-  bindgen-react-native` documents same-thread JSI calls; the
-  Rust side must explicitly hand off to a worker thread.
-  Pattern is well-trodden but the recent deadlock fix history
-  (PRs #88, #158) suggests pinning a known-good version and
-  writing a stress test for `prove + concurrent progress
-  callback`.
-- **Progress callback granularity.** halo2's proving loop
-  doesn't natively emit phase events; we'd be patching
-  `midnight-proofs` to surface them. Acceptable, but a fork-
-  maintenance burden.
-- **SRS distribution.** 600 MB CDN download on first run is a
-  UX cliff. Aztec's "ship only the chunk you need" trick
-  (< 50 MB) only works for Honk-style provers with linear SRS
-  access; KZG-halo2 needs the full degree-2^k SRS in memory.
-  Unproven whether we can chunk-mmap-on-demand without a
-  prohibitive perf cost.
-- **Cooperative cancellation overhead.** Polling `AtomicBool`
-  inside FFT inner loops costs ~1–3 %. Acceptable.
-- **UniFFI version stability.** `uniffi-bindgen-react-native`
-  is at v0.x. Production users exist (Matrix, Bitwarden) but
-  breaking changes are still possible. Pin and vendor.
+**Unknowns that still need a real-device experiment:**
 
-### §13.6 Recommendation summary
+- **iOS k = 20 viability on iPhone 15 Pro.** Theoretical
+  budget says it fits (8 GB RAM, ~5 GiB per-app jetsam).
+  Untested.
+- **Android Service cold-start cost.** Estimated 50–100 ms
+  but device-dependent; measure once the bindings exist.
+- **UniFFI deadlock recurrence under our specific async
+  pattern.** Mitigation is to *not* use UniFFI's cross-FFI
+  async futures (call synchronous Rust on a background
+  thread, surface the result via Coroutine/Promise on the
+  platform layer). PRs #88 + #158 are the litmus test we'd
+  want a stress harness for before promising production
+  use.
 
-**Ship Option A (UniFFI Turbo Module) as
-`@midnight-ntwrk/react-native-prover`.** 4–6 person-weeks to
-first usable version on both platforms. iOS RAM is the
-biggest open question; everything else has clear analogues
-in mopro / Zashi / iden3 to crib from.
+### §13.10 Why not Option D (hand-written everything)
 
-If a future product surface requires k = 20+ proving on
-iPhones older than 15 Pro, the answer is **delegate to a
-remote prover** (existing `proof-server-http` shape, §4.2) —
-not architect a different on-device packaging.
+Hand-written JNI + Swift bridges everywhere give us:
 
-### §13.7 Primary references
+- Zero-copy buffer passing on both platforms (vs UniFFI's
+  Uint8Array copy)
+- No UniFFI version-upgrade tax
+- Full control over the async / thread model
 
-- [zkmopro/mopro](https://github.com/zkmopro/mopro) + [zkmopro/mopro-react-native-package](https://github.com/zkmopro/mopro-react-native-package) + [mopro React Native SDK docs](https://zkmopro.org/docs/sdk/react-native/)
-- [iden3/react-native-rapidsnark](https://github.com/iden3/react-native-rapidsnark) + [iden3/rapidsnark](https://github.com/iden3/rapidsnark)
-- [Mozilla/uniffi-rs](https://github.com/mozilla/uniffi-rs) + [jhugman/uniffi-bindgen-react-native](https://github.com/jhugman/uniffi-bindgen-react-native) + [Mozilla Hacks: UniFFI for React Native](https://hacks.mozilla.org/2024/12/introducing-uniffi-for-react-native-rust-powered-turbo-modules/)
-- [eigerco/uniffi-zcash-lib](https://github.com/eigerco/uniffi-zcash-lib) (Zashi pattern reference)
-- [Aztec: Client-side Proof Generation](https://aztec.network/blog/client-side-proof-generation) + [madztheo/noir-react-native-starter](https://github.com/madztheo/noir-react-native-starter)
-- [Apple Developer Forums: iOS background execution limits](https://developer.apple.com/forums/thread/685525) + [Apple docs: Extending background execution time](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
-- [Apple: 4 GB IPA limit](https://appleinsider.com/articles/15/02/12/apple-increases-size-limit-of-app-store-downloads-to-4gb)
+But cost us:
+
+- **Thousands of LOC** of platform-glue duplicating logic
+  that mopro and Bitwarden have already shaken out.
+- **Two FFI surfaces** (Swift / Kotlin) that drift over time
+  unless heavily disciplined.
+- **No corresponding capability gain** — the OOM-isolation
+  win on Android comes from the Service / process model,
+  *not* from the bindings choice. UniFFI inside an Android
+  Service gets the same isolation as hand-written code
+  inside the same Service.
+
+Where we *should* hand-write code is exactly where UniFFI is
+weak: **JSI buffer ingestion**. A small dedicated JSI C++
+module on each platform handles the no-copy `ArrayBuffer`
+constructor path for any bulk-byte API. UniFFI handles the
+control plane (`prove`, `verify`, `cancel`, callbacks).
+
+### §13.11 Primary references
+
+- **iOS process model:**
+  [Apple Developer Forums – fork/posix_spawn (Quinn)](https://developer.apple.com/forums/thread/747499),
+  [App Extension Programming Guide](https://developer.apple.com/library/archive/documentation/General/Conceptual/ExtensibilityPG/ExtensionOverview.html),
+  [NSXPCConnection docs](https://developer.apple.com/documentation/foundation/nsxpcconnection),
+  [WKProcessPool](https://developer.apple.com/documentation/webkit/wkprocesspool),
+  [BGContinuedProcessingTask](https://developer.apple.com/documentation/backgroundtasks/bgcontinuedprocessingtask) +
+  [WWDC25 session 227](https://developer.apple.com/videos/play/wwdc2025/227/)
+- **Android multi-process:**
+  [`<service>` manifest element](https://developer.android.com/guide/topics/manifest/service-element),
+  [lmkd docs](https://source.android.com/docs/core/perf/lmkd),
+  [TransactionTooLargeException](https://developer.android.com/reference/android/os/TransactionTooLargeException) +
+  [issuetracker 36999615](https://issuetracker.google.com/issues/36999615),
+  [SharedMemory / Ashmem](https://hujinhan.medium.com/implementing-ashmem-to-share-data-between-processes-4f707e0bfc7b),
+  [Xamarin: out-of-process services](https://learn.microsoft.com/en-us/xamarin/android/app-fundamentals/services/out-of-process-services)
+- **UniFFI ecosystem:**
+  [Mozilla/uniffi-rs](https://github.com/mozilla/uniffi-rs),
+  [UniFFI Upgrading](https://mozilla.github.io/uniffi-rs/next/Upgrading.html),
+  [UniFFI CHANGELOG](https://github.com/mozilla/uniffi-rs/blob/main/CHANGELOG.md),
+  [jhugman/uniffi-bindgen-react-native](https://github.com/jhugman/uniffi-bindgen-react-native),
+  [PR #88](https://github.com/jhugman/uniffi-bindgen-react-native/pull/88) +
+  [PR #158](https://github.com/jhugman/uniffi-bindgen-react-native/pull/158) +
+  [PR #187](https://github.com/jhugman/uniffi-bindgen-react-native/pull/187),
+  [Hermes #564 no-copy ArrayBuffer](https://github.com/facebook/hermes/issues/564)
+- **Production ZK-on-mobile precedents:**
+  [zkmopro/mopro](https://github.com/zkmopro/mopro) (UniFFI-based, production),
+  [iden3/react-native-rapidsnark](https://github.com/iden3/react-native-rapidsnark) (hand-written, production),
+  [librustzcash / zcash-android-wallet-sdk JNI](https://zcash.readthedocs.io/en/latest/android/zcash-android-wallet-sdk/cash.z.wallet.sdk.jni/) +
+  [ZcashLightClientKit](https://github.com/Electric-Coin-Company/zcash-swift-wallet-sdk) (hand-written, production),
+  [Bitwarden SDK Architecture](https://contributing.bitwarden.com/architecture/sdk/) (UniFFI, production)
