@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -13,7 +13,7 @@ type UnshieldedTokenType = {
 };
 ```
 
-Unshielded token type (or color), as a hex-encoded 35-byte string
+Unshielded token type (or color), as a hex-encoded 32-byte string
 
 ## Properties
 

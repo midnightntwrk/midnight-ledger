@@ -11,8 +11,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod proof_tests {
+    use super::common::{TestParams, TestResolver};
     use group::Group;
     use midnight_curves::JubjubSubgroup;
     use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
@@ -20,57 +24,18 @@ mod proof_tests {
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
-    use serialize::{Deserializable, Serializable, tagged_serialize};
+    use serialize::{Deserializable, Serializable};
     use std::borrow::Cow;
     use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::BufReader;
     use transient_crypto::curve::EmbeddedGroupAffine;
     use transient_crypto::hash::transient_hash;
     use transient_crypto::proofs::Proof;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::{
-        KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
-        ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
+        KeyLocation, PARAMS_VERIFIER, ProofPreimage, VerifierKey, Zkir,
     };
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
-
-    struct TestResolver {
-        pk: ProverKey,
-        vk: VerifierKey,
-        ir: IrSource,
-    }
-
-    impl Resolver for TestResolver {
-        async fn resolve_key(
-            &self,
-            _key: KeyLocation,
-        ) -> std::io::Result<Option<ProvingKeyMaterial>> {
-            let mut pk = Vec::new();
-            tagged_serialize(&self.pk, &mut pk)?;
-            let mut vk = Vec::new();
-            tagged_serialize(&self.vk, &mut vk)?;
-            let mut ir = Vec::new();
-            tagged_serialize(&self.ir, &mut ir)?;
-            Ok(Some(ProvingKeyMaterial {
-                prover_key: pk,
-                verifier_key: vk,
-                ir_source: ir,
-            }))
-        }
-    }
-
-    struct TestParams;
-
-    impl ParamsProverProvider for TestParams {
-        async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-            const DIR: &str = env!("MIDNIGHT_PP");
-            ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_midnight_2p{k}"
-            ))?))
-        }
-    }
 
     #[actix_rt::test]
     async fn test_extension_attack() {
@@ -79,6 +44,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -118,6 +84,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -176,6 +143,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%p_0" }
@@ -230,6 +198,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
@@ -280,6 +249,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] },
@@ -331,6 +301,7 @@ mod proof_tests {
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
               { "name": "%s1", "type": "Scalar<Jubjub>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%s0"], "output": "%s0d" },
@@ -395,6 +366,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
@@ -453,6 +425,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -482,6 +455,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
@@ -527,6 +501,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
@@ -573,6 +548,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
@@ -619,6 +595,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
@@ -664,6 +641,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
@@ -704,6 +682,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
@@ -748,6 +727,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" },
               { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -803,6 +784,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" }
            ],
+           "outputs": [
+           ],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
@@ -853,6 +836,8 @@ mod proof_tests {
            "inputs": [
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -905,6 +890,8 @@ mod proof_tests {
               { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%p1", "type": "Point<Jubjub>" },
               { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
            ],
            "do_communications_commitment": false,
            "instructions": [
@@ -960,6 +947,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "v_0" }
@@ -991,6 +979,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
@@ -1014,6 +1003,7 @@ mod proof_tests {
            "inputs": [
               { "name": "foo", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "foo" }
