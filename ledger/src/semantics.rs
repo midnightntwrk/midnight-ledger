@@ -1514,6 +1514,15 @@ impl<D: DB> LedgerState<D> {
                         if res.contract.contains_key(&addr) {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
+                        let metadata_size = crate::verify::contract_metadata_size(&deploy.initial_state);
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if metadata_size > limit {
+                            return Err(TransactionInvalid::ContractMetadataTooLarge {
+                                address: addr,
+                                size: metadata_size,
+                                limit,
+                            });
+                        }
                         res.contract = res.contract.insert(addr, deploy.initial_state.clone());
                         events.push(Event {
                             source: event_source.clone(),
@@ -1578,7 +1587,7 @@ impl<D: DB> LedgerState<D> {
                             }
                         }
                         let metadata_size = crate::verify::contract_metadata_size(&cstate);
-                        let limit = self.parameters.max_contract_metadata_size;
+                        let limit = self.parameters.limits.max_contract_metadata_size;
                         if metadata_size > limit {
                             return Err(TransactionInvalid::ContractMetadataTooLarge {
                                 address: addr,

@@ -104,7 +104,6 @@ pub trait StateReference<D: DB> {
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher>;
-    fn ledger_state(&self) -> &LedgerState<D>;
 }
 
 fn get_op<D: DB>(
@@ -222,9 +221,6 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     }
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.state_hash()
-    }
-    fn ledger_state(&self) -> &LedgerState<D> {
-        self
     }
 }
 
@@ -377,9 +373,6 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     }
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.new_state.state_hash()
-    }
-    fn ledger_state(&self) -> &LedgerState<D> {
-        &self.new_state
     }
 }
 
@@ -1775,11 +1768,11 @@ impl<D: DB> ContractDeploy<D> {
         }
         ref_state.param_check(false, |params| {
             let size = contract_metadata_size(&self.initial_state);
-            if size > params.max_contract_metadata_size {
+            if size > params.limits.max_contract_metadata_size {
                 return Err(MalformedTransaction::MalformedContractDeploy(
                     MalformedContractDeploy::MetadataTooLarge {
                         size,
-                        limit: params.max_contract_metadata_size,
+                        limit: params.limits.max_contract_metadata_size,
                     },
                 ));
             }

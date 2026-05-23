@@ -1170,7 +1170,7 @@ pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCost
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable)]
 #[cfg_attr(feature = "fixed-point-custom-serde", derive(Serialize, Deserialize))]
-#[tag = "transaction-limits[v2]"]
+#[tag = "transaction-limits[v3]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
     pub time_to_dismiss_per_byte: CostDuration,
@@ -1184,6 +1184,8 @@ pub struct TransactionLimits {
         serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
     )]
     pub block_withdrawal_minimum_multiple: FixedPoint,
+    // A hard limit on the size of associated contract metadata.
+    pub max_contract_metadata_size: u64,
 }
 tag_enforcement_test!(TransactionLimits);
 
@@ -1199,6 +1201,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
         bytes_churned: 1_000_000,
     },
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
+    max_contract_metadata_size: 10 * 1024 * 1024,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
@@ -1206,7 +1209,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v6]"]
+#[tag = "ledger-parameters[v7]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1232,8 +1235,6 @@ pub struct LedgerParameters {
     pub c_to_m_bridge_min_amount: u128,
     // The minimum value for `fee_prices.overall_price`.
     pub min_block_price: FixedPoint,
-    // A hard limit on the size of associated contract metadata.
-    pub max_contract_metadata_size: u64,
 }
 tag_enforcement_test!(LedgerParameters);
 
@@ -1295,7 +1296,6 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
     price_adjustment_a_parameter: FixedPoint::from_u64_div(100, 1),
     c_to_m_bridge_min_amount: 1000,
     min_block_price: FixedPoint::from_u64_div(10, 1),
-    max_contract_metadata_size: 10 * 1024 * 1024,
 };
 
 #[derive(Storable)]
