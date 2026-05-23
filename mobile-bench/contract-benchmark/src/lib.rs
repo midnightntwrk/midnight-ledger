@@ -64,8 +64,11 @@ use zkir::IrSource;
 #[cfg(not(target_arch = "wasm32"))]
 use zswap::{ZSWAP_EXPECTED_FILES, prove::ZswapResolver};
 
-/// Inclusive upper bound on `k`. Spec asked for 1..=20.
-pub const MAX_K: u32 = 20;
+/// Inclusive upper bound on `k`. Originally 20; raised to 21 to
+/// characterise the failure mode beyond the disk-spill unlock
+/// (advice_cosets remain heap-resident — see §10.8 / §11 in the
+/// architecture doc).
+pub const MAX_K: u32 = 21;
 /// Inclusive lower bound on `k`. `k = 1` corresponds to the minimal
 /// "assert(input == 1)" circuit — the smallest possible zkir program.
 pub const MIN_K: u32 = 1;
@@ -131,6 +134,7 @@ pub const HASHES_FOR_K: [u32; (MAX_K + 1) as usize] = [
     6_242,  // k=18
     12_484, // k=19 (extrapolated by doubling; verified at runtime)
     24_967, // k=20 (extrapolated; verified at runtime)
+    49_935, // k=21 (extrapolated by doubling; verified at runtime)
 ];
 
 #[derive(Debug, thiserror::Error)]

@@ -2693,7 +2693,172 @@ has enough room, unset `MIDNIGHT_SPILL_COSETS=1` (the wallet
 will fall back to the in-heap path and OOM-or-not behaviour
 will match the pre-spill table in §9).
 
-### §10.8 PR map
+### §10.8 Prebuilt PK on disk — the cold-launch unlock (proposed)
+
+Status: design proposal; not yet implemented. Sketched here
+because it is the natural extrapolation of the §10 stack and
+the next unlock the data points at.
+
+#### The problem
+
+After all §10 patches, **keygen at k = 20 still costs ~1 m 16 s
+on every wallet cold-launch.** The `PK_CACHE` warm-cache lives
+in process memory, so once the user closes the app and
+relaunches, the cache is empty and the first prove pays the
+full keygen cost again.
+
+The 1 m 16 s breaks down (from the §10.3 trace):
+
+| Sub-phase                          | k = 20 wall | What it does                              |
+|------------------------------------|------------:|-------------------------------------------|
+| `assembly_built`                   | 0.5 s       | parse circuit IR → cell assignments       |
+| `synthesise.end`                   | 0.5 s       | populate fixed-column cells               |
+| `batch_invert_rational.end`        | 0.9 s       | invert rational denominators              |
+| `selectors_to_fixed.end`           | 0.1 s       | merge selector columns into fixed         |
+| `fixed_polys.end`                  | 1.9 s       | inverse-FFT each fixed column to coeff form |
+| `permutation_pk.end`               | 1.3 s       | compute σ-permutation polynomials         |
+| `lagrange_polys.end`               | 3.1 s       | compute `l0`, `l_last`, `l_active_row`    |
+| `evaluator.end`                    | 0.0 s       | metadata only                             |
+| total                              | ~8 s        | (the rest is dominated by tagged_serialise + MidnightPK::read, which we already short-circuit via warm_pk_cache) |
+
+The actual heavy keygen work is **~8 s of CPU**; the
+remaining ~68 s is the bytes-API round-trip inside
+`ChainResolver::resolve_key` (gzip-compress the PK to ~270 MB
+bytes, then `PK_CACHE` lookup populates the deserialised side
+without re-running keygen).
+
+#### The proposal
+
+**Persist the keygen output to a per-circuit, per-`k`,
+per-halo2-version file on disk in mmap-friendly layout.** On
+subsequent wallet launches, mmap the file, verify SHA, skip
+keygen entirely.
+
+Layout sketch:
+
+```
+$MIDNIGHT_PK_CACHE_DIR/
+└── pk-<circuit_hash>-<k>-<midnight_proofs_version>/
+    ├── manifest.json         # metadata: SHA256 of each blob,
+    │                         #           halo2 version, IR hash
+    ├── fixed_values.bin      # raw [F; n*ncols] — mmap-as-slice
+    ├── fixed_polys.bin       # raw [F; n*ncols] — mmap-as-slice
+    ├── permutation_polys.bin # raw [F; n*nperm] — mmap-as-slice
+    ├── l0.bin / l_last.bin / l_active_row.bin
+    ├── vk.bin                # the small verifying key (gzipped is fine)
+    └── ev.json               # Evaluator structural metadata
+```
+
+The same `BasesStorage<F>` pattern that already powers the
+mmap'd SRS (§10.2 item #8) extends to these vectors:
+`Polynomial<F>.values` becomes either `Owned(Vec<F>)` (the
+keygen output path) or `Mapped { mmap, ptr, len }` (the
+mmap-from-disk path). The prover never knows which it has —
+both expose `&[F]` via deref.
+
+#### Sized projection
+
+For each circuit, persistent disk footprint:
+
+| k    | fixed_values + fixed_polys | perm.polys | l-polys | total per circuit |
+|-----:|---------------------------:|-----------:|--------:|------------------:|
+| 12   | 25 MiB                     | 11 MiB     | 1.5 MiB | ~38 MiB           |
+| 14   | 100 MiB                    | 44 MiB     | 6 MiB   | ~150 MiB          |
+| 17   | 800 MiB                    | 352 MiB    | 50 MiB  | ~1.2 GiB          |
+| 18   | 1.6 GiB                    | 704 MiB    | 100 MiB | ~2.4 GiB          |
+| 20   | 6.4 GiB                    | 2.8 GiB    | 400 MiB | ~9.6 GiB          |
+
+The extended-NTT cosets are **intentionally not persisted** —
+they remain lazy/disk-spilled per the §10 stack. They are
+short-lived per-prove transient anyway; persisting them
+would inflate the artifact 4× without functional benefit.
+
+#### Performance projection
+
+| Stage                                          | Current (post-§10) | With prebuilt PK |
+|------------------------------------------------|-------------------:|-----------------:|
+| First-prove keygen at k = 20 (cold launch)     | 76 s               | ~3–5 s (mmap setup + SHA verify) |
+| Subsequent proves same session (warm PK_CACHE) | ~0                 | ~0 (in-mem cache still wins)     |
+| Across wallet restart                          | full 76 s again    | ~5 s             |
+| First-prove keygen at k = 12 (cold launch)     | ~0.4 s             | ~0.05 s (already fast)           |
+| First-prove keygen at k = 17 (cold launch)     | ~10.7 s            | ~1.5 s            |
+
+The wallet's actual workload (DID circuits at k ≈ 12) gets a
+modest win (~350 ms saved per cold launch). The k = 17–20
+power-user path gets a huge win (76 s → 5 s, a **15× speedup
+on cold-launch first-prove**).
+
+#### Tradeoffs
+
+| Pro                                                              | Con                                                                  |
+|------------------------------------------------------------------|----------------------------------------------------------------------|
+| First-prove cold-launch latency drops 15× at high k              | Per-circuit artifact size: up to ~9.6 GiB at k = 20                  |
+| Same architecture pattern as the mmap'd SRS — proven shape       | Wallet has to manage a cache directory + eviction policy             |
+| Artifacts can be CDN-distributed (downloaded on first run)       | One blob per circuit × per k × per halo2-version → versioning matrix |
+| OS evicts cold artifact pages under memory pressure              | Cache invalidation: any halo2 fork bump invalidates every PK file    |
+| Works the same on Android, iOS, desktop — no platform-specific   | SHA verification is non-negligible (~3 GiB hash at k = 20 = ~1.5 s)  |
+
+#### Where the artifacts come from
+
+Two production options:
+
+1. **Pre-built artifacts shipped via CDN.** Upstream Midnight
+   provides per-circuit-per-k artifacts at e.g.
+   `pk.midnight.network/<circuit_hash>-<k>-<halo2_ver>.tar.zst`.
+   The wallet downloads on first need; same as SRS today.
+   **UX:** ~10 GiB cumulative for typical DID + zswap circuit
+   set at production-sized k, downloaded on demand. Probably
+   2-3 GiB after the wallet curates "which circuits do my
+   contracts use" — comparable to large iOS games.
+
+2. **Locally generated artifacts cached after first compute.**
+   First prove for a new circuit/k pair runs full keygen,
+   then writes the result to disk; subsequent proves mmap.
+   **UX:** no upfront download, but the first-ever prove
+   pays the full keygen cost. Best UX trade-off for the
+   wallet's actual workload (DID circuits computed once,
+   reused thousands of times).
+
+The pragmatic answer is **option 2** — the wallet generates
+its own cache the first time each circuit is touched, then
+mmaps thereafter. Option 1 becomes interesting if/when the
+wallet ships with a fixed set of circuit IDs that everyone
+will need (e.g. the canonical zswap shielded-transfer circuit).
+
+#### Estimated effort
+
+- ~3–5 days for the disk-cached-PK layer (analogous to the
+  existing `BasesStorage<F>` for the SRS — same pattern, more
+  fields).
+- ~1 day for the wallet-side cache directory management
+  (eviction policy, total-size cap, write-on-first-compute
+  hook).
+- ~1 day for CDN-distribution shape (if we pursue option 1).
+- Total: ~5–7 working days for option 2 alone; ~7–10 if we
+  also ship the CDN path.
+
+#### Why not yet
+
+This sits outside the §10 PR chain because:
+
+1. **It is not a memory-peak unlock** — `PK_CACHE` already
+   handles the in-session case. This optimisation is purely
+   a *wall-time* win on cold launch.
+2. **The architectural pattern is identical to mmap'd SRS**,
+   so the design risk is minimal — but the implementation
+   surface (`BasesStorage<F>` applied to every `Polynomial`
+   field in `ProvingKey`) is bigger than any single §10
+   patch.
+3. **It's a wallet-side concern more than a prover-fork
+   concern.** The midnight-zk fork needs the `BasesStorage<F>`
+   plumbing extended, but the cache directory + lifecycle
+   logic lives in the wallet (or in `transient-crypto`'s
+   PK_CACHE neighbour).
+
+Tracked as the next major optimisation; will land in a
+follow-up PR pair after §10 is reviewed.
+
+### §10.9 PR map
 
 Both PRs are inside the personal workspace `yshyn-iohk/*`; no
 upstream `midnightntwrk/*` repos were touched.
