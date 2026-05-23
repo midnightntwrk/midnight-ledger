@@ -310,6 +310,22 @@ pub extern "C" fn main() -> i32 {
     unsafe {
         std::env::set_var("MIDNIGHT_PP", pp);
     }
+    // Enable disk-backed coset spill by default on Android. At k>=19
+    // the extended-domain `fixed_cosets` + `permutation.cosets`
+    // collections push peak heap above the per-app budget; spilling
+    // to a tempfile inside the app's private cache (same partition
+    // as MIDNIGHT_PP, ~93 GiB on an S24) lets the OS evict cold
+    // mmap pages under pressure. The spill files are auto-deleted
+    // on drop. See midnight-proofs::plonk::prover::spill_cosets_to_disk
+    // for the architectural rationale.
+    let spill_dir = format!("/data/data/{APP_ID}/cache/midnight-cosets");
+    if std::fs::create_dir_all(&spill_dir).is_ok() {
+        // SAFETY: same single-threaded process-start window as above.
+        unsafe {
+            std::env::set_var("MIDNIGHT_SPILL_COSETS", "1");
+            std::env::set_var("MIDNIGHT_SPILL_DIR", &spill_dir);
+        }
+    }
     // Raise the per-process address-space ceiling so the proving
     // stack's mmap calls for k >= 19 can land. Android's
     // ActivityManager applies a tighter `RLIMIT_AS` than the
