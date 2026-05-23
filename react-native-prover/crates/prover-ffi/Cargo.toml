@@ -1,11 +1,12 @@
 [package]
 name = "midnight-prover-ffi"
 version = "0.1.0"
-# Pin to 2021 because the UniFFI 0.28 scaffolding generator emits
-# `#[no_mangle]` (not `#[unsafe(no_mangle)]`) which is a hard error
-# under 2024. Bumping to 2024 requires UniFFI ≥ 0.29 — bump the
-# FFI dep alongside the edition when that lands upstream.
-edition = "2021"
+# Pinned to 2021 originally because UniFFI 0.28 emitted bare
+# `#[no_mangle]` (a hard error under 2024). Bumped to 2024
+# now that UniFFI 0.31 wraps the macro in the required
+# `#[unsafe(no_mangle)]` form. Match the rest of the
+# mobile-bench workspace.
+edition = "2024"
 license = "Apache-2.0"
 publish = false
 description = "UniFFI Rust↔(Swift/Kotlin) bindings around the Midnight contract-benchmark prover. Consumed by the @midnight-ntwrk/react-native-prover npm package via uniffi-bindgen-react-native."
@@ -25,10 +26,12 @@ name = "midnight_prover_ffi"
 # identically to the wallet's local prover.
 contract-benchmark = { path = "../../../mobile-bench/contract-benchmark" }
 
-# UniFFI scaffolding (proc-macro + runtime). Pinned to a known-
-# good 0.28 release; bump in lockstep with
-# `uniffi-bindgen-react-native` peer version.
-uniffi = { version = "0.28", features = ["build", "tokio"] }
+# UniFFI scaffolding (proc-macro + runtime). Bumped to 0.31 to
+# match `uniffi-bindgen-react-native` 0.31's expected runtime
+# ABI. The bindgen tool encodes a UniFFI runtime version into
+# its scaffolding output; mismatched versions = `extern fn`
+# signature errors at link time.
+uniffi = { version = "0.31", features = ["build", "tokio"] }
 
 # Async runtime — uniffi's async support hands off blocking
 # work to a tokio executor. `rt-multi-thread` so the prove
@@ -46,4 +49,4 @@ tracing = "0.1"
 thiserror = "1"
 
 [build-dependencies]
-uniffi = { version = "0.28", features = ["build"] }
+uniffi = { version = "0.31", features = ["build"] }

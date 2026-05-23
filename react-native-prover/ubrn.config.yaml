@@ -1,0 +1,38 @@
+# Configuration for uniffi-bindgen-react-native (`ubrn`).
+#
+# Tells the bindgen where to find the Rust crate it should
+# generate Swift / Kotlin / TS bindings for. The `manifestPath`
+# is relative to the directory holding THIS config file
+# (i.e. `react-native-prover/`).
+
+rust:
+  directory: crates/prover-ffi
+  manifestPath: Cargo.toml
+
+# Codegen output directories. Empty = use ubrn's defaults.
+# Default layout (paraphrased from the ubrn source):
+#   bindings/         — generated TS shims
+#   ios/              — generated Swift sources + xcframework
+#   android/          — generated Kotlin sources + jniLibs/
+bindings:
+  cpp: cpp/generated
+  ts: src/generated
+
+ios:
+  # Swift sources land under ios/Sources/, included by the
+  # MidnightProver.podspec via `s.source_files = "ios/Sources/**"`.
+  swiftSources: ios/Sources
+  # xcframework output path — referenced by the podspec.
+  frameworkName: MidnightProver
+  xcframeworkOutput: ios/MidnightProver.xcframework
+
+android:
+  # Kotlin output goes into the Gradle module's java source dir
+  # (Kotlin sources can live in `java/` directories — the
+  # kotlin-android plugin picks them up).
+  kotlinSources: android/src/main/java
+  jniLibs: android/src/main/jniLibs
+
+# Project-level metadata used in some codegen comments.
+project:
+  name: react-native-prover

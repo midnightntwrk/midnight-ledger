@@ -181,8 +181,10 @@ function renderCells(row: BenchRow): {
       return { h: "—", keygen: "—", prove: "—", verify: "—", proof: "—" };
     case "ok": {
       const r = row.outcome.result;
+      // Generated bindings use `?: bigint` (undefined when absent),
+      // not `bigint | null`. Check for undefined explicitly.
       const verify =
-        r.verifyMs === null
+        r.verifyMs === undefined
           ? "skipped"
           : `${formatMs(r.verifyMs)} ${r.verified ? "✓" : "✗"}`;
       // `keygenMs === 0n` happens when the prover hit the KEY_CACHE

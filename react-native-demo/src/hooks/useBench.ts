@@ -8,7 +8,7 @@
  */
 
 import { useCallback, useReducer, useRef } from "react";
-import { prove, isProverError } from "@midnight-ntwrk/react-native-prover";
+import { proveAsync, isProverError } from "@midnight-ntwrk/react-native-prover";
 
 import {
   MAX_K,
@@ -69,7 +69,7 @@ export function useBench(initialMaxK: number = 14) {
     const startedAtMs = Date.now();
     dispatch({ type: "start", k, startedAtMs });
     try {
-      const result = await prove(k, {
+      const result = await proveAsync(k, {
         // The default seed (0x42) is fine for the bench tab —
         // the goal is reproducible timings, not nonce uniqueness.
         seed: 0,

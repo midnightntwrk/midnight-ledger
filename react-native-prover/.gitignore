@@ -1,0 +1,32 @@
+# Node
+node_modules/
+*.tsbuildinfo
+
+# Rust target dir is at workspace root, not here, but if any local
+# `cargo build` against the FFI crate drops a per-crate target dir
+# (e.g. for editor LSPs), ignore it.
+crates/prover-ffi/target/
+
+# Heavy binary artefacts produced by `uniffi-bindgen-react-native
+# build {ios,android}`. These are rebuilt on every CI run from the
+# Rust sources; tracking them would bloat the repo for nothing.
+#
+# iOS xcframework slices are typically ~70 MB each; Android .so
+# files are 12-17 MB per ABI × 4 ABIs = ~60 MB. We track the path
+# placeholders + a .gitkeep so the directory shape is preserved.
+ios/MidnightProver.xcframework/
+android/src/main/jniLibs/*/libmidnight_prover_ffi.so
+
+# Generated TS + C++ bindings — produced by
+# `uniffi-bindgen-react-native generate jsi {bindings,turbo-module}`
+# at build time. Reproducible from the UDL + Rust sources; tracking
+# them invites stale-binding bugs.
+src/generated/
+cpp/generated/
+
+# UniFFI scaffolding output cargo writes alongside its target dir.
+**/uniffi-bindgen-react-native-*
+
+# Misc
+.DS_Store
+*.log
