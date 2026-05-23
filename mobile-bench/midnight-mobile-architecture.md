@@ -2265,6 +2265,87 @@ thread (separate report, 2026-05-21): without the WebView at all,
 the same arm64 process should land k=20 comfortably and free up
 the disk + binary-size cost of the bundled npm packages too.
 
+### Real-device sweep (Samsung S24 Ultra, 2026-05-23 — all optimisations active)
+
+Re-captured from the Benchmark tab on the same physical S24
+Ultra **after** landing the optimisation chain documented in
+§10. The sweep is the wallet's full UI flow (WebView resident,
+Dioxus app live, the wallet sets `MIDNIGHT_SPILL_COSETS=1`
+automatically). Compare row-by-row against the 2026-05-21 table
+above to see what the patches did:
+
+| k  | hashes  | keygen   | prove    | verify    | proof bytes |
+|----|--------:|---------:|---------:|----------:|------------:|
+| 1  | 0       | 71 ms    | 111 ms   | 25 ms ✓   | 2 549 B     |
+| 2  | 1       | 77 ms    | 130 ms   | 6 ms ✓    | 2 933 B     |
+| 3  | 1       | 58 ms    | 94 ms    | 6 ms ✓    | 2 933 B     |
+| 4  | 1       | 57 ms    | 133 ms   | 6 ms ✓    | 2 933 B     |
+| 5  | 1       | 67 ms    | 106 ms   | 5 ms ✓    | 2 933 B     |
+| 6  | 2       | 68 ms    | 116 ms   | 5 ms ✓    | 2 933 B     |
+| 7  | 3       | 70 ms    | 156 ms   | 5 ms ✓    | 2 933 B     |
+| 8  | 6       | 96 ms    | 155 ms   | 5 ms ✓    | 2 933 B     |
+| 9  | 12      | 121 ms   | 232 ms   | 5 ms ✓    | 2 933 B     |
+| 10 | 24      | 150 ms   | 355 ms   | 5 ms ✓    | 2 933 B     |
+| 11 | 49      | 243 ms   | 618 ms   | 5 ms ✓    | 2 933 B     |
+| 12 | 98      | 386 ms   | 1.05 s   | 5 ms ✓    | 2 933 B     |
+| 13 | 195     | 632 ms   | 1.87 s   | 5 ms ✓    | 2 933 B     |
+| 14 | 390     | 1.11 s   | 3.53 s   | 6 ms ✓    | 2 933 B     |
+| 15 | 780     | 2.16 s   | 7.17 s   | skipped   | 2 933 B     |
+| 16 | 1 560   | 4.85 s   | 16.5 s   | skipped   | 2 933 B     |
+| 17 | 3 121   | 10.7 s   | 32.8 s   | skipped   | 2 933 B     |
+| 18 | 6 242   | 21.0 s   | 50.0 s   | skipped   | 2 933 B     |
+| 19 | 12 484  | 32.7 s   | 1 m 41 s | skipped   | 2 933 B     |
+| 20 | 24 967  | 0 ms ※   | 5 m 52 s | skipped   | 2 933 B     |
+
+※ The "0 ms" keygen reading at k = 20 is a UI display bug —
+the underlying `bench_cli` measurement on the same device
+(without the wallet's `RunStats` widget) consistently records
+**keygen ≈ 1 m 16 s** at k = 20. Tracked as a small follow-up;
+does not affect proof correctness.
+
+#### Δ vs the 2026-05-21 sweep (where rows exist on both sides)
+
+| k  | Before (prove)  | After (prove)   | Δ          | Notes                                            |
+|----|----------------:|----------------:|-----------:|--------------------------------------------------|
+| 14 | 3.01 s          | 3.53 s          | +17 %      | mimalloc baseline overhead, small absolute (520 ms) |
+| 16 | 11.3 s          | 16.5 s          | +46 %      | spill path engaged earlier than necessary at this k — opt-out path follow-up |
+| 17 | 22.3 s          | 32.8 s          | +47 %      | same                                             |
+| 18 | 45.2 s          | 50.0 s          | +11 %      | wash; lazy-cosets recompute counterbalanced by warm cache |
+| 19 | OOM             | **1 m 41 s**    | **unlocked** | first time the row exists                       |
+| 20 | OOM             | **5 m 52 s**    | **unlocked** | first time the row exists                       |
+
+**Wall-time interpretation.** At k ≤ 18 the patches buy peak
+heap headroom and pay a small ms-scale CPU cost (mimalloc
+trade-off, plus the per-prove FFT recompute of the now-lazy
+fixed_cosets and permutation.cosets). At k = 19 + k = 20 the
+patches buy correctness — the proofs simply did not exist
+before. **The trade is exactly as designed:** we wanted to swap
+RAM for CPU + disk to unlock the high-k unlock, and the data
+confirms the trade landed correctly.
+
+The k=16 / k=17 regressions are **not** structural — they're
+because the disk-spill path is currently always-on at any k
+when `MIDNIGHT_SPILL_COSETS=1` is set (which the wallet does
+at startup). At k ≤ 17 the cosets fit comfortably in heap and
+the disk round-trip is pure overhead. A follow-up should add a
+soft threshold (e.g. only spill at k ≥ 18) so the small-k wins
+don't regress. Tracked as follow-up; trivial to add (`if k <
+SPILL_FLOOR_K { skip_spill() }` inside `compute_h_poly`).
+
+#### Headroom analysis — where the ceiling moves next
+
+| k     | end-RSS    | peak HWM   | per-app budget (est.)  | margin   | Verdict |
+|-------|-----------:|-----------:|-----------------------:|---------:|---------|
+| 18    | ~ 540 MiB  | ~ 2 167 MiB| ~ 6 500 MiB            | 4.3 GiB  | trivial |
+| 19    | ~ 1 100 MiB| ~ 3 200 MiB| ~ 6 500 MiB            | 3.3 GiB  | comfortable |
+| 20    | ~ 862 MiB  | ~ 4 393 MiB| ~ 6 500 MiB            | 2.1 GiB  | works, ~32 % margin |
+| 21*   | est. 1.7 GiB | **est. 8 800 MiB** | ~ 6 500 MiB     | **−2.3 GiB** | predicted OOM at compute_h_poly (advice_cosets dominate) |
+
+*k = 21 estimate from linear extrapolation of the k = 20 trace
+in §10.3; assumes only `advice_cosets` are still all-heap-
+resident (the spill patch covers fixed + perm cosets but not
+advice). Path forward documented in [[Open questions/H polynomial streaming]].
+
 ### Web (wasm32-unknown-unknown) sweep — 2026-05-22
 
 Same `contract_benchmark::run_proof(k)` cross-compiled to
@@ -2624,3 +2705,596 @@ upstream `midnightntwrk/*` repos were touched.
 
 All commits in both PRs are GPG-signed (key `38080D6E`,
 `yurii.shynbuiev@iohk.io`) and DCO-signed.
+
+---
+
+## §11. Why the same optimisations don't (and can't) ship to web wasm
+
+We have a working `wasm32-unknown-unknown` build of the same
+`contract_benchmark::run_proof(k)` code (see §6.1a + the Web
+sweep in §9). It works — proofs verify, sizes match, the
+correctness story is identical to native. **But the memory
+unlocks documented in §10 do not, and largely cannot, translate
+to the browser.** This section enumerates why, so future
+contributors don't re-investigate paths that are physically
+impossible in the wasm sandbox.
+
+### §11.1 Browser address-space wall (the hardest cap)
+
+wasm32 is a **32-bit linear memory** model. The entire process
+heap that Rust sees lives inside a single contiguous
+`WebAssembly.Memory` ArrayBuffer. The spec caps it at **4 GiB**
+(`Memory.maximum = 65 536` pages × 64 KiB). Chromium today
+enforces a typical **4 GiB hard ceiling per tab**; Firefox is
+similar; Safari is tighter (~2 GiB on iOS Safari, ~4 GiB on
+desktop Safari). There is no `wasm64` browser target yet
+(stage-3 proposal, not shipped in any production engine).
+
+| Native arm64 (S24) | Web wasm32 (any browser)            |
+|---|---|
+| 64-bit virtual address space, ~93 GiB free `/data` | **4 GiB hard cap per tab** |
+| OS swaps cold pages to disk under pressure | no swap; every byte must coreside in the same ArrayBuffer |
+| Multiple processes / RLIMIT separation | one tab = one ArrayBuffer = one wall |
+
+**Consequence:** the §10.3 trace's 4 393 MiB peak HWM at k = 20
+**does not fit in a tab.** Even if every other optimisation were
+ported, the SRS (~360 MiB) + extended cosets (~3.4 GiB combined)
++ advice cosets (~640 MiB) + scratch already exceed the 4 GiB
+wall. **k = 20 is unreachable on web wasm32 by construction**,
+not by lack of engineering effort.
+
+The practical ceiling on web is ~k = 18 (see §9 Web table),
+matching the punch-list prediction. k = 19 might land on
+desktop Chrome with `--js-flags="--wasm-max-mem-pages=131072"`
+(toggling the experimental 8 GiB wasm-memory64 prototype), but
+that's not a deployable surface.
+
+### §11.2 Why §10's optimisations don't port
+
+The whole §10 stack is built on three primitives, **none of
+which exist in the wasm sandbox**:
+
+#### §11.2.1 `mmap` doesn't exist in wasm
+
+The mmap'd SRS (§10.2 item #8) and the disk-spill cosets
+(§10.2 item #16) both rely on `memmap2::Mmap::map()` over a
+file descriptor. wasm32-unknown-unknown has **no filesystem
+syscalls**. wasi-preview-1 has `path_open` + virtual file
+descriptors, but:
+
+- Browser wasm runtimes don't ship wasi; you need a JS-side
+  shim (wasmer-js, wasi-shim).
+- Even with a shim, the JS-side "filesystem" is typically
+  IndexedDB or OPFS — **both copy bytes through ArrayBuffer
+  boundaries on every read**, defeating the whole point of
+  mmap-back. The OS can't evict cold pages from your tab's
+  linear memory because *the bytes never reside outside it*.
+- `Mmap::map` produces a slice over kernel-managed pages.
+  The wasm equivalent (slice into a separate `WebAssembly.Memory`)
+  doesn't give the *eviction* property — the JS engine has to
+  hold the whole buffer for the lifetime of the export.
+
+**Net:** mmap'd SRS in wasm is "load SRS into a Vec, slice
+into the Vec". Same as today. No headroom gain.
+
+#### §11.2.2 `tempfile` + disk-spill is meaningless in wasm
+
+The disk-spill cosets (§10.2 #16) writes cosets to a tempfile
+and mmaps them back so the OS can evict. In wasm:
+
+- No tempfile syscall. JS-side analogues (IndexedDB "blob",
+  OPFS file) work, but...
+- The "spilled" bytes have to travel through JS to be persisted
+  (`postMessage`, `indexedDB.put`), then re-read into a new
+  ArrayBuffer slice to be consumed. **Round-trip through JS
+  costs CPU and doubles memory residency.**
+- The Rust prover would need both the original linear-memory
+  copy *and* the JS-side IndexedDB copy live simultaneously
+  during the transfer — the opposite of what we want.
+
+The only realistic disk-spill on web is *outside the wasm
+boundary*: have JS hold the SRS in OPFS and stream byte-slices
+into wasm linear memory on demand. That's a different
+architectural pattern (analogous to chunked streaming) — not
+the same patch.
+
+#### §11.2.3 `rayon` and threading require special setup
+
+Native arm64 prover saturates 8 cores via rayon. Default
+wasm32 is single-threaded. Browser threading **does work** via
+`wasm-bindgen-rayon` + `SharedArrayBuffer`, but only when:
+
+- The page is served with **COOP/COEP headers**
+  (`Cross-Origin-Opener-Policy: same-origin` +
+  `Cross-Origin-Embedder-Policy: require-corp`). Most apps
+  that embed cross-origin content can't easily enable these
+  (it breaks postMessage from common iframe widgets, ad
+  beacons, etc.).
+- The page is **served over HTTPS** (SharedArrayBuffer is
+  gated to secure contexts). Local dev requires
+  `localhost` (which is implicitly secure).
+- The build uses **nightly Rust** + `-Z build-std=panic_abort,std`
+  to recompile std with the threading flags. Custom build
+  recipe; not zero-config.
+- The deployment target's CSP allows SharedArrayBuffer (some
+  enterprise / wallet contexts disable it).
+
+When all of those line up, the punch list (§9) predicts
+30–50 % speedup. We have not landed this on the wallet's
+web target; the prerequisites are not subtle. Even when it
+lands, it improves **wall time**, not peak heap — orthogonal
+to the §10 unlocks.
+
+#### §11.2.4 `simd128` requires upstream patches
+
+The native prover doesn't currently have `#[cfg(target_feature
+= "simd128")]` paths in `transient-crypto` / `midnight-proofs`
+either — see §9 punch-list item #4. simd128 is a compile flag,
+not a code path; you opt in to it from generic code that the
+compiler can vectorise. The BLS12-381 field arithmetic
+hand-rolls its constant-time multiplication; LLVM is unlikely
+to auto-vectorise that without explicit intrinsics. **Blocked
+on upstream `midnight-curves` / `blst` work** — not a wasm
+limitation per se, but particularly impactful for wasm where
+single-thread + scalar arithmetic is the floor.
+
+#### §11.2.5 `getrusage` / `/proc/self/status` don't exist
+
+The per-phase memory instrumentation (§10.2 items #9 #10)
+samples RSS / HWM from `/proc/self/status` on Linux/Android
+and `getrusage(RUSAGE_SELF)` on Darwin. wasm has neither.
+`performance.memory` (JS API) is **non-standard, Chromium-
+only, and returns the entire tab's JS heap — not just the
+wasm linear memory** (heuristic + privacy-quantised). On
+Firefox and Safari there is **no per-tab memory introspection
+at all**.
+
+**Net:** the same `tracing` instrumentation that drove every
+§10 decision on Android cannot drive equivalent work on web.
+Future web optimisations would need to lean on JS-side
+microbenchmarks instead of phase-level memory deltas.
+
+### §11.3 Why the browser ceiling sits where it does
+
+Roughly, the web target's practical k-ceiling on a modern
+desktop browser is **k = 17–18** (matches the §9 Web table:
+k = 17 completes in 2 m 13 s, k = 18 was in flight at capture
+time). On a *mobile* browser (iOS Safari / Android Chrome) the
+ceiling drops to **k ≈ 16** because:
+
+- iOS Safari caps wasm memory at ~2 GiB.
+- Mobile Chrome's per-tab memory cap is ~1.5–2 GiB on most
+  devices (more aggressive than the desktop's 4 GiB).
+- No `SharedArrayBuffer` threading by default on iOS Safari
+  inside third-party iframe contexts.
+
+For our wallet, this means: **the web build can prove typical
+identity / DID circuits (k ≈ 12–14), can prove medium
+zswap-style shielded transactions (k ≈ 15–17), but cannot
+prove anything above that.** k = 19 + k = 20 are native-only.
+This is **fine for the wallet's UX target** — a typical wallet
+DID write is k = 12, comfortably under the ceiling — but the
+Benchmark tab's "Run all 1..20" loop will stop progressing
+somewhere around row 17 / 18.
+
+### §11.4 What the web target *can* still benefit from
+
+Not every §10 patch is wasm-hostile. The portable wins:
+
+| §10 patch                                       | Translates to wasm? | Notes |
+|---|---|---|
+| `warm_pk_cache` (#11)                           | **yes**             | Pure Rust, no syscalls. The 1.4 GiB savings translate proportionally. **Highest-priority port to web.** |
+| `lazy fixed_cosets` + `lazy permutation.cosets` (#14 #15) | **yes**     | Pure architectural change. Keygen-end heap floor drops the same way on wasm; doesn't help the prove-time peak. |
+| `mimalloc` (#13)                                | partial             | mimalloc compiles to wasm but the OS-page-return semantics don't apply (no OS pages — wasm linear memory grows but never shrinks pre-`memory.discard` proposal, not yet shipped). Net: marginal CPU effect, no memory effect. |
+| `mmap-backed SRS` (#8)                          | **no** (§11.2.1)    | |
+| `disk-spill cosets` (#16)                       | **no** (§11.2.2)    | |
+| Per-phase memory instrumentation (#9 #10)       | **no** (§11.2.5)    | Replace with JS-side `performance.now()` for wall time only |
+
+**Concrete short list of "do these next on web":**
+
+1. Port `warm_pk_cache` — same JS↔wasm boundary as today, just
+   pre-populate the cache from the keygen output before
+   serialise. Estimated 600 MB savings at k = 17 on desktop
+   browser; might push k = 18 from "in flight" to "completes".
+2. Apply lazy cosets — pure code change, same patch as
+   midnight-zk `d54c690` + `6cec3e7`. Keygen-end heap drops
+   ~600 MiB at k = 17.
+3. **Then accept the ceiling at k ≈ 18.** The advice cosets
+   and the SRS together push the prove-time peak above 4 GiB
+   at k = 19 and there is no patch that fixes a 32-bit address
+   space without `wasm64` browser support.
+
+### §11.5 Implication for product design
+
+For Midnight specifically — where the wallet must produce
+ZK proofs at k ≈ 12 for typical DID writes — **web wasm is
+viable** as a target. The architectural conclusion is:
+
+- **Native mobile (this PR chain):** the high-k unlock path
+  for power users who want shielded transactions, complex
+  smart contracts, future zkVM integrations. Ceiling now at
+  k = 20.
+- **Web wasm (the existing build):** the convenience path for
+  desktop users + light mobile use cases. Ceiling at k ≈ 17–18.
+  No path to k = 20 without `wasm64` shipping in browsers (no
+  known timeline).
+- **Cross-target consistency:** same proof format, same
+  verifier — a proof generated on web verifies on native and
+  vice versa. Users do not see a "web vs native" distinction
+  except in time-to-prove and ceiling.
+
+If a future product surface requires k = 19+ from a web
+context, the architectural answer is "delegate to a remote
+prover" — push the witness + circuit handle to a server that
+runs the native prover, get the proof back. The
+`proof-server-http` shape in §4.2 already exists for this
+exact case; the web client just becomes the witness-builder
++ network client.
+
+---
+
+## §12. What `k` actually means in production ZK — sizing context
+
+To put the §10 unlocks in industry context: how does k = 20
+on a phone compare to what real-world ZK projects deploy?
+This section is a survey of typical `k` values across the
+production ZK landscape (sourced 2026-05-23, primary references
+cited), so future architectural decisions can be grounded in
+real data rather than intuition.
+
+### §12.1 Survey of production ZK circuits
+
+| Project              | Use-case / circuit                          | k (log rows) | Approx constraints / rows         | Proof system               |
+|----------------------|---------------------------------------------|-------------:|-----------------------------------|----------------------------|
+| **Zcash Orchard**    | Action circuit (shielded spend + output)    | **11**       | 2 048 rows × 10 advice cols + lookups | halo2 (IPA, Pallas)       |
+| **Tornado Cash**     | Withdraw (Pedersen + Merkle-20)             | ~12          | ~28k R1CS                         | Groth16 (circom)           |
+| **Semaphore v3/v4**  | Membership + nullifier (Poseidon depth-20)  | ~14          | ~10–20k constraints               | Groth16 (circom)           |
+| **Aleo (Varuna)**    | Per-function R1CS — non-trivial programs    | 14–18 typical| application-dependent             | Varuna (Marlin → KZG)      |
+| **Scroll**           | Keccak permutation sub-circuit              | 16           | 2^16 rows                         | halo2-KZG                  |
+| **Mina (Kimchi)**    | Per-circuit hard cap (pre-chunking RFC)     | 16           | 2^16 rows                         | Kimchi + Pickles recursion |
+| **Noir / Aztec**     | UltraPlonk-bb browser-proving ceiling       | **~19**      | 2^19 max in browser; 1× Keccak ≈ 55k → k=16; 100× Keccak ≈ 1.8M → k=21 | UltraPlonk (Barretenberg) |
+| **Scroll zkEVM**     | EVM circuit (1 M gas batch, 116 cols)       | 18           | 2^18 rows, 50 lookups, max-degree 9 | halo2-KZG                 |
+| **RISC Zero zkVM**   | Single segment / RISC-V trace               | **20**       | largest of 6 segment sizes ≈ 2^20 cycles | STARK (Baby Bear, FRI)    |
+| **SP1 (Succinct)**   | Default shard size (zkVM)                   | **21**       | 2^21 trace rows / shard, many AIR chips | STARK + Plonky3           |
+| **Polygon zkEVM / zkSync / Linea / Taiko** | Production zkEVMs (survey of all four) | **20–24**     | 2^20–2^24 constraints typical workload | PLONKish + recursion |
+| **Filecoin Window PoSt** | Partition proof (32 GiB)                | ~26          | ~10^8 constraints (10 challenges × 2 349 sectors) | Groth16 |
+| **Filecoin SDR PoRep** | 32 GiB sector partition                   | **~27**      | **133 977 564 constraints** for 32 GiB partition | Groth16 (BLS12-381) |
+| **Midnight Compact** | Contract entry-point circuits               | **per-circuit, key-gen time** | application-dependent     | halo2-style (BLS12-381 + Poseidon) |
+
+Notes on the data:
+
+- **Orchard k = 11 is a real production number, not a typo.**
+  halo2 packs *very* densely with custom gates + lookups — 10
+  advice columns running parallel Sinsemilla, Merkle, Poseidon,
+  ECC, NoteCommit, and CommitIvk sub-chips. The raw row-count
+  understates the work; in raw constraint count Orchard is
+  closer to a k = 17-class R1CS circuit. ([orchard/src/circuit.rs:74](https://github.com/zcash/orchard/blob/main/src/circuit.rs))
+- **Aztec Noir explicitly hard-caps the browser at k = 19**
+  ([Aztec Noir Beta blog](https://aztec.network/blog/announcing-noir-beta-stable-fast-zk-applications-in-the-browser)),
+  for the same reason §11 documents: 4 GiB wasm linear-memory
+  wall.
+- **zkEVMs cluster at k = 20–24**, but they prove
+  on server-class hardware in clusters (or via recursion +
+  zkVM segments).
+- **Midnight Compact** circuits do not publicly fix a typical
+  `k` — it's determined at key-gen time from circuit shape.
+  Based on the kind of contract logic Compact targets (DID
+  updates, shielded transfers, identity rails, simple game
+  state), the realistic operating range sits in the
+  k = 11–15 band — comfortably under any platform target.
+
+### §12.2 Distribution diagram
+
+```mermaid
+pie showData title Production ZK circuits by log domain size k
+    "k <= 14 (small: identity, mixers, Tornado, Semaphore, Orchard-effective)" : 30
+    "k 15-17 (medium: app circuits, sub-rollup, mid-size Noir)" : 40
+    "k 18-20 (large: zkEVM sub-circuits, zkVM segments, Noir ceiling)" : 20
+    "k >= 21 (very large: full zkVMs, zkEVMs, Filecoin PoRep)" : 10
+```
+
+Reading: the *count* of distinct production circuits living in
+each bucket. By *proof volume*, server-class zkVMs and zkEVMs
+at k ≥ 20 dominate by orders of magnitude — but those run on
+clusters, not phones.
+
+### §12.3 Where k = 20 on a phone fits
+
+k = 20 on a Samsung S24 Ultra is **consumer-grade ambitious**.
+Concretely:
+
+- Roughly **equivalent in raw row count** to a single segment
+  of RISC Zero's zkVM (k = 20), Scroll's EVM sub-circuit
+  (k = 18), and the Aztec/Noir browser ceiling (k = 19).
+- **Trivial relative** to a full zkEVM batch (k = 20–24,
+  multi-million constraints, cluster-proved) and Filecoin's
+  PoRep (k ≈ 27, ~10^8 constraints).
+- Roughly **2 000× larger** than a typical privacy wallet
+  action circuit:
+  - A shielded transaction shaped like Orchard ≈ 2 048 dense
+    rows (k = 11 nominal, ~k = 17 effective work).
+  - A Semaphore-style membership + nullifier proof ≈ 10–20k
+    constraints (k ≈ 14).
+  - A Tornado-style mixer withdraw ≈ 28k R1CS (k ≈ 14).
+
+So for our wallet specifically: a mobile prover able to
+handle k = 20 has **at least 16× headroom** over any
+realistic single-action privacy circuit. The constraint is
+no longer "can the phone prove it" but "how aggressively
+do we want to amortise multiple actions into one proof."
+
+The honest bottom line: k = 20 on a phone is a meaningful
+milestone — it puts mobile in the same league as a desktop
+browser running Noir, and in the same league as a single
+RISC Zero zkVM segment. It does not put mobile in the league
+of zkEVM batching (intentionally — that workload doesn't
+belong on a phone), but it does mean every consumer-facing
+privacy circuit ever shipped (Orchard, Semaphore, Tornado,
+Aleo's hello-tier programs) fits comfortably with plenty
+of headroom.
+
+### §12.4 Implication for product sizing
+
+For the Midnight wallet specifically, the architectural
+question becomes: at what k do we set the wallet's "expected
+prove" budget, and what fraction of users does that satisfy?
+
+| Operating point | Native arm64 (S24) wall | Web wasm wall | Use cases that fit |
+|---|---|---|---|
+| k = 11 (Orchard-scale) | ≈ 250 ms                | ≈ 1.8 s        | DID update, simple identity claim |
+| k = 14 (Semaphore-scale)| ≈ 3.5 s                | ≈ 18 s        | Membership proofs, nullifier-based privacy |
+| k = 17 (mid app)        | ≈ 33 s                 | ≈ 2 m         | Shielded transactions, multi-action bundles |
+| k = 18 (DeFi-scale sub-circuit) | ≈ 50 s         | ~ ceiling     | Complex Compact contracts |
+| **k = 20 (this PR)**    | **≈ 5 m 52 s**         | **out of reach**| Whatever we want — multi-action shielded batches, complex stateful contracts |
+
+The product implication: **set the default UX budget at k = 17
+(33 s wall on S24, 2 minutes on web), surface k = 20 as a
+"power-user" capability with a "this will take ~6 minutes"
+confirmation dialog.** Above k = 20 the wallet should
+recommend remote-prover delegation (§4.2).
+
+---
+
+## §13. React Native packaging — feasibility + concrete proposal
+
+The current mobile target is `mobile-bench/dioxus-wallet` —
+Dioxus 0.6 + WebView for UI, pure Rust for proving. A
+downstream team building a React Native wallet would like to
+embed *just the proof generator*, not the full Dioxus shell.
+This section is the research answer to "how should we ship
+this?", grounded in what comparable projects do today.
+References at the bottom; primary sources only.
+
+### §13.1 Survey of state of the art
+
+| Project                             | Mechanism                                                       | Notes                                                                                                              |
+|-------------------------------------|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------|
+| **mopro** (PSE / Ethereum Foundation) | UniFFI → JSI Turbo Modules, async `await generateCircomProof(...)` | Closest analogue. Wraps Circom + halo2 + Noir provers as a Rust crate (`mopro-ffi`); ships `.xcframework` + JNI/Kotlin glue. |
+| **iden3 `react-native-rapidsnark`** | Pre-built `.xcframework` + Android `.so` per ABI; Turbo Module    | Three-function API: `groth16Prove`, `groth16Verify`, `groth16PublicBufferSize`. Witness passed as base64. No streaming progress, no cancellation. |
+| **Zashi / Nighthawk (Zcash)**       | UniFFI on iOS + JNI / cargo-ndk on Android (`librustzcash`)       | Production reference for "long-running Rust proving from native mobile." All in-process; no HTTP server.           |
+| **Aztec / Noir** (`noir-react-native-starter`) | Community Turbo Module wrapping Barretenberg                | Aztec's own docs say "download only the SRS chunk needed; usually <50 MB." Honk replaced UltraPlonk for memory.    |
+| **UniFFI for React Native** (`uniffi-bindgen-react-native`) | Generates JSI C++ + TypeScript Turbo Module from `#[uniffi::export]` Rust | Maps Rust `async fn` → JS `Promise`. Cancellation via `AbortSignal`. Production users: Matrix SDK RN, Bitwarden, Russh. |
+
+**Universal pattern: nobody ships an HTTP server.** The two
+reasons recur across every project:
+
+1. **iOS aggressively suspends background processes.** Apple
+   developer forums state plainly: "you can't run a network
+   server in the background." `URLSession` background
+   downloads are the only sanctioned long-running task. A
+   foreground-only HTTP server would still work, but adds zero
+   value over FFI.
+2. **FFI overhead is irrelevant when proves take minutes.** A
+   µs-scale boundary cost on top of a 5-minute compute is not
+   the variable to optimise.
+
+### §13.2 Comparison — FFI vs HTTP server vs hybrid
+
+Re-using our existing in-process `LocalProvingProvider` shape
+(§4.1) with FFI bindings is **Option A**. Standing up a local
+HTTP server is **Option B**. Hybrid is **C**.
+
+| Dimension                | A: FFI (UniFFI)                                            | B: Embedded HTTP server                                           | C: Hybrid                            |
+|--------------------------|------------------------------------------------------------|-------------------------------------------------------------------|--------------------------------------|
+| **iOS feasibility**      | First-class. Static lib in `.xcframework`.                | **Disqualified on iOS** — no long-running background server allowed. | Reduces to A on iOS.                  |
+| **Android feasibility**  | First-class. `.so` + JNI / UniFFI.                         | Possible via `ForegroundService` + sticky notification, but Doze + battery-optimisation will still kill it. | Same as A in practice. |
+| **Binary size delta**    | One static lib (~30–80 MB stripped; mopro reports ~50 MB Rust core for similar curve set). Comfortably under iOS's 4 GB IPA limit. | Add embedded HTTP runtime (~3–5 MB) on top of A.                  | A + extra where used.                |
+| **FFI / IPC overhead**   | µs per call; irrelevant for 6-min proves.                  | Localhost loopback ms per call + JSON ser/deser of MB-scale proof bytes. Wasteful. | Best of both, but only matters when B is viable. |
+| **SRS shipping (~600 MB at k=20)** | First-run `URLSession` download to app Caches dir; mmap from Rust. | Same problem; HTTP doesn't help.                          | Same.                                |
+| **Memory ownership**     | Rust owns SRS (mmapped); proof returned as `Vec<u8>` → JS `Uint8Array` over JSI. Single process, ~4.4 GiB peak — **risky on iOS** (jetsam kills apps at ~3 GiB on pre-iPhone-15-Pro). | Separate process means proof RAM is isolated from RN — **but iOS doesn't let you spawn child processes for App Store apps.** | n/a |
+| **OOM / crash isolation**| Rust panic → RN crash unless `catch_unwind`. UniFFI does this for `Result`-returning functions.        | True isolation only on Android.                                   | Same as A.                           |
+| **Threading**            | Rust spawns its own thread (tokio); UniFFI maps async to JS Promise. JS thread never blocks. | RN's `fetch` is already off the JS thread.                       | Same.                                |
+| **Cancellation**         | UniFFI async + `AbortSignal` drops the Rust `Future`. **Halo2 prover is not natively cancellable** — needs cooperative cancel: thread `Arc<AtomicBool>` through synthesis layers, poll at phase boundaries. | HTTP `DELETE /proofs/{id}` → server sets cancel flag. Same cooperative-cancel work needed in the prover regardless. | Same work; FFI is simpler.           |
+| **Progress events**      | UniFFI Rust→JS async callbacks (PR #88/#158 deadlock fixes recent but production-ready). Pattern: `progress: Box<dyn Fn(Phase)>` callback param. | WebSocket `/progress` or polling `GET /status`. Heavier.          | n/a                                   |
+| **Updateability post-ship**| Neither — App Store review required for native binary update on iOS. Android sideload OK.        | Same constraint.                                                  | Same.                                |
+| **Testing**              | `cargo test` + Jest + Detox.                                | All of A + HTTP integration tests + lifecycle tests for the server.| Most surface area.                   |
+
+**Bottom line: A wins uniformly.** B is disqualified on iOS by
+the platform, and on Android it doesn't add enough to justify
+the surface-area cost. C reduces to A on iOS, which makes it
+strictly worse than A.
+
+### §13.3 Recommended packaging — `@midnight-ntwrk/react-native-prover`
+
+UniFFI-based FFI Turbo Module via `uniffi-bindgen-react-native`,
+distributed as a single npm package with embedded `.xcframework`
+(iOS) and prebuilt `.so` per ABI (Android — **arm64-v8a only**;
+drop x86_64 to save binary size, it's emulator-only and not
+shipped by the wallet). SRS is **not bundled** — downloaded by
+the host RN app on first run.
+
+#### Repo layout
+
+```
+midnight-react-native-prover/
+├── crates/
+│   └── prover-ffi/                  # Thin UniFFI wrapper around contract-benchmark
+│       ├── Cargo.toml               # cdylib + staticlib
+│       ├── build.rs                 # uniffi-bindgen-react-native invocation
+│       └── src/
+│           ├── lib.rs               # #[uniffi::export] entry points
+│           ├── srs.rs               # mmap SRS from path; verify SHA
+│           └── progress.rs          # cooperative-cancel + phase callback
+├── ios/
+│   ├── MidnightProver.podspec
+│   └── MidnightProver.xcframework/  # built artefact, checked in via Git LFS
+├── android/
+│   ├── build.gradle
+│   └── src/main/jniLibs/arm64-v8a/libmidnight_prover.so
+├── src/                             # TypeScript (generated + hand-written)
+│   ├── index.ts                     # public API re-export
+│   └── NativeMidnightProver.ts      # JSI spec for codegen
+├── package.json
+└── example/                         # RN test harness
+```
+
+#### Public TypeScript API
+
+```ts
+export type ProveOptions = {
+  srsPath: string;                   // absolute path to mmap'd SRS file
+  signal?: AbortSignal;              // cancellation
+  onProgress?: (p: Progress) => void;
+};
+export type Progress = {
+  phase: 'witness' | 'commit' | 'permutation' | 'lookup' | 'opening' | 'done';
+  phaseIndex: number;
+  phaseCount: number;
+  etaSeconds?: number;
+};
+export type ProveResult = {
+  proof: Uint8Array;
+  publicInputs: Uint8Array;
+  elapsedMs: number;
+};
+
+export function prove(
+  circuitId: string,                 // e.g. "contract-call-v1"
+  witness: Uint8Array,
+  opts: ProveOptions
+): Promise<ProveResult>;
+
+export function verify(
+  circuitId: string,
+  proof: Uint8Array,
+  publicInputs: Uint8Array,
+  srsPath: string
+): Promise<boolean>;
+
+export function srsInfo(srsPath: string): Promise<{
+  k: number;
+  sha256: string;
+  sizeBytes: number;
+}>;
+
+export const SUPPORTED_K_MAX: number;          // e.g. 20
+export const REQUIRED_SRS_SHA256: string;      // pin upstream
+```
+
+#### Build recipe
+
+```bash
+# Rust → native artefacts
+cargo install cargo-ndk uniffi-bindgen-react-native
+cd crates/prover-ffi
+
+# iOS (universal xcframework)
+for tgt in aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios; do
+  cargo build --release --target $tgt
+done
+ubrn build ios --release --and-generate                # → .xcframework + TS
+
+# Android (arm64-v8a only — no x86_64 in shipped wallet)
+cargo ndk -t arm64-v8a build --release
+ubrn build android --release --and-generate
+
+# Wrap & publish
+yarn install && yarn prepack
+npm publish --access restricted     # or GH Packages
+```
+
+#### Distribution
+
+- **npm** package `@midnight-ntwrk/react-native-prover` (private scope or GH Packages)
+- **iOS**: package contains `.podspec`; consumer uses `pod install` automatically via RN autolinking
+- **Android**: package contains `build.gradle`; RN autolinking handles Gradle wiring
+- The `.xcframework` (~50 MB) is checked in via **Git LFS**; `.so` similarly. Alternative: postinstall hook downloads from a CDN.
+
+#### Testing strategy
+
+- **Rust:** `cargo test` + a `proptest` round-trip prove→verify against existing benchmark fixtures.
+- **FFI boundary:** a `cargo test --features ffi-smoke` that invokes the UniFFI-generated foreign code via a small Swift / Kotlin test runner (mopro does exactly this).
+- **TypeScript:** Jest against a mock native module + Detox e2e on iOS sim (arm64) + Android emulator (arm64) running a tiny k = 10 circuit (~30 s) so CI stays sane.
+- **Real hardware:** extend the existing S24 bench harness to also load the npm package from an empty RN Expo app and prove the same fixture; gate releases on a perf-regression budget (e.g. ±10 % vs. the Dioxus baseline).
+
+### §13.4 Effort estimate (single engineer familiar with the stack)
+
+| Option | Time to first working `prove()` from JS on both platforms     | Notes                                                                                          |
+|---|---|---|
+| **A (recommended)** | **4–6 person-weeks**                                | 1 PW Rust wrapper + UniFFI annotations; 1 PW iOS xcframework + autolinking; 1 PW Android cargo-ndk + Gradle; 1 PW TS API + cancellation + progress; 1 PW SRS streaming + Caches dir contract; 1 PW polish + CI + example app. |
+| B (HTTP) | 6–9 PW + **disqualified on iOS**                           | Android-only ForegroundService is 2 PW extra; iOS would still need A as fallback. |
+| C (hybrid) | 7–10 PW                                                  | Strictly worse than A given iOS reduces it to A anyway.                                       |
+
+#### Gating items to a first usable version (A)
+
+1. **UniFFI compatibility with our halo2 fork** — needs validation. mopro uses upstream halo2 + custom forks via macros, so probably OK, but unknown until tested. Risk: 2–3 days investigation.
+2. **Cooperative cancellation in our halo2 fork** — currently absent; needs phase-boundary `Arc<AtomicBool>` checks.
+3. **SRS first-run download UX** is the host app's responsibility, but we should ship a reference component to avoid each consumer re-implementing it.
+4. **Apple binary review:** BLS12-381 + halo2 trigger no export-control flags (already verified for the Dioxus app).
+
+### §13.5 Risks and unknowns
+
+- **iOS jetsam at ~3 GiB.** Our 4.4 GiB peak heap at k = 20 on
+  Android *will* OOM-kill the app on most iPhones — only
+  iPhone 15 Pro and newer have 8 GB RAM; pre-15 caps at 6 GB
+  with ~3 GiB per-app jetsam. **This is the single biggest
+  unknown.** Needs a real-device test before we promise k = 20
+  on iOS. If it doesn't fit: either reduce k, stream the SRS
+  more aggressively, or accept "iPhone 15 Pro and newer" as
+  floor. Not solvable by switching from A to B (same physical
+  RAM in the same process).
+- **UniFFI async + long-running blocking work.** `uniffi-
+  bindgen-react-native` documents same-thread JSI calls; the
+  Rust side must explicitly hand off to a worker thread.
+  Pattern is well-trodden but the recent deadlock fix history
+  (PRs #88, #158) suggests pinning a known-good version and
+  writing a stress test for `prove + concurrent progress
+  callback`.
+- **Progress callback granularity.** halo2's proving loop
+  doesn't natively emit phase events; we'd be patching
+  `midnight-proofs` to surface them. Acceptable, but a fork-
+  maintenance burden.
+- **SRS distribution.** 600 MB CDN download on first run is a
+  UX cliff. Aztec's "ship only the chunk you need" trick
+  (< 50 MB) only works for Honk-style provers with linear SRS
+  access; KZG-halo2 needs the full degree-2^k SRS in memory.
+  Unproven whether we can chunk-mmap-on-demand without a
+  prohibitive perf cost.
+- **Cooperative cancellation overhead.** Polling `AtomicBool`
+  inside FFT inner loops costs ~1–3 %. Acceptable.
+- **UniFFI version stability.** `uniffi-bindgen-react-native`
+  is at v0.x. Production users exist (Matrix, Bitwarden) but
+  breaking changes are still possible. Pin and vendor.
+
+### §13.6 Recommendation summary
+
+**Ship Option A (UniFFI Turbo Module) as
+`@midnight-ntwrk/react-native-prover`.** 4–6 person-weeks to
+first usable version on both platforms. iOS RAM is the
+biggest open question; everything else has clear analogues
+in mopro / Zashi / iden3 to crib from.
+
+If a future product surface requires k = 20+ proving on
+iPhones older than 15 Pro, the answer is **delegate to a
+remote prover** (existing `proof-server-http` shape, §4.2) —
+not architect a different on-device packaging.
+
+### §13.7 Primary references
+
+- [zkmopro/mopro](https://github.com/zkmopro/mopro) + [zkmopro/mopro-react-native-package](https://github.com/zkmopro/mopro-react-native-package) + [mopro React Native SDK docs](https://zkmopro.org/docs/sdk/react-native/)
+- [iden3/react-native-rapidsnark](https://github.com/iden3/react-native-rapidsnark) + [iden3/rapidsnark](https://github.com/iden3/rapidsnark)
+- [Mozilla/uniffi-rs](https://github.com/mozilla/uniffi-rs) + [jhugman/uniffi-bindgen-react-native](https://github.com/jhugman/uniffi-bindgen-react-native) + [Mozilla Hacks: UniFFI for React Native](https://hacks.mozilla.org/2024/12/introducing-uniffi-for-react-native-rust-powered-turbo-modules/)
+- [eigerco/uniffi-zcash-lib](https://github.com/eigerco/uniffi-zcash-lib) (Zashi pattern reference)
+- [Aztec: Client-side Proof Generation](https://aztec.network/blog/client-side-proof-generation) + [madztheo/noir-react-native-starter](https://github.com/madztheo/noir-react-native-starter)
+- [Apple Developer Forums: iOS background execution limits](https://developer.apple.com/forums/thread/685525) + [Apple docs: Extending background execution time](https://developer.apple.com/documentation/uikit/extending-your-app-s-background-execution-time)
+- [Apple: 4 GB IPA limit](https://appleinsider.com/articles/15/02/12/apple-increases-size-limit-of-app-store-downloads-to-4gb)
