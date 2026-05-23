@@ -5530,9 +5530,19 @@ fn render_bench_row(
                 (Some(v), Some(false)) => format!("{} ✗", format_ms(v.clone())),
                 _ => "skipped".to_string(),
             };
+            // `keygen_ms == 0` means the key-cache short-circuited
+            // (see `contract_benchmark::run_proof_with_opts` — when
+            // `key_cache_lookup(k)` hits, `kg_start.elapsed()` is
+            // essentially zero because no real keygen ran). Render
+            // "cached" to avoid the "0 ms" mystery in the UI.
+            let keygen_cell = if *keygen_ms == 0 {
+                "cached".to_string()
+            } else {
+                format_ms(*keygen_ms)
+            };
             (
                 chain.to_string(),
-                format_ms(*keygen_ms),
+                keygen_cell,
                 format_ms(*prove_ms),
                 verify_cell,
                 format!("{} B", proof_bytes),

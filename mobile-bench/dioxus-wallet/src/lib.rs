@@ -370,7 +370,8 @@ pub extern "C" fn start_app() {
     // `Library/Caches/midnight-pp/` so the OS can evict it under
     // pressure without losing user data.
     if let Some(home) = std::env::var_os("HOME") {
-        let pp = std::path::PathBuf::from(home)
+        let home_path = std::path::PathBuf::from(home);
+        let pp = home_path
             .join("Library")
             .join("Caches")
             .join("midnight-pp");
@@ -380,6 +381,27 @@ pub extern "C" fn start_app() {
         // environment.
         unsafe {
             std::env::set_var("MIDNIGHT_PP", &pp);
+        }
+        // Enable disk-backed coset spill by default on iOS too. At
+        // k>=19 the extended-domain `fixed_cosets` + `permutation
+        // .cosets` collections push peak heap above the per-app
+        // jetsam budget (~3 GiB on pre-15-Pro hardware, ~5 GiB on
+        // 15 Pro+); spilling to a tempfile inside the app's
+        // sandbox `Library/Caches/` lets the OS evict cold mmap
+        // pages under pressure. The spill files are auto-deleted
+        // on drop. See midnight-proofs::plonk::prover::spill_cosets_to_disk
+        // for the architectural rationale. Mirrors the Android
+        // setup in `main()` above.
+        let spill_dir = home_path
+            .join("Library")
+            .join("Caches")
+            .join("midnight-cosets");
+        if std::fs::create_dir_all(&spill_dir).is_ok() {
+            // SAFETY: same single-threaded process-start window.
+            unsafe {
+                std::env::set_var("MIDNIGHT_SPILL_COSETS", "1");
+                std::env::set_var("MIDNIGHT_SPILL_DIR", &spill_dir);
+            }
         }
     }
     run();
