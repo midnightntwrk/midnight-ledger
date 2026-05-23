@@ -79,22 +79,23 @@ body {
    * `0` even though the screen has rounded corners — Apple
    * reserves the inset for hardware cutouts (Dynamic Island,
    * home indicator) and treats rounded screen corners as
-   * "soft" boundaries that content can flow under. That
-   * makes right-aligned bench-table content like the Run /
-   * Running… button visually clip under the rounded corner.
+   * "soft" boundaries that content can flow under.
    *
-   * Compensate by floor-clamping each side to a wallet-
-   * specific minimum gutter (24 px) and *adding* the env-inset
-   * on top so hardware cutouts (notch, home indicator) still
-   * push content further in when present. Desktop + Android
-   * keep their existing flat-gutter rendering because env(...)
-   * resolves to 0 and the 24 px floor was the visual gutter
-   * anyway (`--gutter: 16px` was conservative; bench-tab
-   * action column wants more breathing room). */
-  padding: calc(max(var(--gutter), 24px) + env(safe-area-inset-top))
-           calc(max(var(--gutter), 24px) + env(safe-area-inset-right))
-           calc(max(var(--gutter), 24px) + env(safe-area-inset-bottom))
-           calc(max(var(--gutter), 24px) + env(safe-area-inset-left));
+   * Use a small horizontal gutter (8 px) so right-aligned
+   * content has just enough clearance from the rounded corner
+   * to render its border-radius without clipping, while still
+   * giving the bench-table maximum usable width. The button
+   * inside the action column already keeps its own 5 px
+   * breathing margin from the cell's right edge, so we don't
+   * need extra body padding to protect the pill curve from
+   * the card's overflow:hidden. Vertical sides keep the wider
+   * gutter for header / status-bar clearance. Desktop +
+   * Android keep their existing flat-gutter rendering because
+   * env(...) resolves to 0. */
+  padding: calc(var(--gutter) + env(safe-area-inset-top))
+           calc(4px + env(safe-area-inset-right))
+           calc(var(--gutter) + env(safe-area-inset-bottom))
+           calc(4px + env(safe-area-inset-left));
   min-height: 100vh;
 }
 
@@ -1510,8 +1511,16 @@ details .panel .row {
    * the bench-table's 7 columns + 11 px font commonly exceed
    * the card's content width; the `.card.scroll-x` rule below
    * lets the table scroll horizontally inside the card while
-   * keeping the page itself locked to the viewport. */
-  margin: 0 16px 14px;
+   * keeping the page itself locked to the viewport.
+   *
+   * Asymmetric horizontal margin: tight 4 px on the left (the
+   * K column is right-aligned and the leading whitespace
+   * before the digit is already part of the column padding —
+   * adding more outer margin just wastes space on phone-class
+   * viewports), generous 12 px on the right so the Run
+   * button's pill curve doesn't get clipped by the card's
+   * overflow: hidden. */
+  margin: 0 12px 14px 4px;
 }
 
 /* Cards that contain wide content (bench-table specifically)
@@ -1593,27 +1602,35 @@ details .panel .row {
 .bench-table th.action,
 .bench-table td.action {
   /* Narrow column so the whole 7-column table fits on a
-   * 390-pt-wide iPhone without horizontal scroll. Button is
-   * 60 px; column is 68 px to give 4 px breathing room each
-   * side of the cell's `padding: 6px`. */
-  width: 68px;
+   * 390-pt-wide iPhone without horizontal scroll. Cell has
+   * `padding: 6px` (12 px total horizontal); button below is
+   * 50 px → column needs ≥ 62 px to contain the button without
+   * the right-pill curve being clipped by the card's
+   * overflow:hidden. We give it 72 px for a clear 10 px right
+   * gap inside the cell. */
+  width: 72px;
   white-space: nowrap;
   text-align: right;
 }
 .bench-run-btn {
   height: 32px;
-  /* Compact width: fits "Run" with margin and clips "Running…"
-   * with overflow:hidden + text-overflow:ellipsis so the
-   * column width never changes between idle and in-flight
-   * states (which previously pushed the whole table off the
-   * right edge of its card). */
-  width: 60px;
-  padding: 0 8px;
+  /* Compact width: fits "Run" comfortably. "Running…" overflows
+   * the button content visibly but the column width (set on
+   * `td.action`) stays fixed, so the table doesn't reflow.
+   *
+   * NOTE: do NOT set `overflow: hidden` here. WebKit (iOS
+   * WKWebView, macOS Safari) renders the right border-radius
+   * incorrectly on buttons that combine `overflow: hidden` +
+   * `border-radius` — the right pill curve gets squared off.
+   * The column-stability fix instead lives on `td.action`
+   * (fixed `width: 72px`), which keeps the column from
+   * reflowing regardless of button content. */
+  width: 50px;
+  padding: 0 6px;
   font-size: 11px;
   font-weight: 500;
   box-sizing: border-box;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  border-radius: var(--radius-pill);
   white-space: nowrap;
 }
 

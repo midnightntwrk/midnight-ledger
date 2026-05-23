@@ -5489,7 +5489,11 @@ fn BenchmarkTab() -> Element {
                         // (Hashes, Keygen, Prove, Verify, Proof) are
                         // what actually moves between runs.
                         th { "k" }
-                        th { class: "num", "Hashes" }
+                        // Abbreviated to "H" — saves ~30 px of column
+                        // width on phone-class viewports where the
+                        // bench-table is tight. The numeric value
+                        // (chain length) is self-explanatory in context.
+                        th { class: "num", "H" }
                         th { class: "num", "Keygen" }
                         th { class: "num", "Prove" }
                         th { class: "num", "Verify" }
