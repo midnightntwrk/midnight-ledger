@@ -20,6 +20,7 @@ import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 
 import BenchmarkScreen from "./src/screens/BenchmarkScreen";
+import KeysScreen from "./src/screens/KeysScreen";
 import DidScreen from "./src/screens/DidScreen";
 import AboutScreen from "./src/screens/AboutScreen";
 
@@ -41,6 +42,7 @@ export default function App(): React.JSX.Element {
           }}
         >
           <Tab.Screen name="Benchmark" component={BenchmarkScreen} />
+          <Tab.Screen name="Keys" component={KeysScreen} />
           <Tab.Screen name="DID" component={DidScreen} />
           <Tab.Screen name="About" component={AboutScreen} />
         </Tab.Navigator>

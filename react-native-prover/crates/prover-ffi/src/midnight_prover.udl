@@ -18,6 +18,24 @@ namespace midnight_prover {
     // Promise so the JS thread never blocks.
     [Throws=ProverError]
     ProveResult prove(u32 k, ProveOptions opts);
+
+    // ─── Wallet / DID (gated on `wallet` Cargo feature) ───
+    // Resolve a Midnight DID via the indexer. Returns the resolved
+    // DID document as a JSON string.
+    [Throws=WalletError]
+    string did_resolve(string network, string did);
+
+    // EXPLICITLY NOT IMPLEMENTED YET. Always returns
+    // `WalletError::NotImplemented` with a message pointing at
+    // the integration plan.
+    [Throws=WalletError]
+    string did_deploy(Wallet wallet, string label);
+
+    [Throws=WalletError]
+    string did_update_aka(Wallet wallet, string did, string new_aka);
+
+    [Throws=WalletError]
+    string did_deactivate(Wallet wallet, string did);
 };
 
 // Options for a benchmark prove call. Mirrors `RunOpts` from
@@ -75,3 +93,92 @@ enum ProverError {
     "Io",
     "Internal",
 };
+
+// ─── Wallet / keys / DID surface (gated on the `wallet` Cargo feature) ───
+
+[Error]
+enum WalletError {
+    "NotImplemented",   // explicitly not-yet (e.g. DID write)
+    "AlreadyExists",
+    "NotFound",
+    "Io",
+    "Crypto",
+    "Network",
+    "Internal",
+};
+
+// Information about one stored key. Mirrors `secret_storage::
+// types::StoredKeyMeta` from wallet-core, flattened for UniFFI.
+dictionary KeyInfo {
+    // Opaque handle — pass back to sign / get_public / delete.
+    string key_ref;
+    // E.g. "Ed25519", "JubJubSchnorr".
+    string algorithm;
+    // RFC3339 timestamp.
+    string created_at;
+    // Optional user-facing label (e.g. "DID maintenance key").
+    string? label;
+    // JSON-encoded JWK. Apps that want the raw bytes can parse
+    // the JWK; keeping it as a string avoids mirroring 5 fields
+    // across the FFI boundary.
+    string public_key_jwk;
+};
+
+// Network the wallet targets. Mirrors `base_crypto::Network`
+// but flattened to a string discriminant for UniFFI.
+//   "main"     | "preprod" | "testnet" | "regtest"
+// The Rust side maps "preprod" → Network::Preprod, etc., and
+// returns a clear error on unknown strings.
+
+// A handle to an opened wallet store. UniFFI represents this as
+// an Arc<Wallet> on the Rust side; the TS side sees an opaque
+// class with methods. The `wallet_open` constructor returns a
+// fresh handle each time.
+interface Wallet {
+    // Open or create the wallet's underlying redb-backed
+    // secret-store file. The first wallet created in the file
+    // is bound to this handle's wallet_id. If the file already
+    // exists, the passphrase must match the one used to create it.
+    //
+    // `label` is a human-readable wallet name written into the
+    // store's metadata; not exposed to the chain.
+    //
+    // `seed_bytes` must be exactly 32 bytes. Pass `null` to let
+    // the FFI generate a random seed via the OS RNG; pass an
+    // explicit seed for restore-from-mnemonic flows.
+    [Throws=WalletError]
+    constructor(string path, string passphrase, string label, string network, sequence<u8>? seed_bytes);
+
+    // List every key stored under this wallet.
+    [Throws=WalletError]
+    sequence<KeyInfo> list_keys();
+
+    // Generate a new key in this wallet. `algorithm` must be
+    // one of the supported curves — currently "JubjubSchnorr"
+    // for DID maintenance keys; more algorithms surface as
+    // wallet-core gains support.
+    [Throws=WalletError]
+    KeyInfo generate_key(string algorithm, string? label);
+
+    // Look up the public key for a stored key reference. Returns
+    // the JWK as a JSON string. Throws `NotFound` if `key_ref`
+    // doesn't resolve.
+    [Throws=WalletError]
+    string get_public_key_jwk(string key_ref);
+
+    // Sign `payload` with the secret behind `key_ref`. The
+    // signature format depends on the key's algorithm —
+    // documented per-algorithm in wallet-core.
+    [Throws=WalletError]
+    sequence<u8> sign(string key_ref, sequence<u8> payload);
+
+    // Permanently delete `key_ref` from the store. Throws
+    // `NotFound` if the key doesn't exist; idempotent on
+    // repeated calls only by checking first.
+    [Throws=WalletError]
+    void delete_key(string key_ref);
+
+    // The wallet's network ("main", "preprod", "testnet", "regtest").
+    string network();
+};
+

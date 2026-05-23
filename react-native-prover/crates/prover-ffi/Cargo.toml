@@ -26,6 +26,26 @@ name = "midnight_prover_ffi"
 # identically to the wallet's local prover.
 contract-benchmark = { path = "../../../mobile-bench/contract-benchmark" }
 
+# Used by the optional wallet surface (gated on the `wallet`
+# feature) to produce 32-byte seeds when the caller passes a
+# null seed argument. Cheap dep; no harm leaving it unconditional
+# since it's already in the workspace transitive tree.
+rand = "0.8"
+base-crypto = { path = "../../../base-crypto", package = "midnight-base-crypto" }
+
+# Wallet store + secret storage + DID types. Adds substantial
+# binary weight (~60 MB unstripped on aarch64) — wallet-core
+# pulls in reqwest, tokio-tungstenite, graphql_client, redb,
+# jubjub crypto, etc. — but the alternative (re-implementing
+# keys/DID CRUD on the TS side) is far worse than the extra
+# binary size for a real wallet app. If a downstream consumer
+# only needs proving and wants to drop the wallet surface,
+# they can disable the `wallet` cargo feature (added below)
+# and the wallet-core dep falls out of the tree.
+wallet-core = { path = "../../../mobile-bench/wallet-core", optional = true }
+serde_json = { version = "1", optional = true }
+tempfile = { version = "3", optional = true }
+
 # UniFFI scaffolding (proc-macro + runtime). Bumped to 0.31 to
 # match `uniffi-bindgen-react-native` 0.31's expected runtime
 # ABI. The bindgen tool encodes a UniFFI runtime version into
@@ -47,6 +67,13 @@ tracing = "0.1"
 # `#[derive(uniffi::Error)]`, and `thiserror` is the natural
 # fit for the conversion-from-anyhow boilerplate.
 thiserror = "1"
+
+[features]
+default = ["wallet"]
+# Toggle the wallet-core dep + the keys/DID FFI surface.
+# Consumers who only need the prover can disable this feature
+# to keep the binary lean (saves ~60 MB on aarch64).
+wallet = ["dep:wallet-core", "dep:serde_json", "dep:tempfile"]
 
 [build-dependencies]
 uniffi = { version = "0.31", features = ["build"] }
