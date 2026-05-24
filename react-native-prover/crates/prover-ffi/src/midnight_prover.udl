@@ -36,6 +36,22 @@ namespace midnight_prover {
 
     [Throws=WalletError]
     string did_deactivate(Wallet wallet, string did);
+
+    // Probe network reachability — runs three parallel checks
+    // (indexer HTTP, indexer WS, node WS) with a 5-second budget
+    // each. Returns the JSON-encoded ProbeResult so the TS side
+    // can render partial-failure UIs.
+    string probe_connectivity(string network);
+
+    // Override the rayon thread count BEFORE any prove call.
+    // `0` = use the default (num_cpus - 1, leaves one core free
+    // for the OS / UI / JS thread). Idempotent: only the first
+    // configuration sticks for the process lifetime.
+    void configure_threads(u32 num_threads);
+
+    // Currently-configured rayon thread count. Useful for UI
+    // telemetry — confirms the (cores - 1) default applied.
+    u32 rayon_threads();
 };
 
 // Options for a benchmark prove call. Mirrors `RunOpts` from

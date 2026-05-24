@@ -6090,7 +6090,9 @@ version = "0.1.0"
 dependencies = [
  "contract-benchmark",
  "midnight-base-crypto",
+ "num_cpus",
  "rand 0.8.6",
+ "rayon",
  "serde_json",
  "tempfile",
  "thiserror 1.0.69",

@@ -241,6 +241,31 @@ pub fn did_deactivate(_wallet: Arc<Wallet>, _did: String) -> Result<String, Wall
     Err(WalletError::NotImplemented(NOT_IMPLEMENTED_MSG.into()))
 }
 
+/// Probe the indexer + node URLs for a given network. Each probe
+/// runs with a 5-second budget; failures populate `detail` instead
+/// of short-circuiting so the UI can show partial-failure states.
+///
+/// Returns the JSON-encoded ProbeResult. Always succeeds at the
+/// FFI level (returns `Ok` with the JSON) — the probe itself
+/// can't "fail"; reachability is the value being measured. We do
+/// declare this `infallible` at the UDL level (no `[Throws]`) so
+/// the TS side just sees `string` return.
+pub fn probe_connectivity(network: String) -> String {
+    let net = match parse_network(&network) {
+        Ok(n) => n,
+        Err(e) => {
+            return serde_json::json!({
+                "error": format!("{:?}", e),
+            })
+            .to_string();
+        }
+    };
+    let result = block_on(wallet_core::probe_connectivity(net));
+    serde_json::to_string(&result).unwrap_or_else(|e| {
+        serde_json::json!({ "error": format!("json: {e}") }).to_string()
+    })
+}
+
 const NOT_IMPLEMENTED_MSG: &str = "DID write flows (deploy/update/deactivate) require the \
     upstream-TS prepareUnprovenCallTx bridge. Porting that bridge \
     to React Native's Hermes engine is its own subproject — see \

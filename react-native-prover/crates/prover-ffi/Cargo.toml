@@ -33,6 +33,13 @@ contract-benchmark = { path = "../../../mobile-bench/contract-benchmark" }
 rand = "0.8"
 base-crypto = { path = "../../../base-crypto", package = "midnight-base-crypto" }
 
+# Used by the rayon thread-count configurator (`configure_threads`).
+# Already in the workspace transitive tree via halo2 / midnight-proofs;
+# pulling it in directly here lets us call rayon::ThreadPoolBuilder
+# from FFI init without surprise version pin issues.
+rayon = "1"
+num_cpus = "1"
+
 # Wallet store + secret storage + DID types. Adds substantial
 # binary weight (~60 MB unstripped on aarch64) — wallet-core
 # pulls in reqwest, tokio-tungstenite, graphql_client, redb,

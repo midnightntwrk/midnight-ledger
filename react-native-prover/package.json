@@ -35,10 +35,15 @@
     "plonk",
     "uniffi"
   ],
+  "homepage": "https://github.com/midnightntwrk/midnight-ledger#readme",
+  "author": "Midnight Foundation <info@midnight.network>",
   "license": "Apache-2.0",
   "peerDependencies": {
     "react": "*",
     "react-native": ">=0.71.0"
+  },
+  "dependencies": {
+    "uniffi-bindgen-react-native": "0.31.0-2"
   },
   "devDependencies": {
     "react-native": "^0.74.0",
