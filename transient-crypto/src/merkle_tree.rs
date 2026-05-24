@@ -154,6 +154,8 @@ pub enum InvalidUpdate {
     EndBeforeStart(u64, u64),
     /// The update range end is not in the tree bounds.
     EndOutOfTree(u64),
+    /// The update index is not in the tree bounds.
+    IndexOutOfTree(u64),
     /// The update contained a different number of segments than expected.
     WrongNumberOfSegments(usize, usize),
     /// Attempted to build an update over a not-fully rehashed tree
@@ -178,6 +180,9 @@ impl Display for InvalidUpdate {
                 "attempted update with end ({end}) after before ({start})"
             ),
             EndOutOfTree(end) => write!(f, "attempted update with end ({end}) outside of the tree"),
+            IndexOutOfTree(index) => {
+                write!(f, "attempted update at index ({index}) outside of the tree")
+            }
             WrongNumberOfSegments(..) => write!(f, "attempted update with mismatch segment count"),
             NotFullyRehashed => write!(f, "attempted update without the tree being fully rehashed"),
             BadUpdatePath => write!(
@@ -956,6 +961,9 @@ impl<A: Storable<D>, D: DB> MerkleTreeNode<A, D> {
         new_leaf: HashOutput,
         new_aux: A,
     ) -> Result<Sp<Self, D>, InvalidUpdate> {
+        if (index as u128) >= (1u128 << self.height()) {
+            return Err(InvalidUpdate::IndexOutOfTree(index));
+        }
         let h = self.height();
         if self.is_collapsed() {
             return Err(InvalidUpdate::CollapsedIndex(index as u128, h));
@@ -1531,7 +1539,7 @@ mod tests {
             t2.root()
         );
         // test *not* rehashing the tree first
-        let t3 = (33..=64).fold(
+        let t3 = (33..64).fold(
             t.try_update(12, &Fr::from(43u64), ()).unwrap().rehash(),
             |t, i| t.try_update(i, &Fr::from(42u64), ()).unwrap(),
         );
@@ -1701,5 +1709,49 @@ mod tests {
 
         // Empty range finds nothing
         assert!(tree.find_path_for_leaf_within_range(val, 3..=4).is_none());
+    }
+
+    #[test]
+    fn test_update_rejects_out_of_bounds_index() {
+        let val = Fr::from(42u64);
+        let tree = new_mt::<()>(1).try_update(1, &val, ()).unwrap().rehash();
+
+        let root_before = tree.root().unwrap();
+
+        let other_value = Fr::from(43u64);
+        let result = tree.try_update(10, &other_value, ()).unwrap_err();
+
+        assert_eq!(result, InvalidUpdate::IndexOutOfTree(10));
+        assert_eq!(tree.root().unwrap(), root_before);
+    }
+
+    #[test]
+    fn test_update_hash_rejects_out_of_bounds_index() {
+        let val = Fr::from(42u64);
+        let tree = new_mt::<()>(1);
+        let hash = leaf_hash(&val);
+
+        let result = tree.try_update_hash(10, hash, ()).unwrap_err();
+
+        assert_eq!(result, InvalidUpdate::IndexOutOfTree(10));
+    }
+
+    #[cfg(feature = "proptest")]
+    proptest::proptest! {
+        #[test]
+        fn test_update_rejects_indices_at_or_above_tree_size(
+            height in 0u8..=20,
+            extra in 0u64..=1024,
+            leaf in proptest::arbitrary::any::<u64>(),
+        ) {
+            let tree = new_mt::<()>(height);
+            let tree_size = 1u64 << height;
+            let index = tree_size + extra;
+
+            proptest::prop_assert_eq!(
+                tree.try_update(index, &Fr::from(leaf), ()).unwrap_err(),
+                InvalidUpdate::IndexOutOfTree(index),
+            );
+        }
     }
 }
