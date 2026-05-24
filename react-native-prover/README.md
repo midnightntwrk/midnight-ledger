@@ -5,14 +5,53 @@ Rust core that powers the Dioxus mobile wallet (`mobile-bench/
 contract-benchmark`) via UniFFI Turbo Modules, so an RN app can
 generate halo2-KZG proofs entirely on-device.
 
-## Status
+## Status (2026-05-24 evening)
 
-**Alpha — scaffolded but not yet validated end-to-end on a
-device.** The Rust FFI crate compiles + unit-tests pass. The
-xcframework / Android JNI / TS Turbo Module glue is set up but
-requires `uniffi-bindgen-react-native` (`ubrn`) to actually run
-the code-gen step; that tool is referenced in the build scripts
-but not bundled.
+**Alpha — Rust side fully working, RN host integration gated
+on ubrn CLI/npm version alignment.**
+
+What's verified end-to-end on the workspace side:
+
+- ✅ `cargo check -p midnight-prover-ffi` clean
+- ✅ `cargo test -p midnight-prover-ffi --lib` passes
+- ✅ `uniffi-bindgen-react-native build ios --sim-only`
+  produces `ios/MidnightProver.xcframework` (70 MB)
+- ✅ `uniffi-bindgen-react-native build android` produces
+  `.so` for all 4 ABIs (12–17 MB each)
+- ✅ `uniffi-bindgen-react-native generate jsi bindings`
+  emits TS + C++ JSI module
+- ✅ TypeScript public surface (`src/index.ts`) type-checks
+- ✅ Generated package installable via `file:` in an RN host
+
+What's gated on environment alignment:
+
+- ⚠️ Building the demo in a real RN host app currently
+  requires the **ubrn CLI binary and the
+  `uniffi-bindgen-react-native` npm runtime to be at the
+  same git commit**. The CLI installed from
+  `cargo install --git https://github.com/jhugman/uniffi-bindgen-react-native uniffi-bindgen-react-native`
+  pulls latest main (currently `44a1862`), which emits C++
+  code referencing newer symbols (`arraybufferToUint8Array`,
+  `kUbrnRustCapacity`, `string_to_buffer`) than the latest
+  npm-published runtime (`0.31.0-2`) exposes. Build fails
+  with `error: no member named ...` in the generated
+  `cpp/generated/midnight_prover.cpp`.
+
+  **Fix path**: either pin the CLI to a commit matching
+  the npm version (`cargo install --git ... --rev <sha>`),
+  or wait for a fresh ubrn release that aligns the two.
+
+- ⚠️ The ubrn-generated `ios/ReactNativeProver.mm` is
+  **new-arch only** (`#ifdef RCT_NEW_ARCH_ENABLED`). Old-
+  architecture RN hosts will get
+  `TurboModuleRegistry.getEnforcing(...): 'ReactNativeProver'
+  could not be found`. Enable new arch in the host app via
+  `RCT_NEW_ARCH_ENABLED=1` in `ios/.xcode.env.local` and
+  `newArchEnabled=true` in `android/gradle.properties`.
+
+- ⚠️ `react-native-screens` < 3.35 has C++ ABI compile
+  errors with RN 0.74 new arch. The demo dropped the
+  navigation deps entirely to avoid this.
 
 What works today:
 
