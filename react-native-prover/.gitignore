@@ -8,14 +8,16 @@ node_modules/
 crates/prover-ffi/target/
 
 # Heavy binary artefacts produced by `uniffi-bindgen-react-native
-# build {ios,android}`. These are rebuilt on every CI run from the
-# Rust sources; tracking them would bloat the repo for nothing.
+# build {ios,android}` and `cargo ndk` / `cargo build --target ios-sim`.
+# These are rebuilt on every CI run from the Rust sources; tracking
+# them would bloat the repo for nothing.
 #
-# iOS xcframework slices are typically ~70 MB each; Android .so
-# files are 12-17 MB per ABI × 4 ABIs = ~60 MB. We track the path
-# placeholders + a .gitkeep so the directory shape is preserved.
+# iOS xcframework slices are ~140 MB each; Android `.a` static
+# archives are ~190 MB and the resulting `.so` ~23 MB.
 ios/MidnightProver.xcframework/
+MidnightProver.xcframework/
 android/src/main/jniLibs/*/libmidnight_prover_ffi.so
+android/src/main/jniLibs/*/libmidnight_prover_ffi.a
 
 # Generated TS + C++ bindings — produced by
 # `uniffi-bindgen-react-native generate jsi {bindings,turbo-module}`

@@ -132,6 +132,28 @@ pub(crate) fn ensure_rayon_configured(num_threads: usize) {
     });
 }
 
+/// Install rustls' `ring` crypto provider as the process default.
+///
+/// rustls 0.23 requires an explicit `CryptoProvider` installed
+/// before any TLS handshake. The transitive dep tree compiles
+/// in BOTH `aws-lc-rs` (via some indirect deps) and `ring` (via
+/// reqwest/tokio-tungstenite), and rustls picks neither by
+/// default. The first TLS use then either panics ("no default
+/// provider") or — on Android — segfaults inside aws-lc-rs's
+/// jitter-entropy initialization (`jent_entropy_collector_alloc`
+/// landing on an uninitialized function pointer in BSS).
+///
+/// Picking `ring` explicitly keeps us pure-Rust on every target,
+/// no C / aws-lc compile, and dodges the entropy-init crash.
+/// Idempotent — the underlying `install_default()` only succeeds
+/// once.
+pub(crate) fn ensure_default_crypto_provider() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    });
+}
+
 fn default_num_threads() -> usize {
     // Leave 1 core for the OS / UI / JS thread. On dual-core
     // devices this floors at 1 (single-threaded prove); on
@@ -178,10 +200,15 @@ fn runtime() -> &'static Runtime {
     })
 }
 
-/// Run a single bench prove at the requested `k`. Synchronous from
-/// the FFI side — the platform layer (Swift / Kotlin) is expected
-/// to call this from a background thread / Coroutine / Promise
-/// continuation so the JS thread never blocks.
+/// Run a single bench prove at the requested `k`.
+///
+/// The call **blocks the caller** until the proof completes, but
+/// the actual work runs on a freshly-spawned worker thread with a
+/// generous (16 MiB) stack. Critical for React Native: the JSI host
+/// function fires on the JS thread, whose default stack is ~1 MiB
+/// on iOS — and halo2's keygen/prove paths recurse deeper than that
+/// almost immediately. Without the offload the app crashes with
+/// EXC_BAD_ACCESS / "Thread stack size exceeded" on the first prove.
 ///
 /// The implementation lives in `contract-benchmark` and is the same
 /// path the dioxus-wallet exercises from its Bench tab. RNG seed
@@ -194,8 +221,26 @@ pub fn prove(k: u32, opts: ProveOptions) -> Result<ProveResult, ProverError> {
     // (either by us on a prior call, or by an external dep that
     // touched rayon first).
     ensure_rayon_configured(default_num_threads());
+    // Must be installed BEFORE MidnightDataProvider::new — that ctor
+    // builds a reqwest::Client, which in turn touches rustls. On
+    // Android the aws-lc-rs entropy init crashes if ring isn't the
+    // installed default. See ensure_default_crypto_provider().
+    ensure_default_crypto_provider();
     let inner = opts.into_inner();
-    let result: Result<RunStats, _> = runtime().block_on(run_proof_with_opts(k, inner));
+
+    // Sized for halo2 prove at k≈20+. 16 MiB is the same ballpark
+    // dioxus-wallet uses on phone — comfortable headroom above what
+    // we've observed sticking. The worker joins synchronously so
+    // we don't leak threads on early returns.
+    const PROVE_STACK_BYTES: usize = 16 * 1024 * 1024;
+    let handle = std::thread::Builder::new()
+        .name("midnight-prover-worker".into())
+        .stack_size(PROVE_STACK_BYTES)
+        .spawn(move || runtime().block_on(run_proof_with_opts(k, inner)))
+        .map_err(|e| ProverError::ProveFailed(format!("spawn prover worker: {e}")))?;
+    let result: Result<RunStats, _> = handle
+        .join()
+        .map_err(|_| ProverError::ProveFailed("prover worker panicked".to_string()))?;
 
     result.map(Into::into).map_err(|e| {
         // `contract_benchmark::Error` is structured but the discriminant

@@ -30,6 +30,13 @@ APP_BUNDLE="$APP_DIR/ios/build/Build/Products/Debug-iphonesimulator/MidnightDemo
 METRO_LOG="${MIDNIGHT_METRO_LOG:-/tmp/metro.log}"
 SCREEN_OUT="${MIDNIGHT_SCREEN_OUT:-/tmp/midnight-sim-screen.png}"
 
+# ─── Android ─────────────────────────────────────────────────────
+ANDROID_PKG="${MIDNIGHT_ANDROID_PKG:-com.midnightdemoapp}"
+ANDROID_HOME="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$ANDROID_HOME/ndk/27.0.12077973}"
+ADB="$ANDROID_HOME/platform-tools/adb"
+APK="$APP_DIR/android/app/build/outputs/apk/debug/app-debug.apk"
+
 log() { printf '\033[36m[midnight-sim]\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m[midnight-sim warn]\033[0m %s\n' "$*"; }
 err() { printf '\033[31m[midnight-sim err]\033[0m %s\n' "$*" >&2; }
@@ -80,11 +87,18 @@ cmd_build() {
 
   # Force-relink the prover package so any package.json /
   # generated-code changes propagate into node_modules. yarn's
-  # `file:` resolution caches aggressively and skips re-copy
-  # when only the source-tree contents change.
-  log "re-link prover package"
+  # `file:` resolution caches aggressively — even removing the
+  # symlink + re-running install says "Already up-to-date".
+  # The reliable nuke: remove yarn.lock for our package's entry
+  # too, then `yarn install --force`.
+  log "re-link prover package (force)"
   rm -rf "$APP_DIR/node_modules/@midnight-ntwrk"
-  ( cd "$APP_DIR" && yarn install ) 2>&1 | tail -2
+  ( cd "$APP_DIR" && yarn install --force ) 2>&1 | tail -2
+  if [ ! -d "$APP_DIR/node_modules/@midnight-ntwrk/react-native-prover" ]; then
+    warn "prover not re-linked; nuking yarn.lock and retrying"
+    rm -f "$APP_DIR/yarn.lock"
+    ( cd "$APP_DIR" && yarn install ) 2>&1 | tail -2
+  fi
 
   log "pod install (with RCT_NEW_ARCH_ENABLED=1)"
   ( cd "$APP_DIR/ios" && \
@@ -174,7 +188,70 @@ cmd_screen() {
   log "screen ${w}x${h} $sample → $out"
 }
 
-# ─── cycle ───────────────────────────────────────────────────────
+# ─── Android subcommands ─────────────────────────────────────────
+
+cmd_android_status() {
+  local devices
+  devices=$("$ADB" devices 2>&1 | grep -v "List of devices" | grep -E "device$|emulator-" | head -1 || true)
+  if [ -z "$devices" ]; then
+    log "android: no device/emulator visible to adb"
+    return 1
+  fi
+  log "android: $devices"
+  local installed
+  installed=$("$ADB" shell pm list packages "$ANDROID_PKG" 2>/dev/null | head -1)
+  [ -n "$installed" ] && log "android: $ANDROID_PKG installed" || log "android: $ANDROID_PKG NOT installed"
+}
+
+cmd_android_build() {
+  : "${ANDROID_NDK_HOME:?need ANDROID_NDK_HOME}"
+  log "android: re-link prover"
+  rm -rf "$APP_DIR/node_modules/@midnight-ntwrk"
+  ( cd "$APP_DIR" && yarn install --force ) 2>&1 | tail -2
+
+  log "android: gradlew assembleDebug (this can take 5-10 min cold)"
+  local build_log=/tmp/midnight-android-build.log
+  ( cd "$APP_DIR/android" && \
+    ANDROID_HOME="$ANDROID_HOME" ANDROID_NDK_HOME="$ANDROID_NDK_HOME" \
+    ./gradlew assembleDebug --console=plain ) > "$build_log" 2>&1
+  local rc=$?
+  if [ $rc -ne 0 ] || [ ! -f "$APK" ]; then
+    err "android build FAILED (rc=$rc). Last errors from $build_log:"
+    grep -E "FAILED|error:|^e:" "$build_log" | tail -8
+    return 1
+  fi
+  log "android: build OK — $APK"
+}
+
+cmd_android_install() {
+  [ -f "$APK" ] || { err "no APK at $APK — run 'android-build' first"; return 1; }
+  "$ADB" install -r "$APK" 2>&1 | tail -3
+}
+
+cmd_android_launch() {
+  "$ADB" shell am force-stop "$ANDROID_PKG" 2>&1 || true
+  "$ADB" shell am start -n "$ANDROID_PKG/.MainActivity" 2>&1 | tail -3
+}
+
+cmd_android_logs() {
+  local n=${1:-50}
+  "$ADB" logcat -d -t "${n}" ReactNativeJS:V "*:S" 2>&1 | tail -"$n"
+}
+
+cmd_android_cycle() {
+  log "─── android full cycle ───"
+  cmd_metro || return 1
+  cmd_android_status || { err "no android device — boot the emulator first"; return 1; }
+  cmd_android_build || return 1
+  cmd_android_install || return 1
+  cmd_android_launch
+  log "sleeping 12s for JS bundle download + execution"
+  sleep 12
+  cmd_android_logs 60
+  log "─── android cycle done ───"
+}
+
+# ─── cycle (iOS) ─────────────────────────────────────────────────
 cmd_cycle() {
   log "─── full cycle ───"
   cmd_metro || return 1
@@ -204,6 +281,12 @@ case "$sub" in
   logs-watch) cmd_logs_watch "$@" ;;
   screen) cmd_screen "$@" ;;
   cycle) cmd_cycle "$@" ;;
+  android-status) cmd_android_status "$@" ;;
+  android-build) cmd_android_build "$@" ;;
+  android-install) cmd_android_install "$@" ;;
+  android-launch) cmd_android_launch "$@" ;;
+  android-logs) cmd_android_logs "$@" ;;
+  android-cycle) cmd_android_cycle "$@" ;;
   help|-h|--help)
     grep '^#' "$0" | sed 's/^# //; s/^#//'
     ;;

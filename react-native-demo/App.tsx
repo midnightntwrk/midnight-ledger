@@ -16,7 +16,8 @@
  */
 
 import React, { useState } from "react";
-import { LogBox, Pressable, SafeAreaView, StatusBar, StyleSheet, Text, View } from "react-native";
+import { LogBox, Pressable, StatusBar, StyleSheet, Text, View } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 
 import BenchmarkScreen from "./src/screens/BenchmarkScreen";
 import KeysScreen from "./src/screens/KeysScreen";
@@ -52,8 +53,9 @@ export default function App(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>("bench");
 
   return (
-    <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" backgroundColor="#0c0c14" />
+    <SafeAreaProvider>
+      <SafeAreaView style={styles.safe} edges={["top", "left", "right", "bottom"]}>
+        <StatusBar barStyle="light-content" backgroundColor="#0c0c14" />
       <View style={styles.body}>
         {tab === "bench" && <BenchmarkScreen />}
         {tab === "keys" && <KeysScreen />}
@@ -77,7 +79,8 @@ export default function App(): React.JSX.Element {
           </Pressable>
         ))}
       </View>
-    </SafeAreaView>
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 

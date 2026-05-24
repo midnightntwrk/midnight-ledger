@@ -4145,3 +4145,254 @@ yarn ios                         # or `yarn android`
 Both GPG-signed + DCO-signed, pushed to
 `yshyn-iohk/midnight-ledger`'s `mobile-prototype` branch
 (PR #1).
+
+### §14.6 Integration landmines (post-scaffolding session)
+
+A multi-hour session attempting end-to-end integration into a
+real host RN app surfaced **six discrete version-pinning /
+configuration gates**, each of which fails opaquely if missed.
+Documented here so future contributors don't re-discover them.
+Full deep-dive in Obsidian
+`Code/React Native integration — the deep dive`.
+
+| # | Gate | Symptom | Fix |
+|--:|---|---|---|
+| 1 | ubrn CLI ↔ npm runtime version must match exactly | `error: no member named 'arraybufferToUint8Array' in namespace 'uniffi_jsi'` | `cargo install --git ... --rev b7c8a4e uniffi-bindgen-react-native --force` |
+| 2 | `codegenConfig.name` in package.json must equal `"RNNativeModuleSpec"` | `fatal error: 'RNNativeModuleSpec.h' file not found` | Add the codegenConfig block; the default comes from `crates/ubrn_cli/src/config/npm.rs:117` |
+| 3 | Host RN app must be init'd with new architecture from line zero | `TurboModuleRegistry.getEnforcing(...): 'ReactNativeProver' could not be found. Bridgeless mode: false. TurboModule interop: false` | Recreate the app with `RCT_NEW_ARCH_ENABLED=1 npx @react-native-community/cli init`; setting the env var on an already-init'd old-arch app gets you a half-converted state where pods compile in new arch but the host bridges via old arch |
+| 4 | xcframework must be rebuilt when Rust API surface changes | `Undefined symbols: _uniffi_midnight_prover_ffi_checksum_func_did_resolve` etc. | `uniffi-bindgen-react-native build ios --release --sim-only` after every Rust-side FFI addition |
+| 5 | RN 0.74 moved `jsCallInvokerHolder` from `ReactApplicationContext` to `CatalystInstance` | Gradle Kotlin compile: `Unresolved reference: jsCallInvokerHolder` | Patch `ReactNativeProverModule.kt`: `context.catalystInstance.jsCallInvokerHolder` |
+| 6 | Android prover-ffi must be staged in jniLibs as `.a` (static archive), NOT `.so` | `ninja: error: libmidnight_prover_ffi.a missing` during gradle build | Copy `target/aarch64-linux-android/release/libmidnight_prover_ffi.a` (not `.so`) into `android/src/main/jniLibs/arm64-v8a/`; the ubrn CMakeLists links it INTO the Turbo Module's `.so` rather than dlopen'ing a separate library |
+
+Each gate is enforced at a different build stage (cargo
+install → pod install → xcodebuild link → gradle Kotlin
+compile → gradle CMake link) so failing one doesn't surface
+the others. The `midnight-sim` CLI's output capture is what
+made each landmine diagnosable without screenshot
+round-trips.
+
+Also worth avoiding:
+
+- **`@react-navigation/*` + `react-native-screens` < 3.35
+  with new arch on RN 0.74.** C++ ABI compile errors:
+  `non-virtual member function marked 'override' hides
+  virtual member function`. Drop the navigation libraries
+  entirely; use plain `useState` + `Pressable` for tab
+  switching. Same UX, zero Fabric surface to fight with.
+
+### §14.7 The `midnight-sim` CLI
+
+Lives at `react-native-demo/scripts/midnight-sim`. Drives the
+full build+install+launch+diagnose loop for iOS Simulator
+and Android Emulator. Documented in
+`react-native-demo/scripts/README.md`.
+
+Critical for unattended iteration — every landmine in §14.6
+was diagnosed from the CLI's text output, not from
+screenshots.
+
+### §14.8 Commits (initial integration)
+
+| Commit | Description |
+|---|---|
+| `2806ecd7` | UniFFI Option A scaffolding |
+| `3049e655` | Bench screen + DID CRUD UI scaffolding |
+| `c7d70444` | ubrn build chain working end-to-end |
+| `4542d875` | Keys CRUD FFI |
+| `21342386` | did_resolve via Wallet::resolve_did |
+| `c63d2f84` | Rayon (cores-1) + probe + RN host integration |
+| `b1509e36` | useBench guard fix |
+| `314139dd` | Documented version-skew + new-arch reqs |
+| `2e654931` | midnight-sim CLI |
+
+All on `mobile-prototype` branch of
+`yshyn-iohk/midnight-ledger`, GPG-signed + DCO-signed.
+
+### §14.9 Three more gates discovered while wiring end-to-end
+
+After the §14.6 six gates were closed, the next session
+moved to actually exercising the prover from the RN app on
+both simulators. Three additional gates surfaced:
+
+| # | Gate | Symptom | Fix |
+|--:|---|---|---|
+| 7 | RN 0.74 bridgeless TurboModule discovery doesn't honour `+load` registration | JS: `'ReactNativeProver' NotFound` in TurboModuleRegistry, even though `nm` proves `_OBJC_CLASS_$_ReactNativeProver` is in `MidnightDemoApp.debug.dylib` | Explicit hook in `AppDelegate.mm`: implement `-(Class)getModuleClassFromName:(const char *)name` and return `NSClassFromString(@"ReactNativeProver")` for that name |
+| 8 | ubrn `android/CMakeLists.txt` has a wrong CMAKE_SOURCE_DIR assumption | `ninja: error: '../../../../android/src/main/jniLibs/...libmidnight_prover_ffi.a': missing` even when the .a is staged correctly | The template uses `${CMAKE_SOURCE_DIR}/android/src/main/jniLibs/...` but `build.gradle`'s `cmake { path "CMakeLists.txt" }` puts `CMAKE_SOURCE_DIR` at `<pkg>/android` — resolves to `<pkg>/android/android/...`. Drop the leading `android/` |
+| 9 | Rust .a uses Bionic APIs ≥ 24 (`getgrgid_r` / `getgrnam_r`) | Android link: `ld.lld: error: undefined symbol: getgrgid_r` | `minSdkVersion = 24` in host's `android/build.gradle`; **and** restrict to `reactNativeArchitectures=arm64-v8a` (only ABI we ship a Rust .a for) |
+
+Also a non-actionable but worth-knowing diagnostic:
+
+**Xcode 16 / iOS SDK 26 Debug split-binary layout.** The
+main `MidnightDemoApp` binary is now a 72 KB thin stub that
+re-exports `MidnightDemoApp.debug.dylib` (~100 MB) via
+`@rpath/`. `nm` against the main binary finds nothing useful;
+all pod + Rust symbols live in the side dylib. Saves ~10 min
+of "is the pod even linked?" panic when you remember to look
+at the right artefact.
+
+### §14.10 Runtime plumbing — making prove() actually run
+
+With all nine gates open and the app booting clean, the
+first JSI call to `prove()` crashed immediately. Two distinct
+issues, two distinct fixes.
+
+**Issue A — JS-thread stack overflow.**
+- iOS' `com.facebook.react.runtime.JavaScript` thread stack
+  is 1056 KiB (verified from crash region map).
+- `tokio::Runtime::block_on` polls the passed future on the
+  **calling** thread, not on a tokio worker — the worker
+  pool is only used for tokio-spawned subtasks.
+- halo2 keygen recursion blows past 1 MiB at frame #0
+  (`MidnightDataProvider::get_local`).
+- Crash: `EXC_BAD_ACCESS / KERN_PROTECTION_FAILURE` —
+  "Thread stack size exceeded".
+
+Fix in `react-native-prover/crates/prover-ffi/src/lib.rs::prove`:
+```rust
+const PROVE_STACK_BYTES: usize = 16 * 1024 * 1024;
+let handle = std::thread::Builder::new()
+    .name("midnight-prover-worker".into())
+    .stack_size(PROVE_STACK_BYTES)
+    .spawn(move || runtime().block_on(run_proof_with_opts(k, inner)))?;
+let result = handle.join()?;
+```
+
+Verification: `strings <dylib> | grep midnight-prover-worker`
+must print the thread name literal — that's the marker that
+the patched code is actually in the deployed binary.
+
+**Issue B — UI "Running" state never paints.**
+
+Even with Issue A fixed, the worker.join() in the host
+function still blocks the calling JS thread for the entire
+prove duration. The renderer also lives on the JS thread, so
+it can't process the `dispatch({type:"start"})` until after
+`join()` returns — at which point the row jumps straight to
+"done". The spinner never appears.
+
+Fix in `useBench.ts`:
+```ts
+dispatch({ type: "start", k, startedAtMs });
+// Force a real timer tick so React paints the "Running"
+// state before proveSync re-blocks the JS thread.
+// Promise.resolve() is a microtask — not enough.
+await new Promise<void>(r => setTimeout(r, 16));
+const result = await proveAsync(k, { ... });
+```
+
+Long-term fix: make the UniFFI export actually async
+(`[Async]` UDL annotation in UniFFI 0.31). Then the JS
+thread genuinely awaits the worker rather than blocking.
+Out of scope for this iteration.
+
+### §14.11 End-to-end validation
+
+After all the fixes above landed, ran the Benchmark tab's
+"Run all" sweep on iOS Simulator (iPhone 17 Pro arm64,
+SDK 26.4, M2 Max host). Result: **k=1..21 succeeded** in
+~9 minutes total wall, with visible per-row spinner.
+
+Full numbers (cached-keys, prove-only):
+- k=1..12: < 1 s each (sub-200 ms for k=1..10)
+- k=15: 4.3 s, k=16: 8.4 s, k=17: 18.0 s
+- k=18: 35 s, k=19: 1m 10s
+- **k=20: 2m 25s, k=21: 4m 58s**
+
+Comparison vs. the prior Dioxus iOS Sim run shows the
+JSI/UniFFI/worker-thread overhead is **negligible** (within
+noise of cold keygen variance) — i.e. switching from
+WebView-based to React Native packaging is free at the
+prover level.
+
+See [[Benchmarks/iOS Simulator results]] §"RN demo end-to-end
+run" for the full table and cross-target comparison.
+
+### §14.12 Android-specific runtime gates
+
+Validating the same RN demo on Android emulator surfaced two
+more issues not visible on iOS:
+
+**Issue C — aws-lc-rs jitter-entropy SIGSEGV.** rustls 0.23
+requires an explicit `CryptoProvider` install. The dep tree
+compiles in both `ring` (via reqwest/tokio-tungstenite) and
+`aws-lc-rs` (via indirect deps); when neither is marked
+default, the first TLS init lands on aws-lc-rs's jitter-
+entropy collector, which segfaults on the qemu emulator
+(jent expects timer characteristics the virtual CPU doesn't
+provide). Fix: call `rustls::crypto::ring::default_provider()
+.install_default()` once at `prove()` entry, before any
+`MidnightDataProvider::new()` runs.
+
+**Issue D — Android sandbox has no `$HOME`.** The default
+data-provider cache-dir lookup walks `$MIDNIGHT_PP` →
+`$XDG_CACHE_HOME` → `$HOME/.cache`. None of those are set
+in an Android app sandbox. Fix: pass `cacheDir` via
+`ProveOptions`; the FFI then `setenv("MIDNIGHT_PP", dir)`
+before constructing the provider. The demo uses
+`/data/data/com.midnightdemoapp/files/midnight-pp/`; a
+production wrapper should fetch this from a native bridge
+(`Context.getCacheDir()` on Android, `NSCachesDirectory` on
+iOS).
+
+iOS Sim doesn't hit either — different CPU timer (Apple
+Silicon native, not qemu) and inherited `$HOME` from the
+launching shell. Real iPhone / real Android device behaviour
+is unverified.
+
+### §14.13 Android emulator end-to-end validation
+
+Driven entirely via `adb input tap` + `uiautomator dump`
+(emulator is `qemu-system-aarch64-headless`, no visible
+window). After Issues A/B/C/D were all closed and SRS files
+were pre-staged via `adb push`, k=1..13 ran clean through
+the Benchmark tab's "Run all" sweep. No crash, no tombstone.
+
+Numbers (cached-keys, prove-only, Pixel_Fold_API_35 on M2
+Max host):
+
+| k  | prove_ms | k  | prove_ms |
+|----|---------:|----|---------:|
+| 1  | 226      | 8  | 601      |
+| 2  | 291      | 9  | 1,120    |
+| 3  | 388      | 10 | 1,938    |
+| 4  | 132      | 11 | 4,235    |
+| 5  | 149      | 12 | 7,492    |
+| 6  | 285      | 13 | **19,551** |
+| 7  | 332      | 14 | in flight at session end |
+
+**Android emulator is ~12-18× slower than iOS Sim on the
+same host machine.** `top` on the emulator process shows
+100 % CPU pegged with **60 % in `sys` mode** — qemu
+binary-translation overhead. Emulator numbers are NOT
+predictive of real-device performance; use the emulator for
+functional validation only.
+
+See [[Benchmarks/Android Emulator results]] for the full
+table + cross-target comparison.
+
+**Unverified:**
+- Cold SRS HTTPS download path on Android (we pre-staged
+  files to dodge the long download in dev cycles).
+- High-k (≥ 18) on real Android hardware via RN. The
+  Dioxus wallet runs k=20 on S24 Ultra; the RN demo with
+  the same prover should match, modulo any RN-side OOM
+  pressure differences.
+- iPhone real-device (only Sim tested).
+
+### §14.14 Commits
+
+| Commit | Description |
+|---|---|
+| _pending_ | Gate 7: AppDelegate.mm `getModuleClassFromName:` hook (host-app side, lives in `/tmp/midnight-rn-host/`) |
+| _pending_ | Gate 8: `react-native-prover/android/CMakeLists.txt` — drop spurious `android/` prefix |
+| _pending_ | Gate 9: host `android/build.gradle` minSdk=24 + `gradle.properties` ABI restriction (host-app side) |
+| _pending_ | Issue A: `prover-ffi::prove()` spawns 16-MiB-stack worker thread |
+| _pending_ | Issue B: `useBench.ts` 16 ms `setTimeout`-yield between dispatch and `proveSync` |
+| _pending_ | Issue C: `prover-ffi` installs `rustls::crypto::ring` default provider before any TLS path |
+| _pending_ | Issue D: `useBench.ts` passes `cacheDir` on Android (sandbox path) |
+| _pending_ | `SafeAreaProvider` wrap in `App.tsx` (root no longer uses RN-core `SafeAreaView`) |
+| _pending_ | `react-native-prover/scripts/midnight-sim` — emulator-vs-device disambiguation TBD |
+| _pending_ | New benchmark + arch doc sections covering the above |
+
+All on `mobile-prototype` branch of
+`yshyn-iohk/midnight-ledger`, GPG-signed + DCO-signed.

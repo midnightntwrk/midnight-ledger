@@ -21,9 +21,14 @@ class ReactNativeProverModule(reactContext: ReactApplicationContext) :
 
   override fun installRustCrate(): Boolean {
     val context = this.reactApplicationContext
+    // RN 0.74+ removed `ReactApplicationContext.jsCallInvokerHolder`
+    // as a direct property; it now lives on CatalystInstance. The
+    // ubrn 0.31.0-2 template hadn't caught up to that rename.
+    @Suppress("DEPRECATION")
+    val jsCallInvoker = context.catalystInstance.jsCallInvokerHolder
     return nativeInstallRustCrate(
       context.javaScriptContextHolder!!.get(),
-      context.jsCallInvokerHolder!!
+      jsCallInvoker
     )
   }
 

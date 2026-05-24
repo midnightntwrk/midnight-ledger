@@ -40,9 +40,13 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Werror")
 # Set linker flags for 16KB page size alignment (required for Android 15+)
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,max-page-size=16384")
 
+# Path patch: the ubrn-generated template assumes CMAKE_SOURCE_DIR is the
+# package root, but build.gradle's `cmake { path "CMakeLists.txt" }` makes
+# CMAKE_SOURCE_DIR == <package>/android. So we point at src/main/jniLibs
+# directly, not at android/src/main/jniLibs.
 cmake_path(
   SET MY_RUST_LIB
-  ${CMAKE_SOURCE_DIR}/android/src/main/jniLibs/${ANDROID_ABI}/libmidnight_prover_ffi.a
+  ${CMAKE_SOURCE_DIR}/src/main/jniLibs/${ANDROID_ABI}/libmidnight_prover_ffi.a
   NORMALIZE
 )
 add_library(my_rust_lib STATIC IMPORTED)

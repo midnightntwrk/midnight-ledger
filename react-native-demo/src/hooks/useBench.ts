@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useReducer, useRef } from "react";
+import { Platform } from "react-native";
 import { proveAsync, isProverError } from "@midnight-ntwrk/react-native-prover";
 
 import {
@@ -16,6 +17,19 @@ import {
   emptyBenchRows,
   type BenchRow,
 } from "../types/bench";
+
+// Android apps run in a sandboxed env without $HOME / $XDG_CACHE_HOME /
+// $MIDNIGHT_PP, so the prover's default cache-dir lookup fails immediately
+// with "Could not determine $HOME, $XDG_CACHE_HOME, or $MIDNIGHT_PP". Point
+// it at the app's internal files dir (writable, persisted across launches).
+// iOS Simulator inherits $HOME from the host shell so empty-string =>
+// default works there. Real iPhone will need similar plumbing once we test
+// on-device — likely via a native init call that resolves
+// NSCachesDirectory + reflects it back into MIDNIGHT_PP.
+const CACHE_DIR =
+  Platform.OS === "android"
+    ? "/data/data/com.midnightdemoapp/files/midnight-pp"
+    : "";
 
 type Action =
   | { type: "start"; k: number; startedAtMs: number }
@@ -73,11 +87,18 @@ export function useBench(initialMaxK: number = 14) {
     if (k < MIN_K || k > MAX_K) return;
     const startedAtMs = Date.now();
     dispatch({ type: "start", k, startedAtMs });
+    // Force at least one real timer tick so the "Running" state can
+    // paint before proveSync re-blocks the JS thread. `Promise.resolve()`
+    // alone is a microtask, and React's renderer doesn't run between
+    // microtasks — without this setTimeout the row goes straight from
+    // "Run" to a final number with no spinner ever visible.
+    await new Promise<void>((resolve) => setTimeout(resolve, 16));
     try {
       const result = await proveAsync(k, {
         seed: 0,
         verifyAfter: true,
         cacheKeys: true,
+        cacheDir: CACHE_DIR,
       });
       dispatch({
         type: "done",

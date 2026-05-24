@@ -65,6 +65,13 @@ uniffi = { version = "0.31", features = ["build", "tokio"] }
 # call doesn't block the FFI poll loop.
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 
+# Direct dep so we can install `ring` as the rustls default
+# crypto provider at prove() entry. Without this, the first
+# TLS handshake on Android segfaults inside aws-lc-rs's
+# jitter-entropy initialization. Matches the version that
+# wallet-core / reqwest already pull in (rustls 0.23.x).
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+
 # Logging shim — tracing is what the proofs crate uses; we
 # bridge it to whatever the platform consumer wires up (Swift
 # os.log / Android Logcat) via `tracing-subscriber` re-export.
