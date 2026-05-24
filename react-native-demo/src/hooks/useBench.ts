@@ -62,19 +62,20 @@ export function useBench(initialMaxK: number = 14) {
   // Run buttons can disable themselves to avoid double-launch.
   const sweepInFlightRef = useRef(false);
 
-  const runOne = useCallback(async (k: number) => {
-    if (sweepInFlightRef.current) return;
+  // Internal — performs one prove with no guards. Used by both
+  // the per-row Run button (via `runOne`) and the Run-all sweep
+  // (via `runAll`). The earlier version of `runOne` short-
+  // circuited when `sweepInFlightRef.current === true`, which
+  // meant the sweep — which itself sets that flag — would always
+  // skip every iteration immediately. Splitting Internal from
+  // the public guard fixes the bug.
+  const runOneInternal = useCallback(async (k: number) => {
     if (k < MIN_K || k > MAX_K) return;
-
     const startedAtMs = Date.now();
     dispatch({ type: "start", k, startedAtMs });
     try {
       const result = await proveAsync(k, {
-        // The default seed (0x42) is fine for the bench tab —
-        // the goal is reproducible timings, not nonce uniqueness.
         seed: 0,
-        // Verifier params only cover k ≤ 14; the FFI silently
-        // skips verify at higher k regardless of this flag.
         verifyAfter: true,
         cacheKeys: true,
       });
@@ -93,6 +94,15 @@ export function useBench(initialMaxK: number = 14) {
     }
   }, []);
 
+  // Public — per-row Run button. Refuses to overlap with a sweep.
+  const runOne = useCallback(
+    async (k: number) => {
+      if (sweepInFlightRef.current) return;
+      await runOneInternal(k);
+    },
+    [runOneInternal],
+  );
+
   const runAll = useCallback(
     async (upTo: number) => {
       if (sweepInFlightRef.current) return;
@@ -100,15 +110,14 @@ export function useBench(initialMaxK: number = 14) {
       try {
         for (let k = MIN_K; k <= upTo; k++) {
           // Run sequentially — every prove pegs CPU + memory at
-          // high k, so parallelising would just thrash. This
-          // matches the Dioxus wallet's behaviour.
-          await runOne(k);
+          // high k, so parallelising would just thrash.
+          await runOneInternal(k);
         }
       } finally {
         sweepInFlightRef.current = false;
       }
     },
-    [runOne],
+    [runOneInternal],
   );
 
   const reset = useCallback(() => dispatch({ type: "reset" }), []);
