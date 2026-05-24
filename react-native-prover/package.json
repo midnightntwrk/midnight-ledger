@@ -56,5 +56,13 @@
     "type": "git",
     "url": "git+https://github.com/midnightntwrk/midnight-ledger.git",
     "directory": "react-native-prover"
+  },
+  "codegenConfig": {
+    "name": "RNNativeModuleSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.midnightntwrk.reactnativeprover"
+    }
   }
 }
