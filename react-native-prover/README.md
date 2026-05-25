@@ -72,7 +72,7 @@ What's gated on `ubrn` (`cargo install uniffi-bindgen-react-native`):
 
 ## Architecture
 
-Per the [architecture doc §13](https://github.com/yshyn-iohk/midnight-ledger/blob/mobile-prototype/mobile-bench/midnight-mobile-architecture.md#13-react-native-packaging--feasibility--concrete-proposal),
+Per the [react-native-adoption doc §13](https://github.com/yshyn-iohk/midnight-ledger/blob/mobile-prototype/mobile-bench/react-native-adoption.md#13-react-native-packaging--feasibility--concrete-proposal),
 this is **Option A — UniFFI same-process on BOTH platforms.**
 
 | | Android | iOS |

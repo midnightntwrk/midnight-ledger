@@ -5151,7 +5151,7 @@ const BENCH_MIN_K: u32 = contract_benchmark::MIN_K;
 const BENCH_MAX_VERIFIABLE_K: u32 = contract_benchmark::MAX_VERIFIABLE_K;
 /// Empirically-safe default for the "Run all" upper bound on real
 /// mobile hardware. S24 Ultra OOMs on k=18 with the WebView resident
-/// (see `mobile-bench/midnight-mobile-architecture.md` §9). Desktop
+/// (see `mobile-bench/benchmark.md` §9). Desktop
 /// runs can override via the number input next to the Run button.
 const BENCH_DEFAULT_MAX_K: u32 = 17;
 
