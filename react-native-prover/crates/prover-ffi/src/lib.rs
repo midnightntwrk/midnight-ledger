@@ -233,14 +233,47 @@ pub fn prove(k: u32, opts: ProveOptions) -> Result<ProveResult, ProverError> {
     // we've observed sticking. The worker joins synchronously so
     // we don't leak threads on early returns.
     const PROVE_STACK_BYTES: usize = 16 * 1024 * 1024;
+    // Wrap the worker body in catch_unwind so a Rust panic inside
+    // the prover (typically OOM or mmap failure at high k on
+    // Android, where stderr is /dev/null) is converted into a
+    // structured error visible from JS, rather than a "worker
+    // panicked" black box. We capture the panic payload's string
+    // representation and surface it through ProveFailed.
     let handle = std::thread::Builder::new()
         .name("midnight-prover-worker".into())
         .stack_size(PROVE_STACK_BYTES)
-        .spawn(move || runtime().block_on(run_proof_with_opts(k, inner)))
+        .spawn(move || {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                runtime().block_on(run_proof_with_opts(k, inner))
+            }))
+        })
         .map_err(|e| ProverError::ProveFailed(format!("spawn prover worker: {e}")))?;
-    let result: Result<RunStats, _> = handle
-        .join()
-        .map_err(|_| ProverError::ProveFailed("prover worker panicked".to_string()))?;
+    // Outer layer: did the worker thread itself die catastrophically
+    // (impossible after catch_unwind, but the join API still returns
+    // Result so we have to handle it).
+    let panic_or_result = handle.join().map_err(|_| {
+        ProverError::ProveFailed("prover worker join failed".to_string())
+    })?;
+    // Inner layer: did catch_unwind catch a panic? If so, extract a
+    // human-readable message and surface it. Without this, an OOM
+    // or mmap failure on Android (where stderr is /dev/null and
+    // RUST_BACKTRACE isn't visible) shows up as an opaque "worker
+    // panicked" with no diagnostic.
+    let result: Result<RunStats, _> = match panic_or_result {
+        Ok(inner) => inner,
+        Err(payload) => {
+            let msg = if let Some(s) = payload.downcast_ref::<&'static str>() {
+                (*s).to_string()
+            } else if let Some(s) = payload.downcast_ref::<String>() {
+                s.clone()
+            } else {
+                "non-string panic payload".to_string()
+            };
+            return Err(ProverError::ProveFailed(format!(
+                "prover worker panicked: {msg}"
+            )));
+        }
+    };
 
     result.map(Into::into).map_err(|e| {
         // `contract_benchmark::Error` is structured but the discriminant
