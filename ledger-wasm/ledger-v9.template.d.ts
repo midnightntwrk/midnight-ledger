@@ -642,6 +642,33 @@ export class LedgerState {
   testingDistributeNight(recipient: UserAddress, amount: bigint, tblock: Date): LedgerState;
 
   /**
+   * Constructs a ledger state with the given genesis parameterisation, using
+   * the default initial parameters and an empty treasury.
+   * Allows seeding the locked and reserve
+   * NIGHT pools so that subsequent system transactions (e.g.
+   * {@link testingUnlockToTreasury}) can be exercised
+   *
+   * Use is for testing purposes only.
+   */
+  static testingFromGenesis(network_id: string, lockedPool: bigint, reservePool: bigint): LedgerState;
+
+  /**
+   * Applies an `UnlockToTreasury` system transaction, moving the given amount
+   * of Night from the locked pool into the treasury.
+   *
+   * Use is for testing purposes only.
+   */
+  testingUnlockToTreasury(amount: bigint, tblock: Date): LedgerState;
+
+  /**
+   * Applies an `UnlockToReserve` system transaction, moving the given amount
+   * of Night from the locked pool into the reserve pool.
+   *
+   * Use is for testing purposes only.
+   */
+  testingUnlockToReserve(amount: bigint, tblock: Date): LedgerState;
+
+  /**
    * The remaining size of the locked Night pool.
    */
   readonly lockedPool: bigint;

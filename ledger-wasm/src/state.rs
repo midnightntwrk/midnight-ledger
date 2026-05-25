@@ -22,7 +22,7 @@ use base_crypto::cost_model::{FixedPoint, NormalizedCost};
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use js_sys::{Array, BigInt, Date, Function, Map, Set, Uint8Array};
-use ledger::structure::{ClaimKind, OutputInstructionUnshielded};
+use ledger::structure::{ClaimKind, INITIAL_PARAMETERS, OutputInstructionUnshielded};
 use onchain_runtime_wasm::from_value_ser;
 use onchain_runtime_wasm::state::ChargedState;
 use rand::Rng;
@@ -245,6 +245,53 @@ impl LedgerState {
         );
         let (ledger, _) = ledger.apply_system_tx(&sys_tx_rewards, time)?;
 
+        Ok(LedgerState(ledger))
+    }
+
+    #[wasm_bindgen(js_name = "testingFromGenesis")]
+    pub fn testing_from_genesis(
+        network_id: String,
+        locked_pool: BigInt,
+        reserve_pool: BigInt,
+    ) -> Result<LedgerState, JsError> {
+        let locked =
+            u128::try_from(locked_pool).map_err(|_| JsError::new("locked_pool is out of range"))?;
+        let reserve = u128::try_from(reserve_pool)
+            .map_err(|_| JsError::new("reserve_pool is out of range"))?;
+        let state = ledger::structure::LedgerState::<InMemoryDB>::with_genesis_settings(
+            network_id,
+            INITIAL_PARAMETERS,
+            locked,
+            reserve,
+            0,
+        )
+        .map_err(|e| JsError::new(&format!("invalid genesis settings: {e:?}")))?;
+        Ok(LedgerState(state))
+    }
+
+    #[wasm_bindgen(js_name = "testingUnlockToTreasury")]
+    pub fn testing_unlock_to_treasury(
+        &self,
+        amount: BigInt,
+        tblock: &Date,
+    ) -> Result<LedgerState, JsError> {
+        let amount = u128::try_from(amount).map_err(|_| JsError::new("amount is out of range"))?;
+        let sys_tx = ledger::structure::SystemTransaction::UnlockToTreasury { amount };
+        let time = Timestamp::from_secs(js_date_to_seconds(tblock));
+        let (ledger, _) = self.0.apply_system_tx(&sys_tx, time)?;
+        Ok(LedgerState(ledger))
+    }
+
+    #[wasm_bindgen(js_name = "testingUnlockToReserve")]
+    pub fn testing_unlock_to_reserve(
+        &self,
+        amount: BigInt,
+        tblock: &Date,
+    ) -> Result<LedgerState, JsError> {
+        let amount = u128::try_from(amount).map_err(|_| JsError::new("amount is out of range"))?;
+        let sys_tx = ledger::structure::SystemTransaction::UnlockToReserve { amount };
+        let time = Timestamp::from_secs(js_date_to_seconds(tblock));
+        let (ledger, _) = self.0.apply_system_tx(&sys_tx, time)?;
         Ok(LedgerState(ledger))
     }
 }

@@ -34,7 +34,7 @@ import {
   ZswapChainState
 } from '@midnight-ntwrk/ledger';
 
-import { ONE_KB, Random, Static, TestResource, VERSION_HEADER } from '@/test-objects';
+import { LOCAL_TEST_NETWORK_ID, ONE_KB, Random, Static, TestResource, VERSION_HEADER } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
 import { intCell } from '@/test/utils/value-alignment';
 import { applyDoLogCall } from '@/test/utils/log-contract';
@@ -52,7 +52,7 @@ describe('Ledger API - LedgerState', () => {
    */
   test('should deserialize serialized state', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const serialized = ledgerState.serialize();
     const deserialized = LedgerState.deserialize(serialized);
 
@@ -68,7 +68,7 @@ describe('Ledger API - LedgerState', () => {
    */
   test('should not differ after serialization', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const serialized = ledgerState.serialize();
     const ledgerStateDeserialized = LedgerState.deserialize(serialized);
 
@@ -86,7 +86,7 @@ describe('Ledger API - LedgerState', () => {
    */
   test('should get undefined contract state at empty contract address', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
 
     expect(ledgerState.index(Random.contractAddress())).toBeUndefined();
     assertSerializationSuccess(ledgerState);
@@ -115,7 +115,7 @@ describe('Ledger API - LedgerState', () => {
     ]
   ])('%s(expected error:"%s")', (_, expectedError, contractAddress) => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
 
     expect(() => ledgerState.index(contractAddress)).toThrow(expectedError);
   });
@@ -128,7 +128,7 @@ describe('Ledger API - LedgerState', () => {
    * @then Should initialize with default values and proper native, fee, shielded, and unshielded token supply
    */
   test('should create blank ledger state', () => {
-    const ledgerState = LedgerState.blank('local-test');
+    const ledgerState = LedgerState.blank(LOCAL_TEST_NETWORK_ID);
 
     expect(ledgerState.dust.toString()).toEqual(new DustState().toString());
     expect(ledgerState.reservePool).toEqual(24000000000000000n);
@@ -151,7 +151,7 @@ describe('Ledger API - LedgerState', () => {
    */
   test('should create successfully', () => {
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
 
     expect(ledgerState.reservePool).toEqual(24000000000000000n);
     expect(ledgerState.blockRewardPool).toEqual(0n);
@@ -178,7 +178,7 @@ describe('Ledger API - LedgerState', () => {
     stateMap = stateMap.insert(Static.alignedValue, StateValue.newNull());
     const stateValue = new ChargedState(StateValue.newMap(stateMap));
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const contractState = ledgerState.index(contractAddress);
     const updatedLedgerState = ledgerState.updateIndex(contractAddress, stateValue, new Map());
 
@@ -204,7 +204,7 @@ describe('Ledger API - LedgerState', () => {
     const stateMap = new StateMap();
     const stateValue = new ChargedState(StateValue.newMap(stateMap));
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const updatedLedgerState = ledgerState.updateIndex(contractAddress, stateValue, new Map());
 
     expect(updatedLedgerState.index(contractAddress)?.data.state.asMap()?.keys().length).toEqual(0);
@@ -224,7 +224,7 @@ describe('Ledger API - LedgerState', () => {
     stateMap = stateMap.insert(Static.alignedValue, StateValue.newNull());
     const stateValue = new ChargedState(StateValue.newMap(stateMap));
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const updatedLedgerState = ledgerState.updateIndex(contractAddress, stateValue, new Map());
 
     expect(updatedLedgerState.index(contractAddress)?.data.state.asMap()?.keys().length).toEqual(1);
@@ -247,7 +247,7 @@ describe('Ledger API - LedgerState', () => {
     stateMap = stateMap.insert(Static.alignedValue, StateValue.newNull());
     const stateValue = new ChargedState(StateValue.newMap(stateMap));
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const updatedLedgerState = ledgerState.updateIndex(contractAddress, stateValue, new Map());
 
     let newStateMap = new StateMap();
@@ -284,7 +284,7 @@ describe('Ledger API - LedgerState', () => {
     stateMap = stateMap.insert(alignedValue, StateValue.newNull());
     const stateValue = new ChargedState(StateValue.newMap(stateMap));
     const zswapChainState = new ZswapChainState();
-    const ledgerState = new LedgerState('local-test', zswapChainState);
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, zswapChainState);
     const updatedLedgerState = ledgerState.updateIndex(contractAddress, stateValue, new Map());
     const serialized = updatedLedgerState.serialize();
     const deserialized = LedgerState.deserialize(serialized);
@@ -307,9 +307,14 @@ describe('Ledger API - LedgerState', () => {
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(Static.calcBlockTime(new Date(0), 50)).addDeploy(contractDeploy);
     const unprovenOfferGuaranteed = Random.unprovenOfferFromOutput();
-    const unprovenTransaction = Transaction.fromParts('local-test', unprovenOfferGuaranteed, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      unprovenOfferGuaranteed,
+      undefined,
+      intent
+    );
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const blockContext = Static.blockContext(new Date(0));
 
     const strictness = new WellFormedStrictness();
@@ -359,7 +364,12 @@ describe('Ledger API - LedgerState', () => {
     const intent2 = Intent.new(Static.calcBlockTime(new Date(0), 50)).addCall(contractCallPrototype);
 
     const unprovenOfferGuaranteed2 = Random.unprovenOfferFromOutput();
-    const unprovenTransaction2 = Transaction.fromParts('local-test', unprovenOfferGuaranteed2, undefined, intent2);
+    const unprovenTransaction2 = Transaction.fromParts(
+      LOCAL_TEST_NETWORK_ID,
+      unprovenOfferGuaranteed2,
+      undefined,
+      intent2
+    );
     const proofErasedTransaction2 = unprovenTransaction2.eraseProofs();
     const verifiedTransaction2 = proofErasedTransaction2.wellFormed(ledgerStateAfter, strictness, new Date(0));
     const [ledgerStateAfter2, txResult2] = ledgerStateAfter.apply(
@@ -388,9 +398,9 @@ describe('Ledger API - LedgerState', () => {
     contractState.setOperation('testOperation', contractOperation);
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(new Date(Date.now())).addDeploy(contractDeploy);
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
 
     const blockContext = Static.blockContext(new Date(Date.now() - 5_000));
 
@@ -428,9 +438,9 @@ describe('Ledger API - LedgerState', () => {
     contractState.setOperation('testOperation', contractOperation);
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(Static.calcBlockTime(now, -1)).addDeploy(contractDeploy);
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const blockContext = Static.blockContext(now);
 
     const strictness = new WellFormedStrictness();
@@ -464,9 +474,9 @@ describe('Ledger API - LedgerState', () => {
     contractState.setOperation('testOperation', contractOperation);
     const contractDeploy = new ContractDeploy(contractState);
     const intent = Intent.new(new Date((GLOBAL_TTL + 1) * 1000)).addDeploy(contractDeploy);
-    const unprovenTransaction = Transaction.fromParts('local-test', undefined, undefined, intent);
+    const unprovenTransaction = Transaction.fromParts(LOCAL_TEST_NETWORK_ID, undefined, undefined, intent);
     const proofErasedTransaction = unprovenTransaction.eraseProofs();
-    const ledgerState = new LedgerState('local-test', new ZswapChainState());
+    const ledgerState = new LedgerState(LOCAL_TEST_NETWORK_ID, new ZswapChainState());
     const blockContext = Static.blockContext(new Date(0));
 
     const strictness = new WellFormedStrictness();
@@ -494,7 +504,7 @@ describe('Ledger API - LedgerState', () => {
    * @then Should return 0 for unclaimed block rewards
    */
   test('should return bigint for unclaimed block rewards', () => {
-    const ledgerState = LedgerState.blank('local-test');
+    const ledgerState = LedgerState.blank(LOCAL_TEST_NETWORK_ID);
     const userAddress = Random.userAddress();
 
     const unclaimedAmount = ledgerState.unclaimedBlockRewards(userAddress);
@@ -533,6 +543,108 @@ describe('Ledger API - LedgerState', () => {
 
       expect(result.error).toBeUndefined();
       expect(result.type).toBe('success');
+    });
+  });
+
+  describe('genesis seeding and locked-pool system transactions', () => {
+    const MAX_SUPPLY = 24_000_000_000_000_000n;
+    const LOCKED = 500_000n;
+    const RESERVE = MAX_SUPPLY - LOCKED;
+    const EPOCH = new Date(0);
+
+    /**
+     * Test seeding locked and reserve pools via testingFromGenesis.
+     *
+     * @given lockedPool=500_000 and reservePool=MAX_SUPPLY-500_000
+     * @when Constructing via testingFromGenesis
+     * @then Pools should reflect the seeded amounts and treasury is empty
+     */
+    test('testingFromGenesis seeds locked and reserve pools', () => {
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+
+      expect(ledgerState.lockedPool).toEqual(LOCKED);
+      expect(ledgerState.reservePool).toEqual(RESERVE);
+      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(0n);
+      expect(ledgerState.blockRewardPool).toEqual(0n);
+    });
+
+    /**
+     * Test that testingFromGenesis rejects pools violating the night supply invariant.
+     *
+     * @given lockedPool and reservePool that do not sum to MAX_SUPPLY
+     * @when Constructing via testingFromGenesis
+     * @then Should throw an invariant violation
+     */
+    test('testingFromGenesis rejects pools violating night supply invariant', () => {
+      expect(() => LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE - 1n)).toThrow(
+        /invalid genesis settings/
+      );
+    });
+
+    /**
+     * Test UnlockToTreasury moves funds from locked pool to treasury.
+     *
+     * @given A state seeded with lockedPool=500_000
+     * @when Applying testingUnlockToTreasury(200_000)
+     * @then lockedPool decreases by 200_000 and treasury native balance increases by 200_000
+     */
+    test('testingUnlockToTreasury moves funds from locked pool to treasury', () => {
+      const amount = 200_000n;
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+
+      const after = ledgerState.testingUnlockToTreasury(amount, EPOCH);
+
+      expect(after.lockedPool).toEqual(LOCKED - amount);
+      expect(after.treasuryBalance(nativeToken())).toEqual(amount);
+      expect(after.reservePool).toEqual(RESERVE);
+    });
+
+    /**
+     * Test UnlockToTreasury rejection when amount exceeds locked pool.
+     *
+     * @given A state seeded with lockedPool=500_000
+     * @when Applying testingUnlockToTreasury(LOCKED + 1)
+     * @then Should throw without mutating state
+     */
+    test('testingUnlockToTreasury rejects amount exceeding locked pool', () => {
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+
+      expect(() => ledgerState.testingUnlockToTreasury(LOCKED + 1n, EPOCH)).toThrow();
+      expect(ledgerState.lockedPool).toEqual(LOCKED);
+      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(0n);
+    });
+
+    /**
+     * Test UnlockToReserve moves funds from locked pool to reserve pool.
+     *
+     * @given A state seeded with lockedPool=500_000
+     * @when Applying testingUnlockToReserve(200_000)
+     * @then lockedPool decreases by 200_000 and reservePool increases by 200_000
+     */
+    test('testingUnlockToReserve moves funds from locked pool to reserve pool', () => {
+      const amount = 200_000n;
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+
+      const after = ledgerState.testingUnlockToReserve(amount, EPOCH);
+
+      expect(after.lockedPool).toEqual(LOCKED - amount);
+      expect(after.reservePool).toEqual(RESERVE + amount);
+      expect(after.treasuryBalance(nativeToken())).toEqual(0n);
+    });
+
+    /**
+     * Test UnlockToReserve rejection when amount exceeds locked pool.
+     *
+     * @given A state seeded with lockedPool=500_000
+     * @when Applying testingUnlockToReserve(LOCKED + 1)
+     * @then Should throw without mutating state
+     */
+    test('testingUnlockToReserve rejects amount exceeding locked pool', () => {
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+
+      expect(() => ledgerState.testingUnlockToReserve(LOCKED + 1n, EPOCH)).toThrow();
+      expect(ledgerState.lockedPool).toEqual(LOCKED);
+      expect(ledgerState.reservePool).toEqual(RESERVE);
     });
   });
 });
