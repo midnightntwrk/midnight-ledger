@@ -174,6 +174,15 @@ pub struct Wallet {
     /// can return canned `SubmitResult`s without binding a WS
     /// connection.
     node: Option<Arc<dyn chain::NodeClient>>,
+    /// Injected prover. When `None` (the default), the
+    /// prove-stage of every chain-op stream selects between
+    /// `LocalProver` and `HttpProver` based on the wallet's
+    /// `proof_server_url`. When `Some`, the injected prover is
+    /// used unconditionally — Task 1.5.D's `stub_wallet` plugs in
+    /// a `StubProver` that returns a canned `ProvenTx` without
+    /// running halo2 (which would dwarf the rest of the pipeline
+    /// in test wall-clock terms).
+    prover: Option<Arc<dyn chain::Prover>>,
 }
 
 impl Wallet {
@@ -190,6 +199,7 @@ impl Wallet {
             js_bridge: None,
             indexer: None,
             node: None,
+            prover: None,
         }
     }
 
@@ -268,6 +278,34 @@ impl Wallet {
         match self.node.clone() {
             Some(n) => Ok(n),
             None => Ok(Arc::new(crate::SubxtNodeClient::connect(self.network).await?)),
+        }
+    }
+
+    /// Builder: inject a `Prover` trait object. When set, the
+    /// prove-stage of every chain-op stream uses the injected
+    /// prover unconditionally — `proof_server_url` is ignored.
+    /// Used by Task 1.5.D's `stub_wallet` to short-circuit halo2
+    /// in tests.
+    pub fn with_prover(mut self, prover: Arc<dyn chain::Prover>) -> Self {
+        self.prover = Some(prover);
+        self
+    }
+
+    /// Currently-configured prover trait object, if any. `None`
+    /// means the wallet picks between `LocalProver` and
+    /// `HttpProver` based on `proof_server_url`.
+    pub fn prover(&self) -> Option<Arc<dyn chain::Prover>> {
+        self.prover.clone()
+    }
+
+    /// Resolve the active prover: the injected one if any, else
+    /// `chain::default_prover(self.proof_server_url.as_deref())`
+    /// (which is `LocalProver` when no URL is set and `HttpProver`
+    /// when one is).
+    fn resolve_prover(&self) -> Arc<dyn chain::Prover> {
+        match self.prover.clone() {
+            Some(p) => p,
+            None => chain::default_prover(self.proof_server_url.as_deref()),
         }
     }
 
@@ -649,6 +687,7 @@ impl Wallet {
         let dust_syncer = self.dust_syncer.clone();
         let indexer_dep = self.indexer.clone();
         let node_dep = self.node.clone();
+        let prover_dep = self.prover.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
@@ -657,6 +696,7 @@ impl Wallet {
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
+            if let Some(p) = prover_dep.clone() { wallet = wallet.with_prover(p); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -768,11 +808,12 @@ impl Wallet {
 
             // 4. Proving
             yield crate::WizardStage::Proving;
-            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match match proof_server_url.clone() {
-                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
-                None => crate::tx::prove::prove(balanced, prove_rng).await,
-            } {
+            // Trait-routed: real-deps wallets resolve to
+            // `LocalProver` / `HttpProver` based on
+            // `proof_server_url` (the pre-refactor selection
+            // logic, now inside `resolve_prover`); test wallets
+            // can inject a stub via `Wallet::with_prover`.
+            let proven = match wallet.resolve_prover().prove(balanced).await {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };
@@ -837,6 +878,7 @@ impl Wallet {
         let dust_syncer = self.dust_syncer.clone();
         let indexer_dep = self.indexer.clone();
         let node_dep = self.node.clone();
+        let prover_dep = self.prover.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
@@ -845,6 +887,7 @@ impl Wallet {
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
+            if let Some(p) = prover_dep.clone() { wallet = wallet.with_prover(p); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -936,11 +979,12 @@ impl Wallet {
 
             // 4. Proving
             yield crate::WizardStage::Proving;
-            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match match proof_server_url.clone() {
-                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
-                None => crate::tx::prove::prove(balanced, prove_rng).await,
-            } {
+            // Trait-routed: real-deps wallets resolve to
+            // `LocalProver` / `HttpProver` based on
+            // `proof_server_url` (the pre-refactor selection
+            // logic, now inside `resolve_prover`); test wallets
+            // can inject a stub via `Wallet::with_prover`.
+            let proven = match wallet.resolve_prover().prove(balanced).await {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };
@@ -1010,6 +1054,7 @@ impl Wallet {
         let js_bridge_handle = self.js_bridge.clone();
         let indexer_dep = self.indexer.clone();
         let node_dep = self.node.clone();
+        let prover_dep = self.prover.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
@@ -1018,6 +1063,7 @@ impl Wallet {
             if let Some(b) = js_bridge_handle.clone() { wallet = wallet.with_js_bridge(b); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
+            if let Some(p) = prover_dep.clone() { wallet = wallet.with_prover(p); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -1192,11 +1238,12 @@ impl Wallet {
 
             // 4. Proving
             yield crate::WizardStage::Proving;
-            let prove_rng = <rand::rngs::StdRng as rand::SeedableRng>::from_entropy();
-            let proven = match match proof_server_url.clone() {
-                Some(url) => crate::tx::prove::prove_via_http(balanced, prove_rng, url).await,
-                None => crate::tx::prove::prove(balanced, prove_rng).await,
-            } {
+            // Trait-routed: real-deps wallets resolve to
+            // `LocalProver` / `HttpProver` based on
+            // `proof_server_url` (the pre-refactor selection
+            // logic, now inside `resolve_prover`); test wallets
+            // can inject a stub via `Wallet::with_prover`.
+            let proven = match wallet.resolve_prover().prove(balanced).await {
                 Ok(p) => p,
                 Err(e) => { yield crate::WizardStage::Failed(format!("prove: {e}")); return; }
             };

@@ -132,7 +132,6 @@ impl Prover for HttpProver {
 /// → `HttpProver`. Used by [`crate::Wallet::with_deps`] and the
 /// in-stream fallback paths so the selection logic is in one
 /// place.
-#[allow(dead_code)] // Wired by Wallet::with_deps in Task 1.5.B B.5+
 pub(crate) fn default_prover(proof_server_url: Option<&str>) -> Arc<dyn Prover> {
     match proof_server_url {
         Some(url) => Arc::new(HttpProver::new(url.to_owned())),
