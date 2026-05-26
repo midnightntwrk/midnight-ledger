@@ -26,7 +26,7 @@ mod error;
 mod id;
 mod types;
 
-pub use bootstrap::{bootstrap_did_with_keys, BootstrapError, BootstrappedDid};
+pub use bootstrap::{bootstrap_did_with_keys, derive_keys, BootstrapError, BootstrappedDid};
 pub use error::DidError;
 pub use id::{CONTRACT_ADDRESS_LEN, ContractAddressBytes, DidId, DidIdError};
 pub use types::{

@@ -34,7 +34,7 @@ pub use did::{
     DidIdError, KeyType, PublicKeyJwk, ResolvedDid, Service, ServiceEndpoint, VerificationMethod,
     VerificationMethodRef, VerificationMethodRelation, VerificationMethodType,
 };
-pub use crate::did::{bootstrap_did_with_keys, BootstrapError, BootstrappedDid};
+pub use crate::did::{bootstrap_did_with_keys, derive_keys, BootstrapError, BootstrappedDid};
 
 /// Names of every DID circuit whose verifier key is bundled and
 /// loadable via [`Wallet::load_did_circuit`].

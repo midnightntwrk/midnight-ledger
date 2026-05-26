@@ -40,7 +40,8 @@ pub enum BootstrapError {
     MissingRelation(&'static str),
 }
 
-pub(crate) fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
+/// Public so the `did-bootstrap` CLI can re-derive the secrets for the output keystore without widening the `SecretStorage` trait with an `export_secret` method.
+pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     let h = Hkdf::<Sha256>::new(Some(b"midnight-identity-centre-v1"), seed);
     let mut ed = [0u8; 32];
     let mut jb = [0u8; 32];
