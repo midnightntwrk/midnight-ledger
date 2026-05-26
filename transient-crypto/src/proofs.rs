@@ -24,7 +24,7 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightCircuit, MidnightPK, MidnightVK, Relation};
+use midnight_zk_stdlib::{MidnightPK, MidnightVK, Relation, optimal_k};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
@@ -51,6 +51,7 @@ use storage_core::arena::ArenaKey;
 use storage_core::db::DB;
 use storage_core::storable::Loader;
 use zeroize::{Zeroize, ZeroizeOnDrop};
+use derive_where::derive_where;
 
 /// A provider of prover parameters.
 pub trait ParamsProverProvider {
@@ -136,20 +137,16 @@ pub struct Proof(pub Vec<u8>);
 tag_enforcement_test!(Proof);
 
 /// A prover key, used for creating proofs.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
+#[derive_where(Debug; T::ProverKey)]
 pub struct ProverKey<T: Zkir>(Arc<Mutex<InnerProverKey<T>>>);
-
-impl<T: Zkir> From<MidnightPK<T>> for ProverKey<T> {
-    fn from(pk: MidnightPK<T>) -> Self {
-        ProverKey(Arc::new(Mutex::new(InnerProverKey::Initialized(Arc::new(
-            pk,
-        )))))
-    }
-}
 
 /// An intermediate representation for Midnight's circuits.
 #[allow(async_fn_in_trait)]
-pub trait Zkir: Relation + Any + Send + Sync + Debug {
+pub trait Zkir: Any + Send + Sync + Debug + Sized {
+    /// TODO
+    type ProverKey: Send + Sync;
+
     /// Check that a proof preimage satisfies the circuit
     ///
     /// Returns which outputs were skipped in the proof preimage, and how many
@@ -179,33 +176,39 @@ pub trait Zkir: Relation + Any + Send + Sync + Debug {
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError>;
 
     /// Returns the k value for this circuit
-    fn k(&self) -> u8 {
-        MidnightCircuit::from_relation(self).min_k() as u8
-    }
+    fn k(&self) -> u8;
+    // TODO: move to point of impl
+    //{
+    //    optimal_k(self) as u8
+    //}
 
     /// Performs key generation on this circuit, outputting the verifier key
     async fn keygen_vk(
         &self,
         params: &impl ParamsProverProvider,
-    ) -> Result<VerifierKey, anyhow::Error> {
-        use midnight_zk_stdlib::setup_vk;
-        let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
+    ) -> Result<VerifierKey, anyhow::Error>;
+    // TODO: move to point of impl
+    //{
+    //    use midnight_zk_stdlib::setup_vk;
+    //    let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
 
-        Ok(vk)
-    }
+    //    Ok(vk)
+    //}
 
     /// Performs key generation on this circuit, outputting the prover/verifier
     /// key pair
     async fn keygen(
         &self,
         params: &impl ParamsProverProvider,
-    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-        use midnight_zk_stdlib::{setup_pk, setup_vk};
-        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
-        let pk = setup_pk(self, &vk);
+    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error>;
+    // TODO: move to point of impl
+    //{
+    //    use midnight_zk_stdlib::{setup_pk, setup_vk};
+    //    let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+    //    let pk = setup_pk(self, &vk);
 
-        Ok((ProverKey::from(pk), VerifierKey::from(vk)))
-    }
+    //    Ok((ProverKey::from(pk), VerifierKey::from(vk)))
+    //}
 
     /// Loads IR from a tagged serialization. Separated from `Deserializable` to allow for
     /// backwards-compatible deserialization of old variants.
@@ -214,6 +217,11 @@ pub trait Zkir: Relation + Any + Send + Sync + Debug {
     /// Loads a prover key from a tagged serialization. Separated from `Deserializable` to allow
     /// for backwards-compatible deserialization of old variants.
     fn load_prover_key_from_tagged(reader: impl Read + Seek) -> io::Result<ProverKey<Self>>;
+
+    /// TODO
+    fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey>;
+    /// TODO
+    fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()>;
 }
 
 impl<T: Zkir> PartialEq for ProverKey<T> {
@@ -242,7 +250,7 @@ impl<T: Zkir> Distribution<ProverKey<T>> for Standard {
 pub(crate) enum InnerProverKey<T: Zkir> {
     Uninitialized(Vec<u8>),
     Invalid(Vec<u8>),
-    Initialized(Arc<MidnightPK<T>>),
+    Initialized(Arc<T::ProverKey>),
 }
 
 impl<T: Zkir + Tagged> Tagged for ProverKey<T> {
@@ -281,8 +289,15 @@ impl<T: Zkir> InnerProverKey<T> {
 }
 
 impl<T: Zkir> ProverKey<T> {
+    /// TODO
+    pub fn from_raw(raw: T::ProverKey) -> Self {
+        ProverKey(Arc::new(Mutex::new(InnerProverKey::Initialized(Arc::new(
+            raw,
+        )))))
+    }
+
     /// Initializes the lazy prover key
-    pub fn init(&self) -> Result<Arc<MidnightPK<T>>, ProvingError> {
+    pub fn init(&self) -> Result<Arc<T::ProverKey>, ProvingError> {
         let mut mutex = self.0.lock().expect("mutex is not poisoned");
         mutex.try_cache();
         let data = match &*mutex {
@@ -295,9 +310,10 @@ impl<T: Zkir> ProverKey<T> {
             InnerProverKey::Uninitialized(data) => data.clone(),
         };
         let inner_reader = &mut &data[..];
+        // TODO: Probably should move the gzip part *into* the trait impl `read_raw_pk`.
         let mut reader = flate2::read::GzDecoder::new(inner_reader);
         let read_inner = |reader| {
-            let pk = MidnightPK::<T>::read(reader, SerdeFormat::RawBytesUnchecked)?;
+            let pk = T::read_raw_pk(reader)?;
             Ok(pk)
         };
         let res: Result<_, ProvingError> = read_inner(&mut reader);
@@ -325,11 +341,12 @@ impl<T: Zkir> ProverKey<T> {
                 Ok(())
             }
             InnerProverKey::Initialized(key) => {
+                // TODO: Move the gzip stuff into the trait impl
                 let mut writer = flate2::write::GzEncoder::new(
                     writer,
                     flate2::Compression::new(PK_COMPRESSION_LEVEL),
                 );
-                key.write(&mut writer, SerdeFormat::RawBytesUnchecked)
+                T::write_raw_pk(&mut writer, key)
             }
         }
     }
@@ -449,6 +466,7 @@ struct DummyRelation;
 // in the verifier key, and use that for deserializing, but those API endpoints
 // do not currently exist in midnight-circuits.
 impl Relation for DummyRelation {
+    type Error = midnight_proofs::plonk::Error;
     type Instance = Vec<outer::Scalar>;
     type Witness = ();
     fn format_instance(

@@ -325,6 +325,7 @@ struct TestIr {
 }
 
 impl Relation for TestIr {
+    type Error = midnight_proofs::plonk::Error;
     type Instance = Vec<Fr>;
     type Witness = Self;
     fn format_instance(
