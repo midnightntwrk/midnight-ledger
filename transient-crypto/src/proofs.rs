@@ -144,7 +144,7 @@ pub struct ProverKey<T: Zkir>(Arc<Mutex<InnerProverKey<T>>>);
 /// An intermediate representation for Midnight's circuits.
 #[allow(async_fn_in_trait)]
 pub trait Zkir: Any + Send + Sync + Debug + Sized {
-    /// TODO
+    /// The key type used for proving
     type ProverKey: Send + Sync;
 
     /// Check that a proof preimage satisfies the circuit
@@ -177,23 +177,12 @@ pub trait Zkir: Any + Send + Sync + Debug + Sized {
 
     /// Returns the k value for this circuit
     fn k(&self) -> u8;
-    // TODO: move to point of impl
-    //{
-    //    optimal_k(self) as u8
-    //}
 
     /// Performs key generation on this circuit, outputting the verifier key
     async fn keygen_vk(
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error>;
-    // TODO: move to point of impl
-    //{
-    //    use midnight_zk_stdlib::setup_vk;
-    //    let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
-
-    //    Ok(vk)
-    //}
 
     /// Performs key generation on this circuit, outputting the prover/verifier
     /// key pair
@@ -201,14 +190,6 @@ pub trait Zkir: Any + Send + Sync + Debug + Sized {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error>;
-    // TODO: move to point of impl
-    //{
-    //    use midnight_zk_stdlib::{setup_pk, setup_vk};
-    //    let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
-    //    let pk = setup_pk(self, &vk);
-
-    //    Ok((ProverKey::from(pk), VerifierKey::from(vk)))
-    //}
 
     /// Loads IR from a tagged serialization. Separated from `Deserializable` to allow for
     /// backwards-compatible deserialization of old variants.
@@ -262,7 +243,6 @@ impl<T: Zkir + Tagged> Tagged for ProverKey<T> {
     }
 }
 
-const PK_COMPRESSION_LEVEL: u32 = 6;
 const PK_CACHE_SIZE: usize = 5;
 
 lazy_static! {
@@ -309,14 +289,12 @@ impl<T: Zkir> ProverKey<T> {
             }
             InnerProverKey::Uninitialized(data) => data.clone(),
         };
-        let inner_reader = &mut &data[..];
-        // TODO: Probably should move the gzip part *into* the trait impl `read_raw_pk`.
-        let mut reader = flate2::read::GzDecoder::new(inner_reader);
-        let read_inner = |reader| {
-            let pk = T::read_raw_pk(reader)?;
+        let mut inner_reader = &mut &data[..];
+        let read_inner = |inner_reader| {
+            let pk = T::read_raw_pk(inner_reader)?;
             Ok(pk)
         };
-        let res: Result<_, ProvingError> = read_inner(&mut reader);
+        let res: Result<_, ProvingError> = read_inner(&mut inner_reader);
         match res {
             Ok(pk) => {
                 let key = Arc::new(pk);
@@ -341,11 +319,6 @@ impl<T: Zkir> ProverKey<T> {
                 Ok(())
             }
             InnerProverKey::Initialized(key) => {
-                // TODO: Move the gzip stuff into the trait impl
-                let mut writer = flate2::write::GzEncoder::new(
-                    writer,
-                    flate2::Compression::new(PK_COMPRESSION_LEVEL),
-                );
                 T::write_raw_pk(&mut writer, key)
             }
         }

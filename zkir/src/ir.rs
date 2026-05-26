@@ -35,6 +35,8 @@ use transient_crypto::proofs::{
     VerifierKey, Zkir,
 };
 
+const PK_COMPRESSION_LEVEL: u32 = 6;
+
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
@@ -151,8 +153,9 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
-        let vk =
-            VerifierKey::from(midnight_zk_stdlib::setup_vk(params.get_params(self.k()).await?.as_ref(), self));
+        use midnight_zk_stdlib::setup_vk;
+        let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
+
         Ok(vk)
     }
 
@@ -160,16 +163,23 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-        let vk = midnight_zk_stdlib::setup_vk(params.get_params(self.k()).await?.as_ref(), self);
-        let pk = midnight_zk_stdlib::setup_pk(self, &vk);
-        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+       use midnight_zk_stdlib::{setup_pk, setup_vk};
+       let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+       let pk = setup_pk(self, &vk);
+
+       Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
     }
 
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
+        let mut reader = flate2::read::GzDecoder::new(reader);
         MidnightPK::<Self>::read(&mut { reader }, SerdeFormat::RawBytesUnchecked)
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
+        let mut writer = flate2::write::GzEncoder::new(
+            writer,
+            flate2::Compression::new(PK_COMPRESSION_LEVEL),
+        );
         pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
     }
 
