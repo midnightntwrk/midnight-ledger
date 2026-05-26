@@ -28,6 +28,7 @@ pub mod test_support;
 mod tx;
 mod unshielded;
 mod wallet;
+pub mod vc_store;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
@@ -81,3 +82,4 @@ pub use did::deploy::{testing_deploy_state_with_circuits_hex, testing_initial_de
 pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};
+pub use vc_store::{StoredVc, VcMetadata, VcOpening, VcStore};
