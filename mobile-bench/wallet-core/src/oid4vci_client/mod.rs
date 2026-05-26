@@ -11,8 +11,12 @@
 //!    the credential endpoint, parses the VC + openings, and
 //!    hands them to `vc_store` atomically.
 
+mod credential;
 mod offer;
 mod token;
 
+pub use credential::{
+    request_credential, CredentialBody, CredentialFlowError, IssuedVc, OpeningWire,
+};
 pub use offer::{parse_offer_url, CredentialOffer, Grants, Oid4vciParseError, PreAuthorized};
 pub use token::{request_token, Oid4vciTokenError, TokenResponse};
