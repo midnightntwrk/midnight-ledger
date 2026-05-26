@@ -3,10 +3,10 @@
 use std::path::Path;
 use std::sync::Arc;
 
-use redb::Database;
+use redb::{Database, ReadableTable};
 
-use crate::vc_store::tables::{VCS, VC_OPENINGS, VC_METADATA};
-use crate::vc_store::types::StoredVc;
+use crate::vc_store::tables::{VCS, VC_OPENINGS, VC_METADATA, opening_key};
+use crate::vc_store::types::{StoredVc, VcOpening, VcMetadata};
 
 #[derive(Debug, thiserror::Error)]
 pub enum VcStoreError {
@@ -59,6 +59,83 @@ impl VcStore {
             None => Ok(None),
         }
     }
+
+    pub fn insert_opening(&self, op: &VcOpening) -> Result<(), VcStoreError> {
+        let wtx = self.db.begin_write()?;
+        {
+            let mut t = wtx.open_table(VC_OPENINGS)?;
+            let key = opening_key(&op.vc_uri, &op.claim_path);
+            t.insert(key.as_str(), serde_cbor::to_vec(op)?)?;
+        }
+        wtx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_opening(&self, vc_uri: &str, claim_path: &str)
+        -> Result<Option<VcOpening>, VcStoreError>
+    {
+        let rtx = self.db.begin_read()?;
+        let t = rtx.open_table(VC_OPENINGS)?;
+        let key = opening_key(vc_uri, claim_path);
+        match t.get(key.as_str())? {
+            Some(g) => Ok(Some(serde_cbor::from_slice(&g.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    pub fn update_metadata(&self, vc_uri: &str, f: impl FnOnce(&mut VcMetadata))
+        -> Result<(), VcStoreError>
+    {
+        let wtx = self.db.begin_write()?;
+        let mut md = {
+            let t = wtx.open_table(VC_METADATA)?;
+            match t.get(vc_uri)? {
+                Some(g) => serde_cbor::from_slice::<VcMetadata>(&g.value())?,
+                None => VcMetadata { vc_uri: vc_uri.into(), ..Default::default() },
+            }
+        };
+        f(&mut md);
+        {
+            let mut t = wtx.open_table(VC_METADATA)?;
+            t.insert(vc_uri, serde_cbor::to_vec(&md)?)?;
+        }
+        wtx.commit()?;
+        Ok(())
+    }
+
+    pub fn get_metadata(&self, vc_uri: &str)
+        -> Result<Option<VcMetadata>, VcStoreError>
+    {
+        let rtx = self.db.begin_read()?;
+        let t = rtx.open_table(VC_METADATA)?;
+        match t.get(vc_uri)? {
+            Some(g) => Ok(Some(serde_cbor::from_slice(&g.value())?)),
+            None => Ok(None),
+        }
+    }
+
+    /// Returns all VCs sorted by `VcMetadata.display_order` ascending.
+    /// VCs without metadata sort last (display_order = u32::MAX).
+    pub fn list_ordered(&self) -> Result<Vec<StoredVc>, VcStoreError> {
+        let rtx = self.db.begin_read()?;
+        let vcs_t = rtx.open_table(VCS)?;
+        let md_t = rtx.open_table(VC_METADATA)?;
+        let mut rows: Vec<(u32, StoredVc)> = Vec::new();
+        for entry in vcs_t.iter()? {
+            let (k, v) = entry?;
+            let vc: StoredVc = serde_cbor::from_slice(&v.value())?;
+            let order = match md_t.get(k.value())? {
+                Some(g) => {
+                    let md: VcMetadata = serde_cbor::from_slice(&g.value())?;
+                    md.display_order
+                }
+                None => u32::MAX,
+            };
+            rows.push((order, vc));
+        }
+        rows.sort_by_key(|(o, _)| *o);
+        Ok(rows.into_iter().map(|(_, vc)| vc).collect())
+    }
 }
 
 #[cfg(test)]
@@ -97,5 +174,57 @@ mod tests {
     fn get_missing_returns_none() {
         let (store, _g) = open_store();
         assert!(store.get_vc("urn:uuid:nope").expect("get").is_none());
+    }
+
+    #[test]
+    fn opening_round_trips() {
+        let (store, _g) = open_store();
+        let op = VcOpening {
+            vc_uri: "urn:uuid:abc".into(),
+            claim_path: "/credentialSubject/dateOfBirth".into(),
+            plaintext: b"1985-01-01".to_vec(),
+            opening: vec![9, 8, 7],
+        };
+        store.insert_opening(&op).unwrap();
+        let back = store.get_opening("urn:uuid:abc", "/credentialSubject/dateOfBirth")
+            .unwrap().unwrap();
+        assert_eq!(back.plaintext, op.plaintext);
+        assert_eq!(back.opening, op.opening);
+    }
+
+    #[test]
+    fn metadata_update_then_read() {
+        let (store, _g) = open_store();
+        let vc = sample_vc();
+        store.insert_vc(&vc).unwrap();
+        store.update_metadata(&vc.vc_uri, |m| {
+            m.display_order = 3;
+            m.last_verified_ms = Some(42);
+            m.last_verify_outcome = Some("Valid".into());
+        }).unwrap();
+        let md = store.get_metadata(&vc.vc_uri).unwrap().expect("present");
+        assert_eq!(md.display_order, 3);
+        assert_eq!(md.last_verified_ms, Some(42));
+    }
+
+    #[test]
+    fn list_ordered_returns_by_display_order() {
+        let (store, _g) = open_store();
+        for (i, uri) in ["urn:b", "urn:a", "urn:c"].iter().enumerate() {
+            store.insert_vc(&StoredVc {
+                vc_uri: (*uri).into(),
+                issuer_did: "did:midnight:i".into(),
+                holder_did: "did:midnight:h".into(),
+                format: "f".into(),
+                body: vec![i as u8],
+                issued_at_ms: i as u64,
+            }).unwrap();
+            // Note: "urn:a" gets order 2, "urn:b" order 0, "urn:c" order 1 below
+            let order = match *uri { "urn:b" => 0u32, "urn:c" => 1, "urn:a" => 2, _ => unreachable!() };
+            store.update_metadata(uri, |m| m.display_order = order).unwrap();
+        }
+        let list = store.list_ordered().unwrap();
+        let uris: Vec<&str> = list.iter().map(|v| v.vc_uri.as_str()).collect();
+        assert_eq!(uris, vec!["urn:b", "urn:c", "urn:a"]);
     }
 }
