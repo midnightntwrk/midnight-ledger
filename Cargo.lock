@@ -11339,6 +11339,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "url",
+ "urlencoding",
  "uuid",
  "wiremock",
  "zeroize",

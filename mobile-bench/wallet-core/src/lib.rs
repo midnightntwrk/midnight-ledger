@@ -86,3 +86,4 @@ pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};
 pub use vc_store::{StoredVc, VcMetadata, VcOpening, VcStore};
 pub use did_auth::{sign_for_authentication, DidAuthError};
+pub use oid4vp_client::{run_authentication as oid4vp_run_authentication, AuthFlowError};
