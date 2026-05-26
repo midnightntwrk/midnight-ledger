@@ -130,6 +130,7 @@ zeroize = { version = "1.7", features = ["zeroize_derive"] }
 tokio = { version = "1.46.1", features = ["full"] }
 tracing-subscriber = "0.3"
 tempfile = "3"
+wiremock = "0.6"
 
 # `did-bootstrap` CLI — wraps `bootstrap_did_with_keys` so shell
 # scripts (issuer bootstrap, BDD harness setup, demo recovery) can
