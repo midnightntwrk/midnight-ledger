@@ -12,5 +12,7 @@
 //!    hands them to `vc_store` atomically.
 
 mod offer;
+mod token;
 
 pub use offer::{parse_offer_url, CredentialOffer, Grants, Oid4vciParseError, PreAuthorized};
+pub use token::{request_token, Oid4vciTokenError, TokenResponse};
