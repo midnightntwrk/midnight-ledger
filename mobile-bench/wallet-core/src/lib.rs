@@ -29,6 +29,7 @@ mod tx;
 mod unshielded;
 mod wallet;
 pub mod vc_store;
+pub mod did_auth;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
@@ -83,3 +84,4 @@ pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};
 pub use vc_store::{StoredVc, VcMetadata, VcOpening, VcStore};
+pub use did_auth::{sign_for_authentication, DidAuthError};

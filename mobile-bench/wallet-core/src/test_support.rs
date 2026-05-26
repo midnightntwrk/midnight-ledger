@@ -184,6 +184,54 @@ pub fn stub_wallet() -> Wallet {
         .with_stub_did_state(state)
 }
 
+/// Test helper: stub wallet + bootstrapped DID with both authn
+/// + assertion VMs attached. Used by `did_auth` tests.
+///
+/// The wallet runs in stub mode so `bootstrap_did_with_keys`
+/// short-circuits through the in-memory DID-document map. The
+/// secret store is created fresh inside this call; pair with
+/// [`stub_secret_store_with_bootstrapped_did`] using the SAME
+/// seed if you need the matching store handed back independently.
+pub async fn stub_wallet_with_bootstrapped_did(seed: [u8; 32]) -> (Wallet, crate::DidId) {
+    let wallet = stub_wallet();
+    let mut store = InMemorySecretStore::default();
+    let out = crate::bootstrap_did_with_keys(&wallet, &mut store, &seed)
+        .await
+        .expect("stub bootstrap should not fail");
+    (wallet, out.did)
+}
+
+/// Test helper: SecretStorage seeded by a fresh
+/// `bootstrap_did_with_keys` run, deterministic per `seed`. Pair
+/// with [`stub_wallet_with_bootstrapped_did`] using the SAME seed
+/// when tests need both halves independently.
+///
+/// Both helpers re-run `bootstrap_did_with_keys` against a fresh
+/// stub wallet so the resulting `SecretStorage` carries the same
+/// (kid, key) pairs the paired wallet's DID document references.
+pub async fn stub_secret_store_with_bootstrapped_did(
+    seed: [u8; 32],
+) -> InMemorySecretStore {
+    let wallet = stub_wallet();
+    let mut store = InMemorySecretStore::default();
+    let _ = crate::bootstrap_did_with_keys(&wallet, &mut store, &seed)
+        .await
+        .expect("stub bootstrap should not fail");
+    store
+}
+
+/// Test helper: stub wallet + a freshly-created DID with no
+/// verification methods attached. For testing the "no authn key"
+/// error path in `did_auth`.
+pub async fn stub_wallet_with_empty_did() -> (Wallet, crate::DidId) {
+    let wallet = stub_wallet();
+    let (did, _controller_sk) = wallet
+        .create_did_awaitable_with_controller()
+        .await
+        .expect("stub create_did should not fail");
+    (wallet, did)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

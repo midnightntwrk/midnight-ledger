@@ -128,23 +128,21 @@ pub async fn bootstrap_did_with_keys(
 ) -> Result<BootstrappedDid, BootstrapError> {
     let (ed_bytes, jb_bytes) = derive_keys(seed);
 
-    // 1. Import keys into the secret store first.
-    let ed25519_ref = secret_store
-        .import_ed25519(&ed_bytes, "ed25519/authentication")
-        .await
-        .map_err(|e| BootstrapError::AttachAuthn(format!("import ed25519: {e}")))?;
-    let jubjub_ref = secret_store
-        .import_jubjub(&jb_bytes, "jubjub/assertionMethod")
-        .await
-        .map_err(|e| BootstrapError::AttachAssertion(format!("import jubjub: {e}")))?;
-
-    // 2. Create the DID on chain.
+    // 1. Create the DID on chain. We need its address before we
+    //    can build the DID-URL-form kids (`<did>#key-auth`) that
+    //    `did_auth::sign_for_authentication` will use to look the
+    //    secret up later — the doc references VMs by full URL, so
+    //    if the kid in the secret store were the bare
+    //    "ed25519/authentication" tag, `SecretStorage::find_by_kid`
+    //    would miss every lookup. Order here is therefore:
+    //    create_did → indexer-settle → import keys with DID-URL
+    //    kids → attach VMs/relations.
     let (did, controller_sk) = wallet
         .create_did_awaitable_with_controller()
         .await
         .map_err(|e| BootstrapError::CreateDid(e.to_string()))?;
 
-    // 2.5 Wait for the indexer to ingest the freshly-deployed
+    // 1.5 Wait for the indexer to ingest the freshly-deployed
     //     contract. `create_did_awaitable_with_controller` returns
     //     as soon as the node confirms block inclusion, but every
     //     follow-up `add_verification_method` call goes through
@@ -157,6 +155,25 @@ pub async fn bootstrap_did_with_keys(
     //     real bug surfaced by `tests/did_bootstrap_standalone.rs`
     //     against the standalone docker stack on 2026-05-27.
     wait_for_indexer_settle(wallet, &did).await?;
+
+    // 2. Import keys into the secret store with DID-URL-form kids.
+    //    The kid we register here is what `find_by_kid` will match
+    //    on when `sign_for_authentication` walks the doc's
+    //    `authentication[0]` reference (a `<did>#key-auth` string).
+    //    Using the short tag form (`"ed25519/authentication"`) would
+    //    work for the on-chain VM but not for off-chain auth flows
+    //    like SIOPv2 / OID4VP.
+    let did_str = did.to_did_string();
+    let ed_kid = format!("{did_str}#key-auth");
+    let jb_kid = format!("{did_str}#key-assert");
+    let ed25519_ref = secret_store
+        .import_ed25519(&ed_bytes, &ed_kid)
+        .await
+        .map_err(|e| BootstrapError::AttachAuthn(format!("import ed25519: {e}")))?;
+    let jubjub_ref = secret_store
+        .import_jubjub(&jb_bytes, &jb_kid)
+        .await
+        .map_err(|e| BootstrapError::AttachAssertion(format!("import jubjub: {e}")))?;
 
     // 3. Fetch the JWKs the secret store assembled from the imported
     //    private bytes. Encoding (base64url vs decimal bigint) is
@@ -308,16 +325,25 @@ mod tests {
             .await
             .expect("bootstrap should succeed against stub");
 
-        assert!(
-            out.ed25519_ref.id().starts_with("ed25519/"),
-            "ed25519 key ref must be tagged",
+        // Kids are the full DID-URL form (`<did>#fragment`) so
+        // off-chain auth flows (SIOPv2 / OID4VP) can look them up
+        // by walking `DidDocument.authentication[*]` → kid →
+        // `SecretStorage::find_by_kid`. The fragment names match
+        // what `bootstrap_did_with_keys` passes to
+        // `build_verification_method_json`.
+        let did_str = out.did.to_did_string();
+        assert_eq!(
+            out.ed25519_ref.id(),
+            format!("{did_str}#key-auth"),
+            "ed25519 kid must be the authentication-VM DID URL",
+        );
+        assert_eq!(
+            out.jubjub_ref.id(),
+            format!("{did_str}#key-assert"),
+            "jubjub kid must be the assertionMethod-VM DID URL",
         );
         assert!(
-            out.jubjub_ref.id().starts_with("jubjub/"),
-            "jubjub key ref must be tagged",
-        );
-        assert!(
-            out.did.to_did_string().starts_with("did:midnight:"),
+            did_str.starts_with("did:midnight:"),
             "DID must be in the midnight namespace",
         );
     }

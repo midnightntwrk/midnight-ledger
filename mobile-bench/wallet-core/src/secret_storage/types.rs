@@ -310,6 +310,23 @@ pub trait SecretStorage: Send + Sync {
         Ok(key_ref)
     }
 
+    /// Find a stored key whose kid (the caller-supplied `id` tag,
+    /// e.g. `"ed25519/authentication"` or a full DID URL with
+    /// fragment) matches. Walks [`SecretStorage::list_keys`] so
+    /// backends don't have to maintain a second index — not
+    /// hot-path-critical (called at most once per outbound auth
+    /// request). Default impl returns `None` on any underlying
+    /// error so callers see a clean miss rather than having to
+    /// disambiguate "not present" from "store errored".
+    async fn find_by_kid(&self, kid: &str) -> Option<SecretKeyRef> {
+        self.list_keys(None)
+            .await
+            .ok()?
+            .into_iter()
+            .find(|m| m.key_ref.id() == kid)
+            .map(|m| m.key_ref)
+    }
+
     /// Import a 32-byte Jubjub scalar and tag the stored entry with
     /// `kid` (e.g. `"jubjub/assertionMethod"`). See
     /// [`SecretStorage::import_ed25519`] for return semantics.
