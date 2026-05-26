@@ -144,7 +144,6 @@ pub(crate) fn default_prover(proof_server_url: Option<&str>) -> Arc<dyn Prover> 
 /// a network. Wraps [`crate::indexer::HttpIndexerClient::new`]
 /// and returns it behind the trait object so the call site
 /// doesn't care about the concrete type.
-#[allow(dead_code)] // Wired by Wallet::with_deps in Task 1.5.B B.5+
 pub(crate) fn default_indexer(
     network: Network,
 ) -> Result<Arc<dyn IndexerClient>, IndexerError> {

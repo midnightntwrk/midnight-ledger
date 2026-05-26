@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use rand::{RngCore, SeedableRng, rngs::OsRng};
 use rand_chacha::ChaCha20Rng;
 use serialize::Serializable;
 use zswap::keys::{Seed, SecretKeys};
 
+use crate::chain;
 use crate::js_bridge::{JsBridge, JsBridgeExt};
 use crate::network::Network;
 
@@ -153,6 +156,16 @@ pub struct Wallet {
     /// the `NodeChildBridge::spawn` path — fine for desktop
     /// `cargo test`, fails fast on Android.
     js_bridge: Option<std::sync::Arc<dyn JsBridge>>,
+    /// Injected indexer client. When `None` (the default), every
+    /// chain-op method builds a fresh `HttpIndexerClient` via
+    /// `crate::chain::default_indexer(network)` — the original
+    /// pre-Task 1.5.B behaviour. When `Some`, the injected client
+    /// is reused for every call, which is how Task 1.5.D's
+    /// `stub_wallet` factory swaps the live indexer for an
+    /// in-memory mock without touching any of the stream bodies.
+    /// `Arc<dyn _>` so multiple `Wallet`s (re-built per stream
+    /// inside `create_did` etc.) share one trait object.
+    indexer: Option<Arc<dyn chain::IndexerClient>>,
 }
 
 impl Wallet {
@@ -167,6 +180,7 @@ impl Wallet {
             proof_server_url: None,
             dust_syncer: None,
             js_bridge: None,
+            indexer: None,
         }
     }
 
@@ -188,6 +202,36 @@ impl Wallet {
     /// `Arc::clone` — multiple wallets can share the same bridge.
     pub fn js_bridge(&self) -> Option<std::sync::Arc<dyn JsBridge>> {
         self.js_bridge.clone()
+    }
+
+    /// Builder: inject an `IndexerClient` trait object. When set,
+    /// every chain-op method (`create_did`, `load_did_circuit`,
+    /// `call_did_circuit`, `resolve_did`, `resolve_did_full`,
+    /// `sync_dust` fallback) consults the injected client instead
+    /// of constructing a fresh `HttpIndexerClient`. Used by Task
+    /// 1.5.D's `stub_wallet` to drive the pipeline against an
+    /// in-memory indexer mock.
+    pub fn with_indexer(mut self, indexer: Arc<dyn chain::IndexerClient>) -> Self {
+        self.indexer = Some(indexer);
+        self
+    }
+
+    /// Currently-configured indexer trait object, if any. `None`
+    /// means the wallet will build a fresh `HttpIndexerClient` on
+    /// each chain-op invocation (the default real-deps path).
+    pub fn indexer(&self) -> Option<Arc<dyn chain::IndexerClient>> {
+        self.indexer.clone()
+    }
+
+    /// Resolve the active indexer: the injected one if any, else
+    /// a freshly-built `HttpIndexerClient`. This is the single
+    /// seam through which every chain-op method in the file
+    /// reaches the indexer.
+    fn resolve_indexer(&self) -> Result<Arc<dyn chain::IndexerClient>, crate::indexer::IndexerError> {
+        match self.indexer.clone() {
+            Some(i) => Ok(i),
+            None => chain::default_indexer(self.network),
+        }
     }
 
     /// Builder: attach a `midnight-proof-server` base URL. Subsequent
@@ -566,12 +610,14 @@ impl Wallet {
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
+        let indexer_dep = self.indexer.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
+            if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -656,7 +702,7 @@ impl Wallet {
             // chain tip's tblock keeps us inside the window; the
             // root match holds because no dust events have
             // advanced our local tree (single-tenant standalone).
-            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
+            let chain_tip_secs: u64 = match wallet.resolve_indexer() {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -750,12 +796,14 @@ impl Wallet {
         let seed_bytes = self.seed_bytes;
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
+        let indexer_dep = self.indexer.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
+            if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -820,7 +868,7 @@ impl Wallet {
             let params = ledger::structure::INITIAL_PARAMETERS;
             // See `create_did` for the full rationale on ctime
             // selection (chain-tip vs sync_time).
-            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
+            let chain_tip_secs: u64 = match wallet.resolve_indexer() {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -919,12 +967,14 @@ impl Wallet {
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
         let js_bridge_handle = self.js_bridge.clone();
+        let indexer_dep = self.indexer.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(b) = js_bridge_handle.clone() { wallet = wallet.with_js_bridge(b); }
+            if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -946,7 +996,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("encryption pk: {e}")); return; }
             };
-            let indexer = match crate::HttpIndexerClient::new(network) {
+            let indexer = match wallet.resolve_indexer() {
                 Ok(c) => c,
                 Err(e) => { yield crate::WizardStage::Failed(format!("indexer client: {e}")); return; }
             };
@@ -1072,7 +1122,7 @@ impl Wallet {
             let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
             // See `create_did` for the full rationale on ctime
             // selection (chain-tip vs sync_time).
-            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
+            let chain_tip_secs: u64 = match wallet.resolve_indexer() {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -1176,7 +1226,8 @@ impl Wallet {
             )));
         }
 
-        let client = crate::HttpIndexerClient::new(self.network)
+        let client = self
+            .resolve_indexer()
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
         let info = client
             .contract_state(&id.contract_address_hex())
@@ -1216,7 +1267,8 @@ impl Wallet {
         }
 
         let started = std::time::Instant::now();
-        let client = crate::HttpIndexerClient::new(self.network)
+        let client = self
+            .resolve_indexer()
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
         let info = client
             .contract_state(&id.contract_address_hex())
