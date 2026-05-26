@@ -90,4 +90,4 @@ pub use vc_store::{StoredVc, VcMetadata, VcOpening, VcStore};
 pub use did_auth::{sign_for_authentication, DidAuthError};
 pub use oid4vp_client::{run_authentication as oid4vp_run_authentication, AuthFlowError};
 pub use oid4vci_client::{run_issuance as oid4vci_run_issuance, IssuanceFlowError};
-pub use vc_self_verify::{self_verify, InvalidReason, SelfVerifyResult};
+pub use vc_self_verify::{self_verify, self_verify_and_cache, InvalidReason, SelfVerifyResult};

@@ -207,6 +207,40 @@ pub async fn self_verify(
     }
 }
 
+/// Wraps [`self_verify`] and writes the outcome onto the VC's
+/// metadata row so a carousel can show "last verified at HH:MM:SS"
+/// without re-running the chain query.
+///
+/// Writes `last_verified_ms` (epoch millis, now) and
+/// `last_verify_outcome` (a stable display string) regardless of
+/// the outcome — even `Error(_)` lands as
+/// `"Error: <message>"` so the carousel can surface it.
+pub async fn self_verify_and_cache(
+    vc: &StoredVc,
+    wallet: &Wallet,
+    secret_store: &dyn SecretStorage,
+    vc_store: &crate::VcStore,
+) -> SelfVerifyResult {
+    let result = self_verify(vc, wallet, secret_store).await;
+    let outcome = match &result {
+        SelfVerifyResult::Valid { .. } => "Valid".to_string(),
+        SelfVerifyResult::Invalid(reason) => format!("Invalid: {reason:?}"),
+        SelfVerifyResult::Error(msg) => format!("Error: {msg}"),
+    };
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    // Best-effort metadata write — verification result is the
+    // primary return; a metadata write failure shouldn't mask the
+    // verification outcome itself.
+    let _ = vc_store.update_metadata(&vc.vc_uri, |m| {
+        m.last_verified_ms = Some(now_ms);
+        m.last_verify_outcome = Some(outcome);
+    });
+    result
+}
+
 /// Locate a `VerificationMethod` whose `id` matches `vm_id` among
 /// the entries the issuer DID document lists under `assertion_method`.
 /// Accepts both `VerificationMethodRef::Id(...)` (with a lookup
@@ -259,7 +293,6 @@ mod tests {
         stub_secret_store_with_bootstrapped_did, stub_sign_birth_vc,
         stub_wallet_with_bootstrapped_did,
     };
-    // self_verify_and_cache lands in Task 19.
 
     fn make_vc(issuer: &DidId, body: Vec<u8>) -> StoredVc {
         StoredVc {
@@ -321,4 +354,32 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn self_verify_and_cache_writes_metadata() {
+        let seed = [57u8; 32];
+        let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
+        let store = stub_secret_store_with_bootstrapped_did(seed).await;
+        let body = stub_sign_birth_vc(&wallet, &store, &did, b"BIRTH-FIXTURE").await;
+        let vc = make_vc(&did, body);
+
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let vc_store = crate::VcStore::open(dir.path().join("vcs.redb")).expect("open vc store");
+        vc_store.insert_vc(&vc).expect("insert vc");
+
+        let result = self_verify_and_cache(&vc, &wallet, &store, &vc_store).await;
+        assert!(
+            matches!(result, SelfVerifyResult::Valid { .. }),
+            "expected Valid, got {result:?}"
+        );
+        let md = vc_store
+            .get_metadata(&vc.vc_uri)
+            .expect("metadata read ok")
+            .expect("metadata present");
+        assert_eq!(md.last_verify_outcome, Some("Valid".to_string()));
+        assert!(
+            md.last_verified_ms.unwrap_or(0) > 0,
+            "last_verified_ms should be set: {:?}",
+            md.last_verified_ms
+        );
+    }
 }
