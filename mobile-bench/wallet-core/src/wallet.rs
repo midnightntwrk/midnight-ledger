@@ -309,6 +309,35 @@ impl Wallet {
         }
     }
 
+    /// Canonical dependency-injection constructor. Builds a
+    /// wallet from raw seed bytes + the three chain-op trait
+    /// objects (indexer / node / prover). Equivalent to
+    /// `Wallet::from_seed(seed, network)
+    ///     .with_indexer(indexer)
+    ///     .with_node(node)
+    ///     .with_prover(prover)`.
+    ///
+    /// Task 1.5.D's `stub_wallet` factory composes this with the
+    /// three in-memory `Stub*` impls to spin up a wallet that
+    /// drives the entire chain-op pipeline deterministically in
+    /// a single process, without a live indexer, node, or
+    /// proof-server. The existing `from_seed` / `demo` /
+    /// `new_random` / `from_chacha_seed` constructors continue to
+    /// produce real-deps wallets (Option fields stay `None`,
+    /// `resolve_*` builds the live impls on demand).
+    pub fn with_deps(
+        seed: [u8; 32],
+        network: Network,
+        indexer: Arc<dyn chain::IndexerClient>,
+        node: Arc<dyn chain::NodeClient>,
+        prover: Arc<dyn chain::Prover>,
+    ) -> Self {
+        Self::from_seed(seed, network)
+            .with_indexer(indexer)
+            .with_node(node)
+            .with_prover(prover)
+    }
+
     /// Builder: attach a `midnight-proof-server` base URL. Subsequent
     /// `create_did` / `call_did_circuit` / `load_did_circuit` calls
     /// will route proving through that server instead of running the
@@ -1485,5 +1514,86 @@ mod tests {
         let pre = Wallet::demo(Network::PreProd).dust_public_key_hex().unwrap();
         let und = Wallet::demo(Network::Undeployed).dust_public_key_hex().unwrap();
         assert_ne!(pre, und);
+    }
+
+    /// Minimal `chain::*` trait stubs used solely to confirm the
+    /// `Wallet::with_deps` constructor accepts trait objects and
+    /// hands them back via the public accessors. Real chain-op
+    /// stubs live in Task 1.5.D's `stub_wallet` module.
+    mod with_deps_stubs {
+        use crate::chain;
+        use crate::indexer::{ChainTipInfo, ContractStateInfo, IndexerError};
+        use crate::node::{NodeError, SubmitResult};
+        use crate::tx::TxError;
+        use crate::tx::build::UnprovenTx;
+        use crate::tx::prove::ProvenTx;
+        use async_trait::async_trait;
+
+        pub(super) struct NopIndexer;
+        #[async_trait]
+        impl chain::IndexerClient for NopIndexer {
+            async fn chain_tip(&self) -> Result<Option<ChainTipInfo>, IndexerError> {
+                Ok(None)
+            }
+            async fn contract_state(
+                &self,
+                _: &str,
+            ) -> Result<Option<ContractStateInfo>, IndexerError> {
+                Ok(None)
+            }
+        }
+
+        pub(super) struct NopNode;
+        #[async_trait]
+        impl chain::NodeClient for NopNode {
+            async fn submit_deploy(
+                &self,
+                _: Vec<u8>,
+                _: &crate::MidnightSigner,
+            ) -> Result<SubmitResult, NodeError> {
+                Ok(SubmitResult { tx_hash: [0u8; 32], block_hash: [0u8; 32] })
+            }
+        }
+
+        pub(super) struct NopProver;
+        #[async_trait]
+        impl chain::Prover for NopProver {
+            async fn prove(&self, _: UnprovenTx) -> Result<ProvenTx, TxError> {
+                Err(TxError::Prove("nop prover; with_deps test only".into()))
+            }
+        }
+    }
+
+    #[test]
+    fn with_deps_constructs_and_exposes_injected_clients() {
+        use std::sync::Arc;
+        let indexer: Arc<dyn crate::chain::IndexerClient> =
+            Arc::new(with_deps_stubs::NopIndexer);
+        let node: Arc<dyn crate::chain::NodeClient> = Arc::new(with_deps_stubs::NopNode);
+        let prover: Arc<dyn crate::chain::Prover> = Arc::new(with_deps_stubs::NopProver);
+        let seed = [0u8; 32];
+        let w = Wallet::with_deps(
+            seed,
+            Network::Undeployed,
+            Arc::clone(&indexer),
+            Arc::clone(&node),
+            Arc::clone(&prover),
+        );
+        // Seed + network round-trip unchanged.
+        assert_eq!(w.seed_hex(), hex::encode(seed));
+        assert_eq!(w.network(), Network::Undeployed);
+        // Each injected dep is exposed via its accessor as the
+        // *same* Arc (compare by ptr to avoid trait equality).
+        assert!(Arc::ptr_eq(&w.indexer().unwrap(), &indexer));
+        assert!(Arc::ptr_eq(&w.node().unwrap(), &node));
+        assert!(Arc::ptr_eq(&w.prover().unwrap(), &prover));
+    }
+
+    #[test]
+    fn from_seed_leaves_chain_deps_unset() {
+        let w = Wallet::from_seed([0u8; 32], Network::Undeployed);
+        assert!(w.indexer().is_none());
+        assert!(w.node().is_none());
+        assert!(w.prover().is_none());
     }
 }
