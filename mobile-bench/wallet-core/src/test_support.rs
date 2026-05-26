@@ -232,6 +232,154 @@ pub async fn stub_wallet_with_empty_did() -> (Wallet, crate::DidId) {
     (wallet, did)
 }
 
+/// Test helper: build a Phase-1 placeholder VC body (CBOR map) signed by
+/// the issuer's `assertionMethod`-relation key.
+///
+/// Shape:
+/// ```cbor
+/// {
+///   "credentialSubject": <payload bytes>,
+///   "proof": {
+///     "verificationMethod": "<did>#key-assert",
+///     "signature": "<base64-std signature bytes>"
+///   }
+/// }
+/// ```
+///
+/// The canonical (proof-stripped) bytes are what gets signed.
+/// `vc_self_verify::self_verify` re-derives the same canonical
+/// bytes by removing the `proof` entry before calling
+/// `SecretStorage::verify` with the issuer's public JWK.
+///
+/// To keep the canonical bytes stable across sign + verify, we
+/// stage the map as a `BTreeMap<&str, ...>` first (BTreeMap iter
+/// is ordered by key); serde_cbor then preserves that order when
+/// serializing the Value::Map.
+pub async fn stub_sign_birth_vc(
+    wallet: &Wallet,
+    secret_store: &dyn crate::secret_storage::SecretStorage,
+    issuer_did: &crate::DidId,
+    payload: &[u8],
+) -> Vec<u8> {
+    use base64::{engine::general_purpose::STANDARD as B64, Engine};
+    use std::collections::BTreeMap;
+
+    // Re-resolve the issuer DID to find its assertionMethod VM kid.
+    let doc = wallet
+        .resolve_did(&issuer_did.to_did_string())
+        .await
+        .expect("resolve issuer");
+    let assertion_ref = doc
+        .assertion_method
+        .first()
+        .expect("issuer must have an assertionMethod VM");
+    let kid = match assertion_ref {
+        crate::VerificationMethodRef::Id(s) => s.clone(),
+        crate::VerificationMethodRef::Inline(vm) => vm.id.clone(),
+    };
+
+    // Find the secret matching that kid. Seeded by
+    // stub_secret_store_with_bootstrapped_did.
+    let key_ref = secret_store
+        .find_by_kid(&kid)
+        .await
+        .expect("issuer's assertionMethod secret in local store");
+
+    // The stub `add_verification_method` path falls back to an
+    // Ed25519 placeholder JWK whenever the upstream
+    // `VerificationMethod` JSON fails to parse (notably: when the
+    // `type` field is something like `"JubjubVerificationKey2026"`
+    // — anything other than the lone `JsonWebKey` enum variant
+    // serde knows about). For self-verify tests we need the
+    // resolved doc to carry the real Jubjub JWK so the
+    // `SecretStorage::verify` path can run. Patch the stub-mode
+    // DID-doc map in place: look up the assertion VM whose `id`
+    // matches `kid`, then overwrite its `public_key_jwk` with the
+    // public-key half of the secret-store entry we just found.
+    if let Some(state) = wallet.stub_did_state() {
+        let real_jwk = secret_store
+            .get_public_key(key_ref.uuid())
+            .await
+            .expect("issuer assertion pubkey readable");
+        let did_jwk = crate::PublicKeyJwk {
+            kty: match real_jwk.kty {
+                crate::secret_storage::MidnightKeyType::OKP => crate::KeyType::OKP,
+                crate::secret_storage::MidnightKeyType::EC => crate::KeyType::EC,
+            },
+            crv: match real_jwk.crv {
+                crate::secret_storage::MidnightCurve::Ed25519 => crate::CurveType::Ed25519,
+                crate::secret_storage::MidnightCurve::Jubjub => crate::CurveType::Jubjub,
+                crate::secret_storage::MidnightCurve::P256 => crate::CurveType::P256,
+            },
+            x: real_jwk.x.clone(),
+            y: real_jwk.y.clone(),
+        };
+        let mut guard = state.lock().expect("stub did state poisoned");
+        if let Some(doc) = guard.get_mut(issuer_did) {
+            for vm in doc.verification_method.iter_mut() {
+                if vm.id == kid {
+                    vm.public_key_jwk = did_jwk.clone();
+                }
+            }
+        }
+    }
+
+    // Stage the (canonical, proof-stripped) map in a BTreeMap so
+    // entry order is deterministic by key. serde_cbor::Value::Map
+    // is a Vec of pairs; we collect from the BTreeMap to preserve
+    // sorted-by-key order.
+    let mut canonical_btree: BTreeMap<String, serde_cbor::Value> = BTreeMap::new();
+    canonical_btree.insert(
+        "credentialSubject".to_string(),
+        serde_cbor::Value::Bytes(payload.to_vec()),
+    );
+    let canonical_value = serde_cbor::Value::Map(
+        canonical_btree
+            .clone()
+            .into_iter()
+            .map(|(k, v)| (serde_cbor::Value::Text(k), v))
+            .collect(),
+    );
+    let canonical_bytes =
+        serde_cbor::to_vec(&canonical_value).expect("encode canonical cbor");
+
+    // Sign the canonical bytes with the assertion key.
+    let sig = secret_store
+        .sign(key_ref.uuid(), &canonical_bytes)
+        .await
+        .expect("sign assertion key");
+
+    // Re-emit the full body with `proof` appended. BTreeMap key
+    // ordering puts "credentialSubject" before "proof" (alphabetic),
+    // which is the same order the verifier produces when it strips
+    // "proof" — guaranteeing canonical bytes match on both sides.
+    let mut proof_btree: BTreeMap<String, serde_cbor::Value> = BTreeMap::new();
+    proof_btree.insert(
+        "signature".to_string(),
+        serde_cbor::Value::Text(B64.encode(&sig.signature)),
+    );
+    proof_btree.insert(
+        "verificationMethod".to_string(),
+        serde_cbor::Value::Text(kid),
+    );
+    let proof_value = serde_cbor::Value::Map(
+        proof_btree
+            .into_iter()
+            .map(|(k, v)| (serde_cbor::Value::Text(k), v))
+            .collect(),
+    );
+
+    let mut full_btree = canonical_btree;
+    full_btree.insert("proof".to_string(), proof_value);
+    let full_value = serde_cbor::Value::Map(
+        full_btree
+            .into_iter()
+            .map(|(k, v)| (serde_cbor::Value::Text(k), v))
+            .collect(),
+    );
+    serde_cbor::to_vec(&full_value).expect("encode full cbor body")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

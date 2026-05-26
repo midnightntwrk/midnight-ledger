@@ -32,6 +32,7 @@ pub mod vc_store;
 pub mod did_auth;
 pub mod oid4vp_client;
 pub mod oid4vci_client;
+pub mod vc_self_verify;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
@@ -89,3 +90,4 @@ pub use vc_store::{StoredVc, VcMetadata, VcOpening, VcStore};
 pub use did_auth::{sign_for_authentication, DidAuthError};
 pub use oid4vp_client::{run_authentication as oid4vp_run_authentication, AuthFlowError};
 pub use oid4vci_client::{run_issuance as oid4vci_run_issuance, IssuanceFlowError};
+pub use vc_self_verify::{self_verify, InvalidReason, SelfVerifyResult};
