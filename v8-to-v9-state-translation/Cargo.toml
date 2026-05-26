@@ -18,5 +18,6 @@ base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { path = "../serialize", package = "midnight-serialize" }
 
 [dev-dependencies]
+coin-structure = { path = "../coin-structure", package = "midnight-coin-structure" }
 transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
 rand = { version = "^0.8.4", features = ["getrandom"] }

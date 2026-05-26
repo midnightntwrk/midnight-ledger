@@ -13,17 +13,48 @@
 
 //! State translation from ledger v8 to ledger v9.
 //!
-//! Differences in the stored state shape between v8 and v9:
+//! ## Usage
 //!
-//! | type                            | v8 tag                           | v9 tag                           | change |
-//! | ------------------------------- | -------------------------------- | -------------------------------- | ------ |
-//! | LedgerState                     | `ledger-state[v13]`              | `ledger-state[v16]`              | `bridge_receiving` gains `NightAnn` |
-//! | LedgerParameters                | `ledger-parameters[v5]`         | `ledger-parameters[v6]`         | new field `min_block_price` |
-//! | ContractState                   | `contract-state[v6]`             | `contract-state[v7]`             | propagates from CMA change |
-//! | ContractMaintenanceAuthority    | `contract-maintenance-authority[v1]` | `contract-maintenance-authority[v2]` | `committee: Vec<VerifyingKey>` → `Vec<ContractMaintenanceVerifyingKey>` |
+//! ```ignore
+//! use storage::state_translation::TypedTranslationState;
+//! use storage::arena::Sp;
+//! use base_crypto::cost_model::CostDuration;
+//! use v8_to_v9_state_translation::StateTranslationTable;
 //!
-//! Everything else (zswap, utxo, dust, replay_protection, unclaimed_block_rewards,
-//! treasury) is tag-stable and can be `recast`.
+//! let mut tl = TypedTranslationState::<
+//!     ledger_v8::structure::LedgerState<D>,
+//!     ledger_v9::structure::LedgerState<D>,
+//!     StateTranslationTable,
+//!     D,
+//! >::start(Sp::new(v8_state))?;
+//! loop {
+//!     tl = tl.run(cost_per_iteration)?;
+//!     if let Some(result) = tl.result()? { /* done */ break; }
+//! }
+//! ```
+//!
+//! ## State shape differences (only stored types listed)
+//!
+//! | type                         | v8 tag                               | v9 tag                               | change |
+//! | ---------------------------- | ------------------------------------ | ------------------------------------ | ------ |
+//! | LedgerState                  | `ledger-state[v13]`                  | `ledger-state[v16]`                  | `bridge_receiving` map gains `NightAnn` |
+//! | LedgerParameters             | `ledger-parameters[v5]`              | `ledger-parameters[v6]`              | adds `min_block_price` |
+//! | ContractState                | `contract-state[v6]`                 | `contract-state[v7]`                 | reflows `ContractMaintenanceAuthority` change |
+//! | ContractMaintenanceAuthority | `contract-maintenance-authority[v1]` | `contract-maintenance-authority[v2]` | `committee: Vec<VerifyingKey>` → `Vec<ContractMaintenanceVerifyingKey>` (Schnorr/ECDSA sum) |
+//!
+//! Everything else (zswap, utxo, dust, replay_protection, treasury,
+//! unclaimed_block_rewards) is tag-stable and passes through `recast`.
+//!
+//! ## Maintenance notes
+//!
+//! - When v9 ships its first release tag, swap the workspace path deps for
+//!   `[patch.crates-io]` entries pinned to the tag, and remove the local
+//!   `[patch.crates-io]` block from the workspace `Cargo.toml`.
+//! - If production rolls past `ledger-8.1.0`, bump the `ledger-v8` and
+//!   `onchain-state-v8` versions in `Cargo.toml`.
+//! - Final home for this crate is `state-translation/v8-to-v9` (per the
+//!   one-branch-per-translation convention). Until then it lives on the
+//!   personal sketch branch.
 
 use base_crypto::cost_model::CostDuration;
 use serialize::Tagged;

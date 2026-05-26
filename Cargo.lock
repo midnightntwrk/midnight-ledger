@@ -5916,6 +5916,7 @@ name = "v8-to-v9-state-translation"
 version = "0.1.0"
 dependencies = [
  "midnight-base-crypto",
+ "midnight-coin-structure",
  "midnight-ledger",
  "midnight-ledger-v9",
  "midnight-onchain-state 3.0.0",
