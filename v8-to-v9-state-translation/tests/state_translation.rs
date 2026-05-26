@@ -18,7 +18,7 @@ use rand::{Rng, SeedableRng};
 use std::ops::Deref;
 use storage::arena::Sp;
 use storage::db::InMemoryDB;
-use storage::state_translation::TypedTranslationState;
+use storage::state_translation::{TranslationTable, TypedTranslationState};
 use storage::storage::HashMap;
 use transient_crypto::proofs::VerifierKey;
 use v8_to_v9_state_translation::StateTranslationTable;
@@ -317,5 +317,72 @@ fn create_large_state(
         v8.contract = v8.contract.insert(addr, contract);
     }
     (v8, addresses)
+}
+
+// ---------- Table consistency ----------
+//
+// These two tests guard the translation table itself rather than its data
+// behavior. They are cheap to run and catch type/tag drift early — far
+// before any state actually exercises a missing or mismatched entry.
+
+#[test]
+fn table_is_closed() {
+    // Every TranslationId returned by a table entry's `required_translations`
+    // must itself have an entry in the table. If not, translation would error
+    // at runtime the first time the missing translation was needed.
+    <StateTranslationTable as TranslationTable<InMemoryDB>>::assert_closure();
+}
+
+#[test]
+fn table_tags_match_types() {
+    // The TABLE hardcodes string literals for each TranslationId. If a tag on
+    // either side gets bumped without updating the table, the literal would
+    // drift from what `T::tag()` actually produces. Rebuild every expected ID
+    // from types and compare.
+    use serialize::Tagged;
+    use storage::merkle_patricia_trie::{MerklePatriciaTrie, Node};
+    use storage::storable::SizeAnn;
+
+    type V8Ann = ledger_v8::annotation::NightAnn;
+    type V9Ann = ledger_v9::annotation::NightAnn;
+    type V8Contract = onchain_state_v8::state::ContractState<InMemoryDB>;
+    type V9Contract = onchain_state_v9::state::ContractState<InMemoryDB>;
+
+    let expected: Vec<(std::borrow::Cow<'static, str>, std::borrow::Cow<'static, str>)> = vec![
+        (
+            ledger_v8::structure::LedgerState::<InMemoryDB>::tag(),
+            ledger_v9::structure::LedgerState::<InMemoryDB>::tag(),
+        ),
+        (
+            ledger_v8::structure::LedgerParameters::tag(),
+            ledger_v9::structure::LedgerParameters::tag(),
+        ),
+        (V8Contract::tag(), V9Contract::tag()),
+        (
+            MerklePatriciaTrie::<V8Contract, InMemoryDB, V8Ann>::tag(),
+            MerklePatriciaTrie::<V9Contract, InMemoryDB, V9Ann>::tag(),
+        ),
+        (
+            Node::<V8Contract, InMemoryDB, V8Ann>::tag(),
+            Node::<V9Contract, InMemoryDB, V9Ann>::tag(),
+        ),
+        (u128::tag(), u128::tag()),
+        (
+            MerklePatriciaTrie::<u128, InMemoryDB, SizeAnn>::tag(),
+            MerklePatriciaTrie::<u128, InMemoryDB, V9Ann>::tag(),
+        ),
+        (
+            Node::<u128, InMemoryDB, SizeAnn>::tag(),
+            Node::<u128, InMemoryDB, V9Ann>::tag(),
+        ),
+    ];
+
+    let actual: Vec<_> =
+        <StateTranslationTable as TranslationTable<InMemoryDB>>::TABLE
+            .iter()
+            .map(|(id, _)| (id.0.clone(), id.1.clone()))
+            .collect();
+
+    assert_eq!(actual, expected);
 }
 
