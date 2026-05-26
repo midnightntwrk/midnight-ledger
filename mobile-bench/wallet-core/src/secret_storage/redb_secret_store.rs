@@ -106,10 +106,12 @@ fn epoch_to_civil(secs: i64) -> (i32, u32, u32, u32, u32, u32) {
     (year, m, d, hour, minute, second)
 }
 
-fn meta_from_row(key_ref: &SecretKeyRef, row: &KeyRow) -> StoredKeyMeta {
+fn meta_from_row(uuid: &str, row: &KeyRow) -> StoredKeyMeta {
     StoredKeyMeta {
         id: row.label.clone(),
-        key_ref: key_ref.clone(),
+        // Kid mirrors the caller-supplied `id` label, the same
+        // convention `import_ed25519` / `import_jubjub` rely on.
+        key_ref: SecretKeyRef::new(uuid, &row.label),
         did: row.did.clone(),
         purpose: row.purpose.clone(),
         created_at: now_rfc3339_from_ms(row.created_at),
@@ -189,7 +191,8 @@ impl SecretStorage for RedbSecretStore {
             params.crv,
             &private_bytes,
         )?;
-        let key_ref = Uuid::new_v4().to_string();
+        let uuid = Uuid::new_v4().to_string();
+        let key_ref = SecretKeyRef::new(&uuid, &params.id);
         let row = KeyRow {
             label: params.id,
             did: params.did,
@@ -210,7 +213,7 @@ impl SecretStorage for RedbSecretStore {
             updated_at: 0,
         };
         self.store
-            .put_key(self.wallet_id, &key_ref, row)
+            .put_key(self.wallet_id, &uuid, row)
             .map_err(map_store_err)?;
         Ok((key_ref, public_jwk))
     }
@@ -232,7 +235,8 @@ impl SecretStorage for RedbSecretStore {
             &record.private_bytes,
         )
         .map_err(map_store_err)?;
-        let key_ref = Uuid::new_v4().to_string();
+        let uuid = Uuid::new_v4().to_string();
+        let key_ref = SecretKeyRef::new(&uuid, &params.id);
         let row = KeyRow {
             label: params.id,
             did: params.did,
@@ -249,7 +253,7 @@ impl SecretStorage for RedbSecretStore {
             updated_at: 0,
         };
         self.store
-            .put_key(self.wallet_id, &key_ref, row)
+            .put_key(self.wallet_id, &uuid, row)
             .map_err(map_store_err)?;
         Ok((key_ref, public_jwk))
     }
@@ -266,7 +270,8 @@ impl SecretStorage for RedbSecretStore {
             params.crv,
             &private_bytes,
         )?;
-        let key_ref = Uuid::new_v4().to_string();
+        let uuid = Uuid::new_v4().to_string();
+        let key_ref = SecretKeyRef::new(&uuid, &params.id);
         // If the seed-hex matches our wallet's seed, store as
         // Hkdf (re-derivable). Otherwise the caller is
         // deriving from an external seed and we have to wrap
@@ -303,7 +308,7 @@ impl SecretStorage for RedbSecretStore {
             updated_at: 0,
         };
         self.store
-            .put_key(self.wallet_id, &key_ref, row)
+            .put_key(self.wallet_id, &uuid, row)
             .map_err(map_store_err)?;
         Ok((key_ref, public_jwk))
     }
@@ -343,7 +348,7 @@ impl SecretStorage for RedbSecretStore {
         let pk = if let Some(ref pk) = input.public_jwk {
             pk.clone()
         } else if let Some(ref kr) = input.key_ref {
-            self.get_public_key(kr).await?
+            self.get_public_key(kr.uuid()).await?
         } else {
             return Err(SecretStoreError::InvalidInput(
                 "verify needs either key_ref or public_jwk".into(),
@@ -468,7 +473,7 @@ mod tests {
             .unwrap();
         assert_eq!(pk.kty, MidnightKeyType::OKP);
         assert_eq!(pk.crv, MidnightCurve::Ed25519);
-        let sig = s.sign(&kref, b"hello").await.unwrap();
+        let sig = s.sign(kref.uuid(), b"hello").await.unwrap();
         let ok = s
             .verify(VerifyInput {
                 key_ref: Some(kref.clone()),
@@ -495,7 +500,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let sig = s.sign(&kref, b"hello").await.unwrap();
+        let sig = s.sign(kref.uuid(), b"hello").await.unwrap();
         assert!(s
             .verify(VerifyInput {
                 key_ref: Some(kref),
@@ -521,7 +526,7 @@ mod tests {
             })
             .await
             .unwrap();
-        let sig = s.sign(&kref, b"hello").await.unwrap();
+        let sig = s.sign(kref.uuid(), b"hello").await.unwrap();
         assert!(s
             .verify(VerifyInput {
                 key_ref: Some(kref),
@@ -557,8 +562,8 @@ mod tests {
             })
             .await
             .unwrap();
-        let row_a = s.store.get_key(s.wallet_id, &a).unwrap().unwrap();
-        let row_b = s.store.get_key(s.wallet_id, &b).unwrap().unwrap();
+        let row_a = s.store.get_key(s.wallet_id, a.uuid()).unwrap().unwrap();
+        let row_b = s.store.get_key(s.wallet_id, b.uuid()).unwrap().unwrap();
         match (row_a.derivation, row_b.derivation) {
             (
                 KeyDerivation::Hkdf { index: ai, .. },
@@ -588,7 +593,7 @@ mod tests {
             .await
             .unwrap();
         // Sign with the imported key.
-        let sig = s.sign(&kref, b"msg").await.unwrap();
+        let sig = s.sign(kref.uuid(), b"msg").await.unwrap();
         assert!(s
             .verify(VerifyInput {
                 key_ref: Some(kref.clone()),
@@ -599,11 +604,11 @@ mod tests {
             .await
             .unwrap());
         // Imported key MUST land as Direct (no HD path).
-        let row = s.store.get_key(s.wallet_id, &kref).unwrap().unwrap();
+        let row = s.store.get_key(s.wallet_id, kref.uuid()).unwrap().unwrap();
         assert!(matches!(row.derivation, KeyDerivation::Direct { .. }));
         // Delete.
-        s.delete_key(&kref).await.unwrap();
-        assert!(s.store.get_key(s.wallet_id, &kref).unwrap().is_none());
+        s.delete_key(kref.uuid()).await.unwrap();
+        assert!(s.store.get_key(s.wallet_id, kref.uuid()).unwrap().is_none());
     }
 
     #[tokio::test]
@@ -676,7 +681,7 @@ mod tests {
                 })
                 .await
                 .unwrap();
-            let sig = s.sign(&kref, b"determinism").await.unwrap().signature;
+            let sig = s.sign(kref.uuid(), b"determinism").await.unwrap().signature;
             (kref, sig)
         };
         // Reopen.
@@ -688,7 +693,7 @@ mod tests {
         let wallets = list_wallets(&store);
         let id = wallets[0];
         let s = RedbSecretStore::new(store, id);
-        let sig_b = s.sign(&kref, b"determinism").await.unwrap().signature;
+        let sig_b = s.sign(kref.uuid(), b"determinism").await.unwrap().signature;
         assert_eq!(sig_a, sig_b, "Ed25519 determinism: same key, same payload → same sig");
     }
 

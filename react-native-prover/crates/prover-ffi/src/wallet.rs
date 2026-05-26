@@ -153,14 +153,16 @@ impl Wallet {
         let metas = block_on(store.list_keys(None)).map_err(map_secret_err)?;
         let meta = metas
             .into_iter()
-            .find(|m| m.key_ref == key_ref)
+            .find(|m| m.key_ref.uuid() == key_ref.uuid())
             .ok_or_else(|| {
                 WalletError::Internal(format!(
                     "generated key {key_ref:?} not visible to list()"
                 ))
             })?;
         Ok(KeyInfo {
-            key_ref: meta.key_ref.clone(),
+            // FFI surface remains a bare UUID string for ABI
+            // stability; `SecretKeyRef` is internal to wallet-core.
+            key_ref: meta.key_ref.uuid().to_string(),
             algorithm: format_algorithm(&meta.algorithm),
             created_at: meta.created_at.clone(),
             label: Some(meta.id.clone()),
@@ -335,9 +337,9 @@ fn stored_meta_to_key_info(
     store: &RedbSecretStore,
     meta: StoredKeyMeta,
 ) -> Result<KeyInfo, WalletError> {
-    let jwk = block_on(store.get_public_key(&meta.key_ref)).map_err(map_secret_err)?;
+    let jwk = block_on(store.get_public_key(meta.key_ref.uuid())).map_err(map_secret_err)?;
     Ok(KeyInfo {
-        key_ref: meta.key_ref.clone(),
+        key_ref: meta.key_ref.uuid().to_string(),
         algorithm: format_algorithm(&meta.algorithm),
         created_at: meta.created_at.clone(),
         label: Some(meta.id.clone()),

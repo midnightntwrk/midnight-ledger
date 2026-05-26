@@ -35,6 +35,8 @@ pub mod curve_support;
 pub mod errors;
 pub mod file_secret_store;
 pub(crate) mod hd_derivation;
+#[cfg(any(test, feature = "test-support"))]
+pub mod in_memory;
 pub mod jubjub_schnorr;
 pub mod redb_secret_store;
 pub mod types;
@@ -42,6 +44,8 @@ pub mod types;
 pub use curve_support::{PublicForLedger, public_for_ledger, public_for_ledger_by_ref};
 pub use errors::SecretStoreError;
 pub use file_secret_store::FileSecretStore;
+#[cfg(any(test, feature = "test-support"))]
+pub use in_memory::InMemorySecretStore;
 pub use types::{
     AlgorithmTag, DeriveKeyFromSeedInput, GenerateKeyInput, ImportKeyInput, MidnightCurve,
     MidnightKeyType, PublicJwk, SecretKeyRef, SecretStorage, SignOutput, StoredKeyMeta,

@@ -10,6 +10,11 @@ default = []
 # Gates the live preprod connectivity tests so CI/offline runs don't depend
 # on network reachability.
 network-tests = []
+# Surfaces the in-memory `SecretStorage` implementation
+# (`secret_storage::InMemorySecretStore`). Off by default so the
+# HashMap-backed test fixture doesn't ship in release builds; enabled
+# automatically under `cargo test` via `cfg(test)`.
+test-support = []
 
 [dependencies]
 # Existing workspace members.

@@ -7,7 +7,7 @@
 //! tooling.
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Three curves the Midnight DID protocol allows for verification
 /// methods. Maps 1:1 to the upstream `MidnightCurve`.
@@ -27,9 +27,98 @@ pub enum MidnightKeyType {
     EC,
 }
 
-/// Opaque handle the store hands out to refer to a stored key.
-/// Treat as an opaque string; today it's a UUID v4.
-pub type SecretKeyRef = String;
+/// Handle the store hands out to refer to a stored key.
+///
+/// Carries two identifiers:
+/// - [`SecretKeyRef::uuid`] — the opaque internal handle the store
+///   uses to look the key up. UUID v4 today.
+/// - [`SecretKeyRef::id`] — the caller-supplied "kid" tag (e.g.
+///   `"ed25519/authentication"`). Mirrors [`StoredKeyMeta::id`].
+///
+/// On the wire / on disk the value is serialised as the bare UUID
+/// string for backwards compatibility with the existing file and
+/// redb formats. The `kid` is recovered from the surrounding
+/// metadata's `id` field after deserialisation by the concrete
+/// store. Loading a `SecretKeyRef` directly from a bare string
+/// (e.g. a UUID handed in by a caller) leaves `kid` empty until the
+/// store fills it in from metadata.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Hash)]
+pub struct SecretKeyRef {
+    pub(crate) uuid: String,
+    pub(crate) kid: String,
+}
+
+impl SecretKeyRef {
+    /// Construct a key ref with both fields explicit. Used by
+    /// store impls when materialising a meta row.
+    pub fn new(uuid: impl Into<String>, kid: impl Into<String>) -> Self {
+        Self {
+            uuid: uuid.into(),
+            kid: kid.into(),
+        }
+    }
+
+    /// Construct from a bare UUID handle, leaving the kid empty.
+    /// Stores patch the kid in from metadata after deserialisation.
+    pub fn from_uuid(uuid: impl Into<String>) -> Self {
+        Self {
+            uuid: uuid.into(),
+            kid: String::new(),
+        }
+    }
+
+    /// The caller-supplied kid tag, e.g. `"ed25519/authentication"`.
+    /// Empty for refs reconstructed from a bare UUID before the
+    /// surrounding meta has been consulted.
+    pub fn id(&self) -> &str {
+        &self.kid
+    }
+
+    /// The internal opaque handle (UUID v4 today).
+    pub fn uuid(&self) -> &str {
+        &self.uuid
+    }
+
+    /// Update the kid in place. Used by stores after loading meta
+    /// rows whose `id` field carries the kid.
+    pub(crate) fn set_kid(&mut self, kid: impl Into<String>) {
+        self.kid = kid.into();
+    }
+}
+
+impl AsRef<str> for SecretKeyRef {
+    /// Returns the UUID handle so call sites that previously
+    /// passed a `&SecretKeyRef` (when it was a `String` alias) to
+    /// functions taking `&str` keep working.
+    fn as_ref(&self) -> &str {
+        &self.uuid
+    }
+}
+
+impl std::fmt::Display for SecretKeyRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.uuid)
+    }
+}
+
+impl Serialize for SecretKeyRef {
+    /// Wire format is just the UUID — same shape as the legacy
+    /// `pub type SecretKeyRef = String` alias produced. The kid
+    /// lives separately in `StoredKeyMeta::id`.
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&self.uuid)
+    }
+}
+
+impl<'de> Deserialize<'de> for SecretKeyRef {
+    /// Reads a bare UUID string; leaves `kid` empty. The owning
+    /// `StoredKeyMeta` is expected to populate `kid` from its `id`
+    /// field afterwards.
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        Ok(SecretKeyRef::from_uuid(s))
+    }
+}
 
 /// Public-key JWK in the subset the protocol uses. `y` is
 /// `Some(_)` for EC curves and `None` for OKP (Ed25519 has only
@@ -199,4 +288,51 @@ pub trait SecretStorage: Send + Sync {
         &mut self,
         key_ref: &str,
     ) -> Result<(), crate::secret_storage::SecretStoreError>;
+
+    /// Import a 32-byte Ed25519 secret seed (RFC 8032) and tag the
+    /// stored entry with `kid` (e.g. `"ed25519/authentication"`).
+    /// The returned [`SecretKeyRef::id`] echoes `kid`; the internal
+    /// UUID handle is available via [`SecretKeyRef::uuid`].
+    ///
+    /// Default impl delegates to [`SecretStorage::import_key`].
+    /// Backends only need to override if they want to validate the
+    /// seed differently.
+    async fn import_ed25519(
+        &mut self,
+        secret: &[u8; 32],
+        kid: &str,
+    ) -> Result<SecretKeyRef, crate::secret_storage::SecretStoreError> {
+        let (key_ref, _) = self
+            .import_key(ImportKeyInput {
+                id: kid.to_string(),
+                private_key: secret.to_vec(),
+                kty: MidnightKeyType::OKP,
+                crv: MidnightCurve::Ed25519,
+                did: None,
+                purpose: None,
+            })
+            .await?;
+        Ok(key_ref)
+    }
+
+    /// Import a 32-byte Jubjub scalar and tag the stored entry with
+    /// `kid` (e.g. `"jubjub/assertionMethod"`). See
+    /// [`SecretStorage::import_ed25519`] for return semantics.
+    async fn import_jubjub(
+        &mut self,
+        secret: &[u8; 32],
+        kid: &str,
+    ) -> Result<SecretKeyRef, crate::secret_storage::SecretStoreError> {
+        let (key_ref, _) = self
+            .import_key(ImportKeyInput {
+                id: kid.to_string(),
+                private_key: secret.to_vec(),
+                kty: MidnightKeyType::EC,
+                crv: MidnightCurve::Jubjub,
+                did: None,
+                purpose: None,
+            })
+            .await?;
+        Ok(key_ref)
+    }
 }

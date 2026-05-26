@@ -730,12 +730,19 @@ fn seed_preprod_live_keys(
                 return;
             }
         };
-    // id → (key_ref, current did) — lets us decide whether to
-    // skip, re-tag, or import each JSON entry.
+    // id → (key_ref_uuid, current did) — lets us decide whether to
+    // skip, re-tag, or import each JSON entry. `SecretKeyRef`
+    // exposes the UUID handle separately from the kid; the
+    // store APIs (`delete_key` etc.) take the UUID string.
     let existing: std::collections::HashMap<String, (String, Option<String>)> =
         existing_rows
             .iter()
-            .map(|r| (r.id.clone(), (r.key_ref.clone(), r.did.clone())))
+            .map(|r| {
+                (
+                    r.id.clone(),
+                    (r.key_ref.uuid().to_string(), r.did.clone()),
+                )
+            })
             .collect();
 
     let mut imported = 0u32;
@@ -3952,7 +3959,11 @@ fn KeysTab(bridge_state: BridgeState) -> Element {
                             {
                                 let crv = format!("{:?}", meta.algorithm.crv);
                                 let kty = format!("{:?}", meta.algorithm.kty);
-                                let kref = meta.key_ref.clone();
+                                // `SecretKeyRef` carries (uuid, kid);
+                                // the UI shows the UUID handle —
+                                // matches what the upstream JS lib
+                                // exposes as `keyRef`.
+                                let kref = meta.key_ref.uuid().to_string();
                                 rsx! {
                                     tr {
                                         td { "{meta.id}" }

@@ -236,9 +236,18 @@ impl SecretStorage for FileSecretStore {
                     .map(|d| e.meta.did.as_deref() == Some(d))
                     .unwrap_or(true)
             })
-            .map(|e| e.meta.clone())
+            .map(|e| {
+                // The on-disk format serialises `key_ref` as a bare
+                // UUID string; the kid lives in `meta.id`. Repair
+                // the in-memory copy here so callers see a fully
+                // populated `SecretKeyRef`.
+                let mut m = e.meta.clone();
+                let kid = m.id.clone();
+                m.key_ref.set_kid(kid);
+                m
+            })
             .collect();
-        out.sort_by(|a, b| a.key_ref.cmp(&b.key_ref));
+        out.sort_by(|a, b| a.key_ref.uuid().cmp(b.key_ref.uuid()));
         Ok(out)
     }
 
@@ -328,7 +337,7 @@ impl SecretStorage for FileSecretStore {
         let pk = if let Some(pk) = input.public_jwk {
             pk
         } else if let Some(key_ref) = input.key_ref {
-            self.get_public_key(&key_ref).await?
+            self.get_public_key(key_ref.uuid()).await?
         } else {
             return Err(SecretStoreError::InvalidInput(
                 "verify: must supply either key_ref or public_jwk".into(),
@@ -365,7 +374,8 @@ async fn insert_entry(
         .inner
         .lock()
         .map_err(|_| SecretStoreError::Init("mutex poisoned".into()))?;
-    let key_ref = Uuid::new_v4().to_string();
+    let uuid = Uuid::new_v4().to_string();
+    let key_ref = SecretKeyRef::new(&uuid, id);
     let ts = now_iso();
     let meta = StoredKeyMeta {
         id: id.to_string(),
@@ -384,7 +394,7 @@ async fn insert_entry(
         private_record: StoredPrivateRecordOnDisk::from_record(&record),
         public_jwk: public_jwk.clone(),
     };
-    guard.store.keys.insert(key_ref.clone(), entry);
+    guard.store.keys.insert(uuid, entry);
     FileSecretStore::persist(&mut guard)?;
     Ok((key_ref, public_jwk))
 }
@@ -433,7 +443,7 @@ mod tests {
             purpose: Some("authentication".into()),
         };
         let (key_ref, pk) = s.generate_key(params).await.unwrap();
-        assert!(!key_ref.is_empty());
+        assert!(!key_ref.uuid().is_empty());
         assert_eq!(pk.kty, MidnightKeyType::OKP);
 
         let listed = s.list_keys(None).await.unwrap();
@@ -460,7 +470,7 @@ mod tests {
             .await
             .unwrap();
         let payload = b"hello, store";
-        let out = s.sign(&key_ref, payload).await.unwrap();
+        let out = s.sign(key_ref.uuid(), payload).await.unwrap();
         assert_eq!(out.signature.len(), 64);
         let ok = s
             .verify(VerifyInput {
@@ -493,7 +503,7 @@ mod tests {
                     })
                     .await
                     .unwrap();
-                refs.push(kref);
+                refs.push(kref.uuid().to_string());
             }
             refs
         };
@@ -502,8 +512,10 @@ mod tests {
         s2.initialize(&p, Some("pw")).await.unwrap();
         let listed = s2.list_keys(None).await.unwrap();
         assert_eq!(listed.len(), 2);
-        let listed_refs: std::collections::HashSet<_> =
-            listed.iter().map(|m| m.key_ref.clone()).collect();
+        let listed_refs: std::collections::HashSet<_> = listed
+            .iter()
+            .map(|m| m.key_ref.uuid().to_string())
+            .collect();
         for r in &key_refs {
             assert!(listed_refs.contains(r), "missing key {r}");
         }
@@ -566,11 +578,11 @@ mod tests {
             })
             .await
             .unwrap();
-        s.delete_key(&kref).await.unwrap();
-        let err = s.get_public_key(&kref).await.unwrap_err();
+        s.delete_key(kref.uuid()).await.unwrap();
+        let err = s.get_public_key(kref.uuid()).await.unwrap_err();
         assert!(matches!(err, SecretStoreError::NotFound(_)));
         // Deleting the same key again fails.
-        let err2 = s.delete_key(&kref).await.unwrap_err();
+        let err2 = s.delete_key(kref.uuid()).await.unwrap_err();
         assert!(matches!(err2, SecretStoreError::NotFound(_)));
     }
 
