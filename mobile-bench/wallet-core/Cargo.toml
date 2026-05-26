@@ -118,6 +118,8 @@ redb = "2"
 # version-tagged so a struct change is detected at decode time
 # rather than silently mis-parsing.
 bincode = { version = "1.3", features = ["i128"] }
+# CBOR codec for VC and metadata storage.
+serde_cbor = "0.11"
 # Drop-on-scope wrapping for secrets the store unwraps into
 # memory (wallet seeds, controller secrets). Same crate the
 # rest of the workspace pulls in transitively.
