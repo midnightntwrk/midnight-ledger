@@ -136,6 +136,55 @@ impl VcStore {
         rows.sort_by_key(|(o, _)| *o);
         Ok(rows.into_iter().map(|(_, vc)| vc).collect())
     }
+
+    pub fn delete_vc(&self, vc_uri: &str) -> Result<(), VcStoreError> {
+        let wtx = self.db.begin_write()?;
+        {
+            let mut vt = wtx.open_table(VCS)?;
+            vt.remove(vc_uri)?;
+        }
+        {
+            let mut mt = wtx.open_table(VC_METADATA)?;
+            mt.remove(vc_uri)?;
+        }
+        {
+            // Range-scan openings under the vc_uri prefix.
+            let mut ot = wtx.open_table(VC_OPENINGS)?;
+            let prefix_end = format!("{vc_uri}\x20"); // 0x20 = 0x1f + 1
+            let prefix_start = format!("{vc_uri}\x1f");
+            let keys: Vec<String> = ot
+                .range(prefix_start.as_str()..prefix_end.as_str())?
+                .filter_map(Result::ok)
+                .map(|(k, _)| k.value().to_string())
+                .collect();
+            for k in keys {
+                ot.remove(k.as_str())?;
+            }
+        }
+        wtx.commit()?;
+        Ok(())
+    }
+
+    pub fn insert_vc_with_openings(
+        &self,
+        vc: &StoredVc,
+        openings: &[VcOpening],
+    ) -> Result<(), VcStoreError> {
+        let wtx = self.db.begin_write()?;
+        {
+            let mut t = wtx.open_table(VCS)?;
+            t.insert(vc.vc_uri.as_str(), serde_cbor::to_vec(vc)?)?;
+        }
+        {
+            let mut t = wtx.open_table(VC_OPENINGS)?;
+            for op in openings {
+                let key = opening_key(&op.vc_uri, &op.claim_path);
+                t.insert(key.as_str(), serde_cbor::to_vec(op)?)?;
+            }
+        }
+        wtx.commit()?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -226,5 +275,39 @@ mod tests {
         let list = store.list_ordered().unwrap();
         let uris: Vec<&str> = list.iter().map(|v| v.vc_uri.as_str()).collect();
         assert_eq!(uris, vec!["urn:b", "urn:c", "urn:a"]);
+    }
+
+    #[test]
+    fn delete_removes_vc_openings_and_metadata() {
+        let (store, _g) = open_store();
+        let vc = sample_vc();
+        store.insert_vc(&vc).unwrap();
+        store.insert_opening(&VcOpening {
+            vc_uri: vc.vc_uri.clone(),
+            claim_path: "/x".into(),
+            plaintext: vec![1],
+            opening: vec![2],
+        }).unwrap();
+        store.update_metadata(&vc.vc_uri, |m| m.display_order = 1).unwrap();
+
+        store.delete_vc(&vc.vc_uri).unwrap();
+
+        assert!(store.get_vc(&vc.vc_uri).unwrap().is_none());
+        assert!(store.get_opening(&vc.vc_uri, "/x").unwrap().is_none());
+        assert!(store.get_metadata(&vc.vc_uri).unwrap().is_none());
+    }
+
+    #[test]
+    fn insert_vc_with_openings_lands_atomically() {
+        let (store, _g) = open_store();
+        let vc = sample_vc();
+        let openings = vec![
+            VcOpening { vc_uri: vc.vc_uri.clone(), claim_path: "/a".into(), plaintext: vec![1], opening: vec![2] },
+            VcOpening { vc_uri: vc.vc_uri.clone(), claim_path: "/b".into(), plaintext: vec![3], opening: vec![4] },
+        ];
+        store.insert_vc_with_openings(&vc, &openings).unwrap();
+        assert!(store.get_vc(&vc.vc_uri).unwrap().is_some());
+        assert!(store.get_opening(&vc.vc_uri, "/a").unwrap().is_some());
+        assert!(store.get_opening(&vc.vc_uri, "/b").unwrap().is_some());
     }
 }
