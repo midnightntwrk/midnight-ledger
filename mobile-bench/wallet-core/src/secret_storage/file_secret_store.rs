@@ -152,6 +152,17 @@ impl Default for FileSecretStore {
     }
 }
 
+#[cfg(test)]
+impl FileSecretStore {
+    /// Test-only accessor: returns a clone of the canonical in-map
+    /// `StoredKeyMeta` (NOT the `list_keys`-patched copy) so tests
+    /// can verify load-time invariants on `Entry.meta` directly.
+    fn meta_for_test(&self, uuid: &str) -> Option<StoredKeyMeta> {
+        let guard = self.inner.lock().ok()?;
+        guard.store.keys.get(uuid).map(|e| e.meta.clone())
+    }
+}
+
 fn now_iso() -> String {
     // RFC 3339 with seconds precision — no chrono dep needed; pull
     // the integer ms since epoch and format manually. Good enough
@@ -204,7 +215,17 @@ impl SecretStorage for FileSecretStore {
             Ok(bytes) => {
                 let env: FileEnvelope = serde_json::from_slice(&bytes)?;
                 let decrypted = decrypt_json(&guard.passphrase, &env.encrypted)?;
-                guard.store = serde_json::from_slice(&decrypted)?;
+                let mut store: StoreFile = serde_json::from_slice(&decrypted)?;
+                // `SecretKeyRef`'s `Deserialize` reads only the bare
+                // UUID — kid defaults to empty. Synthesise the kid
+                // from `StoredKeyMeta::id` once, here, so every
+                // downstream reader of `Entry.meta.key_ref` sees a
+                // fully populated ref (not just `list_keys`' cloned
+                // output).
+                for (uuid, entry) in &mut store.keys {
+                    entry.meta.key_ref = SecretKeyRef::new(uuid, &entry.meta.id);
+                }
+                guard.store = store;
                 Ok(())
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -236,16 +257,7 @@ impl SecretStorage for FileSecretStore {
                     .map(|d| e.meta.did.as_deref() == Some(d))
                     .unwrap_or(true)
             })
-            .map(|e| {
-                // The on-disk format serialises `key_ref` as a bare
-                // UUID string; the kid lives in `meta.id`. Repair
-                // the in-memory copy here so callers see a fully
-                // populated `SecretKeyRef`.
-                let mut m = e.meta.clone();
-                let kid = m.id.clone();
-                m.key_ref.set_kid(kid);
-                m
-            })
+            .map(|e| e.meta.clone())
             .collect();
         out.sort_by(|a, b| a.key_ref.uuid().cmp(b.key_ref.uuid()));
         Ok(out)
@@ -584,6 +596,47 @@ mod tests {
         // Deleting the same key again fails.
         let err2 = s.delete_key(kref.uuid()).await.unwrap_err();
         assert!(matches!(err2, SecretStoreError::NotFound(_)));
+    }
+
+    #[tokio::test]
+    async fn reopen_populates_in_map_meta_key_ref_kid() {
+        // Regression for I-1: after a load-from-disk round-trip, the
+        // canonical `Entry.meta.key_ref` (NOT just the `list_keys`-
+        // cloned output) must carry the original kid. Without the
+        // load-boundary patch, `SecretKeyRef`'s `Deserialize`
+        // produces an empty kid and any reader of `Entry.meta`
+        // sees the wrong thing.
+        let p = tmp_path("kid-reload");
+        let (uuid, expected_kid) = {
+            let mut s = FileSecretStore::new();
+            s.initialize(&p, Some("pw")).await.unwrap();
+            let (kref, _) = s
+                .generate_key(GenerateKeyInput {
+                    id: "ed25519/authentication".into(),
+                    kty: MidnightKeyType::OKP,
+                    crv: MidnightCurve::Ed25519,
+                    did: Some("did:midnight:test".into()),
+                    purpose: Some("authentication".into()),
+                })
+                .await
+                .unwrap();
+            (kref.uuid().to_string(), kref.id().to_string())
+        };
+
+        // Drop the first store; reopen from the same path.
+        let mut s2 = FileSecretStore::new();
+        s2.initialize(&p, Some("pw")).await.unwrap();
+
+        let meta = s2
+            .meta_for_test(&uuid)
+            .expect("entry should be present after reopen");
+        assert_eq!(
+            meta.key_ref.id(),
+            expected_kid,
+            "canonical in-map meta.key_ref.kid must survive load-from-disk"
+        );
+        assert_eq!(meta.key_ref.uuid(), uuid);
+        assert_eq!(meta.id, expected_kid);
     }
 
     #[tokio::test]

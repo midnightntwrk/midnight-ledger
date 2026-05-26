@@ -57,6 +57,43 @@ impl InMemorySecretStore {
 /// redb backends so curve rejection probabilities are uniform.
 const MAX_DERIVE_CANDIDATES: u32 = 512;
 
+/// RFC 3339 / second-precision UTC timestamp. Same shape and same
+/// reasoning as `file_secret_store::now_iso` / `redb_secret_store::
+/// now_rfc3339` — kept inline here to avoid a cross-module pub and
+/// to keep `StoredKeyMeta::created_at`/`updated_at` honouring the
+/// type's documented contract for this backend too.
+fn now_iso() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default();
+    let total_s = now.as_secs() as i64;
+    let days = total_s.div_euclid(86_400);
+    let rem = total_s.rem_euclid(86_400);
+    let hour = (rem / 3600) as u32;
+    let min = ((rem % 3600) / 60) as u32;
+    let sec = (rem % 60) as u32;
+    let (y, mo, d) = days_to_ymd(days);
+    format!("{y:04}-{mo:02}-{d:02}T{hour:02}:{min:02}:{sec:02}Z")
+}
+
+/// Civil-from-days (Hinnant). Mirrors the helper in
+/// `file_secret_store` — duplicated rather than re-exported because
+/// the file-backend module is gated separately and we don't want a
+/// cross-module dependency for one timestamp.
+fn days_to_ymd(days: i64) -> (i32, u32, u32) {
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let y = yoe as i64 + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = (doy - (153 * mp + 2) / 5 + 1) as u32;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 } as u32;
+    let year = if m <= 2 { y + 1 } else { y };
+    (year as i32, m, d)
+}
+
 #[async_trait]
 impl SecretStorage for InMemorySecretStore {
     async fn initialize(
@@ -231,7 +268,7 @@ impl InMemorySecretStore {
             .map_err(|_| SecretStoreError::Init("mutex poisoned".into()))?;
         let uuid = Uuid::new_v4().to_string();
         let key_ref = SecretKeyRef::new(&uuid, id);
-        let ts = String::new();
+        let ts = now_iso();
         let meta = StoredKeyMeta {
             id: id.to_string(),
             key_ref: key_ref.clone(),

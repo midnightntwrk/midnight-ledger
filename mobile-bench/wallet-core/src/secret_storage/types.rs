@@ -79,11 +79,6 @@ impl SecretKeyRef {
         &self.uuid
     }
 
-    /// Update the kid in place. Used by stores after loading meta
-    /// rows whose `id` field carries the kid.
-    pub(crate) fn set_kid(&mut self, kid: impl Into<String>) {
-        self.kid = kid.into();
-    }
 }
 
 impl AsRef<str> for SecretKeyRef {
