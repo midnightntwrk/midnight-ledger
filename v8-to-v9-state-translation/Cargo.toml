@@ -1,0 +1,22 @@
+[package]
+name = "v8-to-v9-state-translation"
+edition = "2024"
+license.workspace = true
+version = "0.1.0"
+
+[dependencies]
+# v8: pulled from crates.io. Cargo keeps v8's transitive `midnight-onchain-state`
+# / `-onchain-runtime` / `-zswap` separate from v9's because their majors differ.
+ledger-v8 = { version = "8.1.0", package = "midnight-ledger", features = ["proving"] }
+onchain-state-v8 = { version = "3.0.0", package = "midnight-onchain-state" }
+
+# v9: in-workspace path deps.
+ledger-v9 = { path = "../ledger", package = "midnight-ledger-v9", features = ["proving", "test-utilities"] }
+onchain-state-v9 = { path = "../onchain-state", package = "midnight-onchain-state" }
+storage = { path = "../storage", package = "midnight-storage", features = ["state-translation"] }
+base-crypto = { path = "../base-crypto", package = "midnight-base-crypto" }
+serialize = { path = "../serialize", package = "midnight-serialize" }
+
+[dev-dependencies]
+transient-crypto = { path = "../transient-crypto", package = "midnight-transient-crypto" }
+rand = { version = "^0.8.4", features = ["getrandom"] }

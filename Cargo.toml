@@ -24,7 +24,8 @@ members = [
     "generate-cost-model",
     "wasm-proving-demos/zkir-mt",
     "static",
-    "storage-core"
+    "storage-core",
+    "v8-to-v9-state-translation",
 ]
 default-members = [
     "zswap",
@@ -64,3 +65,21 @@ panic = "abort"
 
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
+
+# Unify infrastructure crates whose APIs are tag-stable between ledger-8 and
+# ledger-9. Without this, `v8-to-v9-state-translation` ends up with two copies
+# of `midnight-storage` (etc.) in its dep graph — one from v8 transitively,
+# one from v9 directly — and their traits do not overlap.
+#
+# Crates intentionally NOT patched: midnight-onchain-state, midnight-onchain-
+# runtime, midnight-onchain-vm, midnight-zswap. Those have major-version bumps
+# between v8 and v9 and need to coexist as distinct versions.
+[patch.crates-io]
+midnight-storage = { path = "storage" }
+midnight-storage-core = { path = "storage-core" }
+midnight-serialize = { path = "serialize" }
+midnight-serialize-macros = { path = "serialize-macros" }
+midnight-base-crypto = { path = "base-crypto" }
+midnight-base-crypto-derive = { path = "base-crypto-derive" }
+midnight-coin-structure = { path = "coin-structure" }
+midnight-transient-crypto = { path = "transient-crypto" }
