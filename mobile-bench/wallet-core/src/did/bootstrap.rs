@@ -144,6 +144,20 @@ pub async fn bootstrap_did_with_keys(
         .await
         .map_err(|e| BootstrapError::CreateDid(e.to_string()))?;
 
+    // 2.5 Wait for the indexer to ingest the freshly-deployed
+    //     contract. `create_did_awaitable_with_controller` returns
+    //     as soon as the node confirms block inclusion, but every
+    //     follow-up `add_verification_method` call goes through
+    //     `Wallet::call_did_circuit`, which queries
+    //     `indexer.contract_state(addr_hex)` for the on-chain
+    //     state. The indexer has its own ingestion lag (a few
+    //     seconds on standalone, longer on PreProd), so without
+    //     this poll, step 4 fails immediately with "no on-chain
+    //     state for <addr> — was the DID deployed?". This was a
+    //     real bug surfaced by `tests/did_bootstrap_standalone.rs`
+    //     against the standalone docker stack on 2026-05-27.
+    wait_for_indexer_settle(wallet, &did).await?;
+
     // 3. Fetch the JWKs the secret store assembled from the imported
     //    private bytes. Encoding (base64url vs decimal bigint) is
     //    curve-specific and already baked into the JWK by
@@ -209,6 +223,51 @@ pub async fn bootstrap_did_with_keys(
         ed25519_ref,
         jubjub_ref,
     })
+}
+
+/// Poll `Wallet::resolve_did` until either the indexer reports the
+/// contract or the 30 s deadline expires. Used between step 2 and
+/// step 4 of `bootstrap_did_with_keys` so the first
+/// `add_verification_method` call doesn't lose the race with the
+/// indexer's ingestion lag.
+///
+/// "Transient" failure = `DidError::Indexer` whose message starts
+/// with `"no contract action for address"` — that's the exact
+/// string `Wallet::resolve_did` emits when the contract isn't yet
+/// in the indexer's view. Anything else (network error, decode
+/// failure, wrong network) is surfaced immediately.
+///
+/// In stub mode (`wallet.stub_did_state().is_some()`) the resolve
+/// returns the stub doc instantly on the first attempt, so the
+/// poll loop is a no-op there.
+async fn wait_for_indexer_settle(
+    wallet: &Wallet,
+    did: &crate::DidId,
+) -> Result<(), BootstrapError> {
+    let did_str = did.to_did_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut backoff_ms = 500u64;
+    loop {
+        match wallet.resolve_did(&did_str).await {
+            Ok(_) => return Ok(()),
+            Err(e) => {
+                let msg = e.to_string();
+                let transient = msg.contains("no contract action for address");
+                if !transient {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "indexer-settle for {did_str}: {msg}"
+                    )));
+                }
+                if std::time::Instant::now() >= deadline {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "indexer-settle timeout (30s) for {did_str}"
+                    )));
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(2000);
+    }
 }
 
 #[cfg(test)]
