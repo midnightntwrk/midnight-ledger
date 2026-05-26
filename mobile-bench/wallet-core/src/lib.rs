@@ -31,6 +31,7 @@ mod wallet;
 pub mod vc_store;
 pub mod did_auth;
 pub mod oid4vp_client;
+pub mod oid4vci_client;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
