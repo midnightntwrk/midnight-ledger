@@ -93,6 +93,15 @@ pub enum WalletError {
     Serialize(#[from] std::io::Error),
     #[error("address: {0}")]
     Address(String),
+    /// The `create_did` `WizardStage` stream emitted a `Failed(_)`
+    /// stage, or terminated without ever reaching `Done` / `Failed`.
+    /// Produced exclusively by the awaitable wrappers
+    /// ([`Wallet::create_did_awaitable`],
+    /// [`Wallet::add_verification_method`],
+    /// [`Wallet::add_verification_method_relation`]) — the underlying
+    /// stream itself just yields `WizardStage::Failed(String)`.
+    #[error("create_did failed: {0}")]
+    CreateDidFailed(String),
 }
 
 /// DUST + NIGHT balance snapshot, in atomic units. Returned
@@ -1324,6 +1333,50 @@ impl Wallet {
         }
     }
 
+    /// Drain a `WizardStage` stream until it terminates and convert
+    /// the outcome into a `Result<DidId, WalletError>`. Internal seam
+    /// shared by every awaitable wrapper around a `create_did` /
+    /// `call_did_circuit` / `load_did_circuit` stream.
+    async fn drain_did_stream(
+        stream: impl futures::Stream<Item = crate::WizardStage>,
+    ) -> Result<crate::DidId, WalletError> {
+        use futures::StreamExt;
+        let mut stream = std::pin::pin!(stream);
+        while let Some(stage) = stream.next().await {
+            match stage {
+                crate::WizardStage::Done(outcome) => return Ok(outcome.did_id),
+                crate::WizardStage::Failed(err) => {
+                    return Err(WalletError::CreateDidFailed(err))
+                }
+                _ => continue,
+            }
+        }
+        Err(WalletError::CreateDidFailed(
+            "WizardStage stream ended without Done or Failed".into(),
+        ))
+    }
+
+    /// Awaitable wrapper around [`Wallet::create_did`]. Drains the
+    /// `WizardStage` stream the existing wizard UI consumes and
+    /// returns the freshly-minted DID id on `Done`, or
+    /// [`WalletError::CreateDidFailed`] on `Failed` (or premature
+    /// stream end).
+    ///
+    /// Awaitable callers (Task 2's `bootstrap_did_with_keys`, the
+    /// React Native / CLI demo paths) don't need the stage-by-stage
+    /// progress signal the Dioxus wizard reads — they only want the
+    /// final DID id. This wrapper exists so they don't have to roll
+    /// their own `Stream::next` loop.
+    ///
+    /// **Note**: this method does **not** surface the per-DID
+    /// `controller_sk` minted during `create_did`. Task 2 awaits
+    /// further plumbing (the `BootstrappedDid` outcome will carry it
+    /// once the orchestration lands). For now, callers who need the
+    /// sk must continue to drive [`Wallet::create_did`] directly.
+    pub async fn create_did_awaitable(&self) -> Result<crate::DidId, WalletError> {
+        Self::drain_did_stream(self.create_did()).await
+    }
+
     /// Resolve a Midnight DID to a [`crate::DidDocument`] by querying
     /// the indexer for the contract's current state and decoding it.
     ///
@@ -1595,5 +1648,33 @@ mod tests {
         assert!(w.indexer().is_none());
         assert!(w.node().is_none());
         assert!(w.prover().is_none());
+    }
+
+    /// Confirms the `create_did_awaitable` wrapper compiles against
+    /// the `with_deps` constructor and propagates the underlying
+    /// `WizardStage::Failed` as `WalletError::CreateDidFailed`.
+    ///
+    /// Task 1.5.D's `stub_wallet` factory will plug in a working
+    /// dust path so the happy `Ok(DidId)` branch is exercisable;
+    /// today the wallet's `sync_dust` always opens its own WS
+    /// (regardless of injected `IndexerClient`), so against
+    /// `Network::Undeployed` with no live indexer the stream
+    /// terminates at `Failed("sync dust: ...")`. Either way the
+    /// wrapper must surface a `CreateDidFailed`.
+    #[tokio::test]
+    async fn create_did_awaitable_surfaces_failed_stage_as_walleterror() {
+        use std::sync::Arc;
+        let w = Wallet::with_deps(
+            [0u8; 32],
+            Network::Undeployed,
+            Arc::new(with_deps_stubs::NopIndexer),
+            Arc::new(with_deps_stubs::NopNode),
+            Arc::new(with_deps_stubs::NopProver),
+        );
+        let result = w.create_did_awaitable().await;
+        assert!(
+            matches!(result, Err(WalletError::CreateDidFailed(_))),
+            "expected CreateDidFailed, got {result:?}",
+        );
     }
 }
