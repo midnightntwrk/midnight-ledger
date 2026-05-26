@@ -518,6 +518,8 @@ impl Relation for IrSource {
 
     type Witness = Preprocessed;
 
+    type Error = Error;
+
     fn format_instance(
         instance: &Self::Instance,
     ) -> Result<Vec<outer::Scalar>, midnight_proofs::plonk::Error> {
@@ -861,7 +863,7 @@ impl Relation for IrSource {
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
-        let nr_pow2range_cols = match self.version {
+        let nr_pow2range_cols: u8 = match self.version {
             IrMinorVersion::V0 => 1,
             IrMinorVersion::V1 => 4,
         };
@@ -875,7 +877,9 @@ impl Relation for IrSource {
             blake2b: false,
             nr_pow2range_cols,
             secp256k1: false,
+            p256: false,
             bls12_381: false,
+            curve25519: false,
             base64: false,
             automaton: false,
         }

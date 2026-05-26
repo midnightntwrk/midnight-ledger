@@ -28,8 +28,11 @@ use serialize::{
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
+use midnight_proofs::utils::SerdeFormat;
+use midnight_zk_stdlib::MidnightPK;
 use transient_crypto::proofs::{
-    ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash, Zkir,
+    ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash,
+    VerifierKey, Zkir,
 };
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
@@ -108,6 +111,8 @@ pub enum IrMinorVersion {
 struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
+    type ProverKey = MidnightPK<IrSource>;
+
     fn check(
         &self,
         preimage: &ProofPreimage,
@@ -136,6 +141,36 @@ impl Zkir for IrSource {
         let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
 
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
+    }
+
+    fn k(&self) -> u8 {
+        midnight_zk_stdlib::optimal_k(self) as u8
+    }
+
+    async fn keygen_vk(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<VerifierKey, anyhow::Error> {
+        let vk =
+            VerifierKey::from(midnight_zk_stdlib::setup_vk(params.get_params(self.k()).await?.as_ref(), self));
+        Ok(vk)
+    }
+
+    async fn keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
+        let vk = midnight_zk_stdlib::setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let pk = midnight_zk_stdlib::setup_pk(self, &vk);
+        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+    }
+
+    fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
+        MidnightPK::<Self>::read(&mut { reader }, SerdeFormat::RawBytesUnchecked)
+    }
+
+    fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
+        pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
     }
 
     fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
@@ -472,7 +507,7 @@ impl IrSource {
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
-            model: midnight_zk_stdlib::cost_model(self),
+            model: midnight_zk_stdlib::cost_model(self, None),
         }
     }
 
