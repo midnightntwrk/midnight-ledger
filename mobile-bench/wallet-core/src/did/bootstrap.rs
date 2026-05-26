@@ -55,7 +55,7 @@ pub(crate) fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 #[allow(dead_code)] // Full body lands in Task 2.
 pub async fn bootstrap_did_with_keys(
     _wallet: &Wallet,
-    _secret_store: &dyn SecretStorage,
+    _secret_store: &mut dyn SecretStorage,
     seed: &[u8; 32],
 ) -> Result<BootstrappedDid, BootstrapError> {
     let (_ed, _jb) = derive_keys(seed);
