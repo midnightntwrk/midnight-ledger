@@ -1377,6 +1377,90 @@ impl Wallet {
         Self::drain_did_stream(self.create_did()).await
     }
 
+    /// Awaitable wrapper for the `addVerificationMethod` Compact
+    /// circuit. Builds the JSON arg shape the JS-side harness
+    /// (`prepareUnprovenCallTx`) expects, delegates to
+    /// [`Wallet::call_did_circuit`], and drains the resulting
+    /// `WizardStage` stream.
+    ///
+    /// `controller_sk` is the 32-byte secret the wallet minted for
+    /// `did` at deploy time (see [`crate::DeployOutcome::controller_sk`]).
+    /// Without it the circuit's `localSecretKey()` witness fails the
+    /// contract's controller assertion.
+    ///
+    /// `verification_method_json` is the JSON-encoded
+    /// `VerificationMethod` object the circuit consumes — `{ id,
+    /// typ, publicKeyJwk: { kty, crv, x, y } }` with bigint
+    /// coordinates encoded as `{ "$bigint": "n" }`. Task 2's
+    /// `bootstrap_did_with_keys` will assemble this from the
+    /// `SecretStorage::get_public_key` result before calling.
+    ///
+    /// `_key_ref` is reserved for the Task 1.5.D `stub_wallet` audit
+    /// (lets the stub record which key was attached) but is unused
+    /// in the real-deps path: the JWK already carries the public
+    /// material via `verification_method_json`.
+    pub async fn add_verification_method(
+        &self,
+        did: &crate::DidId,
+        _key_ref: &crate::secret_storage::SecretKeyRef,
+        verification_method_json: serde_json::Value,
+        controller_sk: [u8; 32],
+    ) -> Result<(), WalletError> {
+        let stream = self.call_did_circuit(
+            did.clone(),
+            "addVerificationMethod".to_string(),
+            serde_json::Value::Array(vec![verification_method_json]),
+            controller_sk,
+        );
+        Self::drain_did_stream(stream).await.map(|_| ())
+    }
+
+    /// Awaitable wrapper for the `addVerificationMethodRelation`
+    /// Compact circuit. Same delegation pattern as
+    /// [`Wallet::add_verification_method`]: build the JSON arg
+    /// shape, route through [`Wallet::call_did_circuit`], drain.
+    ///
+    /// `relation` selects which DID-Core relation array
+    /// (`authentication`, `assertionMethod`, etc.) the existing
+    /// verification method at `fragment` is appended to. The
+    /// circuit then enforces "the VM exists" before mutating the
+    /// relation map — so the VM must already have been registered
+    /// via `addVerificationMethod` first.
+    ///
+    /// `fragment` is the `#fragment` of the verification-method
+    /// id — e.g. `"key-1"`, not the full `<did>#key-1`. The JS
+    /// harness composes the full id internally.
+    pub async fn add_verification_method_relation(
+        &self,
+        did: &crate::DidId,
+        fragment: &str,
+        relation: crate::VerificationMethodRelation,
+        controller_sk: [u8; 32],
+    ) -> Result<(), WalletError> {
+        // The JS-side `VerificationMethodRelation` enum is encoded
+        // as the JS numeric value (Undefined=0, Authentication=1,
+        // AssertionMethod=2, KeyAgreement=3, CapabilityInvocation=4,
+        // CapabilityDelegation=5). The harness re-hydrates the enum
+        // from this number before invoking the circuit.
+        let relation_int: u8 = match relation {
+            crate::VerificationMethodRelation::Authentication => 1,
+            crate::VerificationMethodRelation::AssertionMethod => 2,
+            crate::VerificationMethodRelation::KeyAgreement => 3,
+            crate::VerificationMethodRelation::CapabilityInvocation => 4,
+            crate::VerificationMethodRelation::CapabilityDelegation => 5,
+        };
+        let stream = self.call_did_circuit(
+            did.clone(),
+            "addVerificationMethodRelation".to_string(),
+            serde_json::Value::Array(vec![
+                serde_json::Value::Number(relation_int.into()),
+                serde_json::Value::String(fragment.to_string()),
+            ]),
+            controller_sk,
+        );
+        Self::drain_did_stream(stream).await.map(|_| ())
+    }
+
     /// Resolve a Midnight DID to a [`crate::DidDocument`] by querying
     /// the indexer for the contract's current state and decoding it.
     ///
@@ -1672,6 +1756,74 @@ mod tests {
             Arc::new(with_deps_stubs::NopProver),
         );
         let result = w.create_did_awaitable().await;
+        assert!(
+            matches!(result, Err(WalletError::CreateDidFailed(_))),
+            "expected CreateDidFailed, got {result:?}",
+        );
+    }
+
+    /// Same shape assertion for `add_verification_method`. The
+    /// wallet's `call_did_circuit` stream fails at the dust-sync
+    /// step before it ever touches the JS harness or the JSON args,
+    /// so the test exercises the wrapper's stream-draining /
+    /// error-mapping path without needing a working chain.
+    #[tokio::test]
+    async fn add_verification_method_propagates_pipeline_failure() {
+        use std::sync::Arc;
+        let w = Wallet::with_deps(
+            [0u8; 32],
+            Network::Undeployed,
+            Arc::new(with_deps_stubs::NopIndexer),
+            Arc::new(with_deps_stubs::NopNode),
+            Arc::new(with_deps_stubs::NopProver),
+        );
+        let did = crate::DidId::new(Network::Undeployed, [0u8; 32]);
+        let key_ref = crate::secret_storage::SecretKeyRef::new(
+            "00000000-0000-0000-0000-000000000000",
+            "ed25519/authentication",
+        );
+        let vm_json = serde_json::json!({
+            "id": format!("{}#key-1", did.to_did_string()),
+            "typ": 1,
+            "publicKeyJwk": {
+                "kty": 3,
+                "crv": 0,
+                "x": { "$bigint": "0" },
+                "y": { "$bigint": "0" },
+            },
+        });
+        let result = w
+            .add_verification_method(&did, &key_ref, vm_json, [0u8; 32])
+            .await;
+        assert!(
+            matches!(result, Err(WalletError::CreateDidFailed(_))),
+            "expected CreateDidFailed, got {result:?}",
+        );
+    }
+
+    /// Same shape assertion for
+    /// `add_verification_method_relation`. Confirms the wrapper's
+    /// args-encoding (relation enum → JS-side int, fragment passed
+    /// through as a string) compiles and the error path lights up.
+    #[tokio::test]
+    async fn add_verification_method_relation_propagates_pipeline_failure() {
+        use std::sync::Arc;
+        let w = Wallet::with_deps(
+            [0u8; 32],
+            Network::Undeployed,
+            Arc::new(with_deps_stubs::NopIndexer),
+            Arc::new(with_deps_stubs::NopNode),
+            Arc::new(with_deps_stubs::NopProver),
+        );
+        let did = crate::DidId::new(Network::Undeployed, [0u8; 32]);
+        let result = w
+            .add_verification_method_relation(
+                &did,
+                "key-1",
+                crate::VerificationMethodRelation::Authentication,
+                [0u8; 32],
+            )
+            .await;
         assert!(
             matches!(result, Err(WalletError::CreateDidFailed(_))),
             "expected CreateDidFailed, got {result:?}",
