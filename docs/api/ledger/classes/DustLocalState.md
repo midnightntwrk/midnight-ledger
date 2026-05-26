@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -26,6 +26,22 @@ new DustLocalState(params): DustLocalState;
 
 ## Properties
 
+### commitmentTreeFirstFree
+
+```ts
+readonly commitmentTreeFirstFree: bigint;
+```
+
+***
+
+### generatingTreeFirstFree
+
+```ts
+readonly generatingTreeFirstFree: bigint;
+```
+
+***
+
 ### params
 
 ```ts
@@ -37,7 +53,7 @@ readonly params: DustParameters;
 ### syncTime
 
 ```ts
-readonly syncTime: Date;
+syncTime: Date;
 ```
 
 ***
@@ -162,12 +178,12 @@ collapseGenerationTree(generationIndexStart, generationIndexEnd): DustLocalState
 ### commitmentTreeRoot()
 
 ```ts
-commitmentTreeRoot(): undefined | bigint;
+commitmentTreeRoot(): bigint | undefined;
 ```
 
 #### Returns
 
-`undefined` \| `bigint`
+`bigint` \| `undefined`
 
 ***
 
@@ -175,8 +191,8 @@ commitmentTreeRoot(): undefined | bigint;
 
 ```ts
 findUtxoByNullifier(nullifier): 
-  | undefined
-  | QualifiedDustOutput;
+  | QualifiedDustOutput
+  | undefined;
 ```
 
 #### Parameters
@@ -187,20 +203,20 @@ findUtxoByNullifier(nullifier):
 
 #### Returns
 
-  \| `undefined`
   \| [`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
+  \| `undefined`
 
 ***
 
 ### generatingTreeRoot()
 
 ```ts
-generatingTreeRoot(): undefined | bigint;
+generatingTreeRoot(): bigint | undefined;
 ```
 
 #### Returns
 
-`undefined` \| `bigint`
+`bigint` \| `undefined`
 
 ***
 
@@ -208,8 +224,8 @@ generatingTreeRoot(): undefined | bigint;
 
 ```ts
 generationInfo(qdo): 
-  | undefined
-  | DustGenerationInfo;
+  | DustGenerationInfo
+  | undefined;
 ```
 
 #### Parameters
@@ -220,8 +236,8 @@ generationInfo(qdo):
 
 #### Returns
 
-  \| `undefined`
   \| [`DustGenerationInfo`](../type-aliases/DustGenerationInfo.md)
+  \| `undefined`
 
 ***
 
@@ -529,6 +545,24 @@ toString(compact?): string;
 #### Returns
 
 `string`
+
+***
+
+### updateGenerationTreeFromEvidence()
+
+```ts
+updateGenerationTreeFromEvidence(evidence): DustLocalState;
+```
+
+#### Parameters
+
+##### evidence
+
+[`DustGenerationTreeInsertionPath`](DustGenerationTreeInsertionPath.md)
+
+#### Returns
+
+`DustLocalState`
 
 ***
 

@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -33,11 +33,11 @@ signature?): DustRegistration<S>;
 
 ##### nightKey
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ##### dustAddress
 
-`undefined` | `bigint`
+`bigint` | `undefined`
 
 ##### allowFeePayment
 
@@ -64,7 +64,7 @@ allowFeePayment: bigint;
 ### dustAddress
 
 ```ts
-dustAddress: undefined | bigint;
+dustAddress: bigint | undefined;
 ```
 
 ***
@@ -72,7 +72,7 @@ dustAddress: undefined | bigint;
 ### nightKey
 
 ```ts
-nightKey: string;
+nightKey: SignatureVerifyingKey;
 ```
 
 ***
