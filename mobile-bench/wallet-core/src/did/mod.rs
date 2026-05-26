@@ -19,12 +19,14 @@
 //! 4. **all circuits** — addVerificationMethod / removeService / …
 
 pub(crate) mod artifacts;
+pub(crate) mod bootstrap;
 pub(crate) mod contract;
 pub(crate) mod deploy;
 mod error;
 mod id;
 mod types;
 
+pub use bootstrap::{bootstrap_did_with_keys, BootstrapError, BootstrappedDid};
 pub use error::DidError;
 pub use id::{CONTRACT_ADDRESS_LEN, ContractAddressBytes, DidId, DidIdError};
 pub use types::{
