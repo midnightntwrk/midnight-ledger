@@ -10,6 +10,8 @@
 //! 4. `jws::build_id_token` constructs the SIOPv2 id_token JWS.
 //! 5. `http::post_response` POSTs `{id_token, state}` to redirect_uri.
 
+mod jws;
 mod parser;
 
+pub use jws::{build_id_token, IdTokenError};
 pub use parser::{parse_request_url, fetch_request_object, AuthRequest, Oid4vpParseError};
