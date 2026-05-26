@@ -11,6 +11,7 @@
 
 mod address;
 mod artifacts;
+pub mod chain;
 mod crypto;
 mod did;
 mod dust;
@@ -58,11 +59,12 @@ pub fn upstream_demo_controller_secret() -> [u8; 32] {
 
 pub use address::{AddressError, truncate_middle, unshielded_bech32m, unshielded_hrp};
 pub use hd::{HdError, Role};
-pub use indexer::{ChainTipInfo, ContractStateInfo, IndexerClient, IndexerError};
+pub use indexer::{ChainTipInfo, ContractStateInfo, HttpIndexerClient, IndexerError};
 pub use network::{Network, NetworkConfig};
 pub use node::{
-    MidnightSigner, NodeClient, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult,
+    MidnightSigner, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult, SubxtNodeClient,
 };
+pub use chain::{HttpProver, IndexerClient, LocalProver, NodeClient, Prover};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{
     BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,

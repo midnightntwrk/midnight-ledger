@@ -6,7 +6,7 @@ use crate::format::{
 use crate::bench_stage;
 use crate::proc_stats::{CLK_TCK, proc_per_core_stats, proc_self_stats};
 use wallet_core::{
-    ChainTipInfo, IndexerClient, Network, NodeClient, NodeStatus, ProbeResult, Wallet,
+    ChainTipInfo, HttpIndexerClient, Network, NodeStatus, ProbeResult, SubxtNodeClient, Wallet,
     probe_connectivity,
 };
 
@@ -1299,14 +1299,14 @@ pub fn App() -> Element {
             }
 
             let tip_fut = async {
-                IndexerClient::new(net)
+                HttpIndexerClient::new(net)
                     .map_err(|e| e.to_string())?
                     .chain_tip()
                     .await
                     .map_err(|e| e.to_string())
             };
             let node_fut = async {
-                NodeClient::connect(net)
+                SubxtNodeClient::connect(net)
                     .await
                     .map_err(|e| e.to_string())?
                     .status()

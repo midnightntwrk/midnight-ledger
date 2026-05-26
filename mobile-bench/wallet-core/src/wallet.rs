@@ -656,7 +656,7 @@ impl Wallet {
             // chain tip's tblock keeps us inside the window; the
             // root match holds because no dust events have
             // advanced our local tree (single-tenant standalone).
-            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -702,7 +702,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::NodeClient::connect(network).await {
+            let node = match crate::SubxtNodeClient::connect(network).await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
@@ -820,7 +820,7 @@ impl Wallet {
             let params = ledger::structure::INITIAL_PARAMETERS;
             // See `create_did` for the full rationale on ctime
             // selection (chain-tip vs sync_time).
-            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -866,7 +866,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::NodeClient::connect(network).await {
+            let node = match crate::SubxtNodeClient::connect(network).await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
@@ -946,7 +946,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("encryption pk: {e}")); return; }
             };
-            let indexer = match crate::IndexerClient::new(network) {
+            let indexer = match crate::HttpIndexerClient::new(network) {
                 Ok(c) => c,
                 Err(e) => { yield crate::WizardStage::Failed(format!("indexer client: {e}")); return; }
             };
@@ -1072,7 +1072,7 @@ impl Wallet {
             let ttl = base_crypto::time::Timestamp::from_secs(now_secs + 3600);
             // See `create_did` for the full rationale on ctime
             // selection (chain-tip vs sync_time).
-            let chain_tip_secs: u64 = match crate::IndexerClient::new(network) {
+            let chain_tip_secs: u64 = match crate::HttpIndexerClient::new(network) {
                 Ok(c) => match c.chain_tip().await {
                     Ok(Some(t)) => (t.timestamp_unix as u64) / 1000,
                     _ => 0,
@@ -1127,7 +1127,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::NodeClient::connect(network).await {
+            let node = match crate::SubxtNodeClient::connect(network).await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
@@ -1176,7 +1176,7 @@ impl Wallet {
             )));
         }
 
-        let client = crate::IndexerClient::new(self.network)
+        let client = crate::HttpIndexerClient::new(self.network)
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
         let info = client
             .contract_state(&id.contract_address_hex())
@@ -1216,7 +1216,7 @@ impl Wallet {
         }
 
         let started = std::time::Instant::now();
-        let client = crate::IndexerClient::new(self.network)
+        let client = crate::HttpIndexerClient::new(self.network)
             .map_err(|e| crate::DidError::Indexer(e.to_string()))?;
         let info = client
             .contract_state(&id.contract_address_hex())

@@ -9,5 +9,5 @@
 mod client;
 mod signer;
 
-pub use client::{NodeClient, NodeError, NodeHealth, NodeStatus, SubmitResult};
+pub use client::{NodeError, NodeHealth, NodeStatus, SubmitResult, SubxtNodeClient};
 pub use signer::{MidnightSigner, SignerError};

@@ -4,7 +4,7 @@
 
 #![cfg(feature = "network-tests")]
 
-use wallet_core::{IndexerClient, Network, NodeClient, probe_connectivity};
+use wallet_core::{HttpIndexerClient, Network, SubxtNodeClient, probe_connectivity};
 
 #[tokio::test]
 async fn preprod_indexer_and_node_reachable() {
@@ -32,7 +32,7 @@ async fn preprod_indexer_and_node_reachable() {
 #[tokio::test]
 async fn preprod_chain_tip_query() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = IndexerClient::new(Network::PreProd).expect("client");
+    let client = HttpIndexerClient::new(Network::PreProd).expect("client");
     let tip = client.chain_tip().await.expect("chain_tip");
     let tip = tip.expect("preprod always has a latest block");
     eprintln!("preprod chain tip: {:#?}", tip);
@@ -45,7 +45,7 @@ async fn preprod_chain_tip_query() {
 #[tokio::test]
 async fn preprod_node_status_query() {
     let _ = tracing_subscriber::fmt::try_init();
-    let client = NodeClient::connect(Network::PreProd).await.expect("connect");
+    let client = SubxtNodeClient::connect(Network::PreProd).await.expect("connect");
     let status = client.status().await.expect("status");
     eprintln!("preprod node status: {:#?}", status);
 

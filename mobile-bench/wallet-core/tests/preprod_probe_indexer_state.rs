@@ -5,14 +5,14 @@
 
 #![cfg(feature = "network-tests")]
 
-use wallet_core::{IndexerClient, Network};
+use wallet_core::{HttpIndexerClient, Network};
 
 const TARGET: &str = "6b6e06d6f9779b0e4a3596a02edba5539f5b435c07ff5c885f3855d8d8653801";
 
 #[tokio::test]
 async fn dump_contract_state_info() {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    let client = IndexerClient::new(Network::PreProd).expect("client");
+    let client = HttpIndexerClient::new(Network::PreProd).expect("client");
     let info = client
         .contract_state(TARGET)
         .await

@@ -44,7 +44,7 @@ const PREPROD_DID_ADDR: &str =
 /// PreProd indexer. Same path the wallet's
 /// `Wallet::resolve_did_full` walks.
 async fn fetch_contract_state_hex(addr: &str) -> String {
-    let client = wallet_core::IndexerClient::new(wallet_core::Network::PreProd)
+    let client = wallet_core::HttpIndexerClient::new(wallet_core::Network::PreProd)
         .expect("IndexerClient::new");
     let info = client
         .contract_state(addr)

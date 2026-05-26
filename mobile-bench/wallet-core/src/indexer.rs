@@ -89,12 +89,12 @@ pub struct ContractStateInfo {
 }
 
 #[derive(Clone)]
-pub struct IndexerClient {
+pub struct HttpIndexerClient {
     http: reqwest::Client,
     http_url: String,
 }
 
-impl IndexerClient {
+impl HttpIndexerClient {
     pub fn new(network: Network) -> Result<Self, IndexerError> {
         ensure_default_crypto_provider();
         let cfg = network.config();
@@ -171,5 +171,23 @@ impl IndexerClient {
                 ledger_parameters_hex: Some(a.transaction.block.ledger_parameters),
             }
         }))
+    }
+}
+
+/// `crate::chain::IndexerClient` trait impl — delegates to the
+/// inherent methods. The trait exists so [`crate::Wallet`] can be
+/// constructed with a mock for test-only call sites without
+/// dragging in the HTTP stack.
+#[async_trait::async_trait]
+impl crate::chain::IndexerClient for HttpIndexerClient {
+    async fn chain_tip(&self) -> Result<Option<ChainTipInfo>, IndexerError> {
+        HttpIndexerClient::chain_tip(self).await
+    }
+
+    async fn contract_state(
+        &self,
+        address_hex: &str,
+    ) -> Result<Option<ContractStateInfo>, IndexerError> {
+        HttpIndexerClient::contract_state(self, address_hex).await
     }
 }

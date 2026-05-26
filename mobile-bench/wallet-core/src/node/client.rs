@@ -48,12 +48,12 @@ pub struct SubmitResult {
     pub block_hash: [u8; 32],
 }
 
-pub struct NodeClient {
+pub struct SubxtNodeClient {
     inner: WsClient,
     subxt: OnlineClient<SubstrateConfig>,
 }
 
-impl NodeClient {
+impl SubxtNodeClient {
     pub async fn connect(network: Network) -> Result<Self, NodeError> {
         ensure_default_crypto_provider();
         let cfg = network.config();
@@ -150,5 +150,21 @@ impl NodeClient {
             tx_hash: in_block.extrinsic_hash().0,
             block_hash: in_block.block_hash().0,
         })
+    }
+}
+
+/// `crate::chain::NodeClient` trait impl — delegates to the
+/// inherent `submit_deploy`. The trait exists so [`crate::Wallet`]
+/// can be constructed with a mock that returns a canned
+/// `SubmitResult` for test-only call sites without binding a real
+/// `WsClient`.
+#[async_trait::async_trait]
+impl crate::chain::NodeClient for SubxtNodeClient {
+    async fn submit_deploy(
+        &self,
+        bytes: Vec<u8>,
+        signer: &crate::MidnightSigner,
+    ) -> Result<SubmitResult, NodeError> {
+        SubxtNodeClient::submit_deploy(self, bytes, signer).await
     }
 }

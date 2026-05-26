@@ -115,7 +115,7 @@ fn vk_hex(vk: &base_crypto::signatures::VerifyingKey) -> String {
 async fn fetch_contract_state(
     addr: &str,
 ) -> onchain_state::state::ContractState<storage::DefaultDB> {
-    let client = wallet_core::IndexerClient::new(Network::PreProd).expect("IndexerClient::new");
+    let client = wallet_core::HttpIndexerClient::new(Network::PreProd).expect("IndexerClient::new");
     let info = client
         .contract_state(addr)
         .await
