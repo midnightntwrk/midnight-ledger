@@ -166,6 +166,14 @@ pub struct Wallet {
     /// `Arc<dyn _>` so multiple `Wallet`s (re-built per stream
     /// inside `create_did` etc.) share one trait object.
     indexer: Option<Arc<dyn chain::IndexerClient>>,
+    /// Injected node client. When `None` (the default), the
+    /// submit-stage of every chain-op stream builds a fresh
+    /// `SubxtNodeClient` via `SubxtNodeClient::connect(network)` —
+    /// the original pre-Task 1.5.B behaviour. When `Some`, the
+    /// injected client is reused so Task 1.5.D's `stub_wallet`
+    /// can return canned `SubmitResult`s without binding a WS
+    /// connection.
+    node: Option<Arc<dyn chain::NodeClient>>,
 }
 
 impl Wallet {
@@ -181,6 +189,7 @@ impl Wallet {
             dust_syncer: None,
             js_bridge: None,
             indexer: None,
+            node: None,
         }
     }
 
@@ -231,6 +240,34 @@ impl Wallet {
         match self.indexer.clone() {
             Some(i) => Ok(i),
             None => chain::default_indexer(self.network),
+        }
+    }
+
+    /// Builder: inject a `NodeClient` trait object. When set,
+    /// the submit-stage of every chain-op stream consults the
+    /// injected client instead of opening a fresh
+    /// `SubxtNodeClient::connect`. Used by Task 1.5.D's
+    /// `stub_wallet` to short-circuit the WS submit with a
+    /// canned `SubmitResult`.
+    pub fn with_node(mut self, node: Arc<dyn chain::NodeClient>) -> Self {
+        self.node = Some(node);
+        self
+    }
+
+    /// Currently-configured node trait object, if any. `None`
+    /// means the wallet will open a fresh `SubxtNodeClient` on
+    /// each submit (the default real-deps path).
+    pub fn node(&self) -> Option<Arc<dyn chain::NodeClient>> {
+        self.node.clone()
+    }
+
+    /// Resolve the active node client: the injected one if any,
+    /// else a freshly-connected `SubxtNodeClient`. Async because
+    /// the default real-deps path opens a WebSocket.
+    async fn resolve_node(&self) -> Result<Arc<dyn chain::NodeClient>, crate::node::NodeError> {
+        match self.node.clone() {
+            Some(n) => Ok(n),
+            None => Ok(Arc::new(crate::SubxtNodeClient::connect(self.network).await?)),
         }
     }
 
@@ -611,6 +648,7 @@ impl Wallet {
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
         let indexer_dep = self.indexer.clone();
+        let node_dep = self.node.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
@@ -618,6 +656,7 @@ impl Wallet {
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
+            if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -748,7 +787,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::SubxtNodeClient::connect(network).await {
+            let node = match wallet.resolve_node().await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
@@ -797,6 +836,7 @@ impl Wallet {
         let proof_server_url = self.proof_server_url.clone();
         let dust_syncer = self.dust_syncer.clone();
         let indexer_dep = self.indexer.clone();
+        let node_dep = self.node.clone();
         async_stream::stream! {
             // 1. SyncingDust
             yield crate::WizardStage::SyncingDust;
@@ -804,6 +844,7 @@ impl Wallet {
             if let Some(url) = proof_server_url.clone() { wallet = wallet.with_proof_server_url(url); }
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
+            if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -914,7 +955,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::SubxtNodeClient::connect(network).await {
+            let node = match wallet.resolve_node().await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
@@ -968,6 +1009,7 @@ impl Wallet {
         let dust_syncer = self.dust_syncer.clone();
         let js_bridge_handle = self.js_bridge.clone();
         let indexer_dep = self.indexer.clone();
+        let node_dep = self.node.clone();
         async_stream::stream! {
             yield crate::WizardStage::SyncingDust;
             let mut wallet = Wallet::from_seed(seed_bytes, network);
@@ -975,6 +1017,7 @@ impl Wallet {
             if let Some(s) = dust_syncer.clone() { wallet = wallet.with_dust_syncer(s); }
             if let Some(b) = js_bridge_handle.clone() { wallet = wallet.with_js_bridge(b); }
             if let Some(i) = indexer_dep.clone() { wallet = wallet.with_indexer(i); }
+            if let Some(n) = node_dep.clone() { wallet = wallet.with_node(n); }
             let mut dust_state = match wallet.sync_dust().await {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("sync dust: {e}")); return; }
@@ -1177,7 +1220,7 @@ impl Wallet {
                 Ok(s) => s,
                 Err(e) => { yield crate::WizardStage::Failed(format!("signer: {e}")); return; }
             };
-            let node = match crate::SubxtNodeClient::connect(network).await {
+            let node = match wallet.resolve_node().await {
                 Ok(n) => n,
                 Err(e) => { yield crate::WizardStage::Failed(format!("node connect: {e}")); return; }
             };
