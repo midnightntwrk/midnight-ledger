@@ -1668,7 +1668,127 @@ pub fn App() -> Element {
                         },
                     }
                 } else {
-                    // Browse mode: inventory + flat panels.
+                    // Browse mode: Create DID button + inventory +
+                    // resolve panel.
+                    //
+                    // The wizard streams a `DeployOutcome` on
+                    // success. We persist the controller secret
+                    // (without it the operator can never update or
+                    // deactivate the DID), insert a `Pending` row
+                    // in the inventory, log the deploy, and kick
+                    // off a background resolve so the row's
+                    // counter / VM count / status badge converge
+                    // on the on-chain truth as soon as the indexer
+                    // catches up.
+                    CreateDidWizard {
+                        network: *network.read(),
+                        on_done: move |outcome: wallet_core::DeployOutcome| {
+                            let net = *network.read();
+                            let did_string = outcome.did_id.to_did_string();
+                            // Persist controller_sk first — without
+                            // it the user can never update or
+                            // deactivate this DID, and the wizard's
+                            // success blob is the only place it's
+                            // ever surfaced in the clear.
+                            bridge_state.read().remember_controller_secret(
+                                net,
+                                did_string.clone(),
+                                outcome.controller_sk,
+                            );
+                            // Pending inventory entry — counter +
+                            // VMs unknown until the indexer catches
+                            // up and the auto-resolve below
+                            // overwrites it with real values.
+                            let entry = DidInventoryEntry {
+                                did: did_string.clone(),
+                                network_label: net.label().to_string(),
+                                status: DidInventoryStatus::Pending,
+                                counter: None,
+                                vm_count: None,
+                                service_count: None,
+                                last_block_height: None,
+                            };
+                            let mut inv = did_inventory.read().clone();
+                            inv.insert(did_string.clone(), entry.clone());
+                            did_inventory.set(inv);
+                            persist_inventory_entry(
+                                &bridge_state.read(),
+                                net,
+                                &entry,
+                            );
+                            // Session log entry.
+                            let mut log = session_log.read().clone();
+                            log.push(SessionEvent::Deploy {
+                                did: did_string.clone(),
+                                tx_hash: outcome.tx_hash,
+                                block_hash: outcome.block_hash,
+                            });
+                            session_log.set(log);
+                            // Resolve-panel pre-fill.
+                            last_did_id.set(Some(did_string.clone()));
+                            // Background auto-resolve to flip the
+                            // Pending badge to Active and fill in
+                            // counter / VM / service counts.
+                            let bridge = bridge_state.read().clone();
+                            let did_for_spawn = did_string.clone();
+                            spawn(async move {
+                                let w = app_wallet_for(net);
+                                match w.resolve_did_full(&did_for_spawn).await {
+                                    Ok(resolved) => {
+                                        let resolved_did =
+                                            resolved.document.id.to_did_string();
+                                        let entry = DidInventoryEntry {
+                                            did: resolved_did.clone(),
+                                            network_label: net.label().to_string(),
+                                            status: if resolved.document.deactivated {
+                                                DidInventoryStatus::Deactivated
+                                            } else {
+                                                DidInventoryStatus::Active
+                                            },
+                                            counter: Some(resolved.maintenance_counter),
+                                            vm_count: Some(
+                                                resolved.document.verification_method.len(),
+                                            ),
+                                            service_count: Some(
+                                                resolved.document.service.len(),
+                                            ),
+                                            last_block_height: resolved.last_block_height,
+                                        };
+                                        let mut inv = did_inventory.read().clone();
+                                        inv.insert(resolved_did.clone(), entry.clone());
+                                        did_inventory.set(inv);
+                                        persist_inventory_entry(&bridge, net, &entry);
+                                        let mut cache = resolved_cache.read().clone();
+                                        cache.insert(resolved_did.clone(), resolved.clone());
+                                        resolved_cache.set(cache);
+                                        persist_resolved_cache(
+                                            &bridge,
+                                            net,
+                                            &resolved_did,
+                                            &resolved,
+                                        );
+                                    }
+                                    Err(e) => {
+                                        tracing::warn!(
+                                            did=%did_for_spawn,
+                                            error=%e,
+                                            "auto-resolve after Create DID failed",
+                                        );
+                                    }
+                                }
+                            });
+                        },
+                        on_timing: move |run: TimingRun| {
+                            let mut log = timing_log.read().clone();
+                            log.push(run);
+                            timing_log.set(log);
+                        },
+                        on_cost: move |cost: CostRun| {
+                            let mut log = cost_log.read().clone();
+                            log.push(cost);
+                            cost_log.set(log);
+                        },
+                    }
                     DidInventoryPanel {
                         entries: did_inventory.read().values().cloned().collect(),
                         on_select: move |did: String| {
@@ -1999,23 +2119,19 @@ fn terminal(stages: &[wallet_core::WizardStage]) -> Option<TerminalView<'_>> {
 }
 
 enum TerminalView<'a> {
-    /// Used by `CreateDidWizard`'s success panel. The wizard is
-    /// currently unmounted (Create DID is hidden from the DIDs
-    /// tab) so this variant is consulted only by the wizard's
-    /// internal renderer if it gets remounted.
-    #[allow(dead_code)]
+    /// Used by `CreateDidWizard`'s success panel. Mounted again
+    /// on the DIDs tab so the operator can bootstrap a fresh DID
+    /// against the active network (Undeployed / PreProd).
     Done(&'a wallet_core::DeployOutcome),
     Failed(&'a str),
 }
 
-// Currently unmounted — removed from the DIDs tab on operator
-// builds because the 3 pre-seeded preprod-live DIDs make Create DID
-// redundant alongside Open + Update DID. Component is kept in place
-// so the flow can be re-instated with a one-line mount in the
-// Tab::Dids arm. The `dead_code` allow covers the cascade: with no
-// live caller, the dead-code lint trips on the inner `Failed(msg)`
-// pattern and the dependent enum variants.
-#[allow(dead_code)]
+// Mounted on the DIDs tab inside Tab::Dids's browse mode so the
+// operator can create a fresh DID against the active network. The
+// preprod-live seed path covers PreProd's 3 demo DIDs at unlock,
+// but Undeployed and freshly-seeded sessions need the wizard to
+// produce an actual DID before any of the other panels do
+// anything useful.
 #[component]
 fn CreateDidWizard(
     network: Network,
@@ -2374,10 +2490,30 @@ fn WalletSyncPane(
         });
     };
 
-    // Auto-trigger once per mount. The `started` guard prevents
-    // re-renders from kicking duplicate syncs.
+    // Auto-trigger once per mount, but ONLY for `PreProd`.
+    //
+    // Rationale: the PreProd demo profile expects the wallet to be
+    // synced and showing balances on the very first paint — that's
+    // the operator-demo flow. Auto-syncing on other networks
+    // (Undeployed, Mainnet later) is undesirable because:
+    //
+    // - On Undeployed, the operator usually wants to bring up the
+    //   standalone stack, switch the picker, *then* connect. An
+    //   auto-sync racing with `rehydrate_for_network` (which
+    //   re-registers the `DustSyncer` for the new network) can
+    //   fail with "syncer not initialised" before rehydrate
+    //   finishes, OR worse, sync against the previously-registered
+    //   network's data.
+    //
+    // - On Mainnet the user typically wants to review the address
+    //   before a sync touches the indexer.
+    //
+    // The `started` guard still prevents re-renders from re-kicking
+    // an in-flight sync on PreProd. On non-PreProd, the operator
+    // clicks the `Reconnect` button below to sync manually.
+    let auto_sync = matches!(network, Network::PreProd);
     use_effect(move || {
-        if !*started.read() {
+        if auto_sync && !*started.read() {
             started.set(true);
             kick();
         }
@@ -2928,6 +3064,14 @@ fn DidOperationBuilder(
     /// after each accepted load. Subsequent loads in the same
     /// batch use the bumped value.
     initial_counter: u32,
+    /// Fragment ids of every verification method currently in the
+    /// resolved DID document. Drives the `method_id` dropdown for
+    /// `addVerificationMethodRelation` /
+    /// `removeVerificationMethodRelation` — the operator can pick
+    /// an existing VM instead of typing the fragment by hand.
+    /// Empty before the first resolve, in which case the form
+    /// falls back to a free-text input.
+    method_ids: Vec<String>,
     on_back: EventHandler<()>,
     on_event: EventHandler<SessionEvent>,
     on_resolved: EventHandler<wallet_core::ResolvedDid>,
@@ -2955,6 +3099,34 @@ fn DidOperationBuilder(
     let mut f_typ = use_signal(String::new);
     let mut f_endpoint = use_signal(String::new);
     let mut form_error = use_signal::<Option<String>>(|| None);
+
+    // Auto-pick the first known VM as `method_id` whenever the
+    // user lands on a relation op and the current value isn't in
+    // the resolved list. Without this the dropdown would render
+    // with the first <option> visually selected but `f_method_id`
+    // would still be `""`, and the submit handler would reject
+    // the op with "method_id is required". The effect runs on
+    // every render — `use_effect` in Dioxus 0.6 has no
+    // dependency tracking, but the body is a no-op when the
+    // value is already valid so this is fine.
+    {
+        let method_ids = method_ids.clone();
+        use_effect(move || {
+            let kind = BUILDABLE_OPS[*op_idx.read()];
+            let needs_picker = matches!(
+                kind,
+                OpKind::AddVerificationMethodRelation
+                    | OpKind::RemoveVerificationMethodRelation
+            );
+            if !needs_picker || method_ids.is_empty() {
+                return;
+            }
+            let cur = f_method_id.read().clone();
+            if !method_ids.iter().any(|m| m == &cur) {
+                f_method_id.set(method_ids[0].clone());
+            }
+        });
+    }
 
     // Queue + execution state. `queue` is the lifted Signal from
     // DidDetailView; rebind as mutable here to match the existing
@@ -3489,18 +3661,61 @@ fn DidOperationBuilder(
                         }
                     },
                     OpKind::AddVerificationMethodRelation
-                    | OpKind::RemoveVerificationMethodRelation => rsx! {
-                        FormSelect {
-                            label: "relation",
-                            options: RELATIONS,
-                            selected_idx: cur_rel,
-                            on_select: move |i: usize| f_relation_idx.set(i),
-                        }
-                        FormRow {
-                            label: "method_id",
-                            value: f_method_id.read().clone(),
-                            on_change: move |s: String| f_method_id.set(s),
-                            placeholder: "existing verification-method fragment id",
+                    | OpKind::RemoveVerificationMethodRelation => {
+                        let mids = method_ids.clone();
+                        let cur_mid = f_method_id.read().clone();
+                        rsx! {
+                            FormSelect {
+                                label: "relation",
+                                options: RELATIONS,
+                                selected_idx: cur_rel,
+                                on_select: move |i: usize| f_relation_idx.set(i),
+                            }
+                            // When the DID document has at least one
+                            // verification method, render a dropdown
+                            // populated from the resolved cache so
+                            // the operator can't fat-finger a
+                            // non-existent fragment id. With zero VMs
+                            // (e.g. a freshly bootstrapped DID
+                            // before any addVerificationMethod
+                            // landed) we fall back to a free-text
+                            // input — the chain will still reject
+                            // unknown ids but the user gets a path
+                            // out of the impasse.
+                            if mids.is_empty() {
+                                FormRow {
+                                    label: "method_id",
+                                    value: cur_mid,
+                                    on_change: move |s: String| f_method_id.set(s),
+                                    placeholder: "existing verification-method fragment id",
+                                }
+                            } else {
+                                {
+                                    let mids_for_change = mids.clone();
+                                    rsx! {
+                                        div { class: "row",
+                                            label { style: "min-width: 80px;", "method_id" }
+                                            select {
+                                                onchange: move |e| {
+                                                    if let Ok(i) = e.value().parse::<usize>() {
+                                                        if let Some(v) = mids_for_change.get(i) {
+                                                            f_method_id.set(v.clone());
+                                                        }
+                                                    }
+                                                },
+                                                style: "flex: 1; padding: 6px 8px; background: var(--surface-2); color: var(--text); border: 1px solid var(--border); border-radius: 6px;",
+                                                for (i , mid) in mids.iter().enumerate() {
+                                                    option {
+                                                        value: "{i}",
+                                                        selected: mid == &cur_mid,
+                                                        "{mid}"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
                         }
                     },
                     OpKind::AddService | OpKind::UpdateService => rsx! {
@@ -5883,6 +6098,22 @@ fn DidDetailView(
                 .as_ref()
                 .map(|r| (r.loaded_circuits.clone(), r.maintenance_counter))
                 .unwrap_or_else(|| (Vec::new(), 0));
+            // Fragment ids of every VM currently in the resolved
+            // document. Feeds the `method_id` dropdown for the
+            // two relation ops so the operator picks from a real
+            // list instead of typing a fragment. Strip any `did:…#`
+            // prefix to match the on-chain raw form (same shape as
+            // the relationships matrix builder).
+            let method_ids: Vec<String> = cached
+                .as_ref()
+                .map(|r| {
+                    r.document
+                        .verification_method
+                        .iter()
+                        .map(|vm| vm_short_name(&vm.id).to_string())
+                        .collect()
+                })
+                .unwrap_or_default();
             let bridge_state_for_builder = bridge_state.clone();
             return rsx! {
                 DidOperationBuilder {
@@ -5892,6 +6123,7 @@ fn DidDetailView(
                     bridge_state: bridge_state_for_builder,
                     loaded_circuits,
                     initial_counter,
+                    method_ids,
                     on_back: move |_| builder_mode.set(false),
                     on_event,
                     on_resolved,
@@ -6208,13 +6440,19 @@ fn render_methods_tab(r: &wallet_core::ResolvedDid) -> Element {
                         // Type/curve names come straight from the JWK
                         let kty = format!("{:?}", vm.public_key_jwk.kty);
                         let crv = format!("{:?}", vm.public_key_jwk.crv);
-                        let id = vm.id.clone();
+                        let id_full = vm.id.clone();
+                        // Display the human-readable name only so
+                        // the column stays readable; the full
+                        // `did:…#frag` URL stays on the `title`
+                        // attribute (long-press / hover) and is
+                        // what the Copy button yields.
+                        let id_fragment = vm_short_name(&id_full).to_string();
                         rsx! {
                             tr {
-                                td { "{vm.id}" }
+                                td { title: "{id_full}", "{id_fragment}" }
                                 td { class: "muted", "{kty}" }
                                 td { class: "muted", "{crv}" }
-                                td { {copy_btn(id, "Copy DID URL")} }
+                                td { {copy_btn(id_full, "Copy DID URL")} }
                             }
                         }
                     }
@@ -6242,7 +6480,7 @@ fn render_relationships_tab(r: &wallet_core::ResolvedDid) -> Element {
         .document
         .verification_method
         .iter()
-        .map(|vm| vm.id.rsplit('#').next().unwrap_or(&vm.id).to_string())
+        .map(|vm| vm_short_name(&vm.id).to_string())
         .collect();
     let auth = &r.authentication_ids;
     let assr = &r.assertion_method_ids;
@@ -7067,6 +7305,44 @@ fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<Strin
 /// prefix and the last 6 chars of the address so it's still
 /// recognisable but doesn't blow out the column. Full DID lives on
 /// the row's `title` attribute for hover.
+/// Extract the human-readable "name" portion of a verification
+/// method id for table / dropdown display.
+///
+/// `VerificationMethod.id` per DID Core is `<did>#<fragment>`,
+/// and `ledger_to_domain` (`mobile-bench/wallet-core/src/did/contract.rs`)
+/// promotes bare fragment ids into that full URL form on resolve.
+/// But operators sometimes type the full DID URL **without** the
+/// `#` separator into the Operation Builder's id field — when
+/// that happens, `ledger_to_domain` sees a `#`-less id and leaves
+/// it untouched, so a naive `rsplit('#').next()` shows the full
+/// string.
+///
+/// Strategy, in order:
+/// 1. After the last `#` if one exists — DID Core form.
+/// 2. Otherwise, strip a `did:<method>:<network>:<address>`
+///    prefix (3 colons) and return whatever's left, also
+///    stripping any leading `#` / `:`.
+/// 3. Otherwise return the input unchanged.
+fn vm_short_name(id: &str) -> &str {
+    if let Some(p) = id.rfind('#') {
+        return &id[p + 1..];
+    }
+    // No '#': try to strip the `did:method:network:addr` prefix.
+    // Index of the 3rd colon (0-indexed) — separator between the
+    // address and any colon-style suffix.
+    if let Some((p, _)) = id.match_indices(':').nth(2) {
+        // After the 3rd colon is the address. Find the next non-
+        // hex character; anything past it is the "name". If the
+        // whole rest is hex, the id has no name and we return it
+        // as-is.
+        let after_addr = &id[p + 1..];
+        if let Some(end) = after_addr.find(|c: char| !c.is_ascii_hexdigit()) {
+            return after_addr[end..].trim_start_matches(['#', ':']);
+        }
+    }
+    id
+}
+
 fn truncate_did(did: &str) -> String {
     let parts: Vec<&str> = did.splitn(4, ':').collect();
     if parts.len() < 4 {
@@ -7507,6 +7783,44 @@ async fn rehydrate_for_network(
     let wallet_id =
         find_or_create_wallet_for_network(&store, new_net, seed_hex.as_deref());
     bridge_state.set_active_wallet_id(wallet_id);
+
+    // Re-register a DustSyncer for the new network. The unlock
+    // path does this once for the network active at unlock-time
+    // (see `on_unlock` block above); without this re-registration
+    // here, `dust_syncer_for(new_net)` returns `None` after the
+    // user picks a different network from the header dropdown,
+    // and the DUST sync row stays stuck on "syncer not
+    // initialised (unlock the wallet first)" even though the
+    // wallet is fully unlocked. The bug originally surfaced
+    // when switching from PreProd → Undeployed on the standalone
+    // env: NIGHT synced, DUST didn't. `set_dust_syncer_for` is
+    // idempotent (overwrites the prior entry), so the path
+    // remains safe to call on every switch including back to
+    // PreProd.
+    {
+        let tmp = app_wallet_for(new_net);
+        match tmp.dust_secret_key() {
+            Ok(sk) => {
+                let syncer = std::sync::Arc::new(wallet_core::DustSyncer::new(
+                    new_net,
+                    std::sync::Arc::new(store.clone()),
+                    sk,
+                ));
+                set_dust_syncer_for(new_net, syncer);
+                tracing::info!(
+                    network=?new_net,
+                    "dust syncer registered (network switch)"
+                );
+            }
+            Err(e) => {
+                tracing::warn!(
+                    network=?new_net,
+                    error=%e,
+                    "dust secret key derivation failed; DustSyncer not re-registered"
+                );
+            }
+        }
+    }
 
     // Re-seed the PreProd-live demo state when switching INTO
     // PreProd (matches the unlock-time seeding). No-op on
