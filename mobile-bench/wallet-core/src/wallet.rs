@@ -1376,11 +1376,23 @@ impl Wallet {
     async fn drain_did_stream(
         stream: impl futures::Stream<Item = crate::WizardStage>,
     ) -> Result<crate::DidId, WalletError> {
+        Self::drain_did_stream_outcome(stream).await.map(|o| o.did_id)
+    }
+
+    /// Same as [`drain_did_stream`] but surfaces the full
+    /// [`crate::DeployOutcome`] (carrying `controller_sk`, `tx_hash`,
+    /// etc.). Used by [`Wallet::create_did_awaitable_with_controller`]
+    /// so Task 2's `bootstrap_did_with_keys` can chain
+    /// `addVerificationMethod` calls without losing the per-DID
+    /// controller secret minted at deploy time.
+    async fn drain_did_stream_outcome(
+        stream: impl futures::Stream<Item = crate::WizardStage>,
+    ) -> Result<crate::DeployOutcome, WalletError> {
         use futures::StreamExt;
         let mut stream = std::pin::pin!(stream);
         while let Some(stage) = stream.next().await {
             match stage {
-                crate::WizardStage::Done(outcome) => return Ok(outcome.did_id),
+                crate::WizardStage::Done(outcome) => return Ok(outcome),
                 crate::WizardStage::Failed(err) => {
                     return Err(WalletError::CreateDidFailed(err))
                 }
@@ -1415,6 +1427,29 @@ impl Wallet {
             return Ok(self.stub_create_did(state));
         }
         Self::drain_did_stream(self.create_did()).await
+    }
+
+    /// Like [`Wallet::create_did_awaitable`] but additionally surfaces
+    /// the 32-byte `controller_sk` the deploy pipeline minted for the
+    /// new DID. Required by Task 2's `bootstrap_did_with_keys` so the
+    /// subsequent `addVerificationMethod[Relation]` calls can pass the
+    /// controller secret that the Compact circuit's
+    /// `localSecretKey()` witness consumes.
+    ///
+    /// In stub mode (see `test_support::stub_wallet`) the chain-op
+    /// pipeline is bypassed and no real controller_sk is minted, so
+    /// this returns an all-zero secret. The stub
+    /// `add_verification_method[_relation]` impls don't inspect the
+    /// secret either — both ends of the test path stay consistent.
+    pub async fn create_did_awaitable_with_controller(
+        &self,
+    ) -> Result<(crate::DidId, [u8; 32]), WalletError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            return Ok((self.stub_create_did(state), [0u8; 32]));
+        }
+        let outcome = Self::drain_did_stream_outcome(self.create_did()).await?;
+        Ok((outcome.did_id, outcome.controller_sk))
     }
 
     /// Awaitable wrapper for the `addVerificationMethod` Compact
