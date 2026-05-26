@@ -192,6 +192,19 @@ pub struct Wallet {
     /// running halo2 (which would dwarf the rest of the pipeline
     /// in test wall-clock terms).
     prover: Option<Arc<dyn chain::Prover>>,
+    /// Stub-mode shared DID-document map. When `Some`, the four
+    /// public awaitable DID methods (`create_did_awaitable`,
+    /// `add_verification_method`, `add_verification_method_relation`,
+    /// `resolve_did`) short-circuit to this in-memory map instead
+    /// of driving the live chain-op pipeline (JS bridge / dust sync /
+    /// balance / prove / submit). When `None` (the default real-deps
+    /// path), the methods behave exactly as before.
+    ///
+    /// Set exclusively by `test_support::stub_wallet`; gated behind
+    /// `#[cfg(any(test, feature = "test-support"))]` so the field
+    /// + accessor + bypass branches do not appear in release builds.
+    #[cfg(any(test, feature = "test-support"))]
+    stub_did_state: Option<crate::test_support::StubDidMap>,
 }
 
 impl Wallet {
@@ -209,7 +222,30 @@ impl Wallet {
             indexer: None,
             node: None,
             prover: None,
+            #[cfg(any(test, feature = "test-support"))]
+            stub_did_state: None,
         }
+    }
+
+    /// Builder: attach a stub DID-document map. Used **only** by
+    /// `test_support::stub_wallet` to enable the wallet-level
+    /// short-circuit on the four awaitable DID methods. The
+    /// `Arc<Mutex<HashMap>>` is shared with the wallet's injected
+    /// [`crate::test_support::StubIndexerClient`], so mutations made
+    /// here are immediately visible through `IndexerClient` and
+    /// vice-versa.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn with_stub_did_state(mut self, state: crate::test_support::StubDidMap) -> Self {
+        self.stub_did_state = Some(state);
+        self
+    }
+
+    /// Test-only inspector: is this wallet in stub mode? Used by
+    /// the four awaitable methods to branch into the in-memory
+    /// short-circuit. Public only inside the crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub(crate) fn stub_did_state(&self) -> Option<crate::test_support::StubDidMap> {
+        self.stub_did_state.clone()
     }
 
     /// Builder: attach a WebView-side JS bridge. Subsequent
@@ -1374,6 +1410,10 @@ impl Wallet {
     /// once the orchestration lands). For now, callers who need the
     /// sk must continue to drive [`Wallet::create_did`] directly.
     pub async fn create_did_awaitable(&self) -> Result<crate::DidId, WalletError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            return Ok(self.stub_create_did(state));
+        }
         Self::drain_did_stream(self.create_did()).await
     }
 
@@ -1406,6 +1446,10 @@ impl Wallet {
         verification_method_json: serde_json::Value,
         controller_sk: [u8; 32],
     ) -> Result<(), WalletError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            return self.stub_add_verification_method(state, did, &verification_method_json);
+        }
         let stream = self.call_did_circuit(
             did.clone(),
             "addVerificationMethod".to_string(),
@@ -1442,6 +1486,10 @@ impl Wallet {
         // AssertionMethod=2, KeyAgreement=3, CapabilityInvocation=4,
         // CapabilityDelegation=5). The harness re-hydrates the enum
         // from this number before invoking the circuit.
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            return self.stub_add_verification_method_relation(state, did, fragment, relation);
+        }
         let relation_int: u8 = match relation {
             crate::VerificationMethodRelation::Authentication => 1,
             crate::VerificationMethodRelation::AssertionMethod => 2,
@@ -1480,6 +1528,11 @@ impl Wallet {
                 "DID network {:?} does not match wallet network {:?}",
                 id.network, self.network
             )));
+        }
+
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            return self.stub_resolve_did(state, &id);
         }
 
         let client = self
@@ -1568,6 +1621,162 @@ impl Wallet {
             capability_invocation_ids,
             capability_delegation_ids,
             loaded_circuits,
+        })
+    }
+
+    // -- Stub-mode helpers ---------------------------------------------------
+    //
+    // These four methods implement the in-memory short-circuit used by
+    // `test_support::stub_wallet`. They mutate (and read) the shared
+    // `Arc<Mutex<HashMap<DidId, DidDocument>>>` rather than driving the
+    // chain-op pipeline. Gated behind the same feature as the field so
+    // none of this lands in release builds.
+
+    /// Stub-mode `create_did_awaitable`: derive a deterministic
+    /// `DidId` from the wallet seed + the current count of stubbed
+    /// DIDs (so successive calls produce distinct ids), insert an
+    /// empty `DidDocument` into the shared map, and return the id.
+    #[cfg(any(test, feature = "test-support"))]
+    fn stub_create_did(&self, state: crate::test_support::StubDidMap) -> crate::DidId {
+        use sha2::{Digest, Sha256};
+        let mut guard = state.lock().expect("stub_did_state poisoned");
+        let seq = guard.len() as u64;
+        let mut hasher = Sha256::new();
+        hasher.update(b"wallet-core/test_support/stub_did");
+        hasher.update(self.seed_bytes);
+        hasher.update(seq.to_le_bytes());
+        let addr: crate::ContractAddressBytes = hasher.finalize().into();
+        let did = crate::DidId::new(self.network, addr);
+        let now = Some(std::time::SystemTime::now());
+        let doc = crate::DidDocument {
+            id: did.clone(),
+            controller: None,
+            also_known_as: vec![],
+            verification_method: vec![],
+            authentication: vec![],
+            assertion_method: vec![],
+            key_agreement: vec![],
+            capability_invocation: vec![],
+            capability_delegation: vec![],
+            service: vec![],
+            deactivated: false,
+            created: now,
+            updated: now,
+            version: 0,
+        };
+        guard.insert(did.clone(), doc);
+        did
+    }
+
+    /// Stub-mode `add_verification_method`: parse the JWK JSON arg
+    /// into a `VerificationMethod` (best-effort — the JS-side shape
+    /// the real circuit consumes differs from DID-Core; we accept
+    /// either) and append it to the DID document's
+    /// `verification_method` array.
+    #[cfg(any(test, feature = "test-support"))]
+    fn stub_add_verification_method(
+        &self,
+        state: crate::test_support::StubDidMap,
+        did: &crate::DidId,
+        vm_json: &serde_json::Value,
+    ) -> Result<(), WalletError> {
+        let mut guard = state.lock().expect("stub_did_state poisoned");
+        let doc = guard.get_mut(did).ok_or_else(|| {
+            WalletError::CreateDidFailed(format!(
+                "stub_add_verification_method: unknown DID {}",
+                did.to_did_string()
+            ))
+        })?;
+        // Try DID-Core shape first; if that fails, synthesise a
+        // minimal VM from the `id` field alone. The exact JWK
+        // payload isn't load-bearing for Task 2's assertions — the
+        // test only checks that the relation arrays are populated.
+        let vm: crate::VerificationMethod = match serde_json::from_value::<
+            crate::VerificationMethod,
+        >(vm_json.clone())
+        {
+            Ok(parsed) => parsed,
+            Err(_) => {
+                let id = vm_json
+                    .get("id")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                crate::VerificationMethod {
+                    id,
+                    typ: crate::VerificationMethodType::JsonWebKey,
+                    controller: did.clone(),
+                    public_key_jwk: crate::PublicKeyJwk {
+                        kty: crate::KeyType::OKP,
+                        crv: crate::CurveType::Ed25519,
+                        x: String::new(),
+                        y: None,
+                    },
+                }
+            }
+        };
+        doc.verification_method.push(vm);
+        doc.updated = Some(std::time::SystemTime::now());
+        Ok(())
+    }
+
+    /// Stub-mode `add_verification_method_relation`: look up the VM
+    /// by `<did>#<fragment>` in the doc's `verification_method`
+    /// array (falling back to inserting a bare-id reference if not
+    /// present — the JS circuit enforces presence, but the stub is
+    /// lenient so tests can attach a relation directly without
+    /// first registering the VM), then push a
+    /// `VerificationMethodRef::Id(...)` into the matching relation
+    /// vector.
+    #[cfg(any(test, feature = "test-support"))]
+    fn stub_add_verification_method_relation(
+        &self,
+        state: crate::test_support::StubDidMap,
+        did: &crate::DidId,
+        fragment: &str,
+        relation: crate::VerificationMethodRelation,
+    ) -> Result<(), WalletError> {
+        let mut guard = state.lock().expect("stub_did_state poisoned");
+        let doc = guard.get_mut(did).ok_or_else(|| {
+            WalletError::CreateDidFailed(format!(
+                "stub_add_verification_method_relation: unknown DID {}",
+                did.to_did_string()
+            ))
+        })?;
+        let full_id = format!("{}#{}", did.to_did_string(), fragment);
+        let vm_ref = crate::VerificationMethodRef::Id(full_id);
+        let target = match relation {
+            crate::VerificationMethodRelation::Authentication => &mut doc.authentication,
+            crate::VerificationMethodRelation::AssertionMethod => &mut doc.assertion_method,
+            crate::VerificationMethodRelation::KeyAgreement => &mut doc.key_agreement,
+            crate::VerificationMethodRelation::CapabilityInvocation => {
+                &mut doc.capability_invocation
+            }
+            crate::VerificationMethodRelation::CapabilityDelegation => {
+                &mut doc.capability_delegation
+            }
+        };
+        target.push(vm_ref);
+        doc.updated = Some(std::time::SystemTime::now());
+        Ok(())
+    }
+
+    /// Stub-mode `resolve_did`: clone the document out of the shared
+    /// map. Returns `DidError::Indexer` if the id is unknown — same
+    /// shape the real-deps path uses when the indexer doesn't know
+    /// about an address.
+    #[cfg(any(test, feature = "test-support"))]
+    fn stub_resolve_did(
+        &self,
+        state: crate::test_support::StubDidMap,
+        id: &crate::DidId,
+    ) -> Result<crate::DidDocument, crate::DidError> {
+        let guard = state.lock().expect("stub_did_state poisoned");
+        guard.get(id).cloned().ok_or_else(|| {
+            crate::DidError::Indexer(format!(
+                "stub: no DID document for {}",
+                id.to_did_string()
+            ))
         })
     }
 }

@@ -23,6 +23,8 @@ mod node;
 mod probe;
 pub mod secret_storage;
 pub mod store;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_support;
 mod tx;
 mod unshielded;
 mod wallet;
