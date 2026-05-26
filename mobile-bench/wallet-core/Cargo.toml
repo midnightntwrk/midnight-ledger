@@ -107,6 +107,7 @@ hex = "0.4"
 rand = { version = "0.8.4", features = ["getrandom"] }
 rand_chacha = "0.3.1"
 tracing = "0.1"
+url = "2"
 
 # Persistent store — single-file MVCC, pure Rust, no FFI / NDK
 # pain on mobile. Carries wallet seeds (encrypted at row level
