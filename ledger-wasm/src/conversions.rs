@@ -21,7 +21,9 @@ use js_sys::{BigInt, Date, Function, JsString, Map, Number};
 use ledger::events::{EventDetails, EventSource};
 use ledger::structure::{ClaimKind, SignatureKind};
 use ledger::structure::{SignatureVerifyingKey, UtxoMeta};
+use onchain_runtime::ops::{LogEventType, VersionedLogItem};
 use onchain_runtime_wasm::conversions::PreSignature;
+use onchain_runtime_wasm::state::maybe_string;
 use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable};
 use std::io::{BufReader, Read};
@@ -342,6 +344,15 @@ struct PreTreeInsertionPathEntry {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PreVersionedLogItem {
+    version: u32,
+    event_type: LogEventType,
+    #[serde(with = "serde_wasm_bindgen::preserve")]
+    data: JsValue,
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", rename_all_fields = "camelCase", tag = "tag")]
 enum PreEventDetails {
     ZswapInput {
@@ -352,6 +363,12 @@ enum PreEventDetails {
         commitment: String,
         contract: Option<String>,
         mt_index: u64,
+    },
+    ContractLog {
+        address: String,
+        #[serde(with = "serde_wasm_bindgen::preserve")]
+        entry_point: JsValue,
+        logged_item: PreVersionedLogItem,
     },
     DustInitialUtxo {
         output: PreQualifiedDustOutput,
@@ -378,6 +395,17 @@ enum PreEventDetails {
         block_time: Date,
     },
     NotYetSupportedEventType,
+}
+
+impl TryFrom<&VersionedLogItem<InMemoryDB>> for PreVersionedLogItem {
+    type Error = JsError;
+    fn try_from(item: &VersionedLogItem<InMemoryDB>) -> Result<Self, Self::Error> {
+        Ok(PreVersionedLogItem {
+            version: item.version,
+            event_type: item.event_type,
+            data: to_value(&item.data)?,
+        })
+    }
 }
 
 pub fn value_to_shielded_coininfo(value: JsValue) -> Result<ShieldedCoinInfo, JsError> {
@@ -627,6 +655,15 @@ pub fn event_details_to_value(
             v_fee: *v_fee,
             declared_time: seconds_to_js_date(declared_time.to_secs()),
             block_time: seconds_to_js_date(block_time.to_secs()),
+        },
+        L::ContractLog {
+            address,
+            entry_point,
+            logged_item,
+        } => P::ContractLog {
+            address: to_hex_ser(address)?,
+            entry_point: maybe_string(&entry_point.0),
+            logged_item: PreVersionedLogItem::try_from(logged_item)?,
         },
         _ => P::NotYetSupportedEventType,
     };

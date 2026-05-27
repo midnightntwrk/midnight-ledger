@@ -286,6 +286,15 @@ export type EventDetails =
     vFee: bigint,
     declaredTime: Date,
     blockTime: Date,
+  } | {
+    tag: 'contractLog',
+    address: ContractAddress,
+    entryPoint: Uint8Array | string,
+    loggedItem: {
+      version: number,
+      eventType: LogEventType,
+      data: EncodedStateValue,
+    },
   } |
   // Other variants may be added and some events are not yet supported in this API.
   { tag: string };
