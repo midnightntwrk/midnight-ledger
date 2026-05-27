@@ -1,9 +1,28 @@
 # Ed25519-on-BLS-Field encoding for Midnight DID verification methods
 
+> **🪦 SUPERSEDED 2026-05-27** by the upstream `Field → Bytes<32>` refactor
+> of `PublicKeyJwk.x/y` in `midnight-did/packages/contract`.
+> The wallet adopted the new lossless schema in commit `51ecff33`
+> (`feat(did-auth): adopt the Bytes<32> PublicKeyJwk schema`); the
+> Phase 1 cheat described below — 30-byte clamping the Ed25519 pubkey
+> so it fits in BLS Fr — is no longer in the codebase. A 32-byte
+> `Bytes<32>` slot holds the full compressed pubkey losslessly, and
+> the wallet sends both `x` (the 32-byte pubkey) and `y` (32 zero
+> bytes) directly without overflow concerns.
+>
+> Kept on disk for the historical rationale and the math reference
+> on Ed25519 prime field (`p ≈ 5.79 × 10⁷⁶`) vs BLS Fr (`r ≈ 5.24 ×
+> 10⁷⁶`), which still applies if anyone wonders why `Bytes<32>` was
+> necessary instead of staying with `Field`.
+>
+> The current active blocker is the proving-key / circuit-IR
+> input-count mismatch in `docs/superpowers/specs/2026-05-27-proving-key-input-mismatch.md`
+> — completely orthogonal to this Ed25519 issue.
+
 **Date:** 2026-05-27
 **Scope:** `crate wallet-core` — `did/bootstrap.rs`, `did/contract.rs`, `vc_self_verify`, the JS harness (read-only).
 **Severity:** Phase 1 demo blocker for the OID4VP / SIOPv2 holder-auth path. The on-chain Ed25519 public-key bytes are currently a **30-byte prefix** of the 32-byte compressed pubkey — sufficient for the chain (which doesn't crypto-verify the bytes) but insufficient for the issuer-mock to reconstruct a working JWK and verify a SIOPv2 `id_token` JWS.
-**Status:** Open. Cheat shipped on `dioxus-vc-demo` in commit `7f732d66` so the contract stops rejecting `addVerificationMethod` with a Field overflow.
+**Status:** ~~Open. Cheat shipped on `dioxus-vc-demo` in commit `7f732d66` so the contract stops rejecting `addVerificationMethod` with a Field overflow.~~ Superseded (see banner above).
 
 ## TL;DR
 
