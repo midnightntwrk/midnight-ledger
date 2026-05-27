@@ -1,0 +1,52 @@
+[package]
+name = "v8-to-v9-state-translation-replay"
+version = "0.1.0"
+edition = "2024"
+
+# Standalone Cargo project — not a member of the main ledger workspace, since
+# its dep set (toolkit + helpers + v9 alpha) feature-unifies poorly with the
+# rest of the workspace.
+[workspace]
+
+[[bin]]
+name = "v8-to-v9-state-translation-replay"
+path = "src/main.rs"
+
+[dependencies]
+midnight-node-toolkit        = { git = "https://github.com/midnightntwrk/midnight-node", tag = "toolkit-1.0.0", package = "midnight-node-toolkit" }
+midnight-node-ledger-helpers = { git = "https://github.com/midnightntwrk/midnight-node", tag = "toolkit-1.0.0", package = "midnight-node-ledger-helpers", features = ["can-panic", "test-utils"] }
+
+# The translation crate under test. Sibling in the same repo.
+v8-to-v9-state-translation = { path = "../v8-to-v9-state-translation" }
+
+# v9 LedgerState type, plus the shared infra crates used directly in the
+# translation runner. The v9 deps resolve via the v9-alpha patches below;
+# everything else comes from crates.io.
+ledger-v9   = { version = "0.1.0", package = "midnight-ledger-v9", features = ["proving", "test-utilities"] }
+storage     = { version = "2.0.1", package = "midnight-storage", features = ["state-translation"] }
+base-crypto = { version = "1.0.0", package = "midnight-base-crypto" }
+midnight-serialize = "1.1.0"
+
+anyhow               = "1"
+async-trait          = "0.1"
+clap                 = { version = "4", features = ["derive", "env"] }
+log                  = "0.4"
+env_logger           = "0.11"
+indicatif            = "0.18"
+indicatif-log-bridge = "0.2"
+tokio                = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# v9 is in pre-release; redirect its crates to alpha git tags per the v9
+# release notes. Everything else (v8 ledger, shared infra) resolves from
+# crates.io. `yamux` carried over from `midnight-node`'s `toolkit-1.0.0`
+# patch set.
+[patch.crates-io]
+yamux = { git = "https://github.com/midnightntwrk/rust-yamux", branch = "yamux-v0.12.2" }
+
+midnight-ledger-v9      = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-ledger-9.0.1.0-alpha.1" }
+midnight-coin-structure = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "coin-structure-2.1.0-alpha.1" }
+midnight-base-crypto    = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "base-crypto-1.1.0-alpha.1" }
+zswap-9                 = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "zswap-9.0.0-alpha.1",            package = "midnight-zswap" }
+onchain-state-9         = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-state-4.0.0-alpha.1",    package = "midnight-onchain-state" }
+onchain-runtime-9       = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-runtime-4.0.0-alpha.1",  package = "midnight-onchain-runtime" }
+onchain-vm-9            = { git = "https://github.com/midnightntwrk/midnight-ledger", tag = "onchain-vm-4.0.0-alpha.1",       package = "midnight-onchain-vm" }
