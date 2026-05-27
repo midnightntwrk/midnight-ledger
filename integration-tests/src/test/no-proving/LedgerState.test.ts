@@ -13,29 +13,32 @@
 
 import {
   type AlignedValue,
-  communicationCommitmentRandomness,
   ChargedState,
+  communicationCommitmentRandomness,
   ContractCallPrototype,
   ContractDeploy,
   ContractOperation,
   ContractState,
+  DustState,
+  feeToken,
+  Intent,
   LedgerState,
   nativeToken,
+  shieldedToken,
   StateMap,
   StateValue,
   Transaction,
-  ZswapChainState,
-  Intent,
   TransactionContext,
-  WellFormedStrictness,
-  feeToken,
   unshieldedToken,
-  shieldedToken,
-  DustState
+  WellFormedStrictness,
+  ZswapChainState
 } from '@midnight-ntwrk/ledger';
 
 import { ONE_KB, Random, Static, TestResource, VERSION_HEADER } from '@/test-objects';
 import { assertSerializationSuccess } from '@/test-utils';
+import { intCell } from '@/test/utils/value-alignment';
+import { applyDoLogCall } from '@/test/utils/log-contract';
+import { TestState } from '@/test/utils/TestState';
 
 describe('Ledger API - LedgerState', () => {
   const GLOBAL_TTL = 3600;
@@ -497,5 +500,39 @@ describe('Ledger API - LedgerState', () => {
     const unclaimedAmount = ledgerState.unclaimedBlockRewards(userAddress);
 
     expect(unclaimedAmount).toEqual(0n);
+  });
+
+  describe('log emission counts against the bytesWritten budget', () => {
+    /**
+     * Test that a contract call which emits a log fails when the transcript
+     * declares `bytesWritten: 0` - guarding against log emission silently
+     * stopping to count against the per-block bytes-written budget
+     *
+     * @given A deployed contract whose `doLog` entry point logs a small u64
+     *        cell, with a transcript declaring `bytesWritten: 0n`
+     * @when Applying the call transaction
+     * @then The call either throws or returns a non-success result
+     */
+    test('emitting a log with bytesWritten budget of 0 causes the call to fail', () => {
+      const { result } = applyDoLogCall(TestState.new(), intCell(123n, 8), 0n);
+
+      expect(result.type).toBe('failure');
+    });
+
+    /**
+     * Test that the same call succeeds when the transcript declares a
+     * sufficient `bytesWritten` budget - confirms the previous failure is
+     * specifically due to the budget, not an unrelated reason.
+     *
+     * @given The same `doLog` call with `bytesWritten: 8192n`
+     * @when Applying the call transaction
+     * @then The transaction result is `success` with no error
+     */
+    test('emitting the same log with a sufficient bytesWritten budget succeeds', () => {
+      const { result } = applyDoLogCall(TestState.new(), intCell(123n, 8), 8192n);
+
+      expect(result.error).toBeUndefined();
+      expect(result.type).toBe('success');
+    });
   });
 });
