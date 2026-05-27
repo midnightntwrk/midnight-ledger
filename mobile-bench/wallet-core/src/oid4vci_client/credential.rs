@@ -17,7 +17,7 @@ use crate::http::{HttpClient, HttpError};
 use crate::oid4vci_client::token::TokenResponse;
 use crate::oid4vp_client::build_id_token;
 use crate::secret_storage::SecretStorage;
-use crate::vc_store::{StoredVc, VcOpening, VcStore};
+use crate::vc_store::{StoredVc, VcOpening, VcStorage};
 use crate::wallet::Wallet;
 use crate::DidId;
 
@@ -75,7 +75,7 @@ pub async fn request_credential(
     wallet: &Wallet,
     secret_store: &dyn SecretStorage,
     holder_did: &DidId,
-    vc_store: &VcStore,
+    vc_store: &dyn VcStorage,
 ) -> Result<String, CredentialFlowError> {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
@@ -159,10 +159,10 @@ mod tests {
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
+    use crate::vc_store::InMemoryVcStore;
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
     use serde_json::json;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn request_credential_lands_vc_and_openings() {
@@ -200,8 +200,7 @@ mod tests {
         let seed = [23u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let dir = TempDir::new().unwrap();
-        let vc_store = VcStore::open(dir.path().join("vc.redb")).unwrap();
+        let vc_store = InMemoryVcStore::default();
 
         let vc_uri = request_credential(
             &http,

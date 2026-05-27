@@ -19,7 +19,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use wallet_core::{
-    HttpClient, Network, ReqwestHttpClient, SelfVerifyResult, StoredVc, VcStore,
+    HttpClient, Network, RedbVcStore, ReqwestHttpClient, SelfVerifyResult, StoredVc,
     bootstrap_did_with_keys, oid4vci_run_issuance, oid4vp_run_authentication,
     self_verify_and_cache,
 };
@@ -407,7 +407,7 @@ fn Oid4vciSection(
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
-                let vc_store = match VcStore::open(vc_store_path()) {
+                let vc_store = match RedbVcStore::open(vc_store_path()) {
                     Ok(v) => v,
                     Err(e) => {
                         err_msg.set(Some(format!("open vc store: {e}")));
@@ -541,7 +541,7 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
     let vcs = use_resource(move || {
         let _ = refresh_tick.read();
         async move {
-            match VcStore::open(vc_store_path()) {
+            match RedbVcStore::open(vc_store_path()) {
                 Ok(s) => s.list_ordered().map_err(|e| e.to_string()),
                 Err(e) => Err(format!("open vc store: {e}")),
             }
@@ -625,7 +625,7 @@ fn render_vc_row(
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
-                let vc_store = match VcStore::open(vc_store_path()) {
+                let vc_store = match RedbVcStore::open(vc_store_path()) {
                     Ok(v) => v,
                     Err(e) => {
                         let mut b = badges.read().clone();

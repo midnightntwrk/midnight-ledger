@@ -219,7 +219,7 @@ pub async fn self_verify_and_cache(
     vc: &StoredVc,
     wallet: &Wallet,
     secret_store: &dyn SecretStorage,
-    vc_store: &crate::VcStore,
+    vc_store: &dyn crate::VcStorage,
 ) -> SelfVerifyResult {
     let result = self_verify(vc, wallet, secret_store).await;
     let outcome = match &result {
@@ -234,9 +234,9 @@ pub async fn self_verify_and_cache(
     // Best-effort metadata write — verification result is the
     // primary return; a metadata write failure shouldn't mask the
     // verification outcome itself.
-    let _ = vc_store.update_metadata(&vc.vc_uri, |m| {
+    let _ = vc_store.update_metadata(&vc.vc_uri, &mut |m| {
         m.last_verified_ms = Some(now_ms);
-        m.last_verify_outcome = Some(outcome);
+        m.last_verify_outcome = Some(outcome.clone());
     });
     result
 }
@@ -293,6 +293,7 @@ mod tests {
         stub_secret_store_with_bootstrapped_did, stub_sign_birth_vc,
         stub_wallet_with_bootstrapped_did,
     };
+    use crate::VcStorage;
 
     fn make_vc(issuer: &DidId, body: Vec<u8>) -> StoredVc {
         StoredVc {
@@ -362,8 +363,7 @@ mod tests {
         let body = stub_sign_birth_vc(&wallet, &store, &did, b"BIRTH-FIXTURE").await;
         let vc = make_vc(&did, body);
 
-        let dir = tempfile::TempDir::new().expect("tempdir");
-        let vc_store = crate::VcStore::open(dir.path().join("vcs.redb")).expect("open vc store");
+        let vc_store = crate::InMemoryVcStore::default();
         vc_store.insert_vc(&vc).expect("insert vc");
 
         let result = self_verify_and_cache(&vc, &wallet, &store, &vc_store).await;

@@ -1,4 +1,9 @@
 //! VcStore CRUD API.
+//!
+//! Redb-backed adapter implementing the `VcStorage` port. The
+//! inherent methods stay public so existing callers can continue
+//! to hit them directly during the transition off the `VcStore`
+//! type alias; new callers should prefer `&dyn VcStorage`.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -7,6 +12,7 @@ use redb::{Database, ReadableTable};
 
 use crate::vc_store::tables::{VCS, VC_OPENINGS, VC_METADATA, opening_key};
 use crate::vc_store::types::{StoredVc, VcOpening, VcMetadata};
+use crate::vc_store::VcStorage;
 
 #[derive(Debug, thiserror::Error)]
 pub enum VcStoreError {
@@ -24,11 +30,11 @@ pub enum VcStoreError {
     Cbor(#[from] serde_cbor::Error),
 }
 
-pub struct VcStore {
+pub struct RedbVcStore {
     db: Arc<Database>,
 }
 
-impl VcStore {
+impl RedbVcStore {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, VcStoreError> {
         let db = Database::create(path).map_err(redb::Error::from)?;
         // Materialise the three tables so first use doesn't race.
@@ -187,14 +193,60 @@ impl VcStore {
     }
 }
 
+/// `VcStorage` impl delegates to the inherent methods. The
+/// `update_metadata` signature differs (closure-by-trait-object vs
+/// `impl FnOnce`) so we wrap the trait-object closure into the
+/// generic inherent form here.
+impl VcStorage for RedbVcStore {
+    fn insert_vc(&self, vc: &StoredVc) -> Result<(), VcStoreError> {
+        RedbVcStore::insert_vc(self, vc)
+    }
+    fn get_vc(&self, vc_uri: &str) -> Result<Option<StoredVc>, VcStoreError> {
+        RedbVcStore::get_vc(self, vc_uri)
+    }
+    fn insert_opening(&self, op: &VcOpening) -> Result<(), VcStoreError> {
+        RedbVcStore::insert_opening(self, op)
+    }
+    fn get_opening(
+        &self,
+        vc_uri: &str,
+        claim_path: &str,
+    ) -> Result<Option<VcOpening>, VcStoreError> {
+        RedbVcStore::get_opening(self, vc_uri, claim_path)
+    }
+    fn get_metadata(&self, vc_uri: &str) -> Result<Option<VcMetadata>, VcStoreError> {
+        RedbVcStore::get_metadata(self, vc_uri)
+    }
+    fn list_ordered(&self) -> Result<Vec<StoredVc>, VcStoreError> {
+        RedbVcStore::list_ordered(self)
+    }
+    fn delete_vc(&self, vc_uri: &str) -> Result<(), VcStoreError> {
+        RedbVcStore::delete_vc(self, vc_uri)
+    }
+    fn insert_vc_with_openings(
+        &self,
+        vc: &StoredVc,
+        openings: &[VcOpening],
+    ) -> Result<(), VcStoreError> {
+        RedbVcStore::insert_vc_with_openings(self, vc, openings)
+    }
+    fn update_metadata(
+        &self,
+        vc_uri: &str,
+        update: &mut dyn FnMut(&mut VcMetadata),
+    ) -> Result<(), VcStoreError> {
+        RedbVcStore::update_metadata(self, vc_uri, |m| update(m))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn open_store() -> (VcStore, TempDir) {
+    fn open_store() -> (RedbVcStore, TempDir) {
         let dir = TempDir::new().unwrap();
-        let store = VcStore::open(dir.path().join("test.redb")).expect("open");
+        let store = RedbVcStore::open(dir.path().join("test.redb")).expect("open");
         (store, dir)
     }
 
@@ -309,5 +361,43 @@ mod tests {
         assert!(store.get_vc(&vc.vc_uri).unwrap().is_some());
         assert!(store.get_opening(&vc.vc_uri, "/a").unwrap().is_some());
         assert!(store.get_opening(&vc.vc_uri, "/b").unwrap().is_some());
+    }
+
+    // ── Trait-surface parity tests ────────────────────────────────────
+    //
+    // The same scenarios exercised against `&dyn VcStorage` so the
+    // port contract is exercised end-to-end. The `InMemoryVcStore`
+    // adapter has its own block in `in_memory.rs`; this one pins
+    // `RedbVcStore`'s trait impl.
+
+    fn open_store_trait() -> (Box<dyn VcStorage>, TempDir) {
+        let dir = TempDir::new().unwrap();
+        let store = RedbVcStore::open(dir.path().join("trait.redb")).expect("open");
+        (Box::new(store), dir)
+    }
+
+    #[test]
+    fn trait_insert_then_get_round_trips() {
+        let (store, _g) = open_store_trait();
+        let vc = sample_vc();
+        store.insert_vc(&vc).unwrap();
+        let back = store.get_vc(&vc.vc_uri).unwrap().unwrap();
+        assert_eq!(back.body, vc.body);
+    }
+
+    #[test]
+    fn trait_update_metadata_via_closure_object() {
+        let (store, _g) = open_store_trait();
+        let vc = sample_vc();
+        store.insert_vc(&vc).unwrap();
+        store
+            .update_metadata(&vc.vc_uri, &mut |m| {
+                m.display_order = 7;
+                m.last_verify_outcome = Some("Valid".into());
+            })
+            .unwrap();
+        let md = store.get_metadata(&vc.vc_uri).unwrap().unwrap();
+        assert_eq!(md.display_order, 7);
+        assert_eq!(md.last_verify_outcome.as_deref(), Some("Valid"));
     }
 }

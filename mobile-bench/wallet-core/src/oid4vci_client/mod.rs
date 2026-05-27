@@ -28,7 +28,7 @@ pub async fn run_issuance(
     wallet: &crate::wallet::Wallet,
     secret_store: &dyn crate::secret_storage::SecretStorage,
     holder_did: &crate::DidId,
-    vc_store: &crate::vc_store::VcStore,
+    vc_store: &dyn crate::vc_store::VcStorage,
 ) -> Result<String, IssuanceFlowError> {
     let offer = offer::parse_offer_url(qr_url)?;
     let code = offer.grants.pre_authorized.code.clone();
@@ -60,10 +60,10 @@ mod flow_tests {
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
+    use crate::vc_store::InMemoryVcStore;
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
     use serde_json::json;
-    use tempfile::TempDir;
 
     #[tokio::test]
     async fn run_issuance_happy_path() {
@@ -107,8 +107,7 @@ mod flow_tests {
         let seed = [24u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let dir = TempDir::new().unwrap();
-        let vc_store = crate::vc_store::VcStore::open(dir.path().join("v.redb")).unwrap();
+        let vc_store = InMemoryVcStore::default();
 
         let uri = run_issuance(&http, &qr, &wallet, &store, &did, &vc_store)
             .await
