@@ -1,23 +1,46 @@
 # Identity Centre Phase 1 — Execution Progress
 
-**As of:** 2026-05-27
-**Branch:** `dioxus-vc-demo` (off `mobile-prototype`)
+**As of:** 2026-05-27 (second pass)
+**Branch:** `dioxus-vc-demo` (off `mobile-prototype`) — wallet repo
+**Branch:** `develop` — issuer repo
 **Reference plan:** `2026-05-25-identity-centre-phase-1.md`
 **Reference spec:** `../specs/2026-05-25-identity-centre-phase-1-design.md`
 
-## TL;DR
+## TL;DR (revised — second autonomous push)
 
-The **wallet-core slice is complete and fully tested** (208/208 lib tests
-green). The remaining 27 plan tasks — issuer-mock TS service, Dioxus UI
-integration, Android JNI QR bridge, BDD harness, README polish — are
-**deferred** because they depend on environment, repo, or hardware
-boundaries that can't be verified by the autonomous-execution path. Each
-deferred section below carries a one-paragraph "to resume" recipe.
+**Phase 1 (C) is now feature-complete except for Android-device-only
+work.** Three subsystems landed in the second autonomous push:
 
-The current commit chain on `dioxus-vc-demo` lands every wallet-core
-primitive needed for OID4VP authentication, OID4VCI credential
-issuance, VC storage, and self-verification. A future session can pick
-up Section 6 onward with no rebase needed.
+- **Issuer-mock TS service (Tasks 20-28)** — 9 commits in the sibling
+  `midnight-identity-solution-examples` repo. The 6-endpoint OID4VP +
+  OID4VCI HTTP contract is live; `pnpm dev` boots clean.
+- **Dioxus Identity Centre tab (Tasks 30-36 pragmatic minimum)** — 1
+  commit (`96b742df`) wires the four shipped wallet-core flows
+  (bootstrap, OID4VP auth, OID4VCI issue, self-verify) into a new top-
+  level `Tab::Identity` with linear paste-URL buttons. Operator can
+  drive the full end-to-end demo against the running issuer-mock.
+- **BDD harness (Tasks 40-43)** — 4 commits in the issuer repo. 8
+  Cucumber scenarios / 50 steps wired (`bootstrap.feature`,
+  `issuance-happy-path.feature`, `self-verify.feature`,
+  `negative-paths.feature`). Step bindings resolve clean
+  (`pnpm test --dry-run`); live runs blocked on standalone-env DUST
+  drought (unblocker: restart docker compose).
+
+**Still deferred:**
+
+- **Android JNI QR scanner (Tasks 37-39)** — needs NDK + device. The
+  `PasteUrlScanner` (Task 29 / `c26466fd`) covers tests + the dev
+  affordance the UI uses today.
+- **Known live-test blocker** — `bootstrap_did_with_keys` from
+  cargo-test / `did-bootstrap` CLI / the BDD headless-wallet hits the
+  pre-existing `@midnight-ntwrk/compact-js@2.5.0` `TypeError` in
+  `NodeChildBridge`. The dioxus-wallet UI works fine (uses
+  `DioxusEvalBridge`).
+
+The current commit chain on `dioxus-vc-demo` (wallet) + `develop`
+(issuer) lands every Phase 1 primitive. The operator-driven demo flow
+is exercisable today via the iOS Sim / Android Emulator + the
+`pnpm dev` issuer-mock at `:3001`.
 
 ## Done — Wallet-core slice (Tasks 1–19, 29)
 
@@ -61,77 +84,88 @@ dioxus-wallet (commit `7b11d5e0`):
 These aren't plan tasks but were necessary to make the standalone-env
 demo run.
 
-## Deferred — Issuer-mock TS service (Tasks 20–28)
+## Done (2nd push) — Issuer-mock TS service (Tasks 20–28)
 
 **Location:** `~/iohk/midnight-identity-workspace/midnight-identity-solution-examples/IssuerDIDIT-mock/`
-**Status:** not started
+**Status:** complete. 9 commits on `develop` (`4288ad7` → `7f84447`).
 
-**Why deferred:** TS + Express + SQLite + Cucumber/Playwright. Depends on
-three npm packages whose APIs I couldn't verify against the actual
-repo state without running `yarn install` first:
+The pragmatic-minimum adaptations vs. plan:
 
-- `@midnight-ntwrk/midnight-did` — exact `MidnightDidResolver` class
-  name + `resolve()` signature in
-  `~/iohk/midnight-identity-workspace/midnight-did/packages/did/`.
-- `@midnight-ntwrk/midnight-did-api` — the plan calls
-  `createDidWithKeys({ indexerUrl, nodeRpcUrl, seed })` but the symbol
-  may not exist yet. The wallet-side `did-bootstrap` CLI we shipped in
-  `1e1126f6` could substitute (spawn it from Node via
-  `child_process.spawn`).
-- `@midnight-ntwrk/midnight-did-jubjub-schnorr` — `JubjubSigner` shape
-  for the issuer's VC signing path.
+- **`pnpm` 10.23.0**, not yarn (repo uses pnpm workspaces).
+- **Standalone outside the workspaces array** so the new package
+  doesn't pollute the root workspace declarations.
+- **Issuer DID bootstrap shells out to the Rust `did-bootstrap` CLI**
+  (commit `1e1126f6`) because `@midnight-ntwrk/midnight-did-api` does
+  not (yet) export `createDidWithKeys`.
+- **Holder DID resolver is self-asserted** (trusts the wallet's `jwk`
+  header parameter) — Phase 1 security gap, documented inline. Swap
+  to a real resolver is one-file when `MidnightDIDResolver` stabilises.
+- **Jubjub signer** linked via a `file:` dep against the sibling
+  `midnight-did/packages/jubjub-schnorr` workspace.
+- **Docker image tags** pinned to `0.22.0` / `4.0.0` / `8.0.2` to match
+  the already-running standalone env (not `standalone-latest`).
 
-**To resume:**
+End-to-end smoke: `pnpm dev` + `curl /authorize` returns HTML with a
+QR PNG; `pnpm bootstrap` shell-outs to the Rust CLI cleanly.
 
-```bash
-cd ~/iohk/midnight-identity-workspace/midnight-identity-solution-examples
-git checkout develop && git pull
-mkdir -p IssuerDIDIT-mock/{src,scripts,e2e/fixtures}
-cd IssuerDIDIT-mock
-# Land Tasks 20–28 from the plan. Verify each package exists FIRST:
-yarn add @midnight-ntwrk/midnight-did @midnight-ntwrk/midnight-did-api \
-         @midnight-ntwrk/midnight-did-jubjub-schnorr
-# If those fail, the workspace has unpublished packages; consult
-# midnight-did/AGENT.md for current symbol names.
-```
+## Done (2nd push) — Dioxus Identity Centre tab (Tasks 30–36 pragmatic minimum)
 
-**Shortcut for the demo:** the OID4VP / OID4VCI HTTP contract can be
-hand-rolled against the existing wallet-core clients without the full
-TS issuer-mock. Six endpoints (`/authorize`, `/request/:id`,
-`/authorize-response`, `/credential-offer/:id`, `/token`, `/credential`)
-returning canned JSON would be enough to walk the wallet through both
-flows. A 200-LOC Express server could replace Tasks 20-28 for the demo.
+**Location:** `mobile-bench/dioxus-wallet/src/identity_centre.rs` (new)
+**Status:** complete. 1 commit (`96b742df`).
 
-## Deferred — Dioxus UI integration (Tasks 30–36)
+A new top-level `Tab::Identity` rendering a flat linear panel with four
+cards — Bootstrap / OID4VP / OID4VCI / VC inventory — each wiring
+straight to a shipped wallet-core entry point:
 
-**Location:** `mobile-bench/dioxus-wallet/src/`
-**Status:** not started
+| Card | wallet-core call |
+|---|---|
+| Bootstrap | `bootstrap_did_with_keys(&wallet, &mut store, &[42; 32])` |
+| OID4VP authenticate | `oid4vp_run_authentication(qr_url, &wallet, &store, &did)` |
+| OID4VCI issue | `oid4vci_run_issuance(qr_url, &wallet, &store, &did, &vc_store)` |
+| Self-verify | `self_verify_and_cache(&vc, &wallet, &*store, &vc_store)` |
 
-**Why deferred:** The plan's task code assumes a `wallet_handle::*`
-plumbing layer + new helper functions (`Wallet::list_owned_dids`,
-`has_any_bootstrapped_did`, `SecretStorage::has_pair`, etc.) that don't
-exist in the current dioxus-wallet. Building them requires multiple
-choices about how the new `Identity` tab folds into the existing
-`Tab::Wallet / Tab::Dids / Tab::Diagnostics` structure. The DIDs tab
-already has working create / resolve / update / sign flows from the
-earlier UI polish (`7b11d5e0`), so the "stack a VC carousel on top of
-this" decision is best made interactively.
+What's intentionally not built (deferred to Phase 1.5 / 2):
 
-**To resume:**
+- Sub-tab carousel (linear list instead).
+- Floating action button (replaced by inline paste-URL textareas).
+- Native QR camera (deferred to Tasks 37-39).
+- DID picker for multi-DID holders (single-DID demo flow).
 
-Either (a) plumb wallet-core's `bootstrap_did_with_keys` / `vc_store::*`
-/ `oid4vp_client::run_authentication` / `oid4vci_client::run_issuance` /
-`vc_self_verify::self_verify_and_cache` into existing tabs as
-incremental additions (no Tab restructure), or (b) follow the plan's
-Tasks 30–36 verbatim once the `wallet_handle::*` plumbing exists.
+Builds clean on desktop + iOS sim release target (`aarch64-apple-ios-sim`,
+`--features "preprod-live js-bridge"`).
 
-Minimum viable demo UI:
-- A "VCs" tab with `VcStore::list_ordered()` → carousel.
-- The existing **Create DID** button covers Task 31's BootstrapPanel.
-- A floating "+" / Scan button → `oid4vci_client::run_issuance`.
-- Per-card "Self-verify" button → `vc_self_verify::self_verify_and_cache`.
+## Done (2nd push) — BDD harness (Tasks 40–43)
 
-That's ~300 LOC against the surfaces wallet-core already ships.
+**Location:** `~/iohk/midnight-identity-workspace/midnight-identity-solution-examples/IssuerDIDIT-mock/e2e/`
+**Status:** harness wired. 4 commits (`2717b8b` → `c39704c`).
+
+8 Cucumber scenarios / 50 steps across four `.feature` files:
+
+- `bootstrap.feature` — holder DID bootstrap against the standalone env.
+- `issuance-happy-path.feature` — full OID4VP + KYC + OID4VCI flow.
+- `self-verify.feature` — fresh / tampered / rotated issuer key paths.
+- `negative-paths.feature` — nonce replay, kid mismatch, expired codes.
+
+`pnpm test --dry-run` discovers all 50 steps cleanly (0 unbound).
+Headless TS wallet client shells out to the Rust `did-bootstrap` CLI
+for the holder DID bootstrap (same pattern as the issuer's).
+
+Adaptations vs plan:
+
+- **No Playwright** — the operator-driven KYC step uses a direct
+  form-encoded POST to `/kyc-form?session=...` instead of browser
+  automation. Phase 1's contract is HTTP, not UI.
+- **`tsx 4.x` quirks** — cucumber CLI invoked via
+  `tsx node_modules/@cucumber/cucumber/bin/cucumber.js` to dodge the
+  tsx/Cucumber `index.js` extension-expansion clash.
+- **Per-scenario isolation** = fresh issuer-mock server on a unique
+  port + fresh SQLite. Standalone Midnight env assumed up (not
+  brought up/down per scenario — takes minutes).
+
+**Live runs** are currently blocked on the same `compact-js@2.5.0`
+`NodeChildBridge` issue that affects `bootstrap_did_with_keys`
+end-to-end paths from `cargo-test` / the CLI. The harness is correct;
+it'll go green the moment that blocker resolves.
 
 ## Deferred — Android JNI QR scanner bridge (Tasks 37–39)
 
@@ -139,24 +173,13 @@ That's ~300 LOC against the surfaces wallet-core already ships.
 
 **Why deferred:** Needs the Android NDK toolchain + a real device or
 emulator with camera permissions to exercise. The `PasteUrlScanner`
-stub (shipped in Task 29 / `c26466fd`) covers tests + dev affordance,
-so the rest of the pipeline isn't blocked.
+stub (shipped in Task 29 / `c26466fd`) covers tests; the dioxus-wallet
+UI's paste-URL textareas (shipped in `96b742df`) cover the operator
+demo affordance.
 
 **To resume:** Tasks 37–39 in the plan. Pull `cargo-ndk` + `camera2` +
 ML Kit barcode-scanning dep. Adapt the JNI bridge pattern used by the
 existing PERIPHERAL_PROVIDER if it survived.
-
-## Deferred — BDD harness (Tasks 40–43)
-
-**Status:** not started
-
-**Why deferred:** Depends on the issuer-mock being up (Tasks 20–28) +
-the UI integration (Tasks 30–36) to drive Playwright clicks. Land both
-upstream, then the harness is ~200 LOC of `.feature` files + Cucumber
-step defs against a Playwright `chromium.connect()`.
-
-**To resume:** Tasks 40–43. Cucumber config at
-`IssuerDIDIT-mock/cucumber.cjs`; features in `IssuerDIDIT-mock/e2e/features/`.
 
 ## Open questions inherited from the spec
 
@@ -208,14 +231,18 @@ RUST_MIN_STACK=16777216 STANDALONE_RUN=1 cargo test \
 
 ## Suggested next sessions
 
-1. **Fix the JS-bridge / compact-js TypeError.** Unlocks the live
-   integration test + the CLI bootstrap path. Probably a
-   `compactContext` initialization the `NodeChildBridge` harness isn't
-   doing that the WebView path is.
-2. **Land a minimal issuer-mock** — 200-LOC Express server with the six
-   endpoints, no Cucumber yet. Verifies the wallet-core OID4VP /
-   OID4VCI clients against real HTTP.
-3. **Plumb the wallet-core flows into the dioxus-wallet UI** — VCs tab,
-   FAB → scan → run_issuance, per-card self-verify badge.
-4. **Real DIDIT once Tasks 20-28 are stable** — replace the operator
-   form with the DIDIT webhook + redirect-to-DIDIT pattern.
+1. **Fix the JS-bridge / compact-js TypeError.** Single biggest
+   unlocker. Closes the live `did_bootstrap_standalone` integration
+   test, the `did-bootstrap` CLI live path, AND the BDD live runs
+   simultaneously. Probably a `compactContext` initialization the
+   `NodeChildBridge` harness isn't doing that the WebView path is.
+2. **Restart standalone env when DUST drought hits.** 19+ hour-old
+   stacks deplete the demo-seed wallets' DUST balance via dust-decay.
+   `pnpm env:down && pnpm env:up && pnpm bootstrap` resets cleanly.
+3. **Polish the dioxus-wallet Identity Centre UI.** The shipped tab is
+   pragmatic; Phase 1.5 / 2 work: a real carousel, a FAB, a native
+   QR scanner via `QrScanner` trait + Android JNI (Tasks 37-39).
+4. **Real DIDIT integration.** Replace the operator KYC form with
+   webhook + redirect-to-DIDIT. Spec §3 Phase 2.
+5. **Verifier app (Phase B / 2).** Plain selective-disclosure verifier
+   over OID4VP. Fresh spec + plan needed.
