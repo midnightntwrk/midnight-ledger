@@ -376,14 +376,19 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     }
 }
 
-pub(crate) fn contract_metadata_size<D: DB>(state: &ContractState<D>) -> u64 {
-    let mut size = 0u64;
+pub(crate) fn check_entry_point_metadata_sizes<D: DB>(
+    state: &ContractState<D>,
+    limit: u64,
+) -> Result<(), (EntryPointBuf, u64)> {
+    let auth_size = state.maintenance_authority.serialized_size() as u64;
     for entry in state.operations.iter() {
-        size += entry.0.serialized_size() as u64;
-        size += entry.1.serialized_size() as u64;
+        let size =
+            entry.0.serialized_size() as u64 + entry.1.serialized_size() as u64 + auth_size;
+        if size > limit {
+            return Err(((*entry.0).clone(), size));
+        }
     }
-    size += state.maintenance_authority.serialized_size() as u64;
-    size
+    Ok(())
 }
 
 impl<D: DB> ContractStateExt<D> for ContractState<D> {
@@ -1767,12 +1772,15 @@ impl<D: DB> ContractDeploy<D> {
             ));
         }
         ref_state.param_check(false, |params| {
-            let size = contract_metadata_size(&self.initial_state);
-            if size > params.limits.max_contract_metadata_size {
+            let limit = params.limits.max_contract_metadata_size;
+            if let Err((entry_point, size)) =
+                check_entry_point_metadata_sizes(&self.initial_state, limit)
+            {
                 return Err(MalformedTransaction::MalformedContractDeploy(
                     MalformedContractDeploy::MetadataTooLarge {
+                        entry_point,
                         size,
-                        limit: params.limits.max_contract_metadata_size,
+                        limit,
                     },
                 ));
             }

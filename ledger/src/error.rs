@@ -232,6 +232,7 @@ pub enum TransactionInvalid<D: DB> {
     MerkleTreeError(InvalidUpdate),
     ContractMetadataTooLarge {
         address: ContractAddress,
+        entry_point: EntryPointBuf,
         size: u64,
         limit: u64,
     },
@@ -317,11 +318,12 @@ impl<D: DB> Display for TransactionInvalid<D> {
             MerkleTreeError(err) => err.fmt(formatter),
             ContractMetadataTooLarge {
                 address,
+                entry_point,
                 size,
                 limit,
             } => write!(
                 formatter,
-                "contract {address:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+                "contract {address:?} entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
@@ -408,7 +410,7 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
-    MetadataTooLarge { size: u64, limit: u64 },
+    MetadataTooLarge { entry_point: EntryPointBuf, size: u64, limit: u64 },
 }
 
 impl Display for MalformedContractDeploy {
@@ -428,9 +430,13 @@ impl Display for MalformedContractDeploy {
                 formatter,
                 "contract deployment contained an incorrectly computed map of charged keys"
             ),
-            MetadataTooLarge { size, limit } => write!(
+            MetadataTooLarge {
+                entry_point,
+                size,
+                limit,
+            } => write!(
                 formatter,
-                "contract metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+                "contract entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
