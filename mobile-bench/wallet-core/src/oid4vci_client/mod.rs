@@ -24,6 +24,7 @@ pub use token::{request_token, Oid4vciTokenError, TokenResponse};
 /// Drive the full OID4VCI flow from a scanned QR URL.
 pub async fn run_issuance(
     http: &dyn crate::HttpClient,
+    clock: &dyn crate::Clock,
     qr_url: &str,
     wallet: &crate::wallet::Wallet,
     secret_store: &dyn crate::secret_storage::SecretStorage,
@@ -34,6 +35,7 @@ pub async fn run_issuance(
     let code = offer.grants.pre_authorized.code.clone();
     let vc_uri = credential::request_credential(
         http,
+        clock,
         &offer.credential_issuer,
         &code,
         wallet,
@@ -56,6 +58,7 @@ pub enum IssuanceFlowError {
 #[cfg(test)]
 mod flow_tests {
     use super::*;
+    use crate::clock::FixedClock;
     use crate::http::mock::MockHttpClient;
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
@@ -108,8 +111,9 @@ mod flow_tests {
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
         let vc_store = InMemoryVcStore::default();
+        let clock = FixedClock::new(1_700_000_001_000);
 
-        let uri = run_issuance(&http, &qr, &wallet, &store, &did, &vc_store)
+        let uri = run_issuance(&http, &clock, &qr, &wallet, &store, &did, &vc_store)
             .await
             .expect("ok");
         assert_eq!(uri, "urn:uuid:flow-1");

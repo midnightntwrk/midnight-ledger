@@ -12,6 +12,7 @@
 mod address;
 mod artifacts;
 pub mod chain;
+pub mod clock;
 mod crypto;
 mod did;
 mod dust;
@@ -74,6 +75,9 @@ pub use node::{
     MidnightSigner, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult, SubxtNodeClient,
 };
 pub use chain::{HttpProver, IndexerClient, LocalProver, NodeClient, Prover};
+pub use clock::{Clock, SystemClock};
+#[cfg(any(test, feature = "test-support"))]
+pub use clock::FixedClock;
 pub use http::{HttpClient, HttpError, HttpResponse, ReqwestHttpClient};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{

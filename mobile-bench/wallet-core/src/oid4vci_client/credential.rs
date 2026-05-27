@@ -13,6 +13,7 @@
 
 use serde::Deserialize;
 
+use crate::clock::Clock;
 use crate::http::{HttpClient, HttpError};
 use crate::oid4vci_client::token::TokenResponse;
 use crate::oid4vp_client::build_id_token;
@@ -70,6 +71,7 @@ impl From<HttpError> for CredentialFlowError {
 /// /token → /credential → land VC + openings in vc_store atomically.
 pub async fn request_credential(
     http: &dyn HttpClient,
+    clock: &dyn Clock,
     issuer: &str,
     pre_authorized_code: &str,
     wallet: &Wallet,
@@ -125,7 +127,7 @@ pub async fn request_credential(
         holder_did: issued.credential.holder_did,
         format: "midnight-vc-compact".into(),
         body: B64.decode(&issued.credential.body_b64)?,
-        issued_at_ms: now_ms(),
+        issued_at_ms: clock.now_ms(),
     };
     let openings: Vec<VcOpening> = issued
         .openings
@@ -145,16 +147,10 @@ pub async fn request_credential(
     Ok(vc.vc_uri)
 }
 
-fn now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::FixedClock;
     use crate::http::mock::MockHttpClient;
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
@@ -201,9 +197,11 @@ mod tests {
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
         let vc_store = InMemoryVcStore::default();
+        let clock = FixedClock::new(1_700_000_000_000);
 
         let vc_uri = request_credential(
             &http,
+            &clock,
             "https://issuer.local",
             "CODE-1",
             &wallet,
@@ -217,6 +215,10 @@ mod tests {
 
         let landed = vc_store.get_vc(&vc_uri).unwrap().expect("present");
         assert_eq!(landed.body, b"COMPACT_VC_BYTES");
+        assert_eq!(
+            landed.issued_at_ms, 1_700_000_000_000,
+            "issued_at_ms should come from the injected clock"
+        );
         let op = vc_store
             .get_opening(&vc_uri, "/credentialSubject/dateOfBirth")
             .unwrap()

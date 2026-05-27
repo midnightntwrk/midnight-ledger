@@ -19,7 +19,7 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use wallet_core::{
-    HttpClient, Network, RedbVcStore, ReqwestHttpClient, SelfVerifyResult, StoredVc,
+    HttpClient, Network, RedbVcStore, ReqwestHttpClient, SelfVerifyResult, StoredVc, SystemClock,
     bootstrap_did_with_keys, oid4vci_run_issuance, oid4vp_run_authentication,
     self_verify_and_cache,
 };
@@ -416,8 +416,17 @@ fn Oid4vciSection(
                     }
                 };
                 let http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                match oid4vci_run_issuance(&*http, &url, &wallet, &secret_store, &did, &vc_store)
-                    .await
+                let clock = SystemClock;
+                match oid4vci_run_issuance(
+                    &*http,
+                    &clock,
+                    &url,
+                    &wallet,
+                    &secret_store,
+                    &did,
+                    &vc_store,
+                )
+                .await
                 {
                     Ok(vc_uri) => ok_msg.set(Some(format!("issued {vc_uri}"))),
                     Err(e) => err_msg.set(Some(format!("issue failed: {e}"))),
@@ -638,8 +647,15 @@ fn render_vc_row(
                         return;
                     }
                 };
-                let r =
-                    self_verify_and_cache(&vc, &wallet, &secret_store, &vc_store).await;
+                let clock = SystemClock;
+                let r = self_verify_and_cache(
+                    &vc,
+                    &wallet,
+                    &secret_store,
+                    &vc_store,
+                    &clock,
+                )
+                .await;
                 let mut b = badges.read().clone();
                 b.insert(vc_uri.clone(), VerifyBadge::from_result(&r));
                 badges.set(b);

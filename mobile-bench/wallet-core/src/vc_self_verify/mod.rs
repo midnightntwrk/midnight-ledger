@@ -38,6 +38,7 @@ use std::collections::BTreeMap;
 
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
+use crate::clock::Clock;
 use crate::secret_storage::{
     MidnightCurve, MidnightKeyType, PublicJwk, SecretStorage, VerifyInput,
 };
@@ -220,6 +221,7 @@ pub async fn self_verify_and_cache(
     wallet: &Wallet,
     secret_store: &dyn SecretStorage,
     vc_store: &dyn crate::VcStorage,
+    clock: &dyn Clock,
 ) -> SelfVerifyResult {
     let result = self_verify(vc, wallet, secret_store).await;
     let outcome = match &result {
@@ -227,10 +229,7 @@ pub async fn self_verify_and_cache(
         SelfVerifyResult::Invalid(reason) => format!("Invalid: {reason:?}"),
         SelfVerifyResult::Error(msg) => format!("Error: {msg}"),
     };
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0);
+    let now_ms = clock.now_ms();
     // Best-effort metadata write — verification result is the
     // primary return; a metadata write failure shouldn't mask the
     // verification outcome itself.
@@ -365,8 +364,9 @@ mod tests {
 
         let vc_store = crate::InMemoryVcStore::default();
         vc_store.insert_vc(&vc).expect("insert vc");
+        let clock = crate::FixedClock::new(1_700_000_002_000);
 
-        let result = self_verify_and_cache(&vc, &wallet, &store, &vc_store).await;
+        let result = self_verify_and_cache(&vc, &wallet, &store, &vc_store, &clock).await;
         assert!(
             matches!(result, SelfVerifyResult::Valid { .. }),
             "expected Valid, got {result:?}"
@@ -376,10 +376,10 @@ mod tests {
             .expect("metadata read ok")
             .expect("metadata present");
         assert_eq!(md.last_verify_outcome, Some("Valid".to_string()));
-        assert!(
-            md.last_verified_ms.unwrap_or(0) > 0,
-            "last_verified_ms should be set: {:?}",
-            md.last_verified_ms
+        assert_eq!(
+            md.last_verified_ms,
+            Some(1_700_000_002_000),
+            "last_verified_ms should come from the injected clock"
         );
     }
 }
