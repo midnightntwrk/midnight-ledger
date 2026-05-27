@@ -13,19 +13,20 @@
   "dependencies": {
     "@midnight-ntwrk/midnight-did": "file:/Users/ysh/iohk/midnight-did/did",
     "@midnight-ntwrk/midnight-did-api": "file:/Users/ysh/iohk/midnight-did/api",
+    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/contract",
     "@midnight-ntwrk/midnight-did-domain": "file:/Users/ysh/iohk/midnight-did/domain",
-    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/contract"
+    "jsqr": "^1.4.0"
   },
   "devDependencies": {
+    "assert": "^2.1.0",
+    "buffer": "^6.0.3",
+    "crypto-browserify": "^3.12.0",
     "esbuild": "^0.25.0",
     "esbuild-plugins-node-modules-polyfill": "^1.7.0",
-    "isomorphic-ws": "^5.0.0",
-    "buffer": "^6.0.3",
-    "stream-browserify": "^3.0.0",
     "events": "^3.3.0",
-    "crypto-browserify": "^3.12.0",
+    "isomorphic-ws": "^5.0.0",
     "path-browserify": "^1.0.1",
-    "assert": "^2.1.0",
+    "stream-browserify": "^3.0.0",
     "util": "^0.12.5"
   }
 }

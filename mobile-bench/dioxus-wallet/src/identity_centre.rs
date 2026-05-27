@@ -24,6 +24,7 @@ use wallet_core::secret_storage::{SecretStorage, redb_secret_store::RedbSecretSt
 
 use crate::app::{app_wallet_for, truncate_did, wallet_store_path};
 use crate::bridge::BridgeState;
+use crate::eval_bridge;
 
 /// Fixed 32-byte demo seed. Kept constant so an operator can re-run
 /// `bootstrap_did_with_keys` across resets and get the same
@@ -287,6 +288,32 @@ fn Oid4vpSection(
         }
     };
 
+    let scan = {
+        let mut url_input = url_input;
+        let mut err_msg = err_msg;
+        move |_| {
+            err_msg.set(None);
+            spawn(async move {
+                let Some(bridge) = eval_bridge::global_bridge() else {
+                    err_msg.set(Some(
+                        "JS bridge not installed yet (js-bridge feature off?)"
+                            .into(),
+                    ));
+                    return;
+                };
+                match eval_bridge::scan_qr(&*bridge).await {
+                    Ok(url) => url_input.set(url),
+                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
+                        if msg == "cancelled" =>
+                    {
+                        // User pressed Cancel — silent no-op.
+                    }
+                    Err(e) => err_msg.set(Some(format!("scan failed: {e}"))),
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Authenticate with QR (OID4VP)" }
@@ -303,6 +330,11 @@ fn Oid4vpSection(
                     disabled: *busy.read(),
                     onclick: authenticate,
                     {if *busy.read() { "Authenticating…" } else { "Authenticate" }}
+                }
+                button {
+                    disabled: *busy.read(),
+                    onclick: scan,
+                    "📷 Scan QR"
                 }
             }
             if let Some(msg) = ok_msg.read().as_ref() {
@@ -389,6 +421,29 @@ fn Oid4vciSection(
         }
     };
 
+    let scan = {
+        let mut url_input = url_input;
+        let mut err_msg = err_msg;
+        move |_| {
+            err_msg.set(None);
+            spawn(async move {
+                let Some(bridge) = eval_bridge::global_bridge() else {
+                    err_msg.set(Some(
+                        "JS bridge not installed yet (js-bridge feature off?)"
+                            .into(),
+                    ));
+                    return;
+                };
+                match eval_bridge::scan_qr(&*bridge).await {
+                    Ok(url) => url_input.set(url),
+                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
+                        if msg == "cancelled" => {}
+                    Err(e) => err_msg.set(Some(format!("scan failed: {e}"))),
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Request VC (OID4VCI)" }
@@ -405,6 +460,11 @@ fn Oid4vciSection(
                     disabled: *busy.read(),
                     onclick: request_vc,
                     {if *busy.read() { "Requesting…" } else { "Get credential" }}
+                }
+                button {
+                    disabled: *busy.read(),
+                    onclick: scan,
+                    "📷 Scan QR"
                 }
             }
             if let Some(msg) = ok_msg.read().as_ref() {

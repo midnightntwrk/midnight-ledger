@@ -15,6 +15,11 @@ import {
   createVerifierKey,
   createZKIR,
 } from "@midnight-ntwrk/midnight-js-types";
+// Pure-JS QR decoder. ~40 KB minified — esbuild inlines it straight
+// into the bundle so no extra `mn-pkg://` entry is needed. Used by
+// `scanQr()` below to decode frames captured from the device camera
+// via `navigator.mediaDevices.getUserMedia`.
+import jsQR from "jsqr";
 
 declare global {
   interface Window {
@@ -68,7 +73,16 @@ declare global {
        *  deserialise, balance, prove, and submit. */
       prepareUnprovenCallTx(params: PrepareUnprovenCallTxParams):
         Promise<PrepareUnprovenCallTxResult>;
+      /** WebView-based QR scanner. Opens a full-viewport overlay with
+       *  a back-facing camera preview, runs jsQR on every animation
+       *  frame, resolves with `{ url }` on the first decode. Cancel
+       *  button resolves with `{ error: "cancelled" }`; permission
+       *  denial / no camera resolves with `{ error: "<reason>" }`.
+       *  Idempotent — concurrent calls return `{ error: "busy" }`. */
+      scanQr(params?: Record<string, unknown>):
+        Promise<{ url?: string; error?: string }>;
     };
+    __qrScanInProgress?: boolean;
     MIDNIGHT_PROOF_SERVER?: string;
     MIDNIGHT_NETWORK?: string;
   }
@@ -369,6 +383,206 @@ async function prepareUnprovenCallTx(
   };
 }
 
+/**
+ * WebView-based QR scanner. Runs entirely in the WebView — no native
+ * camera bridge — so a single code path works on both Android and
+ * iOS. The overlay element is appended to `document.body` (not the
+ * Dioxus render tree) so the framework can't yank it on rerender;
+ * the `<video>` element is mounted into that overlay and the stream
+ * is torn down on success / cancel / error.
+ *
+ * On every animation frame we draw the video to an offscreen
+ * `<canvas>` and feed its imageData to `jsQR`. On the first hit we
+ * stop the loop and resolve. `inversionAttempts: "dontInvert"` is
+ * the default; we skip inversion for ~2× decode speed since OID4VP
+ * / OID4VCI QRs are always dark-on-light.
+ */
+async function scanQr(
+  _params?: Record<string, unknown>,
+): Promise<{ url?: string; error?: string }> {
+  if (window.__qrScanInProgress) {
+    return { error: "busy" };
+  }
+  window.__qrScanInProgress = true;
+
+  let stream: MediaStream | null = null;
+  let overlay: HTMLDivElement | null = null;
+  let rafId: number | null = null;
+  let settled = false;
+
+  const teardown = () => {
+    if (rafId !== null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    if (stream) {
+      for (const track of stream.getTracks()) {
+        try {
+          track.stop();
+        } catch (_) {}
+      }
+      stream = null;
+    }
+    if (overlay && overlay.parentNode) {
+      overlay.parentNode.removeChild(overlay);
+    }
+    overlay = null;
+    window.__qrScanInProgress = false;
+  };
+
+  return new Promise((resolve) => {
+    const settle = (out: { url?: string; error?: string }) => {
+      if (settled) return;
+      settled = true;
+      teardown();
+      resolve(out);
+    };
+
+    // ── Acquire camera stream ──────────────────────────────────────
+    if (!navigator.mediaDevices?.getUserMedia) {
+      settle({ error: "getUserMedia not available" });
+      return;
+    }
+
+    // ── Build overlay DOM ──────────────────────────────────────────
+    overlay = document.createElement("div");
+    overlay.setAttribute("data-midnight-qr-overlay", "1");
+    overlay.style.cssText = [
+      "position: fixed",
+      "inset: 0",
+      "z-index: 2147483647",
+      "background: rgba(0, 0, 0, 0.85)",
+      "display: flex",
+      "flex-direction: column",
+      "align-items: center",
+      "justify-content: center",
+      "padding: 16px",
+      "box-sizing: border-box",
+    ].join("; ");
+
+    const title = document.createElement("div");
+    title.textContent = "Scan QR code";
+    title.style.cssText = [
+      "color: #fff",
+      "font-family: -apple-system, system-ui, sans-serif",
+      "font-size: 16px",
+      "margin-bottom: 12px",
+    ].join("; ");
+    overlay.appendChild(title);
+
+    const video = document.createElement("video");
+    // `playsinline` is required on iOS to keep the stream embedded
+    // (without it iOS would fullscreen-promote the element and steal
+    // the WebView's view tree).
+    video.setAttribute("playsinline", "true");
+    video.setAttribute("autoplay", "true");
+    video.muted = true;
+    video.style.cssText = [
+      "max-width: 100%",
+      "max-height: 70vh",
+      "background: #000",
+      "border-radius: 8px",
+    ].join("; ");
+    overlay.appendChild(video);
+
+    const status = document.createElement("div");
+    status.textContent = "Point the camera at a QR code…";
+    status.style.cssText = [
+      "color: #ccc",
+      "font-family: -apple-system, system-ui, sans-serif",
+      "font-size: 13px",
+      "margin-top: 12px",
+      "text-align: center",
+    ].join("; ");
+    overlay.appendChild(status);
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.textContent = "Cancel";
+    cancelBtn.style.cssText = [
+      "margin-top: 16px",
+      "padding: 10px 24px",
+      "background: #fff",
+      "color: #000",
+      "border: 0",
+      "border-radius: 8px",
+      "font-family: -apple-system, system-ui, sans-serif",
+      "font-size: 15px",
+      "cursor: pointer",
+    ].join("; ");
+    cancelBtn.onclick = () => settle({ error: "cancelled" });
+    overlay.appendChild(cancelBtn);
+
+    document.body.appendChild(overlay);
+
+    // Offscreen canvas — kept outside the DOM so layout doesn't
+    // recompute for it. `willReadFrequently: true` hints the browser
+    // to use a software-readable backing store, which is what we
+    // want since we call `getImageData` every frame.
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) {
+      settle({ error: "could not allocate 2d canvas context" });
+      return;
+    }
+
+    const tick = () => {
+      if (settled) return;
+      if (
+        video.readyState === video.HAVE_ENOUGH_DATA &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0
+      ) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height, {
+          inversionAttempts: "dontInvert",
+        });
+        if (code && typeof code.data === "string" && code.data.length > 0) {
+          settle({ url: code.data });
+          return;
+        }
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+
+    navigator.mediaDevices
+      .getUserMedia({
+        video: { facingMode: { ideal: "environment" } },
+        audio: false,
+      })
+      .then((s) => {
+        if (settled) {
+          // Cancel pressed while permission prompt was up.
+          for (const t of s.getTracks()) {
+            try {
+              t.stop();
+            } catch (_) {}
+          }
+          return;
+        }
+        stream = s;
+        video.srcObject = s;
+        video
+          .play()
+          .catch((e) =>
+            console.warn("[scanQr] video.play() rejected", e),
+          );
+        rafId = requestAnimationFrame(tick);
+      })
+      .catch((e) => {
+        const msg =
+          e instanceof Error
+            ? e.name === "NotAllowedError"
+              ? "camera permission denied"
+              : `${e.name}: ${e.message}`
+            : String(e);
+        settle({ error: msg });
+      });
+  });
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
@@ -378,6 +592,7 @@ window.midnightDidBundle = {
   bridgeProbe,
   bridgeWitnessTest,
   prepareUnprovenCallTx,
+  scanQr,
 };
 
 console.log(

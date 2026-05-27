@@ -33,6 +33,12 @@ targets:
           - UIInterfaceOrientationPortrait
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # Required by iOS 10+ for any app that calls
+        # `navigator.mediaDevices.getUserMedia({ video: ... })`. The
+        # WKWebView would otherwise reject the prompt with a
+        # `NotAllowedError`. Surface text shown in the system
+        # permission alert when the QR scanner opens.
+        NSCameraUsageDescription: "Scan QR codes to authenticate with services and download verifiable credentials."
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.iohk.midnight.wallet

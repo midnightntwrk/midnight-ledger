@@ -30,7 +30,7 @@ use std::sync::OnceLock;
 
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
-use wallet_core::js_bridge::{JsBridge, JsBridgeError};
+use wallet_core::js_bridge::{JsBridge, JsBridgeError, JsBridgeExt};
 
 /// In-flight call from the bridge handle to the driver task. The
 /// driver runs the JS, then sends the JSON value back over `reply`.
@@ -202,4 +202,30 @@ pub fn global_bridge() -> Option<Arc<dyn JsBridge>> {
         let b: Arc<dyn JsBridge> = Arc::new(b);
         b
     })
+}
+
+/// Drive the WebView-side QR scanner. Opens a full-viewport overlay
+/// with a camera preview, runs jsQR on every animation frame, and
+/// resolves with the decoded string on the first hit. Cancel button
+/// returns `JsBridgeError::Transport("cancelled")` so the caller can
+/// differentiate a user-initiated abort from a real failure.
+///
+/// Wraps the `scanQr` JS function declared in
+/// `mobile-bench/dioxus-wallet/web/src/entry.ts`. Returns the raw
+/// decoded payload (e.g. an `openid4vp://…` or
+/// `openid-credential-offer://…` URL) — the caller's responsible for
+/// parsing.
+pub async fn scan_qr(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
+    #[derive(serde::Deserialize)]
+    struct ScanResult {
+        url: Option<String>,
+        error: Option<String>,
+    }
+    let res: ScanResult = bridge.call("scanQr", serde_json::json!({})).await?;
+    if let Some(url) = res.url {
+        return Ok(url);
+    }
+    Err(JsBridgeError::Transport(
+        res.error.unwrap_or_else(|| "no result".to_string()),
+    ))
 }

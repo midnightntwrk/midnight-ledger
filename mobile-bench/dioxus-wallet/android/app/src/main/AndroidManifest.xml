@@ -2,6 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Camera permission for the WebView-based QR scanner. Wry's
+         `RustWebChromeClient.onPermissionRequest` handles the runtime
+         prompt for `android.webkit.resource.VIDEO_CAPTURE` and grants
+         it iff this manifest permission is also defined. -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <application android:hasCode="true" android:supportsRtl="true" android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name" android:theme="@style/AppTheme"
         android:largeHeap="true">
