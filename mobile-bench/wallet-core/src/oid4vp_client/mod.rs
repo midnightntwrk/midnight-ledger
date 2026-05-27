@@ -24,6 +24,7 @@ pub use respond::{post_response, PostResponseError, PostResponseResult};
 /// session_id + status.
 pub async fn run_authentication(
     http: &dyn crate::HttpClient,
+    clock: &dyn crate::Clock,
     qr_url: &str,
     wallet: &crate::wallet::Wallet,
     secret_store: &dyn crate::secret_storage::SecretStorage,
@@ -34,6 +35,7 @@ pub async fn run_authentication(
     let id_token = jws::build_id_token(
         wallet,
         secret_store,
+        clock,
         did,
         &req.client_id,
         &req.nonce,
@@ -58,6 +60,7 @@ pub enum AuthFlowError {
 #[cfg(test)]
 mod flow_tests {
     use super::*;
+    use crate::clock::FixedClock;
     use crate::http::mock::MockHttpClient;
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
@@ -92,7 +95,8 @@ mod flow_tests {
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
 
-        let r = run_authentication(&http, qr, &wallet, &store, &did)
+        let clock = FixedClock::new(1_700_000_000_000);
+        let r = run_authentication(&http, &clock, qr, &wallet, &store, &did)
             .await
             .expect("ok");
         assert_eq!(r.session_id, "S-42");

@@ -13,8 +13,8 @@
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
-use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::clock::Clock;
 use crate::did_auth::{sign_for_authentication, DidAuthError};
 use crate::secret_storage::SecretStorage;
 use crate::wallet::Wallet;
@@ -26,8 +26,6 @@ pub enum IdTokenError {
     DidAuth(#[from] DidAuthError),
     #[error("serde error: {0}")]
     Serde(#[from] serde_json::Error),
-    #[error("clock error")]
-    Clock,
 }
 
 #[derive(Debug, Serialize)]
@@ -54,13 +52,15 @@ struct IdTokenPayload {
 pub async fn build_id_token(
     wallet: &Wallet,
     secret_store: &dyn SecretStorage,
+    clock: &dyn Clock,
     holder: &DidId,
     client_id: &str,
     nonce: &str,
     lifetime_secs: u64,
 ) -> Result<String, IdTokenError> {
-    // 1. Compose payload.
-    let iat = now()?;
+    // 1. Compose payload. `iat` is epoch-seconds — the clock
+    //    port returns epoch-ms, divide.
+    let iat = clock.now_ms() / 1_000;
     let payload = IdTokenPayload {
         iss: holder.to_did_string(),
         sub: holder.to_did_string(),
@@ -89,16 +89,10 @@ pub async fn build_id_token(
     Ok(format!("{sign_input}.{sig_b64}"))
 }
 
-fn now() -> Result<u64, IdTokenError> {
-    Ok(SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_err(|_| IdTokenError::Clock)?
-        .as_secs())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::clock::FixedClock;
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
@@ -108,9 +102,11 @@ mod tests {
         let seed = [6u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let jwt = build_id_token(&wallet, &store, &did, "client-x", "nonce-y", 300)
-            .await
-            .expect("build");
+        let clock = FixedClock::new(1_700_000_000_000);
+        let jwt =
+            build_id_token(&wallet, &store, &clock, &did, "client-x", "nonce-y", 300)
+                .await
+                .expect("build");
         let parts: Vec<&str> = jwt.split('.').collect();
         assert_eq!(parts.len(), 3, "jws has three b64 segments");
         for p in &parts {
@@ -123,7 +119,8 @@ mod tests {
         let seed = [7u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let jwt = build_id_token(&wallet, &store, &did, "c", "n", 60)
+        let clock = FixedClock::new(1_700_000_000_000);
+        let jwt = build_id_token(&wallet, &store, &clock, &did, "c", "n", 60)
             .await
             .expect("build");
         let header_b64 = jwt.split('.').next().unwrap();
@@ -140,7 +137,8 @@ mod tests {
         let seed = [8u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let jwt = build_id_token(&wallet, &store, &did, "c", "n", 60)
+        let clock = FixedClock::new(1_700_000_000_000);
+        let jwt = build_id_token(&wallet, &store, &clock, &did, "c", "n", 60)
             .await
             .expect("build");
         let payload_b64 = jwt.split('.').nth(1).unwrap();
@@ -152,5 +150,8 @@ mod tests {
         assert_eq!(payload.aud, "c");
         assert_eq!(payload.nonce, "n");
         assert!(payload.exp > payload.iat);
+        // Deterministic timestamps via FixedClock.
+        assert_eq!(payload.iat, 1_700_000_000);
+        assert_eq!(payload.exp, 1_700_000_060);
     }
 }

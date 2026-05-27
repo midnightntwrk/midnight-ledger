@@ -336,11 +336,19 @@ fn Oid4vpSection(
                 let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
                 let http: Arc<dyn HttpClient> =
                     Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+                let clock = SystemClock;
                 let result = time_op(
                     &*metrics,
                     &*probe,
                     "oid4vp_authenticate",
-                    oid4vp_run_authentication(&*http, &url, &wallet, &secret_store, &did),
+                    oid4vp_run_authentication(
+                        &*http,
+                        &clock,
+                        &url,
+                        &wallet,
+                        &secret_store,
+                        &did,
+                    ),
                 )
                 .await;
                 match result {

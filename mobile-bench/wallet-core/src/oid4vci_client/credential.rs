@@ -91,6 +91,7 @@ pub async fn request_credential(
     let proof_jwt = build_id_token(
         wallet,
         secret_store,
+        clock,
         holder_did,
         issuer,
         &token.c_nonce,
