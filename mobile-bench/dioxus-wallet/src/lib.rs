@@ -3,6 +3,7 @@
 mod app;
 mod bench_stage;
 mod bridge;
+mod identity_centre;
 #[cfg(feature = "js-bridge")]
 pub(crate) mod eval_bridge;
 mod format;

@@ -106,6 +106,13 @@ enum Tab {
     Test,
     Logs,
     Settings,
+    /// Identity Centre Phase 1 — drives the four shipped wallet-core
+    /// flows (bootstrap DID + VC keys, OID4VP authenticate, OID4VCI
+    /// issue, self-verify VCs) as paste-URL buttons. The plan's
+    /// carousel + FAB structure is deferred to Phase 2; this tab is
+    /// the pragmatic linear page that exposes the same end-to-end
+    /// contract against the running issuer-mock.
+    Identity,
 }
 
 impl Tab {
@@ -120,6 +127,7 @@ impl Tab {
             Tab::Test => "Test",
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
+            Tab::Identity => "Identity Centre",
         }
     }
 
@@ -137,6 +145,7 @@ impl Tab {
             Tab::Test => 6,
             Tab::Metrics => 7,
             Tab::Benchmark => 8,
+            Tab::Identity => 9,
         }
     }
 
@@ -157,6 +166,7 @@ impl Tab {
             // user resuming from an older session doesn't land on an
             // unreachable variant.
             5 | 6 | 7 | 8 => Tab::Diagnostics,
+            9 => Tab::Identity,
             _ => Tab::Wallet,
         }
     }
@@ -497,7 +507,7 @@ mod preprod_live {
 ///
 /// One place to centralise the swap so the rest of the App
 /// doesn't need to know which build it's running under.
-fn app_wallet_for(net: Network) -> Wallet {
+pub(crate) fn app_wallet_for(net: Network) -> Wallet {
     let base = {
         #[cfg(feature = "preprod-live")]
         {
@@ -1426,7 +1436,7 @@ pub fn App() -> Element {
                 // Metrics / Benchmark / Test / Logs were collapsed
                 // into a carousel under Diagnostics — the top-level
                 // tab bar no longer lists them.
-                for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
+                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1454,7 +1464,7 @@ pub fn App() -> Element {
         // below is a single match on the current value. CSS hides
         // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -1988,6 +1998,12 @@ pub fn App() -> Element {
             },
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
+            },
+            Tab::Identity => rsx! {
+                crate::identity_centre::IdentityCentrePanel {
+                    network: *network.read(),
+                    bridge_state: bridge_state.read().clone(),
+                }
             },
         }
     }
@@ -6452,7 +6468,7 @@ fn render_methods_tab(r: &wallet_core::ResolvedDid) -> Element {
                                 td { title: "{id_full}", "{id_fragment}" }
                                 td { class: "muted", "{kty}" }
                                 td { class: "muted", "{crv}" }
-                                td { {copy_btn(id_full, "Copy DID URL")} }
+                                td { {copy_btn(id_full.clone(), "Copy DID URL")} }
                             }
                         }
                     }
@@ -7343,7 +7359,7 @@ fn vm_short_name(id: &str) -> &str {
     id
 }
 
-fn truncate_did(did: &str) -> String {
+pub(crate) fn truncate_did(did: &str) -> String {
     let parts: Vec<&str> = did.splitn(4, ':').collect();
     if parts.len() < 4 {
         return did.to_string();
@@ -7993,7 +8009,7 @@ enum UnlockState {
 /// Falls back to a `./wallet.redb` next to the binary if the
 /// home dir can't be resolved (unlikely on macOS / Linux /
 /// Windows but defensive).
-fn wallet_store_path() -> std::path::PathBuf {
+pub(crate) fn wallet_store_path() -> std::path::PathBuf {
     #[cfg(target_os = "android")]
     {
         // Android: the app sandbox can write to its own private
