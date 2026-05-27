@@ -19,9 +19,9 @@ use std::sync::Arc;
 use dioxus::prelude::*;
 
 use wallet_core::{
-    HttpClient, Network, RedbVcStore, ReqwestHttpClient, SelfVerifyResult, StoredVc, SystemClock,
-    bootstrap_did_with_keys, oid4vci_run_issuance, oid4vp_run_authentication,
-    self_verify_and_cache,
+    HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
+    SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys, oid4vci_run_issuance,
+    oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
 };
 use wallet_core::secret_storage::{SecretStorage, redb_secret_store::RedbSecretStore};
 
@@ -169,14 +169,34 @@ fn BootstrapSection(
                 };
                 let wallet = app_wallet_for(network);
                 let mut secret_store = RedbSecretStore::new(store, wallet_id);
-                match bootstrap_did_with_keys(&wallet, &mut secret_store, &DEMO_IC_SEED).await
-                {
+                let metrics = bridge_state.metrics_dyn();
+                let in_mem_metrics = bridge_state.metrics();
+                let probe = bridge_state.resource_probe();
+                // Bracket the heaviest Identity-Centre op
+                // (HKDF + key import + on-chain DID write)
+                // so the Diagnostics tab can quantify how
+                // much wall + RSS / CPU it costs. The HTTP
+                // calls inside happen via the wallet's
+                // injected `IndexerClient` / `NodeClient`
+                // which are NOT metered here (those ports
+                // pre-date the telemetry layer — covered by
+                // a follow-up).
+                let result = time_op(
+                    &*metrics,
+                    &*probe,
+                    "bootstrap_did",
+                    bootstrap_did_with_keys(&wallet, &mut secret_store, &DEMO_IC_SEED),
+                )
+                .await;
+                match result {
                     Ok(b) => {
+                        in_mem_metrics.incr("dids.bootstrapped", 1);
                         let did_str = b.did.to_did_string();
                         ic_did.set(Some(did_str.clone()));
                         ok_msg.set(Some(format!("Bootstrapped {did_str}")));
                     }
                     Err(e) => {
+                        in_mem_metrics.incr("dids.bootstrap_failed", 1);
                         err_msg.set(Some(format!("bootstrap failed: {e}")));
                     }
                 }
@@ -276,16 +296,34 @@ fn Oid4vpSection(
             busy.set(true);
             err_msg.set(None);
             ok_msg.set(None);
+            let metrics = bridge_state.metrics_dyn();
+            let in_mem_metrics = bridge_state.metrics();
+            let probe = bridge_state.resource_probe();
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
-                let http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                match oid4vp_run_authentication(&*http, &url, &wallet, &secret_store, &did).await {
-                    Ok(r) => ok_msg.set(Some(format!(
-                        "session_id={} status={}",
-                        r.session_id, r.status
-                    ))),
-                    Err(e) => err_msg.set(Some(format!("authenticate failed: {e}"))),
+                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                let http: Arc<dyn HttpClient> =
+                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+                let result = time_op(
+                    &*metrics,
+                    &*probe,
+                    "oid4vp_authenticate",
+                    oid4vp_run_authentication(&*http, &url, &wallet, &secret_store, &did),
+                )
+                .await;
+                match result {
+                    Ok(r) => {
+                        in_mem_metrics.incr("oid4vp.ok", 1);
+                        ok_msg.set(Some(format!(
+                            "session_id={} status={}",
+                            r.session_id, r.status
+                        )));
+                    }
+                    Err(e) => {
+                        in_mem_metrics.incr("oid4vp.failed", 1);
+                        err_msg.set(Some(format!("authenticate failed: {e}")));
+                    }
                 }
                 busy.set(false);
             });
@@ -404,6 +442,9 @@ fn Oid4vciSection(
             busy.set(true);
             err_msg.set(None);
             ok_msg.set(None);
+            let metrics = bridge_state.metrics_dyn();
+            let in_mem_metrics = bridge_state.metrics();
+            let probe = bridge_state.resource_probe();
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
@@ -415,21 +456,47 @@ fn Oid4vciSection(
                         return;
                     }
                 };
-                let http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                // Wrap the real reqwest client with the
+                // metrics decorator so every /token and
+                // /credential HTTP call lands in the
+                // aggregator (host + status + duration_ms)
+                // and the Logs tab (via TracingMetrics).
+                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                let http: Arc<dyn HttpClient> =
+                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
                 let clock = SystemClock;
-                match oid4vci_run_issuance(
-                    &*http,
-                    &clock,
-                    &url,
-                    &wallet,
-                    &secret_store,
-                    &did,
-                    &vc_store,
+                // Bracket the whole OID4VCI flow with
+                // `time_op` so the aggregator records one
+                // top-level "issuance" sample carrying the
+                // total wall-time + RSS / CPU deltas. The
+                // HTTP decorator records the two sub-calls
+                // separately — the difference highlights
+                // whether the latency lives in the network
+                // or in local crypto.
+                let result = time_op(
+                    &*metrics,
+                    &*probe,
+                    "issuance",
+                    oid4vci_run_issuance(
+                        &*http,
+                        &clock,
+                        &url,
+                        &wallet,
+                        &secret_store,
+                        &did,
+                        &vc_store,
+                    ),
                 )
-                .await
-                {
-                    Ok(vc_uri) => ok_msg.set(Some(format!("issued {vc_uri}"))),
-                    Err(e) => err_msg.set(Some(format!("issue failed: {e}"))),
+                .await;
+                match result {
+                    Ok(vc_uri) => {
+                        in_mem_metrics.incr("vcs.issued", 1);
+                        ok_msg.set(Some(format!("issued {vc_uri}")));
+                    }
+                    Err(e) => {
+                        in_mem_metrics.incr("vcs.issuance_failed", 1);
+                        err_msg.set(Some(format!("issue failed: {e}")));
+                    }
                 }
                 busy.set(false);
             });
@@ -631,6 +698,9 @@ fn render_vc_row(
             busy.set(true);
             let vc = vc.clone();
             let vc_uri = vc_uri_for_set.clone();
+            let metrics = bridge_state.metrics_dyn();
+            let in_mem_metrics = bridge_state.metrics();
+            let probe = bridge_state.resource_probe();
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
@@ -648,14 +718,35 @@ fn render_vc_row(
                     }
                 };
                 let clock = SystemClock;
-                let r = self_verify_and_cache(
-                    &vc,
-                    &wallet,
-                    &secret_store,
-                    &vc_store,
-                    &clock,
+                // Bracket the verify call with `time_op_simple`
+                // (it returns a non-Result `SelfVerifyResult`)
+                // so the aggregator records latency + RSS /
+                // CPU delta per click. Outcomes are
+                // independently broken out via counters below.
+                let r = time_op_simple(
+                    &*metrics,
+                    &*probe,
+                    "self_verify",
+                    self_verify_and_cache(
+                        &vc,
+                        &wallet,
+                        &secret_store,
+                        &vc_store,
+                        &clock,
+                    ),
                 )
                 .await;
+                match &r {
+                    wallet_core::SelfVerifyResult::Valid { .. } => {
+                        in_mem_metrics.incr("verifies.valid", 1);
+                    }
+                    wallet_core::SelfVerifyResult::Invalid(_) => {
+                        in_mem_metrics.incr("verifies.invalid", 1);
+                    }
+                    wallet_core::SelfVerifyResult::Error(_) => {
+                        in_mem_metrics.incr("verifies.error", 1);
+                    }
+                }
                 let mut b = badges.read().clone();
                 b.insert(vc_uri.clone(), VerifyBadge::from_result(&r));
                 badges.set(b);

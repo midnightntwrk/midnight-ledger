@@ -108,6 +108,10 @@ rand = { version = "0.8.4", features = ["getrandom"] }
 rand_chacha = "0.3.1"
 tracing = "0.1"
 url = "2"
+# POSIX `getrusage` for the RusageProbe (macOS/iOS/Linux/Android RSS
+# samples used by `telemetry::time_op` to record per-op CPU-time +
+# peak-RSS deltas).
+libc = "0.2"
 
 # Persistent store — single-file MVCC, pure Rust, no FFI / NDK
 # pain on mobile. Carries wallet seeds (encrypted at row level

@@ -23,7 +23,10 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use tokio::sync::OnceCell;
 use wallet_core::store::{WalletId, WalletStore};
-use wallet_core::{Network, unshielded_bech32m};
+use wallet_core::{
+    CompositeMetrics, InMemoryMetrics, Metrics, Network, RusageProbe, TracingMetrics,
+    unshielded_bech32m,
+};
 
 use crate::logs::LogCapture;
 
@@ -68,6 +71,17 @@ pub struct BridgeState {
     /// tab reads via `snapshot()`; the App spawns the
     /// drainer once the store is attached.
     pub log_capture: Arc<OnceCell<LogCapture>>,
+    /// Process-wide telemetry aggregator. Populated once at
+    /// App boot with an `InMemoryMetrics` (or composite). Read
+    /// by a future Diagnostics tab via `metrics_snapshot()`;
+    /// written by `MeteredHttpClient` (HTTP latencies) and
+    /// `time_op` brackets around intensive operations
+    /// (issuance, self-verify, bootstrap).
+    pub metrics: Arc<InMemoryMetrics>,
+    /// POSIX `getrusage`-backed sampler — RSS + CPU-time
+    /// deltas around bracketed operations. Stateless, share
+    /// the `Arc`.
+    pub resource_probe: Arc<RusageProbe>,
 }
 
 impl PartialEq for BridgeState {
@@ -77,6 +91,8 @@ impl PartialEq for BridgeState {
             && Arc::ptr_eq(&self.store, &other.store)
             && Arc::ptr_eq(&self.active_wallet_id, &other.active_wallet_id)
             && Arc::ptr_eq(&self.log_capture, &other.log_capture)
+            && Arc::ptr_eq(&self.metrics, &other.metrics)
+            && Arc::ptr_eq(&self.resource_probe, &other.resource_probe)
     }
 }
 impl Eq for BridgeState {}
@@ -143,6 +159,30 @@ impl BridgeState {
     /// empty state).
     pub fn log_capture(&self) -> Option<&LogCapture> {
         self.log_capture.get()
+    }
+
+    /// Borrow the telemetry aggregator. The future Diagnostics
+    /// tab calls `.snapshot()` on this to render the
+    /// counter / HTTP / op histograms.
+    pub fn metrics(&self) -> Arc<InMemoryMetrics> {
+        self.metrics.clone()
+    }
+
+    /// Composite sink: forwards every record to both the
+    /// in-memory aggregator (read by the Diagnostics tab) and
+    /// `TracingMetrics` (so events flow into the Logs tab via
+    /// `WalletLogLayer`). Construct once per call site —
+    /// the `Arc`s are cheap.
+    pub fn metrics_dyn(&self) -> Arc<dyn Metrics> {
+        Arc::new(CompositeMetrics::new(vec![
+            self.metrics.clone(),
+            Arc::new(TracingMetrics),
+        ]))
+    }
+
+    /// Borrow the shared resource probe.
+    pub fn resource_probe(&self) -> Arc<RusageProbe> {
+        self.resource_probe.clone()
     }
 
     /// Record the random sk minted for a freshly-deployed DID.

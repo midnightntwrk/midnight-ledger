@@ -27,6 +27,7 @@ pub mod secret_storage;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
+pub mod telemetry;
 mod tx;
 mod unshielded;
 mod wallet;
@@ -79,6 +80,12 @@ pub use clock::{Clock, SystemClock};
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::FixedClock;
 pub use http::{HttpClient, HttpError, HttpResponse, ReqwestHttpClient};
+pub use telemetry::{
+    noop_metrics, time_op, time_op_simple, CompositeMetrics, HistogramSnapshot, HttpRecord,
+    InMemoryMetrics, MeteredHttpClient, Metrics, MetricsSnapshot, NoopMetrics, NoopResourceProbe,
+    OpHistogramSnapshot, OpOutcome, OpRecord, ResourceProbe, ResourceSample, RusageProbe,
+    TracingMetrics,
+};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{
     BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
