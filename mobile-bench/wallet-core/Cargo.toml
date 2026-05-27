@@ -130,7 +130,8 @@ zeroize = { version = "1.7", features = ["zeroize_derive"] }
 tokio = { version = "1.46.1", features = ["full"] }
 tracing-subscriber = "0.3"
 tempfile = "3"
-wiremock = "0.6"
+# `urlencoding` is used only by the OID4VCI/OID4VP QR-URL parser
+# tests (e.g. `offer.rs`) — wallet-core itself does not encode URLs.
 urlencoding = "2"
 
 # `did-bootstrap` CLI — wraps `bootstrap_did_with_keys` so shell

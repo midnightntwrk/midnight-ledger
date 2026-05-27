@@ -14,11 +14,14 @@
 //! + QR-2 contract against the running `IssuerDIDIT-mock` service
 //! end-to-end. Paste-URL only — no camera scanner yet.
 
+use std::sync::Arc;
+
 use dioxus::prelude::*;
 
 use wallet_core::{
-    Network, SelfVerifyResult, StoredVc, VcStore, bootstrap_did_with_keys, oid4vci_run_issuance,
-    oid4vp_run_authentication, self_verify_and_cache,
+    HttpClient, Network, ReqwestHttpClient, SelfVerifyResult, StoredVc, VcStore,
+    bootstrap_did_with_keys, oid4vci_run_issuance, oid4vp_run_authentication,
+    self_verify_and_cache,
 };
 use wallet_core::secret_storage::{SecretStorage, redb_secret_store::RedbSecretStore};
 
@@ -276,7 +279,8 @@ fn Oid4vpSection(
             spawn(async move {
                 let wallet = app_wallet_for(network);
                 let secret_store = RedbSecretStore::new(store, wallet_id);
-                match oid4vp_run_authentication(&url, &wallet, &secret_store, &did).await {
+                let http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                match oid4vp_run_authentication(&*http, &url, &wallet, &secret_store, &did).await {
                     Ok(r) => ok_msg.set(Some(format!(
                         "session_id={} status={}",
                         r.session_id, r.status
@@ -411,7 +415,9 @@ fn Oid4vciSection(
                         return;
                     }
                 };
-                match oid4vci_run_issuance(&url, &wallet, &secret_store, &did, &vc_store).await
+                let http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                match oid4vci_run_issuance(&*http, &url, &wallet, &secret_store, &did, &vc_store)
+                    .await
                 {
                     Ok(vc_uri) => ok_msg.set(Some(format!("issued {vc_uri}"))),
                     Err(e) => err_msg.set(Some(format!("issue failed: {e}"))),

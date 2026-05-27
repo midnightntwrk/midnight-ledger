@@ -8,6 +8,8 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::http::{HttpClient, HttpError};
+
 /// Parsed SIOPv2 authorization request — the subset Phase 1 cares about.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthRequest {
@@ -35,6 +37,12 @@ pub enum Oid4vpParseError {
     Json(#[from] serde_json::Error),
 }
 
+impl From<HttpError> for Oid4vpParseError {
+    fn from(e: HttpError) -> Self {
+        Oid4vpParseError::Http(e.to_string())
+    }
+}
+
 /// Extract `request_uri` from an `openid4vp://...` URL.
 pub fn parse_request_url(url: &str) -> Result<String, Oid4vpParseError> {
     let u = Url::parse(url)?;
@@ -50,22 +58,27 @@ pub fn parse_request_url(url: &str) -> Result<String, Oid4vpParseError> {
 }
 
 /// GET the request object from `request_uri` and parse it.
-pub async fn fetch_request_object(request_uri: &str) -> Result<AuthRequest, Oid4vpParseError> {
-    let body = reqwest::get(request_uri)
-        .await
-        .map_err(|e| Oid4vpParseError::Http(e.to_string()))?
-        .error_for_status()
-        .map_err(|e| Oid4vpParseError::Http(e.to_string()))?
-        .text()
-        .await
-        .map_err(|e| Oid4vpParseError::Http(e.to_string()))?;
-    let req: AuthRequest = serde_json::from_str(&body)?;
+pub async fn fetch_request_object(
+    http: &dyn HttpClient,
+    request_uri: &str,
+) -> Result<AuthRequest, Oid4vpParseError> {
+    let resp = http.get(request_uri).await?;
+    if !resp.is_success() {
+        return Err(Oid4vpParseError::Http(format!(
+            "non-2xx status {} fetching request_uri",
+            resp.status
+        )));
+    }
+    let body = resp.body_text()?;
+    let req: AuthRequest = serde_json::from_str(body)?;
     Ok(req)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::http::mock::MockHttpClient;
+    use serde_json::json;
 
     #[test]
     fn parse_url_extracts_request_uri() {
@@ -84,5 +97,39 @@ mod tests {
     fn parse_url_requires_request_uri_param() {
         let err = parse_request_url("openid4vp://issuer.local/").expect_err("missing");
         assert!(matches!(err, Oid4vpParseError::MissingParam("request_uri")));
+    }
+
+    #[tokio::test]
+    async fn fetch_request_object_parses_200_json() {
+        let http = MockHttpClient::default();
+        http.push_json(
+            200,
+            &json!({
+                "client_id": "demo-issuer",
+                "nonce": "nonce-x",
+                "state": "st-x",
+                "redirect_uri": "https://issuer.local/authorize-response",
+            }),
+        );
+        let req = fetch_request_object(&http, "https://issuer.local/request/abc")
+            .await
+            .expect("ok");
+        assert_eq!(req.client_id, "demo-issuer");
+        assert_eq!(req.nonce, "nonce-x");
+        assert_eq!(req.state.as_deref(), Some("st-x"));
+        let rec = http.recorded();
+        assert_eq!(rec.len(), 1);
+        assert_eq!(rec[0].method, "GET");
+        assert_eq!(rec[0].url, "https://issuer.local/request/abc");
+    }
+
+    #[tokio::test]
+    async fn fetch_request_object_rejects_non_2xx() {
+        let http = MockHttpClient::default();
+        http.push_status_body(500, b"oops");
+        let err = fetch_request_object(&http, "https://issuer.local/request/abc")
+            .await
+            .expect_err("must fail");
+        assert!(matches!(err, Oid4vpParseError::Http(_)));
     }
 }

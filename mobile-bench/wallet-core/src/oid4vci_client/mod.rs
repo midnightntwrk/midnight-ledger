@@ -23,6 +23,7 @@ pub use token::{request_token, Oid4vciTokenError, TokenResponse};
 
 /// Drive the full OID4VCI flow from a scanned QR URL.
 pub async fn run_issuance(
+    http: &dyn crate::HttpClient,
     qr_url: &str,
     wallet: &crate::wallet::Wallet,
     secret_store: &dyn crate::secret_storage::SecretStorage,
@@ -32,6 +33,7 @@ pub async fn run_issuance(
     let offer = offer::parse_offer_url(qr_url)?;
     let code = offer.grants.pre_authorized.code.clone();
     let vc_uri = credential::request_credential(
+        http,
         &offer.credential_issuer,
         &code,
         wallet,
@@ -54,27 +56,29 @@ pub enum IssuanceFlowError {
 #[cfg(test)]
 mod flow_tests {
     use super::*;
+    use crate::http::mock::MockHttpClient;
     use crate::test_support::{
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
+    use serde_json::json;
     use tempfile::TempDir;
-    use wiremock::{matchers::*, Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn run_issuance_happy_path() {
-        let mock = MockServer::start().await;
-        Mock::given(method("POST"))
-            .and(path("/token"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "access_token": "AT", "c_nonce": "CN", "token_type": "Bearer"
-            })))
-            .mount(&mock)
-            .await;
-        Mock::given(method("POST"))
-            .and(path("/credential"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+        let http = MockHttpClient::default();
+        http.push_json(
+            200,
+            &json!({
+                "access_token": "AT",
+                "c_nonce": "CN",
+                "token_type": "Bearer",
+            }),
+        );
+        http.push_json(
+            200,
+            &json!({
                 "credential": {
                     "vc_uri": "urn:uuid:flow-1",
                     "issuer_did": "did:midnight:i",
@@ -82,12 +86,11 @@ mod flow_tests {
                     "body_b64": B64.encode(b"BODY")
                 },
                 "openings": []
-            })))
-            .mount(&mock)
-            .await;
+            }),
+        );
 
-        let offer_json = serde_json::json!({
-            "credential_issuer": mock.uri(),
+        let offer_json = json!({
+            "credential_issuer": "https://issuer.local",
             "credential_configuration_ids": ["birth"],
             "grants": {
                 "urn:ietf:params:oauth:grant-type:pre-authorized_code": {
@@ -107,9 +110,14 @@ mod flow_tests {
         let dir = TempDir::new().unwrap();
         let vc_store = crate::vc_store::VcStore::open(dir.path().join("v.redb")).unwrap();
 
-        let uri = run_issuance(&qr, &wallet, &store, &did, &vc_store)
+        let uri = run_issuance(&http, &qr, &wallet, &store, &did, &vc_store)
             .await
             .expect("ok");
         assert_eq!(uri, "urn:uuid:flow-1");
+
+        let rec = http.recorded();
+        assert_eq!(rec.len(), 2);
+        assert_eq!(rec[0].url, "https://issuer.local/token");
+        assert_eq!(rec[1].url, "https://issuer.local/credential");
     }
 }

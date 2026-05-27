@@ -16,6 +16,7 @@ mod crypto;
 mod did;
 mod dust;
 mod hd;
+pub mod http;
 mod indexer;
 pub mod js_bridge;
 mod network;
@@ -73,6 +74,7 @@ pub use node::{
     MidnightSigner, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult, SubxtNodeClient,
 };
 pub use chain::{HttpProver, IndexerClient, LocalProver, NodeClient, Prover};
+pub use http::{HttpClient, HttpError, HttpResponse, ReqwestHttpClient};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{
     BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
