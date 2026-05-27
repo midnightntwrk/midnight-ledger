@@ -10,6 +10,7 @@ mod format;
 mod logs;
 mod platform;
 mod proc_stats;
+mod telemetry_panel;
 #[cfg(feature = "js-bridge")]
 mod protocol;
 

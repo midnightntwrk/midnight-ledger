@@ -2017,8 +2017,13 @@ pub fn App() -> Element {
                             }
                         }
                     }
-                    // Page 1 — Metrics
+                    // Page 1 — Metrics (+ Telemetry from the
+                    // wallet-core `InMemoryMetrics` aggregator,
+                    // see telemetry_panel.rs)
                     div { class: "carousel-page", id: "diag-page-1",
+                        crate::telemetry_panel::TelemetryPanel {
+                            bridge_state: bridge_state.read().clone(),
+                        }
                         MetricsTab {
                             timings: timing_log.read().clone(),
                             costs: cost_log.read().clone(),
