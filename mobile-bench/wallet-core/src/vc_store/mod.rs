@@ -23,9 +23,6 @@ mod tables;
 mod types;
 
 pub use api::{RedbVcStore, VcStoreError};
-#[allow(deprecated)]
-#[deprecated(note = "use RedbVcStore explicitly or accept `&dyn VcStorage`")]
-pub use api::RedbVcStore as VcStore;
 #[cfg(any(test, feature = "test-support"))]
 pub use in_memory::InMemoryVcStore;
 pub use types::{StoredVc, VcMetadata, VcOpening};

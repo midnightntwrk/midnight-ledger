@@ -100,8 +100,6 @@ pub use did::deploy::{testing_deploy_state_with_circuits_hex, testing_initial_de
 pub use dust::DustError;
 pub use ledger::dust::{DustLocalState, DustPublicKey, DustSecretKey};
 pub use tx::{DeployOutcome, TxError, WizardStage};
-#[allow(deprecated)]
-pub use vc_store::VcStore;
 pub use vc_store::{RedbVcStore, StoredVc, VcMetadata, VcOpening, VcStorage, VcStoreError};
 #[cfg(any(test, feature = "test-support"))]
 pub use vc_store::InMemoryVcStore;

@@ -46,7 +46,7 @@ pub struct OpeningWire {
 #[derive(Debug, thiserror::Error)]
 pub enum CredentialFlowError {
     #[error("http: {0}")]
-    Http(String),
+    Http(#[from] HttpError),
     #[error("non-2xx {status}: {body}")]
     Status { status: u16, body: String },
     #[error("decode: {0}")]
@@ -59,12 +59,6 @@ pub enum CredentialFlowError {
     Proof(#[from] crate::oid4vp_client::IdTokenError),
     #[error("vc_store: {0}")]
     Store(String),
-}
-
-impl From<HttpError> for CredentialFlowError {
-    fn from(e: HttpError) -> Self {
-        CredentialFlowError::Http(e.to_string())
-    }
 }
 
 /// Drive the full Pre-Authorized Code Flow end-to-end:
@@ -110,10 +104,7 @@ pub async fn request_credential(
     let resp = http
         .post_json(&url, &body, Some(&token.access_token))
         .await?;
-    let text = resp
-        .body_text()
-        .map_err(|e| CredentialFlowError::Http(e.to_string()))?
-        .to_string();
+    let text = resp.body_text()?.to_string();
     if !resp.is_success() {
         return Err(CredentialFlowError::Status {
             status: resp.status,
