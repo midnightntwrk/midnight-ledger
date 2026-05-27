@@ -361,6 +361,39 @@ impl Wallet {
         self
     }
 
+    /// Builder: wrap whichever indexer + prover are currently
+    /// installed (or the default real-deps impls if none are set
+    /// yet) with the metered decorators
+    /// [`crate::MeteredIndexerClient`] / [`crate::MeteredProver`].
+    /// Subsequent chain-op invocations record per-call timings
+    /// + RSS/CPU deltas through the supplied `metrics` sink.
+    ///
+    /// `NodeClient` metering isn't wired here yet because the
+    /// default `SubxtNodeClient::connect` is async (it opens a
+    /// WebSocket). Wrap the node manually via
+    /// `.with_node(MeteredNodeClient::new(...))` if the caller
+    /// already has an `Arc<dyn NodeClient>` in hand.
+    pub fn with_metering(
+        self,
+        metrics: Arc<dyn crate::Metrics>,
+        probe: Arc<dyn crate::ResourceProbe>,
+    ) -> Result<Self, crate::indexer::IndexerError> {
+        let indexer = match self.indexer.clone() {
+            Some(i) => i,
+            None => chain::default_indexer(self.network)?,
+        };
+        let prover = match self.prover.clone() {
+            Some(p) => p,
+            None => chain::default_prover(self.proof_server_url.as_deref()),
+        };
+        let metered_indexer: Arc<dyn chain::IndexerClient> = Arc::new(
+            crate::MeteredIndexerClient::new(indexer, metrics.clone(), probe.clone()),
+        );
+        let metered_prover: Arc<dyn chain::Prover> =
+            Arc::new(crate::MeteredProver::new(prover, metrics, probe));
+        Ok(self.with_indexer(metered_indexer).with_prover(metered_prover))
+    }
+
     /// Currently-configured prover trait object, if any. `None`
     /// means the wallet picks between `LocalProver` and
     /// `HttpProver` based on `proof_server_url`.

@@ -29,6 +29,7 @@
 //! POSIX [`RusageProbe`] adapter works on macOS / iOS / Linux /
 //! Android (every platform the wallet ships on).
 
+mod chain_metered;
 mod composite;
 mod http_metered;
 mod in_memory;
@@ -36,6 +37,7 @@ mod resource;
 mod time_op;
 mod tracing_sink;
 
+pub use chain_metered::{MeteredIndexerClient, MeteredNodeClient, MeteredProver};
 pub use composite::CompositeMetrics;
 pub use http_metered::MeteredHttpClient;
 pub use in_memory::{HistogramSnapshot, InMemoryMetrics, MetricsSnapshot, OpHistogramSnapshot};

@@ -82,9 +82,9 @@ pub use clock::FixedClock;
 pub use http::{HttpClient, HttpError, HttpResponse, ReqwestHttpClient};
 pub use telemetry::{
     noop_metrics, time_op, time_op_simple, CompositeMetrics, HistogramSnapshot, HttpRecord,
-    InMemoryMetrics, MeteredHttpClient, Metrics, MetricsSnapshot, NoopMetrics, NoopResourceProbe,
-    OpHistogramSnapshot, OpOutcome, OpRecord, ResourceProbe, ResourceSample, RusageProbe,
-    TracingMetrics,
+    InMemoryMetrics, MeteredHttpClient, MeteredIndexerClient, MeteredNodeClient, MeteredProver,
+    Metrics, MetricsSnapshot, NoopMetrics, NoopResourceProbe, OpHistogramSnapshot, OpOutcome,
+    OpRecord, ResourceProbe, ResourceSample, RusageProbe, TracingMetrics,
 };
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use wallet::{

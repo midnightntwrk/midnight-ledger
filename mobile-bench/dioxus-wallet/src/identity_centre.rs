@@ -23,6 +23,31 @@ use wallet_core::{
     SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys, oid4vci_run_issuance,
     oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
 };
+
+/// Wrap `app_wallet_for(network)` with `with_metering` so the
+/// chain-op pipeline (indexer queries + prover calls) records
+/// per-call timings + RSS/CPU deltas through the supplied
+/// telemetry sink. Falls back silently to the un-metered wallet
+/// if indexer-default construction fails (offline env / bad URL)
+/// — telemetry is a "nice to have", never a hard error path.
+fn metered_app_wallet_for(
+    network: Network,
+    metrics: std::sync::Arc<dyn Metrics>,
+    probe: std::sync::Arc<dyn wallet_core::ResourceProbe>,
+) -> wallet_core::Wallet {
+    match app_wallet_for(network).with_metering(metrics, probe) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!(
+                target: "dioxus_wallet::identity_centre",
+                error = %e,
+                "with_metering failed — running un-metered chain-ops",
+            );
+            // `with_metering` consumed the wallet on failure; build a fresh one.
+            app_wallet_for(network)
+        }
+    }
+}
 use wallet_core::secret_storage::{SecretStorage, redb_secret_store::RedbSecretStore};
 
 use crate::app::{app_wallet_for, truncate_did, wallet_store_path};
@@ -167,20 +192,25 @@ fn BootstrapSection(
                     busy.set(false);
                     return;
                 };
-                let wallet = app_wallet_for(network);
-                let mut secret_store = RedbSecretStore::new(store, wallet_id);
                 let metrics = bridge_state.metrics_dyn();
                 let in_mem_metrics = bridge_state.metrics();
                 let probe = bridge_state.resource_probe();
+                // Build a chain-op-metered Wallet so the
+                // indexer queries (chain_tip, contract_state)
+                // and prover calls (halo2 prove) under the
+                // hood also land in the aggregator as
+                // `indexer.*` / `prover.prove` ops. Falls
+                // back to un-metered if the default indexer
+                // fails to build (offline env).
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
+                let mut secret_store = RedbSecretStore::new(store, wallet_id);
                 // Bracket the heaviest Identity-Centre op
                 // (HKDF + key import + on-chain DID write)
                 // so the Diagnostics tab can quantify how
-                // much wall + RSS / CPU it costs. The HTTP
-                // calls inside happen via the wallet's
-                // injected `IndexerClient` / `NodeClient`
-                // which are NOT metered here (those ports
-                // pre-date the telemetry layer — covered by
-                // a follow-up).
+                // much wall + RSS / CPU it costs. The
+                // chain-op decorators provide the per-call
+                // breakdown for what runs underneath this.
                 let result = time_op(
                     &*metrics,
                     &*probe,
@@ -300,7 +330,8 @@ fn Oid4vpSection(
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
             spawn(async move {
-                let wallet = app_wallet_for(network);
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
                 let secret_store = RedbSecretStore::new(store, wallet_id);
                 let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
                 let http: Arc<dyn HttpClient> =
@@ -446,7 +477,8 @@ fn Oid4vciSection(
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
             spawn(async move {
-                let wallet = app_wallet_for(network);
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
                 let secret_store = RedbSecretStore::new(store, wallet_id);
                 let vc_store = match RedbVcStore::open(vc_store_path()) {
                     Ok(v) => v,
@@ -702,7 +734,8 @@ fn render_vc_row(
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
             spawn(async move {
-                let wallet = app_wallet_for(network);
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
                 let secret_store = RedbSecretStore::new(store, wallet_id);
                 let vc_store = match RedbVcStore::open(vc_store_path()) {
                     Ok(v) => v,
