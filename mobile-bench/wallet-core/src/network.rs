@@ -87,11 +87,17 @@ impl Network {
                 proving_server_url: "http://localhost:6300",
             },
             Network::Undeployed => NetworkConfig {
+                // Standalone Midnight env, host-port-shifted by +10000
+                // (2026-05-27) to evade collision with a parallel
+                // midnight task that occupies the default 9944 / 8088
+                // / 6300 set. The docker-compose macOS overlay at
+                // `/tmp/midnight-standalone/docker-compose.macos.yml`
+                // does the host→container remap.
                 network_id: "undeployed",
-                indexer_http_url: "http://localhost:8088/api/v4/graphql",
-                indexer_ws_url: "ws://localhost:8088/api/v4/graphql/ws",
-                node_ws_url: "ws://localhost:9944",
-                proving_server_url: "http://localhost:6300",
+                indexer_http_url: "http://localhost:18088/api/v4/graphql",
+                indexer_ws_url: "ws://localhost:18088/api/v4/graphql/ws",
+                node_ws_url: "ws://localhost:19944",
+                proving_server_url: "http://localhost:16300",
             },
         }
     }
