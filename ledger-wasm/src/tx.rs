@@ -100,6 +100,7 @@ try_ref_for_exported!(PrePartitionContractCall);
 
 #[wasm_bindgen]
 impl PrePartitionContractCall {
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(constructor)]
     pub fn new(
         address: &str,
@@ -925,6 +926,7 @@ impl Transaction {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen(js_name = "addCalls")]
     pub fn add_calls(
         &self,

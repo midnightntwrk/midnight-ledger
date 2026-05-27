@@ -21,7 +21,7 @@ use crate::events::Event;
 pub use crate::prove::Resolver;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::{
-    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerState,
+    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters, LedgerState,
     MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
     ProofPreimageMarker, SignatureKind, SystemTransaction, Transaction, UnshieldedOffer, Utxo,
     UtxoOutput,
@@ -457,11 +457,11 @@ impl<D: DB> TestState<D> {
         strictness: WellFormedStrictness,
     ) {
         if self.debug_print {
-            dbg!(tx.cost(&self.ledger.parameters, false)).ok();
+            dbg!(tx.cost_with_state(&self.ledger.parameters, &self.ledger, false)).ok();
             dbg!(tx.validation_cost(&self.ledger.parameters.cost_model));
             dbg!(tx.application_cost(&self.ledger.parameters.cost_model));
             dbg!(
-                tx.cost(&self.ledger.parameters, false)
+                tx.cost_with_state(&self.ledger.parameters, &self.ledger, false)
                     .ok()
                     .and_then(|cost| cost.normalize(self.ledger.parameters.limits.block_limits))
             );
@@ -571,7 +571,9 @@ impl<D: DB> TestState<D> {
         let old_dust = self.dust.clone();
         let mut last_dust = 0;
         while let Some(mut dust) = merged_tx
-            .balance(Some(merged_tx.fees(&self.ledger.parameters, false)?))?
+            .balance(Some(merged_tx.fees_with_impl(&self.ledger.parameters, |contract, entry_point| {
+                self.ledger.index(contract).and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
+            }, false)?))?
             .get(&(TokenType::Dust, 0))
             .and_then(|bal| (*bal < 0).then_some((-*bal) as u128))
         {
@@ -1097,4 +1099,31 @@ pub fn test_intents_adv<S: SignatureKind<D>, D: DB, R: Rng + CryptoRng + ?Sized>
         new_intents = new_intents.insert(k, v);
     }
     new_intents
+}
+
+/// Helper for computing fees with state lookup. Required because integration
+/// tests sit outside of the crate and cannot access `pub(crate)` methods.
+pub fn dbg_fees_with_state<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + PedersenDowngradeable<D> + Serializable,
+    D: DB,
+>(
+    tx: &Transaction<S, P, B, D>,
+    params: &LedgerParameters,
+    ledger: &LedgerState<D>,
+    enforce_time_to_dismiss: bool,
+) -> Result<u128, crate::error::FeeCalculationError>
+where
+    Transaction<S, P, B, D>: Serializable,
+{
+    tx.fees_with_impl(
+        params,
+        |contract, entry_point| {
+            ledger
+                .index(contract)
+                .and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
+        },
+        enforce_time_to_dismiss,
+    )
 }

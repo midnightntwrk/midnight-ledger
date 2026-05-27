@@ -494,7 +494,7 @@ impl From<ContractOperation> for state::ContractOperation {
 impl ContractOperation {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Result<ContractOperation, JsError> {
-        Ok(ContractOperation(state::ContractOperation::new(None)))
+        Ok(ContractOperation(state::ContractOperation::new(None, None)))
     }
 
     #[wasm_bindgen(getter = verifierKey)]
