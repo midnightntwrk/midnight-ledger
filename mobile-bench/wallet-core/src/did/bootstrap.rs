@@ -53,53 +53,165 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 }
 
 /// Compose the JSON arg the `addVerificationMethod` Compact circuit
-/// expects. Mirrors the shape `Wallet::add_verification_method`
-/// forwards via `prepareUnprovenCallTx`:
+/// expects. The schema lives in `~/iohk/midnight-identity-workspace/midnight-did/contract/dist/did.compact`:
+///
+/// ```compact
+/// export struct VerificationMethod {
+///     id: Opaque<"string">,
+///     typ: VerificationMethodType,
+///     publicKeyJwk: PublicKeyJwk
+/// };
+/// export struct PublicKeyJwk {
+///     kty: KeyType, crv: CurveType, x: Field, y: Field
+/// }
+/// export enum VerificationMethodType { Undefined, JsonWebKey }
+/// export enum KeyType { EC, RSA, oct, OKP }
+/// export enum CurveType { Ed25519, Jubjub, P256 }
+/// ```
+///
+/// Wire format the harness's `prepareUnprovenCallTx` accepts (see
+/// `tests/js-harness/harness.mjs::vm_to_json` for the UI-side mirror
+/// and `dioxus-wallet/src/app.rs::vm_to_json` for the operator
+/// flow's reference):
 ///
 /// ```json
 /// {
 ///   "id": "<did>#<fragment>",
-///   "type": "Ed25519VerificationKey2020" | "JubjubVerificationKey2026",
-///   "controller": "<did>",
-///   "publicKeyJwk": { "kty": ..., "crv": ..., "x": "...", "y": "..." }
+///   "typ": 1,
+///   "publicKeyJwk": {
+///     "kty": <enum tag, 0..=3>,
+///     "crv": <enum tag, 0..=2>,
+///     "x":   { "$bigint": "0x<be-hex>" },
+///     "y":   { "$bigint": "0x<be-hex>" }
+///   }
 /// }
 /// ```
 ///
-/// The JWK fields come straight from
-/// [`SecretStorage::get_public_key`]: Ed25519 stores `x` as
-/// base64url(pub_bytes); Jubjub stores the coordinates as decimal
-/// bigints (`x`/`y`) per the upstream `secret-storage` contract.
+/// `typ=1` is `VerificationMethodType.JsonWebKey` (only non-undefined
+/// variant the contract accepts). `kty` / `crv` tags follow the
+/// .compact declaration order verbatim (NOT the `MidnightKeyType`
+/// crate enum order, which has OKP first). `x` / `y` are field
+/// elements: the contract upstream's `decodeFieldElement` interprets
+/// base64url-decoded bytes as a big-endian bigint; the
+/// `BigInt("0x…")` revive path in the harness produces the same
+/// value, so we round-trip via hex without introducing a decimal-
+/// bigint dep.
 ///
-/// **TODO (Phase 1, Tasks 5+):** the `type` strings here are
-/// placeholders chosen to disambiguate at the stub layer. The real
-/// `addVerificationMethod` circuit consumes the `VerificationMethod`
-/// type tag through a different path (the JS harness re-derives it
-/// from `(kty, crv)`); when self-verify lands we'll align both ends
-/// on the canonical Midnight verification-method type names.
+/// For Ed25519 keys the secret store returns
+/// `{ kty: OKP, crv: Ed25519, x: base64url(pub_32B) }` with no `y`;
+/// we send `y = 0` per the upstream's `publicKeyJwkToLedger` fallback.
+/// Jubjub returns both coordinates.
+///
+/// Earlier versions of this helper produced a DID-Core-shaped JSON
+/// (`type: "Ed25519VerificationKey2020"`, `controller`, base64url
+/// strings) — that was a placeholder that worked against an old
+/// stub harness but the live circuit rejected it on
+/// 2026-05-27 with "type error: addVerificationMethod argument 1 …
+/// expected struct VerificationMethod<… typ: VerificationMethodType,
+/// publicKeyJwk: struct PublicKeyJwk<…, x: Field, y: Field>>".
 fn build_verification_method_json(
     did: &DidId,
     fragment: &str,
     jwk: &PublicJwk,
 ) -> serde_json::Value {
-    use crate::secret_storage::MidnightCurve;
-    let typ = match jwk.crv {
-        MidnightCurve::Ed25519 => "Ed25519VerificationKey2020",
-        MidnightCurve::Jubjub => "JubjubVerificationKey2026",
-        MidnightCurve::P256 => "JsonWebKey2020",
+    use crate::secret_storage::{MidnightCurve, MidnightKeyType};
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine;
+
+    // .compact: `enum KeyType { EC, RSA, oct, OKP }` (0-indexed).
+    // Our crate's MidnightKeyType has only OKP + EC, in OKP-first
+    // order; map by name.
+    let kty_tag: i32 = match jwk.kty {
+        MidnightKeyType::EC => 0,
+        // RSA = 1 (not in our enum)
+        // oct = 2 (not in our enum)
+        MidnightKeyType::OKP => 3,
     };
-    let mut public_key_jwk = serde_json::json!({
-        "kty": jwk.kty,
-        "crv": jwk.crv,
-        "x": jwk.x,
-    });
-    if let Some(y) = &jwk.y {
-        public_key_jwk["y"] = serde_json::Value::String(y.clone());
+    // .compact: `enum CurveType { Ed25519, Jubjub, P256 }` —
+    // matches our `MidnightCurve` declaration order.
+    let crv_tag: i32 = match jwk.crv {
+        MidnightCurve::Ed25519 => 0,
+        MidnightCurve::Jubjub => 1,
+        MidnightCurve::P256 => 2,
+    };
+    // base64url → 0x<be-hex> → BigInt() in the harness.
+    //
+    // Important: the contract's `Field` type is the BLS12-381 scalar
+    // field with modulus ~2^254.85. A 32-byte big-endian value (e.g.
+    // an Ed25519 compressed pubkey) frequently exceeds that bound
+    // and the contract's input checker rejects with "type error:
+    // addVerificationMethod argument 1 … expected struct
+    // VerificationMethod<… publicKeyJwk: struct PublicKeyJwk<…,
+    // x: Field, y: Field>>".
+    //
+    // For Jubjub (kty=EC, crv=Jubjub) the JWK coordinates come from
+    // `EmbeddedGroupAffine::x()` / `.y()` which are by construction
+    // Fr-fitting (the curve is defined over Fr), so the full bytes
+    // pass through cleanly.
+    //
+    // For Ed25519 (kty=OKP, crv=Ed25519) the JWK `x` is the 32-byte
+    // compressed Edwards-y representation, which can overshoot Fr.
+    // We clamp to the first 30 bytes (240 bits) — safely below the
+    // ~254.85-bit Fr modulus. This makes the on-chain `x` a lossy
+    // 30-byte prefix of the pubkey, NOT a recoverable encoding. The
+    // contract doesn't verify the publicKey bytes cryptographically
+    // (it just stores the struct), so the demo flow round-trips
+    // fine; off-chain self-verify of Ed25519 (e.g. SIOPv2 id_tokens)
+    // can't reconstruct the full pubkey from the resolved doc and
+    // must trust the kid out-of-band. Upstream's integration tests
+    // (`packages/api/src/test/did.api.test.ts:215`) confirm this
+    // posture by using `x: "Kg"` — a one-byte placeholder.
+    //
+    // A proper fix is a separate spec discussion (hash-to-field, or
+    // split-encode the pubkey across `x` + `y`). Logged for Phase 2.
+    fn to_bigint_hex(b64url: &str, clamp_to_field: bool) -> String {
+        match URL_SAFE_NO_PAD.decode(b64url.as_bytes()) {
+            Ok(bytes) if !bytes.is_empty() => {
+                let limit = if clamp_to_field && bytes.len() > 30 {
+                    30
+                } else {
+                    bytes.len()
+                };
+                format!("0x{}", hex::encode(&bytes[..limit]))
+            }
+            // Empty / undecodeable → field zero. Upstream's
+            // `decodeFieldElement` does the same (`bytes.length === 0
+            // ? 0n : …`), so this matches the canonical behaviour.
+            _ => "0x0".to_string(),
+        }
     }
+    // Ed25519 needs the clamp; Jubjub coordinates are already
+    // Fr-fitting and clamping would corrupt them.
+    let clamp = matches!(jwk.crv, MidnightCurve::Ed25519);
+    let x_hex = to_bigint_hex(&jwk.x, clamp);
+    let y_hex = jwk
+        .y
+        .as_deref()
+        .map(|s| to_bigint_hex(s, clamp))
+        .unwrap_or_else(|| "0x0".to_string());
+
+    // Canonical methodId per the upstream's
+    // `normalizeBoundFragmentId`
+    // (`midnight-did/packages/domain/src/ledger-utils.ts`): a
+    // hash-prefixed bare fragment. Sending the full DID URL
+    // (`did:midnight:...#fragment`) is also accepted by the
+    // normalizer when the subject matches, but the on-chain
+    // contract stores the value normalized form, and
+    // `addVerificationMethodRelation` later looks up the VM by
+    // `#fragment` — passing the full URL there fails with "failed
+    // assert: Verification method does not exist" because string
+    // equality misses the stored short form.
+    let _ = did; // kept for signature parity; the relation step
+                 // does its own subject sanity-check.
     serde_json::json!({
-        "id": format!("{}#{}", did.to_did_string(), fragment),
-        "type": typ,
-        "controller": did.to_did_string(),
-        "publicKeyJwk": public_key_jwk,
+        "id": format!("#{}", fragment),
+        "typ": 1,
+        "publicKeyJwk": {
+            "kty": kty_tag,
+            "crv": crv_tag,
+            "x": { "$bigint": x_hex },
+            "y": { "$bigint": y_hex },
+        }
     })
 }
 
@@ -156,6 +268,50 @@ pub async fn bootstrap_did_with_keys(
     //     against the standalone docker stack on 2026-05-27.
     wait_for_indexer_settle(wallet, &did).await?;
 
+    // 1.7 Load the two circuits we're about to call. A freshly-
+    //     deployed DID contract has zero entries in its
+    //     `operations` map; the first `ContractCall` for a circuit
+    //     requires that circuit's verifier key to be loaded via
+    //     a `MaintenanceUpdate` first. The dioxus-wallet's
+    //     Operation Builder does this auto-load lazily before each
+    //     call; here we do both circuits up front since bootstrap
+    //     always needs them.
+    //
+    //     The maintenance-authority counter starts at 0 on a fresh
+    //     deploy and bumps by 1 per accepted MaintenanceUpdate.
+    //     Surfaces a clear error if either load fails before we
+    //     spend time on the ContractCalls.
+    wallet
+        .load_did_circuit_awaitable(did.clone(), "addVerificationMethod".to_string(), 0)
+        .await
+        .map_err(|e| BootstrapError::CreateDid(format!("load addVerificationMethod VK: {e}")))?;
+    // The indexer needs to ingest the counter bump from the first
+    // MaintenanceUpdate before the second one is accepted — without
+    // this wait, the second load lands with `counter: 1` but the
+    // chain still sees `maintenance_authority.counter = 0` and
+    // rejects with `Invalid Transaction (1010)`. Same shape as the
+    // `wait_for_indexer_settle` we already do after create_did,
+    // but the criterion is "counter == 1" not "contract exists".
+    wait_for_counter(wallet, &did, 1).await?;
+    wallet
+        .load_did_circuit_awaitable(
+            did.clone(),
+            "addVerificationMethodRelation".to_string(),
+            1,
+        )
+        .await
+        .map_err(|e| {
+            BootstrapError::CreateDid(format!(
+                "load addVerificationMethodRelation VK: {e}"
+            ))
+        })?;
+    // Same wait before the first ContractCall — that one bumps the
+    // counter to 2 in turn, but the call itself doesn't care about
+    // counter; it cares about the `operations` map carrying the
+    // verifier key for the circuit. Indexer needs to surface both
+    // VK loads in its decoded contract state before the call.
+    wait_for_counter(wallet, &did, 2).await?;
+
     // 2. Import keys into the secret store with DID-URL-form kids.
     //    The kid we register here is what `find_by_kid` will match
     //    on when `sign_for_authentication` walks the doc's
@@ -193,37 +349,57 @@ pub async fn bootstrap_did_with_keys(
     let ed_vm_json = build_verification_method_json(&did, "key-auth", &ed_jwk);
     let jb_vm_json = build_verification_method_json(&did, "key-assert", &jb_jwk);
 
-    // 4. Attach Ed25519 → authentication.
+    // 4. Attach Ed25519 → authentication. Relation methodIds are
+    //    the hash-prefixed canonical form per
+    //    `normalizeBoundFragmentId`; matching the `id` field the
+    //    VM was registered with above.
+    //
+    //    Between every chain-write step we wait for the indexer to
+    //    catch up. `prepareUnprovenCallTx` builds its proof against
+    //    whatever the indexer's current view of the contract state
+    //    is; if it hasn't ingested the prior tx yet, the next
+    //    circuit's input assertions look at a stale state and fail
+    //    (e.g. `addVerificationMethodRelation` requires the VM to
+    //    already be in `verificationMethods`).
     wallet
         .add_verification_method(&did, &ed25519_ref, ed_vm_json, controller_sk)
         .await
         .map_err(|e| BootstrapError::AttachAuthn(e.to_string()))?;
+    // 1 VK load + 1 VK load + 1 ContractCall = counter at 3 now.
+    wait_for_vm_count(wallet, &did, 1).await?;
     wallet
         .add_verification_method_relation(
             &did,
-            "key-auth",
+            "#key-auth",
             crate::did::VerificationMethodRelation::Authentication,
             controller_sk,
         )
         .await
         .map_err(|e| BootstrapError::AttachAuthn(e.to_string()))?;
+    wait_for_authentication_count(wallet, &did, 1).await?;
 
     // 5. Attach Jubjub → assertionMethod.
     wallet
         .add_verification_method(&did, &jubjub_ref, jb_vm_json, controller_sk)
         .await
         .map_err(|e| BootstrapError::AttachAssertion(e.to_string()))?;
+    wait_for_vm_count(wallet, &did, 2).await?;
     wallet
         .add_verification_method_relation(
             &did,
-            "key-assert",
+            "#key-assert",
             crate::did::VerificationMethodRelation::AssertionMethod,
             controller_sk,
         )
         .await
         .map_err(|e| BootstrapError::AttachAssertion(e.to_string()))?;
 
-    // 6. Verify the resolved doc carries both relations.
+    // 6. Verify the resolved doc carries both relations. The last
+    //    `addVerificationMethodRelation` tx may not have surfaced
+    //    in the indexer yet — wait for it before the assertion or
+    //    we'd fail with `MissingRelation("assertionMethod")` on a
+    //    successful bootstrap that's just one block behind.
+    wait_for_assertion_count(wallet, &did, 1).await?;
     let doc = wallet
         .resolve_did(&did.to_did_string())
         .await
@@ -281,6 +457,204 @@ async fn wait_for_indexer_settle(
                     )));
                 }
             }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(2000);
+    }
+}
+
+/// Poll `Wallet::resolve_did_full` until the contract's
+/// `maintenance_authority.counter` reaches `target` or the 30 s
+/// deadline expires. Used after every `MaintenanceUpdate` in the
+/// auto-load step so successive loads don't race the indexer.
+///
+/// `Invalid Transaction (1010)` on a `MaintenanceUpdate` whose
+/// counter LOOKS correct usually means the indexer's view of the
+/// counter is stale — the chain has the newer one. Polling the
+/// indexer's `resolve_did_full` (which decodes the contract state
+/// the indexer has ingested) until it catches up is the easiest
+/// fix. The bound on retries protects against a stuck indexer:
+/// after 30 s we surface the failure with the most recent observed
+/// counter so the operator knows where the lag started.
+///
+/// In stub mode this is a no-op — the stub DID-document map
+/// doesn't model the maintenance counter, so any value of `target`
+/// returns instantly.
+async fn wait_for_counter(
+    wallet: &Wallet,
+    did: &crate::DidId,
+    target: u32,
+) -> Result<(), BootstrapError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if wallet.stub_did_state().is_some() {
+        return Ok(());
+    }
+    let did_str = did.to_did_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut backoff_ms = 500u64;
+    let mut last_seen: u32 = 0;
+    loop {
+        match wallet.resolve_did_full(&did_str).await {
+            Ok(view) => {
+                last_seen = view.maintenance_counter;
+                if last_seen >= target {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                // Transient "no contract action" surfaces while the
+                // indexer hasn't ingested the contract yet — same
+                // shape as wait_for_indexer_settle treats it. Other
+                // errors fail fast.
+                let msg = e.to_string();
+                if !msg.contains("no contract action for address") {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "wait_for_counter for {did_str}: {msg}"
+                    )));
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(BootstrapError::CreateDid(format!(
+                "wait_for_counter timeout (30s) for {did_str}: saw counter \
+                 {last_seen}, target {target}"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(2000);
+    }
+}
+
+/// Poll `Wallet::resolve_did` until the document's
+/// `verification_method` vec reaches `target` entries (or 30 s).
+/// Used after each `addVerificationMethod` so the next call's
+/// `prepareUnprovenCallTx` sees the freshly-inserted VM in the
+/// indexer's view of the contract state.
+async fn wait_for_vm_count(
+    wallet: &Wallet,
+    did: &crate::DidId,
+    target: usize,
+) -> Result<(), BootstrapError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if wallet.stub_did_state().is_some() {
+        return Ok(());
+    }
+    let did_str = did.to_did_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut backoff_ms = 500u64;
+    let mut last_seen = 0usize;
+    loop {
+        match wallet.resolve_did(&did_str).await {
+            Ok(doc) => {
+                last_seen = doc.verification_method.len();
+                if last_seen >= target {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("no contract action for address") {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "wait_for_vm_count for {did_str}: {msg}"
+                    )));
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(BootstrapError::CreateDid(format!(
+                "wait_for_vm_count timeout (30s) for {did_str}: saw {last_seen} \
+                 VMs, target {target}"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(2000);
+    }
+}
+
+/// Poll `Wallet::resolve_did` until the `authentication` relation
+/// vec reaches `target` entries (or 30 s). Used after the first
+/// `addVerificationMethodRelation` for the Ed25519 key so the
+/// downstream verifier flows can see the relation populated.
+async fn wait_for_authentication_count(
+    wallet: &Wallet,
+    did: &crate::DidId,
+    target: usize,
+) -> Result<(), BootstrapError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if wallet.stub_did_state().is_some() {
+        return Ok(());
+    }
+    let did_str = did.to_did_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut backoff_ms = 500u64;
+    let mut last_seen = 0usize;
+    loop {
+        match wallet.resolve_did(&did_str).await {
+            Ok(doc) => {
+                last_seen = doc.authentication.len();
+                if last_seen >= target {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("no contract action for address") {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "wait_for_authentication_count for {did_str}: {msg}"
+                    )));
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(BootstrapError::CreateDid(format!(
+                "wait_for_authentication_count timeout (30s) for {did_str}: \
+                 saw {last_seen}, target {target}"
+            )));
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
+        backoff_ms = (backoff_ms * 2).min(2000);
+    }
+}
+
+/// Poll `Wallet::resolve_did` until the `assertion_method` relation
+/// vec reaches `target` entries (or 30 s). Used after the final
+/// `addVerificationMethodRelation` for the Jubjub key so the
+/// bootstrap success assertion sees the relation populated.
+async fn wait_for_assertion_count(
+    wallet: &Wallet,
+    did: &crate::DidId,
+    target: usize,
+) -> Result<(), BootstrapError> {
+    #[cfg(any(test, feature = "test-support"))]
+    if wallet.stub_did_state().is_some() {
+        return Ok(());
+    }
+    let did_str = did.to_did_string();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let mut backoff_ms = 500u64;
+    let mut last_seen = 0usize;
+    loop {
+        match wallet.resolve_did(&did_str).await {
+            Ok(doc) => {
+                last_seen = doc.assertion_method.len();
+                if last_seen >= target {
+                    return Ok(());
+                }
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                if !msg.contains("no contract action for address") {
+                    return Err(BootstrapError::CreateDid(format!(
+                        "wait_for_assertion_count for {did_str}: {msg}"
+                    )));
+                }
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err(BootstrapError::CreateDid(format!(
+                "wait_for_assertion_count timeout (30s) for {did_str}: \
+                 saw {last_seen}, target {target}"
+            )));
         }
         tokio::time::sleep(std::time::Duration::from_millis(backoff_ms)).await;
         backoff_ms = (backoff_ms * 2).min(2000);

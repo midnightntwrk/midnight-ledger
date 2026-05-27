@@ -207,6 +207,31 @@ pub struct Wallet {
     stub_did_state: Option<crate::test_support::StubDidMap>,
 }
 
+/// Stub-only mirror of the upstream's `absoluteDidUrlReference`
+/// (`midnight-did/packages/did/src/ledger-to-domain.ts`): turn a
+/// stored fragment / relative reference into the canonical
+/// absolute DID URL form (`did:method:net:addr#fragment`).
+///
+/// - Already absolute (`did:…#fragment`) → returned as-is.
+/// - Hash-prefixed bare fragment (`#key-auth`) → prefix with the
+///   owning DID (`did:…#key-auth`, single `#`).
+/// - Bare fragment (`key-auth`) → same prefix.
+///
+/// Stays in this module rather than reusing
+/// `did::contract::ledger_to_domain`'s inner helper because the
+/// stub path bypasses `ledger_to_domain` entirely.
+#[cfg(any(test, feature = "test-support"))]
+fn stub_to_absolute_did_url(did: &crate::DidId, stored: &str) -> String {
+    let did_str = did.to_did_string();
+    if stored.starts_with("did:") {
+        stored.to_string()
+    } else if let Some(frag) = stored.strip_prefix('#') {
+        format!("{did_str}#{frag}")
+    } else {
+        format!("{did_str}#{stored}")
+    }
+}
+
 impl Wallet {
     /// Build from a raw 32-byte seed. Mirrors gsd-wallet's seed semantics
     /// (the seed *is* the wallet identity; no BIP39 yet).
@@ -1452,6 +1477,35 @@ impl Wallet {
         Ok((outcome.did_id, outcome.controller_sk))
     }
 
+    /// Awaitable wrapper for [`Wallet::load_did_circuit`]. Drains
+    /// the `WizardStage` stream and surfaces the `Done` outcome (or
+    /// the `Failed` error as [`WalletError::CreateDidFailed`] — the
+    /// shared error variant the other awaitables use).
+    ///
+    /// `counter` MUST match the contract's current
+    /// `maintenance_authority.counter`. A fresh deploy starts at 0
+    /// and each successful load bumps it; the caller is responsible
+    /// for tracking the bump (or calling `resolve_did_full` to read
+    /// the on-chain counter first).
+    ///
+    /// In stub mode this is a no-op that returns `Ok(())` — the
+    /// stub `DidLedgerState` doesn't track loaded circuits, so the
+    /// subsequent `add_verification_method` short-circuits without
+    /// caring whether a VK is "loaded".
+    pub async fn load_did_circuit_awaitable(
+        &self,
+        did: crate::DidId,
+        circuit_name: String,
+        counter: u32,
+    ) -> Result<(), WalletError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if self.stub_did_state().is_some() {
+            return Ok(());
+        }
+        let stream = self.load_did_circuit(did, circuit_name, counter);
+        Self::drain_did_stream_outcome(stream).await.map(|_| ())
+    }
+
     /// Awaitable wrapper for the `addVerificationMethod` Compact
     /// circuit. Builds the JSON arg shape the JS-side harness
     /// (`prepareUnprovenCallTx`) expects, delegates to
@@ -1726,7 +1780,7 @@ impl Wallet {
         // minimal VM from the `id` field alone. The exact JWK
         // payload isn't load-bearing for Task 2's assertions — the
         // test only checks that the relation arrays are populated.
-        let vm: crate::VerificationMethod = match serde_json::from_value::<
+        let mut vm: crate::VerificationMethod = match serde_json::from_value::<
             crate::VerificationMethod,
         >(vm_json.clone())
         {
@@ -1750,6 +1804,13 @@ impl Wallet {
                 }
             }
         };
+        // Normalize the stored id into the absolute DID URL form
+        // the real-deps path emits from `ledger_to_domain`. The wire
+        // wallet-side now sends the canonical short form (`#key-auth`)
+        // per `normalizeBoundFragmentId`; the stub mirrors the
+        // upstream's `absoluteDidUrlReference` re-expansion so
+        // resolved docs are interchangeable across stub / real paths.
+        vm.id = stub_to_absolute_did_url(did, &vm.id);
         doc.verification_method.push(vm);
         doc.updated = Some(std::time::SystemTime::now());
         Ok(())
@@ -1778,7 +1839,12 @@ impl Wallet {
                 did.to_did_string()
             ))
         })?;
-        let full_id = format!("{}#{}", did.to_did_string(), fragment);
+        // `fragment` arrives in the canonical short form
+        // (`#key-auth`) per `normalizeBoundFragmentId`; promote to
+        // the absolute DID URL so the resolved doc's relation
+        // references match what self-verify / off-chain auth flows
+        // look up by kid.
+        let full_id = stub_to_absolute_did_url(did, fragment);
         let vm_ref = crate::VerificationMethodRef::Id(full_id);
         let target = match relation {
             crate::VerificationMethodRelation::Authentication => &mut doc.authentication,

@@ -175,23 +175,47 @@ pub(crate) fn ledger_to_domain(ledger: &DidLedgerState, id: DidId) -> DidDocumen
     // which we model as `VerificationMethodRef::Id` — full DID URL
     // form: `<did>#<fragment>`.
     let did_str = id.to_did_string();
+    // Convert a stored fragment / relative reference into the
+    // absolute DID URL form (`did:method:net:addr#fragment`) the
+    // DID Core spec uses for `verification_method[*].id` and
+    // relation references. Mirrors upstream's
+    // `LedgerToDomain.absoluteDidUrlReference` so resolved docs
+    // are interchangeable:
+    //
+    // - Already absolute (`did:…#fragment`) → returned as-is.
+    // - Hash-prefixed bare fragment (`#key-auth`) → prefix with
+    //   the owning DID (`did:…#key-auth`, single `#`).
+    // - Bare fragment (`key-auth`) → prefix `did:…#`.
+    //
+    // The canonical on-chain storage shape is `#fragment` (per
+    // `normalizeBoundFragmentId` in
+    // `midnight-did/packages/domain/src/ledger-utils.ts`), so
+    // most paths take the second branch.
+    let to_absolute = |stored: &str| -> String {
+        if stored.starts_with("did:") {
+            stored.to_string()
+        } else if let Some(frag) = stored.strip_prefix('#') {
+            format!("{did_str}#{frag}")
+        } else {
+            format!("{did_str}#{stored}")
+        }
+    };
     let to_refs = |frags: &[String]| -> Vec<VerificationMethodRef> {
         frags
             .iter()
-            .map(|f| VerificationMethodRef::Id(format!("{did_str}#{f}")))
+            .map(|f| VerificationMethodRef::Id(to_absolute(f)))
             .collect()
     };
 
     // Verification methods: same fragment-id → full DID URL
-    // expansion. Controller of each VM defaults to the DID itself.
+    // expansion via the helper above. Controller of each VM
+    // defaults to the DID itself.
     let verification_method = ledger
         .verification_methods
         .iter()
         .cloned()
         .map(|mut vm| {
-            if !vm.id.contains('#') {
-                vm.id = format!("{did_str}#{}", vm.id);
-            }
+            vm.id = to_absolute(&vm.id);
             vm.controller = id.clone();
             vm
         })
@@ -215,9 +239,7 @@ pub(crate) fn ledger_to_domain(ledger: &DidLedgerState, id: DidId) -> DidDocumen
             .iter()
             .cloned()
             .map(|mut s| {
-                if !s.id.contains('#') {
-                    s.id = format!("{did_str}#{}", s.id);
-                }
+                s.id = to_absolute(&s.id);
                 s
             })
             .collect(),
