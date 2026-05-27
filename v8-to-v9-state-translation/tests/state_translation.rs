@@ -334,6 +334,101 @@ fn table_is_closed() {
 }
 
 #[test]
+fn translates_serialized_non_trivial_state_preserving_invariants() {
+    // End-to-end: build a non-trivial v8 state, serialize/deserialize the
+    // v8 side, translate to v9, then assert the v9 state passes its own
+    // NIGHT-balance invariant and survives a v9 serialize round-trip.
+    //
+    // This is the integration-style counterpart to the v6→v7 reference's
+    // `micro_dao.rs` — we skip the whole DAO scenario (which exercised the
+    // ledger, not the translation) and just confirm the translated state
+    // is well-formed enough to plug back into the v9 machinery.
+
+    let mut rng = StdRng::seed_from_u64(0xabc);
+
+    // Mildly non-default LedgerParameters: bump global_ttl.
+    let mut params = ledger_v8::structure::INITIAL_PARAMETERS;
+    params.global_ttl = base_crypto::time::Duration::from_secs(3600);
+
+    // Genesis split: keep almost everything in reserve_pool, leave a sliver
+    // in treasury. The constructor checks the NIGHT balance invariant.
+    let bridge_amount = 500_000u128;
+    let reward_amount = 200_000u128;
+    let treasury_amount = 1_000_000u128;
+    let reserve_init = ledger_v8::structure::MAX_SUPPLY - treasury_amount;
+
+    let mut v8 = ledger_v8::structure::LedgerState::<InMemoryDB>::with_genesis_settings(
+        TEST_NETWORK_ID,
+        params,
+        0,
+        reserve_init,
+        treasury_amount,
+    )
+    .expect("v8 genesis state should be valid");
+
+    // Move some NIGHT into bridge_receiving and unclaimed_block_rewards.
+    // Each move keeps total NIGHT == MAX_SUPPLY.
+    v8.reserve_pool -= bridge_amount;
+    let bridge_addr = UserAddress::from(rng.r#gen::<base_crypto::schnorr::VerifyingKey>());
+    v8.bridge_receiving = v8.bridge_receiving.insert(bridge_addr.clone(), bridge_amount);
+
+    v8.reserve_pool -= reward_amount;
+    let reward_addr = UserAddress::from(rng.r#gen::<base_crypto::schnorr::VerifyingKey>());
+    v8.unclaimed_block_rewards = v8
+        .unclaimed_block_rewards
+        .insert(reward_addr.clone(), reward_amount);
+
+    // Three contracts. They carry no NIGHT (their balance maps are empty),
+    // so they don't perturb the invariant.
+    let mut contract_addrs = Vec::new();
+    for _ in 0..3 {
+        let contract = create_test_contract(&mut rng);
+        let addr: ContractAddress = rng.r#gen();
+        contract_addrs.push(addr.clone());
+        v8.contract = v8.contract.insert(addr, contract);
+    }
+
+    // Round-trip v8 through bytes — exercises the serialized-form path.
+    let mut buf = Vec::new();
+    serialize::tagged_serialize(&v8, &mut buf).expect("v8 serialize");
+    let v8_round_tripped: ledger_v8::structure::LedgerState<InMemoryDB> =
+        serialize::tagged_deserialize(&mut &buf[..]).expect("v8 deserialize");
+
+    // Translate.
+    let v9 = translate_to_completion(v8_round_tripped);
+
+    // (a) The translated state preserves the NIGHT-balance invariant.
+    v9.check_night_balance_invariant()
+        .expect("translated v9 state must preserve NIGHT-balance invariant");
+
+    // (b) Non-trivial pieces survive the translation.
+    assert_eq!(*v9.bridge_receiving.get(&bridge_addr).expect("bridge entry"), bridge_amount);
+    assert_eq!(
+        *v9.unclaimed_block_rewards.get(&reward_addr).expect("reward entry"),
+        reward_amount,
+    );
+    for addr in &contract_addrs {
+        assert!(v9.contract.get(addr).is_some(), "contract should survive");
+    }
+    assert_eq!(v9.parameters.global_ttl, base_crypto::time::Duration::from_secs(3600));
+    assert_eq!(
+        v9.parameters.min_block_price,
+        ledger_v9::structure::INITIAL_PARAMETERS.min_block_price,
+    );
+
+    // (c) Round-trip the v9 state through bytes. Catches any structural
+    // inconsistency the translation might have introduced.
+    let mut buf = Vec::new();
+    serialize::tagged_serialize(&v9, &mut buf).expect("v9 serialize");
+    let v9_round_tripped: ledger_v9::structure::LedgerState<InMemoryDB> =
+        serialize::tagged_deserialize(&mut &buf[..]).expect("v9 deserialize");
+    v9_round_tripped
+        .check_night_balance_invariant()
+        .expect("v9 state must still be valid after a serialize round-trip");
+    assert_eq!(v9_round_tripped.network_id, v9.network_id);
+}
+
+#[test]
 fn table_tags_match_types() {
     // The TABLE hardcodes string literals for each TranslationId. If a tag on
     // either side gets bumped without updating the table, the literal would
