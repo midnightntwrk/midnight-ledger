@@ -2568,37 +2568,37 @@ fn WalletSyncPane(
         });
     };
 
-    // Auto-trigger once per mount, but ONLY for `PreProd`.
+    // No auto-trigger. Sync runs ONLY when the operator clicks
+    // Connect / Resync. Earlier revisions auto-kicked once per mount
+    // on PreProd ("operator-demo profile") but that turned out to
+    // surprise operators who wanted to review the address / pick a
+    // network / bring up the standalone stack before any indexer
+    // traffic. The `started` signal now just tracks whether ANY
+    // sync has run since mount, so the button can label itself
+    // "Connect" before the first run and "Resync" after.
     //
-    // Rationale: the PreProd demo profile expects the wallet to be
-    // synced and showing balances on the very first paint — that's
-    // the operator-demo flow. Auto-syncing on other networks
-    // (Undeployed, Mainnet later) is undesirable because:
-    //
-    // - On Undeployed, the operator usually wants to bring up the
-    //   standalone stack, switch the picker, *then* connect. An
-    //   auto-sync racing with `rehydrate_for_network` (which
-    //   re-registers the `DustSyncer` for the new network) can
-    //   fail with "syncer not initialised" before rehydrate
-    //   finishes, OR worse, sync against the previously-registered
-    //   network's data.
-    //
-    // - On Mainnet the user typically wants to review the address
-    //   before a sync touches the indexer.
-    //
-    // The `started` guard still prevents re-renders from re-kicking
-    // an in-flight sync on PreProd. On non-PreProd, the operator
-    // clicks the `Reconnect` button below to sync manually.
-    let auto_sync = matches!(network, Network::PreProd);
-    use_effect(move || {
-        if auto_sync && !*started.read() {
-            started.set(true);
-            kick();
-        }
-    });
+    // The `DustSyncer` for the active network is still registered
+    // eagerly on unlock + on every network switch (see `on_unlock`
+    // and `rehydrate_for_network`) — only the *sync stream* itself
+    // is gated behind the button. Cheap, idempotent registration vs
+    // expensive subscription.
+    let _ = &started; // signal kept for label state below
 
     let any_running = matches!(*night_row.read(), SyncRow::Running { .. })
         || matches!(*dust_row.read(), SyncRow::Running { .. });
+    let ever_started = *started.read();
+    let primary_label = if any_running {
+        "Syncing…"
+    } else if ever_started {
+        "Resync"
+    } else {
+        "Connect"
+    };
+
+    let kick_with_flag = move |_| {
+        started.set(true);
+        kick();
+    };
 
     let dust_event_id_val = *dust_event_id.read();
     rsx! {
@@ -2609,8 +2609,8 @@ fn WalletSyncPane(
             div { class: "row sync-foot",
                 button {
                     disabled: any_running,
-                    onclick: move |_| kick(),
-                    {if any_running { "Syncing…" } else { "Resync" }}
+                    onclick: kick_with_flag,
+                    "{primary_label}"
                 }
                 if let Some(id) = dust_event_id_val {
                     span { class: "sync-meta",
