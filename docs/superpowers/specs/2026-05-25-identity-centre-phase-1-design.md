@@ -1,8 +1,8 @@
 # Identity Centre — Phase 1 (issuance + self-verify)
 
-**Date:** 2026-05-25
+**Date:** 2026-05-25 (design); 2026-05-27 (wallet-core slice shipped)
 **Branch:** `dioxus-vc-demo` (off `mobile-prototype`)
-**Status:** Approved design — ready for implementation planning
+**Status:** **Wallet-core slice complete — see PROGRESS section below.**
 **Author:** Yurii Shynbuiev with Claude
 
 ## Goal
