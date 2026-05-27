@@ -236,6 +236,11 @@ pub enum TransactionInvalid<D: DB> {
         size: u64,
         limit: u64,
     },
+    ContractAuthorityMetadataTooLarge {
+        address: ContractAddress,
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -325,6 +330,14 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "contract {address:?} entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
+            ContractAuthorityMetadataTooLarge {
+                address,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
         }
     }
 }
@@ -411,6 +424,7 @@ pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
     MetadataTooLarge { entry_point: EntryPointBuf, size: u64, limit: u64 },
+    AuthorityMetadataTooLarge { size: u64, limit: u64 },
 }
 
 impl Display for MalformedContractDeploy {
@@ -437,6 +451,10 @@ impl Display for MalformedContractDeploy {
             } => write!(
                 formatter,
                 "contract entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            AuthorityMetadataTooLarge { size, limit } => write!(
+                formatter,
+                "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }

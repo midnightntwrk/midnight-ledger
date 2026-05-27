@@ -1515,14 +1515,25 @@ impl<D: DB> LedgerState<D> {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
                         let limit = self.parameters.limits.max_contract_metadata_size;
-                        if let Err((entry_point, size)) =
+                        if let Err(e) =
                             crate::verify::check_entry_point_metadata_sizes(&deploy.initial_state, limit)
                         {
-                            return Err(TransactionInvalid::ContractMetadataTooLarge {
-                                address: addr,
-                                entry_point,
-                                size,
-                                limit,
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
                             });
                         }
                         res.contract = res.contract.insert(addr, deploy.initial_state.clone());
@@ -1589,14 +1600,25 @@ impl<D: DB> LedgerState<D> {
                             }
                         }
                         let limit = self.parameters.limits.max_contract_metadata_size;
-                        if let Err((entry_point, size)) =
+                        if let Err(e) =
                             crate::verify::check_entry_point_metadata_sizes(&cstate, limit)
                         {
-                            return Err(TransactionInvalid::ContractMetadataTooLarge {
-                                address: addr,
-                                entry_point,
-                                size,
-                                limit,
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
                             });
                         }
                         res.contract = res.contract.insert(addr, cstate);

@@ -376,16 +376,24 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     }
 }
 
+pub(crate) enum MetadataSizeError {
+    EntryPoint(EntryPointBuf, u64),
+    Authority(u64),
+}
+
 pub(crate) fn check_entry_point_metadata_sizes<D: DB>(
     state: &ContractState<D>,
     limit: u64,
-) -> Result<(), (EntryPointBuf, u64)> {
+) -> Result<(), MetadataSizeError> {
     let auth_size = state.maintenance_authority.serialized_size() as u64;
+    if auth_size > limit {
+        return Err(MetadataSizeError::Authority(auth_size));
+    }
     for entry in state.operations.iter() {
         let size =
-            entry.0.serialized_size() as u64 + entry.1.serialized_size() as u64 + auth_size;
+            entry.0.serialized_size() as u64 + entry.1.serialized_size() as u64;
         if size > limit {
-            return Err(((*entry.0).clone(), size));
+            return Err(MetadataSizeError::EntryPoint((*entry.0).clone(), size));
         }
     }
     Ok(())
@@ -1773,16 +1781,24 @@ impl<D: DB> ContractDeploy<D> {
         }
         ref_state.param_check(false, |params| {
             let limit = params.limits.max_contract_metadata_size;
-            if let Err((entry_point, size)) =
+            if let Err(e) =
                 check_entry_point_metadata_sizes(&self.initial_state, limit)
             {
-                return Err(MalformedTransaction::MalformedContractDeploy(
-                    MalformedContractDeploy::MetadataTooLarge {
-                        entry_point,
-                        size,
-                        limit,
-                    },
-                ));
+                return Err(MalformedTransaction::MalformedContractDeploy(match e {
+                    MetadataSizeError::EntryPoint(entry_point, size) => {
+                        MalformedContractDeploy::MetadataTooLarge {
+                            entry_point,
+                            size,
+                            limit,
+                        }
+                    }
+                    MetadataSizeError::Authority(size) => {
+                        MalformedContractDeploy::AuthorityMetadataTooLarge {
+                            size,
+                            limit,
+                        }
+                    }
+                }));
             }
             Ok(())
         })?;
