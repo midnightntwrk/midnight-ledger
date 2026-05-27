@@ -1565,7 +1565,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op.v2 == None {
+                                    if op.v2.is_none() {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
