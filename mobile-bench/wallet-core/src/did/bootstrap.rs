@@ -53,7 +53,9 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 }
 
 /// Compose the JSON arg the `addVerificationMethod` Compact circuit
-/// expects. The schema lives in `~/iohk/midnight-identity-workspace/midnight-did/contract/dist/did.compact`:
+/// expects. The schema lives in `~/iohk/midnight-identity-workspace/midnight-did/contract/dist/did.compact`
+/// (and its compiled JS view at
+/// `packages/contract/dist/managed/did/contract/index.js`):
 ///
 /// ```compact
 /// export struct VerificationMethod {
@@ -62,17 +64,27 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 ///     publicKeyJwk: PublicKeyJwk
 /// };
 /// export struct PublicKeyJwk {
-///     kty: KeyType, crv: CurveType, x: Field, y: Field
+///     kty: KeyType, crv: CurveType, x: Bytes<32>, y: Bytes<32>
 /// }
 /// export enum VerificationMethodType { Undefined, JsonWebKey }
 /// export enum KeyType { EC, RSA, oct, OKP }
-/// export enum CurveType { Ed25519, Jubjub, P256 }
+/// export enum CurveType { Ed25519, X25519, Jubjub, P256, Secp256k1 }
 /// ```
 ///
+/// The 2026-05-27 upstream refactor switched `x`/`y` from `Field`
+/// (BLS12-381 scalar, ~254.85 bits) to `Bytes<32>` (a 32-byte
+/// fixed-length octet string). That kills the previous Ed25519
+/// Field-overflow problem (a 32-byte compressed pubkey frequently
+/// exceeded Fr modulus) and the lossy 30-byte clamp it forced — we
+/// now round-trip the full pubkey losslessly. The same refactor
+/// expanded `CurveType` to add `X25519` and `Secp256k1`, which
+/// **shifted Jubjub's enum tag from 1 to 2 and P256's from 2 to 3**;
+/// don't reorder the match arms blindly without consulting the
+/// compiled enum.
+///
 /// Wire format the harness's `prepareUnprovenCallTx` accepts (see
-/// `tests/js-harness/harness.mjs::vm_to_json` for the UI-side mirror
-/// and `dioxus-wallet/src/app.rs::vm_to_json` for the operator
-/// flow's reference):
+/// `tests/js-harness/harness.mjs::reviveBigints` — the `$bytes` tag
+/// is what triggers the `Uint8Array(32)` construction):
 ///
 /// ```json
 /// {
@@ -80,35 +92,21 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 ///   "typ": 1,
 ///   "publicKeyJwk": {
 ///     "kty": <enum tag, 0..=3>,
-///     "crv": <enum tag, 0..=2>,
-///     "x":   { "$bigint": "0x<be-hex>" },
-///     "y":   { "$bigint": "0x<be-hex>" }
+///     "crv": <enum tag, 0..=4>,
+///     "x":   { "$bytes": "0x<64-hex-chars>" },
+///     "y":   { "$bytes": "0x<64-hex-chars>" }
 ///   }
 /// }
 /// ```
 ///
-/// `typ=1` is `VerificationMethodType.JsonWebKey` (only non-undefined
-/// variant the contract accepts). `kty` / `crv` tags follow the
-/// .compact declaration order verbatim (NOT the `MidnightKeyType`
-/// crate enum order, which has OKP first). `x` / `y` are field
-/// elements: the contract upstream's `decodeFieldElement` interprets
-/// base64url-decoded bytes as a big-endian bigint; the
-/// `BigInt("0x…")` revive path in the harness produces the same
-/// value, so we round-trip via hex without introducing a decimal-
-/// bigint dep.
-///
 /// For Ed25519 keys the secret store returns
 /// `{ kty: OKP, crv: Ed25519, x: base64url(pub_32B) }` with no `y`;
-/// we send `y = 0` per the upstream's `publicKeyJwkToLedger` fallback.
-/// Jubjub returns both coordinates.
-///
-/// Earlier versions of this helper produced a DID-Core-shaped JSON
-/// (`type: "Ed25519VerificationKey2020"`, `controller`, base64url
-/// strings) — that was a placeholder that worked against an old
-/// stub harness but the live circuit rejected it on
-/// 2026-05-27 with "type error: addVerificationMethod argument 1 …
-/// expected struct VerificationMethod<… typ: VerificationMethodType,
-/// publicKeyJwk: struct PublicKeyJwk<…, x: Field, y: Field>>".
+/// we send the full 32-byte compressed pubkey as `x` and 32 zero
+/// bytes as `y` — matches the upstream's `publicKeyJwkToLedger`
+/// fallback (`y: jwk.y ? decodeBase64UrlBytes32(jwk.y) : new
+/// Uint8Array(32)`). Jubjub keys ship both coordinates as 32-byte
+/// big-endian Fr-encodings (see
+/// `secret_storage::curve_support::fr_to_be_32`); P-256 same shape.
 fn build_verification_method_json(
     did: &DidId,
     fragment: &str,
@@ -127,68 +125,52 @@ fn build_verification_method_json(
         // oct = 2 (not in our enum)
         MidnightKeyType::OKP => 3,
     };
-    // .compact: `enum CurveType { Ed25519, Jubjub, P256 }` —
-    // matches our `MidnightCurve` declaration order.
+    // .compact (post-2026-05-27 refactor):
+    // `enum CurveType { Ed25519, X25519, Jubjub, P256, Secp256k1 }`
+    // — NOT `MidnightCurve`'s declaration order. Verified at
+    // runtime via the compiled enum
+    // (packages/contract/dist/managed/did/contract/index.js).
     let crv_tag: i32 = match jwk.crv {
         MidnightCurve::Ed25519 => 0,
-        MidnightCurve::Jubjub => 1,
-        MidnightCurve::P256 => 2,
+        // X25519 = 1 (not in our enum)
+        MidnightCurve::Jubjub => 2,
+        MidnightCurve::P256 => 3,
+        // Secp256k1 = 4 (not in our enum)
     };
-    // base64url → 0x<be-hex> → BigInt() in the harness.
-    //
-    // Important: the contract's `Field` type is the BLS12-381 scalar
-    // field with modulus ~2^254.85. A 32-byte big-endian value (e.g.
-    // an Ed25519 compressed pubkey) frequently exceeds that bound
-    // and the contract's input checker rejects with "type error:
-    // addVerificationMethod argument 1 … expected struct
-    // VerificationMethod<… publicKeyJwk: struct PublicKeyJwk<…,
-    // x: Field, y: Field>>".
-    //
-    // For Jubjub (kty=EC, crv=Jubjub) the JWK coordinates come from
-    // `EmbeddedGroupAffine::x()` / `.y()` which are by construction
-    // Fr-fitting (the curve is defined over Fr), so the full bytes
-    // pass through cleanly.
-    //
-    // For Ed25519 (kty=OKP, crv=Ed25519) the JWK `x` is the 32-byte
-    // compressed Edwards-y representation, which can overshoot Fr.
-    // We clamp to the first 30 bytes (240 bits) — safely below the
-    // ~254.85-bit Fr modulus. This makes the on-chain `x` a lossy
-    // 30-byte prefix of the pubkey, NOT a recoverable encoding. The
-    // contract doesn't verify the publicKey bytes cryptographically
-    // (it just stores the struct), so the demo flow round-trips
-    // fine; off-chain self-verify of Ed25519 (e.g. SIOPv2 id_tokens)
-    // can't reconstruct the full pubkey from the resolved doc and
-    // must trust the kid out-of-band. Upstream's integration tests
-    // (`packages/api/src/test/did.api.test.ts:215`) confirm this
-    // posture by using `x: "Kg"` — a one-byte placeholder.
-    //
-    // A proper fix is a separate spec discussion (hash-to-field, or
-    // split-encode the pubkey across `x` + `y`). Logged for Phase 2.
-    fn to_bigint_hex(b64url: &str, clamp_to_field: bool) -> String {
-        match URL_SAFE_NO_PAD.decode(b64url.as_bytes()) {
-            Ok(bytes) if !bytes.is_empty() => {
-                let limit = if clamp_to_field && bytes.len() > 30 {
-                    30
-                } else {
-                    bytes.len()
-                };
-                format!("0x{}", hex::encode(&bytes[..limit]))
+
+    // base64url → 32-byte buffer → 0x<64hex>. The contract expects
+    // exactly 32 bytes; pad with leading zeros if the input is
+    // shorter, truncate (keep the FIRST 32 bytes, big-endian) if
+    // longer. For Ed25519 the JWK `x` is exactly 32 bytes already.
+    // For Jubjub coordinates `fr_to_be_32` produces exactly 32. We
+    // assert via the contract's input checker if the output is the
+    // wrong width; an oversized input becomes a `Bytes<32>` of the
+    // truncated prefix which will fail the next assertions on read
+    // (good — we'd rather fail loudly than silently corrupt).
+    fn to_bytes32_hex(b64url: &str) -> String {
+        let mut buf = [0u8; 32];
+        if let Ok(bytes) = URL_SAFE_NO_PAD.decode(b64url.as_bytes()) {
+            // Big-endian: right-align if shorter than 32 bytes (so a
+            // small Fr value stays small), copy first 32 if longer.
+            if bytes.len() <= 32 {
+                let offset = 32 - bytes.len();
+                buf[offset..].copy_from_slice(&bytes);
+            } else {
+                buf.copy_from_slice(&bytes[..32]);
             }
-            // Empty / undecodeable → field zero. Upstream's
-            // `decodeFieldElement` does the same (`bytes.length === 0
-            // ? 0n : …`), so this matches the canonical behaviour.
-            _ => "0x0".to_string(),
         }
+        format!("0x{}", hex::encode(buf))
     }
-    // Ed25519 needs the clamp; Jubjub coordinates are already
-    // Fr-fitting and clamping would corrupt them.
-    let clamp = matches!(jwk.crv, MidnightCurve::Ed25519);
-    let x_hex = to_bigint_hex(&jwk.x, clamp);
+
+    let x_hex = to_bytes32_hex(&jwk.x);
     let y_hex = jwk
         .y
         .as_deref()
-        .map(|s| to_bigint_hex(s, clamp))
-        .unwrap_or_else(|| "0x0".to_string());
+        .map(to_bytes32_hex)
+        // Ed25519's JWK has no `y`; the contract slot must still be
+        // 32 bytes, so we ship 32 zero bytes. Matches the upstream
+        // `decodeBase64UrlBytes32` fallback in `publicKeyJwkToLedger`.
+        .unwrap_or_else(|| format!("0x{}", hex::encode([0u8; 32])));
 
     // Canonical methodId per the upstream's
     // `normalizeBoundFragmentId`
@@ -209,8 +191,8 @@ fn build_verification_method_json(
         "publicKeyJwk": {
             "kty": kty_tag,
             "crv": crv_tag,
-            "x": { "$bigint": x_hex },
-            "y": { "$bigint": y_hex },
+            "x": { "$bytes": x_hex },
+            "y": { "$bytes": y_hex },
         }
     })
 }

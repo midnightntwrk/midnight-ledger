@@ -56,6 +56,13 @@ function reviveBigints(value) {
   if (value === null || typeof value !== "object") return value;
   if (Array.isArray(value)) return value.map(reviveBigints);
   if (typeof value.$bigint === "string") return BigInt(value.$bigint);
+  // `Bytes<N>` fields in the contract schema (e.g. PublicKeyJwk.x/y
+  // after the 2026-05-27 `Field → Bytes<32>` refactor) get encoded
+  // by the Rust caller as `{"$bytes": "0x<2*N hex chars>"}`. The
+  // contract runtime expects a `Uint8Array` of exactly N bytes;
+  // hexToBytes returns one of arbitrary length, so the caller is
+  // responsible for sending the right hex width.
+  if (typeof value.$bytes === "string") return hexToBytes(value.$bytes);
   const out = {};
   for (const [k, v] of Object.entries(value)) {
     out[k] = reviveBigints(v);

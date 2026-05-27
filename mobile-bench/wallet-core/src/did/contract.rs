@@ -529,10 +529,30 @@ fn decode_vm_map(
             }
         };
         let crv_tag = enum_tag_or_zero(av, 3, &format!("{field}.crv"))?;
+        // Post-2026-05-27 schema:
+        // `enum CurveType { Ed25519, X25519, Jubjub, P256, Secp256k1 }`.
+        // Jubjub and P256 shifted to tags 2 and 3 (were 1 and 2).
+        // X25519 + Secp256k1 aren't in our `CurveType` enum yet; map
+        // to the closest neighbour with a `tracing::warn!` so the
+        // decode doesn't silently swallow them.
         let crv = match crv_tag {
             0 => CurveType::Ed25519,
-            1 => CurveType::Jubjub,
-            2 => CurveType::P256,
+            1 => {
+                tracing::warn!(
+                    "{field}.crv: X25519 (tag 1) is not in our CurveType enum; \
+                     falling back to Ed25519"
+                );
+                CurveType::Ed25519
+            }
+            2 => CurveType::Jubjub,
+            3 => CurveType::P256,
+            4 => {
+                tracing::warn!(
+                    "{field}.crv: Secp256k1 (tag 4) is not in our CurveType \
+                     enum; falling back to P256"
+                );
+                CurveType::P256
+            }
             other => {
                 return Err(DidError::DecodeState(format!(
                     "{field}.crv: unexpected enum tag {other}"

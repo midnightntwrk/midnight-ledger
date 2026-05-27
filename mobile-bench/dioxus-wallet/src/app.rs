@@ -328,9 +328,16 @@ fn relation_tag(name: &str) -> i32 {
 
 /// Build the JSON `VerificationMethod` struct payload — `typ` is
 /// always `JsonWebKey` (the only variant the contract accepts);
-/// `publicKeyJwk.x/y` are bigints expressed as decimal strings so
-/// `BigInt(str)` revives them in JS. A "0x…" prefix also works
-/// because `BigInt("0x…")` is well-defined.
+/// `publicKeyJwk.x/y` are `Bytes<32>` slots since the 2026-05-27
+/// upstream `Field → Bytes<32>` refactor. Wire shape is
+/// `{"$bytes": "0x<64-hex-chars>"}` — the harness's
+/// `reviveBigints` decodes that tag to `Uint8Array(32)`.
+///
+/// The UI form's `pk_x` / `pk_y` come in as decimal-or-hex bigint
+/// strings (the user-facing presentation predates the schema
+/// change). Convert via the `pk_to_bytes32_hex` helper so the
+/// wire shape is always 32 padded big-endian bytes regardless of
+/// what the user typed.
 fn vm_to_json(vm: &VerificationMethodInput) -> serde_json::Value {
     serde_json::json!({
         "id": vm.id,
@@ -338,11 +345,66 @@ fn vm_to_json(vm: &VerificationMethodInput) -> serde_json::Value {
         "typ": 1,
         "publicKeyJwk": {
             "kty": enum_tag(KEY_TYPES, &vm.key_type),
-            "crv": enum_tag(CURVE_TYPES, &vm.curve),
-            "x": serde_json::json!({ "$bigint": vm.pk_x.clone() }),
-            "y": serde_json::json!({ "$bigint": vm.pk_y.clone() }),
+            "crv": crv_to_contract_tag(&vm.curve),
+            "x": serde_json::json!({ "$bytes": pk_to_bytes32_hex(&vm.pk_x) }),
+            "y": serde_json::json!({ "$bytes": pk_to_bytes32_hex(&vm.pk_y) }),
         }
     })
+}
+
+/// Translate the UI form's `pk_x` / `pk_y` input into a 32-byte
+/// big-endian hex string `"0x<64-hex>"`. Accepts:
+/// - `"0x<hex>"`        — hex-encoded bytes; left-pad to 32 bytes
+/// - `"<hex>"`          — same, no `0x` prefix
+/// - `"<decimal>"`      — decimal bigint; convert to 32-byte big-
+///                        endian via a small base-10 → bytes routine
+///                        (no `num-bigint` dep)
+/// - empty / malformed  — 32 zero bytes
+///
+/// Truncates from the high end if the input is larger than 32
+/// bytes; the contract will reject mismatched shapes anyway. The
+/// decimal path is necessary because the existing UI form lets
+/// users paste decimal Field elements (the pre-refactor convention).
+fn pk_to_bytes32_hex(input: &str) -> String {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return format!("0x{}", hex::encode([0u8; 32]));
+    }
+    // Hex path (with or without `0x` prefix).
+    let maybe_hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
+    if !maybe_hex.is_empty() && maybe_hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        // Even out odd-length hex by prepending one zero nybble.
+        let mut s = maybe_hex.to_string();
+        if s.len() % 2 == 1 {
+            s.insert(0, '0');
+        }
+        let bytes = hex::decode(&s).unwrap_or_default();
+        let mut buf = [0u8; 32];
+        if bytes.len() <= 32 {
+            let offset = 32 - bytes.len();
+            buf[offset..].copy_from_slice(&bytes);
+        } else {
+            // Keep the trailing 32 bytes (low-order in BE).
+            buf.copy_from_slice(&bytes[bytes.len() - 32..]);
+        }
+        return format!("0x{}", hex::encode(buf));
+    }
+    // Decimal path: convert decimal string → 32-byte BE via repeated
+    // shift-and-add. Inputs of practical Field-element size fit in
+    // ≤78 decimal digits, so the per-character cost is trivial.
+    let mut buf = [0u8; 32];
+    for ch in trimmed.chars() {
+        let Some(d) = ch.to_digit(10) else { continue };
+        let mut carry = d as u16;
+        for byte in buf.iter_mut().rev() {
+            let v = (*byte as u16) * 10 + carry;
+            *byte = (v & 0xff) as u8;
+            carry = v >> 8;
+        }
+        // Overflow past 32 bytes is silently dropped; matches the
+        // hex-too-long branch above.
+    }
+    format!("0x{}", hex::encode(buf))
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -2986,7 +3048,31 @@ impl OpKind {
 }
 
 const KEY_TYPES: &[&str] = &["EC", "RSA", "oct", "OKP"];
+/// Curves the wallet UI offers in the Operation Builder's
+/// `addVerificationMethod` form. Narrow set — the three we have
+/// key derivation for. The contract's full curve enum
+/// (`Ed25519, X25519, Jubjub, P256, Secp256k1` after the
+/// 2026-05-27 refactor) is mapped separately at the encode
+/// boundary via `crv_to_contract_tag`.
 const CURVE_TYPES: &[&str] = &["Ed25519", "Jubjub", "P256"];
+
+/// Translate the UI's curve name into the contract's runtime enum
+/// tag (verified at runtime: `Ed25519=0, X25519=1, Jubjub=2,
+/// P256=3, Secp256k1=4` per
+/// `packages/contract/dist/managed/did/contract/index.js`). The UI
+/// only ships the three we support; future X25519 / Secp256k1
+/// would land here when we add their key derivation.
+fn crv_to_contract_tag(curve_name: &str) -> i32 {
+    match curve_name {
+        "Ed25519" => 0,
+        "X25519" => 1,
+        "Jubjub" => 2,
+        "P256" => 3,
+        "Secp256k1" => 4,
+        _ => 0, // fall back to Ed25519; the contract will reject
+                // mismatched (kty, crv) pairs anyway.
+    }
+}
 const RELATIONS: &[&str] = &[
     "Authentication",
     "AssertionMethod",
