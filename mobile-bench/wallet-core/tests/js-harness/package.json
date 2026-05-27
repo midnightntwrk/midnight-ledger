@@ -3,20 +3,20 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Node-driven JSON-RPC harness for wallet-core integration tests. All deps point at the upstream midnight-did repo's resolved node_modules (already npm-installed there), so we inherit the full transitive dep tree (effect-ts, etc.) without rebuilding it.",
+  "description": "Node-driven JSON-RPC harness for wallet-core integration tests. Deps point at /Users/ysh/iohk/midnight-did's resolved node_modules — the canonical clone on `develop @ 627facb` with the Bytes<32> contract refactor merged. (The workspace-nested clone at midnight-identity-workspace/midnight-did is on the older codex/review-pr-161 branch with a different xLow/xHigh/yLow/yHigh intermediate schema and stale prove keys.)",
   "scripts": {
     "harness": "node harness.mjs"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did-contract": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-did-contract",
-    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-did-jubjub-schnorr",
-    "@midnight-ntwrk/compact-runtime": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/compact-runtime",
-    "@midnight-ntwrk/onchain-runtime-v3": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/onchain-runtime-v3",
-    "@midnight-ntwrk/ledger-v8": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/ledger-v8",
-    "@midnight-ntwrk/compact-js": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/compact-js",
-    "@midnight-ntwrk/midnight-js-contracts": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-contracts",
-    "@midnight-ntwrk/midnight-js-types": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-types",
-    "@midnight-ntwrk/midnight-js-network-id": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-network-id",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:../../../../../../../../midnight-identity-workspace/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider"
+    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-did-contract",
+    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-did-jubjub-schnorr",
+    "@midnight-ntwrk/compact-runtime": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/compact-runtime",
+    "@midnight-ntwrk/onchain-runtime-v3": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/onchain-runtime-v3",
+    "@midnight-ntwrk/ledger-v8": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/ledger-v8",
+    "@midnight-ntwrk/compact-js": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/compact-js",
+    "@midnight-ntwrk/midnight-js-contracts": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-contracts",
+    "@midnight-ntwrk/midnight-js-types": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-types",
+    "@midnight-ntwrk/midnight-js-network-id": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-network-id",
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider"
   }
 }
