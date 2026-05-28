@@ -22,6 +22,7 @@ mod indexer;
 pub mod js_bridge;
 mod network;
 mod node;
+pub mod notifications;
 mod probe;
 pub mod randomness;
 pub mod secret_storage;
@@ -98,6 +99,9 @@ pub use telemetry::{
     OpRecord, ResourceProbe, ResourceSample, RusageProbe, TracingMetrics,
 };
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
+pub use notifications::{
+    CollectingNotifier, NoopNotifier, NotifyLevel, NotifyRecord, Notifications, StderrNotifier,
+};
 pub use randomness::{DeterministicRng, OsRandomness, Randomness};
 pub use wallet::{
     BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
