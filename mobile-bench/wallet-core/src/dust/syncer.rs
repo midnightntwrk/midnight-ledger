@@ -38,7 +38,7 @@ use serde_json::json;
 use storage::DefaultDB;
 
 use super::DustError;
-use super::snapshot::{DUST_LEDGER_EVENTS_QUERY, decode_event};
+use super::snapshot::{DUST_LEDGER_EVENTS_QUERY, DecodedEvent, decode_event};
 use crate::network::Network;
 use crate::store::{DustSyncSnapshot, WalletStore};
 use crate::unshielded::transport;
@@ -54,13 +54,49 @@ const IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 /// the worst-case "lost work" window on a crash to N events
 /// (each is cheap to re-fetch from the indexer anyway).
 ///
-/// 128 is empirically the sweet spot for the Dioxus desktop
-/// executor: small enough that one batch's `replay_events` call
-/// completes inside a frame budget (~80 ms on a debug build),
-/// large enough that redb txn overhead doesn't dominate. The
-/// previous value of 1024 was a UX-freeze grenade — each batch
-/// blocked the renderer for half a second.
-const PERSIST_EVERY_N_EVENTS: usize = 128;
+/// 512 is sized for the producer/consumer split below: the fold
+/// + persist run on `tokio::task::spawn_blocking` worker threads
+/// instead of inline on the Dioxus renderer, so we no longer
+/// have to fit each batch inside an ~80ms frame budget. A bigger
+/// batch lowers redb-txn overhead × (events / batch) and lets
+/// `replay_events` amortise its setup cost across more events.
+/// The previous value (128) was an inline-fold compromise; the
+/// even-earlier 1024 was a UX-freeze grenade because the fold
+/// ran on the renderer. Both pre-conditions are gone.
+const PERSIST_EVERY_N_EVENTS: usize = 512;
+
+/// `tokio::sync::mpsc` channel capacity between the WS reader
+/// producer and the fold consumer. Sized generously so the
+/// async I/O thread can race ahead of the CPU-bound fold without
+/// backpressuring the WebSocket — the indexer can stream events
+/// at ~5k/s but `replay_events` only chews ~1.6k/s on a debug
+/// build, so without buffering we'd be network-bound on the slow
+/// half of the pipeline.
+///
+/// 524288 events × ~1–2 KB/event ≈ 0.5–1 GB peak RAM headroom
+/// on PreProd's ~534k-event log. Comfortably under the 1 GB
+/// budget the operator has approved for this trade-off, and
+/// large enough to buffer the entire PreProd history if the
+/// fold lags. Cheap idle cost: empty `mpsc::channel` doesn't
+/// pre-allocate the queue; only used slots cost memory.
+const WS_TO_FOLD_CAPACITY: usize = 524_288;
+
+/// `tokio::sync::mpsc` channel capacity between the fold worker
+/// and the persist worker. Each in-flight job carries one
+/// already-serialized `DustLocalState` snapshot (a few MB on
+/// PreProd) plus the corresponding `last_id`.
+///
+/// Tradeoff: if the app crashes with N jobs queued, the next
+/// `sync()` call will re-fetch from the last-persisted id (i.e.
+/// up to N × PERSIST_EVERY_N_EVENTS events of re-work). Sizing
+/// at 8 caps the worst case at ~4096 events of re-fetch — a few
+/// seconds of recovery — while letting the fold race ahead for
+/// 8 batches before back-pressuring on disk.
+///
+/// Each queued job supersedes the previous (the persist worker
+/// writes them sequentially, latest-wins on durable state), so
+/// there's no correctness reason to queue more.
+const PERSIST_QUEUE_CAPACITY: usize = 8;
 
 /// Progress event the UI binds to. Emitted at each persist
 /// boundary so the progress bar updates without flickering.
@@ -163,133 +199,267 @@ impl DustSyncer {
     {
         async_stream::try_stream! {
             // 1. Load cached state (or start fresh).
-            let (mut state, mut last_id) = match self.cached_state()? {
+            let (state_init, last_id_init) = match self.cached_state()? {
                 Some(t) => t,
                 None => (DustLocalState::new(self.params), -1),
             };
+            // Held in an `Option` so we can `take()` it into
+            // `spawn_blocking` and put the new state back without
+            // tripping the borrow checker mid-loop. Always `Some`
+            // outside the per-batch consume → swap → restore step.
+            let mut state_holder: Option<DustLocalState<DefaultDB>> = Some(state_init);
+            let mut last_id = last_id_init;
             // Remember whether we resumed from a populated cache.
-            // If yes and the indexer sends zero events (because we
-            // were already at tip), the silent stream is a
-            // "you're caught up" signal, not a connection error.
-            // Without this, every call to `sync()` on an
-            // already-up-to-date wallet would surface as
-            // `StreamClosedEarly` — exactly the bug the user hit on
-            // first Submit batch after the App pre-warmed via the
-            // WalletSyncPane.
+            // If yes and the indexer sends zero events (already at
+            // tip), the silent stream is "caught up", not an
+            // error. Without this, every `sync()` call on an
+            // up-to-date wallet would surface as
+            // `StreamClosedEarly` — exactly the bug the user hit
+            // on first Submit batch after the App pre-warmed via
+            // the WalletSyncPane.
             let started_with_cache = last_id >= 0;
             let starting_last_id = last_id;
 
             tracing::info!(
                 network = %self.network.config().network_id,
                 resume_from = last_id + 1,
-                "dust syncer starting"
+                ws_to_fold_capacity = WS_TO_FOLD_CAPACITY,
+                persist_queue_capacity = PERSIST_QUEUE_CAPACITY,
+                batch_size = PERSIST_EVERY_N_EVENTS,
+                "dust syncer starting (3-stage I/O→CPU→I/O pipeline)"
             );
 
             // 2. Subscribe from `last_id + 1` (inclusive — the
             //    indexer's `id` arg is the FIRST event to deliver).
-            let stream = transport::subscribe(
+            let raw_stream = transport::subscribe(
                 self.ws_url,
                 DUST_LEDGER_EVENTS_QUERY,
                 json!({ "id": (last_id + 1).max(0) }),
             )
             .await
             .map_err(translate_unshielded_error)?;
-            let mut stream = std::pin::pin!(stream.map(|item| {
-                item.map_err(translate_unshielded_error)
-                    .and_then(|v| decode_event(&v))
-            }));
 
-            // 3. Fold loop. Apply events to the state in batches
-            //    so we get one persist + one progress emit per
-            //    batch instead of one per event.
-            let mut batch: Vec<ledger::events::Event<DefaultDB>> = Vec::new();
-            let mut target_max: Option<i64> = None;
-            let mut events_processed: usize = 0;
-
-            'outer: loop {
-                if let Some(max) = target_max {
-                    if last_id >= max {
-                        break;
-                    }
-                }
-                let next = tokio::time::timeout(IDLE_TIMEOUT, stream.next()).await;
-                match next {
-                    Ok(Some(item)) => {
-                        let decoded = item?;
-                        last_id = decoded.id;
-                        target_max = Some(decoded.max_id);
-                        batch.push(decoded.event);
-
-                        // Flush at batch boundary OR when we hit
-                        // the target_max (whichever first).
-                        let caught_up = last_id >= decoded.max_id;
-                        if batch.len() >= PERSIST_EVERY_N_EVENTS || caught_up {
-                            state = state
-                                .replay_events(&self.dust_key, batch.iter())
-                                .map_err(|e| {
-                                    DustError::Replay(format!("replay: {e}"))
-                                })?;
-                            events_processed += batch.len();
-                            batch.clear();
-                            self.persist(&state, last_id).await?;
-                            yield SyncProgress {
-                                current_id: last_id,
-                                max_id: decoded.max_id,
-                                events_processed,
-                            };
-                            // Give the Dioxus renderer + other
-                            // tokio tasks a tick before the next
-                            // batch's CPU-heavy `replay_events`.
-                            // Without this the UI freezes for the
-                            // whole sync because the executor is
-                            // wedged inside the sync function.
-                            tokio::task::yield_now().await;
+            // 3. Producer task: drains the WS into a bounded
+            //    channel and exits. ZERO CPU work here — decoded
+            //    events flow straight through. The async runtime
+            //    keeps the I/O socket busy independent of how
+            //    fast the consumer chews through the fold.
+            let (tx, mut rx) = tokio::sync::mpsc::channel::<
+                Result<DecodedEvent, DustError>,
+            >(WS_TO_FOLD_CAPACITY);
+            let producer = tokio::spawn(async move {
+                let mut stream = std::pin::pin!(raw_stream.map(|item| {
+                    item.map_err(translate_unshielded_error)
+                        .and_then(|v| decode_event(&v))
+                }));
+                loop {
+                    match tokio::time::timeout(IDLE_TIMEOUT, stream.next()).await {
+                        Ok(Some(item)) => {
+                            // Peek for "caught up" BEFORE the move
+                            // (we own the event by-value otherwise).
+                            let caught_up = matches!(&item, Ok(d) if d.id >= d.max_id);
+                            if tx.send(item).await.is_err() {
+                                // Consumer dropped (probably
+                                // errored out). Exit silently.
+                                break;
+                            }
                             if caught_up {
-                                break 'outer;
+                                break;
                             }
                         }
+                        Ok(None) | Err(_) => {
+                            // Stream ended or went idle.
+                            // Dropping `tx` here closes the channel
+                            // and signals end-of-feed to the consumer.
+                            break;
+                        }
                     }
-                    Ok(None) | Err(_) => {
-                        // Stream ended OR went idle. Flush
-                        // anything pending in the current batch.
-                        if !batch.is_empty() {
-                            state = state
-                                .replay_events(&self.dust_key, batch.iter())
-                                .map_err(|e| {
-                                    DustError::Replay(format!("replay: {e}"))
-                                })?;
-                            events_processed += batch.len();
-                            self.persist(&state, last_id).await?;
+                }
+            });
+
+            // 4. Persist worker. Lives on a dedicated blocking
+            //    thread for the duration of the sync. Pulls
+            //    pre-serialized snapshots off `persist_rx` via
+            //    `blocking_recv` (legal inside `spawn_blocking`)
+            //    and commits each to redb. Decoupling persist
+            //    from fold lets the fold worker immediately start
+            //    `replay_events` on the next batch as soon as it
+            //    finishes the current one, instead of waiting for
+            //    the redb txn to commit.
+            //
+            //    Errors flow back via `persist_err_tx`/`_rx` —
+            //    the outer try_stream selects on it after every
+            //    batch so a fatal disk error aborts the whole
+            //    sync instead of silently dropping work.
+            #[derive(Debug)]
+            struct PersistJob {
+                last_id: i64,
+                state_bytes: Vec<u8>,
+            }
+            let (persist_tx, persist_rx) =
+                tokio::sync::mpsc::channel::<PersistJob>(PERSIST_QUEUE_CAPACITY);
+            let (persist_err_tx, mut persist_err_rx) =
+                tokio::sync::mpsc::channel::<DustError>(1);
+            let persist_handle = tokio::task::spawn_blocking({
+                let store = self.store.clone();
+                let network = self.network;
+                let persist_err_tx = persist_err_tx.clone();
+                let mut persist_rx = persist_rx;
+                move || {
+                    // blocking_recv is the sync equivalent of
+                    // recv().await — designed for exactly this
+                    // case (async channel, sync consumer thread).
+                    while let Some(job) = persist_rx.blocking_recv() {
+                        let snap = DustSyncSnapshot {
+                            last_id: job.last_id,
+                            state_bytes: job.state_bytes,
+                            updated_at: now_ms(),
+                        };
+                        if let Err(e) = store.put_dust_sync(network, &snap) {
+                            // First persist failure aborts the
+                            // pipeline. Capacity-1 channel so
+                            // subsequent errors silently drop;
+                            // we don't need the full history.
+                            let _ = persist_err_tx.blocking_send(
+                                DustError::Replay(format!("store put: {e}")),
+                            );
+                            return;
                         }
-                        // Three exit cases:
-                        //  (a) we saw at least one event during
-                        //      this run → normal completion;
-                        //  (b) we resumed from a populated cache
-                        //      and the indexer is silent → that's
-                        //      the "you're already at tip"
-                        //      signal, not an error;
-                        //  (c) fresh wallet, no cache, and the
-                        //      indexer never sent anything →
-                        //      genuinely bad, surface it.
-                        if target_max.is_some() {
-                            yield SyncProgress {
-                                current_id: last_id,
-                                max_id: target_max.unwrap_or(-1),
-                                events_processed,
-                            };
-                            break 'outer;
-                        }
-                        if started_with_cache {
-                            // No new events; cached state is current.
-                            yield SyncProgress {
-                                current_id: starting_last_id,
-                                max_id: starting_last_id,
-                                events_processed: 0,
-                            };
-                            break 'outer;
-                        }
-                        Err(DustError::StreamClosedEarly)?;
                     }
+                }
+            });
+
+            // 5. Fold consumer. Pull batches from `rx` (WS feed),
+            //    move them into `spawn_blocking` for the CPU-bound
+            //    `replay_events` + `tagged_serialize`, then hand
+            //    the serialized bytes off to `persist_tx`. The
+            //    fold worker thread is freed to start the next
+            //    batch as soon as serialization finishes; the
+            //    persist worker thread writes redb asynchronously.
+            let mut events_processed: usize = 0;
+            let mut pulled: Vec<Result<DecodedEvent, DustError>> =
+                Vec::with_capacity(PERSIST_EVERY_N_EVENTS);
+            let mut latest_max: i64 = -1;
+            let mut saw_any_event = false;
+
+            loop {
+                // Bail early if the persist worker already
+                // surfaced an error from a prior batch.
+                if let Ok(e) = persist_err_rx.try_recv() {
+                    Err(e)?;
+                }
+                pulled.clear();
+                let n = rx.recv_many(&mut pulled, PERSIST_EVERY_N_EVENTS).await;
+                if n == 0 {
+                    // Channel closed → producer is done.
+                    break;
+                }
+                saw_any_event = true;
+
+                // Unwrap Results in order; first Err aborts the
+                // whole sync (propagates out of `try_stream!`).
+                let mut events: Vec<DecodedEvent> = Vec::with_capacity(n);
+                for r in pulled.drain(..) {
+                    events.push(r?);
+                }
+                let batch_last_id =
+                    events.last().map(|d| d.id).unwrap_or(last_id);
+                latest_max = events.last().map(|d| d.max_id).unwrap_or(latest_max);
+
+                let prev_state = state_holder
+                    .take()
+                    .expect("state_holder always Some between consume cycles");
+                let dust_key = self.dust_key.clone();
+
+                // CPU-bound stage on the blocking pool: replay +
+                // serialise. Returns the new state PLUS the
+                // already-serialized bytes ready for persist.
+                // Doing the serialization HERE (not in the persist
+                // worker) keeps the persist worker focused on
+                // pure disk I/O — no CPU on the I/O thread.
+                let join_outcome = tokio::task::spawn_blocking(
+                    move || -> Result<(DustLocalState<DefaultDB>, Vec<u8>), DustError> {
+                        let next = prev_state
+                            .replay_events(
+                                &dust_key,
+                                events.iter().map(|d| &d.event),
+                            )
+                            .map_err(|e| DustError::Replay(format!("replay: {e}")))?;
+                        let mut bytes = Vec::new();
+                        tagged_serialize(&next, &mut bytes).map_err(|e| {
+                            DustError::Replay(format!("serialize state: {e}"))
+                        })?;
+                        Ok((next, bytes))
+                    },
+                )
+                .await
+                .map_err(|e| DustError::Replay(format!("blocking join: {e}")))?;
+
+                let (new_state, state_bytes) = join_outcome?;
+                state_holder = Some(new_state);
+                last_id = batch_last_id;
+                events_processed += n;
+
+                // Hand off to the persist worker. If the worker
+                // is keeping up (the usual case), this returns
+                // immediately. If it's behind by
+                // `PERSIST_QUEUE_CAPACITY` jobs, this awaits — a
+                // proper back-pressure signal that gives the
+                // disk time to drain. The `send` only fails if
+                // the persist task panicked (channel closed by
+                // drop); we surface that as a Replay error.
+                persist_tx
+                    .send(PersistJob {
+                        last_id: batch_last_id,
+                        state_bytes,
+                    })
+                    .await
+                    .map_err(|_| {
+                        DustError::Replay(
+                            "persist worker dropped its receiver".into(),
+                        )
+                    })?;
+
+                yield SyncProgress {
+                    current_id: last_id,
+                    max_id: latest_max,
+                    events_processed,
+                };
+            }
+
+            // 6. Drain phase. Close the persist channel, wait for
+            //    the worker to finish writing any queued jobs,
+            //    then surface a late error if one happened during
+            //    the final drain.
+            drop(persist_tx);
+            let _ = persist_handle.await;
+            if let Ok(e) = persist_err_rx.try_recv() {
+                Err(e)?;
+            }
+
+            // Producer should be done by now (its channel close
+            // is what woke us up to exit the fold loop). Join it
+            // to surface any panic; ignore Ok/cancel.
+            let _ = producer.await;
+
+            // Termination signalling — three cases:
+            //  (a) at least one event in this run → normal
+            //      completion; final SyncProgress already emitted
+            //      inside the loop.
+            //  (b) zero events + resumed from cache → "already
+            //      at tip", emit a final flat progress.
+            //  (c) fresh wallet, zero events ever → indexer
+            //      probably unreachable; surface as
+            //      StreamClosedEarly.
+            if !saw_any_event {
+                if started_with_cache {
+                    yield SyncProgress {
+                        current_id: starting_last_id,
+                        max_id: starting_last_id,
+                        events_processed: 0,
+                    };
+                } else {
+                    Err(DustError::StreamClosedEarly)?;
                 }
             }
 
@@ -300,25 +470,6 @@ impl DustSyncer {
                 "dust syncer caught up"
             );
         }
-    }
-
-    async fn persist(
-        &self,
-        state: &DustLocalState<DefaultDB>,
-        last_id: i64,
-    ) -> Result<(), DustError> {
-        let mut bytes = Vec::new();
-        tagged_serialize(state, &mut bytes)
-            .map_err(|e| DustError::Replay(format!("serialize state: {e}")))?;
-        let snap = DustSyncSnapshot {
-            last_id,
-            state_bytes: bytes,
-            updated_at: now_ms(),
-        };
-        self.store
-            .put_dust_sync(self.network, &snap)
-            .map_err(|e| DustError::Replay(format!("store put: {e}")))?;
-        Ok(())
     }
 }
 
