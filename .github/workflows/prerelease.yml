@@ -2,6 +2,11 @@ name: Publish Ledger Release
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Overwrite existing GH Packages versions (delete-then-republish). Public npm cannot be overwritten and will error."
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -40,7 +45,7 @@ jobs:
         with:
           always-auth: true
           registry-url: https://npm.pkg.github.com/
-          scope: '@midnight-ntwrk'
+          scope: '@midnightntwrk'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
@@ -64,10 +69,10 @@ jobs:
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
             cd "$project"
-            VERSION=$((grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml)| awk -F '"' '{print $2}')
+            VERSION=$( (grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml) | awk -F '"' '{print $2}')
             echo "$project version: $VERSION"
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
+            echo "$VAR_NAME=$VERSION" >> "$GITHUB_ENV"
             cd ..
             done
 
@@ -79,9 +84,7 @@ jobs:
           for project in "${projects[@]}"; do
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
             VERSION=${!VAR_NAME}
-            SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
             TAG_NAME="${project}-${VERSION}"
-            SHORT_TAG_NAME="${project}-${SHORT_VERSION}"
 
             # Check if the long version tag exists on the remote
             if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
@@ -97,12 +100,14 @@ jobs:
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # Use wasm version, as this will include pre-release tags
-          VAR_NAME=$(echo "LEDGER_WASM_VERSION")
-          VERSION=${!VAR_NAME}
+          VERSION="${LEDGER_WASM_VERSION}"
           EPOCH_VERSION=$(grep '^name =' ledger/Cargo.toml | awk -F '"' '{print $2}' | grep -- -v | awk -F -v '{print $2}')
           TAG_NAME="ledger-${EPOCH_VERSION}.${VERSION}"
 
@@ -127,8 +132,14 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-v"${EPOCH_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger-v"${EPOCH_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
+            TGZ="midnight-ledger-v${EPOCH_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
+            PKG="@midnightntwrk/ledger-v${EPOCH_VERSION}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             cd ../..
 
             # Create and push the new tag
@@ -140,12 +151,14 @@ jobs:
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # Use wasm version, as this will include pre-release tags
-          VAR_NAME=$(echo "ONCHAIN_RUNTIME_WASM_VERSION")
-          VERSION=${!VAR_NAME}
+          VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
 
@@ -170,8 +183,14 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-onchain-runtime-v"${SHORT_VERSION}"-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/onchain-runtime-v"${SHORT_VERSION}"@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
+            PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
             cd ../..
 
             # Create and push the new tag
@@ -183,11 +202,13 @@ jobs:
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ZKIR_VERSION")
-          VERSION=${!VAR_NAME}
+          VERSION="${ZKIR_VERSION}"
           TAG_NAME="zkir-${VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
 
@@ -212,8 +233,14 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-zkir-v"${SHORT_VERSION}"-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/zkir-v"${SHORT_VERSION}"@${{ env.ZKIR_WASM_VERSION }}
+            TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
+            PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
             cd ../..
 
             # Create and push the new tag
