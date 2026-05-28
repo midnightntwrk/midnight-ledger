@@ -77,7 +77,7 @@ mod tests {
 
     /// Compile-only typecheck. Real exercise: the live wallet
     /// pipeline test once the integration test for "load
-    /// addVerificationMethod" is wired.
+    /// setVerificationMethod" is wired.
     #[test]
     fn signature_typechecks() {
         fn _check<R: Rng + CryptoRng>() {

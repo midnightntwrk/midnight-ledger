@@ -52,8 +52,8 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
     (ed, jb)
 }
 
-/// Compose the JSON arg the `addVerificationMethod` Compact circuit
-/// expects. The schema lives in `~/iohk/midnight-identity-workspace/midnight-did/contract/dist/did.compact`
+/// Compose the JSON arg the `setVerificationMethod` Compact circuit
+/// expects. The schema lives in `~/iohk/midnight-did/packages/contract/src/did.compact`
 /// (and its compiled JS view at
 /// `packages/contract/dist/managed/did/contract/index.js`):
 ///
@@ -64,27 +64,23 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 ///     publicKeyJwk: PublicKeyJwk
 /// };
 /// export struct PublicKeyJwk {
-///     kty: KeyType, crv: CurveType, x: Bytes<32>, y: Bytes<32>
+///     kty: KeyType, crv: CurveType, x: Opaque<"string">, y: Opaque<"string">
 /// }
 /// export enum VerificationMethodType { Undefined, JsonWebKey }
 /// export enum KeyType { EC, RSA, oct, OKP }
 /// export enum CurveType { Ed25519, X25519, Jubjub, P256, Secp256k1 }
 /// ```
 ///
-/// The 2026-05-27 upstream refactor switched `x`/`y` from `Field`
-/// (BLS12-381 scalar, ~254.85 bits) to `Bytes<32>` (a 32-byte
-/// fixed-length octet string). That kills the previous Ed25519
-/// Field-overflow problem (a 32-byte compressed pubkey frequently
-/// exceeded Fr modulus) and the lossy 30-byte clamp it forced — we
-/// now round-trip the full pubkey losslessly. The same refactor
-/// expanded `CurveType` to add `X25519` and `Secp256k1`, which
-/// **shifted Jubjub's enum tag from 1 to 2 and P256's from 2 to 3**;
-/// don't reorder the match arms blindly without consulting the
-/// compiled enum.
+/// 2026-05-28 schema refresh (`feat!: Redesign DID verification
+/// method storage`): `x` / `y` reverted from `Bytes<32>` back to
+/// `Opaque<"string">`, carrying the JWK base64url coordinates
+/// directly. Sending them as `{"$bytes": "0x..."}` no longer
+/// applies — the harness's `reviveBigints` would convert them to
+/// a `Uint8Array`, but the contract now expects a JS string. The
+/// `CurveType` enum keeps its post-2026-05-27 ordering: Jubjub at
+/// tag 2, P256 at tag 3.
 ///
-/// Wire format the harness's `prepareUnprovenCallTx` accepts (see
-/// `tests/js-harness/harness.mjs::reviveBigints` — the `$bytes` tag
-/// is what triggers the `Uint8Array(32)` construction):
+/// Wire format the harness's `prepareUnprovenCallTx` accepts:
 ///
 /// ```json
 /// {
@@ -93,28 +89,24 @@ pub fn derive_keys(seed: &[u8; 32]) -> ([u8; 32], [u8; 32]) {
 ///   "publicKeyJwk": {
 ///     "kty": <enum tag, 0..=3>,
 ///     "crv": <enum tag, 0..=4>,
-///     "x":   { "$bytes": "0x<64-hex-chars>" },
-///     "y":   { "$bytes": "0x<64-hex-chars>" }
+///     "x":   "<base64url-coord-string>",
+///     "y":   "<base64url-coord-string>"
 ///   }
 /// }
 /// ```
 ///
 /// For Ed25519 keys the secret store returns
 /// `{ kty: OKP, crv: Ed25519, x: base64url(pub_32B) }` with no `y`;
-/// we send the full 32-byte compressed pubkey as `x` and 32 zero
-/// bytes as `y` — matches the upstream's `publicKeyJwkToLedger`
-/// fallback (`y: jwk.y ? decodeBase64UrlBytes32(jwk.y) : new
-/// Uint8Array(32)`). Jubjub keys ship both coordinates as 32-byte
-/// big-endian Fr-encodings (see
-/// `secret_storage::curve_support::fr_to_be_32`); P-256 same shape.
+/// we send the full 32-byte compressed pubkey's base64url as `x`
+/// and an empty string as `y` — matches the upstream's
+/// `publicKeyJwkToLedger` fallback (`y: jwk.y ?? ""`). Jubjub /
+/// P-256 ship both coordinates as their JWK base64url strings.
 fn build_verification_method_json(
     did: &DidId,
     fragment: &str,
     jwk: &PublicJwk,
 ) -> serde_json::Value {
     use crate::secret_storage::{MidnightCurve, MidnightKeyType};
-    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-    use base64::Engine;
 
     // .compact: `enum KeyType { EC, RSA, oct, OKP }` (0-indexed).
     // Our crate's MidnightKeyType has only OKP + EC, in OKP-first
@@ -138,40 +130,6 @@ fn build_verification_method_json(
         // Secp256k1 = 4 (not in our enum)
     };
 
-    // base64url → 32-byte buffer → 0x<64hex>. The contract expects
-    // exactly 32 bytes; pad with leading zeros if the input is
-    // shorter, truncate (keep the FIRST 32 bytes, big-endian) if
-    // longer. For Ed25519 the JWK `x` is exactly 32 bytes already.
-    // For Jubjub coordinates `fr_to_be_32` produces exactly 32. We
-    // assert via the contract's input checker if the output is the
-    // wrong width; an oversized input becomes a `Bytes<32>` of the
-    // truncated prefix which will fail the next assertions on read
-    // (good — we'd rather fail loudly than silently corrupt).
-    fn to_bytes32_hex(b64url: &str) -> String {
-        let mut buf = [0u8; 32];
-        if let Ok(bytes) = URL_SAFE_NO_PAD.decode(b64url.as_bytes()) {
-            // Big-endian: right-align if shorter than 32 bytes (so a
-            // small Fr value stays small), copy first 32 if longer.
-            if bytes.len() <= 32 {
-                let offset = 32 - bytes.len();
-                buf[offset..].copy_from_slice(&bytes);
-            } else {
-                buf.copy_from_slice(&bytes[..32]);
-            }
-        }
-        format!("0x{}", hex::encode(buf))
-    }
-
-    let x_hex = to_bytes32_hex(&jwk.x);
-    let y_hex = jwk
-        .y
-        .as_deref()
-        .map(to_bytes32_hex)
-        // Ed25519's JWK has no `y`; the contract slot must still be
-        // 32 bytes, so we ship 32 zero bytes. Matches the upstream
-        // `decodeBase64UrlBytes32` fallback in `publicKeyJwkToLedger`.
-        .unwrap_or_else(|| format!("0x{}", hex::encode([0u8; 32])));
-
     // Canonical methodId per the upstream's
     // `normalizeBoundFragmentId`
     // (`midnight-did/packages/domain/src/ledger-utils.ts`): a
@@ -179,20 +137,28 @@ fn build_verification_method_json(
     // (`did:midnight:...#fragment`) is also accepted by the
     // normalizer when the subject matches, but the on-chain
     // contract stores the value normalized form, and
-    // `addVerificationMethodRelation` later looks up the VM by
+    // `setVerificationMethodRelation` later looks up the VM by
     // `#fragment` — passing the full URL there fails with "failed
     // assert: Verification method does not exist" because string
     // equality misses the stored short form.
     let _ = did; // kept for signature parity; the relation step
                  // does its own subject sanity-check.
+
+    // `x` / `y` are passed verbatim as the JWK base64url strings.
+    // No `$bytes` wrapper — that was needed only while the schema
+    // briefly stored the coordinates as `Bytes<32>` (2026-05-27).
+    // For Ed25519 the JWK omits `y`; we send the empty string,
+    // matching the upstream `publicKeyJwkToLedger` fallback
+    // (`y: jwk.y ?? ""`).
+    let y_str: String = jwk.y.clone().unwrap_or_default();
     serde_json::json!({
         "id": format!("#{}", fragment),
         "typ": 1,
         "publicKeyJwk": {
             "kty": kty_tag,
             "crv": crv_tag,
-            "x": { "$bytes": x_hex },
-            "y": { "$bytes": y_hex },
+            "x": jwk.x.clone(),
+            "y": y_str,
         }
     })
 }
@@ -264,9 +230,9 @@ pub async fn bootstrap_did_with_keys(
     //     Surfaces a clear error if either load fails before we
     //     spend time on the ContractCalls.
     wallet
-        .load_did_circuit_awaitable(did.clone(), "addVerificationMethod".to_string(), 0)
+        .load_did_circuit_awaitable(did.clone(), "setVerificationMethod".to_string(), 0)
         .await
-        .map_err(|e| BootstrapError::CreateDid(format!("load addVerificationMethod VK: {e}")))?;
+        .map_err(|e| BootstrapError::CreateDid(format!("load setVerificationMethod VK: {e}")))?;
     // The indexer needs to ingest the counter bump from the first
     // MaintenanceUpdate before the second one is accepted — without
     // this wait, the second load lands with `counter: 1` but the
@@ -278,13 +244,13 @@ pub async fn bootstrap_did_with_keys(
     wallet
         .load_did_circuit_awaitable(
             did.clone(),
-            "addVerificationMethodRelation".to_string(),
+            "setVerificationMethodRelation".to_string(),
             1,
         )
         .await
         .map_err(|e| {
             BootstrapError::CreateDid(format!(
-                "load addVerificationMethodRelation VK: {e}"
+                "load setVerificationMethodRelation VK: {e}"
             ))
         })?;
     // Same wait before the first ContractCall — that one bumps the
@@ -341,7 +307,7 @@ pub async fn bootstrap_did_with_keys(
     //    whatever the indexer's current view of the contract state
     //    is; if it hasn't ingested the prior tx yet, the next
     //    circuit's input assertions look at a stale state and fail
-    //    (e.g. `addVerificationMethodRelation` requires the VM to
+    //    (e.g. `setVerificationMethodRelation` requires the VM to
     //    already be in `verificationMethods`).
     wallet
         .add_verification_method(&did, &ed25519_ref, ed_vm_json, controller_sk)
@@ -377,7 +343,7 @@ pub async fn bootstrap_did_with_keys(
         .map_err(|e| BootstrapError::AttachAssertion(e.to_string()))?;
 
     // 6. Verify the resolved doc carries both relations. The last
-    //    `addVerificationMethodRelation` tx may not have surfaced
+    //    `setVerificationMethodRelation` tx may not have surfaced
     //    in the indexer yet — wait for it before the assertion or
     //    we'd fail with `MissingRelation("assertionMethod")` on a
     //    successful bootstrap that's just one block behind.
@@ -509,7 +475,7 @@ async fn wait_for_counter(
 
 /// Poll `Wallet::resolve_did` until the document's
 /// `verification_method` vec reaches `target` entries (or 30 s).
-/// Used after each `addVerificationMethod` so the next call's
+/// Used after each `setVerificationMethod` so the next call's
 /// `prepareUnprovenCallTx` sees the freshly-inserted VM in the
 /// indexer's view of the contract state.
 async fn wait_for_vm_count(
@@ -555,7 +521,7 @@ async fn wait_for_vm_count(
 
 /// Poll `Wallet::resolve_did` until the `authentication` relation
 /// vec reaches `target` entries (or 30 s). Used after the first
-/// `addVerificationMethodRelation` for the Ed25519 key so the
+/// `setVerificationMethodRelation` for the Ed25519 key so the
 /// downstream verifier flows can see the relation populated.
 async fn wait_for_authentication_count(
     wallet: &Wallet,
@@ -600,7 +566,7 @@ async fn wait_for_authentication_count(
 
 /// Poll `Wallet::resolve_did` until the `assertion_method` relation
 /// vec reaches `target` entries (or 30 s). Used after the final
-/// `addVerificationMethodRelation` for the Jubjub key so the
+/// `setVerificationMethodRelation` for the Jubjub key so the
 /// bootstrap success assertion sees the relation populated.
 async fn wait_for_assertion_count(
     wallet: &Wallet,

@@ -23,11 +23,14 @@
 //! The state tree's shape is the dual of `did/contract.rs`'s
 //! decoder — root is `StateValue::Array([constants, mutable])`,
 //! constants is `[contractVersion, controllerPublicKey]` and
-//! mutable is the 15-entry sequence
+//! mutable is the 16-entry sequence
 //! `[id, alsoKnownAs, version, created, updated, deactivated,
-//! active, operationCount, verificationMethods, +5 relations,
-//! services]` whose indices we already extracted from the
-//! ledger accessors in `index.js`.
+//! active, operationCount, verificationMethods,
+//! schnorrJubjubVerificationMethods, +5 relations, services]`
+//! whose indices we already extracted from the ledger accessors
+//! in `index.js`. The 2026-05-28 schema refresh inserted
+//! `schnorrJubjubVerificationMethods` at index 9, shifting every
+//! subsequent field up by one.
 //!
 //! `ContractDeploy::address()` is `SHA-256(tagged_serialize(self))`,
 //! so given a stable `(initial_state, nonce)` pair the new DID's
@@ -59,18 +62,23 @@ use crate::network::Network;
 /// The 11 entry-point names did.compact exposes. Order taken from
 /// `Contract.initialState`'s `setOperation` calls
 /// (`midnight-did-contract/.../contract/index.js`).
+///
+/// 2026-05-28 schema refresh: the old `add* / update* / remove*`
+/// triples collapsed into `set*(value, mutation)` circuits, and
+/// the SchnorrJubjub VM map gained its own four circuits +
+/// `rotateControllerKey`.
 pub(crate) const DID_ENTRY_POINTS: &[&str] = &[
-    "addAlsoKnownAs",
-    "removeAlsoKnownAs",
-    "addVerificationMethod",
-    "updateVerificationMethod",
+    "setAlsoKnownAs",
+    "setVerificationMethod",
     "removeVerificationMethod",
-    "addVerificationMethodRelation",
-    "removeVerificationMethodRelation",
-    "addService",
-    "updateService",
+    "setSchnorrJubjubVerificationMethod",
+    "removeSchnorrJubjubVerificationMethod",
+    "verifySchnorrJubjubDigestSignature",
+    "setVerificationMethodRelation",
+    "setService",
     "removeService",
     "deactivate",
+    "rotateControllerKey",
 ];
 
 /// Compose the initial `ContractState` produced by `did.compact`'s
@@ -112,6 +120,10 @@ pub(crate) fn compose_initial_state(
         // operationCount: Counter = 0
         cell_u64(0),
         // verificationMethods: Map<string, VerificationMethod>
+        empty_map(),
+        // schnorrJubjubVerificationMethods: Map<string, SchnorrJubjubVerificationMethod>
+        // (added in the 2026-05-28 schema refresh; shifted all
+        // subsequent indices up by one).
         empty_map(),
         // 5 relation Sets
         empty_map(),
@@ -338,7 +350,7 @@ mod tests {
         assert!(decoded.active, "active");
         assert!(!decoded.deactivated, "deactivated");
         assert_eq!(decoded.operation_count, 0, "operationCount");
-        assert_eq!(decoded.mutable_field_count, 15, "mutable field count");
+        assert_eq!(decoded.mutable_field_count, 16, "mutable field count");
     }
 
     #[test]

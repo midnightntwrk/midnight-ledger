@@ -16,6 +16,14 @@
 //! `contracts/midnight-did/did.compact` for documentation — it's
 //! the canonical reference for state-field ordering used by
 //! `wallet-core::did::contract`'s decoder.
+//!
+//! 2026-05-28 schema refresh: the upstream `feat!: Redesign DID
+//! verification method storage` commit collapsed the old `add* /
+//! update* / remove*` triples into unified `set*(value, mutation)`
+//! circuits parameterised by `MapMutation` / `SetMutation` enums.
+//! It also added a separate `schnorrJubjubVerificationMethods` map
+//! (+ the four `*SchnorrJubjub*` / `rotateControllerKey` circuits).
+//! The bundled 11 entry points reflect the new shape.
 
 #![allow(dead_code)] // surface lights up when Wallet::create_did wires through
 
@@ -49,24 +57,30 @@ macro_rules! full_bundle {
     };
 }
 
-pub(crate) const ADD_VERIFICATION_METHOD: CircuitArtifacts =
-    full_bundle!("addVerificationMethod");
+/// Full artifact bundle for `setVerificationMethod` — the canonical
+/// "add/update a VerificationMethod" circuit post-2026-05-28. The
+/// upstream `midnight-did-manager-service` still derives its
+/// controller secret from this prover key's SHA-256
+/// (`upstream_demo_controller_secret`), so it stays exposed as a
+/// named constant for that derivation + the tests below.
+pub(crate) const SET_VERIFICATION_METHOD: CircuitArtifacts =
+    full_bundle!("setVerificationMethod");
 
 /// Full-bundle registry for every DID circuit (11 entries).
 /// Order matches `CIRCUIT_NAMES`. `Wallet::call_did_circuit`'s
 /// prover step looks the right entry up by name.
 pub(crate) const CIRCUIT_ARTIFACTS: &[CircuitArtifacts] = &[
-    full_bundle!("addAlsoKnownAs"),
-    full_bundle!("addService"),
-    full_bundle!("addVerificationMethod"),
-    full_bundle!("addVerificationMethodRelation"),
     full_bundle!("deactivate"),
-    full_bundle!("removeAlsoKnownAs"),
+    full_bundle!("removeSchnorrJubjubVerificationMethod"),
     full_bundle!("removeService"),
     full_bundle!("removeVerificationMethod"),
-    full_bundle!("removeVerificationMethodRelation"),
-    full_bundle!("updateService"),
-    full_bundle!("updateVerificationMethod"),
+    full_bundle!("rotateControllerKey"),
+    full_bundle!("setAlsoKnownAs"),
+    full_bundle!("setSchnorrJubjubVerificationMethod"),
+    full_bundle!("setService"),
+    full_bundle!("setVerificationMethod"),
+    full_bundle!("setVerificationMethodRelation"),
+    full_bundle!("verifySchnorrJubjubDigestSignature"),
 ];
 
 /// Look up the full artifact bundle for `name`. Returns `None`
@@ -81,28 +95,14 @@ pub(crate) fn circuit_artifacts(name: &str) -> Option<&'static CircuitArtifacts>
 /// [`verifier_key_bytes`] to pick the right entry.
 pub(crate) const VERIFIER_KEYS: &[(&str, &[u8])] = &[
     (
-        "addAlsoKnownAs",
-        include_bytes!("../../contracts/midnight-did/addAlsoKnownAs.verifier"),
-    ),
-    (
-        "addService",
-        include_bytes!("../../contracts/midnight-did/addService.verifier"),
-    ),
-    (
-        "addVerificationMethod",
-        include_bytes!("../../contracts/midnight-did/addVerificationMethod.verifier"),
-    ),
-    (
-        "addVerificationMethodRelation",
-        include_bytes!("../../contracts/midnight-did/addVerificationMethodRelation.verifier"),
-    ),
-    (
         "deactivate",
         include_bytes!("../../contracts/midnight-did/deactivate.verifier"),
     ),
     (
-        "removeAlsoKnownAs",
-        include_bytes!("../../contracts/midnight-did/removeAlsoKnownAs.verifier"),
+        "removeSchnorrJubjubVerificationMethod",
+        include_bytes!(
+            "../../contracts/midnight-did/removeSchnorrJubjubVerificationMethod.verifier"
+        ),
     ),
     (
         "removeService",
@@ -113,32 +113,52 @@ pub(crate) const VERIFIER_KEYS: &[(&str, &[u8])] = &[
         include_bytes!("../../contracts/midnight-did/removeVerificationMethod.verifier"),
     ),
     (
-        "removeVerificationMethodRelation",
-        include_bytes!("../../contracts/midnight-did/removeVerificationMethodRelation.verifier"),
+        "rotateControllerKey",
+        include_bytes!("../../contracts/midnight-did/rotateControllerKey.verifier"),
     ),
     (
-        "updateService",
-        include_bytes!("../../contracts/midnight-did/updateService.verifier"),
+        "setAlsoKnownAs",
+        include_bytes!("../../contracts/midnight-did/setAlsoKnownAs.verifier"),
     ),
     (
-        "updateVerificationMethod",
-        include_bytes!("../../contracts/midnight-did/updateVerificationMethod.verifier"),
+        "setSchnorrJubjubVerificationMethod",
+        include_bytes!(
+            "../../contracts/midnight-did/setSchnorrJubjubVerificationMethod.verifier"
+        ),
+    ),
+    (
+        "setService",
+        include_bytes!("../../contracts/midnight-did/setService.verifier"),
+    ),
+    (
+        "setVerificationMethod",
+        include_bytes!("../../contracts/midnight-did/setVerificationMethod.verifier"),
+    ),
+    (
+        "setVerificationMethodRelation",
+        include_bytes!("../../contracts/midnight-did/setVerificationMethodRelation.verifier"),
+    ),
+    (
+        "verifySchnorrJubjubDigestSignature",
+        include_bytes!(
+            "../../contracts/midnight-did/verifySchnorrJubjubDigestSignature.verifier"
+        ),
     ),
 ];
 
 /// All circuit entry-point names, in registry order.
 pub(crate) const CIRCUIT_NAMES: &[&str] = &[
-    "addAlsoKnownAs",
-    "addService",
-    "addVerificationMethod",
-    "addVerificationMethodRelation",
     "deactivate",
-    "removeAlsoKnownAs",
+    "removeSchnorrJubjubVerificationMethod",
     "removeService",
     "removeVerificationMethod",
-    "removeVerificationMethodRelation",
-    "updateService",
-    "updateVerificationMethod",
+    "rotateControllerKey",
+    "setAlsoKnownAs",
+    "setSchnorrJubjubVerificationMethod",
+    "setService",
+    "setVerificationMethod",
+    "setVerificationMethodRelation",
+    "verifySchnorrJubjubDigestSignature",
 ];
 
 /// Look up the raw verifier bytes for `name`. Returns `None` if
@@ -180,16 +200,16 @@ mod tests {
     use super::*;
 
     #[test]
-    fn add_verification_method_artifacts_present() {
-        assert!(!ADD_VERIFICATION_METHOD.prover_key.is_empty());
-        assert!(!ADD_VERIFICATION_METHOD.verifier_key.is_empty());
-        assert!(!ADD_VERIFICATION_METHOD.bzkir.is_empty());
-        assert!(!ADD_VERIFICATION_METHOD.zkir_json.is_empty());
+    fn set_verification_method_artifacts_present() {
+        assert!(!SET_VERIFICATION_METHOD.prover_key.is_empty());
+        assert!(!SET_VERIFICATION_METHOD.verifier_key.is_empty());
+        assert!(!SET_VERIFICATION_METHOD.bzkir.is_empty());
+        assert!(!SET_VERIFICATION_METHOD.zkir_json.is_empty());
     }
 
     #[test]
     fn zkir_json_is_valid_json() {
-        let s = std::str::from_utf8(ADD_VERIFICATION_METHOD.zkir_json).expect("utf-8");
+        let s = std::str::from_utf8(SET_VERIFICATION_METHOD.zkir_json).expect("utf-8");
         let trimmed = s.trim();
         assert!(trimmed.starts_with('{'));
         assert!(trimmed.ends_with('}'));
@@ -214,11 +234,11 @@ mod tests {
     }
 
     #[test]
-    fn verifier_key_bytes_match_add_verification_method_full_bundle() {
+    fn verifier_key_bytes_match_set_verification_method_full_bundle() {
         // The registry lookup must agree with the full-bundle
         // constant (otherwise we'd have two sources of truth).
-        let from_registry = verifier_key_bytes("addVerificationMethod").expect("hit");
-        assert_eq!(from_registry, ADD_VERIFICATION_METHOD.verifier_key);
+        let from_registry = verifier_key_bytes("setVerificationMethod").expect("hit");
+        assert_eq!(from_registry, SET_VERIFICATION_METHOD.verifier_key);
     }
 
     #[test]

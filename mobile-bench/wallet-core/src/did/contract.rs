@@ -14,18 +14,26 @@
 //!   [0]    contractVersion        : Cell<bigint>
 //!   [1]    controllerPublicKey    : Cell<Bytes32>
 //! root[1]  mutable
-//!   [0]    id                     : Cell<Bytes32>
-//!   [1]    alsoKnownAs            : Map<string, ()>            (Set)
-//!   [2]    version                : Cell<bigint>
-//!   [3]    created                : Cell<bigint>
-//!   [4]    updated                : Cell<bigint>
-//!   [5]    deactivated            : Cell<bool>
-//!   [6]    active                 : Cell<bool>
-//!   [7]    operationCount         : Cell<bigint>
-//!   [8]    verificationMethods    : Map<string, VerificationMethod>
-//!   [9..13] relations             : Map<string, ()> ×5
-//!   [14]   services               : Map<string, Service>
+//!   [0]    id                                : Cell<Bytes32>
+//!   [1]    alsoKnownAs                       : Map<string, ()>            (Set)
+//!   [2]    version                           : Cell<bigint>
+//!   [3]    created                           : Cell<bigint>
+//!   [4]    updated                           : Cell<bigint>
+//!   [5]    deactivated                       : Cell<bool>
+//!   [6]    active                            : Cell<bool>
+//!   [7]    operationCount                    : Cell<bigint>
+//!   [8]    verificationMethods               : Map<string, VerificationMethod>
+//!   [9]    schnorrJubjubVerificationMethods  : Map<string, SchnorrJubjubVerificationMethod>
+//!   [10..14] relations                       : Map<string, ()> ×5
+//!   [15]   services                          : Map<string, Service>
 //! ```
+//!
+//! The 2026-05-28 `feat!: Redesign DID verification method storage`
+//! refresh inserted `schnorrJubjubVerificationMethods` at index 9,
+//! shifting every subsequent index up by one. The schnorrJubjub map
+//! is decoded as a stub (length surfaced via `mutable_field_count`,
+//! contents ignored) — Phase 1 still pushes Jubjub VMs into the
+//! plain `verificationMethods` JWK map.
 //!
 //! Phase 2b (this commit) decodes the *scalar* `Cell` fields:
 //! contractVersion, controllerPublicKey, id, version, created,
@@ -156,12 +164,21 @@ pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState,
         mutable_field_count: mutable.len() as usize,
         also_known_as: decode_string_set(mutable, 1, "alsoKnownAs")?,
         verification_methods: decode_vm_map(mutable, 8, "verificationMethods")?,
-        authentication: decode_string_set(mutable, 9, "authenticationRelation")?,
-        assertion_method: decode_string_set(mutable, 10, "assertionMethodRelation")?,
-        key_agreement: decode_string_set(mutable, 11, "keyAgreementRelation")?,
-        capability_invocation: decode_string_set(mutable, 12, "capabilityInvocationRelation")?,
-        capability_delegation: decode_string_set(mutable, 13, "capabilityDelegationRelation")?,
-        services: decode_service_map(mutable, 14, "services")?,
+        // Index 9 is `schnorrJubjubVerificationMethods` — added in
+        // the 2026-05-28 schema refresh. We don't surface its
+        // entries yet (Phase 1 still uses the plain JWK map), but
+        // we still walk the slot to confirm it's a `Map` so a
+        // schema drift fails loudly here rather than silently
+        // mis-aligning the relation/services decoders below.
+        authentication: {
+            let _stub = map_at(mutable, 9, "schnorrJubjubVerificationMethods")?;
+            decode_string_set(mutable, 10, "authenticationRelation")?
+        },
+        assertion_method: decode_string_set(mutable, 11, "assertionMethodRelation")?,
+        key_agreement: decode_string_set(mutable, 12, "keyAgreementRelation")?,
+        capability_invocation: decode_string_set(mutable, 13, "capabilityInvocationRelation")?,
+        capability_delegation: decode_string_set(mutable, 14, "capabilityDelegationRelation")?,
+        services: decode_service_map(mutable, 15, "services")?,
     })
 }
 
@@ -480,7 +497,13 @@ fn decode_service_map(
 /// has 6 atoms in this order:
 ///   0: id (string)
 ///   1: typ (1-byte enum: 0=Undefined, 1=JsonWebKey)
-///   2..5: PublicKeyJwk { kty (1B enum), crv (1B enum), x (32B field), y (32B field) }
+///   2..5: PublicKeyJwk { kty (1B enum), crv (1B enum), x (string), y (string) }
+///
+/// 2026-05-28 schema refresh: `x` and `y` reverted from `Bytes<32>`
+/// (BLS-aligned 32-byte field elements, base64url-decoded) back to
+/// `Opaque<"string">` carrying the JWK coordinates' base64url
+/// textual form directly. Decode them as UTF-8 atoms — the same
+/// helper we use for the VM `id`.
 fn decode_vm_map(
     arr: &storage::storage::Array<StateValue<DefaultDB>, DefaultDB>,
     idx: usize,
@@ -559,8 +582,14 @@ fn decode_vm_map(
                 )));
             }
         };
-        let x = aligned_atom_at(av, 4, &format!("{field}.x"))?.to_vec();
-        let y = aligned_atom_at(av, 5, &format!("{field}.y"))?.to_vec();
+        // Post-2026-05-28: `x` and `y` ride the wire as UTF-8
+        // strings (the JWK base64url coordinates themselves).
+        // Empty string for `y` means "no y coordinate" (OKP/Ed25519
+        // — the contract still slots an empty string into the
+        // struct, never absent).
+        let x = decode_string_atom(av, 4, &format!("{field}.x"))?;
+        let y_raw = decode_string_atom(av, 5, &format!("{field}.y"))?;
+        let y = if y_raw.is_empty() { None } else { Some(y_raw) };
 
         out.push(VerificationMethod {
             id,
@@ -571,8 +600,8 @@ fn decode_vm_map(
             public_key_jwk: PublicKeyJwk {
                 kty,
                 crv,
-                x: base64url(&x),
-                y: Some(base64url(&y)),
+                x,
+                y,
             },
         });
         debug_assert!(out.last().map(|v| v.id.as_str()) == Some(&key.as_str()[..]));
@@ -585,7 +614,13 @@ fn decode_vm_map(
 const _: VerificationMethodRelation = VerificationMethodRelation::Authentication;
 
 /// URL-safe base64 without padding — DID Core spec for JWK
-/// coordinates.
+/// coordinates. Kept for historical reference: pre-2026-05-28
+/// `x`/`y` were stored on-chain as raw `Bytes<32>` and we
+/// base64url-encoded them on decode. The current schema stores
+/// the textual base64url form directly, so no encoder is needed
+/// on the read path. The helper is left in place (gated
+/// `#[allow(dead_code)]`) for future schemas that revert.
+#[allow(dead_code)]
 fn base64url(bytes: &[u8]) -> String {
     use std::fmt::Write;
     const ALPHABET: &[u8] =

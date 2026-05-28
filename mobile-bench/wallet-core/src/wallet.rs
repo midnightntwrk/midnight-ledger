@@ -993,7 +993,7 @@ impl Wallet {
     /// every successful update bumps it.
     ///
     /// `circuit` selects which bundled artifact to load. Today
-    /// only `"addVerificationMethod"` is bundled — the other 10
+    /// only `"setVerificationMethod"` is bundled — the other 10
     /// follow in a subsequent slice once their artifacts land.
     pub fn load_did_circuit(
         &self,
@@ -1441,7 +1441,7 @@ impl Wallet {
     /// [`crate::DeployOutcome`] (carrying `controller_sk`, `tx_hash`,
     /// etc.). Used by [`Wallet::create_did_awaitable_with_controller`]
     /// so Task 2's `bootstrap_did_with_keys` can chain
-    /// `addVerificationMethod` calls without losing the per-DID
+    /// `setVerificationMethod` calls without losing the per-DID
     /// controller secret minted at deploy time.
     async fn drain_did_stream_outcome(
         stream: impl futures::Stream<Item = crate::WizardStage>,
@@ -1490,7 +1490,7 @@ impl Wallet {
     /// Like [`Wallet::create_did_awaitable`] but additionally surfaces
     /// the 32-byte `controller_sk` the deploy pipeline minted for the
     /// new DID. Required by Task 2's `bootstrap_did_with_keys` so the
-    /// subsequent `addVerificationMethod[Relation]` calls can pass the
+    /// subsequent `setVerificationMethod[Relation]` calls can pass the
     /// controller secret that the Compact circuit's
     /// `localSecretKey()` witness consumes.
     ///
@@ -1539,8 +1539,12 @@ impl Wallet {
         Self::drain_did_stream_outcome(stream).await.map(|_| ())
     }
 
-    /// Awaitable wrapper for the `addVerificationMethod` Compact
-    /// circuit. Builds the JSON arg shape the JS-side harness
+    /// Awaitable wrapper for the `setVerificationMethod` Compact
+    /// circuit (the post-2026-05-28 successor to
+    /// `addVerificationMethod` — the upstream `feat!: Redesign DID
+    /// verification method storage` refactor collapsed `add* /
+    /// update*` into a single `set*(value, mutation)` entry point).
+    /// Builds the JSON arg shape the JS-side harness
     /// (`prepareUnprovenCallTx`) expects, delegates to
     /// [`Wallet::call_did_circuit`], and drains the resulting
     /// `WizardStage` stream.
@@ -1552,15 +1556,20 @@ impl Wallet {
     ///
     /// `verification_method_json` is the JSON-encoded
     /// `VerificationMethod` object the circuit consumes — `{ id,
-    /// typ, publicKeyJwk: { kty, crv, x, y } }` with bigint
-    /// coordinates encoded as `{ "$bigint": "n" }`. Task 2's
-    /// `bootstrap_did_with_keys` will assemble this from the
+    /// typ, publicKeyJwk: { kty, crv, x, y } }` with `x`/`y` as
+    /// plain base64url strings (post-2026-05-28 schema). Task 2's
+    /// `bootstrap_did_with_keys` assembles this from the
     /// `SecretStorage::get_public_key` result before calling.
     ///
     /// `_key_ref` is reserved for the Task 1.5.D `stub_wallet` audit
     /// (lets the stub record which key was attached) but is unused
     /// in the real-deps path: the JWK already carries the public
     /// material via `verification_method_json`.
+    ///
+    /// The kept Rust method name (`add_verification_method`) is
+    /// stable so Identity Centre + bootstrap callers don't churn;
+    /// internally we now call `setVerificationMethod` with the
+    /// `MapMutation::Insert` discriminator.
     pub async fn add_verification_method(
         &self,
         did: &crate::DidId,
@@ -1572,17 +1581,32 @@ impl Wallet {
         if let Some(state) = self.stub_did_state() {
             return self.stub_add_verification_method(state, did, &verification_method_json);
         }
+        // `MapMutation` in the contract:
+        //   0 = Undefined, 1 = Insert, 2 = Update.
+        // Encoded as a plain JSON number; the JS harness's
+        // `reviveBigints` leaves numeric primitives untouched and
+        // the Compact runtime accepts the JS-numeric tag for enum
+        // variants — same shape as the existing
+        // `VerificationMethodRelation` enum already shipped below.
+        const MAP_MUTATION_INSERT: u8 = 1;
         let stream = self.call_did_circuit(
             did.clone(),
-            "addVerificationMethod".to_string(),
-            serde_json::Value::Array(vec![verification_method_json]),
+            "setVerificationMethod".to_string(),
+            serde_json::Value::Array(vec![
+                verification_method_json,
+                serde_json::Value::Number(MAP_MUTATION_INSERT.into()),
+            ]),
             controller_sk,
         );
         Self::drain_did_stream(stream).await.map(|_| ())
     }
 
-    /// Awaitable wrapper for the `addVerificationMethodRelation`
-    /// Compact circuit. Same delegation pattern as
+    /// Awaitable wrapper for the `setVerificationMethodRelation`
+    /// Compact circuit (the post-2026-05-28 successor to
+    /// `addVerificationMethodRelation` /
+    /// `removeVerificationMethodRelation` — collapsed into a
+    /// single `set*(relation, methodId, mutation)` entry point).
+    /// Same delegation pattern as
     /// [`Wallet::add_verification_method`]: build the JSON arg
     /// shape, route through [`Wallet::call_did_circuit`], drain.
     ///
@@ -1591,11 +1615,17 @@ impl Wallet {
     /// verification method at `fragment` is appended to. The
     /// circuit then enforces "the VM exists" before mutating the
     /// relation map — so the VM must already have been registered
-    /// via `addVerificationMethod` first.
+    /// via `setVerificationMethod` first.
     ///
     /// `fragment` is the `#fragment` of the verification-method
     /// id — e.g. `"key-1"`, not the full `<did>#key-1`. The JS
     /// harness composes the full id internally.
+    ///
+    /// The kept Rust method name
+    /// (`add_verification_method_relation`) is stable so callers
+    /// don't churn; internally we now call
+    /// `setVerificationMethodRelation` with the
+    /// `SetMutation::Insert` discriminator.
     pub async fn add_verification_method_relation(
         &self,
         did: &crate::DidId,
@@ -1619,12 +1649,16 @@ impl Wallet {
             crate::VerificationMethodRelation::CapabilityInvocation => 4,
             crate::VerificationMethodRelation::CapabilityDelegation => 5,
         };
+        // `SetMutation` in the contract:
+        //   0 = Undefined, 1 = Insert, 2 = Remove.
+        const SET_MUTATION_INSERT: u8 = 1;
         let stream = self.call_did_circuit(
             did.clone(),
-            "addVerificationMethodRelation".to_string(),
+            "setVerificationMethodRelation".to_string(),
             serde_json::Value::Array(vec![
                 serde_json::Value::Number(relation_int.into()),
                 serde_json::Value::String(fragment.to_string()),
+                serde_json::Value::Number(SET_MUTATION_INSERT.into()),
             ]),
             controller_sk,
         );

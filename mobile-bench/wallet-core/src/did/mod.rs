@@ -16,7 +16,7 @@
 //! 2. **resolve** — query indexer, decode contract state, build a
 //!    `DidDocument`.
 //! 3. **create** — first write circuit, contract deploy.
-//! 4. **all circuits** — addVerificationMethod / removeService / …
+//! 4. **all circuits** — setVerificationMethod / removeService / …
 
 pub(crate) mod artifacts;
 pub(crate) mod bootstrap;
