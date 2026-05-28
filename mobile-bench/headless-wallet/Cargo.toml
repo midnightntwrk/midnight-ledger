@@ -1,0 +1,21 @@
+[package]
+name = "headless-wallet"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+publish = false
+description = "Headless wallet binary — drives every flow the dioxus UI does via a line-delimited JSON protocol. The integration-test driver and the operations-debugging tool. See docs/superpowers/specs/2026-05-29-hexagonal-headless-wallet-design.md §2.4."
+
+[[bin]]
+name = "headless-wallet"
+path = "src/main.rs"
+
+[dependencies]
+wallet-core = { path = "../wallet-core" }
+tokio = { version = "1.46.1", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4", features = ["derive", "env"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1"

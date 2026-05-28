@@ -30,6 +30,7 @@ members = [
     "mobile-bench/dioxus-bench",
     "mobile-bench/wallet-core",
     "mobile-bench/dioxus-wallet",
+    "mobile-bench/headless-wallet",
     "mobile-bench/contract-benchmark",
     "mobile-bench/contract-benchmark-wasm",
     # UniFFI FFI crate consumed by the React Native bindings
