@@ -103,6 +103,41 @@ for (const pkg of PACKAGES) {
   console.log(`[vendor]   ✓ ${pkg}`);
 }
 
+// Post-copy patch: `midnight-did-jubjub-schnorr/dist/signing.js`
+// does a top-level `import { createHash, randomBytes } from "node:crypto"`
+// which the WebView's native ESM loader can't resolve → silently
+// aborts the entire module graph that transitively imports it
+// (witnesses.js → midnight-did-contract → entry.ts), so
+// `window.midnightDidBundle` never gets set.
+//
+// The wallet's actual flow only consumes `TWO_248` (a BigInt constant)
+// from this file — none of the Node-crypto-dependent helpers
+// (`hashToScalar`, `randomScalar`, `signJubjub`) are called from
+// either the WebView or Rust paths. Drop the import; functions
+// that referenced the removed names will throw `ReferenceError` if
+// ever called, which is the correct failure mode.
+const SIGNING_JS = resolve(
+  DEST, "midnight-did-jubjub-schnorr", "dist", "signing.js",
+);
+try {
+  const before = readFileSync(SIGNING_JS, "utf-8");
+  const after = before.replace(
+    /^import \{ createHash, randomBytes \} from "node:crypto";$/m,
+    '// [vendor.mjs patch] removed `node:crypto` import — WebView has no Node modules. Helpers using these will throw if called.',
+  );
+  if (after === before) {
+    console.warn(
+      `[vendor]   ! no node:crypto line found in ${SIGNING_JS} ` +
+      "— signing.js may have changed shape upstream; bundle init may fail.",
+    );
+  } else {
+    writeFileSync(SIGNING_JS, after);
+    console.log("[vendor]   ↻ patched signing.js (dropped node:crypto import)");
+  }
+} catch (e) {
+  console.warn(`[vendor]   ! could not patch signing.js: ${e.message}`);
+}
+
 // Some upstream packages (compact-runtime → object-inspect) reach
 // for third-party CJS modules the WebView's native ESM loader can't
 // load directly. We esbuild-bundle each into an ESM wrapper, place
