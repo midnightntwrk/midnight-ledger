@@ -892,12 +892,13 @@ impl<D: DB> Default for ContractState<D> {
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
     pub v3: Option<VerifierKey>,
+    ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>) -> Self {
-        ContractOperation { v2: None, v3: vk }
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
+        ContractOperation { v2: None, v3: vk, ir }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
@@ -925,12 +926,10 @@ impl Distribution<ContractOperation> for Standard {
             ContractOperation {
                 v2: Some(rng.r#gen()),
                 v3: Some(rng.r#gen()),
+                ir: None,
             }
         } else {
-            ContractOperation {
-                v2: None,
-                v3: None,
-            }
+            ContractOperation { v2: None, v3: None, ir: None }
         }
     }
 }
@@ -980,9 +979,21 @@ impl<F> Dummy<F> for ContractOperation {
         ContractOperation {
             v2: None,
             v3: None,
+            ir: None,
         }
     }
 }
+
+idty!(Ir, IrBuf);
+impl Tagged for IrBuf {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        "ir-buf".into()
+    }
+    fn tag_unique_factor() -> String {
+        "vec(u8)".into()
+    }
+}
+tag_enforcement_test!(IrBuf);
 
 #[cfg(test)]
 mod tests {

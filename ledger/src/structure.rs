@@ -1237,6 +1237,8 @@ pub struct TransactionLimits {
         serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
     )]
     pub block_withdrawal_minimum_multiple: FixedPoint,
+    // A hard limit on the size of associated contract metadata.
+    pub max_contract_metadata_size: u64,
 }
 tag_enforcement_test!(TransactionLimits);
 
@@ -1252,6 +1254,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
         bytes_churned: 1_000_000,
     },
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
+    max_contract_metadata_size: 10 * 1024 * 1024,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
@@ -1924,19 +1927,21 @@ where
         Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
     }
 
-    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+    fn validation_cost_impl(
+        &self,
+        model: &TransactionCostModel,
+        per_call_vk_read: impl Fn(&ContractAddress, &EntryPointBuf) -> RunningCost,
+    ) -> SyntheticCost {
         match self {
             Transaction::Standard(stx) => {
-                let vk_reads = self
+                let unique_calls = self
                     .calls()
                     .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<BTreeSet<_>>()
-                    .len();
+                    .collect::<BTreeSet<_>>();
                 let mut cost = model.baseline_cost;
-                cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)
-                    + model.map_index(EXPECTED_CONTRACT_DEPTH)
-                    + model.map_index(EXPECTED_OPERATIONS_DEPTH))
-                    * vk_reads;
+                for (address, entry_point) in &unique_calls {
+                    cost += per_call_vk_read(address, entry_point);
+                }
                 let offers = stx
                     .guaranteed_coins
                     .iter()
@@ -1999,6 +2004,41 @@ where
             } + model.baseline_cost)
                 .into(),
         }
+    }
+
+    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+        let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
+        self.validation_cost_impl(model, |_, _| per_call)
+    }
+
+    pub fn validation_cost_with_state(
+        &self,
+        model: &TransactionCostModel,
+        ledger: &LedgerState<D>,
+    ) -> SyntheticCost {
+        self.validation_cost_impl(model, |address, entry_point| {
+            let (vk_size, ops_log_size) = ledger
+                .index(*address)
+                .and_then(|cstate| {
+                    let n = cstate.operations.size();
+                    // ceil(log2(n)): number of bits needed to distinguish n entries
+                    let ops_log_size = (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize;
+                    cstate.operations.get(entry_point).map(|op| {
+                        let vk_size = op
+                            .v2
+                            .as_ref()
+                            .map(|vk| vk.serialized_size())
+                            .unwrap_or(VERIFIER_KEY_SIZE);
+                        (vk_size, ops_log_size)
+                    })
+                })
+                .unwrap_or((VERIFIER_KEY_SIZE, EXPECTED_OPERATIONS_DEPTH));
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(ops_log_size)
+        })
     }
 
     fn est_size(&self) -> usize {
@@ -2278,6 +2318,69 @@ where
             });
         }
         Ok(validation_cost + application_cost)
+    }
+
+    pub fn cost_with_state(
+        &self,
+        params: &LedgerParameters,
+        ledger: &LedgerState<D>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
+        let mut validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
+        validation_cost.compute_time =
+            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
+        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let time_to_dismiss = CostDuration::max(
+            params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
+            params.limits.min_time_to_dismiss,
+        );
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
+            return Err(FeeCalculationError::OutsideTimeToDismiss {
+                time_to_dismiss: cost_to_dismiss.max_time(),
+                allowed_time_to_dismiss: time_to_dismiss,
+                size: self.est_size() as u64,
+            });
+        }
+        Ok(validation_cost + application_cost)
+    }
+
+    pub(crate) fn fees_with_impl(
+        &self,
+        params: &LedgerParameters,
+        get_op: impl Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
+        let model = &params.cost_model;
+        let mut validation_cost = self.validation_cost_impl(model, |address, entry_point| {
+            let vk_size = get_op(*address, entry_point)
+                .and_then(|op| op.v2.as_ref().map(|vk| vk.serialized_size()))
+                .unwrap_or(VERIFIER_KEY_SIZE);
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(EXPECTED_OPERATIONS_DEPTH)
+        });
+        validation_cost.compute_time =
+            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let (guaranteed_cost, application_cost) = self.application_cost(model);
+        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let time_to_dismiss = CostDuration::max(
+            params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
+            params.limits.min_time_to_dismiss,
+        );
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
+            return Err(FeeCalculationError::OutsideTimeToDismiss {
+                time_to_dismiss: cost_to_dismiss.max_time(),
+                allowed_time_to_dismiss: time_to_dismiss,
+                size: self.est_size() as u64,
+            });
+        }
+        let synthetic = validation_cost + application_cost;
+        let normalized = synthetic
+            .normalize(params.limits.block_limits)
+            .ok_or(FeeCalculationError::BlockLimitExceeded)?;
+        let fees_fixed_point = params.fee_prices.overall_cost(&normalized);
+        Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
     }
 }
 

@@ -1,5 +1,9 @@
 # `coin-structure` Changelog
 
+## Version `2.1.0`
+
+- feat: add conversions from ECDSA keys to user addresses
+
 ## Version `2.0.0`
 
 - breaking: pull in breaking transient-crypto changes

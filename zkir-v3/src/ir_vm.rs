@@ -558,7 +558,6 @@ impl IrSource {
                         }
                     }
                 }
-                I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
                 I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
@@ -578,6 +577,26 @@ impl IrSource {
                     let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
                     let p = JubjubSubgroup::generator() * s;
                     memory.insert(output.clone(), IrValue::JubjubPoint(p));
+                }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        bail!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        );
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(&memory, val)?;
+                        if value.get_type() != *expected_t {
+                            bail!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            );
+                        }
+                        outputs.push(value);
+                    }
                 }
             }
         }
@@ -602,8 +621,10 @@ impl IrSource {
                 .ok_or(anyhow!("Expected communications randomness"))?;
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
             comm_comm_inputs.extend(preimage.inputs.iter());
-            for output in outputs.iter() {
-                comm_comm_inputs.push(output.clone().try_into()?);
+            for value in outputs.iter() {
+                for ir_val in encode_offcircuit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
             }
             if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
                 error!(
@@ -827,10 +848,6 @@ impl Relation for IrSource {
                         pi_push(guarded_x, &mut public_inputs)?;
                     }
                 }
-                I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, val)?;
-                    outputs.push(val);
-                }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
                     for inp in inputs {
@@ -1037,6 +1054,26 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        )));
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(std, layouter, &memory, val)?;
+                        if value.get_type() != *expected_t {
+                            return Err(Error::Synthesis(format!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            )));
+                        }
+                        outputs.push(value);
+                    }
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1053,14 +1090,18 @@ impl Relation for IrSource {
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
                 if let Some(val) = memory.get(&id.name) {
-                    let x: AssignedNative<_> = val.clone().try_into()?;
-                    preimage.push(x);
+                    for cv in encode_incircuit(std, layouter, val)? {
+                        let x: AssignedNative<_> = cv.try_into()?;
+                        preimage.push(x);
+                    }
                 }
             }
 
-            for output in &outputs {
-                let x: AssignedNative<_> = output.clone().try_into()?;
-                preimage.push(x);
+            for value in &outputs {
+                for cv in encode_incircuit(std, layouter, value)? {
+                    let x: AssignedNative<_> = cv.try_into()?;
+                    preimage.push(x);
+                }
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;
