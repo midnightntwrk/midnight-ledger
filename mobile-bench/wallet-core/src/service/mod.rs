@@ -18,6 +18,7 @@
 // Wave G removes this attribute once every field has a consumer.
 #![allow(dead_code)]
 
+mod builder;
 pub mod backup_service;
 pub mod controller_secret_service;
 pub mod did_service;
@@ -29,6 +30,7 @@ pub mod telemetry_service;
 pub mod vc_verify_service;
 pub mod wallet_service;
 
+pub use builder::{BuildError, WalletServices, WalletServicesBuilder};
 pub use backup_service::BackupService;
 pub use controller_secret_service::ControllerSecretService;
 pub use did_service::DidService;
