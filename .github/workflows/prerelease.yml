@@ -14,20 +14,6 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
 
-      - name: Setup GitHub Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup API Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Install Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y cargo
@@ -228,5 +214,3 @@ jobs:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
       ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
-      GH_USERNAME: ${{ secrets.GH_USERNAME }}
-      GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
