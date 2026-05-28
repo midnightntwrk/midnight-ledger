@@ -220,6 +220,62 @@ pub struct Wallet {
 /// Stays in this module rather than reusing
 /// `did::contract::ledger_to_domain`'s inner helper because the
 /// stub path bypasses `ledger_to_domain` entirely.
+/// Convert a 32-byte big-endian unsigned integer into its
+/// base-10 ASCII representation. Used by the
+/// `setSchnorrJubjubVerificationMethod` call builder to turn the
+/// raw `(x, y)` Jubjub coordinates into the
+/// `{ "$bigint": "<decimal>" }` shape the JS harness's
+/// `reviveBigints` recognises — the Compact runtime's
+/// `CompactTypeJubjubPoint.toValue` consumes the resulting
+/// `BigInt` directly. Hand-rolled to avoid pulling in
+/// `num-bigint` for a single conversion site.
+fn be32_to_decimal_string(be: &[u8; 32]) -> String {
+    // Base-10 long division by repeated subtraction of 10⁹ via
+    // `u32` chunks. The 256-bit value is held as eight 32-bit
+    // limbs (most significant first). On each iteration we take
+    // the limb array, divide by 10⁹, emit nine digits (zero-
+    // padded except for the leading chunk), continue until the
+    // value is zero.
+    let mut limbs = [0u32; 8];
+    for i in 0..8 {
+        let lo = i * 4;
+        limbs[i] = u32::from_be_bytes([be[lo], be[lo + 1], be[lo + 2], be[lo + 3]]);
+    }
+    if limbs.iter().all(|l| *l == 0) {
+        return "0".to_string();
+    }
+    let mut chunks: Vec<u32> = Vec::new();
+    while !limbs.iter().all(|l| *l == 0) {
+        let mut rem: u64 = 0;
+        for limb in limbs.iter_mut() {
+            let cur = (rem << 32) | (*limb as u64);
+            *limb = (cur / 1_000_000_000) as u32;
+            rem = cur % 1_000_000_000;
+        }
+        chunks.push(rem as u32);
+    }
+    let mut out = String::new();
+    if let Some(top) = chunks.pop() {
+        out.push_str(&top.to_string());
+    }
+    while let Some(c) = chunks.pop() {
+        out.push_str(&format!("{c:09}"));
+    }
+    out
+}
+
+/// URL-safe base64 (no padding) of a 32-byte slice. Lives next
+/// to `be32_to_decimal_string` so the stub path of
+/// `set_schnorr_jubjub_verification_method` can synthesize a JWK
+/// envelope matching the shape `ledger_to_domain` emits on the
+/// real path. Gated behind the stub feature flags since the
+/// real-deps path doesn't need it.
+#[cfg(any(test, feature = "test-support"))]
+fn be32_to_base64url(be: &[u8; 32]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(be)
+}
+
 #[cfg(any(test, feature = "test-support"))]
 fn stub_to_absolute_did_url(did: &crate::DidId, stored: &str) -> String {
     let did_str = did.to_did_string();
@@ -1601,6 +1657,78 @@ impl Wallet {
         Self::drain_did_stream(stream).await.map(|_| ())
     }
 
+    /// Awaitable wrapper for the `setSchnorrJubjubVerificationMethod`
+    /// Compact circuit. Added in the 2026-05-28 schema refresh: the
+    /// plain `setVerificationMethod` circuit now REJECTS Jubjub JWKs
+    /// (the contract asserts `crv != Jubjub` for EC keys), so Jubjub
+    /// keys must be pushed through this dedicated map instead.
+    ///
+    /// `public_key_x_be` / `public_key_y_be` are the Jubjub point's
+    /// 32-byte big-endian coordinates — same shape the JWK
+    /// `x`/`y` carry after base64url decode. We translate to the
+    /// decimal `{$bigint: "<dec>"}` form the JS harness's
+    /// `reviveBigints` expects so the Compact runtime's
+    /// `CompactTypeJubjubPoint.toValue({ x: BigInt, y: BigInt })`
+    /// can consume them.
+    ///
+    /// `controller_sk` is the 32-byte secret the wallet minted for
+    /// `did` at deploy time. `_key_ref` mirrors
+    /// `add_verification_method`'s parameter — currently unused by
+    /// the real-deps path (the JubjubPoint already carries the
+    /// public material) but reserved for the stub path to record
+    /// which key was attached.
+    ///
+    /// Internally routes to `call_did_circuit(
+    ///   "setSchnorrJubjubVerificationMethod",
+    ///   [ { id, publicKey: { x: {$bigint}, y: {$bigint} } },
+    ///     MapMutation::Insert ])`.
+    pub async fn set_schnorr_jubjub_verification_method(
+        &self,
+        did: &crate::DidId,
+        _key_ref: &crate::secret_storage::SecretKeyRef,
+        method_id: String,
+        public_key_x_be: [u8; 32],
+        public_key_y_be: [u8; 32],
+        controller_sk: [u8; 32],
+    ) -> Result<(), WalletError> {
+        #[cfg(any(test, feature = "test-support"))]
+        if let Some(state) = self.stub_did_state() {
+            // Stub path: synthesize a JWK envelope so the
+            // resolved-doc surface stays uniform across stub and
+            // real paths. Same JWK shape `ledger_to_domain`
+            // produces for SchnorrJubjub VMs on the real path.
+            let vm_json = serde_json::json!({
+                "id": method_id,
+                "typ": 1,
+                "publicKeyJwk": {
+                    "kty": 0, // EC
+                    "crv": 2, // Jubjub
+                    "x": be32_to_base64url(&public_key_x_be),
+                    "y": be32_to_base64url(&public_key_y_be),
+                },
+            });
+            return self.stub_add_verification_method(state, did, &vm_json);
+        }
+        const MAP_MUTATION_INSERT: u8 = 1;
+        let vm_json = serde_json::json!({
+            "id": method_id,
+            "publicKey": {
+                "x": { "$bigint": be32_to_decimal_string(&public_key_x_be) },
+                "y": { "$bigint": be32_to_decimal_string(&public_key_y_be) },
+            }
+        });
+        let stream = self.call_did_circuit(
+            did.clone(),
+            "setSchnorrJubjubVerificationMethod".to_string(),
+            serde_json::Value::Array(vec![
+                vm_json,
+                serde_json::Value::Number(MAP_MUTATION_INSERT.into()),
+            ]),
+            controller_sk,
+        );
+        Self::drain_did_stream(stream).await.map(|_| ())
+    }
+
     /// Awaitable wrapper for the `setVerificationMethodRelation`
     /// Compact circuit (the post-2026-05-28 successor to
     /// `addVerificationMethodRelation` /
@@ -1952,6 +2080,42 @@ impl Wallet {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn be32_to_decimal_string_handles_zero() {
+        assert_eq!(be32_to_decimal_string(&[0u8; 32]), "0");
+    }
+
+    #[test]
+    fn be32_to_decimal_string_handles_small_values() {
+        let mut be = [0u8; 32];
+        be[31] = 42;
+        assert_eq!(be32_to_decimal_string(&be), "42");
+        be[31] = 0;
+        be[30] = 1; // 256
+        assert_eq!(be32_to_decimal_string(&be), "256");
+    }
+
+    #[test]
+    fn be32_to_decimal_string_handles_max_value() {
+        // 2^256 - 1 = a 78-digit decimal starting with 1157920892…
+        let be = [0xffu8; 32];
+        let s = be32_to_decimal_string(&be);
+        assert_eq!(
+            s,
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        );
+    }
+
+    #[test]
+    fn be32_to_decimal_string_known_value_round_trip() {
+        // Pattern with a non-trivial number of leading zeros after
+        // each 10⁹ subtraction so the format!("{:09}") padding path
+        // is exercised.
+        let mut be = [0u8; 32];
+        be[28..32].copy_from_slice(&1_000_000_001u32.to_be_bytes());
+        assert_eq!(be32_to_decimal_string(&be), "1000000001");
+    }
 
     #[test]
     fn deterministic_seed_yields_stable_keys() {

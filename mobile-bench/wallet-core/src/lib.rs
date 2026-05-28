@@ -40,8 +40,9 @@ pub mod qr_scanner;
 
 pub use did::{
     CONTRACT_ADDRESS_LEN, ContractAddressBytes, CurveType, DidDocument, DidError, DidId,
-    DidIdError, KeyType, PublicKeyJwk, ResolvedDid, Service, ServiceEndpoint, VerificationMethod,
-    VerificationMethodRef, VerificationMethodRelation, VerificationMethodType,
+    DidIdError, KeyType, PublicKeyJwk, ResolvedDid, SchnorrJubjubVerificationMethod, Service,
+    ServiceEndpoint, VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
+    VerificationMethodType,
 };
 pub use crate::did::{bootstrap_did_with_keys, derive_keys, BootstrapError, BootstrappedDid};
 

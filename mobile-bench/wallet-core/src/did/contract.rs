@@ -51,8 +51,8 @@ use storage::DefaultDB;
 use crate::did::error::DidError;
 use crate::did::id::{CONTRACT_ADDRESS_LEN, ContractAddressBytes, DidId};
 use crate::did::types::{
-    CurveType, DidDocument, KeyType, PublicKeyJwk, Service, ServiceEndpoint,
-    VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
+    CurveType, DidDocument, KeyType, PublicKeyJwk, SchnorrJubjubVerificationMethod, Service,
+    ServiceEndpoint, VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
     VerificationMethodType,
 };
 
@@ -79,6 +79,11 @@ pub(crate) struct DidLedgerState {
     pub(crate) mutable_field_count: usize,
     pub(crate) also_known_as: Vec<String>,
     pub(crate) verification_methods: Vec<VerificationMethod>,
+    /// Decoded `schnorrJubjubVerificationMethods` map (ledger
+    /// index 9, added 2026-05-28). Holds raw `JubjubPoint`-backed
+    /// VMs that the resolved DID document surfaces alongside
+    /// JWK VMs via `verificationMethod[]`.
+    pub(crate) schnorr_jubjub_verification_methods: Vec<SchnorrJubjubVerificationMethod>,
     pub(crate) authentication: Vec<String>,
     pub(crate) assertion_method: Vec<String>,
     pub(crate) key_agreement: Vec<String>,
@@ -165,15 +170,17 @@ pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState,
         also_known_as: decode_string_set(mutable, 1, "alsoKnownAs")?,
         verification_methods: decode_vm_map(mutable, 8, "verificationMethods")?,
         // Index 9 is `schnorrJubjubVerificationMethods` — added in
-        // the 2026-05-28 schema refresh. We don't surface its
-        // entries yet (Phase 1 still uses the plain JWK map), but
-        // we still walk the slot to confirm it's a `Map` so a
-        // schema drift fails loudly here rather than silently
-        // mis-aligning the relation/services decoders below.
-        authentication: {
-            let _stub = map_at(mutable, 9, "schnorrJubjubVerificationMethods")?;
-            decode_string_set(mutable, 10, "authenticationRelation")?
-        },
+        // the 2026-05-28 schema refresh. Fully decoded so the
+        // resolved DID document can surface Jubjub VMs alongside
+        // JWK VMs; bootstrap step 6's "relation references a
+        // resolvable VM" check needs Jubjub keys to count as
+        // present in the doc.
+        schnorr_jubjub_verification_methods: decode_schnorr_jubjub_vm_map(
+            mutable,
+            9,
+            "schnorrJubjubVerificationMethods",
+        )?,
+        authentication: decode_string_set(mutable, 10, "authenticationRelation")?,
         assertion_method: decode_string_set(mutable, 11, "assertionMethodRelation")?,
         key_agreement: decode_string_set(mutable, 12, "keyAgreementRelation")?,
         capability_invocation: decode_string_set(mutable, 13, "capabilityInvocationRelation")?,
@@ -227,7 +234,20 @@ pub(crate) fn ledger_to_domain(ledger: &DidLedgerState, id: DidId) -> DidDocumen
     // Verification methods: same fragment-id → full DID URL
     // expansion via the helper above. Controller of each VM
     // defaults to the DID itself.
-    let verification_method = ledger
+    //
+    // Two sources flow into the resolved doc's
+    // `verification_method` array:
+    //   - The JWK map (`verificationMethods`, ledger index 8)
+    //   - The Schnorr/Jubjub map (`schnorrJubjubVerificationMethods`,
+    //     index 9, added 2026-05-28)
+    //
+    // For the second one we synthesize a JWK envelope so the
+    // emitted DID document stays uniform — Phase 1's off-chain
+    // verifier flows (SIOPv2 / OID4VP / VC self-verify) walk a
+    // single `verification_method[]` list. The JWK encoding
+    // mirrors upstream `LedgerToDomain` (Jubjub coords as 32B BE
+    // base64url, kty=EC).
+    let mut verification_method: Vec<VerificationMethod> = ledger
         .verification_methods
         .iter()
         .cloned()
@@ -237,6 +257,19 @@ pub(crate) fn ledger_to_domain(ledger: &DidLedgerState, id: DidId) -> DidDocumen
             vm
         })
         .collect();
+    for sj in &ledger.schnorr_jubjub_verification_methods {
+        verification_method.push(VerificationMethod {
+            id: to_absolute(&sj.id),
+            typ: VerificationMethodType::JsonWebKey,
+            controller: id.clone(),
+            public_key_jwk: PublicKeyJwk {
+                kty: KeyType::EC,
+                crv: CurveType::Jubjub,
+                x: base64url(&sj.public_key_x),
+                y: Some(base64url(&sj.public_key_y)),
+            },
+        });
+    }
 
     DidDocument {
         id: id.clone(),
@@ -610,17 +643,90 @@ fn decode_vm_map(
     Ok(out)
 }
 
+/// Decode `Map<string, SchnorrJubjubVerificationMethod>` at the
+/// given index. The value AlignedValue has 3 atoms:
+///   0: id (UTF-8 string)
+///   1: publicKey.x (Field — 32-byte LE-normalised field element)
+///   2: publicKey.y (Field — 32-byte LE-normalised field element)
+///
+/// Field atoms are stored LE-normalised (trailing zeros stripped)
+/// — same convention `cell_bytes32` walks for `Bytes<32>` cells.
+/// We pad the high bytes with zeros to recover the full 32-byte
+/// form, then reverse-byte-order it into big-endian so the
+/// resulting `[u8; 32]` matches the JWK coordinate encoding
+/// upstream uses (`bigintTo32Be` in `midnight-did/api`).
+fn decode_schnorr_jubjub_vm_map(
+    arr: &storage::storage::Array<StateValue<DefaultDB>, DefaultDB>,
+    idx: usize,
+    field: &str,
+) -> Result<Vec<SchnorrJubjubVerificationMethod>, DidError> {
+    let m = map_at(arr, idx, field)?;
+    let mut out = Vec::with_capacity(m.size());
+    for entry in m.iter() {
+        let (k_sp, v_sp) = &*entry;
+        let key = decode_string_atom(k_sp, 0, &format!("{field}.<key>"))?;
+        let v_state: &StateValue<DefaultDB> = v_sp;
+        let av = match v_state {
+            StateValue::Cell(sp) => &**sp,
+            other => {
+                return Err(DidError::DecodeState(format!(
+                    "{field}[{key}]: expected Cell value, got {}",
+                    state_value_kind(other)
+                )));
+            }
+        };
+        let id = decode_string_atom(av, 0, &format!("{field}.id"))?;
+        let x_le_padded = field_atom_to_32(av, 1, &format!("{field}.publicKey.x"))?;
+        let y_le_padded = field_atom_to_32(av, 2, &format!("{field}.publicKey.y"))?;
+        // Field atoms are LE; upstream JWK encoding is BE. Reverse
+        // so the byte form on the struct matches the JWK
+        // `decodeBase64UrlBytes32` shape (32B BE).
+        let mut x_be = [0u8; 32];
+        let mut y_be = [0u8; 32];
+        for i in 0..32 {
+            x_be[i] = x_le_padded[31 - i];
+            y_be[i] = y_le_padded[31 - i];
+        }
+        out.push(SchnorrJubjubVerificationMethod {
+            id,
+            public_key_x: x_be,
+            public_key_y: y_be,
+        });
+        debug_assert!(out.last().map(|v| v.id.as_str()) == Some(&key.as_str()[..]));
+    }
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
+}
+
+/// Read a Compact `Field`-typed atom as a zero-padded 32-byte LE
+/// buffer. Field atoms (a 256-bit field element) are stored in
+/// normal form (trailing zero bytes stripped) so the wire bytes
+/// can be shorter than 32; we pad the high end with zeros.
+fn field_atom_to_32(
+    av: &AlignedValue,
+    idx: usize,
+    field: &str,
+) -> Result<[u8; 32], DidError> {
+    let bytes = aligned_atom_at(av, idx, field)?;
+    if bytes.len() > 32 {
+        return Err(DidError::DecodeState(format!(
+            "{field}: field atom > 32 bytes ({})",
+            bytes.len()
+        )));
+    }
+    let mut out = [0u8; 32];
+    out[..bytes.len()].copy_from_slice(bytes);
+    Ok(out)
+}
+
 #[allow(dead_code)]
 const _: VerificationMethodRelation = VerificationMethodRelation::Authentication;
 
 /// URL-safe base64 without padding — DID Core spec for JWK
-/// coordinates. Kept for historical reference: pre-2026-05-28
-/// `x`/`y` were stored on-chain as raw `Bytes<32>` and we
-/// base64url-encoded them on decode. The current schema stores
-/// the textual base64url form directly, so no encoder is needed
-/// on the read path. The helper is left in place (gated
-/// `#[allow(dead_code)]`) for future schemas that revert.
-#[allow(dead_code)]
+/// coordinates. Used to encode the Schnorr/Jubjub VMs' raw
+/// 32-byte `(x, y)` coordinates into JWK form when
+/// `ledger_to_domain` surfaces them on the resolved doc's
+/// `verification_method[]` array.
 fn base64url(bytes: &[u8]) -> String {
     use std::fmt::Write;
     const ALPHABET: &[u8] =

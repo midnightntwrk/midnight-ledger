@@ -1,14 +1,21 @@
 //! Offline coverage for DID write circuits via the Node harness.
 //!
 //! Drives every circuit whose preconditions are met by a fresh
-//! empty-deploy state (no `remove*` / `update*` — those need a
-//! prior write to populate state, follow-up tests can compose).
-//! For each: build state, run circuit in JS, deserialise the
+//! empty-deploy state (no `remove*` — those need a prior write
+//! to populate state, follow-up tests can compose). For each:
+//! build state, run circuit in JS, deserialise the
 //! `ProofPreimage` on Rust side, assert structural invariants.
 //!
 //! Companion to `js_inspect_deactivate.rs`; that one covers the
 //! simplest no-arg circuit, this one covers args + structured
-//! types (VerificationMethod, Service).
+//! types (VerificationMethod, Service, SchnorrJubjubVerificationMethod).
+//!
+//! 2026-05-28 schema refresh: the old `add* / update* / remove*`
+//! circuit triples collapsed into unified `set*(value, mutation)`
+//! entry points and the SchnorrJubjub VM map gained its own four
+//! circuits + `rotateControllerKey`. The plain
+//! `setVerificationMethod` circuit now REJECTS Jubjub JWKs — use
+//! `setSchnorrJubjubVerificationMethod` for Jubjub keys instead.
 //!
 //! Run with:
 //!   cargo test -p wallet-core --test js_inspect_circuits -- --nocapture
@@ -33,9 +40,9 @@ fn step(circuit: &str, args: serde_json::Value) -> serde_json::Value {
 
 /// Run one inspect-circuit pass and assert preimage round-trips.
 /// `setup` is a chain of prior calls used to evolve state before the
-/// circuit under test runs (e.g. `addAlsoKnownAs` before
-/// `removeAlsoKnownAs`). Returns the decoded `ProofPreimage` so
-/// callers can do extra circuit-specific assertions.
+/// circuit under test runs (e.g. `setAlsoKnownAs(Insert)` before
+/// `setAlsoKnownAs(Remove)`). Returns the decoded `ProofPreimage`
+/// so callers can do extra circuit-specific assertions.
 async fn run_inspect(
     bridge: &NodeChildBridge,
     circuit: &str,
@@ -71,7 +78,7 @@ async fn run_inspect(
     let expected_key_loc = format!("midnight/did/{circuit}");
     assert_eq!(preimage.key_location.0, expected_key_loc);
     eprintln!(
-        "[{circuit:30}] preimage {:4} B · pub {:3} ops · priv {} · {} ms",
+        "[{circuit:38}] preimage {:4} B · pub {:3} ops · priv {} · {} ms",
         preimage_bytes.len(),
         r.public_transcript_len,
         r.private_transcript_len,
@@ -109,8 +116,9 @@ fn bigint(n: &str) -> serde_json::Value {
 }
 
 /// Canonical valid VerificationMethod fixture — OKP / Ed25519,
-/// satisfying the contract's curve constraint. Helper because
-/// six tests need the same shape.
+/// satisfying the contract's curve constraint. Post-2026-05-28
+/// schema: `x`/`y` are JWK base64url textual strings (NOT
+/// bigints). Helper because half a dozen tests need the shape.
 fn ed25519_vm(id: &str) -> serde_json::Value {
     serde_json::json!({
         "id": id,
@@ -120,6 +128,24 @@ fn ed25519_vm(id: &str) -> serde_json::Value {
             // KeyType.OKP = 3, CurveType.Ed25519 = 0
             "kty": 3,
             "crv": 0,
+            // Placeholder base64url(32 zero bytes) — assertion of
+            // on-curve membership happens for Jubjub only.
+            "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "y": "",
+        }
+    })
+}
+
+/// SchnorrJubjub fixture — `(id, JubjubPoint)`. `JubjubPoint` is
+/// `{ x: bigint, y: bigint }` per `CompactTypeJubjubPoint` in
+/// `@midnight-ntwrk/compact-runtime`. The placeholder coordinates
+/// here are NOT a valid Jubjub point; the offline inspect path
+/// stops short of the on-curve check (that lives in the
+/// `verifySchnorrJubjubDigestSignature` circuit).
+fn schnorr_jubjub_vm(id: &str) -> serde_json::Value {
+    serde_json::json!({
+        "id": id,
+        "publicKey": {
             "x": bigint("1"),
             "y": bigint("2"),
         }
@@ -139,56 +165,67 @@ fn linked_domains_service(id: &str, endpoint: &str) -> serde_json::Value {
 /// five DID Core relation slots.
 const REL_AUTHENTICATION: i32 = 1;
 
+/// `SetMutation::Insert == 1`, `SetMutation::Remove == 2`.
+const SET_INSERT: i32 = 1;
+const SET_REMOVE: i32 = 2;
+
+/// `MapMutation::Insert == 1`, `MapMutation::Update == 2`.
+const MAP_INSERT: i32 = 1;
+const MAP_UPDATE: i32 = 2;
+
 #[tokio::test]
-async fn add_also_known_as() {
+async fn set_also_known_as_insert() {
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
-        "addAlsoKnownAs",
+        "setAlsoKnownAs",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!(["https://alias.example.com"]),
+        serde_json::json!(["https://alias.example.com", SET_INSERT]),
         serde_json::json!([]),
     )
     .await;
 }
 
 #[tokio::test]
-async fn remove_also_known_as() {
+async fn set_also_known_as_remove() {
     // Needs the value present first; insert it in setup.
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
-        "removeAlsoKnownAs",
+        "setAlsoKnownAs",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!(["https://alias.example.com"]),
+        serde_json::json!(["https://alias.example.com", SET_REMOVE]),
         serde_json::json!([
-            step("addAlsoKnownAs", serde_json::json!(["https://alias.example.com"])),
+            step(
+                "setAlsoKnownAs",
+                serde_json::json!(["https://alias.example.com", SET_INSERT]),
+            ),
         ]),
     )
     .await;
 }
 
 #[tokio::test]
-async fn add_verification_method() {
+async fn set_verification_method_insert() {
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
-        "addVerificationMethod",
+        "setVerificationMethod",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!([ed25519_vm("key-0")]),
+        serde_json::json!([ed25519_vm("key-0"), MAP_INSERT]),
         serde_json::json!([]),
     )
     .await;
 }
 
 #[tokio::test]
-async fn update_verification_method() {
+async fn set_verification_method_update() {
     // Needs the id already present; setup adds the original entry.
     let s = fresh_setup();
     let original = ed25519_vm("key-0");
@@ -198,18 +235,21 @@ async fn update_verification_method() {
         "publicKeyJwk": {
             "kty": 3,
             "crv": 0,
-            "x": bigint("11"),
-            "y": bigint("22"),
+            "x": "ERESExQVFhcYGRobHB0eHyAhIiMkJSYnKCkqKyw",
+            "y": "",
         }
     });
     run_inspect(
         &s.bridge,
-        "updateVerificationMethod",
+        "setVerificationMethod",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!([updated]),
-        serde_json::json!([step("addVerificationMethod", serde_json::json!([original]))]),
+        serde_json::json!([updated, MAP_UPDATE]),
+        serde_json::json!([step(
+            "setVerificationMethod",
+            serde_json::json!([original, MAP_INSERT]),
+        )]),
     )
     .await;
 }
@@ -227,83 +267,131 @@ async fn remove_verification_method() {
         &s.addr_hex,
         &s.sk_hex,
         serde_json::json!(["key-0"]),
-        serde_json::json!([step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")]))]),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn add_verification_method_relation() {
-    // Needs the VM to exist before we can relate it.
-    let s = fresh_setup();
-    run_inspect(
-        &s.bridge,
-        "addVerificationMethodRelation",
-        &s.state_hex,
-        &s.addr_hex,
-        &s.sk_hex,
-        serde_json::json!([REL_AUTHENTICATION, "key-0"]),
-        serde_json::json!([step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")]))]),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn remove_verification_method_relation() {
-    // Add the VM, add the relation, then test removing the relation.
-    let s = fresh_setup();
-    run_inspect(
-        &s.bridge,
-        "removeVerificationMethodRelation",
-        &s.state_hex,
-        &s.addr_hex,
-        &s.sk_hex,
-        serde_json::json!([REL_AUTHENTICATION, "key-0"]),
-        serde_json::json!([
-            step("addVerificationMethod", serde_json::json!([ed25519_vm("key-0")])),
-            step("addVerificationMethodRelation", serde_json::json!([REL_AUTHENTICATION, "key-0"])),
-        ]),
-    )
-    .await;
-}
-
-#[tokio::test]
-async fn add_service() {
-    let s = fresh_setup();
-    run_inspect(
-        &s.bridge,
-        "addService",
-        &s.state_hex,
-        &s.addr_hex,
-        &s.sk_hex,
-        serde_json::json!([linked_domains_service(
-            "svc-0",
-            "https://example.com/.well-known/did-config",
+        serde_json::json!([step(
+            "setVerificationMethod",
+            serde_json::json!([ed25519_vm("key-0"), MAP_INSERT]),
         )]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn set_schnorr_jubjub_verification_method_insert() {
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "setSchnorrJubjubVerificationMethod",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([schnorr_jubjub_vm("key-sj-0"), MAP_INSERT]),
         serde_json::json!([]),
     )
     .await;
 }
 
 #[tokio::test]
-async fn update_service() {
+async fn remove_schnorr_jubjub_verification_method() {
     let s = fresh_setup();
     run_inspect(
         &s.bridge,
-        "updateService",
+        "removeSchnorrJubjubVerificationMethod",
         &s.state_hex,
         &s.addr_hex,
         &s.sk_hex,
-        serde_json::json!([linked_domains_service(
-            "svc-0",
-            "https://other.example.com/.well-known/did-config",
-        )]),
+        serde_json::json!(["key-sj-0"]),
         serde_json::json!([step(
-            "addService",
-            serde_json::json!([linked_domains_service(
+            "setSchnorrJubjubVerificationMethod",
+            serde_json::json!([schnorr_jubjub_vm("key-sj-0"), MAP_INSERT]),
+        )]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn set_verification_method_relation_insert() {
+    // Needs the VM to exist before we can relate it.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "setVerificationMethodRelation",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([REL_AUTHENTICATION, "key-0", SET_INSERT]),
+        serde_json::json!([step(
+            "setVerificationMethod",
+            serde_json::json!([ed25519_vm("key-0"), MAP_INSERT]),
+        )]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn set_verification_method_relation_remove() {
+    // Add the VM, add the relation, then test removing the relation.
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "setVerificationMethodRelation",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([REL_AUTHENTICATION, "key-0", SET_REMOVE]),
+        serde_json::json!([
+            step(
+                "setVerificationMethod",
+                serde_json::json!([ed25519_vm("key-0"), MAP_INSERT]),
+            ),
+            step(
+                "setVerificationMethodRelation",
+                serde_json::json!([REL_AUTHENTICATION, "key-0", SET_INSERT]),
+            ),
+        ]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn set_service_insert() {
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "setService",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([
+            linked_domains_service("svc-0", "https://example.com/.well-known/did-config"),
+            MAP_INSERT,
+        ]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn set_service_update() {
+    let s = fresh_setup();
+    run_inspect(
+        &s.bridge,
+        "setService",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([
+            linked_domains_service(
                 "svc-0",
-                "https://example.com/.well-known/did-config",
-            )]),
+                "https://other.example.com/.well-known/did-config",
+            ),
+            MAP_UPDATE,
+        ]),
+        serde_json::json!([step(
+            "setService",
+            serde_json::json!([
+                linked_domains_service("svc-0", "https://example.com/.well-known/did-config"),
+                MAP_INSERT,
+            ]),
         )]),
     )
     .await;
@@ -320,11 +408,11 @@ async fn remove_service() {
         &s.sk_hex,
         serde_json::json!(["svc-0"]),
         serde_json::json!([step(
-            "addService",
-            serde_json::json!([linked_domains_service(
-                "svc-0",
-                "https://example.com/.well-known/did-config",
-            )]),
+            "setService",
+            serde_json::json!([
+                linked_domains_service("svc-0", "https://example.com/.well-known/did-config"),
+                MAP_INSERT,
+            ]),
         )]),
     )
     .await;
@@ -340,6 +428,64 @@ async fn deactivate_no_args() {
         &s.addr_hex,
         &s.sk_hex,
         serde_json::json!([]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn rotate_controller_key() {
+    // `rotateControllerKey` takes a Bytes<32> new-controller-pk.
+    // The chain's witness derivation seeds the current pk from
+    // `localSecretKey()`; the new one just needs to differ.
+    let s = fresh_setup();
+    let new_pk_hex = "ff".repeat(32);
+    run_inspect(
+        &s.bridge,
+        "rotateControllerKey",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([{ "$bytes": format!("0x{new_pk_hex}") }]),
+        serde_json::json!([]),
+    )
+    .await;
+}
+
+/// Bonus: confirm the contract's curve-rejection assertion fires
+/// when we feed `setVerificationMethod` a Jubjub JWK. Without this
+/// guard the bootstrap regression would be silent.
+///
+/// Disabled by default — exists as a manual probe; the offline
+/// harness panics on assertion failures, so the test would need
+/// to be inverted (`#[should_panic]`) once we know the exact
+/// panic shape from the Compact runtime. Left documented here
+/// so future engineers know where to look.
+#[tokio::test]
+#[ignore = "Documents the assertSupportedVerificationMethod \
+            rejection path. Enable + invert (#[should_panic]) once \
+            the offline harness's assertion-failure surface is \
+            stable."]
+async fn set_verification_method_rejects_jubjub_jwk() {
+    let s = fresh_setup();
+    let jubjub_jwk_vm = serde_json::json!({
+        "id": "key-jubjub-via-jwk",
+        "typ": 1,
+        "publicKeyJwk": {
+            // KeyType.EC = 0, CurveType.Jubjub = 2
+            "kty": 0,
+            "crv": 2,
+            "x": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+            "y": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        }
+    });
+    run_inspect(
+        &s.bridge,
+        "setVerificationMethod",
+        &s.state_hex,
+        &s.addr_hex,
+        &s.sk_hex,
+        serde_json::json!([jubjub_jwk_vm, MAP_INSERT]),
         serde_json::json!([]),
     )
     .await;

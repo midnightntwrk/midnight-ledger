@@ -76,18 +76,23 @@ const PREPROD_DID_ADDRESSES: &[&str] = &[
     "ce785669eac7048652d239bd40286240bbe09f9f9c5d614631a3b256a2fec68a",
 ];
 
+/// Post-2026-05-28 schema refresh: the old `add*/update*/remove*`
+/// circuit set collapsed into unified `set*(value, mutation)`
+/// entry points plus the new `*SchnorrJubjub*` circuits +
+/// `rotateControllerKey`. Order matches the bundle's
+/// `CIRCUIT_NAMES`.
 const CIRCUIT_NAMES: &[&str] = &[
-    "addAlsoKnownAs",
-    "addService",
-    "addVerificationMethod",
-    "addVerificationMethodRelation",
     "deactivate",
-    "removeAlsoKnownAs",
+    "removeSchnorrJubjubVerificationMethod",
     "removeService",
     "removeVerificationMethod",
-    "removeVerificationMethodRelation",
-    "updateService",
-    "updateVerificationMethod",
+    "rotateControllerKey",
+    "setAlsoKnownAs",
+    "setSchnorrJubjubVerificationMethod",
+    "setService",
+    "setVerificationMethod",
+    "setVerificationMethodRelation",
+    "verifySchnorrJubjubDigestSignature",
 ];
 
 fn preprod_wallet() -> Wallet {

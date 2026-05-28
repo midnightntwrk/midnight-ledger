@@ -1,8 +1,11 @@
 //! Live integration test for `Wallet::load_did_circuit()` against
 //! the local standalone Midnight stack. Deploys a fresh DID
 //! (committee = wallet's BIP340 verifying key, threshold 1) then
-//! submits a MaintenanceUpdate that loads the addVerificationMethod
+//! submits a MaintenanceUpdate that loads the setVerificationMethod
 //! circuit's verifier key. Gated behind `network-tests`.
+//!
+//! (2026-05-28 schema refresh: `addVerificationMethod` renamed to
+//! `setVerificationMethod` with a `MapMutation` discriminator.)
 //!
 //! Run with:
 //!   docker compose -f mobile-bench/scripts/standalone.yml up -d node indexer
@@ -15,7 +18,7 @@ use futures::StreamExt;
 use wallet_core::{Network, Wallet, WizardStage};
 
 #[tokio::test]
-async fn load_add_verification_method_after_fresh_deploy() {
+async fn load_set_verification_method_after_fresh_deploy() {
     let _ = rustls::crypto::ring::default_provider().install_default();
 
     let w = Wallet::demo(Network::Undeployed);
@@ -44,12 +47,12 @@ async fn load_add_verification_method_after_fresh_deploy() {
     // UTXO, surfacing as `DustDoubleSpend`.
     tokio::time::sleep(std::time::Duration::from_secs(30)).await;
 
-    // 2. Load the addVerificationMethod verifier key via a
+    // 2. Load the setVerificationMethod verifier key via a
     //    MaintenanceUpdate. Counter is 0 — the contract was just
     //    deployed and no maintenance update has yet bumped it.
     let mut load_stream = std::pin::pin!(w.load_did_circuit(
         did.clone(),
-        "addVerificationMethod".to_string(),
+        "setVerificationMethod".to_string(),
         0,
     ));
     let mut load_outcome = None;

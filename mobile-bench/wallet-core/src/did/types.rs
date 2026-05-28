@@ -69,6 +69,36 @@ pub struct VerificationMethod {
     pub public_key_jwk: PublicKeyJwk,
 }
 
+/// On-chain Schnorr/Jubjub verification method — added in the
+/// 2026-05-28 schema refresh as the dedicated map at ledger
+/// index 9. The contract's plain `verificationMethods` map now
+/// REJECTS Jubjub JWKs; Jubjub keys must be pushed through this
+/// map instead via `setSchnorrJubjubVerificationMethod`.
+///
+/// The public key is the raw curve point `(x, y)` as 32-byte
+/// big-endian field elements — the same encoding the Jubjub
+/// JWK uses for its `x`/`y` coordinates before they're
+/// base64url'd. Mirrors upstream
+/// `midnight-did-domain::SchnorrJubjubVerificationMethod` whose
+/// `publicKey` is a `JubjubPoint = { x: bigint, y: bigint }`.
+///
+/// We keep the byte form on this struct so storage layers don't
+/// need to round-trip through bigint; the wallet's call-builder
+/// translates back to bigints when assembling the JS bridge
+/// arg shape (`{ x: { $bigint: "<decimal>" }, y: ...}`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SchnorrJubjubVerificationMethod {
+    /// `<did>#<fragment>` after `ledger_to_domain` expansion; the
+    /// raw on-chain form is the canonical `#fragment` produced by
+    /// upstream's `normalizeBoundFragmentId`.
+    pub id: String,
+    /// 32-byte big-endian Jubjub `x` coordinate.
+    pub public_key_x: [u8; 32],
+    /// 32-byte big-endian Jubjub `y` coordinate.
+    pub public_key_y: [u8; 32],
+}
+
 /// A verification-method ID *or* an inline `VerificationMethod`. DID
 /// Core allows both forms in the relation arrays
 /// (`authentication`, etc.). We model both via an untagged enum.

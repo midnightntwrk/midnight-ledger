@@ -110,19 +110,22 @@ async fn contract_layer_info_lists_all_11_did_circuits() {
         "compact-runtime missing proofDataIntoSerializedPreimage"
     );
 
-    // All 11 DID circuits, in any order.
+    // All 11 DID circuits, in any order. Post-2026-05-28 schema
+    // refresh: the old `add*/update*/remove*` set collapsed into
+    // `set*(value, mutation)` circuits and the SchnorrJubjub VM
+    // map gained its own four circuits + `rotateControllerKey`.
     let expected = [
-        "addAlsoKnownAs",
-        "removeAlsoKnownAs",
-        "addVerificationMethod",
-        "updateVerificationMethod",
-        "removeVerificationMethod",
-        "addVerificationMethodRelation",
-        "removeVerificationMethodRelation",
-        "addService",
-        "updateService",
-        "removeService",
         "deactivate",
+        "removeSchnorrJubjubVerificationMethod",
+        "removeService",
+        "removeVerificationMethod",
+        "rotateControllerKey",
+        "setAlsoKnownAs",
+        "setSchnorrJubjubVerificationMethod",
+        "setService",
+        "setVerificationMethod",
+        "setVerificationMethodRelation",
+        "verifySchnorrJubjubDigestSignature",
     ];
     for name in expected {
         assert!(

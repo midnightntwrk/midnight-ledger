@@ -22,9 +22,24 @@
 //! Path B test plan). Don't repeat that mistake: the apples-to-
 //! apples form is `tagged_serialize`.
 //!
-//! Current finding: **all 11 on-chain VKs match our bundle
-//! byte-for-byte.** Whatever causes the `Invalid Transaction
-//! (1010)` BadProof rejection on writes lives elsewhere.
+//! ### 2026-05-28 schema refresh
+//!
+//! The upstream `feat!: Redesign DID verification method storage`
+//! commit renamed every `add* / update* / remove*` circuit triple
+//! into unified `set*(value, mutation)` entry points, and added
+//! a dedicated SchnorrJubjub VM map (+ four `*SchnorrJubjub*` /
+//! `rotateControllerKey` circuits). The bundled `.verifier`
+//! files now reflect the new shape; the old `add*` / `update*`
+//! `.verifier` files no longer exist on disk.
+//!
+//! Probe behaviour against a PreProd DID that still carries
+//! the OLD circuit set: each on-chain operation name is looked
+//! up in [`bundled_verifier_hex`]. Names not in the new bundle
+//! (e.g. `addVerificationMethod`) come back as `None` and the
+//! row prints as `UNBUNDLED` rather than `MATCH`/`MISMATCH` —
+//! a deliberate signal that the chain still has a pre-refresh
+//! contract and either the seed needs re-minting or the bundle
+//! needs to be re-vendored from a matching upstream tag.
 //!
 //! Read-only (just queries the indexer). Run with:
 //!
@@ -61,44 +76,43 @@ fn sha256_hex(bytes: &[u8]) -> String {
     hex::encode(out)
 }
 
-fn bundled_verifier_hex(circuit: &str) -> String {
+/// Look up a bundled `.verifier` SHA by circuit name. Returns
+/// `None` for any circuit name not in the post-2026-05-28
+/// schema — the caller treats that as an `UNBUNDLED` row in
+/// the diff table rather than a hard mismatch.
+///
+/// Names match exactly the set bundled at
+/// `contracts/midnight-did/<name>.verifier`. Order is irrelevant.
+fn bundled_verifier_hex(circuit: &str) -> Option<String> {
     let bytes: &[u8] = match circuit {
-        "addAlsoKnownAs" => include_bytes!(
-            "../contracts/midnight-did/addAlsoKnownAs.verifier"
+        "deactivate" => include_bytes!("../contracts/midnight-did/deactivate.verifier"),
+        "removeSchnorrJubjubVerificationMethod" => include_bytes!(
+            "../contracts/midnight-did/removeSchnorrJubjubVerificationMethod.verifier"
         ),
-        "addService" => include_bytes!(
-            "../contracts/midnight-did/addService.verifier"
+        "removeService" => include_bytes!("../contracts/midnight-did/removeService.verifier"),
+        "removeVerificationMethod" => {
+            include_bytes!("../contracts/midnight-did/removeVerificationMethod.verifier")
+        }
+        "rotateControllerKey" => {
+            include_bytes!("../contracts/midnight-did/rotateControllerKey.verifier")
+        }
+        "setAlsoKnownAs" => include_bytes!("../contracts/midnight-did/setAlsoKnownAs.verifier"),
+        "setSchnorrJubjubVerificationMethod" => include_bytes!(
+            "../contracts/midnight-did/setSchnorrJubjubVerificationMethod.verifier"
         ),
-        "addVerificationMethod" => include_bytes!(
-            "../contracts/midnight-did/addVerificationMethod.verifier"
+        "setService" => include_bytes!("../contracts/midnight-did/setService.verifier"),
+        "setVerificationMethod" => {
+            include_bytes!("../contracts/midnight-did/setVerificationMethod.verifier")
+        }
+        "setVerificationMethodRelation" => {
+            include_bytes!("../contracts/midnight-did/setVerificationMethodRelation.verifier")
+        }
+        "verifySchnorrJubjubDigestSignature" => include_bytes!(
+            "../contracts/midnight-did/verifySchnorrJubjubDigestSignature.verifier"
         ),
-        "addVerificationMethodRelation" => include_bytes!(
-            "../contracts/midnight-did/addVerificationMethodRelation.verifier"
-        ),
-        "deactivate" => include_bytes!(
-            "../contracts/midnight-did/deactivate.verifier"
-        ),
-        "removeAlsoKnownAs" => include_bytes!(
-            "../contracts/midnight-did/removeAlsoKnownAs.verifier"
-        ),
-        "removeService" => include_bytes!(
-            "../contracts/midnight-did/removeService.verifier"
-        ),
-        "removeVerificationMethod" => include_bytes!(
-            "../contracts/midnight-did/removeVerificationMethod.verifier"
-        ),
-        "removeVerificationMethodRelation" => include_bytes!(
-            "../contracts/midnight-did/removeVerificationMethodRelation.verifier"
-        ),
-        "updateService" => include_bytes!(
-            "../contracts/midnight-did/updateService.verifier"
-        ),
-        "updateVerificationMethod" => include_bytes!(
-            "../contracts/midnight-did/updateVerificationMethod.verifier"
-        ),
-        _ => panic!("unknown circuit name: {circuit}"),
+        _ => return None,
     };
-    sha256_hex(bytes)
+    Some(sha256_hex(bytes))
 }
 
 #[tokio::test]
@@ -120,6 +134,7 @@ async fn preprod_vk_bytes_match_bundle() {
     );
 
     let mut mismatches = Vec::new();
+    let mut unbundled = Vec::new();
     for entry in state.operations.iter() {
         let (ep, op) = &*entry;
         let name = match std::str::from_utf8(&ep[..]) {
@@ -142,15 +157,26 @@ async fn preprod_vk_bytes_match_bundle() {
                 .expect("tagged_serialize VerifierKey");
         }
         let on_chain_hex = sha256_hex(&on_chain_bytes);
-        let bundled_hex = bundled_verifier_hex(&name);
-        let match_marker = if on_chain_hex == bundled_hex { "MATCH" } else { "MISMATCH" };
-        println!(
-            "  {match_marker:8} {name:35} chain={} bundle={}",
-            &on_chain_hex[..16],
-            &bundled_hex[..16],
-        );
-        if on_chain_hex != bundled_hex {
-            mismatches.push((name, on_chain_hex, bundled_hex));
+        match bundled_verifier_hex(&name) {
+            None => {
+                println!(
+                    "  UNBUNDLED {name:35} chain={} (post-2026-05-28 bundle has no \
+                     `{name}` — likely a pre-refresh PreProd contract)",
+                    &on_chain_hex[..16],
+                );
+                unbundled.push(name);
+            }
+            Some(bundled_hex) => {
+                let match_marker = if on_chain_hex == bundled_hex { "MATCH" } else { "MISMATCH" };
+                println!(
+                    "  {match_marker:9} {name:35} chain={} bundle={}",
+                    &on_chain_hex[..16],
+                    &bundled_hex[..16],
+                );
+                if on_chain_hex != bundled_hex {
+                    mismatches.push((name, on_chain_hex, bundled_hex));
+                }
+            }
         }
     }
 
@@ -171,5 +197,18 @@ async fn preprod_vk_bytes_match_bundle() {
         );
         // Don't `panic!` — we want the run to show its findings
         // even on failure. The mismatch IS the answer.
+    }
+    if !unbundled.is_empty() {
+        println!(
+            "\n[summary] {} on-chain circuit(s) absent from our bundle: {:?}",
+            unbundled.len(),
+            unbundled,
+        );
+        println!(
+            "          (2026-05-28 schema refresh renamed add*/update*/remove* to \
+             set*(value, mutation); PreProd DIDs deployed pre-refresh still expose \
+             the old names. Re-mint the DID against a fresh deploy or re-vendor \
+             the contract artifacts to a matching upstream tag.)"
+        );
     }
 }

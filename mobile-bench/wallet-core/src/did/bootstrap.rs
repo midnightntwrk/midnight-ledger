@@ -163,6 +163,40 @@ fn build_verification_method_json(
     })
 }
 
+/// Decode a Jubjub-curve JWK's `(x, y)` coordinates back into raw
+/// 32-byte big-endian field elements — the same encoding
+/// `jubjub_public_jwk_from_point` in `secret_storage/curve_support`
+/// emits before base64url-encoding them. Used by the bootstrap to
+/// route Jubjub keys through `setSchnorrJubjubVerificationMethod`
+/// (the JWK form is no longer accepted by the contract's
+/// `assertSupportedVerificationMethod` check).
+fn decode_jubjub_coords(jwk: &PublicJwk) -> Result<([u8; 32], [u8; 32]), String> {
+    use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+    use base64::Engine as _;
+    let y_str = jwk
+        .y
+        .as_ref()
+        .ok_or_else(|| "Jubjub JWK missing y coordinate".to_string())?;
+    let x = URL_SAFE_NO_PAD
+        .decode(jwk.x.as_bytes())
+        .map_err(|e| format!("decode jubjub x b64url: {e}"))?;
+    let y = URL_SAFE_NO_PAD
+        .decode(y_str.as_bytes())
+        .map_err(|e| format!("decode jubjub y b64url: {e}"))?;
+    if x.len() != 32 || y.len() != 32 {
+        return Err(format!(
+            "Jubjub coords must be 32 bytes each (x={}, y={})",
+            x.len(),
+            y.len()
+        ));
+    }
+    let mut x_arr = [0u8; 32];
+    let mut y_arr = [0u8; 32];
+    x_arr.copy_from_slice(&x);
+    y_arr.copy_from_slice(&y);
+    Ok((x_arr, y_arr))
+}
+
 /// Atomically create a DID and attach the two Phase 1 verification
 /// methods: Ed25519 in `authentication`, Jubjub in `assertionMethod`.
 ///
@@ -234,18 +268,35 @@ pub async fn bootstrap_did_with_keys(
         .await
         .map_err(|e| BootstrapError::CreateDid(format!("load setVerificationMethod VK: {e}")))?;
     // The indexer needs to ingest the counter bump from the first
-    // MaintenanceUpdate before the second one is accepted — without
+    // MaintenanceUpdate before the next one is accepted — without
     // this wait, the second load lands with `counter: 1` but the
     // chain still sees `maintenance_authority.counter = 0` and
     // rejects with `Invalid Transaction (1010)`. Same shape as the
     // `wait_for_indexer_settle` we already do after create_did,
-    // but the criterion is "counter == 1" not "contract exists".
+    // but the criterion is "counter == N" not "contract exists".
     wait_for_counter(wallet, &did, 1).await?;
+    // 2026-05-28 schema refresh: the plain `setVerificationMethod`
+    // map rejects Jubjub JWKs. The assertion VM goes through
+    // `setSchnorrJubjubVerificationMethod` instead, so we need its
+    // VK on-chain too before step 5 can land.
+    wallet
+        .load_did_circuit_awaitable(
+            did.clone(),
+            "setSchnorrJubjubVerificationMethod".to_string(),
+            1,
+        )
+        .await
+        .map_err(|e| {
+            BootstrapError::CreateDid(format!(
+                "load setSchnorrJubjubVerificationMethod VK: {e}"
+            ))
+        })?;
+    wait_for_counter(wallet, &did, 2).await?;
     wallet
         .load_did_circuit_awaitable(
             did.clone(),
             "setVerificationMethodRelation".to_string(),
-            1,
+            2,
         )
         .await
         .map_err(|e| {
@@ -253,12 +304,12 @@ pub async fn bootstrap_did_with_keys(
                 "load setVerificationMethodRelation VK: {e}"
             ))
         })?;
-    // Same wait before the first ContractCall — that one bumps the
-    // counter to 2 in turn, but the call itself doesn't care about
-    // counter; it cares about the `operations` map carrying the
-    // verifier key for the circuit. Indexer needs to surface both
-    // VK loads in its decoded contract state before the call.
-    wait_for_counter(wallet, &did, 2).await?;
+    // Same wait before the first ContractCall — the call itself
+    // doesn't care about counter; it cares about the `operations`
+    // map carrying the verifier key for the circuit. Indexer needs
+    // to surface all three VK loads in its decoded contract state
+    // before the call.
+    wait_for_counter(wallet, &did, 3).await?;
 
     // 2. Import keys into the secret store with DID-URL-form kids.
     //    The kid we register here is what `find_by_kid` will match
@@ -295,7 +346,17 @@ pub async fn bootstrap_did_with_keys(
         })?;
 
     let ed_vm_json = build_verification_method_json(&did, "key-auth", &ed_jwk);
-    let jb_vm_json = build_verification_method_json(&did, "key-assert", &jb_jwk);
+    // Jubjub no longer rides through `build_verification_method_json`
+    // — the new contract's `assertSupportedVerificationMethod`
+    // explicitly rejects `kty=EC, crv=Jubjub` with
+    // "EC keys must use P-256 or secp256k1; use SchnorrJubjub
+    // methods for Jubjub". Decode the JWK coords back to raw BE
+    // bytes; `Wallet::set_schnorr_jubjub_verification_method`
+    // translates them into the `{$bigint}` shape the
+    // `JubjubPoint` circuit arg consumes.
+    let (jb_x_be, jb_y_be) = decode_jubjub_coords(&jb_jwk).map_err(|e| {
+        BootstrapError::AttachAssertion(format!("decode jubjub jwk coords: {e}"))
+    })?;
 
     // 4. Attach Ed25519 → authentication. Relation methodIds are
     //    the hash-prefixed canonical form per
@@ -326,11 +387,30 @@ pub async fn bootstrap_did_with_keys(
         .map_err(|e| BootstrapError::AttachAuthn(e.to_string()))?;
     wait_for_authentication_count(wallet, &did, 1).await?;
 
-    // 5. Attach Jubjub → assertionMethod.
+    // 5. Attach Jubjub → assertionMethod. Goes through the
+    //    dedicated `setSchnorrJubjubVerificationMethod` map at
+    //    ledger index 9 (2026-05-28 schema refresh); the JWK
+    //    `verificationMethods` map no longer accepts Jubjub
+    //    keys. The relation circuit (`setVerificationMethodRelation`)
+    //    is SHARED between both VM maps — it looks the VM up via
+    //    `verificationMethodExists`, which checks BOTH maps —
+    //    so the relation insert below is unchanged from how
+    //    Ed25519 attaches above.
     wallet
-        .add_verification_method(&did, &jubjub_ref, jb_vm_json, controller_sk)
+        .set_schnorr_jubjub_verification_method(
+            &did,
+            &jubjub_ref,
+            "#key-assert".to_string(),
+            jb_x_be,
+            jb_y_be,
+            controller_sk,
+        )
         .await
         .map_err(|e| BootstrapError::AttachAssertion(e.to_string()))?;
+    // The Jubjub VM lives in the SchnorrJubjub map, not the JWK
+    // map; ledger_to_domain folds both into `verification_method[]`
+    // on the resolved doc, so the original `wait_for_vm_count(2)`
+    // still polls the right counter (1 JWK + 1 Schnorr/Jubjub).
     wait_for_vm_count(wallet, &did, 2).await?;
     wallet
         .add_verification_method_relation(

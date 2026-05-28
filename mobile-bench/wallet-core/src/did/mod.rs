@@ -30,8 +30,8 @@ pub use bootstrap::{bootstrap_did_with_keys, derive_keys, BootstrapError, Bootst
 pub use error::DidError;
 pub use id::{CONTRACT_ADDRESS_LEN, ContractAddressBytes, DidId, DidIdError};
 pub use types::{
-    CurveType, DidDocument, KeyType, PublicKeyJwk, Service, ServiceEndpoint,
-    VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
+    CurveType, DidDocument, KeyType, PublicKeyJwk, SchnorrJubjubVerificationMethod, Service,
+    ServiceEndpoint, VerificationMethod, VerificationMethodRef, VerificationMethodRelation,
     VerificationMethodType,
 };
 

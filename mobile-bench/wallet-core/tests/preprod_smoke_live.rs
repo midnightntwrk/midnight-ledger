@@ -12,8 +12,8 @@
 //!    `mobile-bench/iteration-2`: all three resolved in ~5s
 //!    with 11/11 circuit VKs already on-chain.
 //!
-//! 2. `preprod_add_also_known_as` — **write, currently
-//!    `#[ignore]`'d**. Picks DID #1, calls `addAlsoKnownAs`
+//! 2. `preprod_set_also_known_as_insert` — **write, currently
+//!    `#[ignore]`'d**. Picks DID #1, calls `setAlsoKnownAs(Insert)`
 //!    via the JS bridge → Rust balance/prove/submit pipeline,
 //!    re-resolves and asserts the alias landed. First-pass
 //!    run failed at `Submitting` with
@@ -60,15 +60,11 @@
 //! - Seed: matches the manager profile's `seed` field.
 //! - DIDs: the three contract addresses tagged on the
 //!   profile's `contractAddresses`.
-//! - Controller secret: `SHA-256(addVerificationMethod.prover_bytes)`,
-//!   matching upstream `midnight-did/api/src/lib.ts::initPrivateState`.
-//!
-//! Hardcoded configuration (per operator instruction):
-//! - Seed: matches the manager profile's `seed` field.
-//! - DIDs: the three contract addresses tagged on the
-//!   profile's `contractAddresses`.
-//! - Controller secret: `SHA-256(addVerificationMethod.prover_bytes)`,
-//!   matching upstream `midnight-did/api/src/lib.ts::initPrivateState`.
+//! - Controller secret: `SHA-256(setVerificationMethod.prover_bytes)`,
+//!   matching upstream `midnight-did/api/src/lib.ts::initPrivateState`
+//!   after the 2026-05-28 schema refresh (the upstream constant
+//!   re-hashed the renamed prover key; behaviour against the live
+//!   PreProd manager-service has NOT been re-probed).
 //!
 //! Run with:
 //!
@@ -108,21 +104,27 @@ const PREPROD_DID_ADDRESSES: &[&str] = &[
     "ce785669eac7048652d239bd40286240bbe09f9f9c5d614631a3b256a2fec68a",
 ];
 
-/// Prover-key bytes for `addVerificationMethod`. Bundled
-/// alongside our vendored DID artifacts; identical to what
-/// the upstream manager loads via `NodeZkConfigProvider`
-/// (same source — both pull from
-/// `midnight-did/contract/dist/managed/did/keys/`).
-const ADD_VM_PROVER: &[u8] =
-    include_bytes!("../contracts/midnight-did/addVerificationMethod.prover");
+/// Prover-key bytes for `setVerificationMethod`. Post-2026-05-28
+/// schema refresh, the upstream's `addVerificationMethod` circuit
+/// was renamed to `setVerificationMethod`; the bundled artifact
+/// reflects the new name. Whether the manager-service's
+/// controller-secret derivation actually hashes THIS prover key
+/// (vs. some other constant after the refresh) has NOT been
+/// re-probed — punted to a future "re-mint PreProd seed" task.
+const SET_VM_PROVER: &[u8] =
+    include_bytes!("../contracts/midnight-did/setVerificationMethod.prover");
 
-/// Compute the controller-secret the upstream manager uses
-/// for every DID it creates. Matches
-/// `midnight-did/api/src/lib.ts::initPrivateState`:
-/// `secretKey = SHA-256(proverKey("addVerificationMethod"))`.
+/// Compute the controller-secret the upstream manager *probably*
+/// uses for every DID it creates against the post-2026-05-28
+/// schema. Mirrors the historical
+/// `midnight-did/api/src/lib.ts::initPrivateState` pattern
+/// (`secretKey = SHA-256(proverKey("<rename>"))`) but the rename
+/// hasn't been verified against the running manager-service —
+/// the `#[ignore]` annotation on the write test below keeps this
+/// from being load-bearing in CI.
 fn upstream_controller_sk() -> [u8; 32] {
     let mut h = Sha256::new();
-    h.update(ADD_VM_PROVER);
+    h.update(SET_VM_PROVER);
     h.finalize().into()
 }
 
@@ -200,9 +202,13 @@ fn fresh_alias() -> String {
 #[tokio::test]
 #[ignore = "Spends real PreProd DUST. The earlier VK-divergence hypothesis was \
             refuted (see module docs). Run manually with \
-            `cargo test … preprod_add_also_known_as -- --ignored --nocapture` \
-            to surface what actually fails on the live chain now."]
-async fn preprod_add_also_known_as() {
+            `cargo test … preprod_set_also_known_as_insert -- --ignored --nocapture` \
+            to surface what actually fails on the live chain now. \
+            NOTE: 2026-05-28 schema refresh changed circuit names + arg \
+            shape; against a pre-refresh PreProd DID this call will fail \
+            with `circuit not registered` / `wrong arity`. Re-mint the \
+            target DID against a fresh post-refresh deploy first."]
+async fn preprod_set_also_known_as_insert() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     let w = preprod_wallet();
     let target = PREPROD_DID_ADDRESSES[0];
@@ -228,18 +234,21 @@ async fn preprod_add_also_known_as() {
     let controller_sk = upstream_controller_sk();
     let mut counter = pre.maintenance_counter;
 
-    // 2. Auto-load the addAlsoKnownAs VK if it's not already
+    // 2. Auto-load the setAlsoKnownAs VK if it's not already
     //    in the contract's operations map. The manager has
     //    probably loaded the common set already, but this
-    //    handles the case where it didn't.
-    let already_loaded = pre.loaded_circuits.iter().any(|c| c == "addAlsoKnownAs");
+    //    handles the case where it didn't. Post-2026-05-28
+    //    schema refresh: the old `addAlsoKnownAs` / `removeAlsoKnownAs`
+    //    pair collapsed into the single
+    //    `setAlsoKnownAs(value, SetMutation)` entry point.
+    let already_loaded = pre.loaded_circuits.iter().any(|c| c == "setAlsoKnownAs");
     if already_loaded {
-        println!("[load] addAlsoKnownAs already on-chain, skipping MaintenanceUpdate");
+        println!("[load] setAlsoKnownAs already on-chain, skipping MaintenanceUpdate");
     } else {
-        println!("[load] addAlsoKnownAs VK @ counter {counter}");
+        println!("[load] setAlsoKnownAs VK @ counter {counter}");
         let mut stream = std::pin::pin!(w.load_did_circuit(
             did_id.clone(),
-            "addAlsoKnownAs".to_string(),
+            "setAlsoKnownAs".to_string(),
             counter,
         ));
         let mut load_done = false;
@@ -255,7 +264,7 @@ async fn preprod_add_also_known_as() {
                     load_done = true;
                     break;
                 }
-                WizardStage::Failed(e) => panic!("load addAlsoKnownAs VK failed: {e}"),
+                WizardStage::Failed(e) => panic!("load setAlsoKnownAs VK failed: {e}"),
                 other => println!("  {other:?}"),
             }
         }
@@ -273,15 +282,19 @@ async fn preprod_add_also_known_as() {
     }
     let _ = counter; // bumped above; used by future steps if we add more writes
 
-    // 3. ContractCall: addAlsoKnownAs with a fresh, unique
+    // 3. ContractCall: setAlsoKnownAs with a fresh, unique
     //    alias. The wallet's prover proves locally; the JS
     //    bridge builds the UnprovenTransaction.
+    //
+    //    Post-2026-05-28 the circuit takes a `SetMutation`
+    //    discriminator: 1 = Insert, 2 = Remove. We're inserting.
     let alias = fresh_alias();
-    println!("[call] addAlsoKnownAs {alias}");
+    const SET_MUTATION_INSERT: u8 = 1;
+    println!("[call] setAlsoKnownAs Insert({alias})");
     let mut stream = std::pin::pin!(w.call_did_circuit(
         did_id.clone(),
-        "addAlsoKnownAs".to_string(),
-        serde_json::json!([alias]),
+        "setAlsoKnownAs".to_string(),
+        serde_json::json!([alias, SET_MUTATION_INSERT]),
         controller_sk,
     ));
     let mut call_done = false;
@@ -296,7 +309,7 @@ async fn preprod_add_also_known_as() {
                 call_done = true;
                 break;
             }
-            WizardStage::Failed(e) => panic!("call addAlsoKnownAs failed: {e}"),
+            WizardStage::Failed(e) => panic!("call setAlsoKnownAs failed: {e}"),
             other => println!("  {other:?}"),
         }
     }

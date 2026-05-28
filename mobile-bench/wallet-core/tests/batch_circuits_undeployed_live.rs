@@ -7,11 +7,13 @@
 //!
 //! Sequence:
 //!   1. Deploy a fresh DID (Rust pipeline)
-//!   2. Load verifier keys for `addAlsoKnownAs` +
-//!      `addVerificationMethod` via MaintenanceUpdate (Rust
+//!   2. Load verifier keys for `setAlsoKnownAs` +
+//!      `setVerificationMethod` via MaintenanceUpdate (Rust
 //!      pipeline). The chain rejects ContractCall for any
 //!      circuit whose VK isn't on-chain yet, so both VKs must
 //!      be loaded before the batch.
+//!      (2026-05-28 schema refresh: old `add*` names collapsed
+//!       into `set*(value, mutation)` circuits.)
 //!   3. Submit the two write circuits sequentially via
 //!      `call_did_circuit` (JS-built UnprovenTransaction → Rust
 //!      balance / prove / submit).
@@ -33,21 +35,32 @@ use wallet_core::{Network, Wallet, WizardStage};
 const ALIAS: &str = "https://alias.batch.example.com";
 const KEY_ID: &str = "key-batch-0";
 
-/// Convenience: build the JSON arg shape `addVerificationMethod`
-/// expects. Same shape as `tests/js_inspect_circuits.rs::ed25519_vm`.
+/// Convenience: build the JSON arg shape `setVerificationMethod`
+/// expects — `(verificationMethod, MapMutation)`. Same VM shape
+/// as `tests/js_inspect_circuits.rs::ed25519_vm`; the mutation
+/// arg is the discriminator (1 = Insert).
+///
+/// 2026-05-28 schema refresh: `x`/`y` are JWK base64url strings
+/// now (not bigints). Use placeholder strings here — the chain
+/// reject path only validates that the curve is Ed25519, not
+/// that the point is on-curve.
 fn ed25519_vm_args(id: &str) -> serde_json::Value {
-    serde_json::json!([{
-        "id": id,
-        // VerificationMethodType.JsonWebKey = 1
-        "typ": 1,
-        "publicKeyJwk": {
-            // KeyType.OKP = 3, CurveType.Ed25519 = 0
-            "kty": 3,
-            "crv": 0,
-            "x": { "$bigint": "1" },
-            "y": { "$bigint": "2" },
-        }
-    }])
+    const MAP_MUTATION_INSERT: u8 = 1;
+    serde_json::json!([
+        {
+            "id": id,
+            // VerificationMethodType.JsonWebKey = 1
+            "typ": 1,
+            "publicKeyJwk": {
+                // KeyType.OKP = 3, CurveType.Ed25519 = 0 (post-2026-05-27 enum order)
+                "kty": 3,
+                "crv": 0,
+                "x": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+                "y": "",
+            }
+        },
+        MAP_MUTATION_INSERT,
+    ])
 }
 
 #[tokio::test]
@@ -78,8 +91,8 @@ async fn batch_two_write_circuits_on_undeployed_live() {
     // 2. Load both verifier keys. Counter increments per
     //    MaintenanceUpdate — start at 0, second one uses 1.
     for (counter, circuit) in [
-        (0u32, "addAlsoKnownAs"),
-        (1u32, "addVerificationMethod"),
+        (0u32, "setAlsoKnownAs"),
+        (1u32, "setVerificationMethod"),
     ] {
         let mut load_stream = std::pin::pin!(w.load_did_circuit(
             did_id.clone(),
@@ -111,9 +124,15 @@ async fn batch_two_write_circuits_on_undeployed_live() {
     //    `prepareUnprovenCallTx` round-trip needs fresh state
     //    pulled via `indexer.contract_state` (which
     //    `Wallet::call_did_circuit` does internally).
+    // Post-2026-05-28: `setAlsoKnownAs(value, SetMutation)`.
+    // `SetMutation::Insert == 1`.
+    const SET_MUTATION_INSERT: u8 = 1;
     let batch: Vec<(&'static str, serde_json::Value)> = vec![
-        ("addAlsoKnownAs", serde_json::json!([ALIAS])),
-        ("addVerificationMethod", ed25519_vm_args(KEY_ID)),
+        (
+            "setAlsoKnownAs",
+            serde_json::json!([ALIAS, SET_MUTATION_INSERT]),
+        ),
+        ("setVerificationMethod", ed25519_vm_args(KEY_ID)),
     ];
     for (circuit, args) in &batch {
         let mut call_stream = std::pin::pin!(w.call_did_circuit(

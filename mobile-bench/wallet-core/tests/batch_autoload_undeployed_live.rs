@@ -34,12 +34,18 @@ use wallet_core::{Network, Wallet, WizardStage};
 const ALIAS: &str = "https://alias.autoload.example.com";
 const SERVICE_ID: &str = "svc-autoload-0";
 
+/// Build the JSON arg shape `setService` expects post-2026-05-28:
+/// `(service, MapMutation)` with `MapMutation::Insert == 1`.
 fn linked_domains_service_args(id: &str, endpoint: &str) -> serde_json::Value {
-    serde_json::json!([{
-        "id": id,
-        "typ": "LinkedDomains",
-        "serviceEndpoint": endpoint,
-    }])
+    const MAP_MUTATION_INSERT: u8 = 1;
+    serde_json::json!([
+        {
+            "id": id,
+            "typ": "LinkedDomains",
+            "serviceEndpoint": endpoint,
+        },
+        MAP_MUTATION_INSERT,
+    ])
 }
 
 #[tokio::test]
@@ -84,10 +90,18 @@ async fn auto_load_two_unloaded_circuits_on_undeployed_live() {
 
     // 3. Auto-load loop — exactly the shape `DidOperationBuilder`
     //    runs in the spawned submit closure.
+    // 2026-05-28 schema refresh: `addAlsoKnownAs` collapsed into
+    // `setAlsoKnownAs(value, SetMutation)`; `addService` into
+    // `setService(service, MapMutation)`. `SetMutation::Insert ==
+    // MapMutation::Insert == 1`.
+    const SET_MUTATION_INSERT: u8 = 1;
     let queue: Vec<(&'static str, serde_json::Value)> = vec![
-        ("addAlsoKnownAs", serde_json::json!([ALIAS])),
         (
-            "addService",
+            "setAlsoKnownAs",
+            serde_json::json!([ALIAS, SET_MUTATION_INSERT]),
+        ),
+        (
+            "setService",
             linked_domains_service_args(SERVICE_ID, "https://example.com/.well-known/did-config"),
         ),
     ];
@@ -191,7 +205,7 @@ async fn auto_load_two_unloaded_circuits_on_undeployed_live() {
             .map(|s| &s.id)
             .collect::<Vec<_>>(),
     );
-    for circuit in ["addAlsoKnownAs", "addService"] {
+    for circuit in ["setAlsoKnownAs", "setService"] {
         assert!(
             resolved1
                 .loaded_circuits
