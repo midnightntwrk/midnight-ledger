@@ -30,11 +30,17 @@
 //! salt and writes the version row; no data shape is changed
 //! because v0 means "empty file".
 
+mod backup;
 mod codec;
 mod envelope;
 mod error;
 mod migrate;
 mod schema;
+
+pub use backup::{
+    BackupControllerSecretRow, BackupWalletRow, ImportSummary, WalletBackup,
+    BACKUP_FORMAT, BACKUP_VERSION,
+};
 
 use std::path::Path;
 use std::sync::Arc;

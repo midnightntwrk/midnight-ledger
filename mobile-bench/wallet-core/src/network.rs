@@ -49,6 +49,19 @@ impl Network {
         }
     }
 
+    /// Case-insensitive lookup against either `label()`
+    /// ("PreProd") or `config().network_id` ("preprod"). Used
+    /// by the backup-file importer (`store::backup`) to parse
+    /// the human-readable `network` field back into a
+    /// `Network` discriminant.
+    pub fn from_label(s: &str) -> Option<Network> {
+        let needle = s.trim().to_lowercase();
+        Network::ALL.into_iter().find(|n| {
+            n.label().to_lowercase() == needle
+                || n.config().network_id.to_lowercase() == needle
+        })
+    }
+
     pub fn config(self) -> NetworkConfig {
         match self {
             Network::Mainnet => NetworkConfig {

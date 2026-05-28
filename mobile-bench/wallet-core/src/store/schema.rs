@@ -74,6 +74,25 @@ impl TryFrom<u8> for NetworkTag {
     }
 }
 
+impl NetworkTag {
+    /// Inverse of `From<Network>`. Returns `None` for tags that
+    /// don't correspond to a known variant (e.g. a row written
+    /// by a future build that added a new network). Used by
+    /// the backup exporter to surface rows in human-readable
+    /// form.
+    pub fn to_network(self) -> Option<Network> {
+        match self.0 {
+            1 => Some(Network::Mainnet),
+            2 => Some(Network::PreProd),
+            3 => Some(Network::Preview),
+            4 => Some(Network::QaNet),
+            5 => Some(Network::DevNet),
+            6 => Some(Network::Undeployed),
+            _ => None,
+        }
+    }
+}
+
 // ── Tables ─────────────────────────────────────────────────────
 
 /// Key-value scratch — `(name → bytes)`. Carries the on-disk

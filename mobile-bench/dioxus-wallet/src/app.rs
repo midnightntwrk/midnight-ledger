@@ -5159,6 +5159,195 @@ fn SettingsTab(bridge_state: BridgeState) -> Element {
             }
         }
 
+        WalletBackupCard { bridge_state: bridge_state.clone() }
+    }
+}
+
+/// Export/import card under Settings. Lets the operator dump the
+/// two irrecoverable tables (wallet HD seeds + per-DID controller
+/// secrets) into a JSON file outside the per-app sandbox, and
+/// restore from one. See `wallet_core::store::backup` for the
+/// file format + encryption story (existing scrypt envelopes
+/// carry through verbatim — same unlock passphrase decrypts).
+#[component]
+fn WalletBackupCard(bridge_state: BridgeState) -> Element {
+    use wallet_core::store::WalletBackup;
+
+    let backup_dir = wallet_backup_dir();
+    let mut import_path_input =
+        use_signal(|| backup_dir.display().to_string());
+    let mut status =
+        use_signal::<Option<Result<String, String>>>(|| None);
+
+    let do_export = {
+        let state = bridge_state.clone();
+        let dir = backup_dir.clone();
+        move |_| {
+            let Some(store) = state.store() else {
+                status.set(Some(Err(
+                    "wallet store not opened yet — unlock first"
+                        .to_string(),
+                )));
+                return;
+            };
+            let backup = match store.export_backup() {
+                Ok(b) => b,
+                Err(e) => {
+                    status.set(Some(Err(format!("export failed: {e}"))));
+                    return;
+                }
+            };
+            // Timestamp file name to YYYYMMDD-HHMMSS so the
+            // operator's `ls backups/` sorts chronologically.
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_secs())
+                .unwrap_or(0);
+            let fname = format!("wallet-{now}.mwallet.json");
+            let path = dir.join(&fname);
+            let json = match serde_json::to_vec_pretty(&backup) {
+                Ok(j) => j,
+                Err(e) => {
+                    status.set(Some(Err(format!("serialise failed: {e}"))));
+                    return;
+                }
+            };
+            if let Err(e) = std::fs::write(&path, &json) {
+                status.set(Some(Err(format!("write {}: {e}", path.display()))));
+                return;
+            }
+            status.set(Some(Ok(format!(
+                "exported {} wallet seed(s) + {} controller secret(s) → {}",
+                backup.wallets.len(),
+                backup.controller_secrets.len(),
+                path.display()
+            ))));
+        }
+    };
+
+    let do_import = {
+        let state = bridge_state.clone();
+        move |_| {
+            let Some(store) = state.store() else {
+                status.set(Some(Err(
+                    "wallet store not opened yet — unlock first".to_string(),
+                )));
+                return;
+            };
+            let path_str = import_path_input.read().clone();
+            let path = std::path::PathBuf::from(path_str.trim());
+            if path.is_dir() {
+                status.set(Some(Err(format!(
+                    "{} is a directory; type the full path to a .mwallet.json file",
+                    path.display()
+                ))));
+                return;
+            }
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(e) => {
+                    status.set(Some(Err(format!("read {}: {e}", path.display()))));
+                    return;
+                }
+            };
+            let backup: WalletBackup = match serde_json::from_slice(&bytes) {
+                Ok(b) => b,
+                Err(e) => {
+                    status.set(Some(Err(format!("parse {}: {e}", path.display()))));
+                    return;
+                }
+            };
+            let summary = match store.import_backup(&backup) {
+                Ok(s) => s,
+                Err(e) => {
+                    status.set(Some(Err(format!("import failed: {e}"))));
+                    return;
+                }
+            };
+            status.set(Some(Ok(format!(
+                "imported {} from {}: {} wallet(s) inserted / {} overwritten, \
+                 {} controller secret(s) inserted / {} overwritten{}",
+                backup.format,
+                path.display(),
+                summary.wallets_inserted,
+                summary.wallets_overwritten,
+                summary.controller_secrets_inserted,
+                summary.controller_secrets_overwritten,
+                if summary.controller_secrets_skipped_bad_network > 0 {
+                    format!(
+                        " (skipped {} controller_secret rows with unknown network)",
+                        summary.controller_secrets_skipped_bad_network
+                    )
+                } else {
+                    String::new()
+                },
+            ))));
+        }
+    };
+
+    let backup_dir_display = backup_dir.display().to_string();
+    let status_snap = status.read().clone();
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Backup & restore" }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 10px;",
+                "Exports your wallet seeds + per-DID controller secrets to a \
+                 JSON file (existing AES-GCM envelopes ride through; same unlock \
+                 passphrase decrypts). Survives app reinstall, simulator \
+                 device delete, anything that wipes the live store. Keep the \
+                 file somewhere private — it carries everything needed to \
+                 control DIDs you minted on this wallet."
+            }
+            div { class: "detail-kv",
+                div { class: "k", "Backup directory" }
+                div { class: "v", "{backup_dir_display}" }
+            }
+
+            h3 { "Export" }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 6px;",
+                "Writes a timestamped .mwallet.json file into the backup \
+                 directory above. On iOS simulator use \
+                 `xcrun simctl pull` to copy it out of the sandbox."
+            }
+            div { class: "row",
+                button { onclick: do_export, "Export wallet" }
+                {copy_btn(backup_dir_display.clone(), "Copy directory path")}
+            }
+
+            h3 { "Import" }
+            div { style: "color: var(--text-muted); font-size: 11px; margin-bottom: 6px;",
+                "Paste the full file path to a .mwallet.json file. Existing \
+                 rows with the same wallet_id / (network, did) are \
+                 overwritten; rows in the live store but not in the file are \
+                 left alone."
+            }
+            div { class: "row",
+                input {
+                    style: "flex: 1; padding: 6px 10px; font-family: monospace; \
+                            font-size: 12px;",
+                    value: "{import_path_input.read()}",
+                    oninput: move |e| import_path_input.set(e.value()),
+                }
+                button { onclick: do_import, "Import wallet" }
+            }
+
+            {match &status_snap {
+                Some(Ok(msg)) => rsx! {
+                    div { class: "wizard-outcome ok",
+                        div { class: "row label", "OK" }
+                        div { class: "seed-blob", "{msg}" }
+                    }
+                },
+                Some(Err(msg)) => rsx! {
+                    div { class: "wizard-outcome err",
+                        div { class: "row label", "Failed" }
+                        div { class: "seed-blob", "{msg}" }
+                    }
+                },
+                None => rsx! { Fragment {} },
+            }}
+        }
     }
 }
 
@@ -8410,6 +8599,24 @@ pub(crate) fn wallet_store_path() -> std::path::PathBuf {
         }
         std::path::PathBuf::from("wallet.redb")
     }
+}
+
+/// Directory where wallet backup files (`*.mwallet.json`) live.
+/// Co-located with `wallet_store_path()`'s parent so the operator
+/// finds them next to the live database, and on iOS the
+/// backups land under the per-app `Documents/` tree —
+/// reachable via `xcrun simctl pull` for the sim, and via
+/// Files.app for the device (provided
+/// `UIFileSharingEnabled=YES` ever gets flipped in
+/// Info.plist).
+pub(crate) fn wallet_backup_dir() -> std::path::PathBuf {
+    let dir = wallet_store_path()
+        .parent()
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join("backups");
+    let _ = std::fs::create_dir_all(&dir);
+    dir
 }
 
 /// Read the running app's package name from `/proc/self/cmdline`.
