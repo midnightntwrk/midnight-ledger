@@ -1948,11 +1948,68 @@ pub fn App() -> Element {
                             // Background auto-resolve to flip the
                             // Pending badge to Active and fill in
                             // counter / VM / service counts.
+                            //
+                            // **Retry loop** because the indexer
+                            // has its own ingestion lag (a few
+                            // seconds on standalone, longer on
+                            // PreProd). Without retries the first
+                            // resolve fires at <1 s post-deploy,
+                            // the indexer 404s on the new
+                            // address, and the entry stays
+                            // Pending forever — even though the
+                            // DID exists on chain. Pattern mirrors
+                            // `wait_for_indexer_settle` in
+                            // `wallet-core::did::bootstrap`:
+                            // 10 attempts × 3 s back-off = ~30 s
+                            // window matching the live bootstrap
+                            // flow's settle deadline.
                             let bridge = bridge_state.read().clone();
                             let did_for_spawn = did_string.clone();
                             spawn(async move {
                                 let w = app_wallet_for(net);
-                                match w.resolve_did_full(&did_for_spawn).await {
+                                const MAX_ATTEMPTS: u32 = 10;
+                                const BACKOFF: std::time::Duration =
+                                    std::time::Duration::from_secs(3);
+                                let mut last_err: Option<String> = None;
+                                let mut resolved_opt = None;
+                                for attempt in 1..=MAX_ATTEMPTS {
+                                    match w.resolve_did_full(&did_for_spawn).await {
+                                        Ok(r) => {
+                                            resolved_opt = Some(r);
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            let msg = e.to_string();
+                                            // Indexer-lag failures are
+                                            // expected on the first
+                                            // few attempts — log at
+                                            // DEBUG so we don't spam
+                                            // WARN on the happy path.
+                                            tracing::debug!(
+                                                did=%did_for_spawn,
+                                                attempt,
+                                                error=%msg,
+                                                "auto-resolve attempt failed; retrying",
+                                            );
+                                            last_err = Some(msg);
+                                            if attempt < MAX_ATTEMPTS {
+                                                tokio::time::sleep(BACKOFF).await;
+                                            }
+                                        }
+                                    }
+                                }
+                                let Some(resolved) = resolved_opt else {
+                                    tracing::warn!(
+                                        did=%did_for_spawn,
+                                        attempts=MAX_ATTEMPTS,
+                                        last_error=%last_err.unwrap_or_default(),
+                                        "auto-resolve after Create DID failed \
+                                         after retries — entry stays Pending; \
+                                         use Resolve panel to refresh later",
+                                    );
+                                    return;
+                                };
+                                match Ok::<_, ()>(resolved) {
                                     Ok(resolved) => {
                                         let resolved_did =
                                             resolved.document.id.to_did_string();
@@ -1987,13 +2044,9 @@ pub fn App() -> Element {
                                             &resolved,
                                         );
                                     }
-                                    Err(e) => {
-                                        tracing::warn!(
-                                            did=%did_for_spawn,
-                                            error=%e,
-                                            "auto-resolve after Create DID failed",
-                                        );
-                                    }
+                                    Err(_) => unreachable!(
+                                        "outer Result was synthesized from Ok(resolved) above",
+                                    ),
                                 }
                             });
                         },
