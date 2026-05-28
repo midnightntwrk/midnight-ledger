@@ -311,12 +311,29 @@ async function prepareUnprovenCallTx(
     );
   }
 
-  // Witnesses for the DID contract. Identical to the harness — Rust
-  // already supplies `controllerSecretHex` for the DID we're calling.
+  // Witnesses for the DID contract. Mirrors the upstream
+  // `witnesses.ts` shape from `midnight-did-contract`. Rust
+  // already supplies `controllerSecretHex` for the DID we're
+  // calling — `localSecretKey` returns that. `currentTimestamp`
+  // is read by the contract's `recordUpdate` helper. The
+  // `getSchnorrReduction` witness is invoked by Schnorr-using
+  // circuits with a `challengeHash` bigint; it splits the hash
+  // into high/low halves around 2^248 (= JubjubSchnorr digest
+  // reduction). The old stub `[0n, 0n]` worked under the
+  // pre-redesign contract because no circuit then exercised
+  // this witness, but the redesigned contract's
+  // `verifySchnorrJubjubDigestSignature` (and likely
+  // `assertControllerCanUpdate` via Schnorr signature paths)
+  // pulls it for every controller-gated write. See
+  // `~/iohk/midnight-did/packages/contract/src/witnesses.ts`.
+  const TWO_248 = 452312848583266388373324160190187140051835877600158453279131187530910662656n;
   const witnesses = {
     localSecretKey: (ctx: { privateState: unknown }) => [ctx.privateState, skBytes],
     currentTimestamp: (ctx: { privateState: unknown }) => [ctx.privateState, BigInt(Date.now())],
-    getSchnorrReduction: (ctx: { privateState: unknown }) => [ctx.privateState, [0n, 0n]],
+    getSchnorrReduction: (
+      ctx: { privateState: unknown },
+      challengeHash: bigint,
+    ) => [ctx.privateState, [challengeHash / TWO_248, challengeHash % TWO_248]],
   };
 
   const compiledContract = (compactJs as any).CompiledContract.make(
@@ -358,21 +375,40 @@ async function prepareUnprovenCallTx(
     ? params.circuitArgs.map(reviveBigints)
     : [];
 
-  const callTxData = await (createUnprovenCallTxFromInitialStates as any)(
-    zkConfigProvider,
-    {
-      compiledContract,
-      circuitId: params.circuit,
-      contractAddress: params.contractAddressHex,
-      args,
-      coinPublicKey: params.coinPublicKeyHex,
-      initialContractState: contractState,
-      initialZswapChainState: zswapChainState,
-      ledgerParameters,
-      initialPrivateState: { secretKey: skBytes },
-    },
-    params.encryptionPublicKeyHex,
-  );
+  let callTxData;
+  try {
+    callTxData = await (createUnprovenCallTxFromInitialStates as any)(
+      zkConfigProvider,
+      {
+        compiledContract,
+        circuitId: params.circuit,
+        contractAddress: params.contractAddressHex,
+        args,
+        coinPublicKey: params.coinPublicKeyHex,
+        initialContractState: contractState,
+        initialZswapChainState: zswapChainState,
+        ledgerParameters,
+        initialPrivateState: { secretKey: skBytes },
+      },
+      params.encryptionPublicKeyHex,
+    );
+  } catch (e) {
+    // The default Rust-side error wrap (`e.stack || e.message
+    // || e`) loses the message because WebKit's `e.stack` is
+    // bare stack frames with no message prefix. Surface a
+    // structured `bundleError` event first so the message +
+    // call context land in the host log; then re-throw so the
+    // outer Rust caller still propagates the failure.
+    const err = e instanceof Error ? e : new Error(String(e));
+    try {
+      await window.midnightWallet.bundleError({
+        kind: "prepareUnprovenCallTxFailed",
+        message: `${err.name}: ${err.message} (circuit=${params.circuit}, args=${args.length})`,
+        stack: err.stack || "",
+      });
+    } catch (_) {}
+    throw err;
+  }
 
   const unprovenBytes: Uint8Array = callTxData.private.unprovenTx.serialize();
   return {
