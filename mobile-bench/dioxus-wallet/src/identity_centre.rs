@@ -15,14 +15,33 @@
 //! end-to-end. Paste-URL only — no camera scanner yet.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
+use tracing::Instrument;
 
 use wallet_core::{
     HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
     SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys, oid4vci_run_issuance,
     oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
 };
+
+/// Monotonic per-session counter for Identity Centre action IDs.
+/// Rendered as hex so a 4-char string keeps the Logs-tab prefix
+/// short while still being unique across the ~thousand-click
+/// session ceiling we'd ever realistically hit. Wraps at u64::MAX
+/// after roughly 18 quintillion clicks.
+static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Mint a fresh hex-string action ID. One per top-level Identity
+/// Centre click. Used as a `tracing::Span` field so every nested
+/// `time_op` op record, `MeteredHttpClient` http record, and
+/// `tracing::info!` event captured by `WalletLogLayer` gets a
+/// `[action=…]` prefix in the Logs tab — letting an operator
+/// filter all events that came from one click.
+fn next_action_id() -> String {
+    format!("{:x}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed))
+}
 
 /// Wrap `app_wallet_for(network)` with `with_metering` so the
 /// chain-op pipeline (indexer queries + prover calls) records
@@ -181,6 +200,8 @@ fn BootstrapSection(
             err_msg.set(None);
             ok_msg.set(None);
             let bridge_state = bridge_state.clone();
+            let action_id = next_action_id();
+            let span = tracing::info_span!("ic.bootstrap", action_id = %action_id);
             spawn(async move {
                 let Some(store) = bridge_state.store().cloned() else {
                     err_msg.set(Some("wallet store not opened yet".into()));
@@ -231,7 +252,7 @@ fn BootstrapSection(
                     }
                 }
                 busy.set(false);
-            });
+            }.instrument(span));
         }
     };
 
@@ -329,6 +350,9 @@ fn Oid4vpSection(
             let metrics = bridge_state.metrics_dyn();
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
+            let action_id = next_action_id();
+            let span =
+                tracing::info_span!("ic.oid4vp_authenticate", action_id = %action_id);
             spawn(async move {
                 let wallet =
                     metered_app_wallet_for(network, metrics.clone(), probe.clone());
@@ -365,7 +389,7 @@ fn Oid4vpSection(
                     }
                 }
                 busy.set(false);
-            });
+            }.instrument(span));
         }
     };
 
@@ -484,6 +508,8 @@ fn Oid4vciSection(
             let metrics = bridge_state.metrics_dyn();
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
+            let action_id = next_action_id();
+            let span = tracing::info_span!("ic.issuance", action_id = %action_id);
             spawn(async move {
                 let wallet =
                     metered_app_wallet_for(network, metrics.clone(), probe.clone());
@@ -539,7 +565,7 @@ fn Oid4vciSection(
                     }
                 }
                 busy.set(false);
-            });
+            }.instrument(span));
         }
     };
 
@@ -741,6 +767,8 @@ fn render_vc_row(
             let metrics = bridge_state.metrics_dyn();
             let in_mem_metrics = bridge_state.metrics();
             let probe = bridge_state.resource_probe();
+            let action_id = next_action_id();
+            let span = tracing::info_span!("ic.self_verify", action_id = %action_id);
             spawn(async move {
                 let wallet =
                     metered_app_wallet_for(network, metrics.clone(), probe.clone());
@@ -794,7 +822,7 @@ fn render_vc_row(
                 let next = *refresh_tick.read() + 1;
                 refresh_tick.set(next);
                 busy.set(false);
-            });
+            }.instrument(span));
         }
     };
 

@@ -51,9 +51,37 @@ pub(crate) static LOG_CAPTURE: OnceLock<LogCapture> = OnceLock::new();
 pub(crate) static LOG_RX: OnceLock<Mutex<Option<UnboundedReceiver<CapturedLog>>>> =
     OnceLock::new();
 use tracing::field::{Field, Visit};
-use tracing::{Event, Level, Subscriber};
+use tracing::span::Attributes;
+use tracing::{Event, Id, Level, Subscriber};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
+
+/// Span extension carrying the `action_id` string a parent span
+/// was opened with. Installed in `on_new_span` when the span's
+/// attributes name a literal `action_id` field; read in
+/// `on_event` to prefix the captured event's message with
+/// `[action=…]` so the Logs tab can group records by the single
+/// user click that produced them.
+#[derive(Debug, Clone)]
+struct ActionIdField(String);
+
+/// Visitor that pulls just the `action_id` literal field out of
+/// a span's attributes. Other fields are ignored.
+#[derive(Default)]
+struct ActionIdVisitor(Option<String>);
+
+impl Visit for ActionIdVisitor {
+    fn record_str(&mut self, field: &Field, value: &str) {
+        if field.name() == "action_id" {
+            self.0 = Some(value.to_string());
+        }
+    }
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        if field.name() == "action_id" {
+            self.0 = Some(format!("{value:?}"));
+        }
+    }
+}
 
 use wallet_core::store::{LogLevel, LogRow, WalletStore};
 
@@ -159,7 +187,20 @@ impl<S> tracing_subscriber::Layer<S> for WalletLogLayer
 where
     S: Subscriber + for<'a> LookupSpan<'a>,
 {
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+    /// Capture `action_id` attributes off freshly-opened spans
+    /// into the span's `extensions` so `on_event` can later read
+    /// them when an event fires while that span is active.
+    fn on_new_span(&self, attrs: &Attributes<'_>, id: &Id, ctx: Context<'_, S>) {
+        let mut visitor = ActionIdVisitor::default();
+        attrs.record(&mut visitor);
+        if let Some(action_id) = visitor.0 {
+            if let Some(span) = ctx.span(id) {
+                span.extensions_mut().insert(ActionIdField(action_id));
+            }
+        }
+    }
+
+    fn on_event(&self, event: &Event<'_>, ctx: Context<'_, S>) {
         let meta = event.metadata();
         let target = meta.target();
         if !should_capture(target) {
@@ -168,6 +209,18 @@ where
         let level = level_from_tracing(*meta.level());
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
+        // Walk up the span stack looking for the nearest
+        // ancestor carrying an `action_id`. If we find one,
+        // prefix the rendered message so the Logs tab UI can
+        // visually group + filter by click.
+        let action_id = ctx.event_span(event).and_then(|span| {
+            for s in span.scope() {
+                if let Some(ext) = s.extensions().get::<ActionIdField>() {
+                    return Some(ext.0.clone());
+                }
+            }
+            None
+        });
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default();
@@ -175,12 +228,17 @@ where
         // resolution. ms is what the UI renders.
         let timestamp_ns = now.as_nanos() as i64;
         let timestamp_ms = now.as_millis() as i64;
+        let raw_message = visitor.into_message();
+        let message = match action_id {
+            Some(id) => format!("[action={id}] {raw_message}"),
+            None => raw_message,
+        };
         self.capture.push(CapturedLog {
             timestamp_ns,
             timestamp_ms,
             level,
             target: target.to_string(),
-            message: visitor.into_message(),
+            message,
         });
     }
 }
@@ -453,6 +511,113 @@ mod tests {
         assert_eq!(rows[0].target, "dioxuswalletmain::app");
         assert_eq!(rows[1].level, LogLevel::Error);
         assert_eq!(rows[1].target, "wallet_core::store");
+    }
+
+    /// End-to-end: install the `WalletLogLayer` as a tracing
+    /// subscriber, open a span carrying `action_id = "abc123"`,
+    /// fire an event inside it, then verify the captured ring
+    /// entry's message got `[action=abc123]` prefixed. This is
+    /// the contract the Identity Centre clicks depend on for
+    /// per-click correlation in the Logs tab.
+    #[test]
+    fn on_event_enriches_message_with_action_id_from_parent_span() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::Registry;
+
+        let (capture, _rx) = LogCapture::new();
+        let layer = WalletLogLayer::new(capture.clone());
+        let subscriber = Registry::default().with(layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(
+                target: "dioxuswalletmain::test",
+                "demo",
+                action_id = "abc123",
+            );
+            let _enter = span.enter();
+            tracing::info!(
+                target: "wallet_core::metrics",
+                "op self_verify ok in 12ms",
+            );
+        });
+
+        let snap = capture.snapshot();
+        assert_eq!(snap.len(), 1, "one event captured");
+        assert!(
+            snap[0].message.starts_with("[action=abc123] "),
+            "expected action prefix, got: {:?}",
+            snap[0].message,
+        );
+        assert!(
+            snap[0].message.contains("op self_verify ok in 12ms"),
+            "expected original payload preserved, got: {:?}",
+            snap[0].message,
+        );
+    }
+
+    /// Events fired outside any span still capture cleanly —
+    /// the prefix is just absent. Guards against regressing
+    /// the non-IC paths (boot logs, store opens, etc.) that
+    /// don't go through an instrumented future.
+    #[test]
+    fn on_event_without_parent_span_omits_prefix() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::Registry;
+
+        let (capture, _rx) = LogCapture::new();
+        let layer = WalletLogLayer::new(capture.clone());
+        let subscriber = Registry::default().with(layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::info!(target: "wallet_core::store", "opened store");
+        });
+
+        let snap = capture.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert!(
+            !snap[0].message.contains("[action="),
+            "should not prefix when no span, got: {:?}",
+            snap[0].message,
+        );
+        assert_eq!(snap[0].message, "opened store");
+    }
+
+    /// Nested spans: the innermost ancestor's `action_id`
+    /// wins. Defensive — if a future ever does `span_a
+    /// (action_id=X) → instrument → span_b (action_id=Y) →
+    /// event`, the event should attribute to span_b.
+    #[test]
+    fn on_event_prefers_nearest_ancestor_action_id() {
+        use tracing_subscriber::layer::SubscriberExt;
+        use tracing_subscriber::Registry;
+
+        let (capture, _rx) = LogCapture::new();
+        let layer = WalletLogLayer::new(capture.clone());
+        let subscriber = Registry::default().with(layer);
+
+        tracing::subscriber::with_default(subscriber, || {
+            let outer = tracing::info_span!(
+                target: "dioxuswalletmain::test",
+                "outer",
+                action_id = "OUTER",
+            );
+            let _o = outer.enter();
+            let inner = tracing::info_span!(
+                target: "dioxuswalletmain::test",
+                "inner",
+                action_id = "INNER",
+            );
+            let _i = inner.enter();
+            tracing::info!(target: "wallet_core::metrics", "nested event");
+        });
+
+        let snap = capture.snapshot();
+        assert_eq!(snap.len(), 1);
+        assert!(
+            snap[0].message.starts_with("[action=INNER] "),
+            "innermost wins: {:?}",
+            snap[0].message,
+        );
     }
 
     #[test]
