@@ -23,6 +23,14 @@ pub struct BootstrappedDid {
     pub did: DidId,
     pub ed25519_ref: SecretKeyRef,
     pub jubjub_ref: SecretKeyRef,
+    /// The per-DID random 32-byte controller secret minted by
+    /// the chain at deploy time. The wallet needs this to drive
+    /// any subsequent update / deactivate / VM-rotation circuit
+    /// (`assertControllerCanUpdate` reads
+    /// `controllerKey(localSecretKey())` against the on-chain
+    /// `controllerPublicKey`, so the caller MUST persist this
+    /// somewhere — typically `BridgeState::remember_controller_secret`).
+    pub controller_sk: [u8; 32],
 }
 
 /// Errors callers may have to recover from.
@@ -443,6 +451,7 @@ pub async fn bootstrap_did_with_keys(
         did,
         ed25519_ref,
         jubjub_ref,
+        controller_sk,
     })
 }
 

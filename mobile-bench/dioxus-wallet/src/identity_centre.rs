@@ -243,8 +243,56 @@ fn BootstrapSection(
                     Ok(b) => {
                         in_mem_metrics.incr("dids.bootstrapped", 1);
                         let did_str = b.did.to_did_string();
+                        // Persist the per-DID controller secret
+                        // so future Update / Deactivate circuits
+                        // can pull it from `BridgeState` — same
+                        // path the Create-DID wizard uses.
+                        // Without this the new DID shows up in
+                        // the inventory but its Update /
+                        // Deactivate buttons stay disabled.
+                        bridge_state.remember_controller_secret(
+                            network,
+                            did_str.clone(),
+                            b.controller_sk,
+                        );
+                        // Land a Pending inventory entry so the
+                        // DID is visible in the Dids-tab list
+                        // immediately. The on-chain doc was
+                        // already resolved in bootstrap step 6
+                        // (otherwise we wouldn't be in this Ok
+                        // arm), so a follow-up resolve can fill
+                        // in counter / vm_count / etc. via the
+                        // Resolve panel.
+                        if let Some(store) = bridge_state.store() {
+                            let now_ms = std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .map(|d| d.as_millis() as i64)
+                                .unwrap_or(0);
+                            let entry = wallet_core::store::DidInventoryEntry {
+                                did: did_str.clone(),
+                                network,
+                                status: wallet_core::store::InventoryStatus::Pending,
+                                counter: None,
+                                vm_count: Some(2),
+                                service_count: Some(0),
+                                last_block_height: None,
+                                created_at: now_ms,
+                                updated_at: now_ms,
+                            };
+                            if let Err(e) = store.put_did_inventory(entry) {
+                                tracing::warn!(
+                                    error=%e,
+                                    did=%did_str,
+                                    "identity-centre: bootstrap inventory write failed",
+                                );
+                            }
+                        }
                         ic_did.set(Some(did_str.clone()));
-                        ok_msg.set(Some(format!("Bootstrapped {did_str}")));
+                        ok_msg.set(Some(format!(
+                            "Bootstrapped {did_str} \
+                             (added to Dids inventory; \
+                             counter / VMs fill in on next Resolve)",
+                        )));
                     }
                     Err(e) => {
                         in_mem_metrics.incr("dids.bootstrap_failed", 1);
