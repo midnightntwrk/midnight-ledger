@@ -73,6 +73,11 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
+# Base64URL encoding for JWK x/y coordinates. The new
+# `setVerificationMethod` circuit takes `Opaque<"string">` for
+# x/y; we encode the 32-byte BE buffer as base64url-no-pad
+# (RFC 7517 JWK convention).
+base64 = "0.22"
 futures = "0.3"
 # Drives the `#[async_trait]` macro on `DioxusEvalBridge`'s
 # `JsBridge` impl. Same version family wallet-core pulls so the

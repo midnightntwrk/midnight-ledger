@@ -222,6 +222,20 @@ enum DidOperation {
     AddVerificationMethod(VerificationMethodInput),
     UpdateVerificationMethod(VerificationMethodInput),
     RemoveVerificationMethod { id: String },
+    /// Schnorr-Jubjub path. The redesigned `did.compact` (upstream
+    /// commit `6274cff feat!: Redesign DID verification method
+    /// storage`) keeps Jubjub VMs in a dedicated
+    /// `schnorrJubjubVerificationMethods: Map<...>` ledger slot
+    /// because `assertSupportedVerificationMethod` REJECTS
+    /// `kty=EC, crv=Jubjub` from the JWK map with
+    /// "EC keys must use P-256 or secp256k1; use SchnorrJubjub
+    /// methods for Jubjub". The Operation Builder routes Add/Update
+    /// VMs with `curve == "Jubjub"` here automatically; Remove is
+    /// an explicit dropdown entry (id alone doesn't disambiguate
+    /// which map the VM lives in).
+    AddSchnorrJubjubVerificationMethod(VerificationMethodInput),
+    UpdateSchnorrJubjubVerificationMethod(VerificationMethodInput),
+    RemoveSchnorrJubjubVerificationMethod { id: String },
     AddVerificationMethodRelation { relation: String, method_id: String },
     RemoveVerificationMethodRelation { relation: String, method_id: String },
     AddService(ServiceInput),
@@ -235,18 +249,49 @@ enum DidOperation {
     Deactivate,
 }
 
+/// Compact `MapMutation` enum variant tags — used by
+/// `setVerificationMethod`, `setSchnorrJubjubVerificationMethod`,
+/// `setService`. `Undefined=0` is rejected by the contract's
+/// `assertMapMutationDefined`.
+const MAP_MUTATION_INSERT: i32 = 1;
+const MAP_MUTATION_UPDATE: i32 = 2;
+/// Compact `SetMutation` enum variant tags — used by
+/// `setAlsoKnownAs` and `setVerificationMethodRelation`.
+/// `Undefined=0` is rejected by `assertSetMutationDefined`.
+const SET_MUTATION_INSERT: i32 = 1;
+const SET_MUTATION_REMOVE: i32 = 2;
+
 impl DidOperation {
+    /// Circuit entry-point name that `Wallet::load_did_circuit` /
+    /// `Wallet::call_did_circuit` consume. Maps to the artifact
+    /// registry in `wallet-core/contracts/midnight-did/*.{prover,
+    /// verifier,bzkir,zkir}`. Updated 2026-05-28 for the upstream
+    /// `feat!: Redesign DID verification method storage`
+    /// refactor: every Add/Update/Remove circuit was replaced by
+    /// a single `set*(payload, MapMutation|SetMutation)` form;
+    /// Jubjub VMs moved to their own
+    /// `setSchnorrJubjubVerificationMethod` circuit.
     fn circuit(&self) -> &'static str {
         match self {
-            Self::AddAlsoKnownAs { .. } => "addAlsoKnownAs",
-            Self::RemoveAlsoKnownAs { .. } => "removeAlsoKnownAs",
-            Self::AddVerificationMethod(_) => "addVerificationMethod",
-            Self::UpdateVerificationMethod(_) => "updateVerificationMethod",
+            Self::AddAlsoKnownAs { .. } | Self::RemoveAlsoKnownAs { .. } => {
+                "setAlsoKnownAs"
+            }
+            Self::AddVerificationMethod(_) | Self::UpdateVerificationMethod(_) => {
+                "setVerificationMethod"
+            }
             Self::RemoveVerificationMethod { .. } => "removeVerificationMethod",
-            Self::AddVerificationMethodRelation { .. } => "addVerificationMethodRelation",
-            Self::RemoveVerificationMethodRelation { .. } => "removeVerificationMethodRelation",
-            Self::AddService(_) => "addService",
-            Self::UpdateService(_) => "updateService",
+            Self::AddSchnorrJubjubVerificationMethod(_)
+            | Self::UpdateSchnorrJubjubVerificationMethod(_) => {
+                "setSchnorrJubjubVerificationMethod"
+            }
+            Self::RemoveSchnorrJubjubVerificationMethod { .. } => {
+                "removeSchnorrJubjubVerificationMethod"
+            }
+            Self::AddVerificationMethodRelation { .. }
+            | Self::RemoveVerificationMethodRelation { .. } => {
+                "setVerificationMethodRelation"
+            }
+            Self::AddService(_) | Self::UpdateService(_) => "setService",
             Self::RemoveService { .. } => "removeService",
             Self::Deactivate => "deactivate",
         }
@@ -261,7 +306,13 @@ impl DidOperation {
             Self::AddVerificationMethod(vm) | Self::UpdateVerificationMethod(vm) => {
                 format!("id: {} · {}/{}", vm.id, vm.key_type, vm.curve)
             }
-            Self::RemoveVerificationMethod { id } | Self::RemoveService { id } => {
+            Self::AddSchnorrJubjubVerificationMethod(vm)
+            | Self::UpdateSchnorrJubjubVerificationMethod(vm) => {
+                format!("id: {} · Schnorr-Jubjub", vm.id)
+            }
+            Self::RemoveVerificationMethod { id }
+            | Self::RemoveSchnorrJubjubVerificationMethod { id }
+            | Self::RemoveService { id } => {
                 format!("id: {id}")
             }
             Self::AddVerificationMethodRelation { relation, method_id }
@@ -288,24 +339,49 @@ impl DidOperation {
     ///   `contracts/midnight-did/did.compact`.
     fn args_json(&self) -> serde_json::Value {
         match self {
-            Self::AddAlsoKnownAs { value } | Self::RemoveAlsoKnownAs { value } => {
-                serde_json::json!([value])
+            Self::AddAlsoKnownAs { value } => {
+                serde_json::json!([value, SET_MUTATION_INSERT])
             }
-            Self::AddVerificationMethod(vm) | Self::UpdateVerificationMethod(vm) => {
-                serde_json::json!([vm_to_json(vm)])
+            Self::RemoveAlsoKnownAs { value } => {
+                serde_json::json!([value, SET_MUTATION_REMOVE])
             }
-            Self::RemoveVerificationMethod { id } | Self::RemoveService { id } => {
-                serde_json::json!([id])
+            Self::AddVerificationMethod(vm) => {
+                serde_json::json!([vm_to_jwk_json(vm), MAP_MUTATION_INSERT])
             }
-            Self::AddVerificationMethodRelation { relation, method_id }
-            | Self::RemoveVerificationMethodRelation { relation, method_id } => {
-                serde_json::json!([relation_tag(relation), method_id])
+            Self::UpdateVerificationMethod(vm) => {
+                serde_json::json!([vm_to_jwk_json(vm), MAP_MUTATION_UPDATE])
             }
-            Self::AddService(s) | Self::UpdateService(s) => serde_json::json!([{
-                "id": s.id,
-                "typ": s.typ,
-                "serviceEndpoint": s.endpoint,
-            }]),
+            Self::RemoveVerificationMethod { id }
+            | Self::RemoveSchnorrJubjubVerificationMethod { id }
+            | Self::RemoveService { id } => serde_json::json!([id]),
+            Self::AddSchnorrJubjubVerificationMethod(vm) => {
+                serde_json::json!([vm_to_schnorr_jubjub_json(vm), MAP_MUTATION_INSERT])
+            }
+            Self::UpdateSchnorrJubjubVerificationMethod(vm) => {
+                serde_json::json!([vm_to_schnorr_jubjub_json(vm), MAP_MUTATION_UPDATE])
+            }
+            Self::AddVerificationMethodRelation { relation, method_id } => {
+                serde_json::json!([relation_tag(relation), method_id, SET_MUTATION_INSERT])
+            }
+            Self::RemoveVerificationMethodRelation { relation, method_id } => {
+                serde_json::json!([relation_tag(relation), method_id, SET_MUTATION_REMOVE])
+            }
+            Self::AddService(s) => serde_json::json!([
+                {
+                    "id": s.id,
+                    "typ": s.typ,
+                    "serviceEndpoint": s.endpoint,
+                },
+                MAP_MUTATION_INSERT,
+            ]),
+            Self::UpdateService(s) => serde_json::json!([
+                {
+                    "id": s.id,
+                    "typ": s.typ,
+                    "serviceEndpoint": s.endpoint,
+                },
+                MAP_MUTATION_UPDATE,
+            ]),
             Self::Deactivate => serde_json::json!([]),
         }
     }
@@ -326,54 +402,101 @@ fn relation_tag(name: &str) -> i32 {
     enum_tag(RELATIONS, name) + 1
 }
 
-/// Build the JSON `VerificationMethod` struct payload — `typ` is
-/// always `JsonWebKey` (the only variant the contract accepts);
-/// `publicKeyJwk.x/y` are `Bytes<32>` slots since the 2026-05-27
-/// upstream `Field → Bytes<32>` refactor. Wire shape is
-/// `{"$bytes": "0x<64-hex-chars>"}` — the harness's
-/// `reviveBigints` decodes that tag to `Uint8Array(32)`.
+/// Build the JSON `VerificationMethod` struct payload for the
+/// `setVerificationMethod` circuit. The redesigned contract
+/// (upstream commit `6274cff feat!: Redesign DID verification
+/// method storage`) reverted `publicKeyJwk.x/y` from `Bytes<32>`
+/// back to `Opaque<"string">` (base64url-encoded JWK
+/// coordinates, per W3C JWK). The wire shape is now a plain
+/// JSON string the runtime passes straight through to the
+/// contract's `Opaque<"string">` slot — no `$bytes` wrap.
 ///
-/// The UI form's `pk_x` / `pk_y` come in as decimal-or-hex bigint
-/// strings (the user-facing presentation predates the schema
-/// change). Convert via the `pk_to_bytes32_hex` helper so the
-/// wire shape is always 32 padded big-endian bytes regardless of
-/// what the user typed.
-fn vm_to_json(vm: &VerificationMethodInput) -> serde_json::Value {
+/// The upstream API validates that x/y are decode-able to
+/// exactly 32 bytes via `decodeBase64UrlBytes32` before the call
+/// (see `~/iohk/midnight-did/packages/api/src/ledger-mappers.ts`);
+/// we mirror that by encoding our hex/decimal input through a
+/// 32-byte buffer first.
+///
+/// `y` is empty (`""`) for `OKP` keys (Ed25519, X25519) — the
+/// contract's `assertSupportedVerificationMethod` rejects OKP
+/// keys carrying a `y` coordinate. For `EC` keys (P-256, secp256k1)
+/// both x and y are required. **Jubjub MUST NOT come through
+/// this path** — `vm_to_schnorr_jubjub_json` is the right one.
+/// The contract's `assertSupportedVerificationMethod` rejects
+/// `kty=EC, crv=Jubjub` at runtime with a clear error.
+fn vm_to_jwk_json(vm: &VerificationMethodInput) -> serde_json::Value {
+    let kty = enum_tag(KEY_TYPES, &vm.key_type);
+    let is_okp = vm.key_type == "OKP";
+    let y_b64 = if is_okp {
+        String::new()
+    } else {
+        pk_to_base64url(&vm.pk_y)
+    };
     serde_json::json!({
         "id": vm.id,
         // VerificationMethodType.JsonWebKey = 1
         "typ": 1,
         "publicKeyJwk": {
-            "kty": enum_tag(KEY_TYPES, &vm.key_type),
+            "kty": kty,
             "crv": crv_to_contract_tag(&vm.curve),
-            "x": serde_json::json!({ "$bytes": pk_to_bytes32_hex(&vm.pk_x) }),
-            "y": serde_json::json!({ "$bytes": pk_to_bytes32_hex(&vm.pk_y) }),
+            "x": pk_to_base64url(&vm.pk_x),
+            "y": y_b64,
         }
     })
 }
 
-/// Translate the UI form's `pk_x` / `pk_y` input into a 32-byte
-/// big-endian hex string `"0x<64-hex>"`. Accepts:
-/// - `"0x<hex>"`        — hex-encoded bytes; left-pad to 32 bytes
-/// - `"<hex>"`          — same, no `0x` prefix
-/// - `"<decimal>"`      — decimal bigint; convert to 32-byte big-
-///                        endian via a small base-10 → bytes routine
-///                        (no `num-bigint` dep)
-/// - empty / malformed  — 32 zero bytes
+/// Build the JSON `SchnorrJubjubVerificationMethod` struct
+/// payload for the `setSchnorrJubjubVerificationMethod` circuit.
+/// Shape mirrors upstream
+/// `schnorrJubjubVerificationMethodToLedger` — id is the
+/// fragment-bound method id, publicKey is a `JubjubPoint =
+/// {x: bigint, y: bigint}` carrying the two field elements
+/// directly (NOT base64url, NOT JWK).
 ///
-/// Truncates from the high end if the input is larger than 32
-/// bytes; the contract will reject mismatched shapes anyway. The
-/// decimal path is necessary because the existing UI form lets
-/// users paste decimal Field elements (the pre-refactor convention).
-fn pk_to_bytes32_hex(input: &str) -> String {
+/// The runtime's `reviveBigints` revives `{"$bigint": "<dec>"}`
+/// into a JS `BigInt`, which the contract's
+/// `CompactTypeJubjubPoint.toValue` accepts as the x/y inputs.
+fn vm_to_schnorr_jubjub_json(vm: &VerificationMethodInput) -> serde_json::Value {
+    serde_json::json!({
+        "id": vm.id,
+        "publicKey": {
+            "x": serde_json::json!({ "$bigint": pk_to_bigint_decimal(&vm.pk_x) }),
+            "y": serde_json::json!({ "$bigint": pk_to_bigint_decimal(&vm.pk_y) }),
+        }
+    })
+}
+
+/// Convert the UI form's hex-or-decimal `pk_x` / `pk_y` string
+/// into a base64url-encoded 32-byte big-endian string — the
+/// wire format the redesigned JWK contract slot expects. Empty
+/// input → 32 zero bytes encoded as `"AAAA…"`.
+fn pk_to_base64url(input: &str) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(pk_to_bytes32_buf(input))
+}
+
+/// Convert the UI form's hex-or-decimal `pk_x` / `pk_y` string
+/// into a decimal-string representation of the 32-byte BE buffer
+/// interpreted as a big-endian non-negative integer. Used by
+/// `vm_to_schnorr_jubjub_json` so the `$bigint` tag carries a
+/// value the harness's `reviveBigints` can convert into a JS
+/// BigInt for the `JubjubPoint.x/y` field elements.
+fn pk_to_bigint_decimal(input: &str) -> String {
+    let bytes = pk_to_bytes32_buf(input);
+    bigint_decimal_from_be_bytes(&bytes)
+}
+
+/// Strip the format-detection logic out of `pk_to_bytes32_hex`
+/// so the same parser can feed both the base64url and decimal
+/// representations. Returns 32 BE bytes; truncates / zero-pads
+/// as needed.
+fn pk_to_bytes32_buf(input: &str) -> [u8; 32] {
     let trimmed = input.trim();
     if trimmed.is_empty() {
-        return format!("0x{}", hex::encode([0u8; 32]));
+        return [0u8; 32];
     }
-    // Hex path (with or without `0x` prefix).
     let maybe_hex = trimmed.strip_prefix("0x").unwrap_or(trimmed);
     if !maybe_hex.is_empty() && maybe_hex.chars().all(|c| c.is_ascii_hexdigit()) {
-        // Even out odd-length hex by prepending one zero nybble.
         let mut s = maybe_hex.to_string();
         if s.len() % 2 == 1 {
             s.insert(0, '0');
@@ -384,14 +507,11 @@ fn pk_to_bytes32_hex(input: &str) -> String {
             let offset = 32 - bytes.len();
             buf[offset..].copy_from_slice(&bytes);
         } else {
-            // Keep the trailing 32 bytes (low-order in BE).
             buf.copy_from_slice(&bytes[bytes.len() - 32..]);
         }
-        return format!("0x{}", hex::encode(buf));
+        return buf;
     }
-    // Decimal path: convert decimal string → 32-byte BE via repeated
-    // shift-and-add. Inputs of practical Field-element size fit in
-    // ≤78 decimal digits, so the per-character cost is trivial.
+    // Decimal path.
     let mut buf = [0u8; 32];
     for ch in trimmed.chars() {
         let Some(d) = ch.to_digit(10) else { continue };
@@ -401,10 +521,39 @@ fn pk_to_bytes32_hex(input: &str) -> String {
             *byte = (v & 0xff) as u8;
             carry = v >> 8;
         }
-        // Overflow past 32 bytes is silently dropped; matches the
-        // hex-too-long branch above.
     }
-    format!("0x{}", hex::encode(buf))
+    buf
+}
+
+/// Convert a 32-byte BE buffer into a decimal string (no leading
+/// zeros). Used to feed `$bigint`-tagged JubjubPoint coords to
+/// `reviveBigints`. Zero buffer → `"0"`. Implementation is a
+/// repeated divide-by-10 with no external dep — same `[u8; 32]`
+/// shape we already produce, just in the other direction.
+fn bigint_decimal_from_be_bytes(bytes: &[u8; 32]) -> String {
+    // Output buffer; we'll reverse at the end.
+    let mut out: Vec<u8> = Vec::with_capacity(78);
+    let mut work = *bytes;
+    loop {
+        let mut all_zero = true;
+        let mut rem: u32 = 0;
+        for byte in work.iter_mut() {
+            let cur = rem * 256 + *byte as u32;
+            *byte = (cur / 10) as u8;
+            rem = cur % 10;
+            if *byte != 0 {
+                all_zero = false;
+            }
+        }
+        out.push(b'0' + rem as u8);
+        if all_zero {
+            break;
+        }
+    }
+    out.reverse();
+    // Strip leading zeros but always keep at least one digit.
+    let first_nonzero = out.iter().position(|&b| b != b'0').unwrap_or(out.len() - 1);
+    String::from_utf8(out[first_nonzero..].to_vec()).unwrap_or_else(|_| "0".to_string())
 }
 
 #[derive(Clone, PartialEq, Eq, Debug)]
@@ -3028,9 +3177,19 @@ fn ResolveDidPanel(
 enum OpKind {
     AddAlsoKnownAs,
     RemoveAlsoKnownAs,
+    /// JWK verification method (Ed25519, X25519, P-256, secp256k1).
+    /// If the operator picks `curve == "Jubjub"` in the form, the
+    /// submit handler automatically routes to
+    /// `AddSchnorrJubjubVerificationMethod` instead — the
+    /// redesigned contract rejects Jubjub from the JWK map.
     AddVerificationMethod,
     UpdateVerificationMethod,
     RemoveVerificationMethod,
+    /// Jubjub-only path. Distinct from `RemoveVerificationMethod`
+    /// because the new contract keeps Jubjub VMs in a separate
+    /// ledger map and the remove circuit is per-map; the id alone
+    /// doesn't disambiguate which map the VM lives in.
+    RemoveSchnorrJubjubVerificationMethod,
     AddVerificationMethodRelation,
     RemoveVerificationMethodRelation,
     AddService,
@@ -3046,6 +3205,15 @@ enum OpKind {
 }
 
 impl OpKind {
+    /// Display string for the Operation-Builder dropdown. Updated
+    /// 2026-05-28 to reflect the redesigned contract's circuit
+    /// names (every `add*` / `update*` / `remove*` pair became a
+    /// single `set*(payload, mutation)` circuit, plus a separate
+    /// Schnorr-Jubjub path). The dropdown still surfaces the
+    /// old action verbs (`add`/`update`/`remove`) since they're
+    /// the right mental model for the operator — the
+    /// add↔Insert / update↔Update / remove↔Remove mutation tag
+    /// is plumbed in `DidOperation::args_json`.
     fn circuit_name(&self) -> &'static str {
         match self {
             Self::AddAlsoKnownAs => "addAlsoKnownAs",
@@ -3053,6 +3221,9 @@ impl OpKind {
             Self::AddVerificationMethod => "addVerificationMethod",
             Self::UpdateVerificationMethod => "updateVerificationMethod",
             Self::RemoveVerificationMethod => "removeVerificationMethod",
+            Self::RemoveSchnorrJubjubVerificationMethod => {
+                "removeSchnorrJubjubVerificationMethod"
+            }
             Self::AddVerificationMethodRelation => "addVerificationMethodRelation",
             Self::RemoveVerificationMethodRelation => "removeVerificationMethodRelation",
             Self::AddService => "addService",
@@ -3107,6 +3278,7 @@ const BUILDABLE_OPS: &[OpKind] = &[
     OpKind::AddVerificationMethod,
     OpKind::UpdateVerificationMethod,
     OpKind::RemoveVerificationMethod,
+    OpKind::RemoveSchnorrJubjubVerificationMethod,
     OpKind::AddVerificationMethodRelation,
     OpKind::RemoveVerificationMethodRelation,
     OpKind::AddService,
@@ -3298,9 +3470,26 @@ fn DidOperationBuilder(
                     pk_x,
                     pk_y,
                 };
-                match op {
-                    OpKind::AddVerificationMethod => DidOperation::AddVerificationMethod(vm),
-                    OpKind::UpdateVerificationMethod => DidOperation::UpdateVerificationMethod(vm),
+                // Auto-route Jubjub through the SchnorrJubjub
+                // circuit family. The redesigned contract's
+                // `assertSupportedVerificationMethod` rejects
+                // Jubjub from the JWK map; the operator picking
+                // curve=Jubjub clearly means they want the
+                // dedicated Schnorr-Jubjub VM map.
+                let is_jubjub = vm.curve == "Jubjub";
+                match (op, is_jubjub) {
+                    (OpKind::AddVerificationMethod, false) => {
+                        DidOperation::AddVerificationMethod(vm)
+                    }
+                    (OpKind::UpdateVerificationMethod, false) => {
+                        DidOperation::UpdateVerificationMethod(vm)
+                    }
+                    (OpKind::AddVerificationMethod, true) => {
+                        DidOperation::AddSchnorrJubjubVerificationMethod(vm)
+                    }
+                    (OpKind::UpdateVerificationMethod, true) => {
+                        DidOperation::UpdateSchnorrJubjubVerificationMethod(vm)
+                    }
                     _ => unreachable!(),
                 }
             }
@@ -3311,6 +3500,14 @@ fn DidOperationBuilder(
                     return None;
                 }
                 DidOperation::RemoveVerificationMethod { id }
+            }
+            OpKind::RemoveSchnorrJubjubVerificationMethod => {
+                let id = f_id.read().trim().to_string();
+                if id.is_empty() {
+                    form_error.set(Some("id is required".into()));
+                    return None;
+                }
+                DidOperation::RemoveSchnorrJubjubVerificationMethod { id }
             }
             OpKind::AddVerificationMethodRelation => {
                 let method_id = f_method_id.read().trim().to_string();
@@ -3770,7 +3967,9 @@ fn DidOperationBuilder(
                             }
                         }
                     },
-                    OpKind::RemoveVerificationMethod | OpKind::RemoveService => rsx! {
+                    OpKind::RemoveVerificationMethod
+                    | OpKind::RemoveSchnorrJubjubVerificationMethod
+                    | OpKind::RemoveService => rsx! {
                         FormRow {
                             label: "id",
                             value: f_id.read().clone(),
