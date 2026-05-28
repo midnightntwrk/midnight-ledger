@@ -2525,7 +2525,18 @@ fn CreateDidWizard(
                 div { class: "row label",
                     "Controller secret (save this — without it you cannot update or deactivate this DID)"
                 }
-                div { class: "seed-blob", "0x{hex::encode(outcome.controller_sk)}" }
+                {
+                    let sk_hex = format!("0x{}", hex::encode(outcome.controller_sk));
+                    rsx! {
+                        div { class: "row",
+                            div { class: "seed-blob",
+                                style: "flex: 1; word-break: break-all;",
+                                "{sk_hex}"
+                            }
+                            {copy_btn(sk_hex.clone(), "Copy controller secret (hex)")}
+                        }
+                    }
+                }
             }
         } else if let Some(TerminalView::Failed(msg)) = &term {
             div { class: "wizard-outcome err",
@@ -5163,6 +5174,134 @@ fn SettingsTab(bridge_state: BridgeState) -> Element {
     }
 }
 
+/// Controller-secret card at the top of the DID detail view.
+/// Two modes depending on whether the wallet knows this DID's
+/// 32-byte controller secret (`localSecretKey()` witness for
+/// every write circuit):
+///
+/// - **Known** — shows a `Reveal` toggle + `Copy` button so the
+///   operator can save the hex elsewhere (Files-app, password
+///   manager, paper). Hidden by default so a shoulder-surfer can't
+///   read it from the screen.
+/// - **Unknown** — shows a hex input + `Save` button. Lets an
+///   operator who already has the sk from a previous session,
+///   the wizard-success banner, or an export file restore the
+///   key into `BridgeState` (in-memory cache) + `WalletStore`
+///   (persistent redb) so the Update / Deactivate buttons light
+///   up. Validates: hex parses, 32 bytes.
+#[component]
+fn ControllerSecretCard(
+    network: Network,
+    did: String,
+    current_secret: Option<[u8; 32]>,
+    bridge_state: BridgeState,
+) -> Element {
+    let mut revealed = use_signal(|| false);
+    let mut input = use_signal(String::new);
+    let mut status =
+        use_signal::<Option<Result<String, String>>>(|| None);
+
+    if let Some(sk) = current_secret {
+        let hex_full = format!("0x{}", hex::encode(sk));
+        let is_revealed = *revealed.read();
+        let display = if is_revealed {
+            hex_full.clone()
+        } else {
+            "•••••••• click Reveal to show".to_string()
+        };
+        rsx! {
+            div { class: "card",
+                div { class: "card-header", "Controller secret" }
+                div { style: "color: var(--success); font-size: 11px; margin-bottom: 8px;",
+                    "Known — stored on this device. Save the hex if you \
+                     want to restore Update / Deactivate access on a fresh \
+                     install."
+                }
+                div { class: "row",
+                    div { class: "seed-blob",
+                        style: "flex: 1; word-break: break-all; font-family: monospace;",
+                        "{display}"
+                    }
+                    button {
+                        onclick: move |_| revealed.set(!is_revealed),
+                        {if is_revealed { "Hide" } else { "Reveal" }}
+                    }
+                    {copy_btn(hex_full, "Copy controller secret (hex)")}
+                }
+            }
+        }
+    } else {
+        let did_for_save = did.clone();
+        let state_for_save = bridge_state.clone();
+        let save = move |_| {
+            let raw = input.read().clone();
+            let hex_str =
+                raw.trim().trim_start_matches("0x").trim_start_matches("0X");
+            let bytes = match hex::decode(hex_str) {
+                Ok(b) => b,
+                Err(e) => {
+                    status.set(Some(Err(format!("invalid hex: {e}"))));
+                    return;
+                }
+            };
+            if bytes.len() != 32 {
+                status.set(Some(Err(format!(
+                    "expected 32 bytes (64 hex chars), got {}",
+                    bytes.len()
+                ))));
+                return;
+            }
+            let mut sk = [0u8; 32];
+            sk.copy_from_slice(&bytes);
+            state_for_save.remember_controller_secret(
+                network,
+                did_for_save.clone(),
+                sk,
+            );
+            status.set(Some(Ok(
+                "Saved. Update + Deactivate are now enabled \
+                 (you may need to navigate back + forward to refresh the badge).".into(),
+            )));
+            input.set(String::new());
+        };
+        let status_snap = status.read().clone();
+        rsx! {
+            div { class: "card",
+                div { class: "card-header", "Controller secret" }
+                div { style: "color: var(--warning); font-size: 11px; margin-bottom: 8px;",
+                    "Unknown — this DID was minted in another session or by \
+                     a different wallet. Paste the 32-byte hex sk to enable \
+                     Update / Deactivate. Without it, this DID is \
+                     read-only from here on."
+                }
+                div { class: "row",
+                    input {
+                        style: "flex: 1; font-family: monospace; \
+                                font-size: 12px; padding: 6px 10px;",
+                        placeholder: "0x... (64 hex chars)",
+                        value: "{input.read()}",
+                        oninput: move |e| input.set(e.value()),
+                    }
+                    button { onclick: save, "Save" }
+                }
+                {match &status_snap {
+                    Some(Ok(msg)) => rsx! {
+                        div { class: "wizard-outcome ok",
+                            div { class: "seed-blob", "{msg}" }
+                        }
+                    },
+                    Some(Err(msg)) => rsx! {
+                        div { class: "wizard-outcome err",
+                            div { class: "seed-blob", "{msg}" }
+                        }
+                    },
+                    None => rsx! { Fragment {} },
+                }}
+            }
+        }
+    }
+}
+
 /// Export/import card under Settings. Lets the operator dump the
 /// two irrecoverable tables (wallet HD seeds + per-DID controller
 /// secrets) into a JSON file outside the per-app sandbox, and
@@ -6796,6 +6935,12 @@ fn DidDetailView(
                     rsx! { "" }
                 }
             }
+        }
+        ControllerSecretCard {
+            network,
+            did: did.clone(),
+            current_secret: controller_secret,
+            bridge_state: bridge_state.clone(),
         }
         div { class: "detail-tabs",
             for t in DetailTab::ALL {
