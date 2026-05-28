@@ -2270,6 +2270,37 @@ pub fn App() -> Element {
                 crate::identity_centre::IdentityCentrePanel {
                     network: *network.read(),
                     bridge_state: bridge_state.read().clone(),
+                    // Callback fires after `bootstrap_did_with_keys`
+                    // succeeds. Mirrors what the Create-DID wizard's
+                    // `on_done` does: insert a Pending entry into the
+                    // live `did_inventory` signal AND persist it to
+                    // redb. The Dids tab renders from the signal, so
+                    // this is what makes the new DID show up
+                    // immediately (no app restart, no network switch).
+                    on_did_minted: move |(did, net): (String, Network)| {
+                        let entry = DidInventoryEntry {
+                            did: did.clone(),
+                            network_label: net.label().to_string(),
+                            status: DidInventoryStatus::Pending,
+                            counter: None,
+                            // bootstrap_did_with_keys attaches exactly
+                            // two VMs (Ed25519 + Jubjub) before
+                            // returning Ok; pre-seed the count so the
+                            // Dids row reads "2 VMs · 0 services"
+                            // immediately, even before Resolve.
+                            vm_count: Some(2),
+                            service_count: Some(0),
+                            last_block_height: None,
+                        };
+                        let mut inv = did_inventory.read().clone();
+                        inv.insert(did.clone(), entry.clone());
+                        did_inventory.set(inv);
+                        persist_inventory_entry(
+                            &bridge_state.read(),
+                            net,
+                            &entry,
+                        );
+                    },
                 }
             },
         }

@@ -96,8 +96,20 @@ fn vc_store_path() -> std::path::PathBuf {
 
 /// Top-level Identity Centre panel. Renders the four sections
 /// stacked vertically.
+///
+/// `on_did_minted` fires after a successful `bootstrap_did_with_keys`
+/// so the parent (App) can insert the new DID into its
+/// `did_inventory` signal — the Dids tab renders from that
+/// signal, so without this callback the freshly-minted DID
+/// stays invisible until the next rehydration. Same channel the
+/// Dids-tab Create-DID wizard uses for "DID was minted, please
+/// update the inventory" notification.
 #[component]
-pub fn IdentityCentrePanel(network: Network, bridge_state: BridgeState) -> Element {
+pub fn IdentityCentrePanel(
+    network: Network,
+    bridge_state: BridgeState,
+    on_did_minted: EventHandler<(String, Network)>,
+) -> Element {
     // The "current Identity Centre DID" — populated either from a
     // fresh bootstrap or by scanning the secret store for a key
     // whose `kid` carries the `#key-auth` fragment. Held at panel
@@ -118,6 +130,7 @@ pub fn IdentityCentrePanel(network: Network, bridge_state: BridgeState) -> Eleme
             network,
             bridge_state: bridge_state.clone(),
             ic_did,
+            on_did_minted,
         }
 
         Oid4vpSection {
@@ -151,10 +164,20 @@ fn BootstrapSection(
     network: Network,
     bridge_state: BridgeState,
     ic_did: Signal<Option<String>>,
+    on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
     let mut busy = use_signal(|| false);
     let mut err_msg = use_signal::<Option<String>>(|| None);
     let mut ok_msg = use_signal::<Option<String>>(|| None);
+    // Live activity feed shown under the Bootstrap button while
+    // `busy == true`. Populated by polling
+    // `BridgeState::log_capture().snapshot()` every 500 ms and
+    // keeping the last 3 events targeted at
+    // `wallet_core::metrics` (HTTP / op / counter records from
+    // the telemetry layer). Gives the operator visible feedback
+    // during the ~2-3 minute bootstrap instead of a frozen
+    // "Bootstrapping…" button.
+    let activity = use_signal::<Vec<String>>(Vec::new);
 
     // On first mount, probe the secret store for an existing
     // `#key-auth` kid → infer the IC DID from its prefix. Saves the
@@ -245,53 +268,31 @@ fn BootstrapSection(
                         let did_str = b.did.to_did_string();
                         // Persist the per-DID controller secret
                         // so future Update / Deactivate circuits
-                        // can pull it from `BridgeState` — same
+                        // can pull it from `BridgeState`. Same
                         // path the Create-DID wizard uses.
-                        // Without this the new DID shows up in
-                        // the inventory but its Update /
+                        // Without this the new DID's Update /
                         // Deactivate buttons stay disabled.
                         bridge_state.remember_controller_secret(
                             network,
                             did_str.clone(),
                             b.controller_sk,
                         );
-                        // Land a Pending inventory entry so the
-                        // DID is visible in the Dids-tab list
-                        // immediately. The on-chain doc was
-                        // already resolved in bootstrap step 6
-                        // (otherwise we wouldn't be in this Ok
-                        // arm), so a follow-up resolve can fill
-                        // in counter / vm_count / etc. via the
-                        // Resolve panel.
-                        if let Some(store) = bridge_state.store() {
-                            let now_ms = std::time::SystemTime::now()
-                                .duration_since(std::time::UNIX_EPOCH)
-                                .map(|d| d.as_millis() as i64)
-                                .unwrap_or(0);
-                            let entry = wallet_core::store::DidInventoryEntry {
-                                did: did_str.clone(),
-                                network,
-                                status: wallet_core::store::InventoryStatus::Pending,
-                                counter: None,
-                                vm_count: Some(2),
-                                service_count: Some(0),
-                                last_block_height: None,
-                                created_at: now_ms,
-                                updated_at: now_ms,
-                            };
-                            if let Err(e) = store.put_did_inventory(entry) {
-                                tracing::warn!(
-                                    error=%e,
-                                    did=%did_str,
-                                    "identity-centre: bootstrap inventory write failed",
-                                );
-                            }
-                        }
+                        // Notify the parent App so it can insert
+                        // a Pending entry into the live
+                        // `did_inventory` signal AND persist to
+                        // redb (the latter via
+                        // `persist_inventory_entry`). The Dids
+                        // tab renders from the signal, not from
+                        // a snapshot of redb, so a pure redb
+                        // write here wouldn't surface until the
+                        // next rehydration. The callback bridges
+                        // that gap.
+                        on_did_minted.call((did_str.clone(), network));
                         ic_did.set(Some(did_str.clone()));
                         ok_msg.set(Some(format!(
-                            "Bootstrapped {did_str} \
-                             (added to Dids inventory; \
-                             counter / VMs fill in on next Resolve)",
+                            "Bootstrapped {did_str}. Switch to the Dids \
+                             tab to see it; click Resolve there to fill \
+                             in counter / VM counts.",
                         )));
                     }
                     Err(e) => {
@@ -304,12 +305,53 @@ fn BootstrapSection(
         }
     };
 
+    // Activity-feed polling. While `busy == true`, snapshot the
+    // process-global `LogCapture` every ~500 ms and keep the
+    // last 3 events whose target starts with
+    // `wallet_core::metrics` — these are the per-op events
+    // emitted by `time_op` (issuance, indexer.chain_tip,
+    // prover.prove, indexer.contract_state, …). The captured
+    // ring buffer is bounded (1k events), so this poll is
+    // cheap. When `busy` flips to false the effect's read of
+    // `busy` triggers a re-run; the snapshot stays as the
+    // "final" activity slice until the next bootstrap starts.
+    {
+        let bridge_state = bridge_state.clone();
+        let mut activity = activity;
+        use_effect(move || {
+            let running = *busy.read();
+            if !running {
+                return;
+            }
+            let Some(cap) = bridge_state.log_capture().cloned() else {
+                return;
+            };
+            spawn(async move {
+                while *busy.read() {
+                    let snap = cap.snapshot();
+                    let recent: Vec<String> = snap
+                        .into_iter()
+                        .filter(|e| e.target.starts_with("wallet_core::metrics"))
+                        .take(3)
+                        .map(|e| e.message)
+                        .collect();
+                    if !recent.is_empty() {
+                        activity.set(recent);
+                    }
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                }
+            });
+        });
+    }
+
     let current = ic_did.read().clone();
     let button_label = if current.is_some() {
         "Re-bootstrap (creates a new DID)"
     } else {
         "Bootstrap DID with VC keys (Ed25519 + Jubjub)"
     };
+    let activity_lines = activity.read().clone();
+    let is_busy = *busy.read();
 
     rsx! {
         div { class: "card",
@@ -327,11 +369,35 @@ fn BootstrapSection(
             div { class: "row",
                 button {
                     class: "cta",
-                    disabled: *busy.read(),
+                    disabled: is_busy,
                     onclick: bootstrap,
-                    {if *busy.read() { "Working…" } else { button_label }}
+                    {if is_busy { "Working…" } else { button_label }}
                 }
             }
+
+            // Live activity strip — shown only while a bootstrap
+            // is in flight. Three rows max, newest at top, each
+            // a recent op-metric message. Gives the operator a
+            // sense of what's happening during the ~2-3 minute
+            // wait instead of staring at a frozen Working…
+            // button.
+            if is_busy && !activity_lines.is_empty() {
+                div { class: "card-section-header", "Current activity" }
+                ul {
+                    style: "list-style: none; margin: 0; padding: 0; \
+                            font-family: monospace; font-size: 11px; \
+                            line-height: 1.4; color: var(--text-muted);",
+                    for line in activity_lines.iter() {
+                        li {
+                            style: "padding: 2px 0; \
+                                    white-space: nowrap; overflow: hidden; \
+                                    text-overflow: ellipsis;",
+                            "{line}"
+                        }
+                    }
+                }
+            }
+
             if let Some(msg) = ok_msg.read().as_ref() {
                 div { class: "wizard-outcome ok",
                     div { class: "row label", "Bootstrap" }
