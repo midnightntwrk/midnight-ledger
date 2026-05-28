@@ -24,6 +24,7 @@ mod network;
 mod node;
 mod probe;
 pub mod secret_storage;
+pub mod service;
 pub mod store;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_support;
