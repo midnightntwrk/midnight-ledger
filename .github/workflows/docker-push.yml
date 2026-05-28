@@ -6,10 +6,6 @@ on:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE:
         required: true
-      GH_USERNAME:
-        required: true
-      GH_PASSWORD:
-        required: true
       DOCKERHUB_MIDNIGHTNTWRK_USER:
         required: true
       DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
@@ -19,20 +15,6 @@ jobs:
   docker-amd64:
     runs-on: ubuntu-latest-8-core-x64
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
@@ -46,13 +28,6 @@ jobs:
           username: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
           password: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}
 
-      - name: Configure git rewrite
-        run: |
-          mkdir -p $HOME/.config/git
-          echo '[url "https://github.com/"]' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com:"' >> $HOME/.config/git/config
-          echo '  insteadOf = "git@github.com/"' >> $HOME/.config/git/config
-          echo '  insteadOf = "ssh://git@github.com/"' >> $HOME/.config/git/config
 
       - name: Checkout ledger repository
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
@@ -89,20 +64,6 @@ jobs:
     runs-on: ubuntu-latest-4-core-arm64
 
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
@@ -152,20 +113,6 @@ jobs:
     needs: [docker-amd64, docker-arm64]
 
     steps:
-      - name: Setup api.github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup github.com credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
       - name: Docker login to GHCR
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
