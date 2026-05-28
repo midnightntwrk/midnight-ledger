@@ -1340,6 +1340,23 @@ describe('Ledger API - DustLocalState', () => {
   });
 
   /**
+   * Test the nullifiers property on a DustLocalState
+   *
+   * @given A DustLocalState
+   * @when Calling tne nullifiers getter
+   * @then Should return the Nullifier => Utxo map
+   */
+  test('should return the nullifiers map', () => {
+    const state = generateSampleDust(INITIAL_NIGHT_AMOUNT);
+    const localState = state.dust;
+    const { secretKey } = state.dustKey;
+
+    const qdo = localState.utxos[0];
+    const nullifier = dustNullifier(qdo, secretKey);
+    expect(localState.nullifiers.get(nullifier)).toEqual(qdo);
+  });
+
+  /**
    * Test utility methods - dustCommitment
    *
    * @given A DustLocalState with a UTXO

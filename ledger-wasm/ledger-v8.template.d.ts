@@ -507,7 +507,7 @@ export class DustLocalState {
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
   /**
-   * Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+   * Replays a direct concatenation of serialized ledger events. Otherwise, acts as `replayEventsWithChanges`.
    */
   replayRawEvents(sk: DustSecretKey, rawEvents: Uint8Array): DustLocalStateWithChanges;
   addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
@@ -517,6 +517,7 @@ export class DustLocalState {
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
+  readonly nullifiers: Map<DustNullifier, QualifiedDustOutput>;
   readonly params: DustParameters;
   syncTime: Date;
   readonly generatingTreeFirstFree: bigint;

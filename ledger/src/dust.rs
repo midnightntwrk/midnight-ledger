@@ -1314,8 +1314,8 @@ pub const INITIAL_DUST_PARAMETERS: DustParameters = DustParameters {
 #[storable(base)]
 #[tag = "dust-wallet-utxo-state[v1]"]
 pub struct DustWalletUtxoState {
-    utxo: QualifiedDustOutput,
-    pending_until: Option<Timestamp>,
+    pub utxo: QualifiedDustOutput,
+    pub pending_until: Option<Timestamp>,
 }
 tag_enforcement_test!(DustWalletUtxoState);
 
@@ -1362,7 +1362,7 @@ pub struct DustLocalState<D: DB> {
     pub commitment_tree: MerkleTree<(), D>,
     pub commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
-    dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
+    pub dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     pub sync_time: Timestamp,
     pub params: DustParameters,
 }

@@ -17,7 +17,7 @@ use crate::state_changes::DustStateChanges;
 use base_crypto::schnorr;
 use base_crypto::schnorr::Signature;
 use base_crypto::time::{Duration, Timestamp};
-use js_sys::{Array, BigInt, Boolean, Date, Uint8Array};
+use js_sys::{Array, BigInt, Boolean, Date, Map, Uint8Array};
 use ledger::dust::{
     DustActions as LedgerDustActions, DustGenerationInfo as LedgerDustGenerationInfo,
     DustGenerationState as LedgerDustGenerationState, DustLocalState as LedgerDustLocalState,
@@ -1553,6 +1553,17 @@ impl DustLocalState {
             .utxos()
             .map(|qdo| qdo_to_value(&qdo))
             .collect::<Result<_, _>>()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn nullifiers(&self) -> Result<Map, JsError> {
+        let res = Map::new();
+        for x in self.0.dust_utxos.iter() {
+            if x.1.pending_until.is_none() {
+                res.set(&fr_to_bigint(x.0.0), &qdo_to_value(&x.1.utxo)?);
+            }
+        }
+        Ok(res)
     }
 
     #[wasm_bindgen(getter)]
