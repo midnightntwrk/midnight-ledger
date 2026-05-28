@@ -3,6 +3,7 @@
 ## Unreleased
 
 - fix: rehashing serde deserialized `MerkleTree`s
+- breaking: pulled in breaking changes from zk-stdlib 2.1.0
 
 ## Version `2.1.0`
 

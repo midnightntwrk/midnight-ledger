@@ -18,7 +18,7 @@ onchain-vm = { version = "3.0.0", path = "../onchain-vm", package = "midnight-on
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 
 derive-where = "^1.6.1"
 enum_index = "^0.2.0"

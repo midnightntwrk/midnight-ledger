@@ -12,6 +12,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: add `UnlockToTreasury` system transaction, moving funds from the locked
   pool to the treasury.
 - fix: correctly exclude the identity point during coin ciphertext decryption
+- feat: updated zk-stdlib to 2.1.0 through `transient_crypto` maintained
+    backwards compatibility with old proofs by importing an older version of
+    `transient_crypto`
 
 ## Unreleased (8.2)
 

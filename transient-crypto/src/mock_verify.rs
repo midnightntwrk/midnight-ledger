@@ -356,6 +356,8 @@ impl Relation for TestIr {
 }
 
 impl Zkir for TestIr {
+    type ProverKey = midnight_zk_stdlib::MidnightPK<TestIr>;
+
     fn check(&self, _preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, ProvingError> {
         Ok(vec![])
     }
@@ -378,6 +380,27 @@ impl Zkir for TestIr {
             vec![],
         ))
     }
+    fn k(&self) -> u8 {
+        midnight_zk_stdlib::optimal_k(self) as u8
+    }
+    async fn keygen_vk(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<VerifierKey, anyhow::Error> {
+        let vk = VerifierKey::from(midnight_zk_stdlib::setup_vk(
+            params.get_params(self.k()).await?.as_ref(),
+            self,
+        ));
+        Ok(vk)
+    }
+    async fn keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
+        let vk = midnight_zk_stdlib::setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let pk = midnight_zk_stdlib::setup_pk(self, &vk);
+        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+    }
     fn load_ir_from_tagged(reader: impl std::io::Read + std::io::Seek) -> std::io::Result<Self> {
         tagged_deserialize(reader)
     }
@@ -385,6 +408,18 @@ impl Zkir for TestIr {
         reader: impl std::io::Read + std::io::Seek,
     ) -> std::io::Result<ProverKey<Self>> {
         tagged_deserialize(reader)
+    }
+    fn read_raw_pk(reader: impl std::io::Read) -> std::io::Result<Self::ProverKey> {
+        midnight_zk_stdlib::MidnightPK::<Self>::read(
+            &mut { reader },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
+    }
+    fn write_raw_pk(writer: impl std::io::Write, pk: &Self::ProverKey) -> std::io::Result<()> {
+        pk.write(
+            &mut { writer },
+            midnight_proofs::utils::SerdeFormat::RawBytesUnchecked,
+        )
     }
 }
 
