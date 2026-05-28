@@ -956,6 +956,14 @@ pub fn App() -> Element {
     // first DUST sync completes; `Some(0)` is a real "zero
     // balance" reading.
     let dust_subunits = use_signal::<Option<u128>>(|| None);
+    // Monotonic tick that drives `WalletSyncPane` to re-fire both
+    // NIGHT + DUST sync streams. Bumped by the Wallet-tab CTA's
+    // `connect()` closure once the endpoint probe succeeds, so
+    // the user clicks one button to bring everything online
+    // instead of two (the top CTA used to start NIGHT only, the
+    // pane-internal button DUST). 0 = never triggered → pane
+    // sits idle showing "queued". Each bump kicks both syncs.
+    let mut sync_trigger = use_signal::<u64>(|| 0);
     // Top-right menu dropdown open/closed. Toggled by the `≡`
     // button; closed automatically when the user picks a tab.
     let mut menu_open = use_signal(|| false);
@@ -1409,30 +1417,19 @@ pub fn App() -> Element {
                 SyncPhase::Stalled(errs.join("; "))
             });
 
-            // After a successful Connect, snapshot the unshielded
-            // UTXO set so BalancesCard can render the real NIGHT
-            // total. We deliberately use `app_wallet_for(net)` to
-            // match the seed shown in the address card; the
-            // generate flow currently shares the same demo path.
-            // A snapshot failure is non-fatal — the UI stays on
-            // "—" rather than reverting the Synced phase.
+            // After a successful endpoint probe, cascade into the
+            // `WalletSyncPane` to bring NIGHT (UTXO snapshot) +
+            // DUST (event-stream replay) online in one user
+            // action. The pane owns both sync rows and runs the
+            // same `Wallet::sync_unshielded()` we used to duplicate
+            // here, plus the DUST stream — so this CTA now just
+            // bumps the trigger and lets the pane do the work.
+            // (Old behaviour: probe → snapshot NIGHT here, then
+            // user had to click a second button inside the pane to
+            // kick DUST.)
             if errs.is_empty() {
-                let w = app_wallet_for(net);
-                match w.sync_unshielded().await {
-                    Ok(set) => {
-                        // NIGHT's raw 64-char token type is 32 zero bytes
-                        // (per the example-counter MIGRATION_GUIDE — the
-                        // v4 `nativeToken()` tagged form would silently
-                        // miss the balance).
-                        let night = set.total_for(
-                            &wallet_core::TokenType(vec![0u8; 32]),
-                        );
-                        night_subunits.set(Some(night));
-                    }
-                    Err(e) => {
-                        tracing::warn!(error = %e, "unshielded snapshot failed");
-                    }
-                }
+                let next = *sync_trigger.read() + 1;
+                sync_trigger.set(next);
             }
         });
     };
@@ -1629,6 +1626,7 @@ pub fn App() -> Element {
                     network: *network.read(),
                     night_subunits,
                     dust_subunits,
+                    sync_trigger,
                 }
             },
             Tab::Dids => rsx! {
@@ -2452,6 +2450,12 @@ fn WalletSyncPane(
     network: Network,
     night_subunits: Signal<Option<u128>>,
     dust_subunits: Signal<Option<u128>>,
+    /// Monotonic trigger from the parent Wallet tab. When the
+    /// value bumps from 0 → 1 → 2 → … the pane re-fires both
+    /// NIGHT and DUST sync streams. Driven by the top-level
+    /// `Connect` / `Reconnect` CTA so a single click covers
+    /// everything; the pane no longer owns its own button.
+    sync_trigger: Signal<u64>,
 ) -> Element {
     let night_row = use_signal::<SyncRow>(|| SyncRow::Idle);
     let dust_row = use_signal::<SyncRow>(|| SyncRow::Idle);
@@ -2460,7 +2464,7 @@ fn WalletSyncPane(
     // standalone status line and isn't repeated inside the row's
     // summary.
     let dust_event_id = use_signal::<Option<i64>>(|| None);
-    let mut started = use_signal(|| false);
+    let started = use_signal(|| false);
 
     // Closure that re-fires both syncs from scratch.
     let kick = move || {
@@ -2573,36 +2577,42 @@ fn WalletSyncPane(
         });
     };
 
-    // No auto-trigger. Sync runs ONLY when the operator clicks
-    // Connect / Resync. Earlier revisions auto-kicked once per mount
-    // on PreProd ("operator-demo profile") but that turned out to
-    // surprise operators who wanted to review the address / pick a
-    // network / bring up the standalone stack before any indexer
-    // traffic. The `started` signal now just tracks whether ANY
-    // sync has run since mount, so the button can label itself
-    // "Connect" before the first run and "Resync" after.
+    // Sync kicks ONLY when the parent bumps `sync_trigger` — that
+    // happens at the end of the Wallet-tab CTA's `connect()` after
+    // the endpoint probe succeeds, or when the operator clicks
+    // the in-pane `Resync` button below (which bumps the same
+    // signal). Earlier revisions had a self-owned `Connect`/`Resync`
+    // button here, but that competed with the top CTA — the user
+    // had to click both to get NIGHT + DUST online. One trigger,
+    // one user action.
     //
     // The `DustSyncer` for the active network is still registered
     // eagerly on unlock + on every network switch (see `on_unlock`
     // and `rehydrate_for_network`) — only the *sync stream* itself
-    // is gated behind the button. Cheap, idempotent registration vs
-    // expensive subscription.
-    let _ = &started; // signal kept for label state below
+    // is gated behind the trigger. Cheap, idempotent registration
+    // vs expensive subscription.
+    use_effect({
+        let kick = kick;
+        let mut started = started;
+        move || {
+            let v = *sync_trigger.read();
+            if v == 0 {
+                // Initial mount — pane sits "queued" until first
+                // bump. Skip the kick so we don't auto-sync.
+                return;
+            }
+            started.set(true);
+            kick();
+        }
+    });
 
     let any_running = matches!(*night_row.read(), SyncRow::Running { .. })
         || matches!(*dust_row.read(), SyncRow::Running { .. });
-    let ever_started = *started.read();
-    let primary_label = if any_running {
-        "Syncing…"
-    } else if ever_started {
-        "Resync"
-    } else {
-        "Connect"
-    };
 
-    let kick_with_flag = move |_| {
-        started.set(true);
-        kick();
+    let mut sync_trigger_mut = sync_trigger;
+    let resync = move |_| {
+        let next = *sync_trigger_mut.read() + 1;
+        sync_trigger_mut.set(next);
     };
 
     let dust_event_id_val = *dust_event_id.read();
@@ -2613,9 +2623,10 @@ fn WalletSyncPane(
             {render_sync_row("DUST", &dust_row.read())}
             div { class: "row sync-foot",
                 button {
+                    class: "secondary",
                     disabled: any_running,
-                    onclick: kick_with_flag,
-                    "{primary_label}"
+                    onclick: resync,
+                    if any_running { "Syncing…" } else { "Resync" }
                 }
                 if let Some(id) = dust_event_id_val {
                     span { class: "sync-meta",
