@@ -377,15 +377,14 @@ impl<D: DB> ContractOperationExt<D> for ContractOperation {
         address: ContractAddress,
         operation: EntryPoint,
     ) -> Result<(), MalformedTransaction<D>> {
-        match &self.v2 {
-            Some(_) => Ok(()),
-            None => {
-                warn!("no verifier key set");
-                Err(MalformedTransaction::VerifierKeyNotSet {
-                    address,
-                    operation: operation.into(),
-                })
-            }
+        if self.v3.is_some() || self.v2.is_some() {
+            Ok(())
+        } else {
+            warn!("no verifier key set");
+            Err(MalformedTransaction::VerifierKeyNotSet {
+                address,
+                operation: operation.into(),
+            })
         }
     }
 }
@@ -1828,7 +1827,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
                     .clone()
                     .map(|x| x.deref().clone());
 
-                if op.v2.is_some() {
+                if op.v3.is_some() || op.v2.is_some() {
                     if gt.is_some()
                         && !matches!(&gt, Some(Transcript { version: Some(version), ..}) if version.major == 2 && version.minor <= 3)
                     {

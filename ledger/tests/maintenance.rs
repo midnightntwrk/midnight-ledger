@@ -356,19 +356,19 @@ fn maintenance() {
         update.updates = vec![
             SingleUpdate::VerifierKeyRemove(
                 b"foo"[..].to_owned().into(),
-                ContractOperationVersion::V3,
+                ContractOperationVersion::V4,
             ),
             SingleUpdate::VerifierKeyInsert(
                 b"bar"[..].to_owned().into(),
-                ContractOperationVersionedVerifierKey::V3(fake_vk.clone()),
+                ContractOperationVersionedVerifierKey::V4(fake_vk.clone()),
             ),
             SingleUpdate::VerifierKeyInsert(
                 b"baz"[..].to_owned().into(),
-                ContractOperationVersionedVerifierKey::V3(fake_vk.clone()),
+                ContractOperationVersionedVerifierKey::V4(fake_vk.clone()),
             ),
             SingleUpdate::VerifierKeyRemove(
                 b"baz"[..].to_owned().into(),
-                ContractOperationVersion::V3,
+                ContractOperationVersion::V4,
             ),
         ]
         .into();
@@ -413,7 +413,7 @@ fn maintenance() {
         let mut update = update.clone();
         update.updates = vec![SingleUpdate::VerifierKeyRemove(
             b"bar"[..].to_owned().into(),
-            ContractOperationVersion::V3,
+            ContractOperationVersion::V4,
         )]
         .into();
         let data = update.data_to_sign();
@@ -444,7 +444,7 @@ fn maintenance() {
         let mut update = update.clone();
         update.updates = vec![SingleUpdate::VerifierKeyInsert(
             b"foo"[..].to_owned().into(),
-            ContractOperationVersionedVerifierKey::V3(fake_vk.clone()),
+            ContractOperationVersionedVerifierKey::V4(fake_vk.clone()),
         )]
         .into();
         let data = update.data_to_sign();

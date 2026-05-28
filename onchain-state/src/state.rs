@@ -747,7 +747,7 @@ impl Default for ContractMaintenanceAuthority {
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
-#[tag = "contract-state[v7]"]
+#[tag = "contract-state[v8]"]
 pub struct ContractState<D: DB> {
     pub data: ChargedState<D>,
     pub operations: HashMap<EntryPointBuf, ContractOperation, D>,
@@ -887,24 +887,29 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v4]"]
+#[tag = "contract-operation[v5]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
+    pub v3: Option<VerifierKey>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>) -> Self {
-        ContractOperation { v2: vk }
+        ContractOperation { v2: None, v3: vk }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v2.as_ref()
+        self.v3.as_ref().or(self.v2.as_ref())
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        &mut self.v2
+        if self.v3.is_some() {
+            &mut self.v3
+        } else {
+            &mut self.v2
+        }
     }
 }
 
@@ -919,37 +924,48 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
+                v3: Some(rng.r#gen()),
             }
         } else {
-            ContractOperation { v2: None }
+            ContractOperation {
+                v2: None,
+                v3: None,
+            }
         }
     }
 }
 
 impl FieldRepr for ContractOperation {
     fn field_repr<W: MemWrite<Fr>>(&self, writer: &mut W) {
-        match self.v2 {
-            Some(ref vk) => {
-                writer.write(&[0x01.into()]);
-                let mut bytes: Vec<u8> = Vec::new();
-                <VerifierKey as Serializable>::serialize(vk, &mut bytes)
-                    .expect("VerifierKey is serializable");
-                bytes.field_repr(writer);
+        fn vk_field_repr<W: MemWrite<Fr>>(vk: &Option<VerifierKey>, writer: &mut W) {
+            match vk {
+                Some(vk) => {
+                    writer.write(&[0x01.into()]);
+                    let mut bytes: Vec<u8> = Vec::new();
+                    <VerifierKey as Serializable>::serialize(vk, &mut bytes)
+                        .expect("VerifierKey is serializable");
+                    bytes.field_repr(writer);
+                }
+                None => writer.write(&[0x00.into()]),
             }
-            None => writer.write(&[0x00.into()]),
         }
+        vk_field_repr(&self.v2, writer);
+        vk_field_repr(&self.v3, writer);
     }
 
     fn field_size(&self) -> usize {
-        match self.v2 {
-            Some(ref vk) => {
-                let mut bytes: Vec<u8> = Vec::new();
-                <VerifierKey as Serializable>::serialize(vk, &mut bytes)
-                    .expect("VerifierKey is serializable");
-                1 + bytes.into_iter().fold(0, |acc, b| acc + b.field_size())
+        fn vk_field_size(vk: &Option<VerifierKey>) -> usize {
+            match vk {
+                Some(vk) => {
+                    let mut bytes: Vec<u8> = Vec::new();
+                    <VerifierKey as Serializable>::serialize(vk, &mut bytes)
+                        .expect("VerifierKey is serializable");
+                    1 + bytes.into_iter().fold(0, |acc, b| acc + b.field_size())
+                }
+                None => 1,
             }
-            None => 1,
         }
+        vk_field_size(&self.v2) + vk_field_size(&self.v3)
     }
 }
 
@@ -961,7 +977,10 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None }
+        ContractOperation {
+            v2: None,
+            v3: None,
+        }
     }
 }
 

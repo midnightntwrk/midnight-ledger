@@ -408,6 +408,50 @@ impl From<Proof> for ProofVersioned {
     }
 }
 
+/// Verifies a proof using the old transient-crypto (v2.0.1) which uses zk-stdlib v1.
+///
+/// This converts the current VK, proof, and statement to the old crate's types,
+/// then delegates to the old crate's verification.
+#[cfg(feature = "proof-verifying")]
+fn verify_with_v1(
+    vk: &VerifierKey,
+    proof: &Proof,
+    pis: Vec<Fr>,
+) -> Result<(), transient_crypto::proofs::VerifyingError> {
+    use transient_crypto::proofs::VerifyingError;
+
+    // Serialize the current VK, then deserialize with the old crate's type.
+    let mut vk_bytes = Vec::new();
+    serialize::Serializable::serialize(vk, &mut vk_bytes)
+        .map_err(|e| -> VerifyingError { anyhow::anyhow!("failed to serialize VK: {e}") })?;
+    let old_vk: transient_crypto_v1::proofs::VerifierKey =
+        serialize_v1::Deserializable::deserialize(&mut &vk_bytes[..], 0)
+            .map_err(|e| -> VerifyingError {
+                anyhow::anyhow!("failed to deserialize VK with v1: {e}")
+            })?;
+
+    // Convert the proof bytes to the old Proof type (both are Vec<u8> wrappers).
+    let old_proof = transient_crypto_v1::proofs::Proof(proof.0.clone());
+
+    // Convert Fr values: same BLS12-381 scalar field, different crate versions.
+    let old_pis: Vec<transient_crypto_v1::curve::Fr> = pis
+        .into_iter()
+        .map(|f| {
+            let mut bytes = Vec::new();
+            serialize::Serializable::serialize(&f, &mut bytes)
+                .expect("Fr serialization must succeed");
+            serialize_v1::Deserializable::deserialize(&mut &bytes[..], 0)
+                .expect("Fr byte representation is compatible between versions")
+        })
+        .collect();
+
+    old_vk.verify(
+        &transient_crypto_v1::proofs::PARAMS_VERIFIER,
+        &old_proof,
+        old_pis.into_iter(),
+    )
+}
+
 impl<D: DB> ProofKind<D> for ProofMarker {
     type Pedersen = PureGeneratorPedersen;
     type Proof = ProofVersioned;
@@ -441,35 +485,44 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
-        let vk = match &op.v2 {
-            Some(vk) => vk,
-            None => {
-                warn!("missing verifier key");
-                return Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
-                    address: call.address,
-                    operation: call.entry_point.clone(),
-                });
-            }
-        };
-
-        if op.v2.is_some() && !matches!(proof, ProofVersioned::V2(_)) {
+        if !matches!(proof, ProofVersioned::V2(_)) {
             return Err(MalformedTransaction::<D>::UnsupportedProofVersion {
                 op_version: "V2".to_string(),
             });
         }
 
-        match proof {
-            ProofVersioned::V2(proof) => match mode {
-                #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => vk
-                    .mock_verify(pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-                _ => vk
-                    .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-            },
+        if let Some(vk) = &op.v3 {
+            // V4 contract operation: verify with current zk-stdlib (v2)
+            use transient_crypto::proofs::PARAMS_VERIFIER;
+            match proof {
+                ProofVersioned::V2(proof) => match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                },
+            }
+        } else if let Some(vk) = &op.v2 {
+            // V3 contract operation: verify with old zk-stdlib (v1) via transient-crypto v1
+            match proof {
+                ProofVersioned::V2(proof) => match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => verify_with_v1(vk, proof, pis)
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                },
+            }
+        } else {
+            warn!("missing verifier key");
+            Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
+                address: call.address,
+                operation: call.entry_point.clone(),
+            })
         }
     }
     #[allow(clippy::result_large_err)]
@@ -848,7 +901,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v7]"]
+#[tag = "intent[v8]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1170,7 +1223,7 @@ pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCost
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable)]
 #[cfg_attr(feature = "fixed-point-custom-serde", derive(Serialize, Deserialize))]
-#[tag = "transaction-limits[v2]"]
+#[tag = "transaction-limits[v3]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
     pub time_to_dismiss_per_byte: CostDuration,
@@ -1206,7 +1259,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v6]"]
+#[tag = "ledger-parameters[v7]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1298,7 +1351,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v10]"]
+#[tag = "transaction[v11]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1582,7 +1635,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v10]"]
+#[tag = "standard-transaction[v11]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -2533,7 +2586,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v5]"]
+#[tag = "contract-deploy[v6]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2559,6 +2612,7 @@ impl<D: DB> ContractDeploy<D> {
 #[non_exhaustive]
 pub enum ContractOperationVersion {
     V3,
+    V4,
 }
 
 impl Serializable for ContractOperationVersion {
@@ -2566,13 +2620,14 @@ impl Serializable for ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => Serializable::serialize(&2u8, writer),
+            V::V4 => Serializable::serialize(&3u8, writer),
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersion as V;
         match self {
-            V::V3 => 1,
+            V::V3 | V::V4 => 1,
         }
     }
 }
@@ -2598,6 +2653,7 @@ impl Deserializable for ContractOperationVersion {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(V::V3),
+            3u8 => Ok(V::V4),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -2611,12 +2667,14 @@ impl ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2.is_some(),
+            V::V4 => co.v3.is_some(),
         }
     }
     pub(crate) fn rm_from(&self, co: &mut ContractOperation) {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2 = None,
+            V::V4 => co.v3 = None,
         }
     }
 }
@@ -2625,6 +2683,7 @@ impl ContractOperationVersion {
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
     V3(transient_crypto::proofs::VerifierKey),
+    V4(transient_crypto::proofs::VerifierKey),
 }
 
 impl ContractOperationVersionedVerifierKey {
@@ -2633,6 +2692,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(_) => V::V3,
+            VK::V4(_) => V::V4,
         }
     }
 
@@ -2640,6 +2700,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(vk) => co.v2 = Some(vk.clone()),
+            VK::V4(vk) => co.v3 = Some(vk.clone()),
         }
     }
 }
@@ -2652,13 +2713,17 @@ impl Serializable for ContractOperationVersionedVerifierKey {
                 Serializable::serialize(&2u8, writer)?;
                 Serializable::serialize(vk, writer)
             }
+            VK::V4(vk) => {
+                Serializable::serialize(&3u8, writer)?;
+                Serializable::serialize(vk, writer)
+            }
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
-            VK::V3(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V3(vk) | VK::V4(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }
@@ -2668,7 +2733,8 @@ impl Tagged for ContractOperationVersionedVerifierKey {
         "contract-operation-versioned-verifier-key".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],[],{}]", transient_crypto::proofs::VerifierKey::tag())
+        let vk_tag = transient_crypto::proofs::VerifierKey::tag();
+        format!("[[],[],{vk_tag},{vk_tag}]")
     }
 }
 tag_enforcement_test!(ContractOperationVersionedVerifierKey);
@@ -2684,6 +2750,10 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(VK::V3(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            3u8 => Ok(VK::V4(Deserializable::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -2763,7 +2833,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v7]"]
+#[tag = "contract-action[v8]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -3099,7 +3169,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v16]"]
+#[tag = "ledger-state[v17]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
@@ -3280,5 +3350,117 @@ mod tests {
         let mut ser = Vec::new();
         serialize::tagged_serialize(&state, &mut ser).unwrap();
         let _ = serialize::tagged_deserialize::<LedgerState<InMemoryDB>>(&ser[..]).unwrap();
+    }
+
+    /// Produces a proof with the old proving pipeline (zkir v1 / transient-crypto v1,
+    /// using zk-stdlib v1) and verifies it through the current ledger's v1 verification
+    /// path (`verify_with_v1`), which delegates to transient-crypto v1.
+    ///
+    /// This mirrors the real-world flow: a V3 contract operation carries a VK in its
+    /// `v2` field, and proof verification is dispatched to the old transient-crypto.
+    #[tokio::test]
+    async fn old_proof_verifies_with_current_ledger() {
+        use rand::SeedableRng;
+        use rand_chacha::ChaCha20Rng;
+        use std::borrow::Cow;
+        use std::fs::File;
+        use std::io::BufReader;
+
+        // ── old-version helpers ──────────────────────────────────────────
+        type OldIrSource = zkir_v1::IrSource;
+        type OldProverKey = transient_crypto_v1::proofs::ProverKey<OldIrSource>;
+
+        struct OldTestParams;
+        impl transient_crypto_v1::proofs::ParamsProverProvider for OldTestParams {
+            async fn get_params(
+                &self,
+                k: u8,
+            ) -> std::io::Result<transient_crypto_v1::proofs::ParamsProver> {
+                const DIR: &str = env!("MIDNIGHT_PP");
+                transient_crypto_v1::proofs::ParamsProver::read(BufReader::new(File::open(
+                    format!("{DIR}/bls_midnight_2p{k}"),
+                )?))
+            }
+        }
+
+        struct OldTestResolver {
+            pk: OldProverKey,
+            vk: transient_crypto_v1::proofs::VerifierKey,
+            ir: OldIrSource,
+        }
+        impl transient_crypto_v1::proofs::Resolver for OldTestResolver {
+            async fn resolve_key(
+                &self,
+                _key: transient_crypto_v1::proofs::KeyLocation,
+            ) -> std::io::Result<Option<transient_crypto_v1::proofs::ProvingKeyMaterial>> {
+                let mut pk = Vec::new();
+                serialize_v1::tagged_serialize(&self.pk, &mut pk)?;
+                let mut vk = Vec::new();
+                serialize_v1::tagged_serialize(&self.vk, &mut vk)?;
+                let mut ir = Vec::new();
+                serialize_v1::tagged_serialize(&self.ir, &mut ir)?;
+                Ok(Some(transient_crypto_v1::proofs::ProvingKeyMaterial {
+                    prover_key: pk,
+                    verifier_key: vk,
+                    ir_source: ir,
+                }))
+            }
+        }
+
+        // ── build a minimal circuit and prove with old pipeline ──────────
+        let ir_raw = r#"{
+           "version": { "major": 2, "minor": 0 },
+           "num_inputs": 1,
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "assert", "cond": 0 }
+           ]
+        }"#;
+        let old_ir = OldIrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (old_pk, old_vk) = {
+            use transient_crypto_v1::proofs::Zkir;
+            old_ir.keygen(&OldTestParams).await.unwrap()
+        };
+
+        let old_preimage = transient_crypto_v1::proofs::ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![1.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: transient_crypto_v1::proofs::KeyLocation(Cow::Borrowed("builtin")),
+        };
+
+        let (old_proof, _) = old_preimage
+            .prove::<OldIrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &OldTestParams,
+                &OldTestResolver {
+                    pk: old_pk,
+                    vk: old_vk.clone(),
+                    ir: old_ir,
+                },
+            )
+            .await
+            .unwrap();
+
+        // ── convert old VK to current type (as it would be stored on-chain) ──
+        let mut old_vk_bytes = Vec::new();
+        serialize_v1::Serializable::serialize(&old_vk, &mut old_vk_bytes).unwrap();
+        let current_vk: VerifierKey =
+            serialize::Deserializable::deserialize(&mut &old_vk_bytes[..], 0)
+                .expect("old VK bytes should deserialize into current VerifierKey");
+
+        // ── convert old proof to current type ────────────────────────────
+        let current_proof = Proof(old_proof.0);
+
+        // ── build the statement vector ───────────────────────────────────
+        let pis = vec![Fr::from(42u64)];
+
+        // ── verify through the ledger's v1 path ─────────────────────────
+        super::verify_with_v1(&current_vk, &current_proof, pis)
+            .expect("old proof should verify through the ledger's v1 verification path");
     }
 }

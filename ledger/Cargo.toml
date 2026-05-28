@@ -30,6 +30,10 @@ midnight-ledger-static = { version = "9.0.0", path = "../static", package = "mid
 
 zkir_v2 = { version = "2.1.0", path = "../zkir", package = "midnight-zkir", optional = true }
 
+# Pinned pre-zk-stdlib-v2 version of transient-crypto for backwards-compatible proof verification.
+transient-crypto-v1 = { package = "midnight-transient-crypto", version = "=2.0.1" }
+serialize-v1 = { package = "midnight-serialize", version = "=1.0.0" }
+
 tokio = { version = "^1.46.1", features = ["rt", "macros"] }
 lazy_static = "^1.5.0"
 sha2 = "^0.11.0"
@@ -71,6 +75,10 @@ tempfile = "3.20"
 pastey = "0.2.1"
 serde_json = "^1.0.140"
 hex = "^0.4.3"
+
+# Pinned pre-zk-stdlib-v2 versions for backwards-compatibility proof tests.
+zkir-v1 = { package = "midnight-zkir", version = "=2.1.0" }
+rand_chacha = "^0.3.1"
 
 [[bench]]
 name = "benchmarking"
