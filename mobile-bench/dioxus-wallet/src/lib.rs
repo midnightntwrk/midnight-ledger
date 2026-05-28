@@ -228,11 +228,12 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
 <script type="importmap">
 {
   "imports": {
-    "@midnight-ntwrk/midnight-did-contract":   "mn-pkg://localhost/midnight-did-contract/dist/index.js",
-    "@midnight-ntwrk/compact-runtime":         "mn-pkg://localhost/compact-runtime/dist/index.js",
-    "@midnight-ntwrk/onchain-runtime-v3":      "mn-pkg://localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
-    "@midnight-ntwrk/ledger-v8":               "mn-pkg://localhost/ledger-v8/midnight_ledger_wasm.js",
-    "object-inspect":                          "mn-pkg://localhost/object-inspect/index.js"
+    "@midnight-ntwrk/midnight-did-contract":         "mn-pkg://localhost/midnight-did-contract/dist/index.js",
+    "@midnight-ntwrk/midnight-did-jubjub-schnorr":   "mn-pkg://localhost/midnight-did-jubjub-schnorr/dist/index.js",
+    "@midnight-ntwrk/compact-runtime":               "mn-pkg://localhost/compact-runtime/dist/index.js",
+    "@midnight-ntwrk/onchain-runtime-v3":            "mn-pkg://localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
+    "@midnight-ntwrk/ledger-v8":                     "mn-pkg://localhost/ledger-v8/midnight_ledger_wasm.js",
+    "object-inspect":                                "mn-pkg://localhost/object-inspect/index.js"
   }
 }
 </script>"#;
@@ -241,11 +242,12 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
 <script type="importmap">
 {
   "imports": {
-    "@midnight-ntwrk/midnight-did-contract":   "http://mn-pkg.localhost/midnight-did-contract/dist/index.js",
-    "@midnight-ntwrk/compact-runtime":         "http://mn-pkg.localhost/compact-runtime/dist/index.js",
-    "@midnight-ntwrk/onchain-runtime-v3":      "http://mn-pkg.localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
-    "@midnight-ntwrk/ledger-v8":               "http://mn-pkg.localhost/ledger-v8/midnight_ledger_wasm.js",
-    "object-inspect":                          "http://mn-pkg.localhost/object-inspect/index.js"
+    "@midnight-ntwrk/midnight-did-contract":         "http://mn-pkg.localhost/midnight-did-contract/dist/index.js",
+    "@midnight-ntwrk/midnight-did-jubjub-schnorr":   "http://mn-pkg.localhost/midnight-did-jubjub-schnorr/dist/index.js",
+    "@midnight-ntwrk/compact-runtime":               "http://mn-pkg.localhost/compact-runtime/dist/index.js",
+    "@midnight-ntwrk/onchain-runtime-v3":            "http://mn-pkg.localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
+    "@midnight-ntwrk/ledger-v8":                     "http://mn-pkg.localhost/ledger-v8/midnight_ledger_wasm.js",
+    "object-inspect":                                "http://mn-pkg.localhost/object-inspect/index.js"
   }
 }
 </script>"#;

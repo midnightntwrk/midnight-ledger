@@ -38,14 +38,20 @@ const DEST = resolve(__dirname, "..", "assets", "web", "pkg");
 // resolution is consistent — every dep already points at the
 // resolved version, not a peer that might be a symlink.
 // Pure-JS packages with their transitive Effect / wallet-sdk closure
-// (`midnight-js-contracts`, `midnight-js-network-id`,
-// `midnight-did-jubjub-schnorr`) are *not* vendored — esbuild bundles
-// them into `midnight-did.js` so the import-map needs only the
-// WASM-bearing modules below. The vendored DID contract tree carries
-// the `.prover` / `.verifier` blobs that the WebView ZK config
-// provider fetches over `mn-pkg://`.
+// (`midnight-js-contracts`, `midnight-js-network-id`) are *not*
+// vendored — esbuild bundles them into `midnight-did.js` so the
+// import-map needs only the WASM-bearing modules below. The
+// vendored DID contract tree carries the `.prover` / `.verifier`
+// blobs that the WebView ZK config provider fetches over `mn-pkg://`.
+//
+// 2026-05-28 schema refresh: the redesigned DID contract's
+// `witnesses.js` adds a runtime `import { TWO_248 } from
+// "@midnight-ntwrk/midnight-did-jubjub-schnorr"`, so we now have to
+// vendor that package too — the import is loaded over `mn-pkg://`
+// at WebView runtime, not statically bundled by esbuild.
 const PACKAGES = [
   "midnight-did-contract",
+  "midnight-did-jubjub-schnorr",
   "compact-runtime",
   "compact-js",
   "onchain-runtime-v3",
