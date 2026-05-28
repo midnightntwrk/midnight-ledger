@@ -13,20 +13,35 @@
 //! root[0]  constants
 //!   [0]    contractVersion        : Cell<bigint>
 //!   [1]    controllerPublicKey    : Cell<Bytes32>
+//!   [2]    id                     : Cell<Bytes32>
 //! root[1]  mutable
-//!   [0]    id                                : Cell<Bytes32>
-//!   [1]    alsoKnownAs                       : Map<string, ()>            (Set)
-//!   [2]    version                           : Cell<bigint>
-//!   [3]    created                           : Cell<bigint>
-//!   [4]    updated                           : Cell<bigint>
-//!   [5]    deactivated                       : Cell<bool>
-//!   [6]    active                            : Cell<bool>
-//!   [7]    operationCount                    : Cell<bigint>
-//!   [8]    verificationMethods               : Map<string, VerificationMethod>
-//!   [9]    schnorrJubjubVerificationMethods  : Map<string, SchnorrJubjubVerificationMethod>
-//!   [10..14] relations                       : Map<string, ()> ×5
-//!   [15]   services                          : Map<string, Service>
+//!   [0]    alsoKnownAs                       : Map<string, ()>            (Set)
+//!   [1]    version                           : Cell<bigint>
+//!   [2]    created                           : Cell<bigint>
+//!   [3]    updated                           : Cell<bigint>
+//!   [4]    deactivated                       : Cell<bool>
+//!   [5]    active                            : Cell<bool>
+//!   [6]    operationCount                    : Cell<bigint>
+//!   [7]    verificationMethods               : Map<string, VerificationMethod>
+//!   [8]    schnorrJubjubVerificationMethods  : Map<string, SchnorrJubjubVerificationMethod>
+//!   [9..13] relations                        : Map<string, ()> ×5
+//!   [14]   services                          : Map<string, Service>
 //! ```
+//!
+//! **2026-05-29 layout fix:** the Compact compiler classifies `id`
+//! as a *constant* (only assigned in the constructor:
+//! `id = kernel.self()`), so it lives in the `constants` array not
+//! the `mutable` array. The earlier layout put `id` at `mutable[0]`,
+//! shifting every subsequent mutable index up by one — every
+//! decoder slot read landed in the wrong field, and the encoder
+//! mirror put `active = cell_bool(true)` in the contract's
+//! `operationCount` slot while `deactivated = cell_bool(false)`
+//! landed in the actual `active` slot. Result: every write circuit
+//! asserted "Contract is not active" against a freshly-deployed
+//! DID. The canonical layout is encoded in
+//! `~/iohk/midnight-did/packages/contract/dist/managed/did/contract/index.js`
+//! as a series of `queryLedgerState` operations from the compiled
+//! constructor — that's the ground truth this file mirrors.
 //!
 //! The 2026-05-28 `feat!: Redesign DID verification method storage`
 //! refresh inserted `schnorrJubjubVerificationMethods` at index 9,
@@ -159,17 +174,19 @@ pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState,
     Ok(DidLedgerState {
         contract_version: cell_u128(constants, 0, "contractVersion")?,
         controller_public_key: cell_bytes32(constants, 1, "controllerPublicKey")?,
-        id_bytes: cell_bytes32(mutable, 0, "id")?,
-        version: cell_u128(mutable, 2, "version")?,
-        created_raw: cell_bytes32_padded(mutable, 3, "created")?,
-        updated_raw: cell_bytes32_padded(mutable, 4, "updated")?,
-        deactivated: cell_bool(mutable, 5, "deactivated")?,
-        active: cell_bool(mutable, 6, "active")?,
-        operation_count: cell_u128(mutable, 7, "operationCount")?,
+        // `id` is a constants-array slot per the compiled
+        // constructor (only ever assigned via `id = kernel.self()`).
+        id_bytes: cell_bytes32(constants, 2, "id")?,
+        version: cell_u128(mutable, 1, "version")?,
+        created_raw: cell_bytes32_padded(mutable, 2, "created")?,
+        updated_raw: cell_bytes32_padded(mutable, 3, "updated")?,
+        deactivated: cell_bool(mutable, 4, "deactivated")?,
+        active: cell_bool(mutable, 5, "active")?,
+        operation_count: cell_u128(mutable, 6, "operationCount")?,
         mutable_field_count: mutable.len() as usize,
-        also_known_as: decode_string_set(mutable, 1, "alsoKnownAs")?,
-        verification_methods: decode_vm_map(mutable, 8, "verificationMethods")?,
-        // Index 9 is `schnorrJubjubVerificationMethods` — added in
+        also_known_as: decode_string_set(mutable, 0, "alsoKnownAs")?,
+        verification_methods: decode_vm_map(mutable, 7, "verificationMethods")?,
+        // Index 8 is `schnorrJubjubVerificationMethods` — added in
         // the 2026-05-28 schema refresh. Fully decoded so the
         // resolved DID document can surface Jubjub VMs alongside
         // JWK VMs; bootstrap step 6's "relation references a
@@ -177,15 +194,15 @@ pub(crate) fn decode_did_ledger_state(state_hex: &str) -> Result<DidLedgerState,
         // present in the doc.
         schnorr_jubjub_verification_methods: decode_schnorr_jubjub_vm_map(
             mutable,
-            9,
+            8,
             "schnorrJubjubVerificationMethods",
         )?,
-        authentication: decode_string_set(mutable, 10, "authenticationRelation")?,
-        assertion_method: decode_string_set(mutable, 11, "assertionMethodRelation")?,
-        key_agreement: decode_string_set(mutable, 12, "keyAgreementRelation")?,
-        capability_invocation: decode_string_set(mutable, 13, "capabilityInvocationRelation")?,
-        capability_delegation: decode_string_set(mutable, 14, "capabilityDelegationRelation")?,
-        services: decode_service_map(mutable, 15, "services")?,
+        authentication: decode_string_set(mutable, 9, "authenticationRelation")?,
+        assertion_method: decode_string_set(mutable, 10, "assertionMethodRelation")?,
+        key_agreement: decode_string_set(mutable, 11, "keyAgreementRelation")?,
+        capability_invocation: decode_string_set(mutable, 12, "capabilityInvocationRelation")?,
+        capability_delegation: decode_string_set(mutable, 13, "capabilityDelegationRelation")?,
+        services: decode_service_map(mutable, 14, "services")?,
     })
 }
 

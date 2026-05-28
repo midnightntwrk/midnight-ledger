@@ -95,43 +95,55 @@ pub(crate) fn compose_initial_state(
     maintenance_committee: Vec<base_crypto::signatures::VerifyingKey>,
 ) -> ContractState<DefaultDB> {
     let constants = state_array(vec![
-        // contractVersion: Uint<32> = 1
+        // [0] contractVersion: Uint<32> = 1
         cell_u32(1),
-        // controllerPublicKey: Bytes<32>
+        // [1] controllerPublicKey: Bytes<32>
         cell_bytes32(controller_pk_commitment),
+        // [2] id: ContractAddress (zero — kernel.self() resolves at
+        //     runtime; client-side preview pre-resolution).
+        //
+        //     2026-05-29 fix: the Compact compiler classifies `id`
+        //     as a *constant* (it's only ever assigned in the
+        //     constructor — `id = kernel.self()`), so it lives in
+        //     `constants` not `mutable`. The wallet's earlier layout
+        //     put `id` at mutable[0], shifting every subsequent
+        //     mutable slot up by one — `active = cell_bool(true)`
+        //     landed in the contract's `operationCount` slot, while
+        //     `deactivated = cell_bool(false)` landed in the actual
+        //     `active` slot, so every write circuit asserted
+        //     "Contract is not active" after a fresh deploy.
+        //     See `dist/managed/did/contract/index.js`'s
+        //     `queryLedgerState` sequence for the canonical layout.
+        cell_bytes32([0u8; 32]),
     ]);
 
     let mutable = state_array(vec![
-        // id: ContractAddress (zero — kernel.self() resolves at runtime,
-        //                       client-side preview pre-resolution)
-        cell_bytes32([0u8; 32]),
-        // alsoKnownAs: Set<string> — empty Map<key, ()>
+        // [0] alsoKnownAs: Set<string> — empty Map<key, ()>
         empty_map(),
-        // version: Counter (Uint<64>) = 0
+        // [1] version: Counter (Uint<64>) = 0
         cell_u64(0),
-        // created: Uint<64>
+        // [2] created: Uint<64>
         cell_u64(timestamp_ms),
-        // updated: Uint<64>
+        // [3] updated: Uint<64>
         cell_u64(timestamp_ms),
-        // deactivated: Boolean = false
+        // [4] deactivated: Boolean = false
         cell_bool(false),
-        // active: Boolean = true
+        // [5] active: Boolean = true
         cell_bool(true),
-        // operationCount: Counter = 0
+        // [6] operationCount: Counter = 0
         cell_u64(0),
-        // verificationMethods: Map<string, VerificationMethod>
+        // [7] verificationMethods: Map<string, VerificationMethod>
         empty_map(),
-        // schnorrJubjubVerificationMethods: Map<string, SchnorrJubjubVerificationMethod>
-        // (added in the 2026-05-28 schema refresh; shifted all
-        // subsequent indices up by one).
+        // [8] schnorrJubjubVerificationMethods: Map<string, SchnorrJubjubVerificationMethod>
+        // (added in the 2026-05-28 schema refresh)
         empty_map(),
-        // 5 relation Sets
-        empty_map(),
+        // [9..13] 5 relation Sets
         empty_map(),
         empty_map(),
         empty_map(),
         empty_map(),
-        // services: Map<string, Service>
+        empty_map(),
+        // [14] services: Map<string, Service>
         empty_map(),
     ]);
 
@@ -350,7 +362,9 @@ mod tests {
         assert!(decoded.active, "active");
         assert!(!decoded.deactivated, "deactivated");
         assert_eq!(decoded.operation_count, 0, "operationCount");
-        assert_eq!(decoded.mutable_field_count, 16, "mutable field count");
+        // 15 mutable fields after the 2026-05-29 layout fix
+        // (`id` moved to constants[2]).
+        assert_eq!(decoded.mutable_field_count, 15, "mutable field count");
     }
 
     #[test]
