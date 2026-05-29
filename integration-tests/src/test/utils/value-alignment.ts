@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import type { AlignmentSegment } from '@midnight-ntwrk/ledger';
+import { type AlignmentSegment, bigIntToValue, type EncodedStateValue } from '@midnight-ntwrk/ledger';
 
 function atomBytes(len: number): AlignmentSegment {
   return { tag: 'atom', value: { tag: 'bytes', length: len } };
@@ -28,3 +28,14 @@ export const EMPTY_VALUE: Uint8Array = new Uint8Array(0);
 export const ONE_VALUE: Uint8Array = new Uint8Array([1]);
 export const TWO_VALUE: Uint8Array = new Uint8Array([2]);
 export const THREE_VALUE: Uint8Array = new Uint8Array([3]);
+
+export function intCell(n: bigint, byteLength: number): EncodedStateValue {
+  return {
+    tag: 'cell',
+    content: { value: bigIntToValue(n), alignment: [atomBytes(byteLength)] }
+  };
+}
+
+export function arrayCell(elements: EncodedStateValue[]): EncodedStateValue {
+  return { tag: 'array', content: elements };
+}

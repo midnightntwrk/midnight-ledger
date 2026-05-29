@@ -1,8 +1,8 @@
-[**@midnight/ledger v8.1.0-rc.1**](README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](README.md)
 
 ***
 
-# @midnight/ledger v8.1.0-rc.1
+# @midnight/ledger v0.1.0-alpha.1
 
 ## Classes
 
@@ -21,6 +21,7 @@
 - [CostModel](classes/CostModel.md)
 - [DustActions](classes/DustActions.md)
 - [DustGenerationState](classes/DustGenerationState.md)
+- [DustGenerationTreeInsertionPath](classes/DustGenerationTreeInsertionPath.md)
 - [DustLocalState](classes/DustLocalState.md)
 - [DustLocalStateWithChanges](classes/DustLocalStateWithChanges.md)
 - [DustParameters](classes/DustParameters.md)
@@ -115,6 +116,7 @@
 - [GatherResult](type-aliases/GatherResult.md)
 - [IntentHash](type-aliases/IntentHash.md)
 - [Key](type-aliases/Key.md)
+- [LogEventType](type-aliases/LogEventType.md)
 - [Nonce](type-aliases/Nonce.md)
 - [NormalizedCost](type-aliases/NormalizedCost.md)
 - [Nullifier](type-aliases/Nullifier.md)
@@ -133,6 +135,7 @@
 - [ShieldedCoinInfo](type-aliases/ShieldedCoinInfo.md)
 - [ShieldedTokenType](type-aliases/ShieldedTokenType.md)
 - [Signature](type-aliases/Signature.md)
+- [SignatureKind](type-aliases/SignatureKind.md)
 - [SignatureVerifyingKey](type-aliases/SignatureVerifyingKey.md)
 - [Signaturish](type-aliases/Signaturish.md)
 - [SigningKey](type-aliases/SigningKey.md)
@@ -180,6 +183,7 @@
 - [dummyContractAddress](functions/dummyContractAddress.md)
 - [dummyUserAddress](functions/dummyUserAddress.md)
 - [dustCommitment](functions/dustCommitment.md)
+- [dustFirstNonce](functions/dustFirstNonce.md)
 - [dustInitialNonce](functions/dustInitialNonce.md)
 - [dustNonce](functions/dustNonce.md)
 - [dustNullifier](functions/dustNullifier.md)
@@ -195,9 +199,13 @@
 - [entryPointHash](functions/entryPointHash.md)
 - [feeToken](functions/feeToken.md)
 - [hashToCurve](functions/hashToCurve.md)
+- [jubjubSampleScalar](functions/jubjubSampleScalar.md)
+- [jubjubScalarFromNative](functions/jubjubScalarFromNative.md)
 - [leafHash](functions/leafHash.md)
 - [maxAlignedSize](functions/maxAlignedSize.md)
 - [maxField](functions/maxField.md)
+- [maxJubjubScalar](functions/maxJubjubScalar.md)
+- [nativeFromJubjubScalar](functions/nativeFromJubjubScalar.md)
 - [nativeToken](functions/nativeToken.md)
 - [parseCheckResult](functions/parseCheckResult.md)
 - [partitionTranscripts](functions/partitionTranscripts.md)

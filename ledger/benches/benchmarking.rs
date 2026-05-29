@@ -478,31 +478,35 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     fn mk_tx<R: Rng>(rng: &mut R, n: usize) -> SystemTransaction {
         let mut events = Vec::with_capacity(n);
-        let mut owners = Vec::with_capacity(n);
+        // Track (key, remaining_amount, nonce) for each created night.
+        let mut owners: Vec<(DustPublicKey, u128, InitialNonce)> = Vec::with_capacity(n);
         for _ in 0..n {
             if owners.is_empty() || rng.gen_bool(0.5) {
                 let key = DustPublicKey(rng.r#gen());
                 let amt = rng.r#gen::<u32>() as u128;
-                owners.push((key, amt));
+                let nonce = InitialNonce(rng.r#gen());
+                owners.push((key, amt, nonce));
                 events.push(CNightGeneratesDustEvent {
                     value: amt,
                     owner: key,
                     time: Timestamp::from_secs(0),
                     action: CNightGeneratesDustActionType::Create,
-                    nonce: InitialNonce(rng.r#gen()),
+                    nonce,
                 });
             } else {
                 let key: DustPublicKey;
                 let amt: u128;
+                let nonce: InitialNonce;
                 loop {
                     let idx = rng.gen_range(0..owners.len());
-                    let (k, max_amt) = owners[idx];
+                    let (k, max_amt, n) = owners[idx];
                     if max_amt == 0 {
                         continue;
                     }
                     key = k;
                     amt = rng.gen_range(0..max_amt);
-                    owners[idx] = (key, max_amt - amt);
+                    nonce = n;
+                    owners[idx] = (key, max_amt - amt, n);
                     break;
                 }
                 events.push(CNightGeneratesDustEvent {
@@ -510,7 +514,7 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
                     owner: key,
                     time: Timestamp::from_secs(0),
                     action: CNightGeneratesDustActionType::Destroy,
-                    nonce: InitialNonce(rng.r#gen()),
+                    nonce,
                 })
             }
         }

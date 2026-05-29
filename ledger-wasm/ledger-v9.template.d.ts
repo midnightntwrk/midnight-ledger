@@ -1,4 +1,4 @@
-<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v3.d.ts', 'utf8')); %>
+<% print(fs.readFileSync('../onchain-runtime-wasm/onchain-runtime-v4.d.ts', 'utf8')); %>
 
 /**
  * A zero-knowledge proof.
@@ -286,6 +286,15 @@ export type EventDetails =
     vFee: bigint,
     declaredTime: Date,
     blockTime: Date,
+  } | {
+    tag: 'contractLog',
+    address: ContractAddress,
+    entryPoint: Uint8Array | string,
+    loggedItem: {
+      version: number,
+      eventType: LogEventType,
+      data: EncodedStateValue,
+    },
   } |
   // Other variants may be added and some events are not yet supported in this API.
   { tag: string };
