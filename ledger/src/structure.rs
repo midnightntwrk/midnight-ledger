@@ -28,8 +28,6 @@ use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::hash::persistent_hash;
 use base_crypto::repr::MemWrite;
-use base_crypto::schnorr::Signature;
-use base_crypto::schnorr::{SigningKey, VerifyingKey};
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::NIGHT;
 use coin_structure::coin::PublicAddress;
@@ -84,7 +82,11 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
     type Signature<T>: Ord + Serializable + Deserializable + Storable<D> + Debug + Tagged;
 
     /// Verify a signature against a message
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Self::Signature<T>) -> bool;
+    fn signature_verify<T>(
+        msg: &[u8],
+        key: SignatureVerifyingKey,
+        signature: &Self::Signature<T>,
+    ) -> bool;
 
     fn sign<R: Rng + CryptoRng, T>(
         sk: &SigningKey,
@@ -96,7 +98,7 @@ pub trait SignatureKind<D: DB>: Ord + Storable<D> + Debug + Tagged + 'static {
 impl<D: DB> SignatureKind<D> for () {
     type Signature<T> = ();
 
-    fn signature_verify<T>(_msg: &[u8], _key: VerifyingKey, _signature: &()) -> bool {
+    fn signature_verify<T>(_msg: &[u8], _key: SignatureVerifyingKey, _signature: &()) -> bool {
         true
     }
 
@@ -106,7 +108,7 @@ impl<D: DB> SignatureKind<D> for () {
 impl<D: DB> SignatureKind<D> for Signature {
     type Signature<T> = Signature;
 
-    fn signature_verify<T>(msg: &[u8], key: VerifyingKey, signature: &Signature) -> bool {
+    fn signature_verify<T>(msg: &[u8], key: SignatureVerifyingKey, signature: &Signature) -> bool {
         key.verify(msg, signature)
     }
 
@@ -712,7 +714,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v6]"]
+#[tag = "system-transaction[v8]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -732,9 +734,17 @@ pub enum SystemTransaction {
         outputs: Vec<OutputInstructionUnshielded>,
         token_type: UnshieldedTokenType,
     },
-    DistributeReserve(u128),
+    DistributeReserve {
+        amount: u128,
+    },
     CNightGeneratesDustUpdate {
         events: Vec<CNightGeneratesDustEvent>,
+    },
+    UnlockToTreasury {
+        amount: u128,
+    },
+    UnlockToReserve {
+        amount: u128,
     },
 }
 tag_enforcement_test!(SystemTransaction);
@@ -751,7 +761,7 @@ impl<D: DB> SegIntent<D> {
 }
 
 #[derive(Storable)]
-#[tag = "unshielded-offer[v1]"]
+#[tag = "unshielded-offer[v2]"]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
 #[storable(db = D)]
 pub struct UnshieldedOffer<S: SignatureKind<D>, D: DB> {
@@ -838,7 +848,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v6]"]
+#[tag = "intent[v8]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1160,7 +1170,7 @@ pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCost
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable)]
 #[cfg_attr(feature = "fixed-point-custom-serde", derive(Serialize, Deserialize))]
-#[tag = "transaction-limits[v2]"]
+#[tag = "transaction-limits[v3]"]
 pub struct TransactionLimits {
     pub transaction_byte_limit: u64,
     pub time_to_dismiss_per_byte: CostDuration,
@@ -1174,6 +1184,8 @@ pub struct TransactionLimits {
         serde(with = "base_crypto::cost_model::fixed_point_custom_serde")
     )]
     pub block_withdrawal_minimum_multiple: FixedPoint,
+    // A hard limit on the size of associated contract metadata.
+    pub max_contract_metadata_size: u64,
 }
 tag_enforcement_test!(TransactionLimits);
 
@@ -1189,6 +1201,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
         bytes_churned: 1_000_000,
     },
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
+    max_contract_metadata_size: 10 * 1024 * 1024,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
@@ -1196,7 +1209,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v5]"]
+#[tag = "ledger-parameters[v7]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1220,6 +1233,8 @@ pub struct LedgerParameters {
     pub cardano_to_midnight_bridge_fee_basis_points: u32,
     // Note: This is denominated in STARs (atomic night units)
     pub c_to_m_bridge_min_amount: u128,
+    // The minimum value for `fee_prices.overall_price`.
+    pub min_block_price: FixedPoint,
 }
 tag_enforcement_test!(LedgerParameters);
 
@@ -1280,12 +1295,13 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
     cost_dimension_min_ratio: FixedPoint::from_u64_div(1, 4),
     price_adjustment_a_parameter: FixedPoint::from_u64_div(100, 1),
     c_to_m_bridge_min_amount: 1000,
+    min_block_price: FixedPoint::from_u64_div(10, 1),
 };
 
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v9]"]
+#[tag = "transaction[v11]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1298,6 +1314,7 @@ tag_enforcement_test!(Transaction<(), (), Pedersen, InMemoryDB>);
 pub struct VerifiedTransaction<D: DB> {
     pub(crate) inner: Transaction<(), (), Pedersen, D>,
     pub(crate) hash: TransactionHash,
+    pub(crate) fees: u128,
 }
 
 impl<D: DB> Deref for VerifiedTransaction<D> {
@@ -1568,7 +1585,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v9]"]
+#[tag = "standard-transaction[v11]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -1745,11 +1762,11 @@ type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq; S)]
 #[storable(db = D)]
-#[tag = "claim-rewards-transaction[v1]"]
+#[tag = "claim-rewards-transaction[v2]"]
 pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub network_id: String,
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub nonce: Nonce,
     pub signature: S::Signature<ErasedClaimRewardsTransaction<D>>,
     pub kind: ClaimKind,
@@ -1857,19 +1874,21 @@ where
         Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
     }
 
-    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+    fn validation_cost_impl(
+        &self,
+        model: &TransactionCostModel,
+        per_call_vk_read: impl Fn(&ContractAddress, &EntryPointBuf) -> RunningCost,
+    ) -> SyntheticCost {
         match self {
             Transaction::Standard(stx) => {
-                let vk_reads = self
+                let unique_calls = self
                     .calls()
                     .map(|(_, call)| (call.address, call.entry_point))
-                    .collect::<BTreeSet<_>>()
-                    .len();
+                    .collect::<BTreeSet<_>>();
                 let mut cost = model.baseline_cost;
-                cost += (model.cell_read(VERIFIER_KEY_SIZE as u64)
-                    + model.map_index(EXPECTED_CONTRACT_DEPTH)
-                    + model.map_index(EXPECTED_OPERATIONS_DEPTH))
-                    * vk_reads;
+                for (address, entry_point) in &unique_calls {
+                    cost += per_call_vk_read(address, entry_point);
+                }
                 let offers = stx
                     .guaranteed_coins
                     .iter()
@@ -1932,6 +1951,41 @@ where
             } + model.baseline_cost)
                 .into(),
         }
+    }
+
+    pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
+        let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
+            + model.map_index(EXPECTED_CONTRACT_DEPTH)
+            + model.map_index(EXPECTED_OPERATIONS_DEPTH);
+        self.validation_cost_impl(model, |_, _| per_call)
+    }
+
+    pub fn validation_cost_with_state(
+        &self,
+        model: &TransactionCostModel,
+        ledger: &LedgerState<D>,
+    ) -> SyntheticCost {
+        self.validation_cost_impl(model, |address, entry_point| {
+            let (vk_size, ops_log_size) = ledger
+                .index(*address)
+                .and_then(|cstate| {
+                    let n = cstate.operations.size();
+                    // ceil(log2(n)): number of bits needed to distinguish n entries
+                    let ops_log_size = (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize;
+                    cstate.operations.get(entry_point).map(|op| {
+                        let vk_size = op
+                            .v2
+                            .as_ref()
+                            .map(|vk| vk.serialized_size())
+                            .unwrap_or(VERIFIER_KEY_SIZE);
+                        (vk_size, ops_log_size)
+                    })
+                })
+                .unwrap_or((VERIFIER_KEY_SIZE, EXPECTED_OPERATIONS_DEPTH));
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(ops_log_size)
+        })
     }
 
     fn est_size(&self) -> usize {
@@ -2212,6 +2266,69 @@ where
         }
         Ok(validation_cost + application_cost)
     }
+
+    pub fn cost_with_state(
+        &self,
+        params: &LedgerParameters,
+        ledger: &LedgerState<D>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<SyntheticCost, FeeCalculationError> {
+        let mut validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
+        validation_cost.compute_time =
+            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
+        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let time_to_dismiss = CostDuration::max(
+            params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
+            params.limits.min_time_to_dismiss,
+        );
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
+            return Err(FeeCalculationError::OutsideTimeToDismiss {
+                time_to_dismiss: cost_to_dismiss.max_time(),
+                allowed_time_to_dismiss: time_to_dismiss,
+                size: self.est_size() as u64,
+            });
+        }
+        Ok(validation_cost + application_cost)
+    }
+
+    pub(crate) fn fees_with_impl(
+        &self,
+        params: &LedgerParameters,
+        get_op: impl Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        enforce_time_to_dismiss: bool,
+    ) -> Result<u128, FeeCalculationError> {
+        let model = &params.cost_model;
+        let mut validation_cost = self.validation_cost_impl(model, |address, entry_point| {
+            let vk_size = get_op(*address, entry_point)
+                .and_then(|op| op.v2.as_ref().map(|vk| vk.serialized_size()))
+                .unwrap_or(VERIFIER_KEY_SIZE);
+            model.cell_read(vk_size as u64)
+                + model.map_index(EXPECTED_CONTRACT_DEPTH)
+                + model.map_index(EXPECTED_OPERATIONS_DEPTH)
+        });
+        validation_cost.compute_time =
+            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let (guaranteed_cost, application_cost) = self.application_cost(model);
+        let cost_to_dismiss = guaranteed_cost + validation_cost;
+        let time_to_dismiss = CostDuration::max(
+            params.limits.time_to_dismiss_per_byte * self.est_size() as u64,
+            params.limits.min_time_to_dismiss,
+        );
+        if enforce_time_to_dismiss && cost_to_dismiss.max_time() > time_to_dismiss {
+            return Err(FeeCalculationError::OutsideTimeToDismiss {
+                time_to_dismiss: cost_to_dismiss.max_time(),
+                allowed_time_to_dismiss: time_to_dismiss,
+                size: self.est_size() as u64,
+            });
+        }
+        let synthetic = validation_cost + application_cost;
+        let normalized = synthetic
+            .normalize(params.limits.block_limits)
+            .ok_or(FeeCalculationError::BlockLimitExceeded)?;
+        let fees_fixed_point = params.fee_prices.overall_cost(&normalized);
+        Ok(fees_fixed_point.into_atomic_units(SPECKS_PER_DUST))
+    }
 }
 
 impl<S: SignatureKind<D>, P: ProofKind<D>, B: Serializable + Tagged + Storable<D>, D: DB>
@@ -2259,7 +2376,7 @@ impl SystemTransaction {
                 // n offers
                 cost * outputs.len()
             }
-            PayBlockRewardsToTreasury { .. } => {
+            PayBlockRewardsToTreasury { .. } | UnlockToTreasury { .. } => {
                 let mut cost = RunningCost::ZERO;
                 cost += model.cell_read(16) + model.cell_write(16, true);
                 cost += model.map_index(EXPECTED_TOKEN_TYPE_DEPTH);
@@ -2308,7 +2425,7 @@ impl SystemTransaction {
                 );
                 cost
             }
-            DistributeReserve(..) => {
+            DistributeReserve { .. } | UnlockToReserve { .. } => {
                 // changing two pool balances
                 let cost = model.cell_read(16) + model.cell_write(16, true);
                 cost * 2u64
@@ -2519,7 +2636,7 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "contract-deploy[v4]"]
+#[tag = "contract-deploy[v6]"]
 pub struct ContractDeploy<D: DB> {
     pub initial_state: ContractState<D>,
     pub nonce: HashOutput,
@@ -2683,7 +2800,7 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "maintenance-update-single-update[v1]"]
+#[tag = "maintenance-update-single-update[v2]"]
 pub enum SingleUpdate {
     /// Replaces the authority for this contract.
     /// Any subsequent updates in this update sequence are still carried out.
@@ -2699,7 +2816,7 @@ tag_enforcement_test!(SingleUpdate);
 
 #[derive(Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable, Debug)]
 #[storable(base)]
-#[tag = "maintenance-update-signatures-value[v1]"]
+#[tag = "maintenance-update-signatures-value[v2]"]
 // This type exists solely to work nicely with storage. It's the tuple of `(index, signature)` for the elements of `MaintenanceUpdate::signatures`
 pub struct SignaturesValue(pub u32, pub Signature);
 tag_enforcement_test!(SignaturesValue);
@@ -2712,7 +2829,7 @@ impl SignaturesValue {
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[tag = "contract-maintenance-update[v1]"]
+#[tag = "contract-maintenance-update[v2]"]
 #[storable(db = D)]
 pub struct MaintenanceUpdate<D: DB> {
     pub address: ContractAddress,
@@ -2749,7 +2866,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v6]"]
+#[tag = "contract-action[v8]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),
@@ -2851,6 +2968,96 @@ impl<'de> Deserialize<'de> for TransactionIdentifier {
     }
 }
 
+#[derive(
+    Clone,
+    Debug,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    Serializable,
+    Storable,
+    Serialize,
+    Deserialize,
+)]
+#[storable(base)]
+#[tag = "signature-verifying-key[v2]"]
+pub enum SignatureVerifyingKey {
+    Schnorr(base_crypto::schnorr::VerifyingKey),
+    ECDSA(base_crypto::ecdsa::VerifyingKey),
+}
+
+impl Default for SignatureVerifyingKey {
+    fn default() -> Self {
+        SignatureVerifyingKey::Schnorr(Default::default())
+    }
+}
+
+impl From<SignatureVerifyingKey> for UserAddress {
+    fn from(value: SignatureVerifyingKey) -> Self {
+        match value {
+            SignatureVerifyingKey::Schnorr(vk) => UserAddress::from(vk),
+            SignatureVerifyingKey::ECDSA(vk) => UserAddress::from(vk),
+        }
+    }
+}
+
+tag_enforcement_test!(SignatureVerifyingKey);
+
+impl SignatureVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (SignatureVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::Schnorr(_), _) => false,
+            (SignatureVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => vk.verify(msg, sig),
+            (SignatureVerifyingKey::ECDSA(_), _) => false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signature[v2]"]
+pub enum Signature {
+    Schnorr(base_crypto::schnorr::Signature),
+    ECDSA(base_crypto::ecdsa::Signature),
+}
+
+impl Default for Signature {
+    fn default() -> Self {
+        Signature::Schnorr(Default::default())
+    }
+}
+
+tag_enforcement_test!(Signature);
+
+#[derive(Clone, Debug, Serializable, Storable)]
+#[storable(base)]
+#[tag = "signing-key[v2]"]
+pub enum SigningKey {
+    Schnorr(base_crypto::schnorr::SigningKey),
+    ECDSA(base_crypto::ecdsa::SigningKey),
+}
+
+tag_enforcement_test!(SigningKey);
+
+impl SigningKey {
+    pub fn sign(&self, rng: &mut (impl Rng + CryptoRng), msg: &[u8]) -> Signature {
+        match self {
+            SigningKey::Schnorr(sk) => Signature::Schnorr(sk.sign(rng, msg)),
+            SigningKey::ECDSA(sk) => Signature::ECDSA(sk.sign(msg)),
+        }
+    }
+
+    pub fn verifying_key(&self) -> SignatureVerifyingKey {
+        match self {
+            SigningKey::Schnorr(sk) => SignatureVerifyingKey::Schnorr(sk.verifying_key()),
+            SigningKey::ECDSA(sk) => SignatureVerifyingKey::ECDSA(sk.verifying_key()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[tag = "unshielded-utxo[v1]"]
 #[storable(base)]
@@ -2899,10 +3106,10 @@ impl From<Utxo> for UtxoOutput {
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serializable, Storable)]
 #[storable(base)]
-#[tag = "unshielded-utxo-spend"]
+#[tag = "unshielded-utxo-spend[v2]"]
 pub struct UtxoSpend {
     pub value: u128,
-    pub owner: VerifyingKey,
+    pub owner: SignatureVerifyingKey,
     pub type_: UnshieldedTokenType,
     pub intent_hash: IntentHash,
     pub output_no: u32,
@@ -2995,14 +3202,14 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v13]"]
+#[tag = "ledger-state[v17]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,
     #[storable(child)]
     pub parameters: Sp<LedgerParameters, D>,
     pub locked_pool: u128,
-    pub bridge_receiving: Map<UserAddress, u128, D>,
+    pub bridge_receiving: Map<UserAddress, u128, D, NightAnn>,
     pub reserve_pool: u128,
     pub block_reward_pool: u128,
     pub unclaimed_block_rewards: Map<UserAddress, u128, D, NightAnn>,

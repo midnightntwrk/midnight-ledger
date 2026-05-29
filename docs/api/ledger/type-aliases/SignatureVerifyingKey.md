@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -7,7 +7,26 @@
 # Type Alias: SignatureVerifyingKey
 
 ```ts
-type SignatureVerifyingKey = string;
+type SignatureVerifyingKey = {
+  tag: SignatureKind;
+  value: string;
+};
 ```
 
-A hex-encoded signature BIP-340 verifying key, with a 3-byte version prefix
+A hex-encoded signature verifying key annotated with its kind
+
+## Properties
+
+### tag
+
+```ts
+tag: SignatureKind;
+```
+
+***
+
+### value
+
+```ts
+value: string;
+```

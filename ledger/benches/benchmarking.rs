@@ -2,7 +2,6 @@
 #![allow(unused_imports)]
 #![allow(unused)]
 use base_crypto::rng::SplittableRng;
-use base_crypto::schnorr::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::UserAddress;
 use criterion::{BenchmarkId, Criterion, black_box, criterion_group, criterion_main};
@@ -12,14 +11,15 @@ use midnight_ledger::prove::Resolver;
 use midnight_ledger::semantics::{TransactionContext, TransactionResult};
 use midnight_ledger::structure::{
     CNightGeneratesDustActionType, CNightGeneratesDustEvent, Intent, LedgerState,
-    OutputInstructionUnshielded, ProofMarker, SystemTransaction, UnshieldedOffer, UtxoOutput,
-    UtxoSpend,
+    OutputInstructionUnshielded, ProofMarker, Signature, SystemTransaction, UnshieldedOffer,
+    UtxoOutput, UtxoSpend,
 };
 use midnight_ledger::structure::{ClaimKind, Transaction};
 #[cfg(feature = "proving")]
 use midnight_ledger::test_utilities::well_formed_tx_builder;
 use midnight_ledger::test_utilities::{TestState, test_resolver};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::BlockContext;
 use pprof::criterion::{Output, PProfProfiler};
 use rand::rngs::StdRng;
@@ -132,7 +132,9 @@ pub fn rewards(c: &mut Criterion) {
     let mut ledger_state: LedgerState<InMemoryDB> = LedgerState::new("local-test");
     ledger_state = ledger_state
         .apply_system_tx(
-            &SystemTransaction::DistributeReserve(ledger_state.reserve_pool),
+            &SystemTransaction::DistributeReserve {
+                amount: ledger_state.reserve_pool,
+            },
             Timestamp::from_secs(0),
         )
         .unwrap()
@@ -476,31 +478,35 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
     let mut rng = StdRng::seed_from_u64(0x42);
     fn mk_tx<R: Rng>(rng: &mut R, n: usize) -> SystemTransaction {
         let mut events = Vec::with_capacity(n);
-        let mut owners = Vec::with_capacity(n);
+        // Track (key, remaining_amount, nonce) for each created night.
+        let mut owners: Vec<(DustPublicKey, u128, InitialNonce)> = Vec::with_capacity(n);
         for _ in 0..n {
             if owners.is_empty() || rng.gen_bool(0.5) {
                 let key = DustPublicKey(rng.r#gen());
                 let amt = rng.r#gen::<u32>() as u128;
-                owners.push((key, amt));
+                let nonce = InitialNonce(rng.r#gen());
+                owners.push((key, amt, nonce));
                 events.push(CNightGeneratesDustEvent {
                     value: amt,
                     owner: key,
                     time: Timestamp::from_secs(0),
                     action: CNightGeneratesDustActionType::Create,
-                    nonce: InitialNonce(rng.r#gen()),
+                    nonce,
                 });
             } else {
                 let key: DustPublicKey;
                 let amt: u128;
+                let nonce: InitialNonce;
                 loop {
                     let idx = rng.gen_range(0..owners.len());
-                    let (k, max_amt) = owners[idx];
+                    let (k, max_amt, n) = owners[idx];
                     if max_amt == 0 {
                         continue;
                     }
                     key = k;
                     amt = rng.gen_range(0..max_amt);
-                    owners[idx] = (key, max_amt - amt);
+                    nonce = n;
+                    owners[idx] = (key, max_amt - amt, n);
                     break;
                 }
                 events.push(CNightGeneratesDustEvent {
@@ -508,7 +514,7 @@ pub fn create_and_destroy_dust(c: &mut Criterion) {
                     owner: key,
                     time: Timestamp::from_secs(0),
                     action: CNightGeneratesDustActionType::Destroy,
-                    nonce: InitialNonce(rng.r#gen()),
+                    nonce,
                 })
             }
         }

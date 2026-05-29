@@ -13,12 +13,11 @@
 
 use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
-use crate::structure::MAX_SUPPLY;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
+use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
 use base_crypto::cost_model::CostDuration;
 use base_crypto::fab::{Alignment, Value};
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{self, Commitment, Nullifier, PublicAddress, TokenType};
 use coin_structure::contract::ContractAddress;
@@ -231,6 +230,17 @@ pub enum TransactionInvalid<D: DB> {
     },
     DivideByZero,
     MerkleTreeError(InvalidUpdate),
+    ContractMetadataTooLarge {
+        address: ContractAddress,
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    ContractAuthorityMetadataTooLarge {
+        address: ContractAddress,
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -311,6 +321,23 @@ impl<D: DB> Display for TransactionInvalid<D> {
             InvariantViolation(e) => e.fmt(formatter),
             DivideByZero => write!(formatter, "attempted to divide by zero"),
             MerkleTreeError(err) => err.fmt(formatter),
+            ContractMetadataTooLarge {
+                address,
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            ContractAuthorityMetadataTooLarge {
+                address,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
         }
     }
 }
@@ -396,6 +423,8 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
+    MetadataTooLarge { entry_point: EntryPointBuf, size: u64, limit: u64 },
+    AuthorityMetadataTooLarge { size: u64, limit: u64 },
 }
 
 impl Display for MalformedContractDeploy {
@@ -414,6 +443,18 @@ impl Display for MalformedContractDeploy {
             IncorrectChargedState => write!(
                 formatter,
                 "contract deployment contained an incorrectly computed map of charged keys"
+            ),
+            MetadataTooLarge {
+                entry_point,
+                size,
+                limit,
+            } => write!(
+                formatter,
+                "contract entry point {entry_point:?} metadata size ({size} bytes) exceeds limit ({limit} bytes)"
+            ),
+            AuthorityMetadataTooLarge { size, limit } => write!(
+                formatter,
+                "contract authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
         }
     }
@@ -485,7 +526,7 @@ pub enum MalformedTransaction<D: DB> {
         validity_end: Timestamp,
     },
     MultipleDustRegistrationsForKey {
-        key: VerifyingKey,
+        key: SignatureVerifyingKey,
     },
     InsufficientDustForRegistrationFee {
         registration: Box<DustRegistration<(), D>>,
@@ -543,6 +584,7 @@ pub enum MalformedTransaction<D: DB> {
         inputs: Vec<UtxoSpend>,
         erased_signatures: Vec<()>,
     },
+    ZeroValueUtxo(UtxoOutput),
 }
 
 #[derive(Clone, Debug)]
@@ -1064,6 +1106,12 @@ impl<D: DB> Display for MalformedTransaction<D> {
                     "unshielded offer action validation error: mismatch between number of inputs ({}) and signatures ({})",
                     inputs.len(),
                     erased_signatures.len()
+                )
+            }
+            ZeroValueUtxo(utxo) => {
+                write!(
+                    formatter,
+                    "unshielded offer validation error: zero-value utxo output not permitted: {utxo:?}"
                 )
             }
         }

@@ -15,9 +15,9 @@ use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
     ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
-    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, SignatureKind,
-    SignaturesValue, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
-    UnshieldedOffer,
+    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, Signature,
+    SignatureKind, SignaturesValue, SigningKey, SingleUpdate, StandardTransaction, Transaction,
+    TransactionCostModel, UnshieldedOffer,
 };
 use crate::structure::{
     EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
@@ -28,8 +28,6 @@ use base_crypto::cost_model::CostDuration;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
-use base_crypto::schnorr::Signature;
-use base_crypto::schnorr::SigningKey;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::{NIGHT, TokenType};
 use coin_structure::contract::ContractAddress;

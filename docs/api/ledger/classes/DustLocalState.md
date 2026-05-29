@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -26,6 +26,22 @@ new DustLocalState(params): DustLocalState;
 
 ## Properties
 
+### commitmentTreeFirstFree
+
+```ts
+readonly commitmentTreeFirstFree: bigint;
+```
+
+***
+
+### generatingTreeFirstFree
+
+```ts
+readonly generatingTreeFirstFree: bigint;
+```
+
+***
+
 ### params
 
 ```ts
@@ -37,7 +53,7 @@ readonly params: DustParameters;
 ### syncTime
 
 ```ts
-readonly syncTime: Date;
+syncTime: Date;
 ```
 
 ***
@@ -529,6 +545,24 @@ toString(compact?): string;
 #### Returns
 
 `string`
+
+***
+
+### updateGenerationTreeFromEvidence()
+
+```ts
+updateGenerationTreeFromEvidence(evidence): DustLocalState;
+```
+
+#### Parameters
+
+##### evidence
+
+[`DustGenerationTreeInsertionPath`](DustGenerationTreeInsertionPath.md)
+
+#### Returns
+
+`DustLocalState`
 
 ***
 

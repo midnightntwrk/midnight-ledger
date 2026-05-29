@@ -12,18 +12,20 @@
 // limitations under the License.
 
 import {
+  addressFromKey,
   ClaimRewardsTransaction,
   sampleSigningKey,
-  signData,
   SignatureEnabled,
   SignatureErased,
   signatureVerifyingKey,
+  signData,
   Transaction,
   WellFormedStrictness
 } from '@midnight-ntwrk/ledger';
 import { assertSerializationSuccess } from '@/test-utils';
 import { INITIAL_NIGHT_AMOUNT, LOCAL_TEST_NETWORK_ID, Static } from '@/test-objects';
 import { TestState } from '@/test/utils/TestState';
+import { SignatureKindMarker, SignatureMarker } from '@/test/utils/Markers';
 
 describe('Ledger API - ClaimRewardsTransaction', () => {
   /**
@@ -167,5 +169,171 @@ describe('Ledger API - ClaimRewardsTransaction', () => {
     const tx = Transaction.fromRewards(signedRewards);
     state.assertApply(tx, new WellFormedStrictness());
     expect(state.ledger.utxo.utxos.values().next().value?.value).toEqual(INITIAL_NIGHT_AMOUNT);
+  });
+
+  describe('ECDSA signature kind', () => {
+    /**
+     * Test that the owner getter round-trips an ECDSA verifying key.
+     *
+     * @given A ClaimRewardsTransaction constructed with an ECDSA owner
+     * @when Reading back via the owner getter
+     * @then The returned verifying key must equal the input and carry the
+     *   'ecdsa' tag
+     */
+    test('owner getter round-trips an ECDSA verifying key through the constructor', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const tx = new ClaimRewardsTransaction(
+        SignatureMarker.signatureErased,
+        LOCAL_TEST_NETWORK_ID,
+        100n,
+        ecdsaVk,
+        Static.nonce(),
+        new SignatureErased(),
+        'Reward'
+      );
+
+      expect(tx.owner).toEqual(ecdsaVk);
+      expect(tx.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Test that addSignature accepts an ECDSA signature.
+     *
+     * @given A ClaimRewardsTransaction with an ECDSA owner, and an ECDSA
+     *   signature over its dataToSign
+     * @when Calling addSignature with the ECDSA signature
+     * @then The resulting tx should report the ECDSA signature via its
+     *   getter, with the owner tag still 'ecdsa'
+     */
+    test('addSignature attaches an ECDSA signature with matching tag', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, ecdsaVk, Static.nonce(), 'Reward');
+
+      const sig = signData(ecdsaSk, tx.dataToSign);
+      const signed = tx.addSignature(sig);
+
+      expect(signed.signature.toString()).toEqual(new SignatureEnabled(sig).toString());
+      expect(signed.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
+
+    /**
+     * Test v2 wire-format round-trip for an ECDSA-signed claim.
+     *
+     * @given A signed ClaimRewardsTransaction with an ECDSA owner
+     * @when Serialising and deserialising the transaction
+     * @then The deserialised value must match the original via toString
+     */
+    test('serialization v2 round-trip stable for an ECDSA-owned signed reward', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const tx = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, ecdsaVk, Static.nonce(), 'CardanoBridge');
+      const sig = signData(ecdsaSk, tx.dataToSign);
+      const signed = tx.addSignature(sig);
+
+      assertSerializationSuccess(signed, signed.signature.instance);
+    });
+
+    /**
+     * End-to-end happy path: ECDSA-keyed account claims Night rewards.
+     *
+     * @given A ledger with NIGHT distributed to an address derived from an
+     *   ECDSA verifying key, and a ClaimRewardsTransaction signed by the
+     *   matching ECDSA secret key (verifySignatures strictness enabled)
+     * @when Applying the transaction
+     * @then The ledger must succeed and mint a UTXO of the expected value
+     *   owned by the ECDSA-derived address
+     */
+    test('apply an ECDSA-signed reward claim', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const ecdsaAddress = addressFromKey(ecdsaVk);
+
+      const state = TestState.new();
+      state.distributeNight(ecdsaAddress, INITIAL_NIGHT_AMOUNT, state.time);
+
+      const rewards = ClaimRewardsTransaction.new(
+        LOCAL_TEST_NETWORK_ID,
+        INITIAL_NIGHT_AMOUNT,
+        ecdsaVk,
+        Static.nonce(),
+        'Reward'
+      );
+      const sig = signData(ecdsaSk, rewards.dataToSign);
+      const signed = rewards.addSignature(sig);
+
+      const tx = Transaction.fromRewards(signed);
+      const strictness = new WellFormedStrictness();
+      strictness.verifySignatures = true;
+      state.assertApply(tx, strictness);
+
+      const utxo = Array.from(state.ledger.utxo.utxos).find((u) => u.owner === ecdsaAddress);
+
+      expect(utxo?.value).toEqual(INITIAL_NIGHT_AMOUNT);
+    });
+
+    /**
+     * Adversarial path: a ClaimRewardsTransaction with an ECDSA-tagged
+     * owner is signed by a Schnorr key (wrong algorithm). The ledger's
+     * signature verifier must reject.
+     *
+     * @given A ClaimRewardsTransaction with an ECDSA owner, signed by a
+     *   schnorr signing key (verifySignatures strictness enabled)
+     * @when Calling wellFormed
+     * @then It should throw 'signature verification failed for supplied intent'
+     */
+    test('rejects ECDSA-owned reward signed with a Schnorr key', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const ecdsaAddress = addressFromKey(ecdsaVk);
+
+      const state = TestState.new();
+      state.distributeNight(ecdsaAddress, INITIAL_NIGHT_AMOUNT, state.time);
+
+      const rewards = ClaimRewardsTransaction.new(
+        LOCAL_TEST_NETWORK_ID,
+        INITIAL_NIGHT_AMOUNT,
+        ecdsaVk,
+        Static.nonce(),
+        'Reward'
+      );
+
+      const schnorrSk = sampleSigningKey(SignatureKindMarker.schnorr);
+      const wrongSig = signData(schnorrSk, rewards.dataToSign);
+      const signed = rewards.addSignature(wrongSig);
+
+      const tx = Transaction.fromRewards(signed);
+      const strictness = new WellFormedStrictness();
+      strictness.verifySignatures = true;
+
+      expect(() => tx.wellFormed(state.ledger, strictness, state.time)).toThrow(
+        'signature verification failed for supplied intent'
+      );
+    });
+
+    /**
+     * `eraseSignatures()` drops the signature payload from a signed claim. The
+     * ECDSA branch needs explicit coverage because erasure is generic across
+     * signature kinds, and a regression that only erased schnorr would not be
+     * caught by the existing tests.
+     *
+     * @given A ClaimRewardsTransaction signed with an ECDSA signature
+     * @when Calling `eraseSignatures()`
+     * @then The resulting transaction's `signature` is a `SignatureErased` and
+     *   the ECDSA owner is preserved
+     */
+    test('eraseSignatures strips an ECDSA signature from a signed claim', () => {
+      const ecdsaSk = sampleSigningKey(SignatureKindMarker.ecdsa);
+      const ecdsaVk = signatureVerifyingKey(ecdsaSk);
+      const rewards = ClaimRewardsTransaction.new(LOCAL_TEST_NETWORK_ID, 100n, ecdsaVk, Static.nonce(), 'Reward');
+      const signed = rewards.addSignature(signData(ecdsaSk, rewards.dataToSign));
+
+      const erased = signed.eraseSignatures();
+
+      expect(erased.signature).toBeInstanceOf(SignatureErased);
+      expect(erased.owner).toEqual(ecdsaVk);
+      expect(erased.owner.tag).toEqual(SignatureKindMarker.ecdsa);
+    });
   });
 });
