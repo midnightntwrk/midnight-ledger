@@ -18,7 +18,7 @@ use crate::clock::Clock;
 use crate::did_auth::{sign_for_authentication, DidAuthError};
 use crate::secret_storage::SecretStorage;
 use crate::wallet::Wallet;
-use crate::DidId;
+use crate::{DidId, PublicKeyJwk};
 
 #[derive(Debug, thiserror::Error)]
 pub enum IdTokenError {
@@ -33,6 +33,13 @@ struct JwsHeader<'a> {
     alg: &'a str,
     typ: &'a str,
     kid: &'a str,
+    /// Self-asserted public key (Phase-1 posture). The
+    /// IssuerDIDIT-mock verifier (`oid4vpVerifier.ts`) requires
+    /// this — it builds the holder document from the embedded
+    /// `kid` + `jwk` and uses that jwk to verify the signature.
+    /// Without it the issuer 401s with
+    /// "missing self-asserted jwk in JWS header (Phase 1 posture)".
+    jwk: &'a PublicKeyJwk,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,18 +78,25 @@ pub async fn build_id_token(
     };
     let payload_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&payload)?);
 
-    // 2. Probe to discover the kid the authentication VM uses.
-    //    The signature here is thrown away — we just need the kid.
-    let (kid, _probe_sig) =
+    // 2. Probe to discover the kid + publicKeyJwk the
+    //    authentication VM uses. The signature here is thrown
+    //    away — we need the kid (for the header) and the jwk
+    //    (for the self-asserted `jwk` header parameter).
+    let (kid, jwk, _probe_sig) =
         sign_for_authentication(wallet, secret_store, holder, b"oid4vp-kid-probe").await?;
 
-    // 3. Build the final header with the real kid.
-    let header_final = JwsHeader { alg: "EdDSA", typ: "JWT", kid: &kid };
+    // 3. Build the final header with the real kid + jwk.
+    let header_final = JwsHeader {
+        alg: "EdDSA",
+        typ: "JWT",
+        kid: &kid,
+        jwk: &jwk,
+    };
     let header_b64 = URL_SAFE_NO_PAD.encode(serde_json::to_vec(&header_final)?);
 
     // 4. Sign the real `header.payload` input.
     let sign_input = format!("{header_b64}.{payload_b64}");
-    let (_kid2, sig) =
+    let (_kid2, _jwk2, sig) =
         sign_for_authentication(wallet, secret_store, holder, sign_input.as_bytes()).await?;
     let sig_b64 = URL_SAFE_NO_PAD.encode(&sig);
 

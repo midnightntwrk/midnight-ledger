@@ -533,6 +533,32 @@ fn Oid4vpSection(
         }
     };
 
+    // Explicit paste button — iOS WKWebView's long-press / Cmd-V
+    // paste into `<textarea>` is unreliable; the bundle's
+    // `pasteText()` calls `navigator.clipboard.readText()` from a
+    // button click (a valid user gesture) and works on every
+    // supported target.
+    let paste = {
+        let mut url_input = url_input;
+        let mut err_msg = err_msg;
+        move |_| {
+            err_msg.set(None);
+            spawn(async move {
+                let Some(bridge) = eval_bridge::global_bridge() else {
+                    err_msg.set(Some(
+                        "JS bridge not installed yet (js-bridge feature off?)"
+                            .into(),
+                    ));
+                    return;
+                };
+                match eval_bridge::paste_text(&*bridge).await {
+                    Ok(text) => url_input.set(text),
+                    Err(e) => err_msg.set(Some(format!("paste failed: {e}"))),
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Authenticate with QR (OID4VP)" }
@@ -549,6 +575,11 @@ fn Oid4vpSection(
                     disabled: *busy.read(),
                     onclick: authenticate,
                     {if *busy.read() { "Authenticating…" } else { "Authenticate" }}
+                }
+                button {
+                    disabled: *busy.read(),
+                    onclick: paste,
+                    "📋 Paste"
                 }
                 button {
                     disabled: *busy.read(),
@@ -706,6 +737,29 @@ fn Oid4vciSection(
         }
     };
 
+    // See identity_centre OID4VP card — same rationale, iOS
+    // needs an explicit clipboard-read entry point.
+    let paste = {
+        let mut url_input = url_input;
+        let mut err_msg = err_msg;
+        move |_| {
+            err_msg.set(None);
+            spawn(async move {
+                let Some(bridge) = eval_bridge::global_bridge() else {
+                    err_msg.set(Some(
+                        "JS bridge not installed yet (js-bridge feature off?)"
+                            .into(),
+                    ));
+                    return;
+                };
+                match eval_bridge::paste_text(&*bridge).await {
+                    Ok(text) => url_input.set(text),
+                    Err(e) => err_msg.set(Some(format!("paste failed: {e}"))),
+                }
+            });
+        }
+    };
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Request VC (OID4VCI)" }
@@ -722,6 +776,11 @@ fn Oid4vciSection(
                     disabled: *busy.read(),
                     onclick: request_vc,
                     {if *busy.read() { "Requesting…" } else { "Get credential" }}
+                }
+                button {
+                    disabled: *busy.read(),
+                    onclick: paste,
+                    "📋 Paste"
                 }
                 button {
                     disabled: *busy.read(),

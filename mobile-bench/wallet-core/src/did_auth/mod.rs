@@ -10,7 +10,7 @@
 
 use crate::secret_storage::SecretStorage;
 use crate::wallet::Wallet;
-use crate::{DidId, VerificationMethodRef};
+use crate::{DidId, PublicKeyJwk, VerificationMethodRef};
 
 #[derive(Debug, thiserror::Error)]
 pub enum DidAuthError {
@@ -24,15 +24,21 @@ pub enum DidAuthError {
     Sign(String),
 }
 
-/// `Ok((kid, signature_bytes))` on success. `kid` is the full
-/// DID URL form (`did:midnight:net:addr#fragment`). The signature
-/// is raw bytes — JWS construction is the caller's concern.
+/// `Ok((kid, public_jwk, signature_bytes))` on success.
+///
+/// - `kid` is the full DID URL form (`did:midnight:net:addr#fragment`).
+/// - `public_jwk` is the verification method's `publicKeyJwk` —
+///   surfaces so JWS-header builders (OID4VP id_token, OID4VCI
+///   credential proof) can embed it as the self-asserted `jwk`
+///   header parameter the Phase-1 issuer verifier requires.
+/// - The signature is raw bytes — JWS construction is the
+///   caller's concern.
 pub async fn sign_for_authentication(
     wallet: &Wallet,
     secret_store: &dyn SecretStorage,
     did: &DidId,
     payload: &[u8],
-) -> Result<(String, Vec<u8>), DidAuthError> {
+) -> Result<(String, PublicKeyJwk, Vec<u8>), DidAuthError> {
     let doc = wallet
         .resolve_did(&did.to_did_string())
         .await
@@ -40,14 +46,28 @@ pub async fn sign_for_authentication(
 
     // First authentication-relation VM. Both `Id(s)` and `Inline(vm)`
     // forms carry a string id; we coerce to a single kid string.
-    let kid = doc
+    // When the relation entry is `Inline`, the publicKeyJwk is
+    // right there; for `Id(s)` we look it up in
+    // `doc.verification_method` by id.
+    let (kid, public_jwk) = match doc
         .authentication
         .first()
-        .map(|r| match r {
-            VerificationMethodRef::Id(s) => s.clone(),
-            VerificationMethodRef::Inline(vm) => vm.id.clone(),
-        })
-        .ok_or_else(|| DidAuthError::NoAuthnKey(did.to_did_string()))?;
+        .ok_or_else(|| DidAuthError::NoAuthnKey(did.to_did_string()))?
+    {
+        VerificationMethodRef::Inline(vm) => (vm.id.clone(), vm.public_key_jwk.clone()),
+        VerificationMethodRef::Id(id) => {
+            let vm = doc
+                .verification_method
+                .iter()
+                .find(|v| v.id == *id)
+                .ok_or_else(|| {
+                    DidAuthError::Resolve(format!(
+                        "authentication kid {id} not present in verificationMethod[]"
+                    ))
+                })?;
+            (vm.id.clone(), vm.public_key_jwk.clone())
+        }
+    };
 
     let key_ref = secret_store
         .find_by_kid(&kid)
@@ -58,7 +78,7 @@ pub async fn sign_for_authentication(
         .await
         .map_err(|e| DidAuthError::Sign(e.to_string()))?;
 
-    Ok((kid, out.signature))
+    Ok((kid, public_jwk, out.signature))
 }
 
 #[cfg(test)]
@@ -75,12 +95,19 @@ mod tests {
         let store = stub_secret_store_with_bootstrapped_did([5u8; 32]).await;
 
         let payload = b"hello-nonce";
-        let (kid, sig) = sign_for_authentication(&wallet, &store, &did, payload)
+        let (kid, jwk, sig) = sign_for_authentication(&wallet, &store, &did, payload)
             .await
             .expect("sign");
         assert!(kid.starts_with("did:midnight:"));
         assert!(kid.contains("#key-auth"));
         assert!(!sig.is_empty());
+        // The Ed25519 auth key is `kty=OKP`. The `x` coordinate
+        // is whatever the stub fixture put on chain — for live
+        // wallets it's the base64url-encoded raw Ed25519 public
+        // key bytes; for the stub it may be empty (the fixture
+        // doesn't mint real keys). The semantic check is just
+        // that the structure carries an OKP-shaped JWK.
+        assert_eq!(format!("{:?}", jwk.kty), format!("{:?}", crate::KeyType::OKP));
     }
 
     #[tokio::test]

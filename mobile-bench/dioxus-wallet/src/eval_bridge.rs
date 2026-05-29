@@ -229,3 +229,39 @@ pub async fn scan_qr(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
         res.error.unwrap_or_else(|| "no result".to_string()),
     ))
 }
+
+/// Read the system clipboard's text content.
+///
+/// Routes through the JS bundle's `pasteText` method, which
+/// calls `navigator.clipboard.readText()`. Works on every
+/// supported target:
+///
+/// - **Desktop Wry (macOS / Linux / Windows):** native paste via
+///   Cmd-V already works into `<textarea>`; this helper is an
+///   alternative entry point so the UI can offer a "📋 Paste"
+///   button without depending on the user knowing the shortcut.
+/// - **iOS sim + real device:** the long-press / Cmd-V paste
+///   path into `<textarea>` is unreliable inside WKWebView —
+///   this button is the only reliable way to land clipboard
+///   contents in the input. iOS may show a one-time system
+///   prompt before the first read.
+/// - **Android WebView:** same `navigator.clipboard.readText()`
+///   API; works on API 30+ inside a user gesture.
+///
+/// The `JsBridgeError::Transport` variant carries the JS-side
+/// reason on failure: `"navigator.clipboard.readText unavailable"`,
+/// permission denials, etc.
+pub async fn paste_text(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
+    #[derive(serde::Deserialize)]
+    struct PasteResult {
+        text: Option<String>,
+        error: Option<String>,
+    }
+    let res: PasteResult = bridge.call("pasteText", serde_json::json!({})).await?;
+    if let Some(text) = res.text {
+        return Ok(text);
+    }
+    Err(JsBridgeError::Transport(
+        res.error.unwrap_or_else(|| "no result".to_string()),
+    ))
+}

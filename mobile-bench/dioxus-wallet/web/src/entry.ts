@@ -81,6 +81,16 @@ declare global {
        *  Idempotent — concurrent calls return `{ error: "busy" }`. */
       scanQr(params?: Record<string, unknown>):
         Promise<{ url?: string; error?: string }>;
+      /** Read the system clipboard's text content via
+       *  `navigator.clipboard.readText()`. Used by the Identity
+       *  Centre's "📋 Paste" buttons because iOS WKWebView's
+       *  long-press / Cmd-V paste affordance into `<textarea>`
+       *  is unreliable (works fine on desktop Wry but the
+       *  iOS sim + real-device path silently no-ops). The button
+       *  click is the required user gesture; iOS may show a
+       *  one-time "Allow Paste from <App>?" prompt before the
+       *  first call. */
+      pasteText(): Promise<{ text?: string; error?: string }>;
     };
     __qrScanInProgress?: boolean;
     MIDNIGHT_PROOF_SERVER?: string;
@@ -619,6 +629,24 @@ async function scanQr(
   });
 }
 
+async function pasteText(): Promise<{ text?: string; error?: string }> {
+  // Modern iOS WKWebView + macOS WebKit expose
+  // `navigator.clipboard.readText()` when called from a user
+  // gesture. The bridge driver only invokes us via a button
+  // click, which counts as a gesture, so the Promise resolves
+  // without an explicit permission API call. iOS may still
+  // surface a one-time system prompt before the first read.
+  try {
+    if (!navigator?.clipboard?.readText) {
+      return { error: "navigator.clipboard.readText unavailable" };
+    }
+    const text = await navigator.clipboard.readText();
+    return { text };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) };
+  }
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
@@ -629,6 +657,7 @@ window.midnightDidBundle = {
   bridgeWitnessTest,
   prepareUnprovenCallTx,
   scanQr,
+  pasteText,
 };
 
 console.log(
