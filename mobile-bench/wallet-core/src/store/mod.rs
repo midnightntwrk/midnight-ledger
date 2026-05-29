@@ -54,7 +54,11 @@ use crate::Network;
 pub use error::StoreError;
 pub use schema::{NetworkTag, SCHEMA_VERSION, WalletId};
 
-use codec::Bincoded;
+// Surfaced for the `UnlockGate` adapter (`unlock.rs`) — it
+// needs to decode the bincoded envelope before handing it to
+// `decrypt_secret`. Crate-only visibility keeps it out of the
+// public API surface.
+pub(crate) use codec::Bincoded;
 pub use envelope::{SecretEnvelope, decrypt_secret, encrypt_secret};
 pub(crate) use envelope::encrypt_secret as wrap_secret;
 pub use schema::{InventoryStatus, KeyDerivation, LogLevel};
