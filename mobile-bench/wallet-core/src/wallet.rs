@@ -943,8 +943,43 @@ impl Wallet {
             };
 
             // 3. Balancing
+            //
+            // Same tip-params dance as `call_did_circuit` (see
+            // wallet.rs:1325-1394 for the long-form rationale).
+            // This path used to take `INITIAL_PARAMETERS`
+            // unconditionally; that broke against any chain whose
+            // live `LedgerParameters` had drifted from the wallet
+            // crate's hardcoded constant — the balanced tx's
+            // `v_fee` no longer matched what the chain rederives
+            // during validation, so submit failed with
+            // `Invalid Transaction (1010)`. Reproduces every time
+            // against a freshly-booted standalone env post 2026-05-29
+            // ledger upgrade.
             yield crate::WizardStage::Balancing;
-            let params = ledger::structure::INITIAL_PARAMETERS;
+            let tip_params_hex_balance = match wallet.resolve_indexer() {
+                Ok(c) => match c.chain_tip().await {
+                    Ok(Some(t)) => t.ledger_parameters_hex,
+                    _ => None,
+                },
+                Err(_) => None,
+            };
+            let parsed_tip_params_balance: Option<ledger::structure::LedgerParameters> =
+                tip_params_hex_balance.as_ref().and_then(|h| {
+                    let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                    serialize::tagged_deserialize(&bytes[..]).ok()
+                });
+            let initial_params_fallback_balance = ledger::structure::INITIAL_PARAMETERS;
+            let used_tip = parsed_tip_params_balance.is_some();
+            let params: &ledger::structure::LedgerParameters =
+                parsed_tip_params_balance
+                    .as_ref()
+                    .unwrap_or(&initial_params_fallback_balance);
+            tracing::warn!(
+                target: "params-debug",
+                used_tip_params = used_tip,
+                tip_hex_len = tip_params_hex_balance.as_ref().map(|s| s.len()).unwrap_or(0),
+                "wallet params source for deploy/maintenance"
+            );
             // Pick a `ctime` the verifier will accept and that
             // matches our local commitment_tree.root().
             //
@@ -1136,8 +1171,43 @@ impl Wallet {
             };
 
             // 3. Balancing
+            //
+            // Same tip-params dance as `call_did_circuit` (see
+            // wallet.rs:1325-1394 for the long-form rationale).
+            // This path used to take `INITIAL_PARAMETERS`
+            // unconditionally; that broke against any chain whose
+            // live `LedgerParameters` had drifted from the wallet
+            // crate's hardcoded constant — the balanced tx's
+            // `v_fee` no longer matched what the chain rederives
+            // during validation, so submit failed with
+            // `Invalid Transaction (1010)`. Reproduces every time
+            // against a freshly-booted standalone env post 2026-05-29
+            // ledger upgrade.
             yield crate::WizardStage::Balancing;
-            let params = ledger::structure::INITIAL_PARAMETERS;
+            let tip_params_hex_balance = match wallet.resolve_indexer() {
+                Ok(c) => match c.chain_tip().await {
+                    Ok(Some(t)) => t.ledger_parameters_hex,
+                    _ => None,
+                },
+                Err(_) => None,
+            };
+            let parsed_tip_params_balance: Option<ledger::structure::LedgerParameters> =
+                tip_params_hex_balance.as_ref().and_then(|h| {
+                    let bytes = hex::decode(h.trim_start_matches("0x")).ok()?;
+                    serialize::tagged_deserialize(&bytes[..]).ok()
+                });
+            let initial_params_fallback_balance = ledger::structure::INITIAL_PARAMETERS;
+            let used_tip = parsed_tip_params_balance.is_some();
+            let params: &ledger::structure::LedgerParameters =
+                parsed_tip_params_balance
+                    .as_ref()
+                    .unwrap_or(&initial_params_fallback_balance);
+            tracing::warn!(
+                target: "params-debug",
+                used_tip_params = used_tip,
+                tip_hex_len = tip_params_hex_balance.as_ref().map(|s| s.len()).unwrap_or(0),
+                "wallet params source for deploy/maintenance"
+            );
             // See `create_did` for the full rationale on ctime
             // selection (chain-tip vs sync_time).
             let chain_tip_secs: u64 = match wallet.resolve_indexer() {

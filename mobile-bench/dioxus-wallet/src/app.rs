@@ -2281,7 +2281,19 @@ pub fn App() -> Element {
                         let entry = DidInventoryEntry {
                             did: did.clone(),
                             network_label: net.label().to_string(),
-                            status: DidInventoryStatus::Pending,
+                            // `bootstrap_did_with_keys` includes
+                            // indexer-settle waits between every
+                            // chain write, so by the time this
+                            // callback fires the DID is fully
+                            // active on chain — no need to leave
+                            // the row in Pending and force the
+                            // user to click Open to trigger an
+                            // auto-resolve refresh. (The
+                            // Create-DID Wizard path at L1924
+                            // legitimately uses Pending because
+                            // it submits + returns without
+                            // settling.)
+                            status: DidInventoryStatus::Active,
                             counter: None,
                             // bootstrap_did_with_keys attaches exactly
                             // two VMs (Ed25519 + Jubjub) before
