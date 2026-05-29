@@ -30,6 +30,7 @@
 //! salt and writes the version row; no data shape is changed
 //! because v0 means "empty file".
 
+pub mod api;
 mod backup;
 mod codec;
 mod envelope;

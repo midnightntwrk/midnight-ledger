@@ -92,6 +92,9 @@ pub use node::{
 };
 pub use chain::{HttpProver, IndexerClient, LocalProver, NodeClient, Prover};
 pub use chain_publisher::{CallReceipt, ChainError, ChainPublisher, RecordedCall, StubChainPublisher};
+pub use store::api::WalletStorage;
+#[cfg(any(test, feature = "test-support"))]
+pub use store::api::InMemoryWalletStorage;
 pub use clock::{Clock, SystemClock};
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::FixedClock;
