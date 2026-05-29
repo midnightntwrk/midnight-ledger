@@ -12,6 +12,7 @@
 mod address;
 mod artifacts;
 pub mod chain;
+pub mod chain_publisher;
 pub mod clock;
 mod crypto;
 mod did;
@@ -90,6 +91,7 @@ pub use node::{
     MidnightSigner, NodeError, NodeHealth, NodeStatus, SignerError, SubmitResult, SubxtNodeClient,
 };
 pub use chain::{HttpProver, IndexerClient, LocalProver, NodeClient, Prover};
+pub use chain_publisher::{CallReceipt, ChainError, ChainPublisher, RecordedCall, StubChainPublisher};
 pub use clock::{Clock, SystemClock};
 #[cfg(any(test, feature = "test-support"))]
 pub use clock::FixedClock;
