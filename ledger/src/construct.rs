@@ -871,7 +871,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
             validation += model.proof_verify(public_input_count);
             validation.compute_time += model.runtime_cost_model.verifier_key_load;
         }
-        validation.compute_time = validation.compute_time / model.parallelism_factor;
+        validation.compute_time = validation.compute_time * model.validation_factor;
 
         let mut application = RunningCost::ZERO;
         application += model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -879,6 +879,7 @@ impl<D: DB> QueryResultsExt for QueryResults<ResultModeVerify, D> {
             + model.map_index(1)
             + model.map_insert(1, true);
         application += model.stack_setup_cost_for_effects(&self.context.effects);
+        application.compute_time = application.compute_time * model.guaranteed_factor;
 
         transcript_gas_cost_with_overhead + validation + application
     }
@@ -943,7 +944,7 @@ fn per_tx_cost_reserve<D: DB>(
         model.runtime_cost_model.signature_verify_constant * unshielded_inputs;
     // Dust spend proof verification (heuristically assume 1)
     validation += model.proof_verify(crate::dust::DUST_SPEND_PIS);
-    validation.compute_time = validation.compute_time / model.parallelism_factor;
+    validation.compute_time = validation.compute_time * model.validation_factor;
 
     // === Application cost ===
     let mut application = model.baseline_cost;
@@ -988,6 +989,7 @@ fn per_tx_cost_reserve<D: DB>(
         + model.cell_write(FR_BYTES as u64, false)
         + model.time_filter_map_lookup() * 2u64;
 
+    application.compute_time = application.compute_time * model.guaranteed_factor;
     let total = validation + application;
     CostDuration::max(total.compute_time, total.read_time)
 }

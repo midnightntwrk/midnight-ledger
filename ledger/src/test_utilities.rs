@@ -21,8 +21,8 @@ use crate::events::Event;
 pub use crate::prove::Resolver;
 use crate::semantics::{TransactionContext, TransactionResult};
 use crate::structure::{
-    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters, LedgerState,
-    MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
+    BindingKind, ClaimKind, ClaimRewardsTransaction, ContractDeploy, Intent, LedgerParameters,
+    LedgerState, MaintenanceUpdate, OutputInstructionUnshielded, PedersenDowngradeable, ProofKind,
     ProofPreimageMarker, SignatureKind, SystemTransaction, Transaction, UnshieldedOffer, Utxo,
     UtxoOutput,
 };
@@ -571,9 +571,15 @@ impl<D: DB> TestState<D> {
         let old_dust = self.dust.clone();
         let mut last_dust = 0;
         while let Some(mut dust) = merged_tx
-            .balance(Some(merged_tx.fees_with_impl(&self.ledger.parameters, |contract, entry_point| {
-                self.ledger.index(contract).and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
-            }, false)?))?
+            .balance(Some(merged_tx.fees_with_impl(
+                &self.ledger.parameters,
+                |contract, entry_point| {
+                    self.ledger
+                        .index(contract)
+                        .and_then(|cs| cs.operations.get(entry_point).map(|op| (*op).clone()))
+                },
+                false,
+            )?))?
             .get(&(TokenType::Dust, 0))
             .and_then(|bal| (*bal < 0).then_some((-*bal) as u128))
         {
