@@ -32,6 +32,7 @@ pub mod store;
 pub mod test_support;
 pub mod telemetry;
 mod tx;
+pub mod ui_port;
 pub mod unlock;
 mod unshielded;
 mod wallet;
@@ -104,6 +105,9 @@ pub use notifications::{
     CollectingNotifier, NoopNotifier, NotifyLevel, NotifyRecord, Notifications, StderrNotifier,
 };
 pub use randomness::{DeterministicRng, OsRandomness, Randomness};
+pub use ui_port::{
+    NoopUiAdapter, TestUiAdapter, UiError, UiEvent, UiOutcome, UserInterface,
+};
 pub use unlock::{AlwaysOkUnlockGate, NeverOkUnlockGate, ScryptUnlockGate, UnlockGate, UnlockOutcome};
 pub use wallet::{
     BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
