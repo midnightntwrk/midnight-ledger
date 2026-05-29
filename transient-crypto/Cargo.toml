@@ -1,6 +1,6 @@
 [package]
 name = "midnight-transient-crypto"
-version = "2.1.0"
+version = "3.0.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -30,7 +30,7 @@ group = "^0.13.0"
 midnight-curves = { version = "^0.3.0" }
 midnight-proofs = { version = "^0.8.0" }
 midnight-circuits = { version = "^7.0.0" }
-midnight-zk-stdlib = { version = "^2.0.0" }
+midnight-zk-stdlib = { version = "2.2.0" }
 anyhow = { version = "^1.0.102" }
 lru = "0.18.0"
 

@@ -23,7 +23,9 @@ coin-structure = { version = "2.0.0", path = "../coin-structure", package = "mid
 onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
+serialize-old = { package = "midnight-serialize", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
@@ -62,6 +64,9 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-ledger-v9 = { path = ".", features = ["test-utilities", "proptest", "fixed-point-custom-serde"] }
 onchain-vm = { path = "../onchain-vm", package = "midnight-onchain-vm" }
+zkir-old = { package = "midnight-zkir", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
+rand_chacha = "^0.3.1"
+actix-rt = "^2.9.0"
 storage = { path = "../storage", package = "midnight-storage", features = ["parity-db"] }
 storage-core = { path = "../storage-core", package = "midnight-storage-core", features = ["test-utilities", "layout-v2", "gc-v1"] }
 tokio = { version = "^1.46.1", features = ["rt", "rt-multi-thread", "macros"] }

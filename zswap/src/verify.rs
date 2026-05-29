@@ -73,6 +73,39 @@ lazy_static! {
         .expect("Zswap Sign VK should be valid");
 }
 
+/// Verify a proof by delegating to the pinned old transient-crypto pipeline.
+///
+/// Accepts current types, converts them to old types internally, and calls
+/// the old `VerifierKey::verify`.
+#[cfg(feature = "proof-verifying")]
+pub fn verify_backwards_compatible(
+    vk: &VerifierKey,
+    proof: &Proof,
+    statement: impl Iterator<Item = transient_crypto::curve::Fr>,
+) -> Result<(), transient_crypto::proofs::VerifyingError> {
+    let mut vk_bytes = Vec::new();
+    serialize::Serializable::serialize(vk, &mut vk_bytes)
+        .map_err(|e| anyhow::anyhow!("serialize VK: {e}"))?;
+    let old_vk: transient_crypto_old::proofs::VerifierKey =
+        serialize_old::Deserializable::deserialize(&mut &vk_bytes[..], 0)
+            .map_err(|e| anyhow::anyhow!("deserialize old VK: {e}"))?;
+
+    let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
+
+    let old_statement: Vec<transient_crypto_old::curve::Fr> = statement
+        .map(|fr| {
+            transient_crypto_old::curve::Fr::from_le_bytes(&fr.as_le_bytes())
+                .expect("field element round-trips through LE bytes")
+        })
+        .collect();
+
+    old_vk.verify(
+        &transient_crypto_old::proofs::PARAMS_VERIFIER,
+        &old_proof,
+        old_statement.into_iter(),
+    )
+}
+
 #[cfg(feature = "proof-verifying")]
 pub fn with_outputs<
     'a,
@@ -137,8 +170,7 @@ impl AuthorizedClaim<Proof> {
         for op in filter_invalid(prog.iter().cloned()) {
             op.field_repr(&mut statement);
         }
-        SIGN_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        verify_backwards_compatible(&SIGN_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -186,8 +218,7 @@ impl<D: DB> Input<Proof, D> {
         for op in with_outputs(prog.into_iter(), [true.into(), segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        SPEND_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        verify_backwards_compatible(&SPEND_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -254,8 +285,7 @@ impl<D: DB> Output<Proof, D> {
         for op in with_outputs(prog.into_iter(), [segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        OUTPUT_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        verify_backwards_compatible(&OUTPUT_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -362,3 +392,4 @@ impl<D: DB> Offer<ProofPreimage, D> {
         offer_well_formed_common(self, segment)
     }
 }
+

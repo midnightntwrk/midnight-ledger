@@ -35,6 +35,13 @@ use transient_crypto::proofs::{
     VerifierKey, Zkir,
 };
 
+use std::borrow::Cow;
+use transient_crypto_old::curve::Fr as OldFr;
+use transient_crypto_old::proofs::ProofPreimage as OldProofPreimage;
+
+/// The old (pre-breaking-change) IrSource from the pinned registry version.
+pub type OldIrSourceV2 = zkir_old::IrSource;
+
 const PK_COMPRESSION_LEVEL: u32 = 6;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
@@ -210,6 +217,82 @@ impl Zkir for IrSource {
             ))
         }
     }
+}
+
+// ── Field element conversions between old and new transient_crypto ──────
+
+/// Convert a new [`Fr`] to an old [`OldFr`] via little-endian byte representation.
+pub fn fr_to_old(fr: Fr) -> OldFr {
+    OldFr::from_le_bytes(&fr.as_le_bytes()).expect("field element round-trips through LE bytes")
+}
+
+/// Convert an old [`OldFr`] to a new [`Fr`] via little-endian byte representation.
+pub fn fr_from_old(fr: OldFr) -> Fr {
+    Fr::from_le_bytes(&fr.as_le_bytes()).expect("field element round-trips through LE bytes")
+}
+
+/// Convert a new [`ProofPreimage`] to an old [`OldProofPreimage`].
+pub fn preimage_to_old(preimage: &ProofPreimage) -> OldProofPreimage {
+    OldProofPreimage {
+        inputs: preimage.inputs.iter().copied().map(fr_to_old).collect(),
+        private_transcript: preimage.private_transcript.iter().copied().map(fr_to_old).collect(),
+        public_transcript_inputs: preimage
+            .public_transcript_inputs
+            .iter()
+            .copied()
+            .map(fr_to_old)
+            .collect(),
+        public_transcript_outputs: preimage
+            .public_transcript_outputs
+            .iter()
+            .copied()
+            .map(fr_to_old)
+            .collect(),
+        binding_input: fr_to_old(preimage.binding_input),
+        communications_commitment: preimage
+            .communications_commitment
+            .map(|(a, b)| (fr_to_old(a), fr_to_old(b))),
+        key_location: transient_crypto_old::proofs::KeyLocation(Cow::Owned(
+            preimage.key_location.0.to_string(),
+        )),
+    }
+}
+
+/// Convert an old [`OldProofPreimage`] to a new [`ProofPreimage`].
+pub fn preimage_from_old(preimage: &OldProofPreimage) -> ProofPreimage {
+    ProofPreimage {
+        inputs: preimage.inputs.iter().copied().map(fr_from_old).collect(),
+        private_transcript: preimage.private_transcript.iter().copied().map(fr_from_old).collect(),
+        public_transcript_inputs: preimage
+            .public_transcript_inputs
+            .iter()
+            .copied()
+            .map(fr_from_old)
+            .collect(),
+        public_transcript_outputs: preimage
+            .public_transcript_outputs
+            .iter()
+            .copied()
+            .map(fr_from_old)
+            .collect(),
+        binding_input: fr_from_old(preimage.binding_input),
+        communications_commitment: preimage
+            .communications_commitment
+            .map(|(a, b)| (fr_from_old(a), fr_from_old(b))),
+        key_location: transient_crypto::proofs::KeyLocation(Cow::Owned(
+            preimage.key_location.0.to_string(),
+        )),
+    }
+}
+
+// ── Delegation helpers for old proving pipeline ─────────────────────────
+
+/// Convert a local [`IrSource`] to the old registry version via serde.
+pub fn ir_to_old(ir: &IrSource) -> io::Result<OldIrSourceV2> {
+    let json = serde_json::to_value(ir)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    serde_json::from_value(json)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 /// An index referring to the circuit memory of the IR machine

@@ -25,7 +25,11 @@ proptest = [
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+
+# Pinned pre-breaking-change versions for proving (ledger-9 snapshot with V1 circuit support).
+transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
+zkir-old = { package = "midnight-zkir", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
 
 midnight-proofs = { version = "^0.8.0" }
 midnight-circuits = { version = "^7.0.0" }
@@ -65,7 +69,5 @@ midnight-zkir = { path = ".", features = ["proptest"] }
 actix-rt = "^2.9.0"
 sha2 = "^0.11.0"
 
-# Pinned pre-zk-stdlib-v2 versions for backwards-compatibility proof tests.
-zkir-old = { package = "midnight-zkir", version = "=2.1.0" }
-transient-crypto-old = { package = "midnight-transient-crypto", version = "=2.0.1" }
-serialize-old = { package = "midnight-serialize", version = "=1.0.0" }
+# Pinned serialize matching the git-pinned old deps.
+serialize-old = { package = "midnight-serialize", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }

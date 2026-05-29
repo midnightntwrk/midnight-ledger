@@ -891,21 +891,33 @@ impl<D: DB> Default for ContractState<D> {
 #[non_exhaustive]
 pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
+    /// Verifier key for the current zk-stdlib. When present, verification uses
+    /// the current transient-crypto pipeline; when absent, `v2` is verified
+    /// via the backwards-compatible (old zk-stdlib) path.
+    pub v3: Option<VerifierKey>,
     ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: vk, ir }
+        ContractOperation {
+            v2: vk,
+            v3: None,
+            ir,
+        }
     }
 
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v2.as_ref()
+        self.v3.as_ref().or(self.v2.as_ref())
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        &mut self.v2
+        if self.v3.is_some() {
+            &mut self.v3
+        } else {
+            &mut self.v2
+        }
     }
 }
 
@@ -920,10 +932,15 @@ impl Distribution<ContractOperation> for Standard {
         if some {
             ContractOperation {
                 v2: Some(rng.r#gen()),
+                v3: None,
                 ir: None,
             }
         } else {
-            ContractOperation { v2: None, ir: None }
+            ContractOperation {
+                v2: None,
+                v3: None,
+                ir: None,
+            }
         }
     }
 }
@@ -963,7 +980,11 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None, ir: None }
+        ContractOperation {
+            v2: None,
+            v3: None,
+            ir: None,
+        }
     }
 }
 

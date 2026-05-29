@@ -443,7 +443,7 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let vk = match &op.v2 {
+        let vk = match op.latest() {
             Some(vk) => vk,
             None => {
                 warn!("missing verifier key");
@@ -454,20 +454,16 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         };
 
-        if op.v2.is_some() && !matches!(proof, ProofVersioned::V2(_)) {
-            return Err(MalformedTransaction::<D>::UnsupportedProofVersion {
-                op_version: "V2".to_string(),
-            });
-        }
-
         match proof {
             ProofVersioned::V2(proof) => match mode {
                 #[cfg(feature = "mock-verify")]
                 ProofVerificationMode::CalibratedMock => vk
                     .mock_verify(pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
-                _ => vk
+                _ if op.v3.is_some() => vk
                     .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+                _ => zswap::verify::verify_backwards_compatible(vk, proof, pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
             },
         }

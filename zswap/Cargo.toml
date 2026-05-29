@@ -12,7 +12,10 @@ proof-verifying = []
 
 [dependencies]
 base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+# Pinned pre-breaking-change version for verification compatibility (ledger-9 snapshot).
+transient-crypto-old = { package = "midnight-transient-crypto", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
+serialize-old = { package = "midnight-serialize", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
 coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
@@ -22,6 +25,7 @@ midnight-ledger-static = { version = "9.0.0", path = "../static", package = "mid
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
 rand = { version = "^0.8.4", features = ["getrandom"] }
+anyhow = "^1.0.102"
 is_sorted = "^0.1.1"
 lazy_static = "^1.5.0"
 tracing = { version = "^0.1.41" }
@@ -35,6 +39,9 @@ derive-where = "^1.6.1"
 
 [dev-dependencies]
 zkir_v2 = { path = "../zkir", package = "midnight-zkir" }
+zkir-old = { package = "midnight-zkir", git = "https://github.com/midnightntwrk/midnight-ledger", rev = "35f0336d5b0284626ca15944624e77ee47c6a3a5" }
+rand_chacha = "^0.3.1"
+actix-rt = "^2.9.0"
 fake = { version = "^2.10.0", features = ["derive"] }
 rand = { version = "^0.8.4", features = ["getrandom"] }
 futures = "^0.3.31"

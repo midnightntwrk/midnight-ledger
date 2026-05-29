@@ -25,24 +25,28 @@
 //! ```
 
 use midnight_zkir::IrSource;
-use serialize::tagged_serialize;
 use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
 use std::fs::{self, File};
 use std::io::{BufReader, Write};
 use std::path::{Path, PathBuf};
-use transient_crypto::proofs::{ParamsProver, ParamsProverProvider, Zkir};
 
+// Keygen uses the old (pinned) transient-crypto pipeline so that prover keys
+// remain byte-identical to what the deployed verifiers expect.
+use transient_crypto_old::proofs::{
+    ParamsProver as OldParamsProver, ParamsProverProvider as OldParamsProverProvider,
+    Zkir as OldZkir,
+};
 const UPDATE_ENV: &str = "UPDATE_ZKIR_HASHES";
 const REFRESH_HINT: &str =
     "Run `UPDATE_ZKIR_HASHES=1 cargo test -p midnight-zkir --test precompile_hashes` to refresh.";
 
-struct TestParams;
+struct OldTestParams;
 
-impl ParamsProverProvider for TestParams {
-    async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
+impl OldParamsProverProvider for OldTestParams {
+    async fn get_params(&self, k: u8) -> std::io::Result<OldParamsProver> {
         const DIR: &str = env!("MIDNIGHT_PP");
-        ParamsProver::read(BufReader::new(File::open(format!(
+        OldParamsProver::read(BufReader::new(File::open(format!(
             "{DIR}/bls_midnight_2p{k}"
         ))?))
     }
@@ -92,13 +96,14 @@ fn read_pinned_hex(pin_path: &Path) -> std::io::Result<String> {
     Ok(contents.split_whitespace().next().unwrap_or("").to_string())
 }
 
-async fn produce_key_bytes(ir: &IrSource, params: &TestParams) -> (Vec<u8>, Vec<u8>) {
-    let (pk, vk) = ir.keygen(params).await.expect("keygen");
+async fn produce_key_bytes(ir: &IrSource, params: &OldTestParams) -> (Vec<u8>, Vec<u8>) {
+    let old_ir = midnight_zkir::ir_to_old(ir).expect("convert to old IrSource");
+    let (pk, vk) = old_ir.keygen(params).await.expect("keygen");
     let mut pk_bytes = Vec::new();
-    IrSource::serialize_prover_key_to_tagged(ir.version, &pk, &mut pk_bytes)
+    zkir_old::IrSource::serialize_prover_key_to_tagged(old_ir.version, &pk, &mut pk_bytes)
         .expect("serialize prover key");
     let mut vk_bytes = Vec::new();
-    tagged_serialize(&vk, &mut vk_bytes).expect("serialize verifier key");
+    serialize_old::tagged_serialize(&vk, &mut vk_bytes).expect("serialize verifier key");
     (pk_bytes, vk_bytes)
 }
 
@@ -117,7 +122,7 @@ async fn precompile_key_hashes_pinned() {
         ))
         .unwrap_or_else(|e| panic!("load IR {zkir_path:?}: {e}"));
 
-        let (pk_bytes, vk_bytes) = produce_key_bytes(&ir, &TestParams).await;
+        let (pk_bytes, vk_bytes) = produce_key_bytes(&ir, &OldTestParams).await;
 
         let stem = zkir_path
             .file_stem()
@@ -190,7 +195,7 @@ fn smoke_ir(minor: u8) -> IrSource {
 async fn smoke_check(minor: u8, version_label: &str) {
     let update = std::env::var_os(UPDATE_ENV).is_some();
     let ir = smoke_ir(minor);
-    let (pk_bytes, vk_bytes) = produce_key_bytes(&ir, &TestParams).await;
+    let (pk_bytes, vk_bytes) = produce_key_bytes(&ir, &OldTestParams).await;
 
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
