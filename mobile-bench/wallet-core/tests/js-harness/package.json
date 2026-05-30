@@ -8,8 +8,8 @@
     "harness": "node harness.mjs"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-did-contract",
-    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-did-jubjub-schnorr",
+    "@midnight-ntwrk/midnight-did-contract": "file:../../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did-jubjub-schnorr": "file:../../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-jubjub-schnorr-0.4.0.tgz",
     "@midnight-ntwrk/compact-runtime": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/compact-runtime",
     "@midnight-ntwrk/onchain-runtime-v3": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/onchain-runtime-v3",
     "@midnight-ntwrk/ledger-v8": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/ledger-v8",

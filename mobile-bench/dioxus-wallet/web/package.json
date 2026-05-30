@@ -11,10 +11,10 @@
     "watch": "node ./build.mjs --watch"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did": "file:/Users/ysh/iohk/midnight-did/did",
-    "@midnight-ntwrk/midnight-did-api": "file:/Users/ysh/iohk/midnight-did/api",
-    "@midnight-ntwrk/midnight-did-contract": "file:/Users/ysh/iohk/midnight-did/contract",
-    "@midnight-ntwrk/midnight-did-domain": "file:/Users/ysh/iohk/midnight-did/domain",
+    "@midnight-ntwrk/midnight-did": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did-api": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-api-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did-contract": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did-domain": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-domain-0.4.0.tgz",
     "jsqr": "^1.4.0"
   },
   "devDependencies": {
