@@ -6089,6 +6089,7 @@ dependencies = [
 [[package]]
 name = "midnight-proofs"
 version = "0.7.99"
+source = "git+https://github.com/yshyn-iohk/midnight-zk?branch=feat%2Fv0.7-h-poly-streaming#cf60e3ccb87f2de40b1307f7e78abdcb4c696c91"
 dependencies = [
  "blake2b_simd",
  "ff",

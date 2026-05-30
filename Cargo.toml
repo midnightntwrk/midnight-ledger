@@ -79,11 +79,11 @@ panic = "abort"
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"
 
-# ---- Local fork of midnight-proofs (experimental) ----
+# ---- Git fork of midnight-proofs (experimental) ----
 #
-# Points at `~/iohk/midnight-zk` (a clone of
-# github.com/midnightntwrk/midnight-zk) checked out at the
-# `feat/v0.7-mmap-srs` branch. The branch carries four patches
+# Points at the `feat/v0.7-h-poly-streaming` branch of
+# https://github.com/yshyn-iohk/midnight-zk (a fork of
+# github.com/midnightntwrk/midnight-zk). The branch carries four patches
 # on top of the `midnight-proofs-v0.7.0` tag:
 #
 #   1. lazy g_lagrange via OnceLock + drop_lazy_bases
@@ -128,4 +128,4 @@ config = ".spellcheck/cargo-spellcheck.toml"
 # lose `drop_lazy_bases` (no other consumer currently calls it,
 # so the only fallout is contract-benchmark losing the API hook).
 [patch.crates-io]
-midnight-proofs = { path = "/Users/ysh/iohk/midnight-zk/proofs" }
+midnight-proofs = { git = "https://github.com/yshyn-iohk/midnight-zk", branch = "feat/v0.7-h-poly-streaming" }
