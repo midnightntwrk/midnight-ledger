@@ -272,7 +272,8 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/compact-runtime":               "mn-pkg://localhost/compact-runtime/dist/index.js",
     "@midnight-ntwrk/onchain-runtime-v3":            "mn-pkg://localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "mn-pkg://localhost/ledger-v8/midnight_ledger_wasm.js",
-    "object-inspect":                                "mn-pkg://localhost/object-inspect/index.js"
+    "object-inspect":                                "mn-pkg://localhost/object-inspect/index.js",
+    "@noble/hashes/":                                "mn-pkg://localhost/@noble/hashes/"
   }
 }
 </script>"#;
@@ -286,7 +287,8 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/compact-runtime":               "http://mn-pkg.localhost/compact-runtime/dist/index.js",
     "@midnight-ntwrk/onchain-runtime-v3":            "http://mn-pkg.localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "http://mn-pkg.localhost/ledger-v8/midnight_ledger_wasm.js",
-    "object-inspect":                                "http://mn-pkg.localhost/object-inspect/index.js"
+    "object-inspect":                                "http://mn-pkg.localhost/object-inspect/index.js",
+    "@noble/hashes/":                                "http://mn-pkg.localhost/@noble/hashes/"
   }
 }
 </script>"#;
