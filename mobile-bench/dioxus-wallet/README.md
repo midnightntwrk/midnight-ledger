@@ -42,6 +42,29 @@ PROGRESS doc above. Key entry points:
 
 ## Build
 
+### JS bundle prerequisite
+
+`web/vendor.mjs` and `web/build.mjs` require a built checkout of the
+`midnight-did` repo (with `pnpm install && pnpm build` already
+run). Set the environment variable before building:
+
+```bash
+export MIDNIGHT_DID_SRC=/path/to/midnight-did
+# Any checkout with `pnpm install && pnpm build` already run will work —
+# a standalone clone, a submodule, etc.
+```
+
+Then, from `web/`:
+
+```bash
+npm install          # resolves .tgz vendored packages
+cd $MIDNIGHT_DID_SRC && pnpm install && pnpm build && cd -
+npm run vendor       # copies WASM-bearing packages → ../assets/web/pkg/
+npm run build        # esbuild bundle → ../assets/web/midnight-did.js
+```
+
+Both scripts exit with an error if `MIDNIGHT_DID_SRC` is unset.
+
 ### iOS Simulator
 
 ```bash
@@ -67,8 +90,8 @@ build` → `gradlew assembleDebug` → `adb install` → `am start`.
 ## Standalone Midnight env
 
 ```bash
-# At /tmp/midnight-standalone/ — files copied from
-# ~/iohk/midnight-identity-workspace/arc-passport/experiments/redjubjub-wallet-rs/infra
+# At /tmp/midnight-standalone/ — files copied from the
+# midnight-identity-workspace arc-passport experiments infra
 cat > .env <<'EOF'
 APP__INFRA__SECRET=303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030303030
 EOF

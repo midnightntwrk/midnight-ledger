@@ -15,6 +15,7 @@
     "@midnight-ntwrk/midnight-did-api": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-api-0.4.0.tgz",
     "@midnight-ntwrk/midnight-did-contract": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
     "@midnight-ntwrk/midnight-did-domain": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-domain-0.4.0.tgz",
+    "@noble/hashes": "^2.2.0",
     "jsqr": "^1.4.0"
   },
   "devDependencies": {

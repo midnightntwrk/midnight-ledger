@@ -335,7 +335,7 @@ async function prepareUnprovenCallTx(
   // `verifySchnorrJubjubDigestSignature` (and likely
   // `assertControllerCanUpdate` via Schnorr signature paths)
   // pulls it for every controller-gated write. See
-  // `~/iohk/midnight-did/packages/contract/src/witnesses.ts`.
+  // `<midnight-did-source>/packages/contract/src/witnesses.ts`.
   const TWO_248 = 452312848583266388373324160190187140051835877600158453279131187530910662656n;
   const witnesses = {
     localSecretKey: (ctx: { privateState: unknown }) => [ctx.privateState, skBytes],

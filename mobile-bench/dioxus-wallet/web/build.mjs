@@ -78,15 +78,26 @@ const config = {
       },
     }),
   ],
-  // Look in the upstream midnight-did repo's resolved tree for
+  // Look in the midnight-did repo's resolved tree for
   // packages the entry imports but `web/package.json` doesn't list
   // directly (e.g. `@midnight-ntwrk/midnight-js-contracts`,
   // `@midnight-ntwrk/midnight-js-network-id`, `effect`, ...).
-  // Override path lives in `$MIDNIGHT_DID_NODE_MODULES`; otherwise we
-  // default to the standard location operators use for the harness.
+  // The env var MIDNIGHT_DID_SRC must point at a midnight-did checkout
+  // with `pnpm install && pnpm build` already run — there is no
+  // default.
   nodePaths: [
-    env.MIDNIGHT_DID_NODE_MODULES ||
-      resolve(env.HOME ?? "", "iohk", "midnight-did", "node_modules"),
+    (() => {
+      const src = env.MIDNIGHT_DID_SRC;
+      if (!src) {
+        console.error(
+          "[esbuild] MIDNIGHT_DID_SRC is not set. Export it to point at the" +
+            " midnight-did repo checkout (with pnpm install && pnpm build" +
+            " already run), then re-run this script.",
+        );
+        process.exit(1);
+      }
+      return resolve(src, "node_modules");
+    })(),
   ],
   outfile: resolve(outdir, "midnight-did.js"),
   loader: { ".wasm": "file" }, // not really used now (externals handle WASM)

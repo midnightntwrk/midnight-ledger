@@ -28,8 +28,23 @@ import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-// Source repo (cloned outside this workspace).
-const SOURCE = resolve(process.env.HOME, "iohk", "midnight-did");
+// Built checkout of the midnight-did repo (submodule or standalone clone)
+// with `pnpm install && pnpm build` already run.
+// Must be set — there is no default.
+const SOURCE = resolve(
+  (() => {
+    const src = process.env.MIDNIGHT_DID_SRC;
+    if (!src) {
+      console.error(
+        "[vendor] MIDNIGHT_DID_SRC is not set. Export it to point at the" +
+          " midnight-did repo checkout (with pnpm install && pnpm build" +
+          " already run), then re-run this script.",
+      );
+      process.exit(1);
+    }
+    return src;
+  })(),
+);
 // Where Wry's `mn-pkg://` handler reads from.
 const DEST = resolve(__dirname, "..", "assets", "web", "pkg");
 
