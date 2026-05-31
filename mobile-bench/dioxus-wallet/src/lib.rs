@@ -273,7 +273,8 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/onchain-runtime-v3":            "mn-pkg://localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "mn-pkg://localhost/ledger-v8/midnight_ledger_wasm.js",
     "object-inspect":                                "mn-pkg://localhost/object-inspect/index.js",
-    "@noble/hashes/":                                "mn-pkg://localhost/@noble/hashes/"
+    "@noble/hashes/":                                "mn-pkg://localhost/@noble/hashes/esm/",
+    "@noble/hashes/crypto":                           "mn-pkg://localhost/@noble/hashes/esm/crypto.js"
   }
 }
 </script>"#;
@@ -288,7 +289,8 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/onchain-runtime-v3":            "http://mn-pkg.localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "http://mn-pkg.localhost/ledger-v8/midnight_ledger_wasm.js",
     "object-inspect":                                "http://mn-pkg.localhost/object-inspect/index.js",
-    "@noble/hashes/":                                "http://mn-pkg.localhost/@noble/hashes/"
+    "@noble/hashes/":                                "http://mn-pkg.localhost/@noble/hashes/esm/",
+    "@noble/hashes/crypto":                           "http://mn-pkg.localhost/@noble/hashes/esm/crypto.js"
   }
 }
 </script>"#;
