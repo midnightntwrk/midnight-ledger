@@ -22,8 +22,9 @@ use tracing::Instrument;
 
 use wallet_core::{
     HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
-    SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys, oid4vci_run_issuance,
-    oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
+    SelfVerifyResult, StoredVc, SystemClock, VcOpening, bootstrap_did_with_keys,
+    oid4vci_run_issuance, oid4vp_run_authentication, self_verify_and_cache, time_op,
+    time_op_simple,
 };
 
 /// Monotonic per-session counter for Identity Centre action IDs.
@@ -885,12 +886,225 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
                 },
                 Some(Ok(list)) => rsx! {
                     for vc in list.iter().cloned() {
-                        {render_vc_row(network, bridge_state.clone(), vc, badges, refresh_tick)}
+                        {render_vc_dispatch(network, bridge_state.clone(), vc, badges, refresh_tick)}
                     }
                 },
             }
+
+            // Dev-only sample inserter. Lets us validate the
+            // digital-passport card without depending on the
+            // upstream issuer minting `digital-passport:v1` VCs
+            // yet. Stripped from release builds via cfg gate.
+            {render_sample_digital_passport_inserter(refresh_tick)}
         }
     }
+}
+
+/// Dispatch a VC row to either the schema-specific card component
+/// (when we have a view for that family) or the generic fallback
+/// row. Keeps `render_vc_row` ignorant of view-module specifics so
+/// future schema additions are a single match arm here.
+fn render_vc_dispatch(
+    network: Network,
+    bridge_state: BridgeState,
+    vc: StoredVc,
+    badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
+    refresh_tick: Signal<u64>,
+) -> Element {
+    if crate::vc_views::digital_passport::is_digital_passport(&vc) {
+        render_digital_passport_dispatch(vc, badges)
+    } else {
+        render_vc_row(network, bridge_state, vc, badges, refresh_tick)
+    }
+}
+
+/// Wire `DigitalPassportCard` to the redb-backed opening store
+/// and the existing verify-badge map. Keeps the card itself
+/// storage-agnostic — see `vc_views/digital_passport.rs` for the
+/// extraction rationale.
+fn render_digital_passport_dispatch(
+    vc: StoredVc,
+    badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
+) -> Element {
+    use crate::vc_views::digital_passport::DigitalPassportCard;
+
+    // Open the redb VC store once per render and capture in an Rc
+    // so the closure can hand `Option<VcOpening>` lookups to the
+    // card. `RedbVcStore` internally holds `Arc<Database>` so the
+    // open is cheap; failures (corrupt file, disk full) fall
+    // through as "no openings", which the card renders as
+    // "(no opening stored)" rows.
+    let store_opt =
+        std::rc::Rc::new(RedbVcStore::open(vc_store_path()).ok());
+    let vc_uri = vc.vc_uri.clone();
+    let fetch_opening: std::rc::Rc<dyn Fn(&str) -> Option<VcOpening>> = {
+        let store_opt = store_opt.clone();
+        let vc_uri = vc_uri.clone();
+        std::rc::Rc::new(move |path: &str| -> Option<VcOpening> {
+            store_opt
+                .as_ref()
+                .as_ref()?
+                .get_opening(&vc_uri, path)
+                .ok()
+                .flatten()
+        })
+    };
+
+    let badge_label = badges
+        .read()
+        .get(&vc_uri)
+        .cloned()
+        .map(|b| b.label());
+
+    DigitalPassportCard(vc, fetch_opening, badge_label)
+}
+
+/// Insert a hard-coded `digital-passport:v1` sample into the redb
+/// store on click. Body is a placeholder byte string (not a valid
+/// CBOR-encoded credential) — self-verify against this row will
+/// fail, but the card renders against the openings + envelope only
+/// so the privacy-tier visualisation is exercised end-to-end.
+///
+/// Gated on `debug_assertions` so release builds (which the demo
+/// would actually ship) don't expose the inserter. Listed last in
+/// the inventory card to keep it out of the way.
+#[cfg(debug_assertions)]
+fn render_sample_digital_passport_inserter(
+    mut refresh_tick: Signal<u64>,
+) -> Element {
+    let mut busy = use_signal(|| false);
+    let mut last_msg = use_signal::<Option<String>>(|| None);
+
+    let insert = move |_| {
+        if *busy.read() {
+            return;
+        }
+        busy.set(true);
+        spawn(async move {
+            let result =
+                tokio::task::spawn_blocking(insert_sample_digital_passport)
+                    .await;
+            let msg = match result {
+                Ok(Ok(uri)) => format!("Inserted {uri}"),
+                Ok(Err(e)) => format!("Insert failed: {e}"),
+                Err(e) => format!("Insert task panicked: {e}"),
+            };
+            last_msg.set(Some(msg));
+            let next = *refresh_tick.read() + 1;
+            refresh_tick.set(next);
+            busy.set(false);
+        });
+    };
+
+    rsx! {
+        div { class: "row",
+            button {
+                disabled: *busy.read(),
+                onclick: insert,
+                {if *busy.read() { "Inserting…" } else { "Insert sample Digital Passport" }}
+            }
+        }
+        if let Some(msg) = last_msg.read().as_ref() {
+            div { class: "detail-empty", "{msg}" }
+        }
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn render_sample_digital_passport_inserter(
+    _refresh_tick: Signal<u64>,
+) -> Element {
+    rsx! {}
+}
+
+/// Synchronous body of the dev-only sample inserter. Builds a
+/// canonical `digital-passport:v1` envelope with the three
+/// expected openings under their JSON-Pointer paths, stamps a
+/// `display_order` that pushes it to the bottom of the list, and
+/// writes everything atomically. Returns the assigned `vc_uri` on
+/// success.
+#[cfg(debug_assertions)]
+fn insert_sample_digital_passport() -> Result<String, String> {
+    use crate::vc_views::digital_passport::{
+        CLAIM_DATE_OF_BIRTH, CLAIM_FIRST_NAME, CLAIM_LAST_NAME,
+    };
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let store = RedbVcStore::open(vc_store_path())
+        .map_err(|e| format!("open vc store: {e}"))?;
+
+    let suffix = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    let vc_uri = format!("urn:vc:digital-passport:sample-{suffix}");
+    let issued_at_ms = suffix;
+
+    let vc = StoredVc {
+        vc_uri: vc_uri.clone(),
+        issuer_did: "did:midnight:demo-issuer-sample".into(),
+        holder_did: "did:midnight:demo-holder-sample".into(),
+        format: "midnight-vc-compact".into(),
+        // Placeholder body. The card renders against the envelope
+        // + openings; the body is opaque CBOR in production and we
+        // don't decode it here.
+        body: b"<sample digital-passport placeholder body>".to_vec(),
+        issued_at_ms,
+    };
+
+    // Text-pad first/last name to 64 bytes (the schema's
+    // `Bytes<64>` representation).
+    let first = pad_to_64(b"Alice");
+    let last = pad_to_64(b"Liddell");
+
+    // `dateOfBirth` as days-since-epoch for 1990-01-01.
+    // 7305 days = 1970-01-01 + 20 years (5 leap days).
+    let dob_days: u32 = 7305;
+    let dob_bytes = dob_days.to_le_bytes().to_vec();
+
+    let openings = vec![
+        VcOpening {
+            vc_uri: vc_uri.clone(),
+            claim_path: CLAIM_FIRST_NAME.into(),
+            plaintext: first,
+            opening: vec![0u8; 32],
+        },
+        VcOpening {
+            vc_uri: vc_uri.clone(),
+            claim_path: CLAIM_LAST_NAME.into(),
+            plaintext: last,
+            opening: vec![0u8; 32],
+        },
+        VcOpening {
+            vc_uri: vc_uri.clone(),
+            claim_path: CLAIM_DATE_OF_BIRTH.into(),
+            plaintext: dob_bytes,
+            opening: vec![0u8; 32],
+        },
+    ];
+
+    store
+        .insert_vc_with_openings(&vc, &openings)
+        .map_err(|e| format!("insert: {e}"))?;
+    store
+        .update_metadata(&vc_uri, |m| {
+            // Push sample rows to the end of the list so they
+            // don't reorder real issuer-minted VCs.
+            m.display_order = u32::MAX - 1;
+        })
+        .map_err(|e| format!("update metadata: {e}"))?;
+    Ok(vc_uri)
+}
+
+/// Right-pad a byte slice with zeros up to 64 bytes. Used by the
+/// dev-only sample inserter to mirror the schema's text-padded
+/// `Bytes<64>` representation of first/last name claims.
+#[cfg(debug_assertions)]
+fn pad_to_64(s: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; 64];
+    let n = s.len().min(64);
+    out[..n].copy_from_slice(&s[..n]);
+    out
 }
 
 /// Render a single VC row. Plain helper (not a `#[component]`)
