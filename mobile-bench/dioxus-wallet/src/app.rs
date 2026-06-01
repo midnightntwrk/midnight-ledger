@@ -42,16 +42,16 @@ pub(crate) const LOGO_ICON_SVG: &str = include_str!("../assets/logo-icon.svg");
 // would be unused.
 
 #[derive(Clone, PartialEq, Eq)]
-struct WalletInfo {
-    seed_hex: String,
-    coin_pk_hex: String,
-    enc_pk_hex: String,
-    address: String,
-    network: Network,
+pub(crate) struct WalletInfo {
+    pub(crate) seed_hex: String,
+    pub(crate) coin_pk_hex: String,
+    pub(crate) enc_pk_hex: String,
+    pub(crate) address: String,
+    pub(crate) network: Network,
 }
 
 impl WalletInfo {
-    fn from_wallet(w: &Wallet) -> Self {
+    pub(crate) fn from_wallet(w: &Wallet) -> Self {
         Self {
             seed_hex: w.seed_hex(),
             coin_pk_hex: w.coin_public_key_hex().unwrap_or_else(|e| e.to_string()),
@@ -1505,14 +1505,10 @@ pub fn App() -> Element {
         }
     });
 
-    let mut load_demo = move || {
-        let w = app_wallet_for(*network.read());
-        wallet.set(Some(WalletInfo::from_wallet(&w)));
-    };
-    let mut generate = move || {
-        let w = Wallet::new_random(*network.read());
-        wallet.set(Some(WalletInfo::from_wallet(&w)));
-    };
+    // `load_demo` and `generate` closures lived here; both moved
+    // to `BootstrapPanel::DemoWalletControlsSection` along with the
+    // buttons that triggered them. Wallet-tab kept its `connect`
+    // closure (the production-facing affordance).
 
     let mut connect = move || {
         if matches!(*phase.read(), SyncPhase::Connecting) {
@@ -1776,11 +1772,11 @@ pub fn App() -> Element {
                     }
                 }
 
-                div { class: "row",
-                    button { onclick: move |_| load_demo(), "Reload demo" }
-                    button { onclick: move |_| generate(), "Random wallet" }
-                }
-
+                // `Reload demo` and `Random wallet` dev affordances
+                // moved to the Bootstrap tab. They cluttered the
+                // Wallet hero by sitting at the same visual weight
+                // as the balance + Connect CTA. See BootstrapPanel
+                // → `DemoWalletControlsSection`.
                 WalletSyncPane {
                     network: *network.read(),
                     night_subunits,
@@ -2281,6 +2277,7 @@ pub fn App() -> Element {
                     network: *network.read(),
                     bridge_state: bridge_state.read().clone(),
                     did_inventory,
+                    wallet,
                     // Same `on_did_minted` channel the Identity Centre
                     // used pre-C1 (and the Create-DID wizard before
                     // that) — inserts the new DID into the live

@@ -513,6 +513,7 @@ pub fn BootstrapPanel(
     did_inventory: Signal<
         std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
     >,
+    wallet: Signal<Option<crate::app::WalletInfo>>,
     on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
     let ic_did = use_signal::<Option<String>>(|| None);
@@ -533,6 +534,11 @@ pub fn BootstrapPanel(
             }
         }
 
+        DemoWalletControlsSection {
+            network,
+            wallet,
+        }
+
         BootstrapSection {
             network,
             bridge_state: bridge_state.clone(),
@@ -549,6 +555,52 @@ pub fn BootstrapPanel(
         }
 
         crate::did_picker::DidPickerModal { pending_pick }
+    }
+}
+
+/// Demo-only wallet swap controls. Lets the operator flip between
+/// the deterministic demo wallet (`app_wallet_for(network)` — same
+/// seed across restarts) and a fresh `Wallet::new_random` for
+/// negative-path scenarios. Lives on the Bootstrap tab because
+/// it's a setup affordance, not part of the everyday Wallet view.
+#[component]
+fn DemoWalletControlsSection(
+    network: Network,
+    wallet: Signal<Option<crate::app::WalletInfo>>,
+) -> Element {
+    let mut wallet = wallet;
+
+    let reload_demo = move |_| {
+        let w = crate::app::app_wallet_for(network);
+        wallet.set(Some(crate::app::WalletInfo::from_wallet(&w)));
+    };
+    let randomise = move |_| {
+        let w = wallet_core::Wallet::new_random(network);
+        wallet.set(Some(crate::app::WalletInfo::from_wallet(&w)));
+    };
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Demo wallet controls" }
+            div { class: "detail-empty",
+                "Swap the in-memory wallet without touching the chain. "
+                "Use Reload demo to return to the deterministic "
+                "genesis-funded wallet; use Random wallet to seed a "
+                "fresh keypair for negative-path scenarios."
+            }
+            div { class: "row",
+                button {
+                    class: "btn-secondary",
+                    onclick: reload_demo,
+                    "Reload demo"
+                }
+                button {
+                    class: "btn-secondary",
+                    onclick: randomise,
+                    "Random wallet"
+                }
+            }
+        }
     }
 }
 
