@@ -3181,7 +3181,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: var(--sp-3);
-  padding: var(--sp-6);
+  padding: var(--sp-5) var(--sp-5);
   border: 1px solid var(--line-strong);
   border-radius: var(--r-5);
   background:
@@ -3189,6 +3189,14 @@ body {
     rgba(8, 13, 24, 0.78);
   box-shadow: var(--shadow-card), var(--shadow-inset);
   margin-bottom: var(--sp-4);
+  /* Defensive — when this card lives inside a flex container that
+   * stretches its children (e.g. an App-root tab shell with
+   * `min-height: 100vh`), prevent it from inflating to viewport
+   * height. The card sizes to its own content, top-aligned. */
+  align-self: flex-start;
+  flex: 0 0 auto;
+  height: auto;
+  max-height: max-content;
 }
 .cta-card__ambient {
   position: absolute;
@@ -3244,15 +3252,14 @@ body {
  * ════════════════════════════════════════════════════════════════ */
 
 .wallet-hero {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  align-items: center;
-  gap: var(--sp-6);
+  display: block;
   margin-bottom: var(--sp-4);
   padding: var(--sp-6) var(--sp-4) var(--sp-5);
   /* No card chrome — the page background's ambient gradient is
    * the hero's surface. Trust-line + connect CTA below sit
-   * directly on the same surface. */
+   * directly on the same surface. The decorative `.token-mark--lg`
+   * that used to float on the right was removed — without a
+   * contextual label it read as a mystery box. */
 }
 .wallet-hero__copy {
   min-width: 0;
@@ -3316,12 +3323,6 @@ body {
   font-size: var(--fs-small);
   color: var(--text-faint-new);
   max-width: 38ch;
-}
-.wallet-hero__mark {
-  /* Shrink the token-mark when it lives in the hero header — the
-   * default --lg is 80 px which works on wide layouts but pushes
-   * the number out on phones. */
-  --tm-size: 72px;
 }
 
 /* ══════════════════════════════════════════════════════════════════
@@ -3436,17 +3437,78 @@ body {
   text-align: center;
 }
 
-/* Narrow phone window — stack the wallet hero so the token-mark
- * sits above the copy block instead of crushing the number. */
+/* ── Controller-secret card (DID detail view) ────────────────────
+ *
+ * Compact replacement for the previous inline-styled blob layout
+ * that wrapped the 64-char hex across multiple lines and pushed
+ * the Reveal + Copy buttons off the right edge on narrow phones.
+ * Tighter padding, single-line note, and a dedicated value row
+ * that scrolls horizontally rather than wrapping mid-word.
+ */
+.secret-card {
+  padding: var(--sp-4) var(--sp-4) var(--sp-4);
+}
+.secret-card__note {
+  margin: 0 0 var(--sp-3);
+  font-size: var(--fs-small);
+  line-height: 1.45;
+}
+.secret-card__note.ok   { color: var(--accent-green); }
+.secret-card__note.warn { color: var(--warn-new); }
+
+.secret-card__row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+}
+.secret-card__value {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--r-2);
+  background: var(--surface-4-new);
+  color: var(--text-new);
+  font-size: var(--fs-meta);
+  letter-spacing: 0.04em;
+  /* Single-line + scroll instead of wrap-mid-word. Tap-and-hold
+   * still selects the full hex; the Copy button beside it is
+   * the canonical copy affordance. */
+  overflow: auto;
+  white-space: nowrap;
+  text-overflow: clip;
+}
+.secret-card__value.mono {
+  font-family: ui-monospace, monospace;
+}
+.secret-card__input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-4-new);
+  color: var(--text-new);
+  font-size: var(--fs-meta);
+}
+.secret-card__input.mono { font-family: ui-monospace, monospace; }
+.secret-card__input:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 1px;
+  border-color: var(--accent-cyan);
+}
+.secret-card__actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 0 0 auto;
+}
+
+/* Narrow phone window — tighten the wallet hero padding. */
 @media (max-width: 480px) {
   .wallet-hero {
-    grid-template-columns: 1fr;
-    gap: var(--sp-3);
     padding: var(--sp-5) var(--sp-4) var(--sp-4);
-  }
-  .wallet-hero__mark {
-    justify-self: end;
-    --tm-size: 56px;
   }
 }
 

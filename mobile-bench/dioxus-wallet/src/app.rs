@@ -5342,29 +5342,25 @@ fn ControllerSecretCard(
     if let Some(sk) = current_secret {
         let hex_full = format!("0x{}", hex::encode(sk));
         let is_revealed = *revealed.read();
-        let display = if is_revealed {
-            hex_full.clone()
-        } else {
-            "•••••••• click Reveal to show".to_string()
-        };
         rsx! {
-            div { class: "card",
+            div { class: "card secret-card",
                 div { class: "card-header", "Controller secret" }
-                div { style: "color: var(--success); font-size: 11px; margin-bottom: 8px;",
-                    "Known — stored on this device. Save the hex if you \
-                     want to restore Update / Deactivate access on a fresh \
-                     install."
+                p { class: "secret-card__note ok",
+                    "Stored on this device. Save the hex to restore "
+                    "Update / Deactivate on a fresh install."
                 }
-                div { class: "row",
-                    div { class: "seed-blob",
-                        style: "flex: 1; word-break: break-all; font-family: monospace;",
-                        "{display}"
+                div { class: "secret-card__row",
+                    div { class: "secret-card__value mono",
+                        if is_revealed { "{hex_full}" } else { "••••••••••••" }
                     }
-                    button {
-                        onclick: move |_| revealed.set(!is_revealed),
-                        {if is_revealed { "Hide" } else { "Reveal" }}
+                    div { class: "secret-card__actions",
+                        button {
+                            class: "btn-secondary",
+                            onclick: move |_| revealed.set(!is_revealed),
+                            {if is_revealed { "Hide" } else { "Reveal" }}
+                        }
+                        {copy_btn(hex_full, "Copy controller secret (hex)")}
                     }
-                    {copy_btn(hex_full, "Copy controller secret (hex)")}
                 }
             }
         }
@@ -5404,33 +5400,36 @@ fn ControllerSecretCard(
         };
         let status_snap = status.read().clone();
         rsx! {
-            div { class: "card",
+            div { class: "card secret-card",
                 div { class: "card-header", "Controller secret" }
-                div { style: "color: var(--warning); font-size: 11px; margin-bottom: 8px;",
-                    "Unknown — this DID was minted in another session or by \
-                     a different wallet. Paste the 32-byte hex sk to enable \
-                     Update / Deactivate. Without it, this DID is \
-                     read-only from here on."
+                p { class: "secret-card__note warn",
+                    "Minted in another session. Paste the 32-byte hex "
+                    "to re-enable Update / Deactivate."
                 }
-                div { class: "row",
+                div { class: "secret-card__row",
                     input {
-                        style: "flex: 1; font-family: monospace; \
-                                font-size: 12px; padding: 6px 10px;",
-                        placeholder: "0x... (64 hex chars)",
+                        class: "secret-card__input mono",
+                        placeholder: "0x… (64 hex chars)",
                         value: "{input.read()}",
                         oninput: move |e| input.set(e.value()),
                     }
-                    button { onclick: save, "Save" }
+                    div { class: "secret-card__actions",
+                        button {
+                            class: "btn-primary",
+                            onclick: save,
+                            "Save"
+                        }
+                    }
                 }
                 {match &status_snap {
                     Some(Ok(msg)) => rsx! {
-                        div { class: "wizard-outcome ok",
-                            div { class: "seed-blob", "{msg}" }
+                        div { class: "outcome outcome--ok",
+                            div { class: "outcome__body", "{msg}" }
                         }
                     },
                     Some(Err(msg)) => rsx! {
-                        div { class: "wizard-outcome err",
-                            div { class: "seed-blob", "{msg}" }
+                        div { class: "outcome outcome--err",
+                            div { class: "outcome__body", "{msg}" }
                         }
                     },
                     None => rsx! { Fragment {} },
@@ -8559,13 +8558,10 @@ fn BalancesCard(
                 }
                 p { class: "wallet-hero__hint", "{hint}" }
             }
-            div {
-                class: if connected {
-                    "token-mark token-mark--lg token-mark--green wallet-hero__mark"
-                } else {
-                    "token-mark token-mark--lg wallet-hero__mark"
-                },
-            }
+            // Decorative token-mark removed — without a contextual
+            // label it read as a floating mystery box above the
+            // Connect button. The hero's typography already
+            // anchors the page; the glyph isn't needed.
         }
     }
 }
