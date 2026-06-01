@@ -160,6 +160,10 @@ const AGE_THRESHOLDS: &[u32] = &[13, 16, 18, 21, 65];
 ///   whatever storage the host wallet uses (redb in the demo)
 /// - `verify_label`: optional pre-computed self-verify badge text
 ///   from the host — `None` ⇒ the card omits the badge slot
+/// - `on_delete`: optional handler invoked with the `vc_uri` when
+///   the user clicks Delete. `None` ⇒ the Delete button is
+///   omitted (useful when the host doesn't want a destructive
+///   action on this row).
 ///
 /// No interactions emit network or chain ops yet; the Reveal
 /// toggles and the threshold dropdown mutate local state only.
@@ -174,6 +178,7 @@ pub fn DigitalPassportCard(
     vc: StoredVc,
     fetch_opening: std::rc::Rc<dyn Fn(&str) -> Option<VcOpening>>,
     verify_label: Option<String>,
+    on_delete: Option<EventHandler<String>>,
 ) -> Element {
     let mut reveal = use_signal(RevealState::default);
     let mut age_threshold = use_signal(|| 18u32);
@@ -337,16 +342,15 @@ pub fn DigitalPassportCard(
             // dateOfBirth — predicate-only
             div { class: "vc-card-passport__claim",
                 div { class: "vc-card-passport__claim-head",
-                    span { class: "vc-card-passport__claim-icon", "🎂" }
+                    span { class: "vc-card-passport__claim-icon", "📅" }
                     span { class: "vc-card-passport__claim-name", "Date of birth" }
                     span { class: "vc-card-passport__tier-chip vc-card-passport__tier-chip--pred",
                         "Predicate-only — never revealed"
                     }
                 }
                 div { class: "vc-card-passport__claim-body",
-                    div { class: "vc-card-passport__hidden",
-                        span { class: "vc-card-passport__hidden-icon", "🧮" }
-                        span { "Discloses only: age ≥ threshold" }
+                    div { class: "vc-card-passport__predicate-caption",
+                        "Discloses only: age ≥ threshold"
                     }
                     div { class: "vc-card-passport__predicate-row",
                         label { class: "vc-card-passport__predicate-label", "Prove age over:" }
@@ -379,6 +383,25 @@ pub fn DigitalPassportCard(
                 }
                 div { class: "vc-card-passport__footer-hint",
                     "Generating a presentation is wired in Phase 2."
+                }
+                if let Some(handler) = on_delete {
+                    {
+                        // The `vc_uri` capture is the key the host
+                        // uses to look up the row in storage when
+                        // the button is clicked. Clone it once and
+                        // hand the clone to each click — the
+                        // handler is `Copy` (EventHandler is
+                        // a `Copy` wrapper around an Rc).
+                        let vc_uri = vc.vc_uri.clone();
+                        rsx! {
+                            button {
+                                class: "vc-card-passport__delete-btn",
+                                title: "Remove this credential from the wallet (local-only — no chain op)",
+                                onclick: move |_| handler.call(vc_uri.clone()),
+                                "Delete"
+                            }
+                        }
+                    }
                 }
             }
         }

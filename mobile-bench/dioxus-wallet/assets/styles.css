@@ -2206,3 +2206,54 @@ details .panel .row {
   font-style: italic;
   color: var(--text-muted);
 }
+
+/* Predicate-only caption — short, italic, no leading icon. The
+ * tier chip above already telegraphs the privacy story; the
+ * caption fills in the "what's disclosed instead" detail without
+ * a noisy second glyph. */
+.vc-card-passport__predicate-caption {
+  font-size: 12.5px;
+  font-style: italic;
+  color: var(--text-muted);
+}
+
+/* Destructive Delete button. Quiet by default — red ink on the
+ * neutral surface — flips to a solid red tint on hover so an
+ * accidental brush is obviously about to do something. Smaller
+ * than the primary Reveal button so it doesn't pull the eye in
+ * the footer rhythm.
+ *
+ * Sized to clear the 32 px mobile touch target (8 px vertical
+ * padding + ~14 px text = 30 px content + 2 px border ≈ 32 px). */
+.vc-card-passport__delete-btn {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vc-card-passport__delete-btn:hover {
+  background: rgba(255, 92, 122, 0.18);
+}
+
+/* Generic-row Delete button — same posture as the digital-
+ * passport card delete but tuned for the tighter row layout
+ * (no pill radius, lines up with the Self-verify button). */
+.vc-row-delete-btn {
+  background: transparent;
+  color: var(--error);
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  margin-left: 8px;
+}
+.vc-row-delete-btn:hover {
+  background: rgba(255, 92, 122, 0.18);
+}

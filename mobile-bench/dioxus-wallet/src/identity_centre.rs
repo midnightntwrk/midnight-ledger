@@ -912,7 +912,7 @@ fn render_vc_dispatch(
     refresh_tick: Signal<u64>,
 ) -> Element {
     if crate::vc_views::digital_passport::is_digital_passport(&vc) {
-        render_digital_passport_dispatch(vc, badges)
+        render_digital_passport_dispatch(vc, badges, refresh_tick)
     } else {
         render_vc_row(network, bridge_state, vc, badges, refresh_tick)
     }
@@ -925,6 +925,7 @@ fn render_vc_dispatch(
 fn render_digital_passport_dispatch(
     vc: StoredVc,
     badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
+    refresh_tick: Signal<u64>,
 ) -> Element {
     use crate::vc_views::digital_passport::DigitalPassportCard;
 
@@ -956,7 +957,54 @@ fn render_digital_passport_dispatch(
         .cloned()
         .map(|b| b.label());
 
-    DigitalPassportCard(vc, fetch_opening, badge_label)
+    // Wire Delete to the local redb store via the same path the
+    // sample-insertion button uses. Local-only — there's no
+    // chain-side equivalent in Phase 1; the holder simply forgets
+    // a credential. Errors are logged at info level (best-effort
+    // demo cleanup, not a hard fail path).
+    let on_delete = EventHandler::new({
+        let mut refresh_tick = refresh_tick;
+        move |uri_to_delete: String| {
+            spawn(async move {
+                let store_path = vc_store_path();
+                let res = tokio::task::spawn_blocking(move || {
+                    RedbVcStore::open(store_path)
+                        .map_err(|e| format!("open: {e}"))
+                        .and_then(|s| {
+                            s.delete_vc(&uri_to_delete)
+                                .map_err(|e| format!("delete: {e}"))
+                        })
+                })
+                .await;
+                match res {
+                    Ok(Ok(())) => {
+                        tracing::info!(
+                            target: "dioxus_wallet::identity_centre",
+                            "vc.delete: removed",
+                        );
+                    }
+                    Ok(Err(e)) => {
+                        tracing::warn!(
+                            target: "dioxus_wallet::identity_centre",
+                            error = %e,
+                            "vc.delete: store error",
+                        );
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            target: "dioxus_wallet::identity_centre",
+                            error = %e,
+                            "vc.delete: task panicked",
+                        );
+                    }
+                }
+                let next = *refresh_tick.read() + 1;
+                refresh_tick.set(next);
+            });
+        }
+    });
+
+    DigitalPassportCard(vc, fetch_opening, badge_label, Some(on_delete))
 }
 
 /// Insert a hard-coded `digital-passport:v1` sample into the redb
@@ -1219,6 +1267,43 @@ fn render_vc_row(
         .cloned()
         .unwrap_or(VerifyBadge::Unknown);
 
+    // Per-row Delete handler — local-only redb removal. Same
+    // pattern as the digital-passport card's delete: spawn a
+    // blocking task, log the outcome at info/warn, then bump the
+    // refresh tick so the inventory re-renders without the row.
+    let delete = {
+        let vc_uri_for_delete = vc_uri.clone();
+        let mut refresh_tick = refresh_tick;
+        move |_| {
+            let uri = vc_uri_for_delete.clone();
+            spawn(async move {
+                let store_path = vc_store_path();
+                let res = tokio::task::spawn_blocking(move || {
+                    RedbVcStore::open(store_path)
+                        .map_err(|e| format!("open: {e}"))
+                        .and_then(|s| {
+                            s.delete_vc(&uri).map_err(|e| format!("delete: {e}"))
+                        })
+                })
+                .await;
+                let outcome = match res {
+                    Ok(Ok(())) => None,
+                    Ok(Err(e)) => Some(e),
+                    Err(e) => Some(format!("task panicked: {e}")),
+                };
+                if let Some(msg) = outcome {
+                    tracing::warn!(
+                        target: "dioxus_wallet::identity_centre",
+                        error = %msg,
+                        "vc.delete (generic row): failed",
+                    );
+                }
+                let next = *refresh_tick.read() + 1;
+                refresh_tick.set(next);
+            });
+        }
+    };
+
     rsx! {
         div { class: "row label", "VC" }
         div { class: "seed-blob", "{truncate_did(&vc_uri)}" }
@@ -1230,6 +1315,11 @@ fn render_vc_row(
                 disabled: *busy.read(),
                 onclick: verify,
                 {if *busy.read() { "Verifying…" } else { "Self-verify" }}
+            }
+            button {
+                class: "vc-row-delete-btn",
+                onclick: delete,
+                "Delete"
             }
             div { class: "{badge.css()}",
                 div { class: "seed-blob", "{badge.label()}" }
