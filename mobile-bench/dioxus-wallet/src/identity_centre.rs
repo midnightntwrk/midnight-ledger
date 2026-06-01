@@ -457,30 +457,54 @@ fn ScanQrSection(
     };
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header", "📷 Scan QR" }
-            div { class: "detail-empty",
-                "One tap — auto-detects OID4VP (authenticate) vs "
-                "OID4VCI (request credential)."
-            }
-            div { class: "row",
-                button {
-                    class: "cta",
-                    disabled: *busy.read(),
-                    onclick: scan_and_dispatch,
-                    {if *busy.read() { "Working…" } else { "📷 Scan QR" }}
+        section { class: "cta-card scan-hero",
+            div { class: "cta-card__ambient cta-card__ambient--one" }
+            div { class: "cta-card__ambient cta-card__ambient--two" }
+
+            div { class: "scan-hero__body",
+                div { class: "scan-hero__copy",
+                    p { class: "cta-card__eyebrow", "Identity Centre" }
+                    h2 { class: "cta-card__title", "Scan to continue" }
+                    p { class: "cta-card__sub",
+                        "One tap — auto-detects OID4VP (authenticate) "
+                        "vs OID4VCI (request credential)."
+                    }
+                    div { class: "cta-card__action",
+                        button {
+                            class: "btn-primary",
+                            disabled: *busy.read(),
+                            onclick: scan_and_dispatch,
+                            {if *busy.read() { "Working…" } else { "📷 Scan QR" }}
+                        }
+                    }
+                }
+                // QR-frame illustration. Pure CSS + inline SVG so the
+                // wallet binary doesn't pull a new asset. Corner
+                // brackets evoke a viewfinder; the centre is a faint
+                // grid hint suggesting the QR module pattern. Hidden
+                // on narrow viewports via the `.cta-card`
+                // breakpoint-collapse below.
+                div { class: "scan-hero__frame", aria_hidden: "true",
+                    div { class: "scan-hero__frame-inner",
+                        div { class: "scan-hero__frame-corner scan-hero__frame-corner--tl" }
+                        div { class: "scan-hero__frame-corner scan-hero__frame-corner--tr" }
+                        div { class: "scan-hero__frame-corner scan-hero__frame-corner--bl" }
+                        div { class: "scan-hero__frame-corner scan-hero__frame-corner--br" }
+                        div { class: "scan-hero__frame-grid" }
+                    }
                 }
             }
+
             if let Some(msg) = ok_msg.read().as_ref() {
-                div { class: "wizard-outcome ok",
-                    div { class: "row label", "Done" }
-                    div { class: "seed-blob", "{msg}" }
+                div { class: "outcome outcome--ok",
+                    div { class: "outcome__title", "Done" }
+                    div { class: "outcome__body", "{msg}" }
                 }
             }
             if let Some(msg) = err_msg.read().as_ref() {
-                div { class: "wizard-outcome err",
-                    div { class: "row label", "Failed" }
-                    div { class: "seed-blob", "{msg}" }
+                div { class: "outcome outcome--err",
+                    div { class: "outcome__title", "Failed" }
+                    div { class: "outcome__body", "{msg}" }
                 }
             }
         }
