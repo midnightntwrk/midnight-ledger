@@ -615,6 +615,40 @@ button:disabled {
   opacity: 0.7;
 }
 
+/* ── Scan-QR button (icon + label) ──────────────────────────────
+ *
+ * Lays out the Lucide `scan-line` glyph as a leading icon next to
+ * the "Scan QR" label so the CTA matches the Lucide line-icon
+ * vocabulary used by the bottom nav. Without `display: inline-flex`
+ * the SVG would push the label onto a new line. Stroke colour is
+ * inherited (`currentColor`), so the icon picks up `.btn-primary`'s
+ * dark-on-gradient label colour automatically.
+ *
+ * The `.scan-btn__icon` line-height clamp prevents the host
+ * button's tall line-height from adding vertical slack around the
+ * 22 × 22 glyph.
+ */
+.scan-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.55rem;
+}
+.scan-btn__icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+.scan-btn__icon svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+}
+.scan-btn__label {
+  display: inline-flex;
+  align-items: center;
+}
+
 /* Text — low-emphasis chrome-less. */
 .btn-text {
   background: transparent;

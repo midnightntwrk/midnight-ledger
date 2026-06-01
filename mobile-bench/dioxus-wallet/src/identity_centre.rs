@@ -396,6 +396,29 @@ fn ScanQrSection(
                                 busy.set(false);
                                 return;
                             }
+                            Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
+                                if msg.contains("getUserMedia not available") =>
+                            {
+                                // Android WebView gates
+                                // `navigator.mediaDevices` behind a
+                                // secure-context check. The wallet's
+                                // shell loads from the `dioxus://`
+                                // scheme, which Chromium treats as
+                                // insecure, so the API is `undefined`
+                                // and we can't drive a camera preview
+                                // here. Point the operator at the
+                                // paste fallback that already lives
+                                // under Diagnostics → Bootstrap.
+                                err_msg.set(Some(
+                                    "Camera unavailable in this WebView \
+                                     (Android secure-context limit). \
+                                     Paste the OID4VC URL in \
+                                     Diagnostics → Bootstrap instead."
+                                        .into(),
+                                ));
+                                busy.set(false);
+                                return;
+                            }
                             Err(e) => {
                                 err_msg.set(Some(format!("scan failed: {e}")));
                                 busy.set(false);
@@ -458,10 +481,24 @@ fn ScanQrSection(
                     }
                     div { class: "cta-card__action",
                         button {
-                            class: "btn-primary",
+                            // `scan-btn` lays out the leading icon
+                            // + label inline; without it the SVG
+                            // would render as a block before the
+                            // text. Defined in `assets/styles.css`
+                            // next to `.btn-primary`.
+                            class: "btn-primary scan-btn",
                             disabled: *busy.read(),
                             onclick: scan_and_dispatch,
-                            {if *busy.read() { "Working…" } else { "📷 Scan QR" }}
+                            if *busy.read() {
+                                "Working…"
+                            } else {
+                                span {
+                                    class: "scan-btn__icon",
+                                    aria_hidden: "true",
+                                    dangerous_inner_html: crate::app::LUCIDE_SCAN_LINE,
+                                }
+                                span { class: "scan-btn__label", "Scan QR" }
+                            }
                         }
                     }
                 }
@@ -698,7 +735,21 @@ fn BootstrapSection(
             let bridge_state = bridge_state.clone();
             let action_id = next_action_id();
             let span = tracing::info_span!("ic.bootstrap", action_id = %action_id);
-            spawn(async move {
+            // Box::pin moves the bootstrap state machine off the
+            // WebView dispatch thread's ~256 KiB stack. On Android
+            // the click is delivered via
+            // `RustWebViewClient.shouldInterceptRequest` on a
+            // Chromium foreground-pool thread; without this the
+            // inline `async move {...}` generator (Wallet +
+            // indexer/node/prover clients + bootstrap_did_with_keys
+            // futures) overflows before `spawn` is reached and the
+            // process SIGSEGVs at
+            // `dioxus_core::runtime::Runtime::with_current_scope`.
+            // See tombstone_04 (2026-06-01 23:54) for the canonical
+            // backtrace.
+            let fut: std::pin::Pin<
+                Box<dyn std::future::Future<Output = ()> + 'static>,
+            > = Box::pin(async move {
                 let Some(store) = bridge_state.store().cloned() else {
                     err_msg.set(Some("wallet store not opened yet".into()));
                     busy.set(false);
@@ -775,6 +826,7 @@ fn BootstrapSection(
                 }
                 busy.set(false);
             }.instrument(span));
+            spawn(fut);
         }
     };
 

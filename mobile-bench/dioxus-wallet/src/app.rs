@@ -788,11 +788,37 @@ pub(crate) fn app_wallet_for(net: Network) -> Wallet {
     // startup and read here on every wallet construction, so all
     // ~15 call sites of `app_wallet_for` transparently get the
     // proof-server-backed wallet without parameter threading.
-    let with_url = if let Some(url) = PROOF_SERVER_URL.get() {
-        tracing::info!(target: "dioxuswalletmain", proof_server_url = %url, "app_wallet_for: attaching proof-server URL");
-        base.with_proof_server_url(url.clone())
+    //
+    // Resolution order:
+    //   1. `PROOF_SERVER_URL` OnceLock — populated at runtime by
+    //      `BridgeState::spawn_proof_server` (desktop / iOS path).
+    //   2. `MIDNIGHT_PROOF_SERVER_URL` env var captured at build
+    //      time via `option_env!()`. This is the Android / cross-
+    //      compile path: the APK's `.so` carries the operator's
+    //      tailnet proof-server URL baked in, since you can't set
+    //      process env vars on Android without Java glue.
+    //   3. Fall back to LocalProvingProvider (in-process Halo2 —
+    //      slow on phones, OK on desktop debug).
+    let build_time_url: Option<&'static str> =
+        option_env!("MIDNIGHT_PROOF_SERVER_URL");
+    let resolved_url: Option<String> = PROOF_SERVER_URL
+        .get()
+        .cloned()
+        .or_else(|| build_time_url.map(String::from));
+    let with_url = if let Some(url) = resolved_url {
+        tracing::info!(
+            target: "dioxuswalletmain",
+            proof_server_url = %url,
+            "app_wallet_for: attaching proof-server URL",
+        );
+        base.with_proof_server_url(url)
     } else {
-        tracing::info!(target: "dioxuswalletmain", "app_wallet_for: PROOF_SERVER_URL not set yet — will use LocalProvingProvider");
+        tracing::info!(
+            target: "dioxuswalletmain",
+            "app_wallet_for: no proof-server URL (runtime OnceLock empty, \
+             MIDNIGHT_PROOF_SERVER_URL build-time env unset) — will use \
+             LocalProvingProvider",
+        );
         base
     };
     // Layer 2 / Phase 3: attach the persisted DUST syncer if the
@@ -2462,6 +2488,13 @@ const LUCIDE_KEY_ROUND: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width=
 const LUCIDE_ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>"#;
 
 const LUCIDE_SETTINGS_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>"#;
+
+/// Lucide `scan-line` glyph — camera viewfinder brackets with a
+/// horizontal scan beam. Used by the Identity Centre's top-level
+/// Scan QR CTA in place of the previous 📷 emoji so the icon
+/// matches the rest of the wallet's Lucide line-icon vocabulary
+/// (22 × 22 viewBox, currentColor stroke, stroke-width 2).
+pub(crate) const LUCIDE_SCAN_LINE: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><path d="M7 12h10"/></svg>"#;
 
 /// Fixed pipeline order — used to render a checklist with one row
 /// per stage. Done/Failed sit outside this list as terminal states.
