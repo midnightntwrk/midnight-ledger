@@ -301,15 +301,9 @@ pub fn IdentityCentrePanel(
     let _ = on_did_minted;
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header", "Identity Centre" }
-            div { class: "detail-empty",
-                "Scan a QR code to authenticate or receive a credential. "
-                "Need to mint a fresh DID or paste an OID4VP URL by "
-                "hand? Switch to the Bootstrap tab."
-            }
-        }
-
+        // (Intro "Identity Centre" card removed — duplicated the
+        // bottom-tab label + the scan-hero eyebrow underneath.
+        // The scan-hero itself anchors the page now.)
         ScanQrSection {
             network,
             bridge_state: bridge_state.clone(),
@@ -463,7 +457,7 @@ fn ScanQrSection(
 
             div { class: "scan-hero__body",
                 div { class: "scan-hero__copy",
-                    p { class: "cta-card__eyebrow", "Identity Centre" }
+                    p { class: "cta-card__eyebrow", "Receive" }
                     h2 { class: "cta-card__title", "Scan to continue" }
                     p { class: "cta-card__sub",
                         "One tap — auto-detects OID4VP (authenticate) "
@@ -548,16 +542,9 @@ pub fn BootstrapPanel(
         use_signal::<Option<crate::did_picker::PickerState>>(|| None);
 
     rsx! {
-        div { class: "card",
-            div { class: "card-header", "Bootstrap" }
-            div { class: "detail-empty",
-                "Seed a wallet for the demo. Mint a new DID + the "
-                "Ed25519 / Jubjub key pair the OID4VP + OID4VCI flows "
-                "use, or paste an OID4VP URL by hand if you don't "
-                "want the camera scanner."
-            }
-        }
-
+        // (Intro "Bootstrap" card removed — restated the bottom-tab
+        // label without adding signal. Each section below carries
+        // its own header.)
         DemoWalletControlsSection {
             network,
             wallet,
