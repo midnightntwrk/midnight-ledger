@@ -1161,7 +1161,7 @@ describe('Ledger API - functions', () => {
      *
      * @given Freshly-sampled schnorr and ecdsa verifying keys
      * @when Deriving a UserAddress from each
-     * @then Addresses should differ (ecdsa derivation uses an "midnight:ecdsa:"
+     * @then Addresses should differ (ecdsa derivation uses an "midnight:ecdsa"
      *   domain-separator prefix that schnorr derivation lacks)
      */
     test('addressFromKey produces different addresses for schnorr vs ecdsa', () => {

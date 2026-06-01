@@ -611,7 +611,7 @@ describe('Cryptographic Attack Vector Tests', () => {
 
     /**
      * Address derivation differs across algorithms: ECDSA prefixes its raw
-     * key bytes with the "midnight:ecdsa:" domain separator before hashing, while
+     * key bytes with the "midnight:ecdsa" domain separator before hashing, while
      * Schnorr does not. Two verifying keys randomly sampled from each scheme
      * must yield distinct addresses - otherwise an attacker could craft a
      * Schnorr key that addresses the same account as an existing ECDSA key
