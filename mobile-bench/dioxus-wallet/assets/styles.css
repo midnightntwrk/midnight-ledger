@@ -2257,3 +2257,154 @@ details .panel .row {
 .vc-row-delete-btn:hover {
   background: rgba(255, 92, 122, 0.18);
 }
+
+/* ── DID picker modal (C3) ───────────────────────────────────────
+ *
+ * Centre-screen modal that lets the user pick which DID to act
+ * as when the wallet holds more than one. Renders when
+ * `pending_pick` signal is `Some`. Backdrop catches clicks
+ * outside the dialog. Sits above every tab via fixed
+ * positioning + high z-index.
+ */
+
+.did-picker-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 900;
+}
+
+.did-picker-dialog {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 901;
+  width: min(420px, calc(100vw - 32px));
+  max-height: min(80vh, 620px);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
+  overflow: hidden;
+}
+
+.did-picker-header {
+  padding: 14px 16px 10px;
+  border-bottom: 1px solid var(--border-faint);
+}
+.did-picker-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.did-picker-subtitle {
+  font-size: 12.5px;
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.did-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+.did-picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+  border: none;
+  border-bottom: 1px solid var(--border-faint);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  font-family: inherit;
+}
+.did-picker-row:last-child {
+  border-bottom: none;
+}
+.did-picker-row:hover {
+  background: var(--surface-2);
+}
+
+.did-picker-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.did-picker-row-did {
+  font-size: 12.5px;
+  color: var(--text-soft);
+  overflow-wrap: anywhere;
+}
+.did-picker-row-did.mono {
+  font-family: ui-monospace, monospace;
+}
+.did-picker-row-meta {
+  display: flex;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.did-picker-row-sep {
+  color: var(--text-faint);
+}
+
+.did-picker-status {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  border: 1px solid transparent;
+  flex: 0 0 auto;
+}
+.did-picker-status--active {
+  background: rgba(46, 230, 166, 0.16);
+  color: var(--success);
+  border-color: rgba(46, 230, 166, 0.40);
+}
+.did-picker-status--pending {
+  background: rgba(255, 176, 32, 0.18);
+  color: var(--warn);
+  border-color: rgba(255, 176, 32, 0.40);
+}
+.did-picker-status--deactivated {
+  background: var(--surface-3);
+  color: var(--text-muted);
+  border-color: var(--border-faint);
+  opacity: 0.7;
+}
+
+.did-picker-footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 10px 16px;
+  border-top: 1px solid var(--border-faint);
+  background: var(--surface-2);
+}
+.did-picker-cancel {
+  background: transparent;
+  color: var(--text-soft);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.did-picker-cancel:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}

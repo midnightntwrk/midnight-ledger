@@ -95,6 +95,170 @@ fn vc_store_path() -> std::path::PathBuf {
     p
 }
 
+/// Run the OID4VP authentication flow with a known DID + URL.
+/// Shared by `Oid4vpSection` (paste flow) and `ScanQrSection`
+/// (scan flow); each call site invokes via `require_did` so the
+/// DID has already been picked by the time we land here.
+///
+/// Sets `busy = true` synchronously and clears it after the
+/// spawned task finishes; writes the protocol outcome to
+/// `ok_msg` / `err_msg`.
+fn run_oid4vp_authenticate(
+    network: Network,
+    bridge_state: BridgeState,
+    did_str: String,
+    url: String,
+    mut err_msg: Signal<Option<String>>,
+    mut ok_msg: Signal<Option<String>>,
+    mut busy: Signal<bool>,
+) {
+    let did = match wallet_core::DidId::parse(&did_str) {
+        Ok(d) => d,
+        Err(e) => {
+            err_msg.set(Some(format!("did parse: {e}")));
+            return;
+        }
+    };
+    let Some(store) = bridge_state.store().cloned() else {
+        err_msg.set(Some("wallet store not opened yet".into()));
+        return;
+    };
+    let Some(wallet_id) = bridge_state.active_wallet_id() else {
+        err_msg.set(Some("no active wallet".into()));
+        return;
+    };
+    busy.set(true);
+    err_msg.set(None);
+    ok_msg.set(None);
+    let metrics = bridge_state.metrics_dyn();
+    let in_mem_metrics = bridge_state.metrics();
+    let probe = bridge_state.resource_probe();
+    let action_id = next_action_id();
+    let span = tracing::info_span!("ic.oid4vp_authenticate", action_id = %action_id);
+    spawn(
+        async move {
+            let wallet =
+                metered_app_wallet_for(network, metrics.clone(), probe.clone());
+            let secret_store = RedbSecretStore::new(store, wallet_id);
+            let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+            let http: Arc<dyn HttpClient> =
+                Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+            let clock = SystemClock;
+            let result = time_op(
+                &*metrics,
+                &*probe,
+                "oid4vp_authenticate",
+                oid4vp_run_authentication(
+                    &*http,
+                    &clock,
+                    &url,
+                    &wallet,
+                    &secret_store,
+                    &did,
+                ),
+            )
+            .await;
+            match result {
+                Ok(r) => {
+                    in_mem_metrics.incr("oid4vp.ok", 1);
+                    ok_msg.set(Some(format!(
+                        "session_id={} status={}",
+                        r.session_id, r.status,
+                    )));
+                }
+                Err(e) => {
+                    in_mem_metrics.incr("oid4vp.failed", 1);
+                    err_msg.set(Some(format!("authenticate failed: {e}")));
+                }
+            }
+            busy.set(false);
+        }
+        .instrument(span),
+    );
+}
+
+/// Run the OID4VCI issuance flow with a known DID + URL. Counterpart
+/// to `run_oid4vp_authenticate` for the credential-offer side.
+fn run_oid4vci_request(
+    network: Network,
+    bridge_state: BridgeState,
+    did_str: String,
+    url: String,
+    mut err_msg: Signal<Option<String>>,
+    mut ok_msg: Signal<Option<String>>,
+    mut busy: Signal<bool>,
+) {
+    let did = match wallet_core::DidId::parse(&did_str) {
+        Ok(d) => d,
+        Err(e) => {
+            err_msg.set(Some(format!("did parse: {e}")));
+            return;
+        }
+    };
+    let Some(store) = bridge_state.store().cloned() else {
+        err_msg.set(Some("wallet store not opened yet".into()));
+        return;
+    };
+    let Some(wallet_id) = bridge_state.active_wallet_id() else {
+        err_msg.set(Some("no active wallet".into()));
+        return;
+    };
+    busy.set(true);
+    err_msg.set(None);
+    ok_msg.set(None);
+    let metrics = bridge_state.metrics_dyn();
+    let in_mem_metrics = bridge_state.metrics();
+    let probe = bridge_state.resource_probe();
+    let action_id = next_action_id();
+    let span = tracing::info_span!("ic.issuance", action_id = %action_id);
+    spawn(
+        async move {
+            let wallet =
+                metered_app_wallet_for(network, metrics.clone(), probe.clone());
+            let secret_store = RedbSecretStore::new(store, wallet_id);
+            let vc_store = match RedbVcStore::open(vc_store_path()) {
+                Ok(v) => v,
+                Err(e) => {
+                    err_msg.set(Some(format!("open vc store: {e}")));
+                    busy.set(false);
+                    return;
+                }
+            };
+            let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+            let http: Arc<dyn HttpClient> =
+                Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+            let clock = SystemClock;
+            let result = time_op(
+                &*metrics,
+                &*probe,
+                "issuance",
+                oid4vci_run_issuance(
+                    &*http,
+                    &clock,
+                    &url,
+                    &wallet,
+                    &secret_store,
+                    &did,
+                    &vc_store,
+                ),
+            )
+            .await;
+            match result {
+                Ok(vc_uri) => {
+                    in_mem_metrics.incr("vcs.issued", 1);
+                    ok_msg.set(Some(format!("issued {vc_uri}")));
+                }
+                Err(e) => {
+                    in_mem_metrics.incr("vcs.issuance_failed", 1);
+                    err_msg.set(Some(format!("issue failed: {e}")));
+                }
+            }
+            busy.set(false);
+        }
+        .instrument(span),
+    );
+}
+
 /// Top-level Identity Centre panel. Renders the four sections
 /// stacked vertically.
 ///
@@ -109,6 +273,9 @@ fn vc_store_path() -> std::path::PathBuf {
 pub fn IdentityCentrePanel(
     network: Network,
     bridge_state: BridgeState,
+    did_inventory: Signal<
+        std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
+    >,
     on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
     // The "current Identity Centre DID" — populated either from a
@@ -116,6 +283,14 @@ pub fn IdentityCentrePanel(
     // whose `kid` carries the `#key-auth` fragment. Held at panel
     // scope so all four sections share it.
     let ic_did = use_signal::<Option<String>>(|| None);
+
+    // Picker state — `Some` while the DID-picker modal is up.
+    // Shared by every flow that needs an explicit "act as which
+    // DID?" decision: the Scan QR button (this panel) and the
+    // OID4VCI request (this panel). The Bootstrap tab owns its
+    // own copy for the OID4VP paste-URL flow.
+    let pending_pick =
+        use_signal::<Option<crate::did_picker::PickerState>>(|| None);
 
     // `on_did_minted` is the bridge between this panel and `app.rs`'s
     // `did_inventory` signal. It travels with the BootstrapPanel
@@ -139,18 +314,28 @@ pub fn IdentityCentrePanel(
             network,
             bridge_state: bridge_state.clone(),
             ic_did,
+            did_inventory,
+            pending_pick,
         }
 
         Oid4vciSection {
             network,
             bridge_state: bridge_state.clone(),
             ic_did,
+            did_inventory,
+            pending_pick,
         }
 
         VcInventorySection {
             network,
             bridge_state,
         }
+
+        // Modal — renders when pending_pick is `Some`, returns
+        // empty rsx otherwise. Sits at panel-bottom so the
+        // backdrop overlays everything above (CSS handles the
+        // z-index + full-viewport sizing).
+        crate::did_picker::DidPickerModal { pending_pick }
     }
 }
 
@@ -176,6 +361,10 @@ fn ScanQrSection(
     network: Network,
     bridge_state: BridgeState,
     ic_did: Signal<Option<String>>,
+    did_inventory: Signal<
+        std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
+    >,
+    pending_pick: Signal<Option<crate::did_picker::PickerState>>,
 ) -> Element {
     let mut busy = use_signal(|| false);
     let mut err_msg = use_signal::<Option<String>>(|| None);
@@ -183,153 +372,87 @@ fn ScanQrSection(
 
     let scan_and_dispatch = {
         let bridge_state = bridge_state.clone();
-        let ic_did = ic_did;
+        let mut ic_did = ic_did;
         move |_| {
             if *busy.read() {
                 return;
             }
-            let Some(did_str) = ic_did.read().clone() else {
-                err_msg.set(Some(
-                    "Bootstrap a DID first (Bootstrap tab → Bootstrap DID).".into(),
-                ));
-                return;
-            };
-            let did = match wallet_core::DidId::parse(&did_str) {
-                Ok(d) => d,
-                Err(e) => {
-                    err_msg.set(Some(format!("did parse: {e}")));
-                    return;
-                }
-            };
-            let Some(store) = bridge_state.store().cloned() else {
-                err_msg.set(Some("wallet store not opened yet".into()));
-                return;
-            };
-            let Some(wallet_id) = bridge_state.active_wallet_id() else {
-                err_msg.set(Some("no active wallet".into()));
-                return;
-            };
-            let bridge_state = bridge_state.clone();
-            err_msg.set(None);
-            ok_msg.set(None);
-            busy.set(true);
-            spawn(async move {
-                let Some(bridge) = eval_bridge::global_bridge() else {
-                    err_msg.set(Some(
-                        "JS bridge not installed yet (js-bridge feature off?)".into(),
-                    ));
-                    busy.set(false);
-                    return;
-                };
-                let url = match eval_bridge::scan_qr(&*bridge).await {
-                    Ok(u) => u,
-                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
-                        if msg == "cancelled" =>
-                    {
-                        busy.set(false);
-                        return;
-                    }
-                    Err(e) => {
-                        err_msg.set(Some(format!("scan failed: {e}")));
-                        busy.set(false);
-                        return;
-                    }
-                };
-
-                let metrics = bridge_state.metrics_dyn();
-                let in_mem_metrics = bridge_state.metrics();
-                let probe = bridge_state.resource_probe();
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let secret_store = RedbSecretStore::new(store, wallet_id);
-                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                let http: Arc<dyn HttpClient> =
-                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-                let clock = SystemClock;
-                let action_id = next_action_id();
-
-                if let Some(rest) = url.strip_prefix("openid4vp://") {
-                    let _ = rest; // suppress unused-var warning under #[deny(warnings)]
-                    let span = tracing::info_span!(
-                        "ic.scan.oid4vp",
-                        action_id = %action_id,
-                    );
-                    let result = time_op(
-                        &*metrics,
-                        &*probe,
-                        "oid4vp_authenticate",
-                        oid4vp_run_authentication(
-                            &*http,
-                            &clock,
-                            &url,
-                            &wallet,
-                            &secret_store,
-                            &did,
-                        ),
-                    )
-                    .instrument(span)
-                    .await;
-                    match result {
-                        Ok(r) => {
-                            in_mem_metrics.incr("oid4vp.ok", 1);
-                            ok_msg.set(Some(format!(
-                                "OID4VP session_id={} status={}",
-                                r.session_id, r.status,
-                            )));
-                        }
-                        Err(e) => {
-                            in_mem_metrics.incr("oid4vp.failed", 1);
-                            err_msg.set(Some(format!("authenticate failed: {e}")));
-                        }
-                    }
-                } else if url.starts_with("openid-credential-offer://") {
-                    let vc_store = match RedbVcStore::open(vc_store_path()) {
-                        Ok(v) => v,
-                        Err(e) => {
-                            err_msg.set(Some(format!("open vc store: {e}")));
+            let bridge_state_outer = bridge_state.clone();
+            let mut err_msg_outer = err_msg;
+            // Pick the DID FIRST — saves the user cancelling the
+            // camera scan if it turns out they don't want to
+            // authenticate as the only DID they have.
+            crate::did_picker::require_did(
+                did_inventory,
+                pending_pick,
+                "Scan QR (auto-detect protocol)",
+                move |chosen_did| {
+                    ic_did.set(Some(chosen_did.clone()));
+                    err_msg.set(None);
+                    ok_msg.set(None);
+                    busy.set(true);
+                    let bridge_state = bridge_state_outer.clone();
+                    spawn(async move {
+                        let Some(bridge) = eval_bridge::global_bridge() else {
+                            err_msg.set(Some(
+                                "JS bridge not installed yet (js-bridge feature off?)"
+                                    .into(),
+                            ));
                             busy.set(false);
                             return;
+                        };
+                        let url = match eval_bridge::scan_qr(&*bridge).await {
+                            Ok(u) => u,
+                            Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
+                                if msg == "cancelled" =>
+                            {
+                                busy.set(false);
+                                return;
+                            }
+                            Err(e) => {
+                                err_msg.set(Some(format!("scan failed: {e}")));
+                                busy.set(false);
+                                return;
+                            }
+                        };
+                        if url.starts_with("openid4vp://") {
+                            // `run_oid4vp_authenticate` re-sets
+                            // busy=true synchronously so the inner
+                            // helper owns the busy lifecycle from
+                            // here on. We've already flipped it
+                            // true above; the helper flipping it
+                            // true again is a no-op.
+                            run_oid4vp_authenticate(
+                                network,
+                                bridge_state.clone(),
+                                chosen_did.clone(),
+                                url,
+                                err_msg,
+                                ok_msg,
+                                busy,
+                            );
+                        } else if url.starts_with("openid-credential-offer://") {
+                            run_oid4vci_request(
+                                network,
+                                bridge_state.clone(),
+                                chosen_did.clone(),
+                                url,
+                                err_msg,
+                                ok_msg,
+                                busy,
+                            );
+                        } else {
+                            err_msg.set(Some(format!(
+                                "Unsupported QR payload: expected openid4vp:// or \
+                                 openid-credential-offer:// prefix, got: {}",
+                                truncate_for_msg(&url, 80),
+                            )));
+                            busy.set(false);
                         }
-                    };
-                    let span = tracing::info_span!(
-                        "ic.scan.issuance",
-                        action_id = %action_id,
-                    );
-                    let result = time_op(
-                        &*metrics,
-                        &*probe,
-                        "issuance",
-                        oid4vci_run_issuance(
-                            &*http,
-                            &clock,
-                            &url,
-                            &wallet,
-                            &secret_store,
-                            &did,
-                            &vc_store,
-                        ),
-                    )
-                    .instrument(span)
-                    .await;
-                    match result {
-                        Ok(vc_uri) => {
-                            in_mem_metrics.incr("vcs.issued", 1);
-                            ok_msg.set(Some(format!("OID4VCI issued {vc_uri}")));
-                        }
-                        Err(e) => {
-                            in_mem_metrics.incr("vcs.issuance_failed", 1);
-                            err_msg.set(Some(format!("issue failed: {e}")));
-                        }
-                    }
-                } else {
-                    err_msg.set(Some(format!(
-                        "Unsupported QR payload: expected openid4vp:// or \
-                         openid-credential-offer:// prefix, got: {}",
-                        truncate_for_msg(&url, 80),
-                    )));
-                }
-                busy.set(false);
-            });
+                    });
+                },
+                move |msg| err_msg_outer.set(Some(msg)),
+            );
         }
     };
 
@@ -387,12 +510,17 @@ fn truncate_for_msg(s: &str, max: usize) -> String {
 pub fn BootstrapPanel(
     network: Network,
     bridge_state: BridgeState,
+    did_inventory: Signal<
+        std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
+    >,
     on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
-    // Same single-DID handle the IdentityCentrePanel uses. Each
-    // panel keeps its own copy; the C3 multi-DID picker will switch
-    // both panels onto a shared inventory-backed selector.
     let ic_did = use_signal::<Option<String>>(|| None);
+    // See IdentityCentrePanel for the picker rationale; the
+    // Bootstrap tab owns its own signal so the modal renders here
+    // when the OID4VP paste-URL flow needs a DID decision.
+    let pending_pick =
+        use_signal::<Option<crate::did_picker::PickerState>>(|| None);
 
     rsx! {
         div { class: "card",
@@ -416,7 +544,11 @@ pub fn BootstrapPanel(
             network,
             bridge_state,
             ic_did,
+            did_inventory,
+            pending_pick,
         }
+
+        crate::did_picker::DidPickerModal { pending_pick }
     }
 }
 
@@ -689,15 +821,19 @@ fn Oid4vpSection(
     network: Network,
     bridge_state: BridgeState,
     ic_did: Signal<Option<String>>,
+    did_inventory: Signal<
+        std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
+    >,
+    pending_pick: Signal<Option<crate::did_picker::PickerState>>,
 ) -> Element {
     let mut url_input = use_signal(String::new);
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut err_msg = use_signal::<Option<String>>(|| None);
-    let mut ok_msg = use_signal::<Option<String>>(|| None);
+    let ok_msg = use_signal::<Option<String>>(|| None);
 
     let authenticate = {
         let bridge_state = bridge_state.clone();
-        let ic_did = ic_did;
+        let mut ic_did = ic_did;
         move |_| {
             if *busy.read() {
                 return;
@@ -707,71 +843,30 @@ fn Oid4vpSection(
                 err_msg.set(Some("paste an openid4vp:// URL first".into()));
                 return;
             }
-            let Some(did_str) = ic_did.read().clone() else {
-                err_msg.set(Some("bootstrap an Identity Centre DID first".into()));
-                return;
-            };
-            let did = match wallet_core::DidId::parse(&did_str) {
-                Ok(d) => d,
-                Err(e) => {
-                    err_msg.set(Some(format!("did parse: {e}")));
-                    return;
-                }
-            };
-            let Some(store) = bridge_state.store().cloned() else {
-                err_msg.set(Some("wallet store not opened yet".into()));
-                return;
-            };
-            let Some(wallet_id) = bridge_state.active_wallet_id() else {
-                err_msg.set(Some("no active wallet".into()));
-                return;
-            };
-            busy.set(true);
-            err_msg.set(None);
-            ok_msg.set(None);
-            let metrics = bridge_state.metrics_dyn();
-            let in_mem_metrics = bridge_state.metrics();
-            let probe = bridge_state.resource_probe();
-            let action_id = next_action_id();
-            let span =
-                tracing::info_span!("ic.oid4vp_authenticate", action_id = %action_id);
-            spawn(async move {
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let secret_store = RedbSecretStore::new(store, wallet_id);
-                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                let http: Arc<dyn HttpClient> =
-                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-                let clock = SystemClock;
-                let result = time_op(
-                    &*metrics,
-                    &*probe,
-                    "oid4vp_authenticate",
-                    oid4vp_run_authentication(
-                        &*http,
-                        &clock,
-                        &url,
-                        &wallet,
-                        &secret_store,
-                        &did,
-                    ),
-                )
-                .await;
-                match result {
-                    Ok(r) => {
-                        in_mem_metrics.incr("oid4vp.ok", 1);
-                        ok_msg.set(Some(format!(
-                            "session_id={} status={}",
-                            r.session_id, r.status
-                        )));
-                    }
-                    Err(e) => {
-                        in_mem_metrics.incr("oid4vp.failed", 1);
-                        err_msg.set(Some(format!("authenticate failed: {e}")));
-                    }
-                }
-                busy.set(false);
-            }.instrument(span));
+            let bridge_state_outer = bridge_state.clone();
+            let mut err_msg_outer = err_msg;
+            // Route through the DID picker. 0 usable DIDs → error
+            // surfaced via the on_error sink; 1 → continuation runs
+            // immediately; >1 → modal opens and the continuation
+            // runs once the user picks.
+            crate::did_picker::require_did(
+                did_inventory,
+                pending_pick,
+                "Authenticate via OID4VP",
+                move |chosen_did| {
+                    ic_did.set(Some(chosen_did.clone()));
+                    run_oid4vp_authenticate(
+                        network,
+                        bridge_state_outer.clone(),
+                        chosen_did,
+                        url.clone(),
+                        err_msg,
+                        ok_msg,
+                        busy,
+                    );
+                },
+                move |msg| err_msg_outer.set(Some(msg)),
+            );
         }
     };
 
@@ -851,107 +946,50 @@ fn Oid4vciSection(
     network: Network,
     bridge_state: BridgeState,
     ic_did: Signal<Option<String>>,
+    did_inventory: Signal<
+        std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
+    >,
+    pending_pick: Signal<Option<crate::did_picker::PickerState>>,
 ) -> Element {
     let mut url_input = use_signal(String::new);
-    let mut busy = use_signal(|| false);
+    let busy = use_signal(|| false);
     let mut err_msg = use_signal::<Option<String>>(|| None);
-    let mut ok_msg = use_signal::<Option<String>>(|| None);
+    let ok_msg = use_signal::<Option<String>>(|| None);
 
     let request_vc = {
         let bridge_state = bridge_state.clone();
-        let ic_did = ic_did;
+        let mut ic_did = ic_did;
         move |_| {
             if *busy.read() {
                 return;
             }
             let url = url_input.read().trim().to_string();
             if url.is_empty() {
-                err_msg.set(Some("paste an openid-credential-offer:// URL first".into()));
+                err_msg.set(Some(
+                    "paste an openid-credential-offer:// URL first".into(),
+                ));
                 return;
             }
-            let Some(did_str) = ic_did.read().clone() else {
-                err_msg.set(Some("bootstrap an Identity Centre DID first".into()));
-                return;
-            };
-            let did = match wallet_core::DidId::parse(&did_str) {
-                Ok(d) => d,
-                Err(e) => {
-                    err_msg.set(Some(format!("did parse: {e}")));
-                    return;
-                }
-            };
-            let Some(store) = bridge_state.store().cloned() else {
-                err_msg.set(Some("wallet store not opened yet".into()));
-                return;
-            };
-            let Some(wallet_id) = bridge_state.active_wallet_id() else {
-                err_msg.set(Some("no active wallet".into()));
-                return;
-            };
-            busy.set(true);
-            err_msg.set(None);
-            ok_msg.set(None);
-            let metrics = bridge_state.metrics_dyn();
-            let in_mem_metrics = bridge_state.metrics();
-            let probe = bridge_state.resource_probe();
-            let action_id = next_action_id();
-            let span = tracing::info_span!("ic.issuance", action_id = %action_id);
-            spawn(async move {
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let secret_store = RedbSecretStore::new(store, wallet_id);
-                let vc_store = match RedbVcStore::open(vc_store_path()) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        err_msg.set(Some(format!("open vc store: {e}")));
-                        busy.set(false);
-                        return;
-                    }
-                };
-                // Wrap the real reqwest client with the
-                // metrics decorator so every /token and
-                // /credential HTTP call lands in the
-                // aggregator (host + status + duration_ms)
-                // and the Logs tab (via TracingMetrics).
-                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                let http: Arc<dyn HttpClient> =
-                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-                let clock = SystemClock;
-                // Bracket the whole OID4VCI flow with
-                // `time_op` so the aggregator records one
-                // top-level "issuance" sample carrying the
-                // total wall-time + RSS / CPU deltas. The
-                // HTTP decorator records the two sub-calls
-                // separately — the difference highlights
-                // whether the latency lives in the network
-                // or in local crypto.
-                let result = time_op(
-                    &*metrics,
-                    &*probe,
-                    "issuance",
-                    oid4vci_run_issuance(
-                        &*http,
-                        &clock,
-                        &url,
-                        &wallet,
-                        &secret_store,
-                        &did,
-                        &vc_store,
-                    ),
-                )
-                .await;
-                match result {
-                    Ok(vc_uri) => {
-                        in_mem_metrics.incr("vcs.issued", 1);
-                        ok_msg.set(Some(format!("issued {vc_uri}")));
-                    }
-                    Err(e) => {
-                        in_mem_metrics.incr("vcs.issuance_failed", 1);
-                        err_msg.set(Some(format!("issue failed: {e}")));
-                    }
-                }
-                busy.set(false);
-            }.instrument(span));
+            let bridge_state_outer = bridge_state.clone();
+            let mut err_msg_outer = err_msg;
+            crate::did_picker::require_did(
+                did_inventory,
+                pending_pick,
+                "Request credential (OID4VCI)",
+                move |chosen_did| {
+                    ic_did.set(Some(chosen_did.clone()));
+                    run_oid4vci_request(
+                        network,
+                        bridge_state_outer.clone(),
+                        chosen_did,
+                        url.clone(),
+                        err_msg,
+                        ok_msg,
+                        busy,
+                    );
+                },
+                move |msg| err_msg_outer.set(Some(msg)),
+            );
         }
     };
 

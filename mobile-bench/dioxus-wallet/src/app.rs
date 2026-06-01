@@ -589,25 +589,25 @@ struct ServiceInput {
 /// vm/service counts + last-seen block are kept fresh so the
 /// table always reflects the most recent observation.
 #[derive(Clone, PartialEq, Eq, Debug)]
-struct DidInventoryEntry {
+pub(crate) struct DidInventoryEntry {
     /// `did:midnight:<network>:<address>` — primary key.
-    did: String,
-    network_label: String,
-    status: DidInventoryStatus,
+    pub(crate) did: String,
+    pub(crate) network_label: String,
+    pub(crate) status: DidInventoryStatus,
     /// `None` for a freshly-deployed DID that hasn't been
     /// resolved yet (we don't know the counter chain-side until
     /// the indexer catches up).
-    counter: Option<u32>,
-    vm_count: Option<usize>,
-    service_count: Option<usize>,
-    last_block_height: Option<i64>,
+    pub(crate) counter: Option<u32>,
+    pub(crate) vm_count: Option<usize>,
+    pub(crate) service_count: Option<usize>,
+    pub(crate) last_block_height: Option<i64>,
 }
 
 /// Status badge for [`DidInventoryEntry`]. `Pending` is what we
 /// show between deploy and first successful resolve; afterwards
 /// the resolve reports `Active` or `Deactivated`.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-enum DidInventoryStatus {
+pub(crate) enum DidInventoryStatus {
     Pending,
     Active,
     Deactivated,
@@ -2280,6 +2280,7 @@ pub fn App() -> Element {
                 crate::identity_centre::BootstrapPanel {
                     network: *network.read(),
                     bridge_state: bridge_state.read().clone(),
+                    did_inventory,
                     // Same `on_did_minted` channel the Identity Centre
                     // used pre-C1 (and the Create-DID wizard before
                     // that) — inserts the new DID into the live
@@ -2310,6 +2311,7 @@ pub fn App() -> Element {
                 crate::identity_centre::IdentityCentrePanel {
                     network: *network.read(),
                     bridge_state: bridge_state.read().clone(),
+                    did_inventory,
                     // Callback fires after `bootstrap_did_with_keys`
                     // succeeds. Mirrors what the Create-DID wizard's
                     // `on_done` does: insert a Pending entry into the
