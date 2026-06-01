@@ -62,7 +62,16 @@ impl SubxtNodeClient {
             .connection_timeout(Duration::from_secs(10))
             .build(cfg.node_ws_url)
             .await?;
-        let subxt = OnlineClient::<SubstrateConfig>::from_url(cfg.node_ws_url)
+        // `from_url` rejects `ws://` to any non-loopback host with
+        // `Error::InsecureUrl` (see `subxt-rpcs/src/utils.rs`).
+        // We need plain `ws://` for the `Network::Undeployed`
+        // standalone env reachable over Tailscale's CGNAT range
+        // (`100.x.y.z`) — the laptop's node doesn't terminate TLS.
+        // `from_insecure_url` is the documented sibling that
+        // bypasses the check; it still accepts `wss://` for the
+        // mainnet / preprod / preview / qanet / devnet configs, so
+        // a single call site covers every network.
+        let subxt = OnlineClient::<SubstrateConfig>::from_insecure_url(cfg.node_ws_url)
             .await
             .map_err(|e| NodeError::Subxt(e.to_string()))?;
         Ok(Self { inner, subxt })
