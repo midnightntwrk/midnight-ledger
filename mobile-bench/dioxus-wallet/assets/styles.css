@@ -495,28 +495,38 @@ body {
 }
 
 /* ─────────────── Primary CTA ─────────────── */
+/* `.cta` — the one big primary action per screen (legacy class
+ * name; the new canonical is `.btn-primary` below — they share
+ * the same visual). Gradient green→cyan with dark text and a
+ * soft halo, per redesign spec §D P0 #3. */
 .cta {
   display: block;
   width: 100%;
   height: 48px;
   border: none;
-  border-radius: var(--radius-cta);
-  background: var(--accent-soft);
-  color: var(--accent);
+  border-radius: var(--r-3);
+  background: var(--gradient-primary);
+  color: #041018;
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 800;
   cursor: pointer;
   margin-top: 4px;
-  transition: transform 400ms cubic-bezier(.34, 1.56, .64, 1),
-              background 120ms ease,
-              color 120ms ease;
+  box-shadow: var(--shadow-button);
+  transition: transform var(--dur-slow) var(--ease-spring),
+              filter var(--dur-fast) ease,
+              box-shadow var(--dur-fast) ease;
 }
 .cta:active { transform: scale(.97); }
-.cta:hover:not(:disabled) { background: var(--accent); color: var(--bg); }
+.cta:hover:not(:disabled) {
+  filter: brightness(1.06);
+  box-shadow: 0 18px 46px rgba(53, 211, 255, 0.22);
+}
 .cta:disabled {
   background: var(--surface-4);
   color: var(--text-faint);
   cursor: not-allowed;
+  box-shadow: none;
+  filter: none;
 }
 
 /* ─────────────── Buttons (Material 3 inspired) ───────────────
@@ -569,27 +579,29 @@ button:disabled {
   cursor: not-allowed;
 }
 
-/* Filled — primary action emphasis. */
+/* Filled — primary action emphasis. New canonical primary
+ * button: gradient green→cyan with dark text and a halo shadow.
+ * The one "do the thing" affordance per screen. Replaces the
+ * previous tonal-purple variant per redesign spec §D P0 #3.
+ *
+ * Sibling `.cta` is the legacy class name for the same visual
+ * (full-width block variant); keep both for transition. */
 .btn-primary {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  /* M3 "elevation 1" — subtle shadow so the filled button reads
-   * as raised above tonal/text siblings. */
-  box-shadow:
-    0 1px 3px rgb(0 0 0 / 0.35),
-    0 1px 2px rgb(0 0 0 / 0.20);
+  background: var(--gradient-primary);
+  color: #041018;
+  font-weight: 800;
+  box-shadow: var(--shadow-button);
 }
 .btn-primary:hover:not(:disabled) {
-  background: color-mix(in oklab, var(--accent) 88%, white 12%);
-  box-shadow:
-    0 2px 6px rgb(0 0 0 / 0.40),
-    0 1px 3px rgb(0 0 0 / 0.25);
+  filter: brightness(1.06);
+  box-shadow: 0 18px 46px rgba(53, 211, 255, 0.22);
 }
 .btn-primary:disabled {
-  background: color-mix(in oklab, var(--surface-3) 80%, var(--accent) 20%);
+  background: var(--surface-4);
   color: var(--text-faint);
   box-shadow: none;
+  filter: none;
+  opacity: 0.7;
 }
 
 /* Text — low-emphasis chrome-less. */
@@ -2519,4 +2531,488 @@ details .panel .row {
   .credential-card .meta-grid,
   .credential-card .claim-card { grid-template-columns: 1fr; }
   .credential-card .threshold-control { flex-wrap: wrap; }
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ *  ATOMS + MOLECULES (P0 W2)
+ *
+ *  New design-system primitives introduced by the 2026-06-01 UI
+ *  redesign. See docs/superpowers/specs/2026-06-01-ui-redesign-
+ *  backlog.md §B + §D. Each atom replaces (or unifies) a handful
+ *  of older near-duplicate classes; the old class names stay
+ *  defined so unmigrated call sites keep rendering. New screens
+ *  built from Wave 3 onward should use the new vocabulary.
+ * ════════════════════════════════════════════════════════════════ */
+
+/* ── Chip atom (P0 #4) ───────────────────────────────────────────
+ *
+ * Single chip primitive — `.chip` + tone + variant modifiers.
+ * Collapses what used to be six near-duplicate classes
+ * (`.status-pill`, `.did-picker-status--*`, `.log-level-pill`,
+ * `.store-badge`, the now-removed `.vc-card-passport__tier-chip*`)
+ * into one shape with predictable variants.
+ *
+ * Use:  <span class="chip chip--tone-success">Active</span>
+ * Variants: chip--status (with optional .dot child), chip--tier,
+ * chip--category, chip--version (mono).
+ * Tones: success / warn / error / info / purple / muted (default).
+ */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill-new);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-soft-new);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.chip--tone-success {
+  background: rgba(67, 242, 178, 0.10);
+  border-color: var(--line-success);
+  color: var(--accent-green);
+}
+.chip--tone-warn {
+  background: rgba(255, 176, 32, 0.12);
+  border-color: rgba(255, 176, 32, 0.40);
+  color: var(--warn-new);
+}
+.chip--tone-error {
+  background: rgba(255, 85, 127, 0.10);
+  border-color: var(--line-danger);
+  color: var(--error-new);
+}
+.chip--tone-info {
+  background: rgba(53, 211, 255, 0.10);
+  border-color: rgba(53, 211, 255, 0.36);
+  color: var(--accent-cyan);
+}
+.chip--tone-purple {
+  background: rgba(185, 156, 255, 0.12);
+  border-color: rgba(185, 156, 255, 0.40);
+  color: var(--accent-purple);
+}
+.chip--tone-muted {
+  background: var(--surface-4-new);
+  border-color: var(--line-faint);
+  color: var(--text-muted-new);
+}
+.chip--version {
+  font-family: ui-monospace, monospace;
+  font-size: 0.75rem;
+}
+.chip--tier {
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.7rem;
+}
+.chip .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 14px currentColor;
+}
+
+/* ── Button atom — secondary + ghost + danger (P0 #3 partial) ────
+ *
+ * `.btn-primary` (gradient) is defined above near the legacy
+ * button rules. The lower-emphasis siblings live here so they
+ * share the same atomic-design layer in the file.
+ */
+.btn-secondary {
+  background: var(--surface-4-new);
+  border: 1px solid var(--line);
+  color: var(--text-new);
+  font-weight: 600;
+  border-radius: var(--r-3);
+  padding: 9px 16px;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.18);
+  border-color: var(--line-strong);
+}
+
+.btn-ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--text-soft-new);
+  border-radius: var(--r-3);
+  padding: 9px 16px;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: var(--surface-4-new);
+  color: var(--text-new);
+}
+
+.btn-icon {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--surface-4-new);
+  color: var(--text-soft-new);
+  border-radius: var(--r-3);
+  font-size: 0.95rem;
+}
+.btn-icon:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.18);
+  color: var(--text-new);
+}
+
+/* ── MetaItem molecule (P0 #5) ───────────────────────────────────
+ *
+ * Replaces the seed-blob "long mono string in a box" pattern
+ * littered across every outcome panel. A meta-item is a
+ * 22 px-radius card containing an uppercase label + a mono
+ * value with overflow-wrap anywhere. Grid them up for a
+ * meta-grid block.
+ *
+ * Use:
+ *   <div class="meta-grid">
+ *     <article class="meta-item">
+ *       <span>Issuer</span>
+ *       <strong>did:midnight…7fd5e</strong>
+ *     </article>
+ *     ...
+ *   </div>
+ *
+ * Status variants: .meta-item.success / .warn / .error / .info
+ * tint the strong text.
+ */
+.meta-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--sp-3);
+}
+.meta-item {
+  min-width: 0;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-4);
+  background: rgba(15, 23, 42, 0.7);
+}
+.meta-item span {
+  display: block;
+  margin-bottom: var(--sp-2);
+  color: var(--text-muted-new);
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+}
+.meta-item strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-meta);
+  font-weight: 600;
+  color: var(--text-strong);
+  font-family: ui-monospace, monospace;
+}
+.meta-item.success strong { color: var(--accent-green); font-family: inherit; }
+.meta-item.warn strong    { color: var(--warn-new);     font-family: inherit; }
+.meta-item.error strong   { color: var(--error-new);    font-family: inherit; }
+.meta-item.info strong    { color: var(--accent-cyan);  font-family: inherit; }
+
+/* ── OutcomeBanner atom (P0 #6) ──────────────────────────────────
+ *
+ * Replaces `.wizard-outcome.{ok,err}` (still defined elsewhere
+ * for unmigrated call sites). Single shape with four tones and
+ * optional title + body slots.
+ *
+ * Use:
+ *   <div class="outcome outcome--ok">
+ *     <div class="outcome__title">Done</div>
+ *     <div class="outcome__body">{msg}</div>
+ *   </div>
+ */
+.outcome {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-4-new);
+  color: var(--text-new);
+  animation: outcome-in 220ms var(--ease-out);
+}
+@keyframes outcome-in {
+  from { transform: translateY(-4px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+.outcome__title {
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: inherit;
+}
+.outcome__body {
+  font-size: var(--fs-meta);
+  color: var(--text-soft-new);
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+}
+.outcome--ok {
+  border-color: var(--line-success);
+  background: rgba(67, 242, 178, 0.08);
+  color: var(--accent-green);
+}
+.outcome--err {
+  border-color: var(--line-danger);
+  background: rgba(255, 85, 127, 0.08);
+  color: var(--error-new);
+}
+.outcome--warn {
+  border-color: rgba(255, 176, 32, 0.40);
+  background: rgba(255, 176, 32, 0.08);
+  color: var(--warn-new);
+}
+.outcome--info {
+  border-color: rgba(53, 211, 255, 0.36);
+  background: rgba(53, 211, 255, 0.08);
+  color: var(--accent-cyan);
+}
+
+/* ── CredentialTokenMark atom (P0 #12) ──────────────────────────
+ *
+ * The decorative "this is a credential / identity" visual.
+ * Foundational primitive reused on DID rows + VC cards +
+ * Wallet hero. Three lines layered over a gradient inset; rotated
+ * 3° so it reads as a tilted card.
+ *
+ * Sizes: --xs (32 px), --sm (48 px), --md (64 px), --lg (80 px),
+ *         --xl (148 px — used by the VC card hero).
+ * Tones: --cyan (default), --purple, --green.
+ */
+.token-mark {
+  --tm-size: 48px;
+  --tm-tint-a: rgba(53, 211, 255, 0.24);
+  --tm-tint-b: rgba(185, 156, 255, 0.11);
+  --tm-glow-a: var(--accent-green);
+  --tm-glow-b: var(--accent-cyan);
+  --tm-border: rgba(53, 211, 255, 0.35);
+
+  position: relative;
+  width: var(--tm-size);
+  height: calc(var(--tm-size) * 1.3);
+  border: 1px solid var(--tm-border);
+  border-radius: calc(var(--tm-size) * 0.22);
+  background:
+    linear-gradient(145deg, var(--tm-tint-a), var(--tm-tint-b)),
+    rgba(255, 255, 255, 0.05);
+  box-shadow: var(--shadow-inset),
+              0 18px 36px rgba(53, 211, 255, 0.10);
+  transform: rotate(3deg);
+  flex-shrink: 0;
+}
+.token-mark::before {
+  /* Inset glow */
+  content: "";
+  position: absolute;
+  inset: calc(var(--tm-size) * 0.12);
+  border-radius: calc(var(--tm-size) * 0.14);
+  background: linear-gradient(135deg, var(--tm-glow-a), var(--tm-glow-b));
+  opacity: 0.36;
+  filter: blur(calc(var(--tm-size) * 0.12));
+}
+.token-mark::after {
+  /* Two thin "magnetic stripe" lines */
+  content: "";
+  position: absolute;
+  left: calc(var(--tm-size) * 0.18);
+  right: calc(var(--tm-size) * 0.18);
+  bottom: calc(var(--tm-size) * 0.28);
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.72);
+  box-shadow: 0 calc(var(--tm-size) * -0.18) 0 -2px rgba(248, 250, 252, 0.55);
+}
+.token-mark--xs { --tm-size: 32px; }
+.token-mark--sm { --tm-size: 48px; }
+.token-mark--md { --tm-size: 64px; }
+.token-mark--lg { --tm-size: 80px; }
+.token-mark--xl { --tm-size: 148px; }
+.token-mark--purple {
+  --tm-tint-a: rgba(185, 156, 255, 0.30);
+  --tm-tint-b: rgba(53, 211, 255, 0.10);
+  --tm-glow-a: var(--accent-purple);
+  --tm-glow-b: var(--accent-cyan);
+  --tm-border: rgba(185, 156, 255, 0.40);
+}
+.token-mark--green {
+  --tm-tint-a: rgba(67, 242, 178, 0.25);
+  --tm-tint-b: rgba(53, 211, 255, 0.10);
+  --tm-glow-a: var(--accent-green);
+  --tm-glow-b: var(--accent-green);
+  --tm-border: rgba(67, 242, 178, 0.40);
+}
+
+/* ── SectionHeader molecule (P0 #15) ─────────────────────────────
+ *
+ * Eyebrow + h2 + optional right-aligned action. Used at the top
+ * of a section inside a tab. Replaces ad-hoc `.card-header` calls
+ * where the row carries both a title and a button.
+ *
+ * Use:
+ *   <header class="section-header">
+ *     <div>
+ *       <p class="section-header__eyebrow">VC Inventory</p>
+ *       <h2 class="section-header__title">Your credentials</h2>
+ *     </div>
+ *     <button class="btn-primary">Add</button>
+ *   </header>
+ */
+.section-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--sp-4);
+  margin-top: var(--sp-6);
+  margin-bottom: var(--sp-3);
+}
+.section-header__eyebrow {
+  margin: 0 0 var(--sp-1);
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted-new);
+}
+.section-header__title {
+  margin: 0;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.03em;
+  color: var(--text-strong);
+}
+.section-header__sub {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-meta);
+  color: var(--text-muted-new);
+}
+
+/* ── PageHero molecule ───────────────────────────────────────────
+ *
+ * Hero strip used at the top of a tab. Big H1, optional subtitle,
+ * optional trust-row with status dot. Variant `--with-token`
+ * reserves space for a `.token-mark--lg` on the right (used by
+ * Wallet + Identity Centre).
+ */
+.page-hero {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--sp-3);
+  padding: var(--sp-6) var(--sp-4) var(--sp-4);
+  margin-bottom: var(--sp-4);
+}
+.page-hero--with-token {
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+.page-hero__eyebrow {
+  margin: 0;
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted-new);
+}
+.page-hero__title {
+  margin: 0;
+  font-size: var(--fs-h1);
+  line-height: 1.05;
+  letter-spacing: -0.04em;
+  color: var(--text-strong);
+}
+.page-hero__subtitle {
+  margin: 0;
+  max-width: 540px;
+  font-size: var(--fs-meta);
+  color: var(--text-soft-new);
+  line-height: 1.5;
+}
+.page-hero__trust-row {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--accent-green);
+  font-weight: 700;
+  font-size: var(--fs-meta);
+}
+.page-hero__trust-row .dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent-green);
+  box-shadow: 0 0 22px var(--accent-green);
+}
+
+/* ── CTACard organism — scan-QR / connect / claim hero ──────────
+ *
+ * A full-width card with gradient backdrop + ambient halo +
+ * single primary action. Used by Identity Centre Scan-QR
+ * (P0 #10) and reusable for any other "the one big action on
+ * this screen" surface.
+ */
+.cta-card {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-6);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-5);
+  background:
+    linear-gradient(135deg, rgba(53, 211, 255, 0.12), rgba(185, 156, 255, 0.08)),
+    rgba(8, 13, 24, 0.78);
+  box-shadow: var(--shadow-card), var(--shadow-inset);
+  margin-bottom: var(--sp-4);
+}
+.cta-card__ambient {
+  position: absolute;
+  pointer-events: none;
+  filter: var(--blur-ambient);
+  opacity: 0.7;
+  border-radius: 999px;
+}
+.cta-card__ambient--one {
+  width: 220px; height: 220px;
+  right: -80px; top: -40px;
+  background: rgba(53, 211, 255, 0.18);
+}
+.cta-card__ambient--two {
+  width: 220px; height: 220px;
+  left: -100px; bottom: -80px;
+  background: rgba(185, 156, 255, 0.16);
+}
+.cta-card > * { position: relative; z-index: 1; }
+.cta-card__eyebrow {
+  margin: 0;
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted-new);
+}
+.cta-card__title {
+  margin: 0;
+  font-size: var(--fs-h2);
+  letter-spacing: -0.03em;
+  color: var(--text-strong);
+}
+.cta-card__sub {
+  margin: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-soft-new);
+  line-height: 1.5;
+}
+.cta-card__action {
+  margin-top: var(--sp-2);
 }
