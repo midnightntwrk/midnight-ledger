@@ -11,10 +11,10 @@
     "watch": "node ./build.mjs --watch"
   },
   "dependencies": {
-    "@midnight-ntwrk/midnight-did": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-0.4.0.tgz",
-    "@midnight-ntwrk/midnight-did-api": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-api-0.4.0.tgz",
-    "@midnight-ntwrk/midnight-did-contract": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-contract-0.4.0.tgz",
-    "@midnight-ntwrk/midnight-did-domain": "file:../../../tooling/vendor/midnight-did/midnight-ntwrk-midnight-did-domain-0.4.0.tgz",
+    "@midnight-ntwrk/midnight-did": "file:../../../../midnight-did/packages/did",
+    "@midnight-ntwrk/midnight-did-api": "file:../../../../midnight-did/packages/api",
+    "@midnight-ntwrk/midnight-did-contract": "file:../../../../midnight-did/packages/contract",
+    "@midnight-ntwrk/midnight-did-domain": "file:../../../../midnight-did/packages/domain",
     "@noble/hashes": "^2.2.0",
     "jsqr": "^1.4.0"
   },

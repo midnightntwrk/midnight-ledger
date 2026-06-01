@@ -18,6 +18,7 @@ import { nodeModulesPolyfillPlugin } from "esbuild-plugins-node-modules-polyfill
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { argv, env } from "node:process";
+import { readdirSync } from "node:fs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const outdir = resolve(__dirname, "..", "assets", "web");
@@ -82,23 +83,29 @@ const config = {
   // packages the entry imports but `web/package.json` doesn't list
   // directly (e.g. `@midnight-ntwrk/midnight-js-contracts`,
   // `@midnight-ntwrk/midnight-js-network-id`, `effect`, ...).
-  // The env var MIDNIGHT_DID_SRC must point at a midnight-did checkout
-  // with `pnpm install && pnpm build` already run — there is no
-  // default.
+  // Falls back to the workspace submodule when MIDNIGHT_DID_SRC is not set.
   nodePaths: [
     (() => {
-      const src = env.MIDNIGHT_DID_SRC;
-      if (!src) {
-        console.error(
-          "[esbuild] MIDNIGHT_DID_SRC is not set. Export it to point at the" +
-            " midnight-did repo checkout (with pnpm install && pnpm build" +
-            " already run), then re-run this script.",
-        );
-        process.exit(1);
-      }
-      return resolve(src, "node_modules");
+      const src =
+        env.MIDNIGHT_DID_SRC ||
+        resolve(__dirname, "../../../../midnight-did");
+      // pnpm nests deps in .pnpm/<name>@<ver>/node_modules/ —
+      // add the most common ones so esbuild can resolve them.
+      // The hoisted node_modules is already searched by default.
+      const paths = [resolve(src, "node_modules")];
+      const pnpmRoot = resolve(src, "node_modules", ".pnpm");
+      try {
+        for (const entry of readdirSync(pnpmRoot)) {
+          if (entry.startsWith("@midnight-ntwrk+")) {
+            paths.push(
+              resolve(pnpmRoot, entry, "node_modules"),
+            );
+          }
+        }
+      } catch (_) {}
+      return paths;
     })(),
-  ],
+  ].flat(),
   outfile: resolve(outdir, "midnight-did.js"),
   loader: { ".wasm": "file" }, // not really used now (externals handle WASM)
   sourcemap: true,

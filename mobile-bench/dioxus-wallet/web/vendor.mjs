@@ -30,28 +30,50 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 // Built checkout of the midnight-did repo (submodule or standalone clone)
 // with `pnpm install && pnpm build` already run.
-// Must be set — there is no default.
+// Falls back to the workspace submodule at ../../../../midnight-did
+// when MIDNIGHT_DID_SRC is not set.
 const SOURCE = resolve(
-  (() => {
-    const src = process.env.MIDNIGHT_DID_SRC;
-    if (!src) {
-      console.error(
-        "[vendor] MIDNIGHT_DID_SRC is not set. Export it to point at the" +
-          " midnight-did repo checkout (with pnpm install && pnpm build" +
-          " already run), then re-run this script.",
-      );
-      process.exit(1);
-    }
-    return src;
-  })(),
+  process.env.MIDNIGHT_DID_SRC ||
+    resolve(__dirname, "../../../../midnight-did"),
 );
 // Where Wry's `mn-pkg://` handler reads from.
 const DEST = resolve(__dirname, "..", "assets", "web", "pkg");
 
-// `node_modules/@midnight-ntwrk/<name>` is the resolved tree we copy.
-// We pick this over the workspace `<source>/<dir>/` so transitive
-// resolution is consistent — every dep already points at the
-// resolved version, not a peer that might be a symlink.
+// Resolve a `@midnight-ntwrk/<pkg>` name to its directory in the
+// midnight-did checkout. Workspace packages (midnight-did-*) live
+// under `packages/<dir>/`, not in `node_modules/` — pnpm keeps them
+// out of the hoisted tree. Third-party deps (compact-runtime, etc.)
+// live in `node_modules/@midnight-ntwrk/`.
+function resolvePackage(source, pkg) {
+  // Workspace packages: @midnight-ntwrk/midnight-did-contract → packages/contract
+  // midnight-did-jubjub-schnorr → packages/jubjub-schnorr
+  let wsDir = pkg;
+  if (pkg === 'midnight-did') wsDir = 'did';
+  else if (pkg === 'midnight-did-jubjub-schnorr') wsDir = 'jubjub-schnorr';
+  else if (pkg.startsWith('midnight-did-')) wsDir = pkg.replace('midnight-did-', '');
+  // Try workspace packages/ first, then hoisted node_modules/,
+  // then pnpm content-addressable store.
+  const candidates = [
+    resolve(source, 'packages', wsDir),
+    resolve(source, 'node_modules', '@midnight-ntwrk', pkg),
+  ];
+  // pnpm .pnpm store: find any matching @midnight-ntwrk+<pkg>@<ver> directory
+  const pnpmRoot = resolve(source, 'node_modules', '.pnpm');
+  try {
+    for (const entry of readdirSync(pnpmRoot)) {
+      if (entry.startsWith(`@midnight-ntwrk+${pkg}@`)) {
+        candidates.push(
+          resolve(pnpmRoot, entry, 'node_modules', '@midnight-ntwrk', pkg),
+        );
+      }
+    }
+  } catch (_) {}
+  for (const c of candidates) {
+    try { statSync(c); return c; } catch (_) {}
+  }
+  return null;
+}
+
 // Pure-JS packages with their transitive Effect / wallet-sdk closure
 // (`midnight-js-contracts`, `midnight-js-network-id`) are *not*
 // vendored — esbuild bundles them into `midnight-did.js` so the
@@ -68,7 +90,6 @@ const PACKAGES = [
   "midnight-did-contract",
   "midnight-did-jubjub-schnorr",
   "compact-runtime",
-  "compact-js",
   "onchain-runtime-v3",
   "ledger-v8",
 ];
@@ -105,17 +126,15 @@ mkdirSync(DEST, { recursive: true });
 
 let total = 0;
 for (const pkg of PACKAGES) {
-  const src = resolve(SOURCE, "node_modules", "@midnight-ntwrk", pkg);
-  const dst = resolve(DEST, pkg);
-  try {
-    statSync(src);
-  } catch (_) {
-    console.error(`[vendor] missing source: ${src}`);
+  const src = resolvePackage(SOURCE, pkg);
+  if (!src) {
+    console.error(`[vendor] missing source: ${pkg} (checked packages/ and node_modules/@midnight-ntwrk/)`);
     process.exit(1);
   }
+  const dst = resolve(DEST, pkg);
   copyDirRecursive(src, dst);
   total++;
-  console.log(`[vendor]   ✓ ${pkg}`);
+  console.log(`[vendor]   ✓ ${pkg} ← ${src}`);
 }
 
 // Post-copy patch: `midnight-did-jubjub-schnorr/dist/signing.js`
@@ -165,14 +184,26 @@ const CJS_DEPS = [
 ];
 
 for (const dep of CJS_DEPS) {
-  const src = resolve(SOURCE, "node_modules", dep);
-  const dst = resolve(DEST, dep);
-  try {
-    statSync(src);
-  } catch (_) {
-    console.error(`[vendor] missing CJS dep: ${src}`);
+  // Try hoisted node_modules first, then pnpm store.
+  let src = null;
+  const hoisted = resolve(SOURCE, "node_modules", dep);
+  try { statSync(hoisted); src = hoisted; } catch (_) {}
+  if (!src) {
+    const pnpmRoot = resolve(SOURCE, "node_modules", ".pnpm");
+    try {
+      for (const entry of readdirSync(pnpmRoot)) {
+        if (entry.startsWith(`${dep}@`)) {
+          const candidate = resolve(pnpmRoot, entry, "node_modules", dep);
+          try { statSync(candidate); src = candidate; break; } catch (_) {}
+        }
+      }
+    } catch (_) {}
+  }
+  if (!src) {
+    console.error(`[vendor] missing CJS dep: ${dep}`);
     process.exit(1);
   }
+  const dst = resolve(DEST, dep);
   mkdirSync(dst, { recursive: true });
   await esbuildBuild({
     entryPoints: [resolve(src, "index.js")],

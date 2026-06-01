@@ -46,24 +46,21 @@ PROGRESS doc above. Key entry points:
 
 `web/vendor.mjs` and `web/build.mjs` require a built checkout of the
 `midnight-did` repo (with `pnpm install && pnpm build` already
-run). Set the environment variable before building:
+run). The workspace submodule at `../../../../midnight-did` is used
+by default; override with `MIDNIGHT_DID_SRC` if needed:
 
 ```bash
-export MIDNIGHT_DID_SRC=/path/to/midnight-did
-# Any checkout with `pnpm install && pnpm build` already run will work —
-# a standalone clone, a submodule, etc.
+export MIDNIGHT_DID_SRC=/path/to/midnight-did   # optional, defaults to workspace submodule
 ```
 
 Then, from `web/`:
 
 ```bash
-npm install          # resolves .tgz vendored packages
-cd $MIDNIGHT_DID_SRC && pnpm install && pnpm build && cd -
+npm install          # resolves @midnight-ntwrk/midnight-did* from workspace submodule
+cd ${MIDNIGHT_DID_SRC:-../../../../midnight-did} && pnpm install && pnpm build && cd -
 npm run vendor       # copies WASM-bearing packages → ../assets/web/pkg/
 npm run build        # esbuild bundle → ../assets/web/midnight-did.js
 ```
-
-Both scripts exit with an error if `MIDNIGHT_DID_SRC` is unset.
 
 ### iOS Simulator
 
