@@ -73,6 +73,11 @@ serde_json = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 hex = "0.4"
+# QR-code matrix → SVG renderer for the Wallet hero's receive
+# address QRs. Pure-Rust, no_std-friendly, ~30 KB compiled.
+# `default-features = false` drops the `image` crate it pulls in
+# for raster output we don't need.
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 # Base64URL encoding for JWK x/y coordinates. The new
 # `setVerificationMethod` circuit takes `Opaque<"string">` for
 # x/y; we encode the 32-byte BE buffer as base64url-no-pad

@@ -7,6 +7,7 @@
 //! VerifyingKey)` already does in this workspace.
 
 use bech32::{Bech32m, Hrp};
+use serialize::Serializable;
 
 use crate::hd::{HdError, Role, derive_child_priv};
 use crate::network::Network;
@@ -23,6 +24,8 @@ pub enum AddressError {
     Bech32(#[from] bech32::EncodeError),
     #[error("bech32 hrp: {0}")]
     Hrp(#[from] bech32::primitives::hrp::Error),
+    #[error("key serialise: {0}")]
+    KeySerialise(String),
 }
 
 /// HRP for an unshielded NIGHT receive address per network.
@@ -36,6 +39,60 @@ pub fn unshielded_hrp(network: Network) -> &'static str {
         Network::DevNet => "mn_addr_devnet",
         Network::Undeployed => "mn_addr_undeployed",
     }
+}
+
+/// HRP for a shielded NIGHT receive address per network. Mirrors
+/// the unshielded HRP layout — `mn_shield-addr` on mainnet,
+/// `mn_shield-addr_<networkId>` on every other env. Matches the
+/// upstream TS package
+/// `@midnight-ntwrk/wallet-sdk-address-format::ShieldedAddress`.
+pub fn shielded_hrp(network: Network) -> &'static str {
+    match network {
+        Network::Mainnet => "mn_shield-addr",
+        Network::PreProd => "mn_shield-addr_preprod",
+        Network::Preview => "mn_shield-addr_preview",
+        Network::QaNet => "mn_shield-addr_qanet",
+        Network::DevNet => "mn_shield-addr_devnet",
+        Network::Undeployed => "mn_shield-addr_undeployed",
+    }
+}
+
+/// Encode a shielded receive address as Bech32m.
+///
+/// Payload = `serialize(coin_public_key) || serialize(encryption_public_key)`
+/// — the same byte layout the upstream
+/// `@midnight-ntwrk/wallet-sdk-address-format::ShieldedAddress`
+/// produces when given the two keys. The shielded address pairs
+/// a coin pubkey (used to identify which UTXOs are yours) with an
+/// encryption pubkey (used by senders to encrypt coin info to
+/// you), letting one string carry both halves of a shielded
+/// receive intent.
+///
+/// **Caveat:** this is a port written from the upstream docs,
+/// not a verbatim copy of the TS canonical implementation. If a
+/// future scanner-side compatibility check surfaces a byte-order
+/// or padding mismatch, the fix lands here; the only consumer
+/// today is the Wallet hero's QR display + clipboard copy.
+pub fn shielded_bech32m<C, E>(
+    coin_pk: &C,
+    enc_pk: &E,
+    network: Network,
+) -> Result<String, AddressError>
+where
+    C: Serializable,
+    E: Serializable,
+{
+    let mut payload = Vec::with_capacity(64);
+    coin_pk
+        .serialize(&mut payload)
+        .map_err(|e| AddressError::KeySerialise(format!("coin: {e}")))?;
+    enc_pk
+        .serialize(&mut payload)
+        .map_err(|e| AddressError::KeySerialise(format!("enc: {e}")))?;
+
+    let hrp = Hrp::parse(shielded_hrp(network))?;
+    let encoded = bech32::encode::<Bech32m>(hrp, &payload)?;
+    Ok(encoded)
 }
 
 /// Derive the unshielded receive address for `(seed, network)`.

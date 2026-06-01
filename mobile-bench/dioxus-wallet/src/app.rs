@@ -46,7 +46,13 @@ pub(crate) struct WalletInfo {
     pub(crate) seed_hex: String,
     pub(crate) coin_pk_hex: String,
     pub(crate) enc_pk_hex: String,
+    /// Bech32m unshielded NIGHT receive address —
+    /// `mn_addr_<network>1…`. Used as the "send NIGHT here" string.
     pub(crate) address: String,
+    /// Bech32m shielded receive address —
+    /// `mn_shield-addr_<network>1…`. Pairs the coin pubkey + enc
+    /// pubkey so senders can encrypt coin info to this wallet.
+    pub(crate) shielded_address: String,
     pub(crate) network: Network,
 }
 
@@ -61,6 +67,9 @@ impl WalletInfo {
             address: w
                 .unshielded_address()
                 .unwrap_or_else(|e| format!("(address error: {e})")),
+            shielded_address: w
+                .shielded_address()
+                .unwrap_or_else(|e| format!("(shielded address error: {e})")),
             network: w.network(),
         }
     }
@@ -1698,7 +1707,10 @@ pub fn App() -> Element {
         match *active_tab.read() {
             Tab::Wallet => rsx! {
                 if let Some(w) = wallet.read().as_ref() {
-                    AddressCard { address: w.address.clone() }
+                    AddressCard {
+                        unshielded: w.address.clone(),
+                        shielded: w.shielded_address.clone(),
+                    }
                 }
 
                 BalancesCard {
@@ -8340,15 +8352,55 @@ fn StatusLine(phase: SyncPhase, network: Network, tip_height: Option<i64>) -> El
     }
 }
 
+/// Receive-address card. Renders the wallet's unshielded NIGHT
+/// address + the shielded address as two pills. Each pill has a
+/// Copy button and a QR toggle. Clicking QR expands an inline
+/// SVG QR code rendered from the bech32m string via the `qrcode`
+/// crate — no JS, no asset, deterministic.
 #[component]
-fn AddressCard(address: String) -> Element {
+fn AddressCard(unshielded: String, shielded: String) -> Element {
+    rsx! {
+        AddressRow {
+            label: "Unshielded".to_string(),
+            sub: "Send NIGHT here".to_string(),
+            tone: "info".to_string(),
+            address: unshielded,
+        }
+        AddressRow {
+            label: "Shielded".to_string(),
+            sub: "Private NIGHT receive".to_string(),
+            tone: "purple".to_string(),
+            address: shielded,
+        }
+    }
+}
+
+/// One address row — pill + toggleable inline QR. Carries its
+/// own `copied` / `qr_open` state so the two addresses on the
+/// Wallet hero can be revealed / copied independently.
+#[component]
+fn AddressRow(
+    label: String,
+    sub: String,
+    tone: String,
+    address: String,
+) -> Element {
     let mut copied = use_signal(|| false);
     let mut qr_open = use_signal(|| false);
     let short = truncate_address_for_pill(&address);
 
     rsx! {
         div { class: "address-pill",
-            span { class: "address-pill__label", "Receive" }
+            div { class: "address-pill__labelpair",
+                span {
+                    class: match tone.as_str() {
+                        "purple" => "address-pill__label tone-purple",
+                        _ => "address-pill__label tone-info",
+                    },
+                    "{label}"
+                }
+                span { class: "address-pill__sub", "{sub}" }
+            }
             span {
                 class: "address-pill__value mono",
                 title: "{address}",
@@ -8356,7 +8408,7 @@ fn AddressCard(address: String) -> Element {
             }
             button {
                 class: if *copied.read() { "btn-icon address-pill__copy copied" } else { "btn-icon address-pill__copy" },
-                title: "Copy NIGHT receive address",
+                title: "Copy {label} address",
                 onclick: {
                     let address = address.clone();
                     move |_| {
@@ -8368,7 +8420,7 @@ fn AddressCard(address: String) -> Element {
             }
             button {
                 class: "btn-icon address-pill__qr",
-                title: "Show QR (planned)",
+                title: if *qr_open.read() { "Hide QR" } else { "Show QR" },
                 onclick: move |_| {
                     let cur = *qr_open.read();
                     qr_open.set(!cur);
@@ -8377,13 +8429,44 @@ fn AddressCard(address: String) -> Element {
             }
         }
         if *qr_open.read() {
-            div { class: "address-qr-placeholder",
-                div { class: "address-qr-placeholder__frame",
-                    div { class: "address-qr-placeholder__label", "QR" }
+            div { class: "address-qr",
+                div {
+                    class: "address-qr__frame",
+                    dangerous_inner_html: render_qr_svg(&address),
                 }
-                p { "QR rendering lands in Phase 2 — use the Copy button for now." }
+                p { class: "address-qr__caption",
+                    "{label} — point a wallet camera at this QR or tap Copy."
+                }
             }
         }
+    }
+}
+
+/// Render a bech32m address string as an SVG QR code. Uses the
+/// `qrcode` crate's medium-error-correction default (recovers ~15%
+/// of damaged modules), embedded as inline SVG so Dioxus can
+/// drop it into the DOM via `dangerous_inner_html`. On encode
+/// failure (string too long / invalid) returns a placeholder
+/// `<div>` with an error message rather than panicking — the
+/// Copy button is the canonical channel anyway.
+fn render_qr_svg(s: &str) -> String {
+    use qrcode::QrCode;
+    use qrcode::render::svg;
+    match QrCode::new(s.as_bytes()) {
+        Ok(code) => code
+            .render::<svg::Color<'_>>()
+            .min_dimensions(200, 200)
+            .max_dimensions(280, 280)
+            .quiet_zone(true)
+            .dark_color(svg::Color("#f8fafc"))
+            .light_color(svg::Color("transparent"))
+            .build(),
+        Err(e) => format!(
+            "<div style=\"color:#ff557f;font-size:11px;padding:24px;\
+                          font-family:ui-monospace,monospace;\">\
+               QR encode failed: {e}\
+             </div>"
+        ),
     }
 }
 

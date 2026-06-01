@@ -3378,49 +3378,62 @@ body {
   color: var(--accent-green);
 }
 
-/* Inline placeholder shown when the QR icon-button is pressed.
- * Real QR rendering lands in a follow-up commit; for now it
- * surfaces a 200 px-square frame with a "QR" placeholder
- * watermark + a one-line explainer so the button doesn't feel
- * dead. */
-.address-qr-placeholder {
+/* Tone variants for the address pill's eyebrow label —
+ * Unshielded reads in info-cyan, Shielded in purple to echo the
+ * privacy-tier vocabulary used by the digital-passport card. */
+.address-pill__labelpair {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 0 0 auto;
+  min-width: 92px;
+}
+.address-pill__label.tone-info    { color: var(--accent-cyan); }
+.address-pill__label.tone-purple  { color: var(--accent-purple); }
+.address-pill__sub {
+  font-size: 10px;
+  color: var(--text-faint-new);
+  letter-spacing: 0.04em;
+}
+
+/* Inline QR code revealed when the QR icon-button on a pill is
+ * pressed. The 200-280 px SVG renders via the `qrcode` crate
+ * (white modules on a transparent quiet-zone) inside a tinted
+ * frame that picks up the page's ambient gradients underneath.
+ * Caption ties the QR back to the address it represents. */
+.address-qr {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: var(--sp-3);
-  margin-bottom: var(--sp-4);
+  margin: calc(var(--sp-3) * -1) 0 var(--sp-4);
   padding: var(--sp-5);
-  border: 1px dashed var(--line);
-  border-radius: var(--r-4);
-  background: rgba(8, 13, 24, 0.6);
+  border: 1px solid var(--line);
+  border-top: 0;
+  border-radius: 0 0 var(--r-4) var(--r-4);
+  background: rgba(8, 13, 24, 0.65);
   color: var(--text-muted-new);
-  font-size: var(--fs-small);
-  text-align: center;
 }
-.address-qr-placeholder__frame {
-  width: 180px;
-  height: 180px;
+.address-qr__frame {
   display: flex;
   align-items: center;
   justify-content: center;
+  padding: var(--sp-3);
   border-radius: var(--r-3);
   background:
-    repeating-conic-gradient(
-      from 0deg,
-      rgba(53, 211, 255, 0.10) 0deg 90deg,
-      rgba(185, 156, 255, 0.10) 90deg 180deg
-    ),
+    linear-gradient(135deg, rgba(53, 211, 255, 0.06), rgba(185, 156, 255, 0.04)),
     rgba(15, 23, 42, 0.85);
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-faint);
 }
-.address-qr-placeholder__label {
-  font-size: 1.4rem;
-  font-weight: 800;
-  letter-spacing: 0.4em;
-  color: var(--text-faint-new);
+.address-qr__frame svg {
+  display: block;
+  width: 220px;
+  height: 220px;
 }
-.address-qr-placeholder p {
+.address-qr__caption {
   margin: 0;
+  font-size: var(--fs-small);
+  text-align: center;
 }
 
 /* Narrow phone window — stack the wallet hero so the token-mark

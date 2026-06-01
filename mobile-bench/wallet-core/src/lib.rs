@@ -83,7 +83,10 @@ pub fn upstream_demo_controller_secret() -> [u8; 32] {
     h.finalize().into()
 }
 
-pub use address::{AddressError, truncate_middle, unshielded_bech32m, unshielded_hrp};
+pub use address::{
+    AddressError, shielded_bech32m, shielded_hrp, truncate_middle, unshielded_bech32m,
+    unshielded_hrp,
+};
 pub use hd::{HdError, Role};
 pub use indexer::{ChainTipInfo, ContractStateInfo, HttpIndexerClient, IndexerError};
 pub use network::{Network, NetworkConfig};

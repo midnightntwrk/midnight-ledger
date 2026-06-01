@@ -610,6 +610,20 @@ impl Wallet {
             .map_err(|e| WalletError::Address(e.to_string()))
     }
 
+    /// Bech32m-encoded shielded NIGHT receive address for this
+    /// wallet on the chosen network. Pairs the coin public key
+    /// + encryption public key into one HRP-prefixed string —
+    /// senders use the coin pk to identify your UTXOs and the
+    /// enc pk to encrypt the coin info to you. See
+    /// `crate::address::shielded_bech32m` for the byte layout +
+    /// upstream-TS caveat.
+    pub fn shielded_address(&self) -> Result<String, WalletError> {
+        let coin_pk = self.keys.coin_public_key();
+        let enc_pk = self.keys.enc_public_key();
+        crate::address::shielded_bech32m(&coin_pk, &enc_pk, self.network)
+            .map_err(|e| WalletError::Address(e.to_string()))
+    }
+
     /// Snapshot the unshielded UTXO set for this wallet's default
     /// address. See `docs/superpowers/specs/2026-05-14-unshielded-sync-design.md`.
     /// Opens a fresh `graphql-transport-ws` WebSocket to the
