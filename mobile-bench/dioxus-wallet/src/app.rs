@@ -614,6 +614,13 @@ pub(crate) enum DidInventoryStatus {
 }
 
 impl DidInventoryStatus {
+    /// Display string used by the legacy `.did-badge` rendering
+    /// path. The Wave 5 redesign of `render_inventory_row` no
+    /// longer calls this — the DidInventoryPanel now emits chip
+    /// classes inline — but the method is preserved for any other
+    /// consumer (e.g. detail-view headers in later waves) and so
+    /// the BDD steps that match on these strings keep compiling.
+    #[allow(dead_code)]
     fn label(&self) -> &'static str {
         match self {
             Self::Pending => "Pending",
@@ -621,6 +628,7 @@ impl DidInventoryStatus {
             Self::Deactivated => "Deactivated",
         }
     }
+    #[allow(dead_code)]
     fn badge_class(&self) -> &'static str {
         match self {
             Self::Pending => "did-badge pending",
@@ -8040,24 +8048,30 @@ fn DidInventoryPanel(
 ) -> Element {
     if entries.is_empty() {
         return rsx! {
-            div { class: "wizard-header", "DIDs" }
-            div { class: "session-log-empty",
-                "No DIDs in this session yet. Create one or resolve an existing one to populate the inventory."
+            header { class: "section-header",
+                div {
+                    p { class: "section-header__eyebrow", "DIDs" }
+                    h2 { class: "section-header__title", "No DIDs yet" }
+                    p { class: "section-header__sub",
+                        "Bootstrap one from the Bootstrap tab, or resolve an "
+                        "existing DID to add it to this session's inventory."
+                    }
+                }
             }
         };
     }
-    // Compact inventory layout: status badge | Open button | short
-    // DID. Network / Counter / VMs / Services columns removed —
-    // the active network lives in the header, and the rest is
-    // visible inside the DID detail view itself.
     rsx! {
-        div { class: "wizard-header", "DIDs ({entries.len()})" }
-        div { class: "did-inventory",
-            div { class: "did-inventory-row did-inventory-header",
-                span { class: "did-inventory-cell status", "Status" }
-                span { class: "did-inventory-cell action", "" }
-                span { class: "did-inventory-cell did", "DID" }
+        header { class: "section-header",
+            div {
+                p { class: "section-header__eyebrow", "DIDs" }
+                h2 { class: "section-header__title", "Your identities" }
+                p { class: "section-header__sub",
+                    "{entries.len()} on this network. Tap a row to open the "
+                    "detail view."
+                }
             }
+        }
+        div { class: "did-inventory",
             for entry in entries.iter() {
                 {render_inventory_row(entry, on_select.clone())}
             }
@@ -8068,27 +8082,58 @@ fn DidInventoryPanel(
 fn render_inventory_row(entry: &DidInventoryEntry, on_select: EventHandler<String>) -> Element {
     let did_short = truncate_did(&entry.did);
     let did_full = entry.did.clone();
-    let badge_class = entry.status.badge_class();
-    let status_label = entry.status.label();
     let did_for_click = did_full.clone();
+
+    // Map inventory status → unified `.chip` tone variant.
+    let (tone_class, status_label) = match entry.status {
+        DidInventoryStatus::Active      => ("chip chip--tone-success",  "Active"),
+        DidInventoryStatus::Pending     => ("chip chip--tone-warn",     "Pending"),
+        DidInventoryStatus::Deactivated => ("chip chip--tone-muted",    "Deactivated"),
+    };
+    // Token-mark tone follows status — active gets green, others
+    // stay neutral cyan.
+    let token_class = if matches!(entry.status, DidInventoryStatus::Active) {
+        "token-mark token-mark--sm token-mark--green"
+    } else {
+        "token-mark token-mark--sm"
+    };
+
+    let vm_count = entry.vm_count.map(|n| n.to_string()).unwrap_or_else(|| "—".into());
+    let svc_count = entry.service_count.map(|n| n.to_string()).unwrap_or_else(|| "—".into());
+
     rsx! {
-        div {
+        button {
             key: "{did_full}",
-            class: "did-inventory-row",
-            span { class: "did-inventory-cell status",
-                span { class: "{badge_class}", "{status_label}" }
-            }
-            span { class: "did-inventory-cell action",
-                button {
-                    onclick: move |_| on_select.call(did_for_click.clone()),
-                    "Open"
+            class: "did-card",
+            onclick: move |_| on_select.call(did_for_click.clone()),
+            div { class: "{token_class}" }
+            div { class: "did-card__body",
+                div { class: "did-card__top",
+                    span {
+                        class: "did-card__did mono",
+                        title: "{did_full}",
+                        "{did_short}"
+                    }
+                    span { class: "{tone_class}", "{status_label}" }
+                }
+                div { class: "did-card__meta",
+                    span { class: "did-card__meta-item",
+                        span { class: "did-card__meta-label", "VMs" }
+                        span { class: "did-card__meta-value", "{vm_count}" }
+                    }
+                    span { class: "did-card__meta-item",
+                        span { class: "did-card__meta-label", "Services" }
+                        span { class: "did-card__meta-value", "{svc_count}" }
+                    }
+                    if let Some(counter) = entry.counter {
+                        span { class: "did-card__meta-item",
+                            span { class: "did-card__meta-label", "Counter" }
+                            span { class: "did-card__meta-value", "{counter}" }
+                        }
+                    }
                 }
             }
-            span {
-                class: "did-inventory-cell did",
-                title: "{did_full}",
-                "{did_short}"
-            }
+            span { class: "did-card__chevron", "›" }
         }
     }
 }

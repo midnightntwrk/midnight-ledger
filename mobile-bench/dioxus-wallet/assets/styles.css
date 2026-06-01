@@ -1151,18 +1151,115 @@ details .panel .row {
   white-space: nowrap;
 }
 
-/* DID inventory — tabular view of the session's DIDs, adopting
- * the bundle's "Active / Pending / Deactivated" badge pattern. */
+/* DID inventory — list of `.did-card` rows. Each row is a
+ * 22 px-radius card with a `.token-mark--sm` glyph on the left,
+ * truncated DID + status chip on the right line, and a meta row
+ * underneath. Tapping the row opens the detail view.
+ *
+ * Replaces the previous compact 3-column grid (`status / Open /
+ * did`). Old `.did-inventory-row`/`.did-inventory-cell` rules
+ * left as fallbacks for any unmigrated call site.
+ */
 .did-inventory {
-  margin: 6px 16px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  overflow: hidden;
-  font-size: 11px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
 }
+
+.did-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: var(--sp-4);
+  width: 100%;
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-4);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.04), transparent 50%),
+    rgba(8, 13, 24, 0.76);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform var(--dur-norm) var(--ease-out),
+              border-color var(--dur-norm) var(--ease-out),
+              background var(--dur-norm) var(--ease-out);
+}
+.did-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(53, 211, 255, 0.36);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 50%),
+    rgba(12, 21, 38, 0.9);
+}
+.did-card__body {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+.did-card__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-width: 0;
+}
+.did-card__did {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: var(--fs-meta);
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.did-card__did.mono {
+  font-family: ui-monospace, monospace;
+}
+.did-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-3);
+  font-size: var(--fs-small);
+}
+.did-card__meta-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.did-card__meta-label {
+  color: var(--text-muted-new);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.66rem;
+  font-weight: 700;
+}
+.did-card__meta-value {
+  color: var(--text-soft-new);
+  font-family: ui-monospace, monospace;
+}
+.did-card__chevron {
+  flex: 0 0 auto;
+  font-size: 1.6rem;
+  color: var(--text-faint-new);
+  font-weight: 300;
+  line-height: 1;
+  transition: transform var(--dur-norm) var(--ease-out),
+              color var(--dur-norm) ease;
+}
+.did-card:hover .did-card__chevron {
+  transform: translateX(3px);
+  color: var(--accent-cyan);
+}
+
+/* Legacy `.did-inventory-row` rules retained for any
+ * non-DidInventoryPanel call site. The DidInventoryPanel itself
+ * now emits `.did-card` exclusively. */
 .did-inventory-row {
   display: grid;
-  /* Compact layout: status pill | Open button | short DID. */
   grid-template-columns: 64px 52px 1fr;
   align-items: center;
   gap: 8px;
