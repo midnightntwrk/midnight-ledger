@@ -14,31 +14,118 @@
    * default rendering, so the system controls don't flash white. */
   color-scheme: dark;
 
-  /* Palette — aligned with the `midnight-did-uiux-bundle` design
-   * system (05-design-system.md). Mostly the same as before;
-   * accent shifted from blue-ish to the bundle's purple. */
-  --bg:           #080B14;
-  --surface:      #101827;
-  --surface-2:    #172033;
-  --surface-3:    #1d2939;
-  --surface-4:    #252b37;
-  --border:       #26334D;
-  --border-faint: #1d2638;
-  --text:         #F5F7FB;
-  --text-soft:    #cecfd2;
-  --text-muted:   #9AA7BD;
-  --text-faint:   #717680;
-  --accent:       #7C5CFF;
-  --accent-soft:  #2a2052;
-  --success:      #2EE6A6;
-  --warn:         #FFB020;
-  --error:        #FF5C7A;
-  --mono-tint:    #a3acc4;
+  /* ── Design tokens (2026-06-01 redesign) ───────────────────────
+   *
+   * See docs/superpowers/specs/2026-06-01-ui-redesign-backlog.md
+   * §C for the rationale + scale design. The new tokens are the
+   * canonical layer; the legacy `--bg / --surface / --border / …`
+   * names below are kept as aliases so unmigrated rules keep
+   * resolving while the redesign rolls out wave by wave.
+   *
+   * Surfaces (darkest → lightest):
+   */
+  --surface-0:        #070b14;                       /* page bg, behind everything */
+  --surface-1:        #0b1020;                       /* tab content background */
+  --surface-2-new:    rgba(16, 24, 43, 0.82);        /* card */
+  --surface-3-new:    rgba(22, 33, 57, 0.94);        /* elevated card / modal */
+  --surface-4-new:    rgba(255, 255, 255, 0.045);    /* hover tint, claim background */
 
-  --radius-card: 12px;
-  --radius-pill: 999px;
-  --radius-cta:  16px;
-  --gutter:      16px;
+  /* Text */
+  --text-strong:      #f8fafc;
+  --text-new:         #e2e8f0;
+  --text-soft-new:    #cbd5e1;
+  --text-muted-new:   #94a3b8;
+  --text-faint-new:   #64748b;
+
+  /* Accent / status */
+  --accent-cyan:      #35d3ff;
+  --accent-purple:    #b99cff;
+  --accent-green:     #43f2b2;
+  --success-new:      var(--accent-green);
+  --warn-new:         #ffb020;
+  --error-new:        #ff557f;
+  --info-new:         var(--accent-cyan);
+
+  /* Gradients */
+  --gradient-primary: linear-gradient(135deg, var(--accent-green), var(--accent-cyan));
+  --gradient-purple:  linear-gradient(135deg, var(--accent-purple), var(--accent-cyan));
+  --gradient-token:   linear-gradient(145deg, rgba(53,211,255,.24), rgba(185,156,255,.11));
+
+  /* Borders */
+  --line-faint:       rgba(148, 163, 184, 0.10);
+  --line:             rgba(148, 163, 184, 0.16);
+  --line-strong:      rgba(148, 163, 184, 0.28);
+  --line-danger:      rgba(255, 85, 127, 0.45);
+  --line-success:     rgba(67, 242, 178, 0.30);
+
+  /* Radius scale */
+  --r-1: 8px;        /* input */
+  --r-2: 12px;       /* small card, badge container */
+  --r-3: 16px;       /* button, icon-button squircle */
+  --r-4: 22px;       /* meta-item, claim-card, list-row */
+  --r-5: 28px;       /* modal, large card */
+  --r-6: 36px;       /* hero card, credential card */
+  --r-pill-new: 999px;
+
+  /* Spacing scale (4 px base) */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-12: 48px;
+
+  /* Typography ramp */
+  --fs-hero:    clamp(2.35rem, 7vw, 5rem);
+  --fs-h1:      clamp(1.75rem, 4vw, 2.5rem);
+  --fs-h2:      1.4rem;
+  --fs-h3:      1.15rem;
+  --fs-h4:      1.0rem;
+  --fs-body:    0.96rem;
+  --fs-meta:    0.85rem;
+  --fs-small:   0.78rem;
+  --fs-eyebrow: 0.72rem;
+  --fs-mono:    0.85rem;
+
+  /* Shadow + blur */
+  --shadow-card:   0 26px 90px rgba(0, 0, 0, 0.45);
+  --shadow-inset:  inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  --shadow-button: 0 16px 40px rgba(53, 211, 255, 0.16);
+  --shadow-modal:  0 24px 48px rgba(0, 0, 0, 0.55);
+  --blur-card:     blur(22px);
+  --blur-ambient:  blur(54px);
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast:    120ms;
+  --dur-norm:    180ms;
+  --dur-slow:    320ms;
+
+  /* ── Legacy aliases (kept until every call site migrates) ──── */
+  --bg:           var(--surface-0);
+  --surface:      #101827;             /* opaque card backstop (some rules can't use rgba) */
+  --surface-2:    var(--surface-2-new);
+  --surface-3:    var(--surface-3-new);
+  --surface-4:    var(--surface-4-new);
+  --border:       var(--line-strong);
+  --border-faint: var(--line-faint);
+  --text:         var(--text-new);
+  --text-soft:    var(--text-soft-new);
+  --text-muted:   var(--text-muted-new);
+  --text-faint:   var(--text-faint-new);
+  --accent:       #7C5CFF;             /* legacy purple — unchanged for now */
+  --accent-soft:  #2a2052;
+  --success:      var(--success-new);
+  --warn:         var(--warn-new);
+  --error:        var(--error-new);
+  --mono-tint:    #a3acc4;
+  --radius-card:  var(--r-4);
+  --radius-pill:  var(--r-pill-new);
+  --radius-cta:   var(--r-3);
+  --gutter:       var(--sp-4);
 }
 
 * { box-sizing: border-box; }
@@ -46,7 +133,6 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--text);
   font-family:
     "Outfit", -apple-system, BlinkMacSystemFont,
@@ -59,6 +145,34 @@ html, body {
    * page scroll sideways. Tables/grids that genuinely need
    * more width opt into a card-local scroll via `.scroll-x`. */
   overflow-x: hidden;
+}
+
+/* Ambient page background — two radial-gradient hotspots (cyan
+ * top-left, purple top-right) over a deep navy linear base. Reads
+ * as a "designed surface" rather than the previous flat dev shell
+ * (see redesign backlog §C.5 + §D P0 #2). Fixed attachment so the
+ * blobs don't slide with scroll. */
+html {
+  background:
+    radial-gradient(
+      circle at 18% 12%,
+      rgba(53, 211, 255, 0.14),
+      transparent 34%
+    ),
+    radial-gradient(
+      circle at 78% 24%,
+      rgba(185, 156, 255, 0.14),
+      transparent 34%
+    ),
+    linear-gradient(180deg, var(--surface-0) 0%, var(--surface-1) 100%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+body {
+  /* Body is transparent so the html-level gradient shows
+   * through every scroll position. Without this the body would
+   * paint flat `var(--surface-0)` over the gradient. */
+  background: transparent;
 }
 
 /* Body needs `box-sizing: border-box` so the iOS safe-area
@@ -204,21 +318,45 @@ body {
 .dot.error   { background: var(--error); }
 .dot.muted   { background: var(--text-faint); }
 
-/* ─────────────── Cards ─────────────── */
+/* ─────────────── Cards ───────────────
+ *
+ * Card primitive — 22 px radius layered surface with faint inner
+ * top-highlight + a deep drop shadow. The bundle's `.credential-card`
+ * grammar generalised so every existing `.card` site inherits the
+ * lift without an rsx! change. See redesign backlog §D P0 #7.
+ *
+ * Padding is intentionally NOT baked into the base rule — the
+ * existing children (`.card-header`, `.row`, `.detail-empty`, …)
+ * still own their own padding so the migration stays additive.
+ * New screens should use the `--sp-*` scale directly inside the
+ * card.
+ */
 .card {
-  background: var(--surface);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-card);
-  margin-bottom: 16px;
+  position: relative;
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-4);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.045), transparent 28%),
+    var(--surface-2-new);
+  box-shadow: var(--shadow-card), var(--shadow-inset);
+  backdrop-filter: var(--blur-card);
+  -webkit-backdrop-filter: var(--blur-card);
   overflow: hidden;
+  transition: border-color var(--dur-norm) var(--ease-out),
+              transform var(--dur-norm) var(--ease-out);
 }
 
 .card-header {
-  padding: 12px 16px 8px;
-  font-size: 11px;
-  letter-spacing: 0.04em;
+  padding: 0 0 var(--sp-2);
+  margin-bottom: var(--sp-3);
+  font-size: var(--fs-eyebrow);
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text-muted);
+  color: var(--text-muted-new);
+  font-weight: 700;
+  border-bottom: 1px solid var(--line-faint);
 }
 
 /* ─────────────── Address block ───────────────
@@ -710,28 +848,18 @@ hr, .divider {
   background: var(--border);
 }
 
-/* Cards (M3 Elevated). The existing `.card` already covers the
- * "Filled" variant — same surface, outlined edge. These additions
- * give it a subtle drop shadow so cards read as raised above the
- * page background (M3 Elevation 1). Cards do not lift on hover by
- * default — opt in via `.card.interactive`.
+/* Card interactive modifier. Base `.card` rule lives at the top
+ * of this file in the redesigned grammar (22 px radius, layered
+ * gradient, ambient inset highlight, deep drop shadow). Hover
+ * lift is opt-in via `.card.interactive`. The old M3 Elevation 1
+ * variant was rolled into the new base — duplicate block removed.
  */
-.card {
-  /* Inherits background + border-radius from earlier definition. */
-  background: var(--surface);
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.20),
-    0 1px 3px rgb(0 0 0 / 0.12);
-  transition: box-shadow 160ms ease, transform 160ms ease;
-}
 .card.interactive {
   cursor: pointer;
 }
 .card.interactive:hover {
-  transform: translateY(-1px);
-  box-shadow:
-    0 2px 4px rgb(0 0 0 / 0.25),
-    0 4px 10px rgb(0 0 0 / 0.18);
+  transform: translateY(-2px);
+  border-color: rgba(53, 211, 255, 0.36);
 }
 
 /* ─────────────── Network select ─────────────── */
