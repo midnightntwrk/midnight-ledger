@@ -2148,7 +2148,7 @@ pub fn App() -> Element {
             Tab::Diagnostics => rsx! {
                 div { class: "carousel-nav",
                     for (idx , label) in [
-                        "Probes", "Metrics", "Benchmark", "Test", "Logs"
+                        "Probes", "Metrics", "Benchmark", "Bootstrap", "Logs"
                     ].iter().enumerate() {
                         button {
                             class: if *diag_view.read() as usize == idx {
@@ -2271,10 +2271,38 @@ pub fn App() -> Element {
                     div { class: "carousel-page", id: "diag-page-2",
                         BenchmarkTab {}
                     }
-                    // Page 3 — Test / dev probes
+                    // Page 3 — Bootstrap (setup + manual OID4VC URL paste)
+                    //
+                    // Replaces the former "Test" page (JsBridgePanel +
+                    // TimingsPanel, both dev probes that the operator
+                    // never used during a demo — components stay defined
+                    // in the codebase for future reuse but no longer
+                    // mount here).
                     div { class: "carousel-page", id: "diag-page-3",
-                        JsBridgePanel { seed_did: last_did_id.read().clone() }
-                        TimingsPanel { runs: timing_log.read().clone() }
+                        crate::identity_centre::DiagBootstrapPanel {
+                            network: *network.read(),
+                            bridge_state: bridge_state.read().clone(),
+                            did_inventory,
+                            on_did_minted: move |(did, net): (String, Network)| {
+                                let entry = DidInventoryEntry {
+                                    did: did.clone(),
+                                    network_label: net.label().to_string(),
+                                    status: DidInventoryStatus::Active,
+                                    counter: None,
+                                    vm_count: Some(2),
+                                    service_count: Some(0),
+                                    last_block_height: None,
+                                };
+                                let mut inv = did_inventory.read().clone();
+                                inv.insert(did.clone(), entry.clone());
+                                did_inventory.set(inv);
+                                persist_inventory_entry(
+                                    &bridge_state.read(),
+                                    net,
+                                    &entry,
+                                );
+                            },
+                        }
                     }
                     // Page 4 — Logs
                     div { class: "carousel-page", id: "diag-page-4",
@@ -2303,36 +2331,14 @@ pub fn App() -> Element {
             },
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
-                // Recovery section — formerly the standalone
-                // `Tab::Bootstrap`. Folded into Settings so the
-                // bottom nav can surface Diagnostics. Carries the
-                // same `on_did_minted` plumbing as before — inserts
-                // a Pending entry into the live `did_inventory`
-                // signal AND persists to redb.
-                crate::identity_centre::BootstrapPanel {
+                // Demo-wallet controls (Reload demo / Random wallet)
+                // belong here — they swap the in-memory wallet
+                // state, which is a Settings concern. The DID +
+                // OID4VC paste flows that used to mount alongside
+                // moved to Diagnostics → Bootstrap.
+                crate::identity_centre::DemoWalletControlsSection {
                     network: *network.read(),
-                    bridge_state: bridge_state.read().clone(),
-                    did_inventory,
                     wallet,
-                    on_did_minted: move |(did, net): (String, Network)| {
-                        let entry = DidInventoryEntry {
-                            did: did.clone(),
-                            network_label: net.label().to_string(),
-                            status: DidInventoryStatus::Active,
-                            counter: None,
-                            vm_count: Some(2),
-                            service_count: Some(0),
-                            last_block_height: None,
-                        };
-                        let mut inv = did_inventory.read().clone();
-                        inv.insert(did.clone(), entry.clone());
-                        did_inventory.set(inv);
-                        persist_inventory_entry(
-                            &bridge_state.read(),
-                            net,
-                            &entry,
-                        );
-                    },
                 }
             },
             Tab::Identity => rsx! {

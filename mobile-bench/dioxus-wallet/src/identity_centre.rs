@@ -301,18 +301,11 @@ pub fn IdentityCentrePanel(
     let _ = on_did_minted;
 
     rsx! {
-        // (Intro "Identity Centre" card removed — duplicated the
-        // bottom-tab label + the scan-hero eyebrow underneath.
-        // The scan-hero itself anchors the page now.)
+        // Scan-only Credentials tab. The OID4VCI paste-URL section
+        // (and its OID4VP sibling) live under Diagnostics →
+        // Bootstrap now; the everyday holder-facing surface is the
+        // scan-QR hero + the credential inventory underneath.
         ScanQrSection {
-            network,
-            bridge_state: bridge_state.clone(),
-            ic_did,
-            did_inventory,
-            pending_pick,
-        }
-
-        Oid4vciSection {
             network,
             bridge_state: bridge_state.clone(),
             ic_did,
@@ -524,43 +517,38 @@ fn truncate_for_msg(s: &str, max: usize) -> String {
 ///
 /// The everyday holder-facing surface (`IdentityCentrePanel`) stays
 /// scan-first and skips these heavier controls.
+///
+/// Mounted inside the Diagnostics carousel's "Bootstrap" page.
+/// Settings mounts `DemoWalletControlsSection` directly — the
+/// wallet-swap dev affordance isn't bootstrap-related.
 #[component]
-pub fn BootstrapPanel(
+pub fn DiagBootstrapPanel(
     network: Network,
     bridge_state: BridgeState,
     did_inventory: Signal<
         std::collections::BTreeMap<String, crate::app::DidInventoryEntry>,
     >,
-    wallet: Signal<Option<crate::app::WalletInfo>>,
     on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
     let ic_did = use_signal::<Option<String>>(|| None);
-    // See IdentityCentrePanel for the picker rationale; the
-    // Bootstrap tab owns its own signal so the modal renders here
-    // when the OID4VP paste-URL flow needs a DID decision.
+    // Shared picker state — both the OID4VP-paste and the
+    // OID4VCI-paste sections route their entry-point clicks
+    // through `require_did(pending_pick, …)`. Modal renders
+    // last in the rsx so its backdrop sits above the cards.
     let pending_pick =
         use_signal::<Option<crate::did_picker::PickerState>>(|| None);
 
     rsx! {
-        // Recovery is now a sub-section of Settings (not its own
-        // top-level tab). A section-header sits at the top to mark
-        // the boundary between the persistent-store / backup cards
-        // above (rendered by SettingsTab) and the wallet-setup
-        // controls below.
         header { class: "section-header",
             div {
-                p { class: "section-header__eyebrow", "Recovery" }
-                h2 { class: "section-header__title", "Wallet recovery & setup" }
+                p { class: "section-header__eyebrow", "Bootstrap" }
+                h2 { class: "section-header__title", "Setup & manual flows" }
                 p { class: "section-header__sub",
-                    "Swap the in-memory wallet, mint a fresh DID, or "
-                    "paste an OID4VP URL by hand."
+                    "Mint a fresh DID + VC keys, or paste an OID4VP / "
+                    "OID4VCI URL by hand. The everyday Credentials tab "
+                    "drives the same flows from the scanner."
                 }
             }
-        }
-
-        DemoWalletControlsSection {
-            network,
-            wallet,
         }
 
         BootstrapSection {
@@ -571,6 +559,14 @@ pub fn BootstrapPanel(
         }
 
         Oid4vpSection {
+            network,
+            bridge_state: bridge_state.clone(),
+            ic_did,
+            did_inventory,
+            pending_pick,
+        }
+
+        Oid4vciSection {
             network,
             bridge_state,
             ic_did,
@@ -585,10 +581,11 @@ pub fn BootstrapPanel(
 /// Demo-only wallet swap controls. Lets the operator flip between
 /// the deterministic demo wallet (`app_wallet_for(network)` — same
 /// seed across restarts) and a fresh `Wallet::new_random` for
-/// negative-path scenarios. Lives on the Bootstrap tab because
-/// it's a setup affordance, not part of the everyday Wallet view.
+/// negative-path scenarios. Lives on the Settings tab — it's a
+/// wallet-state affordance, not part of the credential / DID
+/// bootstrap flow.
 #[component]
-fn DemoWalletControlsSection(
+pub fn DemoWalletControlsSection(
     network: Network,
     wallet: Signal<Option<crate::app::WalletInfo>>,
 ) -> Element {
