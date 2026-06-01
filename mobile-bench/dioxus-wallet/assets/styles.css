@@ -2,12 +2,19 @@
  * Spec: mobile-bench/MOBILE_WALLET.md "Dark theme" section.
  * Phone-first; responsive cap at 560 px on desktop. */
 
-/* Outfit — the typeface Midnight uses across their brand
- * (see https://fonts.google.com/specimen/Outfit). We pull
- * weights 400/500/600/700; the WebView caches per session.
- * Falls through to the previous stack if Google Fonts can't
- * be reached (e.g. offline). */
-@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&display=swap");
+/* Inter — adopted per the Oxid VC style guide. Pulls every
+ * weight from 400 (body) to 900 (hero number / primary CTA);
+ * the WebView caches per session. Falls through to the system
+ * sans-serif stack if Google Fonts isn't reachable (offline /
+ * preprod env). Previous typeface was Outfit (geometric warmth);
+ * Inter is the typographic register of every reference wallet
+ * the guide cites — Apple Wallet, Linear, Stripe, Vercel,
+ * Rainbow — and is what the bundle's mockups assume.
+ *
+ * `tnum` is opted in inside the `body` rule so balance / hex
+ * digit columns sit at tabular widths without monospacing the
+ * whole UI. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap");
 
 :root {
   /* Tells the WebView to use dark-mode native scrollbars + form
@@ -37,13 +44,17 @@
   --text-muted-new:   #94a3b8;
   --text-faint-new:   #64748b;
 
-  /* Accent / status */
-  --accent-cyan:      #35d3ff;
-  --accent-purple:    #b99cff;
-  --accent-green:     #43f2b2;
+  /* Accent / status — values aligned to the Oxid VC style guide
+   * (`/tmp/oxid-bundle/oxid-vc-style-guide.md`). `--mint` is a
+   * semantic alias for `--accent-green` that reads better at the
+   * call site when the colour signals "holder-bound / verified". */
+  --accent-cyan:      #38d5ff;
+  --accent-purple:    #a78bfa;
+  --accent-green:     #46f3b5;
+  --mint:             var(--accent-green);
   --success-new:      var(--accent-green);
-  --warn-new:         #ffb020;
-  --error-new:        #ff557f;
+  --warn-new:         #fbbf24;
+  --error-new:        #ff5c8a;
   --info-new:         var(--accent-cyan);
 
   /* Gradients */
@@ -135,8 +146,8 @@ html, body {
   padding: 0;
   color: var(--text);
   font-family:
-    "Outfit", -apple-system, BlinkMacSystemFont,
-    "Inter", "Segoe UI", Roboto, sans-serif;
+    "Inter", ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   font-size: 15px;
   font-feature-settings: "tnum" on, "lnum" on;
   -webkit-font-smoothing: antialiased;
@@ -2403,10 +2414,14 @@ body {
  */
 
 .credential-card {
-  --cc-cyan:   #35d3ff;
-  --cc-green:  #43f2b2;
-  --cc-purple: #b99cff;
-  --cc-danger: #ff557f;
+  /* Local accent tokens — kept in lockstep with the global
+   * `--accent-*` palette (and the Oxid guide's hex values).
+   * `--cc-green` is also referred to as "mint" at call sites
+   * where the colour means "holder-bound / verified". */
+  --cc-cyan:   #38d5ff;
+  --cc-green:  #46f3b5;
+  --cc-purple: #a78bfa;
+  --cc-danger: #ff5c8a;
   --cc-line:        rgba(148, 163, 184, 0.16);
   --cc-line-strong: rgba(148, 163, 184, 0.28);
   --cc-muted:       #94a3b8;

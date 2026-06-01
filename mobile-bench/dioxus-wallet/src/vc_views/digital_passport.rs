@@ -280,7 +280,7 @@ pub fn DigitalPassportCard(
             section { class: "claims-header",
                 div {
                     h2 { "Available proofs" }
-                    p { "Choose exactly what to reveal to a verifier." }
+                    p { "Choose exactly what to disclose." }
                 }
                 // Generate VP lands in Phase 2 — disabled for now
                 // so the button still anchors the card visually but
@@ -306,7 +306,7 @@ pub fn DigitalPassportCard(
                                 if reveal_first {
                                     "{first_name_revealed}"
                                 } else {
-                                    "Encrypted until you reveal it."
+                                    "Encrypted until revealed."
                                 }
                             } else {
                                 "No opening stored — cannot reveal."
@@ -332,7 +332,7 @@ pub fn DigitalPassportCard(
                                 if reveal_last {
                                     "{last_name_revealed}"
                                 } else {
-                                    "Encrypted until you reveal it."
+                                    "Encrypted until revealed."
                                 }
                             } else {
                                 "No opening stored — cannot reveal."
@@ -354,8 +354,8 @@ pub fn DigitalPassportCard(
                         span { class: "claim-type purple", "Predicate-only" }
                         h3 { "Date of birth" }
                         p {
-                            "Never reveals the raw date. Proves only "
-                            "age ≥ threshold."
+                            "Never reveals your date of birth. "
+                            "Proves only age ≥ threshold."
                             if !dob_present {
                                 " (no opening stored — predicate cannot prove)"
                             }
@@ -399,7 +399,7 @@ pub fn DigitalPassportCard(
                     if let Some(badge) = verify_label.as_ref() {
                         "{badge} · "
                     }
-                    "Presentation generation is wired in Phase 2."
+                    "Presentation generation is planned for Phase 2."
                 }
             }
         }
