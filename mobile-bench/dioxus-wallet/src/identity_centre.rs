@@ -380,47 +380,28 @@ fn ScanQrSection(
                     busy.set(true);
                     let bridge_state = bridge_state_outer.clone();
                     spawn(async move {
-                        let Some(bridge) = eval_bridge::global_bridge() else {
-                            err_msg.set(Some(
-                                "JS bridge not installed yet (js-bridge feature off?)"
-                                    .into(),
-                            ));
-                            busy.set(false);
-                            return;
-                        };
-                        let url = match eval_bridge::scan_qr(&*bridge).await {
+                        // Platform-resolved scanner. On Android,
+                        // `ActiveQrScanner = AndroidQrScanner`,
+                        // which JNIs into ML Kit and ignores the
+                        // JS bridge. On every other target it's
+                        // `FallbackQrScanner`, which delegates to
+                        // `eval_bridge::scan_qr` (the legacy
+                        // jsQR/getUserMedia path). The wallet UI
+                        // code below doesn't branch on platform.
+                        let scanner = crate::ActiveQrScanner;
+                        let url = match wallet_core::QrScanner::scan(&scanner).await {
                             Ok(u) => u,
-                            Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
-                                if msg == "cancelled" =>
-                            {
+                            Err(wallet_core::QrScanError::Cancelled) => {
                                 busy.set(false);
                                 return;
                             }
-                            Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
-                                if msg.contains("getUserMedia not available") =>
-                            {
-                                // Android WebView gates
-                                // `navigator.mediaDevices` behind a
-                                // secure-context check. The wallet's
-                                // shell loads from the `dioxus://`
-                                // scheme, which Chromium treats as
-                                // insecure, so the API is `undefined`
-                                // and we can't drive a camera preview
-                                // here. Point the operator at the
-                                // paste fallback that already lives
-                                // under Diagnostics → Bootstrap.
-                                err_msg.set(Some(
-                                    "Camera unavailable in this WebView \
-                                     (Android secure-context limit). \
-                                     Paste the OID4VC URL in \
-                                     Diagnostics → Bootstrap instead."
-                                        .into(),
-                                ));
+                            Err(wallet_core::QrScanError::Unavailable(msg)) => {
+                                err_msg.set(Some(msg));
                                 busy.set(false);
                                 return;
                             }
                             Err(e) => {
-                                err_msg.set(Some(format!("scan failed: {e}")));
+                                err_msg.set(Some(format!("{e}")));
                                 busy.set(false);
                                 return;
                             }

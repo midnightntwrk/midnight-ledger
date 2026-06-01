@@ -96,4 +96,12 @@ dependencies {
     // the local Maven repo declared above. Version pinned to the AAR
     // that ships with rustls-platform-verifier 0.6.2.
     implementation("rustls:rustls-platform-verifier:0.1.1")
+    // Google ML Kit Code Scanner — backs the native Scan QR flow.
+    // ML Kit handles the camera, viewfinder UI, and runtime
+    // permission prompt itself; called from Rust through the
+    // companion `QrScanBridge.kt` + JNI `nativeOnQrResult` symbol.
+    // Falls back gracefully via `GoogleApiAvailability` on devices
+    // without Play Services. See
+    // docs/superpowers/specs/2026-06-02-native-qr-scanner-android.md.
+    implementation("com.google.android.gms:play-services-code-scanner:16.1.0")
 }

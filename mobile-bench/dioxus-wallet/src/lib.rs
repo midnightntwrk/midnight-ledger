@@ -16,6 +16,23 @@ mod vc_views;
 #[cfg(feature = "js-bridge")]
 mod protocol;
 
+// QR scanner — Android uses native ML Kit via JNI; every other
+// target delegates to the WebView's `getUserMedia` path through
+// the JS bridge. `ActiveQrScanner` is the platform-resolved alias
+// the wallet code instantiates; the implementations live in the
+// two sibling modules below, each gated to its target. See
+// docs/superpowers/specs/2026-06-02-native-qr-scanner-android.md
+// for the full architecture.
+#[cfg(target_os = "android")]
+mod qr_scanner_android;
+#[cfg(not(target_os = "android"))]
+mod qr_scanner_fallback;
+
+#[cfg(target_os = "android")]
+pub(crate) use qr_scanner_android::AndroidQrScanner as ActiveQrScanner;
+#[cfg(not(target_os = "android"))]
+pub(crate) use qr_scanner_fallback::FallbackQrScanner as ActiveQrScanner;
+
 pub fn run() {
     // Two tracing layers ride together: the standard `fmt`
     // layer for stderr (developer feedback when running
