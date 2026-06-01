@@ -6739,6 +6739,12 @@ fn DidDetailView(
     // irreversible — the contract has no reactivation circuit —
     // so a confirm step is warranted.
     let mut confirm_deactivate = use_signal(|| false);
+    // When true, render the `ControllerSecretCard` inline with the
+    // other detail cards. Hidden by default — the panel exposes
+    // sensitive key material and the operator only needs it when
+    // explicitly backing up / restoring the secret. Toggled by the
+    // "Secret" button in the segmented header capsule.
+    let mut show_controller_secret = use_signal(|| false);
     // When true, render `DidOperationBuilder` instead of the
     // 8-tab view. Toggled by the "Update DID" button (which is
     // disabled unless we have the controller secret for this DID
@@ -7026,6 +7032,18 @@ fn DidDetailView(
                     onclick: move |_| confirm_deactivate.set(true),
                     "Deactivate"
                 }
+                button {
+                    title: if controller_known {
+                        "Show / hide the controller secret (used by Update / Deactivate)"
+                    } else {
+                        "Restore the controller secret to enable Update / Deactivate"
+                    },
+                    onclick: move |_| {
+                        let cur = *show_controller_secret.read();
+                        show_controller_secret.set(!cur);
+                    },
+                    {if *show_controller_secret.read() { "🔑 Hide" } else { "🔑 Secret" }}
+                }
             }
             if let Some(err) = resolve_error.read().as_ref() {
                 div { class: "wizard-outcome err",
@@ -7062,11 +7080,17 @@ fn DidDetailView(
                 }
             }
         }
-        ControllerSecretCard {
-            network,
-            did: did.clone(),
-            current_secret: controller_secret,
-            bridge_state: bridge_state.clone(),
+        // ControllerSecretCard is gated behind the "🔑 Secret" /
+        // "🔑 Hide" toggle in the segmented header capsule above.
+        // Hidden by default so the sensitive key material isn't
+        // surfaced unsolicited.
+        if *show_controller_secret.read() {
+            ControllerSecretCard {
+                network,
+                did: did.clone(),
+                current_secret: controller_secret,
+                bridge_state: bridge_state.clone(),
+            }
         }
         div { class: "detail-tabs",
             for t in DetailTab::ALL {
