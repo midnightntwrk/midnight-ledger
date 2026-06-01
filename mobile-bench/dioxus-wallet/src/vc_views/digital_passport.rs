@@ -128,24 +128,6 @@ fn format_unix_date_ymd(unix_secs: i64) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-/// Per-claim reveal state. `firstName` / `lastName` are toggleable;
-/// `dateOfBirth` has a separate age threshold dropdown and is
-/// never revealed plaintext.
-#[derive(Clone, Copy, PartialEq, Eq)]
-struct RevealState {
-    first_name: bool,
-    last_name: bool,
-}
-
-impl Default for RevealState {
-    fn default() -> Self {
-        Self {
-            first_name: false,
-            last_name: false,
-        }
-    }
-}
-
 /// Common age thresholds rendered in the predicate dropdown.
 /// Selecting a value here will, in Phase 2, drive the
 /// `proveAgeOverThreshold` disclosure in the emitted presentation.
@@ -156,42 +138,52 @@ const AGE_THRESHOLDS: &[u32] = &[13, 16, 18, 21, 65];
 ///
 /// Inputs:
 /// - `vc`: the stored credential envelope (no decoding done here)
-/// - `fetch_opening`: pulls `(claim_path) → Option<VcOpening>` from
-///   whatever storage the host wallet uses (redb in the demo)
+/// - `opening_first` / `opening_last` / `opening_dob`: eagerly-
+///   resolved opening blobs the host pulled from its store. `None`
+///   for any of them means "no opening recorded" — the card
+///   renders that row with a "cannot reveal" caption.
+/// - `reveal_first` / `reveal_last`: whether each selectively-
+///   disclosable claim is currently shown in plaintext. Host owns
+///   the state; the card calls back via `on_toggle_first` /
+///   `on_toggle_last` when the user clicks Reveal / Hide.
+/// - `age_threshold` / `on_threshold_change`: same pattern for the
+///   predicate-only DOB row's age threshold dropdown.
 /// - `verify_label`: optional pre-computed self-verify badge text
-///   from the host — `None` ⇒ the card omits the badge slot
+///   from the host — `None` ⇒ the card omits the badge slot.
 /// - `on_delete`: optional handler invoked with the `vc_uri` when
 ///   the user clicks Delete. `None` ⇒ the Delete button is
 ///   omitted (useful when the host doesn't want a destructive
 ///   action on this row).
 ///
+/// **No hooks inside.** All per-row state is owned by the host so
+/// the card stays a pure presentation function — safe to invoke
+/// from inside a Dioxus `for` loop where the row count can change
+/// across renders.
+///
 /// No interactions emit network or chain ops yet; the Reveal
-/// toggles and the threshold dropdown mutate local state only.
+/// toggles and the threshold dropdown route through callbacks.
 /// Phase 2 will wire `Generate presentation` to the OID4VP client.
 ///
 /// The PascalCase name matches Dioxus's component convention. We
 /// don't use the `#[component]` macro because `StoredVc` doesn't
 /// derive `PartialEq` — the macro generates a `Props` struct that
 /// requires `PartialEq`. Calling sites use the function directly.
-#[allow(non_snake_case)]
+#[allow(non_snake_case, clippy::too_many_arguments)]
 pub fn DigitalPassportCard(
     vc: StoredVc,
-    fetch_opening: std::rc::Rc<dyn Fn(&str) -> Option<VcOpening>>,
+    opening_first: Option<VcOpening>,
+    opening_last: Option<VcOpening>,
+    opening_dob: Option<VcOpening>,
+    reveal_first: bool,
+    reveal_last: bool,
+    age_threshold: u32,
+    on_toggle_first: EventHandler<()>,
+    on_toggle_last: EventHandler<()>,
+    on_threshold_change: EventHandler<u32>,
     verify_label: Option<String>,
     on_delete: Option<EventHandler<String>>,
 ) -> Element {
-    let mut reveal = use_signal(RevealState::default);
-    let mut age_threshold = use_signal(|| 18u32);
-
-    // Eagerly fetch the three openings once per render. For a card
-    // that has three known claim paths this is cheap; we don't
-    // memoise across rerenders since `StoredVc` may have changed
-    // between calls (e.g. after self-verify metadata updates).
-    let opening_first = fetch_opening(CLAIM_FIRST_NAME);
-    let opening_last = fetch_opening(CLAIM_LAST_NAME);
-    let opening_dob = fetch_opening(CLAIM_DATE_OF_BIRTH);
-
-    let first_name_revealed = if reveal.read().first_name {
+    let first_name_revealed = if reveal_first {
         opening_first
             .as_ref()
             .map(|o| decode_text_padded(&o.plaintext))
@@ -199,7 +191,7 @@ pub fn DigitalPassportCard(
     } else {
         String::new()
     };
-    let last_name_revealed = if reveal.read().last_name {
+    let last_name_revealed = if reveal_last {
         opening_last
             .as_ref()
             .map(|o| decode_text_padded(&o.plaintext))
@@ -268,7 +260,7 @@ pub fn DigitalPassportCard(
                 }
                 div { class: "vc-card-passport__claim-body",
                     if first_name_present {
-                        if reveal.read().first_name {
+                        if reveal_first {
                             div { class: "vc-card-passport__plaintext",
                                 span { class: "vc-card-passport__plaintext-icon", "👁" }
                                 span { "{first_name_revealed}" }
@@ -281,14 +273,8 @@ pub fn DigitalPassportCard(
                         }
                         button {
                             class: "vc-card-passport__reveal-btn",
-                            onclick: move |_| {
-                                let cur = *reveal.read();
-                                reveal.set(RevealState {
-                                    first_name: !cur.first_name,
-                                    ..cur
-                                });
-                            },
-                            {if reveal.read().first_name { "Hide" } else { "Reveal" }}
+                            onclick: move |_| on_toggle_first.call(()),
+                            {if reveal_first { "Hide" } else { "Reveal" }}
                         }
                     } else {
                         div { class: "vc-card-passport__missing",
@@ -309,7 +295,7 @@ pub fn DigitalPassportCard(
                 }
                 div { class: "vc-card-passport__claim-body",
                     if last_name_present {
-                        if reveal.read().last_name {
+                        if reveal_last {
                             div { class: "vc-card-passport__plaintext",
                                 span { class: "vc-card-passport__plaintext-icon", "👁" }
                                 span { "{last_name_revealed}" }
@@ -322,14 +308,8 @@ pub fn DigitalPassportCard(
                         }
                         button {
                             class: "vc-card-passport__reveal-btn",
-                            onclick: move |_| {
-                                let cur = *reveal.read();
-                                reveal.set(RevealState {
-                                    last_name: !cur.last_name,
-                                    ..cur
-                                });
-                            },
-                            {if reveal.read().last_name { "Hide" } else { "Reveal" }}
+                            onclick: move |_| on_toggle_last.call(()),
+                            {if reveal_last { "Hide" } else { "Reveal" }}
                         }
                     } else {
                         div { class: "vc-card-passport__missing",
@@ -356,10 +336,10 @@ pub fn DigitalPassportCard(
                         label { class: "vc-card-passport__predicate-label", "Prove age over:" }
                         select {
                             class: "vc-card-passport__predicate-select",
-                            value: "{age_threshold.read()}",
+                            value: "{age_threshold}",
                             onchange: move |evt| {
                                 if let Ok(n) = evt.value().parse::<u32>() {
-                                    age_threshold.set(n);
+                                    on_threshold_change.call(n);
                                 }
                             },
                             for n in AGE_THRESHOLDS.iter().copied() {

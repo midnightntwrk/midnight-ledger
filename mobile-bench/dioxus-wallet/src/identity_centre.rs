@@ -22,7 +22,7 @@ use tracing::Instrument;
 
 use wallet_core::{
     HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
-    SelfVerifyResult, StoredVc, SystemClock, VcOpening, bootstrap_did_with_keys,
+    SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys,
     oid4vci_run_issuance, oid4vp_run_authentication, self_verify_and_cache, time_op,
     time_op_simple,
 };
@@ -868,6 +868,26 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
     // self-verify click.
     let badges = use_signal::<std::collections::HashMap<String, VerifyBadge>>(Default::default);
 
+    // Per-row state hoisted to the inventory scope so it survives
+    // (and isolates) row inserts + deletes. Each map is keyed by
+    // `vc_uri`. Hoisting is necessary because Dioxus's rules of
+    // hooks forbid calling `use_signal` inside per-row helpers:
+    // the helper is invoked once per VC in the inventory's render
+    // loop, so any `use_signal` inside it joins the inventory's
+    // hook list. When the row count changes (delete!) the hook
+    // count changes and Dioxus panics with "Unable to retrieve
+    // the hook that was initialized at this index". The maps
+    // below give us the same per-row state without ever touching
+    // a hook from inside the helpers.
+    let reveal_first_set =
+        use_signal::<std::collections::HashSet<String>>(Default::default);
+    let reveal_last_set =
+        use_signal::<std::collections::HashSet<String>>(Default::default);
+    let threshold_map =
+        use_signal::<std::collections::HashMap<String, u32>>(Default::default);
+    let busy_set =
+        use_signal::<std::collections::HashSet<String>>(Default::default);
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "VC inventory" }
@@ -886,7 +906,17 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
                 },
                 Some(Ok(list)) => rsx! {
                     for vc in list.iter().cloned() {
-                        {render_vc_dispatch(network, bridge_state.clone(), vc, badges, refresh_tick)}
+                        {render_vc_dispatch(
+                            network,
+                            bridge_state.clone(),
+                            vc,
+                            badges,
+                            refresh_tick,
+                            reveal_first_set,
+                            reveal_last_set,
+                            threshold_map,
+                            busy_set,
+                        )}
                     }
                 },
             }
@@ -904,17 +934,41 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
 /// (when we have a view for that family) or the generic fallback
 /// row. Keeps `render_vc_row` ignorant of view-module specifics so
 /// future schema additions are a single match arm here.
+///
+/// All per-row state lives in the inventory-level signals (see
+/// `VcInventorySection`). The helpers below are *pure presentation*
+/// — they never call hooks, so the inventory's hook count stays
+/// constant across inserts and deletes.
+#[allow(clippy::too_many_arguments)]
 fn render_vc_dispatch(
     network: Network,
     bridge_state: BridgeState,
     vc: StoredVc,
     badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
     refresh_tick: Signal<u64>,
+    reveal_first_set: Signal<std::collections::HashSet<String>>,
+    reveal_last_set: Signal<std::collections::HashSet<String>>,
+    threshold_map: Signal<std::collections::HashMap<String, u32>>,
+    busy_set: Signal<std::collections::HashSet<String>>,
 ) -> Element {
     if crate::vc_views::digital_passport::is_digital_passport(&vc) {
-        render_digital_passport_dispatch(vc, badges, refresh_tick)
+        render_digital_passport_dispatch(
+            vc,
+            badges,
+            refresh_tick,
+            reveal_first_set,
+            reveal_last_set,
+            threshold_map,
+        )
     } else {
-        render_vc_row(network, bridge_state, vc, badges, refresh_tick)
+        render_vc_row(
+            network,
+            bridge_state,
+            vc,
+            badges,
+            refresh_tick,
+            busy_set,
+        )
     }
 }
 
@@ -926,30 +980,29 @@ fn render_digital_passport_dispatch(
     vc: StoredVc,
     badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
     refresh_tick: Signal<u64>,
+    reveal_first_set: Signal<std::collections::HashSet<String>>,
+    reveal_last_set: Signal<std::collections::HashSet<String>>,
+    threshold_map: Signal<std::collections::HashMap<String, u32>>,
 ) -> Element {
-    use crate::vc_views::digital_passport::DigitalPassportCard;
-
-    // Open the redb VC store once per render and capture in an Rc
-    // so the closure can hand `Option<VcOpening>` lookups to the
-    // card. `RedbVcStore` internally holds `Arc<Database>` so the
-    // open is cheap; failures (corrupt file, disk full) fall
-    // through as "no openings", which the card renders as
-    // "(no opening stored)" rows.
-    let store_opt =
-        std::rc::Rc::new(RedbVcStore::open(vc_store_path()).ok());
-    let vc_uri = vc.vc_uri.clone();
-    let fetch_opening: std::rc::Rc<dyn Fn(&str) -> Option<VcOpening>> = {
-        let store_opt = store_opt.clone();
-        let vc_uri = vc_uri.clone();
-        std::rc::Rc::new(move |path: &str| -> Option<VcOpening> {
-            store_opt
-                .as_ref()
-                .as_ref()?
-                .get_opening(&vc_uri, path)
-                .ok()
-                .flatten()
-        })
+    use crate::vc_views::digital_passport::{
+        CLAIM_DATE_OF_BIRTH, CLAIM_FIRST_NAME, CLAIM_LAST_NAME,
+        DigitalPassportCard,
     };
+
+    // Open redb once + look up the three known openings. Failures
+    // (corrupt file, disk full) degrade to "(no opening stored)"
+    // rows inside the card.
+    let store_opt = RedbVcStore::open(vc_store_path()).ok();
+    let vc_uri = vc.vc_uri.clone();
+    let opening_first = store_opt
+        .as_ref()
+        .and_then(|s| s.get_opening(&vc_uri, CLAIM_FIRST_NAME).ok().flatten());
+    let opening_last = store_opt
+        .as_ref()
+        .and_then(|s| s.get_opening(&vc_uri, CLAIM_LAST_NAME).ok().flatten());
+    let opening_dob = store_opt
+        .as_ref()
+        .and_then(|s| s.get_opening(&vc_uri, CLAIM_DATE_OF_BIRTH).ok().flatten());
 
     let badge_label = badges
         .read()
@@ -957,11 +1010,50 @@ fn render_digital_passport_dispatch(
         .cloned()
         .map(|b| b.label());
 
-    // Wire Delete to the local redb store via the same path the
-    // sample-insertion button uses. Local-only — there's no
-    // chain-side equivalent in Phase 1; the holder simply forgets
-    // a credential. Errors are logged at info level (best-effort
-    // demo cleanup, not a hard fail path).
+    // Pull per-row toggle state out of the inventory-level maps.
+    // Absent keys default to "hidden" / threshold = 18 so a freshly
+    // listed VC starts in the privacy-preserving posture.
+    let reveal_first = reveal_first_set.read().contains(&vc_uri);
+    let reveal_last = reveal_last_set.read().contains(&vc_uri);
+    let age_threshold = threshold_map.read().get(&vc_uri).copied().unwrap_or(18);
+
+    // Toggle handlers mutate the inventory maps. EventHandler is a
+    // Copy wrapper over an Rc so it's cheap to clone via re-call.
+    let on_toggle_first = {
+        let vc_uri = vc_uri.clone();
+        let mut set = reveal_first_set;
+        EventHandler::new(move |_| {
+            let mut next = set.read().clone();
+            if !next.insert(vc_uri.clone()) {
+                next.remove(&vc_uri);
+            }
+            set.set(next);
+        })
+    };
+    let on_toggle_last = {
+        let vc_uri = vc_uri.clone();
+        let mut set = reveal_last_set;
+        EventHandler::new(move |_| {
+            let mut next = set.read().clone();
+            if !next.insert(vc_uri.clone()) {
+                next.remove(&vc_uri);
+            }
+            set.set(next);
+        })
+    };
+    let on_threshold_change = {
+        let vc_uri = vc_uri.clone();
+        let mut map = threshold_map;
+        EventHandler::new(move |n: u32| {
+            let mut next = map.read().clone();
+            next.insert(vc_uri.clone(), n);
+            map.set(next);
+        })
+    };
+
+    // Wire Delete to the local redb store. Local-only — there's
+    // no chain-side equivalent in Phase 1; the holder simply
+    // forgets the credential.
     let on_delete = EventHandler::new({
         let mut refresh_tick = refresh_tick;
         move |uri_to_delete: String| {
@@ -1004,7 +1096,20 @@ fn render_digital_passport_dispatch(
         }
     });
 
-    DigitalPassportCard(vc, fetch_opening, badge_label, Some(on_delete))
+    DigitalPassportCard(
+        vc,
+        opening_first,
+        opening_last,
+        opening_dob,
+        reveal_first,
+        reveal_last,
+        age_threshold,
+        on_toggle_first,
+        on_toggle_last,
+        on_threshold_change,
+        badge_label,
+        Some(on_delete),
+    )
 }
 
 /// Insert a hard-coded `digital-passport:v1` sample into the redb
@@ -1077,6 +1182,7 @@ fn insert_sample_digital_passport() -> Result<String, String> {
         CLAIM_DATE_OF_BIRTH, CLAIM_FIRST_NAME, CLAIM_LAST_NAME,
     };
     use std::time::{SystemTime, UNIX_EPOCH};
+    use wallet_core::VcOpening;
 
     let store = RedbVcStore::open(vc_store_path())
         .map_err(|e| format!("open vc store: {e}"))?;
@@ -1158,24 +1264,30 @@ fn pad_to_64(s: &[u8]) -> Vec<u8> {
 /// Render a single VC row. Plain helper (not a `#[component]`)
 /// because `StoredVc` doesn't implement `PartialEq` — the
 /// `#[component]` macro requires Eq props.
+///
+/// **No hooks inside.** The "busy" state for a self-verify in
+/// flight is owned by the inventory-level `busy_set` signal so
+/// this helper can be invoked from a `for` loop with a variable
+/// row count without violating rules of hooks.
 fn render_vc_row(
     network: Network,
     bridge_state: BridgeState,
     vc: StoredVc,
     mut badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
     mut refresh_tick: Signal<u64>,
+    mut busy_set: Signal<std::collections::HashSet<String>>,
 ) -> Element {
-    let mut busy = use_signal(|| false);
     let vc_uri = vc.vc_uri.clone();
     let issuer_did = vc.issuer_did.clone();
     let body_len = vc.body.len();
+    let busy = busy_set.read().contains(&vc_uri);
 
     let verify = {
         let bridge_state = bridge_state.clone();
         let vc = vc.clone();
         let vc_uri_for_set = vc_uri.clone();
         move |_| {
-            if *busy.read() {
+            if busy_set.read().contains(&vc_uri_for_set) {
                 return;
             }
             let Some(store) = bridge_state.store().cloned() else {
@@ -1196,7 +1308,11 @@ fn render_vc_row(
                 badges.set(b);
                 return;
             };
-            busy.set(true);
+            {
+                let mut next = busy_set.read().clone();
+                next.insert(vc_uri_for_set.clone());
+                busy_set.set(next);
+            }
             let vc = vc.clone();
             let vc_uri = vc_uri_for_set.clone();
             let metrics = bridge_state.metrics_dyn();
@@ -1217,7 +1333,9 @@ fn render_vc_row(
                             VerifyBadge::Error(format!("open vc store: {e}")),
                         );
                         badges.set(b);
-                        busy.set(false);
+                        let mut next = busy_set.read().clone();
+                        next.remove(&vc_uri);
+                        busy_set.set(next);
                         return;
                     }
                 };
@@ -1256,7 +1374,9 @@ fn render_vc_row(
                 badges.set(b);
                 let next = *refresh_tick.read() + 1;
                 refresh_tick.set(next);
-                busy.set(false);
+                let mut next_busy = busy_set.read().clone();
+                next_busy.remove(&vc_uri);
+                busy_set.set(next_busy);
             }.instrument(span));
         }
     };
@@ -1312,9 +1432,9 @@ fn render_vc_row(
         div { class: "detail-empty", "body: {body_len} bytes" }
         div { class: "row",
             button {
-                disabled: *busy.read(),
+                disabled: busy,
                 onclick: verify,
-                {if *busy.read() { "Verifying…" } else { "Self-verify" }}
+                {if busy { "Verifying…" } else { "Self-verify" }}
             }
             button {
                 class: "vc-row-delete-btn",
