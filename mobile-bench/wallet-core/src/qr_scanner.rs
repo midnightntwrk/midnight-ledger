@@ -7,12 +7,28 @@
 use std::future::Future;
 use std::pin::Pin;
 
-#[derive(Debug, thiserror::Error)]
+/// Outcome variants the wallet's scan-dispatch needs to distinguish.
+///
+/// `Cancelled` is a deliberate user gesture (dismiss / permission
+/// deny) → wallet returns silently. `Unavailable` means the scanner
+/// couldn't even start (Play Services missing on Android, secure-
+/// context limit on desktop) → wallet shows a recoverable banner
+/// with a paste hint. `Decoder` means the platform layer ran but
+/// returned an opaque error after start (ML Kit barcode parsing
+/// fault, JS bridge transport, etc.) → wallet shows the inner
+/// message verbatim.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum QrScanError {
     #[error("user cancelled the scan")]
     Cancelled,
     #[error("scanner unavailable: {0}")]
     Unavailable(String),
+    /// Platform scanner ran but the decode / callback path
+    /// surfaced an error after start. Distinct from `Unavailable`
+    /// (which is "couldn't even open the scanner") so the wallet
+    /// can offer "Try again" rather than the paste fallback.
+    #[error("scan failed: {0}")]
+    Decoder(String),
 }
 
 pub trait QrScanner: Send + Sync {
