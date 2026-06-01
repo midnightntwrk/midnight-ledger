@@ -896,7 +896,7 @@ impl From<base_crypto::schnorr::VerifyingKey> for UserAddress {
 
 impl From<base_crypto::ecdsa::VerifyingKey> for UserAddress {
     fn from(value: base_crypto::ecdsa::VerifyingKey) -> Self {
-        let mut repr = b"mn:ecdsa:".to_vec();
+        let mut repr = b"midnight:ecdsa:".to_vec();
         value.binary_repr(&mut repr);
         UserAddress(persistent_hash(repr.as_slice()))
     }
