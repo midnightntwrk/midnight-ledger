@@ -121,18 +121,24 @@ pub fn IdentityCentrePanel(
     // `did_inventory` signal. It travels with the BootstrapPanel
     // (where the actual minting happens) rather than the
     // IdentityCentrePanel now, but the props are kept here so older
-    // call sites (and the C2/C3 work coming next) can compile while
-    // C1 lands the tab split in isolation.
+    // call sites (and the C3 picker work coming next) can compile
+    // unchanged.
     let _ = on_did_minted;
 
     rsx! {
         div { class: "card",
             div { class: "card-header", "Identity Centre" }
             div { class: "detail-empty",
-                "Receive credentials, view them, and present claims. "
+                "Scan a QR code to authenticate or receive a credential. "
                 "Need to mint a fresh DID or paste an OID4VP URL by "
                 "hand? Switch to the Bootstrap tab."
             }
+        }
+
+        ScanQrSection {
+            network,
+            bridge_state: bridge_state.clone(),
+            ic_did,
         }
 
         Oid4vciSection {
@@ -146,6 +152,227 @@ pub fn IdentityCentrePanel(
             bridge_state,
         }
     }
+}
+
+// ─── Top-level Scan QR (C2) ────────────────────────────────────────
+
+/// Prominent scan-and-route action at the top of the Identity
+/// Centre. Single entry point for both protocols — replaces the
+/// per-section "📷 Scan QR" buttons that lived in `Oid4vpSection`
+/// and `Oid4vciSection` pre-C1.
+///
+/// Behaviour:
+///
+/// 1. Click → opens the WebView's full-viewport camera overlay.
+/// 2. On a decoded payload, inspect the URI scheme:
+///    - `openid4vp://...` → run OID4VP authentication
+///    - `openid-credential-offer://...` → run OID4VCI issuance
+///    - anything else → surface "unsupported QR payload" error.
+/// 3. The flow code mirrors what `Oid4vpSection` / `Oid4vciSection`
+///    do internally (same wallet-core entry points, same metering
+///    decorators). DID picker integration lands in C3.
+#[component]
+fn ScanQrSection(
+    network: Network,
+    bridge_state: BridgeState,
+    ic_did: Signal<Option<String>>,
+) -> Element {
+    let mut busy = use_signal(|| false);
+    let mut err_msg = use_signal::<Option<String>>(|| None);
+    let mut ok_msg = use_signal::<Option<String>>(|| None);
+
+    let scan_and_dispatch = {
+        let bridge_state = bridge_state.clone();
+        let ic_did = ic_did;
+        move |_| {
+            if *busy.read() {
+                return;
+            }
+            let Some(did_str) = ic_did.read().clone() else {
+                err_msg.set(Some(
+                    "Bootstrap a DID first (Bootstrap tab → Bootstrap DID).".into(),
+                ));
+                return;
+            };
+            let did = match wallet_core::DidId::parse(&did_str) {
+                Ok(d) => d,
+                Err(e) => {
+                    err_msg.set(Some(format!("did parse: {e}")));
+                    return;
+                }
+            };
+            let Some(store) = bridge_state.store().cloned() else {
+                err_msg.set(Some("wallet store not opened yet".into()));
+                return;
+            };
+            let Some(wallet_id) = bridge_state.active_wallet_id() else {
+                err_msg.set(Some("no active wallet".into()));
+                return;
+            };
+            let bridge_state = bridge_state.clone();
+            err_msg.set(None);
+            ok_msg.set(None);
+            busy.set(true);
+            spawn(async move {
+                let Some(bridge) = eval_bridge::global_bridge() else {
+                    err_msg.set(Some(
+                        "JS bridge not installed yet (js-bridge feature off?)".into(),
+                    ));
+                    busy.set(false);
+                    return;
+                };
+                let url = match eval_bridge::scan_qr(&*bridge).await {
+                    Ok(u) => u,
+                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
+                        if msg == "cancelled" =>
+                    {
+                        busy.set(false);
+                        return;
+                    }
+                    Err(e) => {
+                        err_msg.set(Some(format!("scan failed: {e}")));
+                        busy.set(false);
+                        return;
+                    }
+                };
+
+                let metrics = bridge_state.metrics_dyn();
+                let in_mem_metrics = bridge_state.metrics();
+                let probe = bridge_state.resource_probe();
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
+                let secret_store = RedbSecretStore::new(store, wallet_id);
+                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                let http: Arc<dyn HttpClient> =
+                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+                let clock = SystemClock;
+                let action_id = next_action_id();
+
+                if let Some(rest) = url.strip_prefix("openid4vp://") {
+                    let _ = rest; // suppress unused-var warning under #[deny(warnings)]
+                    let span = tracing::info_span!(
+                        "ic.scan.oid4vp",
+                        action_id = %action_id,
+                    );
+                    let result = time_op(
+                        &*metrics,
+                        &*probe,
+                        "oid4vp_authenticate",
+                        oid4vp_run_authentication(
+                            &*http,
+                            &clock,
+                            &url,
+                            &wallet,
+                            &secret_store,
+                            &did,
+                        ),
+                    )
+                    .instrument(span)
+                    .await;
+                    match result {
+                        Ok(r) => {
+                            in_mem_metrics.incr("oid4vp.ok", 1);
+                            ok_msg.set(Some(format!(
+                                "OID4VP session_id={} status={}",
+                                r.session_id, r.status,
+                            )));
+                        }
+                        Err(e) => {
+                            in_mem_metrics.incr("oid4vp.failed", 1);
+                            err_msg.set(Some(format!("authenticate failed: {e}")));
+                        }
+                    }
+                } else if url.starts_with("openid-credential-offer://") {
+                    let vc_store = match RedbVcStore::open(vc_store_path()) {
+                        Ok(v) => v,
+                        Err(e) => {
+                            err_msg.set(Some(format!("open vc store: {e}")));
+                            busy.set(false);
+                            return;
+                        }
+                    };
+                    let span = tracing::info_span!(
+                        "ic.scan.issuance",
+                        action_id = %action_id,
+                    );
+                    let result = time_op(
+                        &*metrics,
+                        &*probe,
+                        "issuance",
+                        oid4vci_run_issuance(
+                            &*http,
+                            &clock,
+                            &url,
+                            &wallet,
+                            &secret_store,
+                            &did,
+                            &vc_store,
+                        ),
+                    )
+                    .instrument(span)
+                    .await;
+                    match result {
+                        Ok(vc_uri) => {
+                            in_mem_metrics.incr("vcs.issued", 1);
+                            ok_msg.set(Some(format!("OID4VCI issued {vc_uri}")));
+                        }
+                        Err(e) => {
+                            in_mem_metrics.incr("vcs.issuance_failed", 1);
+                            err_msg.set(Some(format!("issue failed: {e}")));
+                        }
+                    }
+                } else {
+                    err_msg.set(Some(format!(
+                        "Unsupported QR payload: expected openid4vp:// or \
+                         openid-credential-offer:// prefix, got: {}",
+                        truncate_for_msg(&url, 80),
+                    )));
+                }
+                busy.set(false);
+            });
+        }
+    };
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "📷 Scan QR" }
+            div { class: "detail-empty",
+                "One tap — auto-detects OID4VP (authenticate) vs "
+                "OID4VCI (request credential)."
+            }
+            div { class: "row",
+                button {
+                    class: "cta",
+                    disabled: *busy.read(),
+                    onclick: scan_and_dispatch,
+                    {if *busy.read() { "Working…" } else { "📷 Scan QR" }}
+                }
+            }
+            if let Some(msg) = ok_msg.read().as_ref() {
+                div { class: "wizard-outcome ok",
+                    div { class: "row label", "Done" }
+                    div { class: "seed-blob", "{msg}" }
+                }
+            }
+            if let Some(msg) = err_msg.read().as_ref() {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Failed" }
+                    div { class: "seed-blob", "{msg}" }
+                }
+            }
+        }
+    }
+}
+
+/// Trim a URL for inclusion in a user-facing error message.
+/// Keeps the head + tail like the digital-passport card does
+/// elsewhere, just less ornate.
+fn truncate_for_msg(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        return s.into();
+    }
+    let head: String = s.chars().take(max / 2).collect();
+    format!("{head}…")
 }
 
 /// Operator/dev setup panel. Renders for `Tab::Bootstrap`. Holds

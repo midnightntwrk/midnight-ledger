@@ -214,13 +214,9 @@ pub fn global_bridge() -> Option<Arc<dyn JsBridge>> {
 /// `mobile-bench/dioxus-wallet/web/src/entry.ts`. Returns the raw
 /// decoded payload (e.g. an `openid4vp://…` or
 /// `openid-credential-offer://…` URL) — the caller's responsible for
-/// parsing.
-///
-/// Briefly unused between C1 (which removed the per-section
-/// Scan-QR buttons) and C2 (which wires the top-level scan button).
-/// Kept around — `#[allow(dead_code)]` shields the `#![deny(warnings)]`
-/// gate at the lib root for the in-flight commit.
-#[allow(dead_code)]
+/// parsing. The Identity Centre's top-level Scan QR button is the
+/// canonical caller now; the per-section buttons that used to call
+/// this were removed in the C1 layout split.
 pub async fn scan_qr(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
     #[derive(serde::Deserialize)]
     struct ScanResult {
