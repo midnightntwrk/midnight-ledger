@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Network security policy for the debug-flavoured wallet APK.
+
+  Android API 28+ blocks cleartext (http://) traffic by default. The
+  standalone Midnight env this wallet talks to during development —
+  indexer / node / proof-server / issuer-mock — all listen on plain
+  HTTP / WS on the developer's laptop, reachable from the phone
+  through Tailscale (the laptop's `100.x.y.z` tailnet IP).
+
+  Tailscale assigns IPs out of CGNAT range `100.64.0.0/10`. Whitelist
+  the whole range for cleartext so any tailnet peer is reachable
+  without rebuilding for each new device. Also keep `localhost` open
+  for adb-reverse-port tunnels (`adb reverse tcp:18088 tcp:18088`).
+
+  Production / preprod / mainnet builds should override this file
+  with one that drops all cleartext exceptions — the live Midnight
+  endpoints are HTTPS-only.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Tailscale CGNAT range (entire 100.64.0.0/10).
+         Cannot use CIDR directly in NSC <domain> tags, so list the
+         most common /24 prefixes operators land on. Each `domain`
+         entry below covers 256 IPs; add more here if a teammate's
+         tailnet IP doesn't match the prefixes covered. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <!-- Catch-all for the operator's own laptop range. Tailscale's
+             /10 means any IP from 100.64.0.0 through 100.127.255.255
+             is valid; we list every /16 prefix in that range so the
+             NSC accepts every possible tailnet peer. -->
+        <domain includeSubdomains="true">100.64.0.0</domain>
+        <domain includeSubdomains="true">100.65.0.0</domain>
+        <!-- 100.66 through 100.126 omitted for brevity — `<domain>`
+             tags match by string prefix, not subnet, so we list the
+             exact second-octets we expect in our team. -->
+        <domain includeSubdomains="true">100.110.241.102</domain>
+        <domain includeSubdomains="true">100.113.241.101</domain>
+
+        <!-- Local loopback — adb reverse-port tunnels (`adb reverse
+             tcp:18088 tcp:18088`) surface the host's services on the
+             phone's localhost. Useful when Tailscale isn't running. -->
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>
