@@ -112,3 +112,11 @@ Option 1 scales better past the first scan.
   `App::run()` in `lib.rs`).
 - **Switch back to `localhost` for desktop runs** — just rebuild
   without the env vars. The defaults kick back in via `option_env!`.
+- **Scan QR opens then immediately shows "scanner unavailable: Play
+  Services unavailable: …"** — your phone doesn't have Google Play
+  Services available (GrapheneOS, Huawei post-2020, emulator
+  without Play). The native scanner from commit `fdba2182` relies
+  on ML Kit's `GmsBarcodeScanning`, which is a Play-Services-only
+  API. Use the paste field under Diagnostics → Bootstrap instead.
+  A CameraX + `rqrr` fallback for AOSP-only devices fits behind
+  the same `QrScanner` trait — file an issue if you need it.
