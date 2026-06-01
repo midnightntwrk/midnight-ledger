@@ -3439,32 +3439,33 @@ body {
 
 /* ── Controller-secret card (DID detail view) ────────────────────
  *
- * Compact replacement for the previous inline-styled blob layout
- * that wrapped the 64-char hex across multiple lines and pushed
- * the Reveal + Copy buttons off the right edge on narrow phones.
- * Tighter padding, single-line note, and a dedicated value row
- * that scrolls horizontally rather than wrapping mid-word.
+ * Vertical-stack layout: note → full-width value field →
+ * right-aligned actions. Replaces the previous horizontal row
+ * that spread the value pill across most of the card width and
+ * pushed the action buttons to the right edge, reading as
+ * sprawling on narrow viewports.
  */
 .secret-card {
-  padding: var(--sp-4) var(--sp-4) var(--sp-4);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
 }
 .secret-card__note {
   margin: 0 0 var(--sp-3);
   font-size: var(--fs-small);
-  line-height: 1.45;
+  line-height: 1.4;
 }
 .secret-card__note.ok   { color: var(--accent-green); }
 .secret-card__note.warn { color: var(--warn-new); }
 
 .secret-card__row {
+  /* Vertical stack — value on its own line, action buttons on
+   * the next. Keeps the value field compact and the buttons
+   * predictably placed regardless of viewport width. */
   display: flex;
-  align-items: center;
-  gap: var(--sp-3);
-  flex-wrap: wrap;
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
 }
 .secret-card__value {
-  flex: 1 1 auto;
-  min-width: 0;
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line-faint);
   border-radius: var(--r-2);
@@ -3483,8 +3484,7 @@ body {
   font-family: ui-monospace, monospace;
 }
 .secret-card__input {
-  flex: 1 1 auto;
-  min-width: 0;
+  width: 100%;
   padding: var(--sp-2) var(--sp-3);
   border: 1px solid var(--line);
   border-radius: var(--r-2);
@@ -3499,10 +3499,19 @@ body {
   border-color: var(--accent-cyan);
 }
 .secret-card__actions {
-  display: inline-flex;
+  display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--sp-2);
-  flex: 0 0 auto;
+}
+/* Compact buttons inside the secret card — full-pill height
+ * works at primary level but reads cramped at this density. */
+.secret-card__actions .btn-secondary,
+.secret-card__actions .btn-primary {
+  padding: 6px 14px;
+  font-size: var(--fs-small);
+  height: auto;
+  border-radius: var(--r-pill-new);
 }
 
 /* Narrow phone window — tighten the wallet hero padding. */
