@@ -757,9 +757,14 @@ fn BootstrapSection(
         div { class: "card",
             div { class: "card-header", "Identity Centre DID" }
             if let Some(did) = current.as_ref() {
-                div { class: "row label", "Current" }
-                div { class: "seed-blob", "{did}" }
-                div { class: "detail-empty", "{truncate_did(did)}" }
+                div { class: "ic-did-row",
+                    div { class: "ic-did-label", "Active DID" }
+                    div {
+                        class: "ic-did-value mono",
+                        title: "{did}",
+                        "{truncate_did(did)}"
+                    }
+                }
             } else {
                 div { class: "detail-empty",
                     "No Identity Centre DID yet. Click below to mint one "

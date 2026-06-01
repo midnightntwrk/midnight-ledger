@@ -1951,460 +1951,444 @@ details .panel .row {
 .log-row.level-debug .level { color: var(--text-muted); }
 .log-row.level-trace .level { color: var(--text-faint); }
 
-/* ── Digital Passport VC card ─────────────────────────────────────
+
+/* ── Identity Centre DID row ─────────────────────────────────────
  *
- * Schema-specific view for `digital-passport:v1`. Three claim rows
- * with privacy-tier chips: `committedPrivate` (selectively
- * disclosable) in sky tint, `committedPrivate + predicateOnly` in
- * violet tint. Everything else inherits the existing dark theme via
- * the `--bg / --surface / --text` custom properties — when a future
- * light theme overrides those at `:root`, this namespace updates
- * for free.
- *
- * Designed for extraction with the matching component module — see
- * `src/vc_views/digital_passport.rs`.
+ * Compact single-line display of the Active Identity Centre DID
+ * inside `BootstrapSection`. Replaces the previous full-DID +
+ * truncated-form double-render. Hovering the value surfaces the
+ * full DID via the row's `title` attribute (native tooltip).
  */
 
-.vc-card-passport {
+.ic-did-row {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 12px;
-  margin-top: 14px;
-  padding: 14px;
-  background: linear-gradient(
-    180deg,
-    rgba(124, 92, 255, 0.06) 0%,
-    var(--surface-2) 60%
-  );
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
+  padding: 10px 14px;
+  margin-top: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-faint);
+  border-radius: 12px;
+}
+.ic-did-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.ic-did-value {
+  font-size: 12.5px;
+  color: var(--text);
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ic-did-value.mono {
+  font-family: ui-monospace, monospace;
 }
 
-.vc-card-passport__header {
+/* ── Digital Passport VC card (modern bundle) ────────────────────
+ *
+ * Ported from `/tmp/vc-bundle/vc_inventory_modern.css` (the
+ * design north-star the user supplied). The matching DOM
+ * structure is in `src/vc_views/digital_passport.rs`. Keep the
+ * two in lockstep when iterating.
+ *
+ * Differences from the bundle:
+ * - Drops the bundle's `:root` colour overrides — we use the
+ *   wallet's existing `--bg`, `--surface*`, `--text*` palette
+ *   plus four local accent tokens (`--cc-cyan`, `--cc-green`,
+ *   `--cc-purple`, `--cc-danger`) declared at the card root.
+ * - Drops body / font-family rules — owned by the global
+ *   stylesheet.
+ * - Scopes the bundle's bare element selectors (`h1`, `h2`,
+ *   `h3`, `p`, `button`, `input`) under `.credential-card` so
+ *   they don't leak into other tabs.
+ * - Slightly tightened metrics for the wallet's 390px-ish
+ *   phone window default — `h1` clamp tops out at 3.4rem
+ *   (bundle: 5rem), radii nudged from 36/28 → 24/22 on narrow
+ *   viewports.
+ */
+
+.credential-card {
+  --cc-cyan:   #35d3ff;
+  --cc-green:  #43f2b2;
+  --cc-purple: #b99cff;
+  --cc-danger: #ff557f;
+  --cc-line:        rgba(148, 163, 184, 0.16);
+  --cc-line-strong: rgba(148, 163, 184, 0.28);
+  --cc-muted:       #94a3b8;
+  --cc-soft:        #cbd5e1;
+
+  position: relative;
+  overflow: hidden;
+  border: 1px solid var(--cc-line-strong);
+  border-radius: 36px;
+  padding: clamp(22px, 4vw, 42px);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 28%),
+    rgba(16, 24, 43, 0.82);
+  box-shadow: 0 26px 90px rgba(0, 0, 0, 0.45),
+              inset 0 1px 0 rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(22px);
+  margin-top: 14px;
+  color: var(--text);
+}
+
+.credential-card * { box-sizing: border-box; }
+.credential-card button,
+.credential-card input { font: inherit; }
+.credential-card h1,
+.credential-card h2,
+.credential-card h3,
+.credential-card p { margin-top: 0; }
+
+.credential-card .ambient {
+  position: absolute;
+  pointer-events: none;
+  filter: blur(54px);
+  opacity: 0.72;
+  border-radius: 999px;
+}
+.credential-card .ambient-one {
+  width: 260px;
+  height: 260px;
+  background: rgba(53, 211, 255, 0.13);
+  right: -90px;
+  top: 60px;
+}
+.credential-card .ambient-two {
+  width: 320px;
+  height: 320px;
+  background: rgba(185, 156, 255, 0.12);
+  left: -130px;
+  bottom: 160px;
+}
+
+.credential-card .topbar,
+.credential-card .hero,
+.credential-card .identity-strip,
+.credential-card .meta-grid,
+.credential-card .claims-header,
+.credential-card .claims-list,
+.credential-card .footer-actions { position: relative; z-index: 1; }
+
+.credential-card .topbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 10px;
+  gap: 16px;
+  margin-bottom: 28px;
 }
-.vc-card-passport__title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 16px;
+.credential-card .eyebrow {
+  margin: 0;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--cc-muted);
+  font-size: 0.8rem;
   font-weight: 700;
-  color: var(--text);
-}
-.vc-card-passport__emoji {
-  font-size: 20px;
-  line-height: 1;
-}
-.vc-card-passport__schema {
-  font-family: ui-monospace, monospace;
-  font-size: 10.5px;
-  color: var(--text-muted);
-  background: var(--surface-3);
-  border: 1px solid var(--border-faint);
-  border-radius: var(--radius-pill);
-  padding: 4px 10px;
 }
 
-.vc-card-passport__meta {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  background: var(--surface-3);
-  border: 1px solid var(--border-faint);
-  border-radius: 8px;
-  font-size: 13px;
-}
-.vc-card-passport__meta-row {
+.credential-card .hero {
   display: grid;
-  grid-template-columns: 100px 1fr;
-  gap: 8px;
-  align-items: baseline;
-}
-.vc-card-passport__meta-label {
-  color: var(--text-muted);
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-.vc-card-passport__meta-value {
-  color: var(--text);
-  overflow-wrap: anywhere;
-}
-.vc-card-passport__meta-value.mono {
-  font-family: ui-monospace, monospace;
-  font-size: 12px;
-  color: var(--text-soft);
-}
-.vc-card-passport__binding-ok {
-  color: var(--success);
-  font-weight: 600;
-}
-
-.vc-card-passport__section-title {
-  font-size: 11.5px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 600;
-  color: var(--text-muted);
-  margin-top: 4px;
-}
-
-.vc-card-passport__claim {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  background: var(--surface);
-  border: 1px solid var(--border-faint);
-  border-radius: 10px;
-}
-.vc-card-passport__claim-head {
-  display: flex;
-  flex-wrap: wrap;
+  grid-template-columns: 1fr auto;
+  gap: 24px;
   align-items: center;
-  gap: 8px;
 }
-.vc-card-passport__claim-icon {
-  font-size: 16px;
-  line-height: 1;
-}
-.vc-card-passport__claim-name {
-  font-weight: 600;
-  color: var(--text);
-  flex: 0 0 auto;
-}
-
-/* Privacy-tier chips — text is the canonical label,
- * background tints supply the at-a-glance distinction.
- * Sky for "selectively disclosable", violet for "predicate-only". */
-.vc-card-passport__tier-chip {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  margin-left: auto;
-}
-.vc-card-passport__tier-chip--sd {
-  background: rgba(56, 189, 248, 0.14);
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.36);
-}
-.vc-card-passport__tier-chip--pred {
-  background: rgba(167, 139, 250, 0.18);
-  color: #a78bfa;
-  border-color: rgba(167, 139, 250, 0.40);
-}
-
-.vc-card-passport__claim-body {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.vc-card-passport__hidden {
-  display: flex;
+.credential-card .trust-row {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
-  color: var(--text-muted);
-  font-style: italic;
-  font-size: 13px;
-}
-.vc-card-passport__hidden-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.vc-card-passport__plaintext {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  background: var(--accent-soft);
-  border: 1px solid var(--accent);
-  border-radius: 6px;
-  color: var(--text);
-  font-family: ui-monospace, monospace;
-  font-size: 13px;
-}
-.vc-card-passport__plaintext-icon {
-  font-size: 14px;
-  line-height: 1;
-}
-
-.vc-card-passport__missing {
-  color: var(--warn);
-  font-size: 12px;
-  font-style: italic;
-}
-
-.vc-card-passport__reveal-btn {
-  align-self: flex-start;
-  background: var(--surface-3);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.vc-card-passport__reveal-btn:hover {
-  background: var(--surface-4);
-  border-color: var(--accent);
-}
-
-.vc-card-passport__predicate-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  font-size: 13px;
-}
-.vc-card-passport__predicate-label {
-  color: var(--text-soft);
-}
-.vc-card-passport__predicate-select {
-  background: var(--surface-3);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 13px;
-  font-family: inherit;
-}
-.vc-card-passport__predicate-suffix {
-  color: var(--text-muted);
-  font-size: 12px;
-}
-
-.vc-card-passport__footer {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border-faint);
-}
-.vc-card-passport__verify-badge {
-  align-self: flex-start;
-  font-size: 11.5px;
-  font-weight: 600;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  background: var(--surface-3);
-  border: 1px solid var(--border-faint);
-  color: var(--text-soft);
-}
-.vc-card-passport__footer-hint {
-  font-size: 11.5px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-/* Predicate-only caption — short, italic, no leading icon. The
- * tier chip above already telegraphs the privacy story; the
- * caption fills in the "what's disclosed instead" detail without
- * a noisy second glyph. */
-.vc-card-passport__predicate-caption {
-  font-size: 12.5px;
-  font-style: italic;
-  color: var(--text-muted);
-}
-
-/* Destructive Delete button. Quiet by default — red ink on the
- * neutral surface — flips to a solid red tint on hover so an
- * accidental brush is obviously about to do something. Smaller
- * than the primary Reveal button so it doesn't pull the eye in
- * the footer rhythm.
- *
- * Sized to clear the 32 px mobile touch target (8 px vertical
- * padding + ~14 px text = 30 px content + 2 px border ≈ 32 px). */
-.vc-card-passport__delete-btn {
-  align-self: flex-start;
-  background: transparent;
-  color: var(--error);
-  border: 1px solid var(--error);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.vc-card-passport__delete-btn:hover {
-  background: rgba(255, 92, 122, 0.18);
-}
-
-/* Generic-row Delete button — same posture as the digital-
- * passport card delete but tuned for the tighter row layout
- * (no pill radius, lines up with the Self-verify button). */
-.vc-row-delete-btn {
-  background: transparent;
-  color: var(--error);
-  border: 1px solid var(--error);
-  border-radius: 6px;
-  padding: 6px 12px;
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-  margin-left: 8px;
-}
-.vc-row-delete-btn:hover {
-  background: rgba(255, 92, 122, 0.18);
-}
-
-/* ── DID picker modal (C3) ───────────────────────────────────────
- *
- * Centre-screen modal that lets the user pick which DID to act
- * as when the wallet holds more than one. Renders when
- * `pending_pick` signal is `Some`. Backdrop catches clicks
- * outside the dialog. Sits above every tab via fixed
- * positioning + high z-index.
- */
-
-.did-picker-backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.55);
-  z-index: 900;
-}
-
-.did-picker-dialog {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  z-index: 901;
-  width: min(420px, calc(100vw - 32px));
-  max-height: min(80vh, 620px);
-  display: flex;
-  flex-direction: column;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.55);
-  overflow: hidden;
-}
-
-.did-picker-header {
-  padding: 14px 16px 10px;
-  border-bottom: 1px solid var(--border-faint);
-}
-.did-picker-title {
-  font-size: 16px;
+  gap: 9px;
+  color: var(--cc-green);
   font-weight: 700;
-  color: var(--text);
+  margin-bottom: 10px;
+  font-size: 0.86rem;
 }
-.did-picker-subtitle {
-  font-size: 12.5px;
-  color: var(--text-muted);
-  margin-top: 4px;
+.credential-card .status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--cc-green);
+  box-shadow: 0 0 22px var(--cc-green);
+}
+.credential-card h1 {
+  margin-bottom: 10px;
+  font-size: clamp(1.85rem, 5.2vw, 3.4rem);
+  line-height: 0.96;
+  letter-spacing: -0.05em;
+}
+.credential-card .subtitle {
+  max-width: 560px;
+  margin-bottom: 0;
+  color: var(--cc-soft);
+  font-size: 0.92rem;
+  line-height: 1.5;
 }
 
-.did-picker-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  overflow-y: auto;
-  padding: 6px 0;
+.credential-card .credential-token {
+  position: relative;
+  width: 96px;
+  height: 124px;
+  border: 1px solid rgba(53, 211, 255, 0.35);
+  border-radius: 22px;
+  background:
+    linear-gradient(145deg, rgba(53, 211, 255, 0.24), rgba(185, 156, 255, 0.11)),
+    rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14),
+              0 22px 54px rgba(53, 211, 255, 0.12);
+  transform: rotate(3deg);
+}
+.credential-card .token-glow {
+  position: absolute;
+  inset: 14px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--cc-green), var(--cc-cyan));
+  opacity: 0.36;
+  filter: blur(14px);
+}
+.credential-card .token-line {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 34px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(248, 250, 252, 0.72);
+}
+.credential-card .token-line.short {
+  right: 36px;
+  bottom: 20px;
+  opacity: 0.55;
 }
 
-.did-picker-row {
+.credential-card .identity-strip {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
-  padding: 10px 16px;
-  border: none;
-  border-bottom: 1px solid var(--border-faint);
-  background: transparent;
+  margin: 22px 0 16px;
+}
+.credential-card .version-chip,
+.credential-card .binding-chip,
+.credential-card .claim-type {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  border: 1px solid var(--cc-line);
+  padding: 6px 12px;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--cc-soft);
+  font-weight: 700;
+  font-size: 0.75rem;
+  letter-spacing: 0.02em;
+}
+.credential-card .binding-chip {
+  border-color: rgba(67, 242, 178, 0.24);
+  color: var(--cc-green);
+  background: rgba(67, 242, 178, 0.08);
+}
+
+.credential-card .meta-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+}
+.credential-card .meta-item {
+  min-width: 0;
+  border: 1px solid var(--cc-line);
+  border-radius: 18px;
+  padding: 14px;
+  background: rgba(15, 23, 42, 0.7);
+}
+.credential-card .meta-item span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--cc-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  font-size: 0.64rem;
+  font-weight: 800;
+}
+.credential-card .meta-item strong {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 0.82rem;
   color: var(--text);
-  cursor: pointer;
-  text-align: left;
-  width: 100%;
+  font-family: ui-monospace, monospace;
+  font-weight: 600;
+}
+.credential-card .meta-item.success strong {
+  color: var(--cc-green);
   font-family: inherit;
 }
-.did-picker-row:last-child {
-  border-bottom: none;
+
+.credential-card .claims-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 28px;
+  margin-bottom: 12px;
 }
-.did-picker-row:hover {
-  background: var(--surface-2);
+.credential-card .claims-header h2 {
+  margin-bottom: 4px;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+.credential-card .claims-header p {
+  margin-bottom: 0;
+  color: var(--cc-muted);
+  font-size: 0.82rem;
 }
 
-.did-picker-row-text {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  flex: 1;
-  min-width: 0;
-}
-.did-picker-row-did {
-  font-size: 12.5px;
-  color: var(--text-soft);
-  overflow-wrap: anywhere;
-}
-.did-picker-row-did.mono {
-  font-family: ui-monospace, monospace;
-}
-.did-picker-row-meta {
-  display: flex;
-  gap: 6px;
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.did-picker-row-sep {
-  color: var(--text-faint);
-}
-
-.did-picker-status {
-  font-size: 10.5px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  padding: 4px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid transparent;
-  flex: 0 0 auto;
-}
-.did-picker-status--active {
-  background: rgba(46, 230, 166, 0.16);
-  color: var(--success);
-  border-color: rgba(46, 230, 166, 0.40);
-}
-.did-picker-status--pending {
-  background: rgba(255, 176, 32, 0.18);
-  color: var(--warn);
-  border-color: rgba(255, 176, 32, 0.40);
-}
-.did-picker-status--deactivated {
-  background: var(--surface-3);
-  color: var(--text-muted);
-  border-color: var(--border-faint);
-  opacity: 0.7;
-}
-
-.did-picker-footer {
-  display: flex;
-  justify-content: flex-end;
-  padding: 10px 16px;
-  border-top: 1px solid var(--border-faint);
-  background: var(--surface-2);
-}
-.did-picker-cancel {
-  background: transparent;
-  color: var(--text-soft);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-pill);
-  padding: 6px 14px;
-  font-size: 12px;
-  font-weight: 600;
+.credential-card .primary-button,
+.credential-card .claim-action,
+.credential-card .danger-button {
+  border: 0;
+  border-radius: 14px;
+  padding: 9px 14px;
+  font-weight: 700;
+  font-size: 0.82rem;
   cursor: pointer;
 }
-.did-picker-cancel:hover {
-  background: var(--surface-3);
+.credential-card .primary-button {
+  color: #041018;
+  background: linear-gradient(135deg, var(--cc-green), var(--cc-cyan));
+  box-shadow: 0 12px 30px rgba(53, 211, 255, 0.16);
+}
+.credential-card .primary-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.credential-card .claims-list {
+  display: grid;
+  gap: 10px;
+}
+.credential-card .claim-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--cc-line);
+  border-radius: 20px;
+  padding: 14px 16px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.045), transparent 42%),
+    rgba(8, 13, 24, 0.76);
+  transition: transform 180ms ease,
+              border-color 180ms ease,
+              background 180ms ease;
+}
+.credential-card .claim-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(53, 211, 255, 0.36);
+  background: rgba(12, 21, 38, 0.9);
+}
+
+.credential-card .claim-type {
+  width: fit-content;
+  margin-bottom: 8px;
+  border-color: rgba(53, 211, 255, 0.32);
+  color: var(--cc-cyan);
+  background: rgba(53, 211, 255, 0.08);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+}
+.credential-card .claim-type.purple {
+  border-color: rgba(185, 156, 255, 0.42);
+  color: var(--cc-purple);
+  background: rgba(185, 156, 255, 0.1);
+}
+
+.credential-card .claim-copy h3 {
+  margin-bottom: 6px;
+  font-size: 1rem;
+  letter-spacing: -0.02em;
+}
+.credential-card .claim-copy p {
+  margin-bottom: 0;
+  color: var(--cc-muted);
+  line-height: 1.45;
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.credential-card .claim-action {
   color: var(--text);
+  background: rgba(148, 163, 184, 0.12);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+}
+.credential-card .claim-action:hover {
+  background: rgba(148, 163, 184, 0.22);
+}
+
+.credential-card .threshold-control {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--cc-soft);
+  white-space: nowrap;
+  font-size: 0.82rem;
+}
+.credential-card .threshold-control input {
+  width: 54px;
+  border: 1px solid var(--cc-line-strong);
+  border-radius: 12px;
+  padding: 7px 8px;
+  background: rgba(148, 163, 184, 0.12);
+  color: var(--text);
+  text-align: center;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.credential-card .footer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--cc-line);
+}
+.credential-card .footer-actions p {
+  margin: 0;
+  color: var(--cc-muted);
+  font-style: italic;
+  font-size: 0.78rem;
+  text-align: right;
+}
+.credential-card .danger-button {
+  color: var(--cc-danger);
+  background: rgba(255, 85, 127, 0.09);
+  border: 1px solid rgba(255, 85, 127, 0.45);
+}
+.credential-card .danger-button:hover {
+  background: rgba(255, 85, 127, 0.18);
+}
+
+/* Narrow phone window — collapse multi-column grids, hide the
+ * decorative token, stack the header + footer rows. Mirrors the
+ * bundle's breakpoints scaled to the wallet's 390px-ish default. */
+@media (max-width: 520px) {
+  .credential-card { border-radius: 24px; padding: 18px; }
+  .credential-card .hero { grid-template-columns: 1fr; }
+  .credential-card .credential-token { display: none; }
+  .credential-card .meta-grid { grid-template-columns: repeat(2, 1fr); }
+  .credential-card .claims-header,
+  .credential-card .footer-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .credential-card .primary-button,
+  .credential-card .danger-button { width: 100%; }
+  .credential-card .footer-actions p { text-align: center; }
+}
+@media (max-width: 380px) {
+  .credential-card .meta-grid,
+  .credential-card .claim-card { grid-template-columns: 1fr; }
+  .credential-card .threshold-control { flex-wrap: wrap; }
 }

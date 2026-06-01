@@ -128,9 +128,12 @@ fn format_unix_date_ymd(unix_secs: i64) -> String {
     format!("{:04}-{:02}-{:02}", y, m, d)
 }
 
-/// Common age thresholds rendered in the predicate dropdown.
-/// Selecting a value here will, in Phase 2, drive the
-/// `proveAgeOverThreshold` disclosure in the emitted presentation.
+/// Common age thresholds. The modern card switched from a
+/// `<select>` dropdown to a free-form `<input type="number">`
+/// so this list is no longer rendered, but it's kept as
+/// documentation of the values a verifier is most likely to
+/// request (and the BDD harness uses it).
+#[allow(dead_code)]
 const AGE_THRESHOLDS: &[u32] = &[13, 16, 18, 21, 65];
 
 /// Digital-Passport card. Self-contained so the entire component
@@ -208,180 +211,195 @@ pub fn DigitalPassportCard(
     let last_name_present = opening_last.is_some();
     let dob_present = opening_dob.is_some();
 
+    // Rendered structure mirrors `/tmp/vc-bundle/vc_inventory_modern.html`
+    // verbatim — same element nesting, same class names. The
+    // matching CSS lives under `.credential-card`, `.hero`,
+    // `.meta-grid`, `.claim-card`, … in `assets/styles.css`. Keep
+    // the two in lockstep when iterating on the design.
     rsx! {
-        div { class: "vc-card-passport",
+        section { class: "credential-card",
 
-            // ── Header ────────────────────────────────────────
-            div { class: "vc-card-passport__header",
-                div { class: "vc-card-passport__title",
-                    span { class: "vc-card-passport__emoji", "📘" }
-                    span { "Digital Passport" }
-                }
-                div { class: "vc-card-passport__schema", "{SCHEMA_ID}" }
+            // Ambient gradient blobs. Decorative only — pointer
+            // events disabled in CSS so they never interfere with
+            // clicks on the actual content layered above.
+            div { class: "ambient ambient-one" }
+            div { class: "ambient ambient-two" }
+
+            // ── Topbar (eyebrow + ghost overflow button) ─────────
+            header { class: "topbar",
+                p { class: "eyebrow", "VC Inventory" }
             }
 
-            // ── Meta strip ────────────────────────────────────
-            div { class: "vc-card-passport__meta",
-                div { class: "vc-card-passport__meta-row",
-                    span { class: "vc-card-passport__meta-label", "Issuer" }
-                    span { class: "vc-card-passport__meta-value mono",
-                        title: "{vc.issuer_did}",
-                        "{issuer_short}"
+            // ── Hero (trust row + H1 + subtitle + token graphic) ─
+            section { class: "hero",
+                div {
+                    div { class: "trust-row",
+                        span { class: "status-dot" }
+                        span { "Verified credential" }
+                    }
+                    h1 { "Digital Passport" }
+                    p { class: "subtitle",
+                        "Passport-grade identity proof with selective "
+                        "disclosure and predicate-only claims."
                     }
                 }
-                div { class: "vc-card-passport__meta-row",
-                    span { class: "vc-card-passport__meta-label", "ID" }
-                    span { class: "vc-card-passport__meta-value mono",
-                        title: "{vc.vc_uri}",
-                        "{uri_short}"
-                    }
-                }
-                div { class: "vc-card-passport__meta-row",
-                    span { class: "vc-card-passport__meta-label", "Issued" }
-                    span { class: "vc-card-passport__meta-value", "{issued_iso}" }
-                }
-                div { class: "vc-card-passport__meta-row",
-                    span { class: "vc-card-passport__meta-label", "Holder binding" }
-                    span { class: "vc-card-passport__binding-ok", "Explicit ✓" }
+                div { class: "credential-token",
+                    span { class: "token-glow" }
+                    span { class: "token-line" }
+                    span { class: "token-line short" }
                 }
             }
 
-            // ── Claims ────────────────────────────────────────
-            div { class: "vc-card-passport__section-title", "Claims" }
+            // ── Identity strip (schema chip + holder-binding chip)
+            div { class: "identity-strip",
+                span { class: "version-chip", "{SCHEMA_ID}" }
+                span { class: "binding-chip", "Holder bound" }
+            }
 
-            // firstName — selectively disclosable
-            div { class: "vc-card-passport__claim",
-                div { class: "vc-card-passport__claim-head",
-                    span { class: "vc-card-passport__claim-icon", "👤" }
-                    span { class: "vc-card-passport__claim-name", "First name" }
-                    span { class: "vc-card-passport__tier-chip vc-card-passport__tier-chip--sd",
-                        "Selectively disclosable"
-                    }
+            // ── Meta grid (4 columns, wraps on narrow viewports)
+            section { class: "meta-grid",
+                article { class: "meta-item",
+                    span { "Issuer" }
+                    strong { title: "{vc.issuer_did}", "{issuer_short}" }
                 }
-                div { class: "vc-card-passport__claim-body",
-                    if first_name_present {
-                        if reveal_first {
-                            div { class: "vc-card-passport__plaintext",
-                                span { class: "vc-card-passport__plaintext-icon", "👁" }
-                                span { "{first_name_revealed}" }
-                            }
-                        } else {
-                            div { class: "vc-card-passport__hidden",
-                                span { class: "vc-card-passport__hidden-icon", "🔒" }
-                                span { "Hidden — not disclosed" }
+                article { class: "meta-item",
+                    span { "Credential ID" }
+                    strong { title: "{vc.vc_uri}", "{uri_short}" }
+                }
+                article { class: "meta-item",
+                    span { "Issued" }
+                    strong { "{issued_iso}" }
+                }
+                article { class: "meta-item success",
+                    span { "Holder binding" }
+                    strong { "Explicit proof" }
+                }
+            }
+
+            // ── Claims header + primary CTA ──────────────────────
+            section { class: "claims-header",
+                div {
+                    h2 { "Available proofs" }
+                    p { "Choose exactly what to reveal to a verifier." }
+                }
+                // Generate VP lands in Phase 2 — disabled for now
+                // so the button still anchors the card visually but
+                // can't fire a half-implemented flow.
+                button {
+                    class: "primary-button",
+                    disabled: true,
+                    title: "Wired in Phase 2",
+                    "Generate VP"
+                }
+            }
+
+            // ── Claims list ──────────────────────────────────────
+            section { class: "claims-list",
+
+                // firstName — selective disclosure
+                article { class: "claim-card",
+                    div { class: "claim-copy",
+                        span { class: "claim-type", "Selective disclosure" }
+                        h3 { "First name" }
+                        p {
+                            if first_name_present {
+                                if reveal_first {
+                                    "{first_name_revealed}"
+                                } else {
+                                    "Encrypted until you reveal it."
+                                }
+                            } else {
+                                "No opening stored — cannot reveal."
                             }
                         }
+                    }
+                    if first_name_present {
                         button {
-                            class: "vc-card-passport__reveal-btn",
+                            class: "claim-action",
                             onclick: move |_| on_toggle_first.call(()),
                             {if reveal_first { "Hide" } else { "Reveal" }}
                         }
-                    } else {
-                        div { class: "vc-card-passport__missing",
-                            "(no opening stored — cannot reveal)"
-                        }
                     }
                 }
-            }
 
-            // lastName — selectively disclosable
-            div { class: "vc-card-passport__claim",
-                div { class: "vc-card-passport__claim-head",
-                    span { class: "vc-card-passport__claim-icon", "👤" }
-                    span { class: "vc-card-passport__claim-name", "Last name" }
-                    span { class: "vc-card-passport__tier-chip vc-card-passport__tier-chip--sd",
-                        "Selectively disclosable"
-                    }
-                }
-                div { class: "vc-card-passport__claim-body",
-                    if last_name_present {
-                        if reveal_last {
-                            div { class: "vc-card-passport__plaintext",
-                                span { class: "vc-card-passport__plaintext-icon", "👁" }
-                                span { "{last_name_revealed}" }
-                            }
-                        } else {
-                            div { class: "vc-card-passport__hidden",
-                                span { class: "vc-card-passport__hidden-icon", "🔒" }
-                                span { "Hidden — not disclosed" }
+                // lastName — selective disclosure
+                article { class: "claim-card",
+                    div { class: "claim-copy",
+                        span { class: "claim-type", "Selective disclosure" }
+                        h3 { "Last name" }
+                        p {
+                            if last_name_present {
+                                if reveal_last {
+                                    "{last_name_revealed}"
+                                } else {
+                                    "Encrypted until you reveal it."
+                                }
+                            } else {
+                                "No opening stored — cannot reveal."
                             }
                         }
+                    }
+                    if last_name_present {
                         button {
-                            class: "vc-card-passport__reveal-btn",
+                            class: "claim-action",
                             onclick: move |_| on_toggle_last.call(()),
                             {if reveal_last { "Hide" } else { "Reveal" }}
                         }
-                    } else {
-                        div { class: "vc-card-passport__missing",
-                            "(no opening stored — cannot reveal)"
+                    }
+                }
+
+                // dateOfBirth — predicate-only
+                article { class: "claim-card predicate",
+                    div { class: "claim-copy",
+                        span { class: "claim-type purple", "Predicate-only" }
+                        h3 { "Date of birth" }
+                        p {
+                            "Never reveals the raw date. Proves only "
+                            "age ≥ threshold."
+                            if !dob_present {
+                                " (no opening stored — predicate cannot prove)"
+                            }
                         }
                     }
-                }
-            }
-
-            // dateOfBirth — predicate-only
-            div { class: "vc-card-passport__claim",
-                div { class: "vc-card-passport__claim-head",
-                    span { class: "vc-card-passport__claim-icon", "📅" }
-                    span { class: "vc-card-passport__claim-name", "Date of birth" }
-                    span { class: "vc-card-passport__tier-chip vc-card-passport__tier-chip--pred",
-                        "Predicate-only — never revealed"
-                    }
-                }
-                div { class: "vc-card-passport__claim-body",
-                    div { class: "vc-card-passport__predicate-caption",
-                        "Discloses only: age ≥ threshold"
-                    }
-                    div { class: "vc-card-passport__predicate-row",
-                        label { class: "vc-card-passport__predicate-label", "Prove age over:" }
-                        select {
-                            class: "vc-card-passport__predicate-select",
+                    div { class: "threshold-control",
+                        span { "Age over" }
+                        input {
+                            r#type: "number",
+                            inputmode: "numeric",
+                            min: "1",
+                            max: "120",
                             value: "{age_threshold}",
                             onchange: move |evt| {
                                 if let Ok(n) = evt.value().parse::<u32>() {
                                     on_threshold_change.call(n);
                                 }
                             },
-                            for n in AGE_THRESHOLDS.iter().copied() {
-                                option { value: "{n}", "{n}" }
-                            }
                         }
-                        span { class: "vc-card-passport__predicate-suffix", "years" }
-                    }
-                    if !dob_present {
-                        div { class: "vc-card-passport__missing",
-                            "(no opening stored — predicate will fail to prove)"
-                        }
+                        span { "years" }
                     }
                 }
             }
 
-            // ── Footer ────────────────────────────────────────
-            div { class: "vc-card-passport__footer",
-                if let Some(badge) = verify_label.as_ref() {
-                    div { class: "vc-card-passport__verify-badge", "{badge}" }
-                }
-                div { class: "vc-card-passport__footer-hint",
-                    "Generating a presentation is wired in Phase 2."
-                }
-                if let Some(handler) = on_delete {
-                    {
-                        // The `vc_uri` capture is the key the host
-                        // uses to look up the row in storage when
-                        // the button is clicked. Clone it once and
-                        // hand the clone to each click — the
-                        // handler is `Copy` (EventHandler is
-                        // a `Copy` wrapper around an Rc).
-                        let vc_uri = vc.vc_uri.clone();
-                        rsx! {
+            // ── Footer (delete + verify badge + Phase 2 hint) ───
+            footer { class: "footer-actions",
+                {
+                    let vc_uri = vc.vc_uri.clone();
+                    rsx! {
+                        if let Some(handler) = on_delete {
                             button {
-                                class: "vc-card-passport__delete-btn",
+                                class: "danger-button",
                                 title: "Remove this credential from the wallet (local-only — no chain op)",
                                 onclick: move |_| handler.call(vc_uri.clone()),
                                 "Delete"
                             }
                         }
                     }
+                }
+                p {
+                    if let Some(badge) = verify_label.as_ref() {
+                        "{badge} · "
+                    }
+                    "Presentation generation is wired in Phase 2."
                 }
             }
         }
