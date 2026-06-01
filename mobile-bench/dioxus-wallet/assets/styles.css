@@ -1519,13 +1519,47 @@ details .panel .row {
   border-radius: 2px;
   background: var(--gradient-primary);
 }
+/* Active-state radial glow behind the icon — the Oxid guide
+ * calls for a "subtle radial glow behind the active item" on
+ * top of the pill background. Sits beneath the SVG via z-index. */
+.bottom-nav__item.active::before {
+  content: "";
+  position: absolute;
+  top: 6px;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(56, 213, 255, 0.30),
+    transparent 65%
+  );
+  pointer-events: none;
+}
 .bottom-nav__icon {
-  font-size: 1.3rem;
+  /* Sized to wrap the inline Lucide SVG. The SVG itself is
+   * 22 × 22 px with `stroke="currentColor"` so the icon
+   * colour follows the button's `color` (muted by default,
+   * cyan when active). */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
   line-height: 1;
+  position: relative;
+  z-index: 1;
+}
+.bottom-nav__icon svg {
+  display: block;
+  width: 22px;
+  height: 22px;
 }
 .bottom-nav__label {
   text-transform: none;
   letter-spacing: 0;
+  position: relative;
+  z-index: 1;
 }
 
 /* Body bottom-padding — make sure scrolling content clears the

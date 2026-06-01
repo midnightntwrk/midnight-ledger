@@ -133,8 +133,12 @@ enum Tab {
 
 impl Tab {
     fn label(&self) -> &'static str {
+        // Labels follow `oxid-vc-style-guide.md` — Wallet → Assets,
+        // Identity → Credentials, Bootstrap → Recovery. DIDs stays
+        // as-is because the guide says it's acceptable in developer
+        // mode (this is an SSI-expert-facing demo wallet).
         match self {
-            Tab::Wallet => "Wallet",
+            Tab::Wallet => "Assets",
             Tab::Dids => "DIDs",
             Tab::Keys => "Keys",
             Tab::Diagnostics => "Diagnostics",
@@ -143,8 +147,8 @@ impl Tab {
             Tab::Test => "Test",
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
-            Tab::Identity => "Identity Centre",
-            Tab::Bootstrap => "Bootstrap",
+            Tab::Identity => "Credentials",
+            Tab::Bootstrap => "Recovery",
         }
     }
 
@@ -2383,21 +2387,21 @@ pub fn App() -> Element {
         }
 
         // Bottom tab nav — fixed at the foot of the viewport. Holds
-        // the 5 primary destinations (Wallet · DIDs · Identity ·
-        // Bootstrap · Settings); overflow (Keys / Diagnostics) is
-        // still reachable via the hamburger menu at the top of the
-        // header. Production-wallet UX convention. See backlog §D
-        // P0 #14.
+        // the 5 primary destinations: Assets / DIDs / Credentials /
+        // Recovery / Settings. Overflow (Keys / Diagnostics / dev
+        // tabs) is reachable via the hamburger menu at the top of
+        // the header. Icons follow the Oxid style guide — Lucide
+        // line SVGs at 22 px, currentColor stroke, no fill.
         nav { class: "bottom-nav",
             {[
-                (Tab::Wallet,    "💳", "Wallet"),
-                (Tab::Dids,      "🪪", "DIDs"),
-                (Tab::Identity,  "📷", "Identity"),
-                (Tab::Bootstrap, "⚙️", "Bootstrap"),
-                (Tab::Settings,  "👤", "Settings"),
-            ].iter().map(|(t, icon, label)| {
+                (Tab::Wallet,    LUCIDE_WALLET,      "Assets"),
+                (Tab::Dids,      LUCIDE_FINGERPRINT, "DIDs"),
+                (Tab::Identity,  LUCIDE_BADGE_CHECK, "Credentials"),
+                (Tab::Bootstrap, LUCIDE_KEY_ROUND,   "Recovery"),
+                (Tab::Settings,  LUCIDE_SETTINGS_2,  "Settings"),
+            ].iter().map(|(t, icon_svg, label)| {
                 let t = *t;
-                let icon = *icon;
+                let icon_svg = *icon_svg;
                 let label = *label;
                 let is_active = *active_tab.read() == t;
                 rsx! {
@@ -2405,7 +2409,11 @@ pub fn App() -> Element {
                         key: "{label}",
                         class: if is_active { "bottom-nav__item active" } else { "bottom-nav__item" },
                         onclick: move |_| active_tab.set(t),
-                        span { class: "bottom-nav__icon", "{icon}" }
+                        span {
+                            class: "bottom-nav__icon",
+                            aria_hidden: "true",
+                            dangerous_inner_html: "{icon_svg}",
+                        }
                         span { class: "bottom-nav__label", "{label}" }
                     }
                 }
@@ -2413,6 +2421,24 @@ pub fn App() -> Element {
         }
     }
 }
+
+// ─── Lucide icon SVGs (Oxid style-guide) ──────────────────────────
+//
+// Inline Lucide line icons used by the bottom tab nav. MIT-licensed
+// path data lifted verbatim from https://lucide.dev/icons/. All five
+// share the same 24 × 24 viewBox, no fill, stroke = currentColor
+// (the bottom-nav button's text colour drives the stroke colour so
+// the active-state cyan tint flows through unchanged).
+
+const LUCIDE_WALLET: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 7V4a1 1 0 0 0-1-1H5a2 2 0 0 0 0 4h15a1 1 0 0 1 1 1v4h-3a2 2 0 0 0 0 4h3a1 1 0 0 0 1-1v-2a1 1 0 0 0-1-1"/><path d="M3 5v14a2 2 0 0 0 2 2h15a1 1 0 0 0 1-1v-4"/></svg>"#;
+
+const LUCIDE_FINGERPRINT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 10a2 2 0 0 0-2 2c0 1.02-.1 2.51-.26 4"/><path d="M14 13.12c0 2.38 0 6.38-1 8.88"/><path d="M17.29 21.02c.12-.6.43-2.3.5-3.02"/><path d="M2 12a10 10 0 0 1 18-6"/><path d="M2 16h.01"/><path d="M21.8 16c.2-2 .131-5.354 0-6"/><path d="M5 19.5C5.5 18 6 15 6 12a6 6 0 0 1 .34-2"/><path d="M8.65 22c.21-.66.45-1.32.57-2"/><path d="M9 6.8a6 6 0 0 1 9 5.2c0 .47 0 1.17-.02 2"/></svg>"#;
+
+const LUCIDE_BADGE_CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg>"#;
+
+const LUCIDE_KEY_ROUND: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>"#;
+
+const LUCIDE_SETTINGS_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>"#;
 
 /// Fixed pipeline order — used to render a checklist with one row
 /// per stage. Done/Failed sit outside this list as terminal states.
