@@ -542,9 +542,22 @@ pub fn BootstrapPanel(
         use_signal::<Option<crate::did_picker::PickerState>>(|| None);
 
     rsx! {
-        // (Intro "Bootstrap" card removed — restated the bottom-tab
-        // label without adding signal. Each section below carries
-        // its own header.)
+        // Recovery is now a sub-section of Settings (not its own
+        // top-level tab). A section-header sits at the top to mark
+        // the boundary between the persistent-store / backup cards
+        // above (rendered by SettingsTab) and the wallet-setup
+        // controls below.
+        header { class: "section-header",
+            div {
+                p { class: "section-header__eyebrow", "Recovery" }
+                h2 { class: "section-header__title", "Wallet recovery & setup" }
+                p { class: "section-header__sub",
+                    "Swap the in-memory wallet, mint a fresh DID, or "
+                    "paste an OID4VP URL by hand."
+                }
+            }
+        }
+
         DemoWalletControlsSection {
             network,
             wallet,

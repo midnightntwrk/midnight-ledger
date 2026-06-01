@@ -122,14 +122,18 @@ enum Tab {
     /// the pragmatic linear page that exposes the same end-to-end
     /// contract against the running issuer-mock.
     Identity,
-    /// Operator/dev setup tab. Holds the heavy-weight one-time
-    /// `bootstrap_did_with_keys` flow (mint a fresh issuer-/holder-
-    /// facing DID + Ed25519 + Jubjub keys) and the manual paste-URL
-    /// `OID4VP` authenticate path. The everyday holder-facing surface
-    /// (Identity Centre) stays scan-first; this tab is where you'd
-    /// go to seed a new wallet or debug the protocol step-by-step.
-    Bootstrap,
 }
+
+// `Tab::Bootstrap` was a separate top-level tab between the C1
+// split (commit 5290cc92) and the Recovery-into-Settings fold
+// (this commit). The bootstrap content — DemoWalletControls +
+// BootstrapSection + OID4VP-paste — now lives inside the
+// Settings tab so the bottom nav can surface Diagnostics in
+// the slot Recovery used to occupy.
+//
+// Session rows persisted as u8=10 (the old Bootstrap discriminant)
+// route to `Tab::Settings` in `from_persist` below so a user
+// resuming an older session lands in the right place.
 
 impl Tab {
     fn label(&self) -> &'static str {
@@ -148,7 +152,6 @@ impl Tab {
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
             Tab::Identity => "Credentials",
-            Tab::Bootstrap => "Recovery",
         }
     }
 
@@ -167,7 +170,10 @@ impl Tab {
             Tab::Metrics => 7,
             Tab::Benchmark => 8,
             Tab::Identity => 9,
-            Tab::Bootstrap => 10,
+            // u8=10 was `Tab::Bootstrap`. The variant is gone; the
+            // discriminant stays reserved so older session rows
+            // decode to `Tab::Settings` via `from_persist` below
+            // (Bootstrap content lives inside Settings now).
         }
     }
 
@@ -189,7 +195,9 @@ impl Tab {
             // unreachable variant.
             5 | 6 | 7 | 8 => Tab::Diagnostics,
             9 => Tab::Identity,
-            10 => Tab::Bootstrap,
+            // Legacy `Tab::Bootstrap` was u8=10. The content moved
+            // into Settings, so older sessions resume there.
+            10 => Tab::Settings,
             _ => Tab::Wallet,
         }
     }
@@ -1671,7 +1679,7 @@ pub fn App() -> Element {
                 // Metrics / Benchmark / Test / Logs were collapsed
                 // into a carousel under Diagnostics — the top-level
                 // tab bar no longer lists them.
-                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Bootstrap, Tab::Settings] {
+                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1699,7 +1707,7 @@ pub fn App() -> Element {
         // below is a single match on the current value. CSS hides
         // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Bootstrap, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -2295,18 +2303,17 @@ pub fn App() -> Element {
             },
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
-            },
-            Tab::Bootstrap => rsx! {
+                // Recovery section — formerly the standalone
+                // `Tab::Bootstrap`. Folded into Settings so the
+                // bottom nav can surface Diagnostics. Carries the
+                // same `on_did_minted` plumbing as before — inserts
+                // a Pending entry into the live `did_inventory`
+                // signal AND persists to redb.
                 crate::identity_centre::BootstrapPanel {
                     network: *network.read(),
                     bridge_state: bridge_state.read().clone(),
                     did_inventory,
                     wallet,
-                    // Same `on_did_minted` channel the Identity Centre
-                    // used pre-C1 (and the Create-DID wizard before
-                    // that) — inserts the new DID into the live
-                    // inventory signal + persists. See `Tab::Identity`
-                    // below for the full rationale.
                     on_did_minted: move |(did, net): (String, Network)| {
                         let entry = DidInventoryEntry {
                             did: did.clone(),
@@ -2388,17 +2395,19 @@ pub fn App() -> Element {
 
         // Bottom tab nav — fixed at the foot of the viewport. Holds
         // the 5 primary destinations: Assets / DIDs / Credentials /
-        // Recovery / Settings. Overflow (Keys / Diagnostics / dev
-        // tabs) is reachable via the hamburger menu at the top of
-        // the header. Icons follow the Oxid style guide — Lucide
-        // line SVGs at 22 px, currentColor stroke, no fill.
+        // Diagnostics / Settings. Overflow (Keys / Logs / dev tabs)
+        // is reachable via the hamburger menu at the top of the
+        // header. Recovery used to occupy slot 4 here; it's now a
+        // sub-section inside Settings. Icons follow the Oxid style
+        // guide — Lucide line SVGs at 22 px, currentColor stroke,
+        // no fill.
         nav { class: "bottom-nav",
             {[
-                (Tab::Wallet,    LUCIDE_WALLET,      "Assets"),
-                (Tab::Dids,      LUCIDE_FINGERPRINT, "DIDs"),
-                (Tab::Identity,  LUCIDE_BADGE_CHECK, "Credentials"),
-                (Tab::Bootstrap, LUCIDE_KEY_ROUND,   "Recovery"),
-                (Tab::Settings,  LUCIDE_SETTINGS_2,  "Settings"),
+                (Tab::Wallet,      LUCIDE_WALLET,      "Assets"),
+                (Tab::Dids,        LUCIDE_FINGERPRINT, "DIDs"),
+                (Tab::Identity,    LUCIDE_BADGE_CHECK, "Credentials"),
+                (Tab::Diagnostics, LUCIDE_ACTIVITY,    "Diagnostics"),
+                (Tab::Settings,    LUCIDE_SETTINGS_2,  "Settings"),
             ].iter().map(|(t, icon_svg, label)| {
                 let t = *t;
                 let icon_svg = *icon_svg;
@@ -2436,7 +2445,15 @@ const LUCIDE_FINGERPRINT: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" widt
 
 const LUCIDE_BADGE_CHECK: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.85 8.62a4 4 0 0 1 4.78-4.77 4 4 0 0 1 6.74 0 4 4 0 0 1 4.78 4.78 4 4 0 0 1 0 6.74 4 4 0 0 1-4.77 4.78 4 4 0 0 1-6.75 0 4 4 0 0 1-4.78-4.77 4 4 0 0 1 0-6.76Z"/><path d="m9 12 2 2 4-4"/></svg>"#;
 
+/// Used by the Settings tab's embedded Recovery section heading.
+#[allow(dead_code)]
 const LUCIDE_KEY_ROUND: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></svg>"#;
+
+/// Lucide `Activity` — heart-rate pulse line. Used by the
+/// bottom-nav Diagnostics slot. Reads as "system health /
+/// telemetry" which is exactly what the Diagnostics carousel
+/// surfaces (probes, timings, logs, benchmark).
+const LUCIDE_ACTIVITY: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>"#;
 
 const LUCIDE_SETTINGS_2: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></svg>"#;
 
