@@ -2369,6 +2369,36 @@ pub fn App() -> Element {
                 }
             },
         }
+
+        // Bottom tab nav — fixed at the foot of the viewport. Holds
+        // the 5 primary destinations (Wallet · DIDs · Identity ·
+        // Bootstrap · Settings); overflow (Keys / Diagnostics) is
+        // still reachable via the hamburger menu at the top of the
+        // header. Production-wallet UX convention. See backlog §D
+        // P0 #14.
+        nav { class: "bottom-nav",
+            {[
+                (Tab::Wallet,    "💳", "Wallet"),
+                (Tab::Dids,      "🪪", "DIDs"),
+                (Tab::Identity,  "📷", "Identity"),
+                (Tab::Bootstrap, "⚙️", "Bootstrap"),
+                (Tab::Settings,  "👤", "Settings"),
+            ].iter().map(|(t, icon, label)| {
+                let t = *t;
+                let icon = *icon;
+                let label = *label;
+                let is_active = *active_tab.read() == t;
+                rsx! {
+                    button {
+                        key: "{label}",
+                        class: if is_active { "bottom-nav__item active" } else { "bottom-nav__item" },
+                        onclick: move |_| active_tab.set(t),
+                        span { class: "bottom-nav__icon", "{icon}" }
+                        span { class: "bottom-nav__label", "{label}" }
+                    }
+                }
+            })}
+        }
     }
 }
 

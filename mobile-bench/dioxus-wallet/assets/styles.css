@@ -1420,10 +1420,100 @@ details .panel .row {
 }
 
 @media (max-width: 480px) {
-  /* On phones: hide the horizontal tab strip; the dropdown is
-   * the only navigation surface. */
+  /* On phones: hide the horizontal tab strip; the bottom-nav
+   * + hamburger menu are the only navigation surfaces. */
   .tab-nav { display: none; }
 }
+
+/* ══════════════════════════════════════════════════════════════════
+ *  BOTTOM TAB NAV (P0 W6)
+ *
+ *  Production-wallet bottom navigation: fixed at the foot of the
+ *  viewport, holds 5 primary destinations as icon + label cells.
+ *  Active cell gets a small accent pill behind the icon + an
+ *  underline indicator + accent text. Overflow tabs (Keys /
+ *  Diagnostics / dev tabs) stay reachable via the existing
+ *  hamburger menu in the header.
+ * ════════════════════════════════════════════════════════════════ */
+
+.bottom-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 2px;
+  padding: 8px 8px calc(var(--sp-2) + env(safe-area-inset-bottom));
+  background:
+    linear-gradient(180deg, rgba(11, 16, 32, 0.86), rgba(7, 11, 20, 0.96));
+  border-top: 1px solid var(--line);
+  backdrop-filter: var(--blur-card);
+  -webkit-backdrop-filter: var(--blur-card);
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.35);
+}
+.bottom-nav__item {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px;
+  height: auto;
+  min-height: 56px;
+  color: var(--text-muted-new);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  border-radius: var(--r-3);
+  transition: color var(--dur-fast) ease,
+              background var(--dur-fast) ease;
+}
+.bottom-nav__item:hover:not(:disabled) {
+  color: var(--text-soft-new);
+  background: var(--surface-4-new);
+}
+.bottom-nav__item.active {
+  color: var(--accent-cyan);
+  background: rgba(53, 211, 255, 0.10);
+}
+.bottom-nav__item.active::after {
+  content: "";
+  position: absolute;
+  margin-top: 44px;
+  width: 28px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--gradient-primary);
+}
+.bottom-nav__icon {
+  font-size: 1.3rem;
+  line-height: 1;
+}
+.bottom-nav__label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+/* Body bottom-padding — make sure scrolling content clears the
+ * fixed bottom-nav (76 px tall including the safe-area inset).
+ * The previous global `padding-bottom: env(safe-area-inset-bottom)`
+ * on body alone wasn't enough once the nav landed. */
+body {
+  padding-bottom: calc(80px + env(safe-area-inset-bottom));
+}
+
+/* Hide the legacy top `.tab-nav` strip on all viewports now —
+ * the bottom-nav is the canonical navigation surface. The
+ * hamburger menu in the header still exposes every tab including
+ * overflow ones (Keys / Diagnostics carousel host / Bootstrap /
+ * dev tabs). */
+.tab-nav { display: none !important; }
 
 .session-log {
   margin: 12px 16px 8px;
