@@ -549,22 +549,23 @@ describe('Ledger API - LedgerState', () => {
   describe('genesis seeding and locked-pool system transactions', () => {
     const MAX_SUPPLY = 24_000_000_000_000_000n;
     const LOCKED = 500_000n;
-    const RESERVE = MAX_SUPPLY - LOCKED;
+    const TREASURY = 300_000n;
+    const RESERVE = MAX_SUPPLY - LOCKED - TREASURY;
     const EPOCH = new Date(0);
 
     /**
      * Test seeding locked and reserve pools via testingFromGenesis.
      *
-     * @given lockedPool=500_000 and reservePool=MAX_SUPPLY-500_000
+     * @given lockedPool=500_000, treasury=300_000 and reservePool=MAX_SUPPLY-500_000-300_000
      * @when Constructing via testingFromGenesis
-     * @then Pools should reflect the seeded amounts and treasury is empty
+     * @then Pools should reflect the seeded amounts, including a seeded treasury
      */
-    test('testingFromGenesis seeds locked and reserve pools', () => {
-      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+    test('testingFromGenesis seeds locked, reserve, and treasury pools', () => {
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE, TREASURY);
 
       expect(ledgerState.lockedPool).toEqual(LOCKED);
       expect(ledgerState.reservePool).toEqual(RESERVE);
-      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(0n);
+      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(TREASURY);
       expect(ledgerState.blockRewardPool).toEqual(0n);
     });
 
@@ -576,7 +577,7 @@ describe('Ledger API - LedgerState', () => {
      * @then Should throw an invariant violation
      */
     test('testingFromGenesis rejects pools violating night supply invariant', () => {
-      expect(() => LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE - 1n)).toThrow(
+      expect(() => LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE - 1n, TREASURY)).toThrow(
         /invalid genesis settings/
       );
     });
@@ -590,12 +591,12 @@ describe('Ledger API - LedgerState', () => {
      */
     test('testingUnlockToTreasury moves funds from locked pool to treasury', () => {
       const amount = 200_000n;
-      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE, TREASURY);
 
       const after = ledgerState.testingUnlockToTreasury(amount, EPOCH);
 
       expect(after.lockedPool).toEqual(LOCKED - amount);
-      expect(after.treasuryBalance(nativeToken())).toEqual(amount);
+      expect(after.treasuryBalance(nativeToken())).toEqual(TREASURY + amount);
       expect(after.reservePool).toEqual(RESERVE);
     });
 
@@ -607,11 +608,11 @@ describe('Ledger API - LedgerState', () => {
      * @then Should throw without mutating state
      */
     test('testingUnlockToTreasury rejects amount exceeding locked pool', () => {
-      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE, TREASURY);
 
       expect(() => ledgerState.testingUnlockToTreasury(LOCKED + 1n, EPOCH)).toThrow();
       expect(ledgerState.lockedPool).toEqual(LOCKED);
-      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(0n);
+      expect(ledgerState.treasuryBalance(nativeToken())).toEqual(TREASURY);
     });
 
     /**
@@ -623,13 +624,13 @@ describe('Ledger API - LedgerState', () => {
      */
     test('testingUnlockToReserve moves funds from locked pool to reserve pool', () => {
       const amount = 200_000n;
-      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE, TREASURY);
 
       const after = ledgerState.testingUnlockToReserve(amount, EPOCH);
 
       expect(after.lockedPool).toEqual(LOCKED - amount);
       expect(after.reservePool).toEqual(RESERVE + amount);
-      expect(after.treasuryBalance(nativeToken())).toEqual(0n);
+      expect(after.treasuryBalance(nativeToken())).toEqual(TREASURY);
     });
 
     /**
@@ -640,7 +641,7 @@ describe('Ledger API - LedgerState', () => {
      * @then Should throw without mutating state
      */
     test('testingUnlockToReserve rejects amount exceeding locked pool', () => {
-      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE);
+      const ledgerState = LedgerState.testingFromGenesis(LOCAL_TEST_NETWORK_ID, LOCKED, RESERVE, TREASURY);
 
       expect(() => ledgerState.testingUnlockToReserve(LOCKED + 1n, EPOCH)).toThrow();
       expect(ledgerState.lockedPool).toEqual(LOCKED);

@@ -253,17 +253,20 @@ impl LedgerState {
         network_id: String,
         locked_pool: BigInt,
         reserve_pool: BigInt,
+        treasury: BigInt,
     ) -> Result<LedgerState, JsError> {
         let locked =
             u128::try_from(locked_pool).map_err(|_| JsError::new("locked_pool is out of range"))?;
         let reserve = u128::try_from(reserve_pool)
             .map_err(|_| JsError::new("reserve_pool is out of range"))?;
+        let treasury =
+            u128::try_from(treasury).map_err(|_| JsError::new("treasury is out of range"))?;
         let state = ledger::structure::LedgerState::<InMemoryDB>::with_genesis_settings(
             network_id,
             INITIAL_PARAMETERS,
             locked,
             reserve,
-            0,
+            treasury,
         )
         .map_err(|e| JsError::new(&format!("invalid genesis settings: {e:?}")))?;
         Ok(LedgerState(state))

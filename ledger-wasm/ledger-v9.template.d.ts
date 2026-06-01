@@ -643,14 +643,13 @@ export class LedgerState {
 
   /**
    * Constructs a ledger state with the given genesis parameterisation, using
-   * the default initial parameters and an empty treasury.
-   * Allows seeding the locked and reserve
-   * NIGHT pools so that subsequent system transactions (e.g.
+   * the default initial parameters. Allows seeding the locked, reserve, and
+   * treasury NIGHT pools so that subsequent system transactions (e.g.
    * {@link testingUnlockToTreasury}) can be exercised
    *
    * Use is for testing purposes only.
    */
-  static testingFromGenesis(network_id: string, lockedPool: bigint, reservePool: bigint): LedgerState;
+  static testingFromGenesis(network_id: string, lockedPool: bigint, reservePool: bigint, treasury: bigint): LedgerState;
 
   /**
    * Applies an `UnlockToTreasury` system transaction, moving the given amount
