@@ -3198,24 +3198,30 @@ body {
   height: auto;
   max-height: max-content;
 }
-.cta-card__ambient {
+/* Universal child rule first — lifts every direct child into a
+ * `position: relative` stacking context above the layered gradient
+ * background. The ambient-blob overrides below win via the
+ * `.cta-card .cta-card__ambient` compound selector (0,2,0 beats
+ * the universal-child 0,1,1). */
+.cta-card > * { position: relative; z-index: 1; }
+.cta-card .cta-card__ambient {
   position: absolute;
   pointer-events: none;
   filter: var(--blur-ambient);
   opacity: 0.7;
   border-radius: 999px;
+  z-index: 0;
 }
-.cta-card__ambient--one {
+.cta-card .cta-card__ambient--one {
   width: 220px; height: 220px;
   right: -80px; top: -40px;
   background: rgba(53, 211, 255, 0.18);
 }
-.cta-card__ambient--two {
+.cta-card .cta-card__ambient--two {
   width: 220px; height: 220px;
   left: -100px; bottom: -80px;
   background: rgba(185, 156, 255, 0.16);
 }
-.cta-card > * { position: relative; z-index: 1; }
 .cta-card__eyebrow {
   margin: 0;
   font-size: var(--fs-eyebrow);
