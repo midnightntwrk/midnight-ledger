@@ -106,11 +106,24 @@ impl Network {
                 // / 6300 set. The docker-compose macOS overlay at
                 // `/tmp/midnight-standalone/docker-compose.macos.yml`
                 // does the host→container remap.
+                //
+                // Each URL accepts a build-time override via env var
+                // (`option_env!`) — the Android APK build pipes the
+                // operator's tailnet IP / ngrok host in this way so
+                // the device-side wallet can reach the laptop-hosted
+                // standalone env over the network. See
+                // `mobile-bench/dioxus-wallet/android/TAILSCALE.md`
+                // for the build invocation. Unset env vars (e.g.
+                // desktop dev) fall back to `localhost`.
                 network_id: "undeployed",
-                indexer_http_url: "http://localhost:18088/api/v4/graphql",
-                indexer_ws_url: "ws://localhost:18088/api/v4/graphql/ws",
-                node_ws_url: "ws://localhost:19944",
-                proving_server_url: "http://localhost:16300",
+                indexer_http_url: option_env!("MIDNIGHT_INDEXER_HTTP_URL")
+                    .unwrap_or("http://localhost:18088/api/v4/graphql"),
+                indexer_ws_url: option_env!("MIDNIGHT_INDEXER_WS_URL")
+                    .unwrap_or("ws://localhost:18088/api/v4/graphql/ws"),
+                node_ws_url: option_env!("MIDNIGHT_NODE_WS_URL")
+                    .unwrap_or("ws://localhost:19944"),
+                proving_server_url: option_env!("MIDNIGHT_PROOF_SERVER_URL")
+                    .unwrap_or("http://localhost:16300"),
             },
         }
     }
