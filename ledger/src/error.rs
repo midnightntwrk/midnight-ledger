@@ -11,7 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend, InitialNonce};
+use crate::dust::{DustGenerationInfo, DustNullifier, DustRegistration, DustSpend};
 use crate::error::coin::UserAddress;
 use crate::structure::{ClaimKind, ContractOperationVersion, Utxo, UtxoOutput, UtxoSpend};
 use crate::structure::{MAX_SUPPLY, SignatureVerifyingKey};
@@ -1440,9 +1440,6 @@ pub enum DustLocalStateError {
     CommitmentIndexNotFound {
         commitment_index: u64,
     },
-    BackingNightNotFound {
-        backing_night: InitialNonce,
-    },
     MerkleTreeError(InvalidUpdate),
 }
 
@@ -1469,11 +1466,6 @@ impl Display for DustLocalStateError {
             CommitmentIndexNotFound { commitment_index } => write!(
                 f,
                 "failed to find commitment for commitment index {commitment_index}"
-            ),
-            BackingNightNotFound { backing_night } => write!(
-                f,
-                "failed to find generation info for backing night {:?}",
-                backing_night.0
             ),
             MerkleTreeError(err) => err.fmt(f),
         }

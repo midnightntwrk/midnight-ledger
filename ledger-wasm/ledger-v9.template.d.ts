@@ -517,20 +517,17 @@ export class DustLocalState {
   replayEvents(sk: DustSecretKey, events: Event[]): DustLocalState;
   replayEventsWithChanges(sk: DustSecretKey, events: Event[]): DustLocalStateWithChanges;
   /**
-   * Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+   * Replays a direct concatenation of serialized ledger events. Otherwise, acts as `replayEventsWithChanges`.
    */
   replayRawEvents(sk: DustSecretKey, rawEvents: Uint8Array): DustLocalStateWithChanges;
   addUtxo(nullifier: DustNullifier, utxo: QualifiedDustOutput, pendingUntil?: Date): DustLocalState;
   findUtxoByNullifier(nullifier: DustNullifier): QualifiedDustOutput | undefined;
   removeUtxo(nullifier: DustNullifier): DustLocalState;
-  /**
-   * Returns a new UTXO with a reduced value and the sequential nonce
-   */
-  successorUtxo(qdo: QualifiedDustOutput, now: Date, subtract_fee: bigint, new_commitment_index: bigint, sk: DustSecretKey): QualifiedDustOutput;
   serialize(): Uint8Array;
   static deserialize(raw: Uint8Array): DustLocalState;
   toString(compact?: boolean): string;
   readonly utxos: QualifiedDustOutput[];
+  readonly nullifiers: Map<DustNullifier, QualifiedDustOutput>;
   readonly params: DustParameters;
   syncTime: Date;
   readonly generatingTreeFirstFree: bigint;
@@ -1561,6 +1558,11 @@ export function dustFirstNonce(backingNight: DustInitialNonce, dustAddress: Dust
  * Calculate Dust initial nonce (a backing night hash)
  */
 export function dustInitialNonce(outputNo: bigint, intentHash: IntentHash): DustInitialNonce;
+
+/**
+ * Returns a new Dust UTXO with a reduced value and the sequential nonce
+ */
+export function successorDustUtxo(qdo: QualifiedDustOutput, now: Date, subtractFee: bigint, newCommitmentIndex: bigint, genInfo: DustGenerationInfo, sk: DustSecretKey, dustParams: DustParameters): QualifiedDustOutput;
 
 /**
  * Parameters used by the Midnight ledger, including transaction fees and

@@ -23,6 +23,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: fix potential panic in bridge fee processing
 - fix: address non-associativity of Dust event processing.
 - fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
 
 ## 8.1.0
 

@@ -993,7 +993,10 @@ fn per_tx_cost_reserve<D: DB>(
 }
 
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
-    transient_commit(&AlignedValue::concat([&input, &output]), rand)
+    transient_commit(
+        &ValueReprAlignedValue(AlignedValue::concat([&input, &output])),
+        rand,
+    )
 }
 
 pub type TranscriptPair<D> = (Option<Transcript<D>>, Option<Transcript<D>>);
