@@ -1168,11 +1168,21 @@ details .panel .row {
 }
 
 .did-card {
+  /* `<button>` defaults (global `button` rule: height: 36px,
+   * border-radius: 999px, padding: 0 18px, background:
+   * accent-soft, color: accent) collide with the card layout —
+   * the 22 px radius + 16 px padding on a 36 px-tall element
+   * renders as a fully rounded pill with overflow, and the
+   * inherited accent colour bleeds purple into every child.
+   * Explicitly reset everything the global rule sets but the
+   * card layout doesn't want. */
   display: grid;
   grid-template-columns: auto 1fr auto;
   align-items: center;
   gap: var(--sp-4);
   width: 100%;
+  height: auto;
+  min-height: 0;
   padding: var(--sp-4);
   border: 1px solid var(--line);
   border-radius: var(--r-4);
@@ -1182,10 +1192,28 @@ details .panel .row {
   color: var(--text);
   text-align: left;
   cursor: pointer;
+  font: inherit;
   transition: transform var(--dur-norm) var(--ease-out),
               border-color var(--dur-norm) var(--ease-out),
               background var(--dur-norm) var(--ease-out);
 }
+.did-card:hover:not(:disabled) {
+  /* Higher-specificity sibling of the global `button:hover` rule
+   * (which pulls in `--accent-soft` purple); this one wins via
+   * the longer compound selector + matches the visual treatment
+   * below in `.did-card:hover`. */
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 50%),
+    rgba(12, 21, 38, 0.9);
+}
+.did-card:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+/* In-row token-mark — drop the 3° rotation that works in the
+ * credential-card hero but overlaps neighbours inside a tight
+ * list row. */
+.did-card .token-mark { transform: none; }
 .did-card:hover {
   transform: translateY(-2px);
   border-color: rgba(53, 211, 255, 0.36);
