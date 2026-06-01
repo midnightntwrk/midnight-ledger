@@ -8244,26 +8244,64 @@ fn StatusLine(phase: SyncPhase, network: Network, tip_height: Option<i64>) -> El
 #[component]
 fn AddressCard(address: String) -> Element {
     let mut copied = use_signal(|| false);
+    let mut qr_open = use_signal(|| false);
+    let short = truncate_address_for_pill(&address);
+
     rsx! {
-        div { class: "card",
-            div { class: "card-header", "Address (NIGHT receive)" }
-            div { class: "address-block",
-                div { class: "text", "{address}" }
-                button {
-                    class: if *copied.read() { "copy-btn copied" } else { "copy-btn" },
-                    title: "Copy address",
-                    onclick: {
-                        let address = address.clone();
-                        move |_| {
-                            let _ = copy_to_clipboard(&address);
-                            copied.set(true);
-                        }
-                    },
-                    {if *copied.read() { "✓" } else { "⧉" }}
+        div { class: "address-pill",
+            span { class: "address-pill__label", "Receive" }
+            span {
+                class: "address-pill__value mono",
+                title: "{address}",
+                "{short}"
+            }
+            button {
+                class: if *copied.read() { "btn-icon address-pill__copy copied" } else { "btn-icon address-pill__copy" },
+                title: "Copy NIGHT receive address",
+                onclick: {
+                    let address = address.clone();
+                    move |_| {
+                        let _ = copy_to_clipboard(&address);
+                        copied.set(true);
+                    }
+                },
+                {if *copied.read() { "✓" } else { "⧉" }}
+            }
+            button {
+                class: "btn-icon address-pill__qr",
+                title: "Show QR (planned)",
+                onclick: move |_| {
+                    let cur = *qr_open.read();
+                    qr_open.set(!cur);
+                },
+                "▣"
+            }
+        }
+        if *qr_open.read() {
+            div { class: "address-qr-placeholder",
+                div { class: "address-qr-placeholder__frame",
+                    div { class: "address-qr-placeholder__label", "QR" }
                 }
+                p { "QR rendering lands in Phase 2 — use the Copy button for now." }
             }
         }
     }
+}
+
+/// Mid-truncate an unshielded address so it fits inside the
+/// receive pill while staying recognisable. Keeps the first 16
+/// chars + last 6, ellipsis in the middle. Full string lives in
+/// the pill's `title` attribute for hover discovery.
+fn truncate_address_for_pill(s: &str) -> String {
+    const HEAD: usize = 16;
+    const TAIL: usize = 6;
+    let n = s.chars().count();
+    if n <= HEAD + TAIL + 1 {
+        return s.into();
+    }
+    let head: String = s.chars().take(HEAD).collect();
+    let tail: String = s.chars().skip(n - TAIL).collect();
+    format!("{head}…{tail}")
 }
 
 // Pure formatting helpers were moved to `src/format.rs` so they
@@ -8298,20 +8336,53 @@ fn BalancesCard(
         }
     };
 
+    // Hero number (NIGHT) — exact whole-unit value if synced,
+    // dash if not connected, ellipsis while syncing. Compact
+    // form rendered as a small "≈ 5K" tag underneath when it
+    // adds information.
+    let (night_primary, night_compact_tag) = match &night {
+        None => ("—".to_string(), None),
+        Some(BalanceCell::Syncing) => ("…".to_string(), None),
+        Some(BalanceCell::Value { compact, exact }) => {
+            let tag = (compact != exact).then(|| format!("≈ {compact}"));
+            (exact.clone(), tag)
+        }
+    };
+    let dust_text = match &dust {
+        None => "—".to_string(),
+        Some(BalanceCell::Syncing) => "syncing…".to_string(),
+        Some(BalanceCell::Value { exact, .. }) => exact.clone(),
+    };
+    let hint = match (connected, night_subunits, dust_subunits) {
+        (false, _, _) => "Connect to the network to see live balances.",
+        (true, None, _) | (true, _, None) => "Syncing wallet state from the indexer…",
+        (true, Some(0), _) => "No NIGHT yet. Send NIGHT to the receive address above.",
+        (true, Some(_), Some(_)) => "DUST accrues from registered NIGHT UTXOs.",
+    };
+
     rsx! {
-        div { class: "card",
-            div { class: "card-header", "Balances" }
-            {render_balance_row("NIGHT", &night)}
-            {render_balance_row("DUST", &dust)}
-            div { class: "balance-row",
-                span { class: "hint",
-                    {match (connected, night_subunits, dust_subunits) {
-                        (false, _, _) => "Connect to the network to see live balances.",
-                        (true, None, _) | (true, _, None) => "Syncing wallet state from the indexer…",
-                        (true, Some(0), _) => "No NIGHT yet. Send NIGHT to the address above.",
-                        (true, Some(_), Some(_)) => "DUST accrues from registered NIGHT UTXOs.",
-                    }}
+        section { class: "wallet-hero",
+            div { class: "wallet-hero__copy",
+                p { class: "wallet-hero__eyebrow", "Total balance" }
+                div { class: "wallet-hero__number-row",
+                    span { class: "wallet-hero__number", "{night_primary}" }
+                    span { class: "wallet-hero__unit", "NIGHT" }
                 }
+                if let Some(tag) = night_compact_tag {
+                    p { class: "wallet-hero__compact", "{tag}" }
+                }
+                div { class: "wallet-hero__dust",
+                    span { class: "wallet-hero__dust-label", "DUST" }
+                    span { class: "wallet-hero__dust-value", "{dust_text}" }
+                }
+                p { class: "wallet-hero__hint", "{hint}" }
+            }
+            div {
+                class: if connected {
+                    "token-mark token-mark--lg token-mark--green wallet-hero__mark"
+                } else {
+                    "token-mark token-mark--lg wallet-hero__mark"
+                },
             }
         }
     }
@@ -8333,6 +8404,12 @@ enum BalanceCell {
 /// only when the whole-unit part is large enough that the
 /// abbreviation is informative (≥ 1,000). Below 1,000 the exact
 /// value alone is shown.
+///
+/// Currently unused by the modernised Wallet hero (which renders
+/// NIGHT + DUST inline in its own template) but kept around as a
+/// reusable helper for the secondary balance breakdowns the
+/// Wave 3+ work may surface.
+#[allow(dead_code)]
 fn render_balance_row(unit: &str, cell: &Option<BalanceCell>) -> Element {
     let (primary, secondary) = match cell {
         None => ("—".to_string(), None),

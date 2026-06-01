@@ -3016,3 +3016,208 @@ details .panel .row {
 .cta-card__action {
   margin-top: var(--sp-2);
 }
+
+/* ══════════════════════════════════════════════════════════════════
+ *  WALLET HERO (P0 W3)
+ *
+ *  The Wallet tab's top-of-page hero — balance as the page subject,
+ *  not row 2 of a flat-card stack. NIGHT total is the page H1 at
+ *  `--fs-hero` weight-900 with the currency unit at 0.42×; DUST is
+ *  the secondary balance below at small-meta weight. A 80 px
+ *  `.token-mark--lg` floats to the right of the copy block on
+ *  wide viewports; on narrow phones it stacks above.
+ * ════════════════════════════════════════════════════════════════ */
+
+.wallet-hero {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: var(--sp-6);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-6) var(--sp-4) var(--sp-5);
+  /* No card chrome — the page background's ambient gradient is
+   * the hero's surface. Trust-line + connect CTA below sit
+   * directly on the same surface. */
+}
+.wallet-hero__copy {
+  min-width: 0;
+}
+.wallet-hero__eyebrow {
+  margin: 0 0 var(--sp-2);
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--text-muted-new);
+}
+.wallet-hero__number-row {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+.wallet-hero__number {
+  font-size: var(--fs-hero);
+  font-weight: 900;
+  line-height: 0.92;
+  letter-spacing: -0.075em;
+  color: var(--text-strong);
+}
+.wallet-hero__unit {
+  font-size: clamp(1rem, 2.6vw, 1.6rem);
+  font-weight: 700;
+  color: var(--text-muted-new);
+  letter-spacing: 0.04em;
+}
+.wallet-hero__compact {
+  margin: var(--sp-1) 0 0;
+  font-size: var(--fs-small);
+  color: var(--text-muted-new);
+}
+.wallet-hero__dust {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin-top: var(--sp-4);
+  padding: 6px 14px;
+  background: var(--surface-4-new);
+  border: 1px solid var(--line-faint);
+  border-radius: var(--r-pill-new);
+}
+.wallet-hero__dust-label {
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-muted-new);
+}
+.wallet-hero__dust-value {
+  font-size: var(--fs-meta);
+  color: var(--text-new);
+  font-family: ui-monospace, monospace;
+}
+.wallet-hero__hint {
+  margin: var(--sp-3) 0 0;
+  font-size: var(--fs-small);
+  color: var(--text-faint-new);
+  max-width: 38ch;
+}
+.wallet-hero__mark {
+  /* Shrink the token-mark when it lives in the hero header — the
+   * default --lg is 80 px which works on wide layouts but pushes
+   * the number out on phones. */
+  --tm-size: 72px;
+}
+
+/* ══════════════════════════════════════════════════════════════════
+ *  ADDRESS PILL (P0 W3 — replaces AddressCard's full-mono block)
+ *
+ *  Compact horizontal pill: eyebrow label, truncated mono address
+ *  with the full string available via title-attr hover, copy
+ *  icon-button, QR placeholder icon-button. Lives directly under
+ *  the wallet hero — single-row layout that doesn't dominate the
+ *  page.
+ * ════════════════════════════════════════════════════════════════ */
+
+.address-pill {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  margin-bottom: var(--sp-4);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill-new);
+  background: var(--surface-4-new);
+  backdrop-filter: var(--blur-card);
+  -webkit-backdrop-filter: var(--blur-card);
+}
+.address-pill__label {
+  font-size: var(--fs-eyebrow);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: var(--text-muted-new);
+  flex: 0 0 auto;
+}
+.address-pill__value {
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--fs-meta);
+  color: var(--text-new);
+}
+.address-pill__value.mono {
+  font-family: ui-monospace, monospace;
+}
+.address-pill__copy,
+.address-pill__qr {
+  width: 36px;
+  height: 36px;
+  font-size: 0.95rem;
+  flex: 0 0 auto;
+}
+.address-pill__copy.copied {
+  background: rgba(67, 242, 178, 0.14);
+  border-color: var(--line-success);
+  color: var(--accent-green);
+}
+
+/* Inline placeholder shown when the QR icon-button is pressed.
+ * Real QR rendering lands in a follow-up commit; for now it
+ * surfaces a 200 px-square frame with a "QR" placeholder
+ * watermark + a one-line explainer so the button doesn't feel
+ * dead. */
+.address-qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  margin-bottom: var(--sp-4);
+  padding: var(--sp-5);
+  border: 1px dashed var(--line);
+  border-radius: var(--r-4);
+  background: rgba(8, 13, 24, 0.6);
+  color: var(--text-muted-new);
+  font-size: var(--fs-small);
+  text-align: center;
+}
+.address-qr-placeholder__frame {
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--r-3);
+  background:
+    repeating-conic-gradient(
+      from 0deg,
+      rgba(53, 211, 255, 0.10) 0deg 90deg,
+      rgba(185, 156, 255, 0.10) 90deg 180deg
+    ),
+    rgba(15, 23, 42, 0.85);
+  border: 1px solid var(--line);
+}
+.address-qr-placeholder__label {
+  font-size: 1.4rem;
+  font-weight: 800;
+  letter-spacing: 0.4em;
+  color: var(--text-faint-new);
+}
+.address-qr-placeholder p {
+  margin: 0;
+}
+
+/* Narrow phone window — stack the wallet hero so the token-mark
+ * sits above the copy block instead of crushing the number. */
+@media (max-width: 480px) {
+  .wallet-hero {
+    grid-template-columns: 1fr;
+    gap: var(--sp-3);
+    padding: var(--sp-5) var(--sp-4) var(--sp-4);
+  }
+  .wallet-hero__mark {
+    justify-self: end;
+    --tm-size: 56px;
+  }
+}
