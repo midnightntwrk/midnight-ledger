@@ -215,6 +215,12 @@ pub fn global_bridge() -> Option<Arc<dyn JsBridge>> {
 /// decoded payload (e.g. an `openid4vp://…` or
 /// `openid-credential-offer://…` URL) — the caller's responsible for
 /// parsing.
+///
+/// Briefly unused between C1 (which removed the per-section
+/// Scan-QR buttons) and C2 (which wires the top-level scan button).
+/// Kept around — `#[allow(dead_code)]` shields the `#![deny(warnings)]`
+/// gate at the lib root for the in-flight commit.
+#[allow(dead_code)]
 pub async fn scan_qr(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
     #[derive(serde::Deserialize)]
     struct ScanResult {

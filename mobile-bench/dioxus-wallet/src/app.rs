@@ -113,6 +113,13 @@ enum Tab {
     /// the pragmatic linear page that exposes the same end-to-end
     /// contract against the running issuer-mock.
     Identity,
+    /// Operator/dev setup tab. Holds the heavy-weight one-time
+    /// `bootstrap_did_with_keys` flow (mint a fresh issuer-/holder-
+    /// facing DID + Ed25519 + Jubjub keys) and the manual paste-URL
+    /// `OID4VP` authenticate path. The everyday holder-facing surface
+    /// (Identity Centre) stays scan-first; this tab is where you'd
+    /// go to seed a new wallet or debug the protocol step-by-step.
+    Bootstrap,
 }
 
 impl Tab {
@@ -128,6 +135,7 @@ impl Tab {
             Tab::Logs => "Logs",
             Tab::Settings => "Settings",
             Tab::Identity => "Identity Centre",
+            Tab::Bootstrap => "Bootstrap",
         }
     }
 
@@ -146,6 +154,7 @@ impl Tab {
             Tab::Metrics => 7,
             Tab::Benchmark => 8,
             Tab::Identity => 9,
+            Tab::Bootstrap => 10,
         }
     }
 
@@ -167,6 +176,7 @@ impl Tab {
             // unreachable variant.
             5 | 6 | 7 | 8 => Tab::Diagnostics,
             9 => Tab::Identity,
+            10 => Tab::Bootstrap,
             _ => Tab::Wallet,
         }
     }
@@ -1644,7 +1654,7 @@ pub fn App() -> Element {
                 // Metrics / Benchmark / Test / Logs were collapsed
                 // into a carousel under Diagnostics — the top-level
                 // tab bar no longer lists them.
-                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Settings] {
+                for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Bootstrap, Tab::Settings] {
                     button {
                         class: if *active_tab.read() == t { "menu-item active" } else { "menu-item" },
                         onclick: move |_| {
@@ -1672,7 +1682,7 @@ pub fn App() -> Element {
         // below is a single match on the current value. CSS hides
         // this row on narrow viewports — see `.tab-nav` rule.
         div { class: "tab-nav",
-            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
+            for t in [Tab::Wallet, Tab::Dids, Tab::Identity, Tab::Keys, Tab::Diagnostics, Tab::Bootstrap, Tab::Metrics, Tab::Benchmark, Tab::Test, Tab::Logs, Tab::Settings] {
                 button {
                     class: if *active_tab.read() == t { "tab-btn active" } else { "tab-btn" },
                     onclick: move |_| active_tab.set(t),
@@ -2266,6 +2276,36 @@ pub fn App() -> Element {
             Tab::Settings => rsx! {
                 SettingsTab { bridge_state: bridge_state.read().clone() }
             },
+            Tab::Bootstrap => rsx! {
+                crate::identity_centre::BootstrapPanel {
+                    network: *network.read(),
+                    bridge_state: bridge_state.read().clone(),
+                    // Same `on_did_minted` channel the Identity Centre
+                    // used pre-C1 (and the Create-DID wizard before
+                    // that) — inserts the new DID into the live
+                    // inventory signal + persists. See `Tab::Identity`
+                    // below for the full rationale.
+                    on_did_minted: move |(did, net): (String, Network)| {
+                        let entry = DidInventoryEntry {
+                            did: did.clone(),
+                            network_label: net.label().to_string(),
+                            status: DidInventoryStatus::Active,
+                            counter: None,
+                            vm_count: Some(2),
+                            service_count: Some(0),
+                            last_block_height: None,
+                        };
+                        let mut inv = did_inventory.read().clone();
+                        inv.insert(did.clone(), entry.clone());
+                        did_inventory.set(inv);
+                        persist_inventory_entry(
+                            &bridge_state.read(),
+                            net,
+                            &entry,
+                        );
+                    },
+                }
+            },
             Tab::Identity => rsx! {
                 crate::identity_centre::IdentityCentrePanel {
                     network: *network.read(),
@@ -2277,6 +2317,12 @@ pub fn App() -> Element {
                     // redb. The Dids tab renders from the signal, so
                     // this is what makes the new DID show up
                     // immediately (no app restart, no network switch).
+                    //
+                    // Today the Identity Centre tab itself doesn't
+                    // bootstrap (Bootstrap tab does), but the prop is
+                    // still threaded so the C2/C3 work — and any
+                    // future in-Identity-Centre DID minting — can
+                    // light up without rewiring the parent.
                     on_did_minted: move |(did, net): (String, Network)| {
                         let entry = DidInventoryEntry {
                             did: did.clone(),

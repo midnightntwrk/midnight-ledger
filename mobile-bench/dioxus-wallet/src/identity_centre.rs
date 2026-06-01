@@ -117,13 +117,64 @@ pub fn IdentityCentrePanel(
     // scope so all four sections share it.
     let ic_did = use_signal::<Option<String>>(|| None);
 
+    // `on_did_minted` is the bridge between this panel and `app.rs`'s
+    // `did_inventory` signal. It travels with the BootstrapPanel
+    // (where the actual minting happens) rather than the
+    // IdentityCentrePanel now, but the props are kept here so older
+    // call sites (and the C2/C3 work coming next) can compile while
+    // C1 lands the tab split in isolation.
+    let _ = on_did_minted;
+
     rsx! {
         div { class: "card",
             div { class: "card-header", "Identity Centre" }
             div { class: "detail-empty",
-                "Phase 1 — drive the four shipped wallet-core flows. "
-                "Paste URLs from the issuer-mock to authenticate, "
-                "fetch a credential, and self-verify."
+                "Receive credentials, view them, and present claims. "
+                "Need to mint a fresh DID or paste an OID4VP URL by "
+                "hand? Switch to the Bootstrap tab."
+            }
+        }
+
+        Oid4vciSection {
+            network,
+            bridge_state: bridge_state.clone(),
+            ic_did,
+        }
+
+        VcInventorySection {
+            network,
+            bridge_state,
+        }
+    }
+}
+
+/// Operator/dev setup panel. Renders for `Tab::Bootstrap`. Holds
+/// the heavy-weight one-time DID minting flow (`bootstrap_did_with_keys`)
+/// and the manual paste-URL `OID4VP` authenticate path — the two
+/// surfaces a developer/operator uses to seed a wallet or debug
+/// the OID4VP step-by-step without the camera-scan path.
+///
+/// The everyday holder-facing surface (`IdentityCentrePanel`) stays
+/// scan-first and skips these heavier controls.
+#[component]
+pub fn BootstrapPanel(
+    network: Network,
+    bridge_state: BridgeState,
+    on_did_minted: EventHandler<(String, Network)>,
+) -> Element {
+    // Same single-DID handle the IdentityCentrePanel uses. Each
+    // panel keeps its own copy; the C3 multi-DID picker will switch
+    // both panels onto a shared inventory-backed selector.
+    let ic_did = use_signal::<Option<String>>(|| None);
+
+    rsx! {
+        div { class: "card",
+            div { class: "card-header", "Bootstrap" }
+            div { class: "detail-empty",
+                "Seed a wallet for the demo. Mint a new DID + the "
+                "Ed25519 / Jubjub key pair the OID4VP + OID4VCI flows "
+                "use, or paste an OID4VP URL by hand if you don't "
+                "want the camera scanner."
             }
         }
 
@@ -136,19 +187,8 @@ pub fn IdentityCentrePanel(
 
         Oid4vpSection {
             network,
-            bridge_state: bridge_state.clone(),
-            ic_did,
-        }
-
-        Oid4vciSection {
-            network,
-            bridge_state: bridge_state.clone(),
-            ic_did,
-        }
-
-        VcInventorySection {
-            network,
             bridge_state,
+            ic_did,
         }
     }
 }
@@ -508,37 +548,15 @@ fn Oid4vpSection(
         }
     };
 
-    let scan = {
-        let mut url_input = url_input;
-        let mut err_msg = err_msg;
-        move |_| {
-            err_msg.set(None);
-            spawn(async move {
-                let Some(bridge) = eval_bridge::global_bridge() else {
-                    err_msg.set(Some(
-                        "JS bridge not installed yet (js-bridge feature off?)"
-                            .into(),
-                    ));
-                    return;
-                };
-                match eval_bridge::scan_qr(&*bridge).await {
-                    Ok(url) => url_input.set(url),
-                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
-                        if msg == "cancelled" =>
-                    {
-                        // User pressed Cancel — silent no-op.
-                    }
-                    Err(e) => err_msg.set(Some(format!("scan failed: {e}"))),
-                }
-            });
-        }
-    };
-
     // Explicit paste button — iOS WKWebView's long-press / Cmd-V
     // paste into `<textarea>` is unreliable; the bundle's
     // `pasteText()` calls `navigator.clipboard.readText()` from a
     // button click (a valid user gesture) and works on every
     // supported target.
+    //
+    // Per-section Scan QR was removed in the C1 layout split — the
+    // top-of-IdentityCentre Scan QR button (landed in C2) is the
+    // single QR entry point now and dispatches by protocol prefix.
     let paste = {
         let mut url_input = url_input;
         let mut err_msg = err_msg;
@@ -581,11 +599,6 @@ fn Oid4vpSection(
                     disabled: *busy.read(),
                     onclick: paste,
                     "📋 Paste"
-                }
-                button {
-                    disabled: *busy.read(),
-                    onclick: scan,
-                    "📷 Scan QR"
                 }
             }
             if let Some(msg) = ok_msg.read().as_ref() {
@@ -715,31 +728,11 @@ fn Oid4vciSection(
         }
     };
 
-    let scan = {
-        let mut url_input = url_input;
-        let mut err_msg = err_msg;
-        move |_| {
-            err_msg.set(None);
-            spawn(async move {
-                let Some(bridge) = eval_bridge::global_bridge() else {
-                    err_msg.set(Some(
-                        "JS bridge not installed yet (js-bridge feature off?)"
-                            .into(),
-                    ));
-                    return;
-                };
-                match eval_bridge::scan_qr(&*bridge).await {
-                    Ok(url) => url_input.set(url),
-                    Err(wallet_core::js_bridge::JsBridgeError::Transport(msg))
-                        if msg == "cancelled" => {}
-                    Err(e) => err_msg.set(Some(format!("scan failed: {e}"))),
-                }
-            });
-        }
-    };
-
     // See identity_centre OID4VP card — same rationale, iOS
-    // needs an explicit clipboard-read entry point.
+    // needs an explicit clipboard-read entry point. Per-section
+    // Scan QR was removed in the C1 layout split — the
+    // top-of-IdentityCentre Scan QR button (landed in C2) is the
+    // single QR entry point and dispatches by protocol prefix.
     let paste = {
         let mut url_input = url_input;
         let mut err_msg = err_msg;
@@ -782,11 +775,6 @@ fn Oid4vciSection(
                     disabled: *busy.read(),
                     onclick: paste,
                     "📋 Paste"
-                }
-                button {
-                    disabled: *busy.read(),
-                    onclick: scan,
-                    "📷 Scan QR"
                 }
             }
             if let Some(msg) = ok_msg.read().as_ref() {
