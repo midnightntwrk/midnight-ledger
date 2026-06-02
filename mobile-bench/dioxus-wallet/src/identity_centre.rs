@@ -44,6 +44,40 @@ use crate::did_ports::{CachedWalletAuthnDiscovery, RedbDidSigner};
 /// after roughly 18 quintillion clicks.
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Cross-component "VC inventory changed" tick.
+///
+/// [`VcInventorySection`] subscribes to this in its
+/// `use_resource` so any flow that mutates `vcs.redb` (the redb
+/// VC store) can bump the counter and force the next render to
+/// re-read the rows.
+///
+/// Why a `GlobalSignal` and not the existing per-component
+/// `refresh_tick`: OID4VCI issuance can run from the
+/// Diagnostics → Bootstrap paste-URL flow (whose component tree
+/// doesn't include `VcInventorySection`) OR from the
+/// Credentials → Scan QR flow (which mounts the inventory but
+/// dispatches via [`run_oid4vci_request`] in a sibling scope
+/// that has no handle to the local `refresh_tick`). A module-
+/// level [`GlobalSignal`] is the smallest fix that bridges
+/// across both component trees AND survives navigation without
+/// re-instantiating.
+///
+/// The original per-component `refresh_tick` is unchanged —
+/// kept for the cheap in-place bumps (post-verify badge
+/// refresh, sample-VC inserter) so an empty round-trip through
+/// the global doesn't churn the resource on every badge tick.
+pub(crate) static VC_INVENTORY_TICK: GlobalSignal<u64> =
+    GlobalSignal::new(|| 0);
+
+/// Bump the global VC-inventory tick. Call this after any
+/// mutation to `vcs.redb` that originated outside
+/// `VcInventorySection`'s own scope. Cheap: a single atomic
+/// increment + Dioxus subscription wake.
+pub(crate) fn bump_vc_inventory_tick() {
+    let next = *VC_INVENTORY_TICK.read() + 1;
+    *VC_INVENTORY_TICK.write() = next;
+}
+
 /// Mint a fresh hex-string action ID. One per top-level Identity
 /// Centre click. Used as a `tracing::Span` field so every nested
 /// `time_op` op record, `MeteredHttpClient` http record, and
@@ -285,6 +319,15 @@ fn run_oid4vci_request(
                 match result {
                     Ok(vc_uri) => {
                         in_mem_metrics.incr("vcs.issued", 1);
+                        // Tell every mounted `VcInventorySection`
+                        // a row landed in `vcs.redb` — the
+                        // resource resubscribes via
+                        // `VC_INVENTORY_TICK`. Without this the
+                        // freshly-issued VC stays invisible
+                        // until the user switches tabs and back
+                        // (the symptom this lookup-time bump
+                        // fixes).
+                        bump_vc_inventory_tick();
                         ok_msg.set(Some(format!("issued {vc_uri}")));
                     }
                     Err(e) => {
@@ -1230,7 +1273,15 @@ fn VcInventorySection(network: Network, bridge_state: BridgeState) -> Element {
     let refresh_tick = use_signal(|| 0u64);
 
     let vcs = use_resource(move || {
+        // Subscribe to BOTH the per-component tick (verify
+        // badge / sample-insert) AND the module-level
+        // `VC_INVENTORY_TICK` (cross-component bumps from
+        // OID4VCI issuance — see [`bump_vc_inventory_tick`]).
+        // Dioxus re-runs the resource when EITHER signal
+        // changes; reading both inside the closure registers
+        // the dependency.
         let _ = refresh_tick.read();
+        let _ = VC_INVENTORY_TICK.read();
         async move {
             match RedbVcStore::open(vc_store_path()) {
                 Ok(s) => s.list_ordered().map_err(|e| e.to_string()),
