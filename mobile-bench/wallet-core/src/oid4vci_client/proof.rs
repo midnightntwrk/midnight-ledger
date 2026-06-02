@@ -131,9 +131,9 @@ impl ProofBuilder for IdTokenProofBuilder {
         c_nonce: &str,
     ) -> Result<ProofValue, CredentialFlowError> {
         let jwt = sign_id_token_with_ports(
-            &self.discovery,
-            &self.signer,
-            &self.clock,
+            &*self.discovery,
+            &*self.signer,
+            &*self.clock,
             &self.holder,
             issuer,
             c_nonce,

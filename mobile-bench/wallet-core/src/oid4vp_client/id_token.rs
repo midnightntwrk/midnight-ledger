@@ -17,8 +17,6 @@
 //! Reference:
 //! `docs/superpowers/specs/2026-06-02-login-with-did-architecture.md`.
 
-use std::sync::Arc;
-
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -90,9 +88,9 @@ pub fn encode_segment<T: Serialize>(value: &T) -> Result<String, serde_json::Err
 /// pipeline doesn't have to branch on the flow that minted
 /// the JWS.
 pub async fn sign_id_token_with_ports(
-    discovery: &Arc<dyn DidAuthnDiscovery>,
-    signer: &Arc<dyn DidSigner>,
-    clock: &Arc<dyn Clock>,
+    discovery: &dyn DidAuthnDiscovery,
+    signer: &dyn DidSigner,
+    clock: &dyn Clock,
     holder: &DidId,
     aud: &str,
     nonce: &str,

@@ -76,9 +76,9 @@ impl ResponseBuilder for IdTokenBuilder {
         // verifier DID) and `nonce` is the request nonce — both
         // travel through `AuthorizationRequest`.
         let token = sign_id_token_with_ports(
-            &self.discovery,
-            &self.signer,
-            &self.clock,
+            &*self.discovery,
+            &*self.signer,
+            &*self.clock,
             &self.holder,
             &req.client_id,
             &req.nonce,
