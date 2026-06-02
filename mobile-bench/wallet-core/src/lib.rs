@@ -52,6 +52,8 @@ pub mod oid4vci_client;
 pub mod vc_self_verify;
 pub mod qr_scanner;
 pub mod prelude;
+#[cfg(any(test, feature = "test-support"))]
+pub mod headless;
 
 // ─── Domain types ──────────────────────────────────────────────
 // The "inner hexagon" content: types every layer of the stack

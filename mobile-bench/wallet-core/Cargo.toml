@@ -147,3 +147,13 @@ urlencoding = "2"
 name = "did-bootstrap"
 path = "src/bin/did-bootstrap.rs"
 required-features = ["test-support"]
+
+# `headless-wallet` — drives the same port-typed use cases the
+# Dioxus shell uses (Bootstrap → OID4VP → OID4VCI → verify)
+# without a UI. Same `test-support` gating as `did-bootstrap`
+# because it consumes `wallet_core::headless`, which is itself
+# gated on `InMemorySecretStore` availability.
+[[bin]]
+name = "headless-wallet"
+path = "src/bin/headless-wallet.rs"
+required-features = ["test-support"]
