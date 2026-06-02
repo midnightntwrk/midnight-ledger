@@ -222,6 +222,64 @@ try {
   console.warn(`[vendor]   ! could not patch signing.js: ${e.message}`);
 }
 
+// Pure-ESM third-party packages that are imported at runtime by
+// vendored WASM-touching packages and resolved over `mn-pkg://`
+// via the import map. `@noble/hashes` is imported by
+// `midnight-did-jubjub-schnorr/dist/signing.js` (sha256, utils)
+// which the WebView loads dynamically. The import map routes
+// `@noble/hashes/` → `mn-pkg://localhost/@noble/hashes/esm/`, so
+// we place the files under `pkg/@noble/hashes/esm/`.
+//
+// Keep this map in sync with the import map in
+// `dioxus-wallet/src/lib.rs::head_html`.
+const ESM_DEPS = {
+  "@noble/hashes": {
+    files: ["sha2.js", "utils.js", "_md.js", "_u64.js", "crypto.js"],
+    srcSubdir: "esm",  // @noble/hashes v1.x puts ESM files under esm/ (top-level .js files are CJS)
+    destSubdir: "esm",  // placed at pkg/@noble/hashes/esm/sha2.js etc.
+  },
+};
+
+for (const [dep, cfg] of Object.entries(ESM_DEPS)) {
+  // Resolve the package in node_modules (hoisted or pnpm store).
+  let srcDir = null;
+  const sourceCandidates = [SOURCE, VC_SOURCE];
+  for (const s of sourceCandidates) {
+    // Handle scoped packages: @noble/hashes → node_modules/@noble/hashes
+    const hoisted = resolve(s, "node_modules", dep);
+    try { statSync(hoisted); srcDir = hoisted; break; } catch (_) {}
+  }
+  if (!srcDir) {
+    for (const s of sourceCandidates) {
+      const pnpmRoot = resolve(s, "node_modules", ".pnpm");
+      try {
+        for (const entry of readdirSync(pnpmRoot)) {
+          // @noble/hashes → @noble+hashes@…
+          const escaped = dep.replace("/", "+");
+          if (entry.startsWith(`${escaped}@`)) {
+            const candidate = resolve(pnpmRoot, entry, "node_modules", dep);
+            try { statSync(candidate); srcDir = candidate; break; } catch (_) {}
+          }
+        }
+        if (srcDir) break;
+      } catch (_) {}
+    }
+  }
+  if (!srcDir) {
+    console.error(`[vendor] missing ESM dep: ${dep}`);
+    process.exit(1);
+  }
+  const srcSubdir = cfg.srcSubdir || "";  // e.g. "esm" for @noble/hashes v1.x where ESM lives in esm/
+  const actualSrcDir = srcSubdir ? resolve(srcDir, srcSubdir) : srcDir;
+  const dstDir = resolve(DEST, dep, cfg.destSubdir);
+  mkdirSync(dstDir, { recursive: true });
+  for (const f of cfg.files) {
+    copyFileSync(resolve(actualSrcDir, f), resolve(dstDir, f));
+  }
+  total++;
+  console.log(`[vendor]   ✓ ${dep} (ESM, ${cfg.files.length} files → ${cfg.destSubdir}/)`);
+}
+
 // Some upstream packages (compact-runtime → object-inspect) reach
 // for third-party CJS modules the WebView's native ESM loader can't
 // load directly. We esbuild-bundle each into an ESM wrapper, place
