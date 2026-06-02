@@ -397,6 +397,12 @@ this audit by section number.
 | `0c135238`   | docs(bridge): document the three concerns BridgeState bundles         | §5.D       |
 | `56b27134`   | docs(service): flag wallet-core/service/ as a never-populated skeleton | §3 aside  |
 | `e31f96f3`   | refactor(wallet-core): loosen `sign_id_token_with_ports` to `&dyn _`   | composability |
+| `635977a4`   | docs(arch): close the audit doc with delivery summary                  | —          |
+| `50841942`   | feat(wallet-core): HeadlessWallet façade + headless-wallet CLI binary  | headless capability |
+| `d9326ca0`   | test(wallet-core): use-case-by-use-case live integration tests         | use-case-per-test promise |
+| `7bcf7d54`   | feat(ios): native QR scanner via AVCaptureSession + Swift bridge       | iOS parity |
+| `a0812524`   | test(wallet-core): OID4VCI issuance live e2e via HeadlessWallet        | use-case + live coverage |
+| _(issuer)_ `ac312ab` | fix(IssuerDIDIT-mock): /credential reads sub_jwk from payload | OID4VCI wire-shape sync (local-only on issuer fork) |
 
 ⚠ `a57c3eb1` was signed with a malformed GPG signature
 (verifies as BAD) — transient GPG-agent state at commit time.
@@ -406,17 +412,31 @@ already been pushed to the personal fork.
 
 ### Aggregate impact
 
-- **Tests**: 316 → 318 lib + 14 → 22 integration (OID4VCI suite
-  is the new 8). All pass; `cargo check -p dioxus-wallet
-  --target aarch64-linux-android` clean throughout.
-- **Lines of code**: roughly +900 (mostly tests + the audit doc
-  itself) and -80 (legacy re-export comments folded into
-  section headers).
-- **Surface added**: `oid4vci_client::{CredentialCoordinator,
-  ProofBuilder, IdTokenProofBuilder, ProofValue}`,
-  `wallet_core::prelude`.
+- **Tests**: 316 → 318 lib + 14 → 22 mock-driven integration
+  (new OID4VCI suite). Plus three new **live integration tests**
+  against running standalone env + issuer-mock:
+  Bootstrap, Bootstrap+Login, Bootstrap+Login+OID4VCI-issuance.
+  All pass; `cargo check -p dioxus-wallet --target
+  aarch64-linux-android` clean throughout; `cargo build -p
+  dioxus-wallet --target aarch64-apple-ios-sim --release` +
+  `xcodebuild … -sdk iphonesimulator` succeed for iOS.
+- **Lines of code**: roughly +2 500 (audit doc + headless
+  module + iOS QR adapter + integration tests) and -80
+  (legacy re-export comments).
+- **Surface added**:
+  - `oid4vci_client::{CredentialCoordinator, ProofBuilder,
+    IdTokenProofBuilder, ProofValue}`.
+  - `wallet_core::prelude`.
+  - `wallet_core::headless::HeadlessWallet` + `HeadlessConfig`.
+  - `wallet_core::bin::headless-wallet` (CLI binary).
+  - `dioxus-wallet::qr_scanner_ios::IosQrScanner` + the Swift
+    bridge.
 - **Surface loosened**: `sign_id_token_with_ports` accepts
   `&dyn _` (was `&Arc<dyn _>`).
+- **Verified end-to-end**: the full demo arc Bootstrap →
+  OID4VP login → KYC submit → OID4VCI issuance, run as an
+  integration test on every `cargo test --features
+  test-support --test headless_use_cases_e2e -- --ignored`.
 
 ### What did NOT change
 
@@ -463,3 +483,26 @@ deliberately deferred:
    bridge, identity_centre, worker/handlers}.rs` could drop
    ~50 lines of `use wallet_core::{…}` boilerplate. Mechanical
    sweep, do once the human is around to review.
+
+5. **Jubjub-Schnorr signature wire-encoding mismatch.**
+   `vc_self_verify` calls
+   `secret_storage::curve_support::verify`, which uses
+   `jubjub_schnorr::decode` (64-byte compact format:
+   `point_compressed(32) || response_le(32)`). The issuer's
+   TS signer (`@midnight-ntwrk/midnight-did-jubjub-schnorr`)
+   emits 96 bytes (`ann.x BE(32) || ann.y BE(32) || response
+   BE(32)` — that's
+   `jubjub_schnorr::JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES`,
+   already documented in code as the upstream-compatible
+   shape). Result: every issuer-signed VC fails self-verify
+   with `Jubjub sig must be 64 bytes, got 96`.
+   Surfaced by
+   `tests/headless_use_cases_e2e::bootstrap_then_login_then_issue_credential_round_trip`
+   — exactly the kind of cross-stack bug the headless-wallet
+   capability was designed to find. Fix: add
+   `jubjub_schnorr::decode_upstream(&[u8; 96])` mirroring the
+   existing `encode_upstream`, and have `curve_support::verify`
+   dispatch on length (64 → compact, 96 → upstream). Plus a
+   round-trip test that signs in Rust + verifies in JS, and
+   vice-versa. Defer because it touches the cryptographic
+   verifier path and needs careful focus.
