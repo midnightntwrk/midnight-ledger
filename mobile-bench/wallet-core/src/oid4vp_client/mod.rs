@@ -13,9 +13,11 @@
 mod jws;
 mod parser;
 mod respond;
+pub mod ports;
 
 pub use jws::{build_id_token, IdTokenError};
 pub use parser::{parse_request_url, fetch_request_object, AuthRequest, Oid4vpParseError};
+pub use ports::{AuthnKey, DidAuthnDiscovery, DidSigner, DiscoverError, SignError};
 pub use respond::{post_response, PostResponseError, PostResponseResult};
 
 /// Drive the entire OID4VP / SIOPv2 authentication flow:
