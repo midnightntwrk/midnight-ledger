@@ -39,6 +39,13 @@ pub(crate) use qr_scanner_fallback::FallbackQrScanner as ActiveQrScanner;
 // the architecture rationale.
 pub(crate) mod worker;
 
+// DID-port adapters — implement wallet-core's OID4VP discovery +
+// signing ports on top of the dioxus-wallet runtime types. Used by
+// the new IdTokenBuilder + LoginCoordinator pipeline; see
+// docs/superpowers/specs/2026-06-02-login-with-did-architecture.md
+// for the wider Login-with-DID architecture.
+pub(crate) mod did_ports;
+
 pub fn run() {
     // Two tracing layers ride together: the standard `fmt`
     // layer for stderr (developer feedback when running
