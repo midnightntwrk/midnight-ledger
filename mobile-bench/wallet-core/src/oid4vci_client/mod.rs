@@ -13,28 +13,29 @@
 
 mod credential;
 mod offer;
+pub mod proof;
 mod token;
 
 pub use credential::{
     request_credential, CredentialBody, CredentialFlowError, IssuedVc, OpeningWire,
 };
 pub use offer::{parse_offer_url, CredentialOffer, Grants, Oid4vciParseError, PreAuthorized};
+pub use proof::{CredentialCoordinator, IdTokenProofBuilder, ProofBuilder, ProofValue};
 pub use token::{request_token, Oid4vciTokenError, TokenResponse};
 
 /// Drive the full OID4VCI flow from a scanned QR URL.
 ///
-/// Port-typed: the caller hands `Arc<dyn DidAuthnDiscovery>` +
-/// `Arc<dyn DidSigner>` — the same pair the OID4VP path
-/// (`LoginCoordinator::mode_a`) consumes. Sharing the adapters
-/// across both protocols means one DID-resolution cache covers
-/// every login + every issuance for the session.
+/// The coordinator owns the proof-of-possession step. Phase-1
+/// callers wire `CredentialCoordinator::jwt(IdTokenProofBuilder)`
+/// for the canonical JWT-typed proof — that uses the same
+/// `Arc<dyn DidAuthnDiscovery>` + `Arc<dyn DidSigner>` pair the
+/// OID4VP path (`LoginCoordinator::mode_a`) consumes, so a
+/// session-scoped discovery cache covers both protocols.
 pub async fn run_issuance(
     http: &dyn crate::HttpClient,
     clock: &std::sync::Arc<dyn crate::Clock>,
     qr_url: &str,
-    discovery: &std::sync::Arc<dyn crate::oid4vp_client::DidAuthnDiscovery>,
-    signer: &std::sync::Arc<dyn crate::oid4vp_client::DidSigner>,
-    holder_did: &crate::DidId,
+    coordinator: &CredentialCoordinator,
     vc_store: &dyn crate::vc_store::VcStorage,
 ) -> Result<String, IssuanceFlowError> {
     let offer = offer::parse_offer_url(qr_url)?;
@@ -44,9 +45,7 @@ pub async fn run_issuance(
         clock,
         &offer.credential_issuer,
         &code,
-        discovery,
-        signer,
-        holder_did,
+        coordinator,
         vc_store,
     )
     .await?;
@@ -123,12 +122,16 @@ mod flow_tests {
         let signer = stub_did_signer(store);
         let vc_store = InMemoryVcStore::default();
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
+        let coordinator = CredentialCoordinator::jwt(IdTokenProofBuilder::new(
+            discovery,
+            signer,
+            clock.clone(),
+            did,
+        ));
 
-        let uri = run_issuance(
-            &http, &clock, &qr, &discovery, &signer, &did, &vc_store,
-        )
-        .await
-        .expect("ok");
+        let uri = run_issuance(&http, &clock, &qr, &coordinator, &vc_store)
+            .await
+            .expect("ok");
         assert_eq!(uri, "urn:uuid:flow-1");
 
         let rec = http.recorded();

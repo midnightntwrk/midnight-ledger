@@ -2,32 +2,35 @@
 //!
 //! Flow:
 //! 1. Run `request_token` to get the access token + c_nonce.
-//! 2. Build a DID-bound JWS proof over the c_nonce via the shared
-//!    [`sign_id_token_with_ports`] helper — same single-resolve /
-//!    single-sign discipline OID4VP's `IdTokenBuilder` uses, just
-//!    parameterised with `aud = issuer` and `nonce = c_nonce`.
-//! 3. POST `{format, proof: {proof_type: "jwt", jwt}}` to
+//! 2. Call the coordinator's [`ProofBuilder`] to mint the proof
+//!    bound to the issuer's `c_nonce`. The default Phase-1
+//!    builder (`IdTokenProofBuilder`) produces a JWT-typed
+//!    proof through the shared `sign_id_token_with_ports`
+//!    helper — same single-resolve / single-sign discipline
+//!    OID4VP uses, just with `aud = issuer` + `nonce = c_nonce`.
+//! 3. POST `{format, proof: {proof_type, jwt}}` to
 //!    `{issuer}/credential` with Bearer auth.
 //! 4. Decode the wire VC + openings, base64-decode the bodies,
 //!    and land everything in `vc_store` via the single-write-txn
 //!    `insert_vc_with_openings`.
 //!
-//! Port-typed surface: the caller owns the
-//! [`DidAuthnDiscovery`] + [`DidSigner`] adapters (the same pair
-//! OID4VP's `LoginCoordinator` consumes), so a single adapter
-//! cache benefits both protocols within one wallet session.
-
-use std::sync::Arc;
+//! Composability: the proof-construction step lives behind the
+//! [`ProofBuilder`] trait (`oid4vci_client::proof`). Phase-1
+//! ships the JWT-typed builder; Phase-2 proof types
+//! (`ldp_vp`, `mso_mdoc`, EBSI) plug in by registering a new
+//! builder, not by editing this function. Spec rationale:
+//! `docs/superpowers/specs/2026-06-03-hex-architecture-audit.md`
+//! §5.B.
+//!
+//! [`ProofBuilder`]: super::proof::ProofBuilder
 
 use serde::Deserialize;
 
-use crate::clock::Clock;
 use crate::http::{HttpClient, HttpError};
+use crate::oid4vci_client::proof::CredentialCoordinator;
 use crate::oid4vci_client::token::TokenResponse;
-use crate::oid4vp_client::id_token::sign_id_token_with_ports;
-use crate::oid4vp_client::{DidAuthnDiscovery, DidSigner, LoginError};
+use crate::oid4vp_client::LoginError;
 use crate::vc_store::{StoredVc, VcOpening, VcStorage};
-use crate::DidId;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct IssuedVc {
@@ -73,28 +76,20 @@ pub enum CredentialFlowError {
     Store(String),
 }
 
-/// OID4VCI proof-of-possession JWS TTL. 5 minutes matches the
-/// OID4VP id_token convention and gives c_nonce-bound replay
-/// windows the same upper bound across both flows.
-const PROOF_LIFETIME_SECS: u64 = 300;
-
 /// Drive the full Pre-Authorized Code Flow end-to-end:
 /// /token → /credential → land VC + openings in vc_store atomically.
 ///
-/// Port-typed: `discovery` resolves the holder DID to the
-/// authentication-relation kid + JWK, `signer` produces the
-/// EdDSA signature for the c_nonce-bound JWS. Both are the same
-/// `Arc<dyn _>` instances the wallet hands `LoginCoordinator`
-/// for OID4VP — keeping the adapter pair shared means one
-/// indexer-cache lookup covers both protocols within a session.
+/// The coordinator owns the proof-of-possession step. Phase-1
+/// callers wire `CredentialCoordinator::jwt(IdTokenProofBuilder)`
+/// for the canonical JWT-typed proof; Phase-2 proof types plug
+/// in by passing a different `ProofBuilder` to
+/// `CredentialCoordinator::new`.
 pub async fn request_credential(
     http: &dyn HttpClient,
-    clock: &Arc<dyn Clock>,
+    clock: &std::sync::Arc<dyn crate::Clock>,
     issuer: &str,
     pre_authorized_code: &str,
-    discovery: &Arc<dyn DidAuthnDiscovery>,
-    signer: &Arc<dyn DidSigner>,
-    holder_did: &DidId,
+    coordinator: &CredentialCoordinator,
     vc_store: &dyn VcStorage,
 ) -> Result<String, CredentialFlowError> {
     use base64::engine::general_purpose::STANDARD as B64;
@@ -103,30 +98,27 @@ pub async fn request_credential(
     let token: TokenResponse =
         crate::oid4vci_client::token::request_token(http, issuer, pre_authorized_code).await?;
 
-    // Build a DID-bound JWS over the c_nonce. The proof_type=jwt
-    // path of OID4VCI reuses the SIOPv2 id_token shape — same
-    // header (alg=EdDSA, typ=JWT, kid), same payload schema
-    // (iss/sub/aud/nonce/iat/exp/sub_jwk) — just with
-    // `aud = issuer URL` and `nonce = c_nonce`. The shared
-    // helper guarantees both flows emit byte-for-byte identical
-    // wire shapes so the issuer's verifier doesn't have to
-    // branch on which flow minted the JWS.
-    let proof_jwt = sign_id_token_with_ports(
-        discovery,
-        signer,
-        clock,
-        holder_did,
-        issuer,
-        &token.c_nonce,
-        PROOF_LIFETIME_SECS,
-    )
-    .await?;
+    // Mint the proof-of-possession through the coordinator's
+    // builder. Phase-1: `IdTokenProofBuilder` produces a JWS
+    // matching OID4VP's id_token shape, with `aud = issuer URL`
+    // and `nonce = c_nonce`. Phase-2 builders may emit other
+    // proof types (`ldp_vp`, `mso_mdoc`, etc.) — see
+    // `oid4vci_client::proof` for the trait surface.
+    let proof = coordinator
+        .proof_builder
+        .build(issuer, &token.c_nonce)
+        .await?;
 
     let body = serde_json::json!({
         "format": "midnight-vc-compact",
         "proof": {
-            "proof_type": "jwt",
-            "jwt": proof_jwt,
+            "proof_type": proof.proof_type,
+            // Field name is `jwt` for back-compat with the
+            // Phase-1 issuer-mock wire shape; for proof types
+            // beyond JWT this becomes a more general
+            // payload-bearing field (handled when those proof
+            // types land).
+            "jwt": proof.payload,
         },
     });
     let url = format!("{}/credential", issuer.trim_end_matches('/'));
@@ -171,8 +163,9 @@ pub async fn request_credential(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::clock::FixedClock;
+    use crate::clock::{Clock, FixedClock};
     use crate::http::mock::MockHttpClient;
+    use crate::oid4vci_client::proof::{CredentialCoordinator, IdTokenProofBuilder};
     use crate::test_support::{
         stub_authn_discovery, stub_did_signer,
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
@@ -181,6 +174,7 @@ mod tests {
     use base64::engine::general_purpose::STANDARD as B64;
     use base64::Engine;
     use serde_json::json;
+    use std::sync::Arc;
 
     #[tokio::test]
     async fn request_credential_lands_vc_and_openings() {
@@ -218,21 +212,26 @@ mod tests {
         let seed = [23u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        // Wrap the wallet + secret store in the same port pair
-        // production callers pass in (matching the OID4VP path).
+        // Wrap the wallet + secret store in the port pair the
+        // coordinator's JWT proof builder consumes — matches the
+        // OID4VP path.
         let discovery = stub_authn_discovery(wallet);
         let signer = stub_did_signer(store);
         let vc_store = InMemoryVcStore::default();
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_000_000));
+        let coordinator = CredentialCoordinator::jwt(IdTokenProofBuilder::new(
+            discovery,
+            signer,
+            clock.clone(),
+            did,
+        ));
 
         let vc_uri = request_credential(
             &http,
             &clock,
             "https://issuer.local",
             "CODE-1",
-            &discovery,
-            &signer,
-            &did,
+            &coordinator,
             &vc_store,
         )
         .await

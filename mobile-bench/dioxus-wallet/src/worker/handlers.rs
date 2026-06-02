@@ -259,19 +259,24 @@ async fn handle_oid4vci_issuance(
         as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
     let clock: Arc<dyn wallet_core::clock::Clock> = Arc::new(SystemClock);
 
+    // Build the coordinator with the canonical Phase-1 JWT
+    // proof. Other proof types (`ldp_vp`, `mso_mdoc`, EBSI)
+    // would substitute a different `ProofBuilder` here without
+    // touching `run_issuance` or `request_credential`.
+    let coordinator = wallet_core::oid4vci_client::CredentialCoordinator::jwt(
+        wallet_core::oid4vci_client::IdTokenProofBuilder::new(
+            discovery,
+            signer,
+            clock.clone(),
+            did,
+        ),
+    );
+
     let result = time_op(
         &*metrics,
         &*probe,
         "issuance",
-        oid4vci_run_issuance(
-            &*http,
-            &clock,
-            &qr_url,
-            &discovery,
-            &signer,
-            &did,
-            &vc_store,
-        ),
+        oid4vci_run_issuance(&*http, &clock, &qr_url, &coordinator, &vc_store),
     )
     .await;
 
