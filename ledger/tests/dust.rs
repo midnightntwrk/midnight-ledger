@@ -188,7 +188,7 @@ async fn test_replay_events_associative_for_non_owning_viewer() {
 
     let mut events: Vec<Event<InMemoryDB>> = Vec::new();
 
-    let create = SystemTransaction::CNightGeneratesDustUpdate {
+    let create_tx = SystemTransaction::CNightGeneratesDustUpdate {
         events: vec![CNightGeneratesDustEvent {
             action: CNightGeneratesDustActionType::Create,
             nonce,
@@ -199,14 +199,14 @@ async fn test_replay_events_associative_for_non_owning_viewer() {
     };
     let (ledger, evs) = state
         .ledger
-        .apply_system_tx(&create, state.time)
+        .apply_system_tx(&create_tx, state.time)
         .expect("apply create");
     state.ledger = ledger;
     events.extend(evs);
 
     state.fast_forward(INITIAL_DUST_PARAMETERS.time_to_cap());
 
-    let destroy = SystemTransaction::CNightGeneratesDustUpdate {
+    let destroy_tx = SystemTransaction::CNightGeneratesDustUpdate {
         events: vec![CNightGeneratesDustEvent {
             action: CNightGeneratesDustActionType::Destroy,
             nonce,
@@ -217,7 +217,7 @@ async fn test_replay_events_associative_for_non_owning_viewer() {
     };
     let (ledger, evs) = state
         .ledger
-        .apply_system_tx(&destroy, state.time)
+        .apply_system_tx(&destroy_tx, state.time)
         .expect("apply destroy");
     state.ledger = ledger;
     events.extend(evs);
@@ -234,14 +234,14 @@ async fn test_replay_events_associative_for_non_owning_viewer() {
         .expect("fixture must contain a DustGenerationDtimeUpdate event");
 
     let viewer = DustSecretKey::sample(&mut rng);
-    let state0 = DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust);
+    let viewer_state = DustLocalState::<InMemoryDB>::new(INITIAL_PARAMETERS.dust);
 
-    let batch = state0
+    let batch = viewer_state
         .replay_events(&viewer, events.iter())
         .expect("batch replay");
 
     let (head, tail) = events.split_at(split_idx);
-    let split = state0
+    let split = viewer_state
         .replay_events(&viewer, head.iter())
         .expect("replay head")
         .replay_events(&viewer, tail.iter())
@@ -253,7 +253,8 @@ async fn test_replay_events_associative_for_non_owning_viewer() {
     tagged_serialize(&split, &mut split_bytes).expect("serialize split state");
 
     assert_eq!(
-        batch_bytes, split_bytes,
+        batch_bytes,
+        split_bytes,
         "replay_events must be associative across chunk boundaries \
          (batch = {} B, split = {} B)",
         batch_bytes.len(),
