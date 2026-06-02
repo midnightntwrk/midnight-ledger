@@ -20,13 +20,10 @@ use wallet_core::oid4vp_client::{
     IdTokenBuilder, LoginCoordinator, run_authentication,
 };
 use wallet_core::secret_storage::redb_secret_store::RedbSecretStore;
-use wallet_core::store::WalletStore;
 use wallet_core::{
     DidId, HttpClient, MeteredHttpClient, RedbVcStore, ReqwestHttpClient,
     bootstrap_did_with_keys, oid4vci_run_issuance, time_op,
 };
-
-use crate::app::wallet_store_path;
 
 use super::{BridgeState, Network, WorkMsg, WorkOutcome};
 use crate::app::metered_app_wallet_for;
@@ -62,10 +59,6 @@ pub(super) async fn dispatch(state: &BridgeState, msg: WorkMsg) -> WorkOutcome {
             did,
             qr_url,
         } => handle_oid4vci_issuance(state, action_id, network, did, qr_url).await,
-        WorkMsg::OpenStore {
-            action_id,
-            passphrase,
-        } => handle_open_store(action_id, &passphrase).await,
     }
 }
 
@@ -287,42 +280,6 @@ async fn handle_oid4vci_issuance(
         Err(e) => WorkOutcome::Err {
             action_id,
             msg: format!("issue failed: {e}"),
-        },
-    }
-}
-
-/// Open the wallet store on the worker thread.
-///
-/// `WalletStore::open` runs all pending migrations and decodes the
-/// per-network ledger snapshot — on the preprod-live demo store
-/// (~534k DUST events cached) this is the deepest async state
-/// machine in the app. The Bootstrap fix in commit `f1dffe5e`
-/// originally box-pinned this on the WebView dispatch thread to
-/// avoid SIGSEGV; the worker thread (8 MiB stack, current-thread
-/// Tokio runtime) is the right home for it.
-///
-/// The handler returns the `WalletStore` itself rather than
-/// piggybacking the full unlock pipeline. Hydration of inventory
-/// signals + `did_inventory` / `resolved_cache` / `unlock_state`
-/// mutations stay on the UI thread (those Dioxus `Signal`s are
-/// `!Send`). The UI's outcome handler runs the rest of the
-/// pipeline once the store handle arrives — see
-/// `app::on_unlock`.
-async fn handle_open_store(action_id: u64, passphrase: &str) -> WorkOutcome {
-    let path = wallet_store_path();
-    match WalletStore::open(&path, passphrase) {
-        Ok(store) => {
-            tracing::info!(
-                target: "wallet_worker",
-                action_id,
-                path = %path.display(),
-                "WalletStore opened on worker thread",
-            );
-            WorkOutcome::OpenStoreOk { action_id, store }
-        }
-        Err(e) => WorkOutcome::Err {
-            action_id,
-            msg: format!("open store: {e}"),
         },
     }
 }
