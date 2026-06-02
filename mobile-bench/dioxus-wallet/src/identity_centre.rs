@@ -25,17 +25,10 @@ use wallet_core::{
     SelfVerifyResult, StoredVc, SystemClock, oid4vci_run_issuance,
     self_verify_and_cache, time_op, time_op_simple,
 };
-// `oid4vp_run_authentication` is the LEGACY re-export still
-// shipping in wallet-core::lib; after Task 8 (this file) no one
-// in dioxus-wallet calls it anymore, and Task 9 deletes the
-// alias entirely. We import the new coordinator-driven path
-// through the full module name to avoid any confusion with the
-// legacy alias.
-use wallet_core::oid4vp_client::{
-    run_authentication as oid4vp_run_authentication_v2, IdTokenBuilder, LoginCoordinator,
-};
-
-use crate::did_ports::{CachedWalletAuthnDiscovery, RedbDidSigner};
+// OID4VP coordinator + DID-port adapters live on the worker
+// thread now (worker-thread plan Task 3, commit 758a5fa3 +
+// THIS commit). The click site only sends a WorkMsg::
+// Oid4vpAuthenticate and registers an outcome handler.
 
 /// Monotonic per-session counter for Identity Centre action IDs.
 /// Rendered as hex so a 4-char string keeps the Logs-tab prefix
@@ -138,6 +131,8 @@ fn run_oid4vp_authenticate(
     mut ok_msg: Signal<Option<String>>,
     mut busy: Signal<bool>,
 ) {
+    // Parse the DID synchronously — anything malformed is a
+    // user / UI bug that doesn't deserve a worker round-trip.
     let did = match wallet_core::DidId::parse(&did_str) {
         Ok(d) => d,
         Err(e) => {
@@ -145,98 +140,78 @@ fn run_oid4vp_authenticate(
             return;
         }
     };
-    let Some(store) = bridge_state.store().cloned() else {
+    // Defensive: these reads also happen on the worker side;
+    // catching them here lets us surface a precise error before
+    // a WorkMsg flies and avoids a needless busy flicker.
+    if bridge_state.store().is_none() {
         err_msg.set(Some("wallet store not opened yet".into()));
         return;
-    };
-    let Some(wallet_id) = bridge_state.active_wallet_id() else {
+    }
+    if bridge_state.active_wallet_id().is_none() {
         err_msg.set(Some("no active wallet".into()));
         return;
-    };
+    }
     busy.set(true);
     err_msg.set(None);
     ok_msg.set(None);
-    let metrics = bridge_state.metrics_dyn();
+
+    // Reach the worker. If the bridge state hasn't installed one
+    // yet (shouldn't happen post-App-boot), surface a clean
+    // error rather than silently spinning.
+    let Some(worker) = bridge_state.worker().cloned() else {
+        err_msg.set(Some("wallet worker not ready".into()));
+        busy.set(false);
+        return;
+    };
     let in_mem_metrics = bridge_state.metrics();
-    let probe = bridge_state.resource_probe();
-    let action_id = next_action_id();
-    let span = tracing::info_span!("ic.oid4vp_authenticate", action_id = %action_id);
-    // Box::pin keeps the OID4VP state machine off the spawning
-    // thread's stack — same trick used by the Bootstrap flow
-    // (commit f1dffe5e). The future inlines a Wallet + indexer +
-    // HTTP client + run_authentication state machine; if it
-    // lands on the WebView dispatch thread (~256 KiB stack on
-    // Android) construction blows the guard page and triggers
-    // SIGSEGV at `Runtime::with_current_scope`. Today OID4VP
-    // happens to fit because run_authentication is smaller
-    // than Bootstrap, but the safety margin is tiny.
-    let fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
-        Box::pin(
-            async move {
-                // Build the chain-op-metered wallet + persistent
-                // secret store + metered HTTP client. Same shape
-                // as the legacy path; the difference is what we
-                // hand to the orchestrator: instead of
-                // (wallet, store, clock) it's a LoginCoordinator
-                // pre-loaded with an IdTokenBuilder that owns
-                // typed DidAuthnDiscovery + DidSigner port
-                // implementations.
-                //
-                // Architectural payoff: this is now ONE indexer
-                // resolve + ONE sign per login (the legacy path
-                // was two of each). See the spec at
-                // docs/superpowers/specs/2026-06-02-login-with-did-architecture.md
-                // §"Architectural smells" 1.
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let secret_store = RedbSecretStore::new(store, wallet_id);
-                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                let http: Arc<dyn HttpClient> =
-                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+    let action_id = crate::worker::next_action_id();
 
-                // Phase-1 Mode-A coordinator: a single
-                // IdTokenBuilder. Phase-2 will register a
-                // VpTokenBuilder + PresentationSubmissionBuilder
-                // beside it via `LoginCoordinator::mode_b`
-                // without changing this call site.
-                let discovery =
-                    Arc::new(CachedWalletAuthnDiscovery::new(wallet))
-                        as Arc<dyn wallet_core::oid4vp_client::DidAuthnDiscovery>;
-                let signer = Arc::new(RedbDidSigner::new(secret_store))
-                    as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
-                let clock: Arc<dyn wallet_core::clock::Clock> = Arc::new(SystemClock);
-                let coordinator = LoginCoordinator::mode_a(IdTokenBuilder::new(
-                    discovery,
-                    signer,
-                    clock,
-                    did,
-                ));
-
-                let result = time_op(
-                    &*metrics,
-                    &*probe,
-                    "oid4vp_authenticate",
-                    oid4vp_run_authentication_v2(&*http, &coordinator, &url),
-                )
-                .await;
-                match result {
-                    Ok(r) => {
-                        in_mem_metrics.incr("oid4vp.ok", 1);
-                        ok_msg.set(Some(format!(
-                            "session_id={} status={}",
-                            r.session_id, r.status,
-                        )));
-                    }
-                    Err(e) => {
-                        in_mem_metrics.incr("oid4vp.failed", 1);
-                        err_msg.set(Some(format!("authenticate failed: {e}")));
-                    }
+    // Register the outcome handler BEFORE sending so a very fast
+    // worker can't race the registration. The closure captures
+    // the local signals + metrics; it runs inside the outcome-
+    // pump `use_future` (Dioxus scope) so signal writes are
+    // valid. The metrics counter increments mirror the pre-
+    // worker inline behaviour.
+    crate::worker::router::register(
+        action_id,
+        Box::new(move |outcome| {
+            match outcome {
+                crate::worker::WorkOutcome::Oid4vpOk {
+                    session_id,
+                    status,
+                    ..
+                } => {
+                    in_mem_metrics.incr("oid4vp.ok", 1);
+                    ok_msg.set(Some(format!(
+                        "session_id={session_id} status={status}",
+                    )));
                 }
-                busy.set(false);
+                crate::worker::WorkOutcome::Err { msg, .. } => {
+                    in_mem_metrics.incr("oid4vp.failed", 1);
+                    err_msg.set(Some(format!("authenticate failed: {msg}")));
+                }
+                // Worker only emits Oid4vpOk / Err for an
+                // Oid4vpAuthenticate action_id; log defensively
+                // if a future variant routes wrongly.
+                other => {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        action_id,
+                        ?other,
+                        "OID4VP handler received unexpected outcome",
+                    );
+                }
             }
-            .instrument(span),
-        );
-    spawn(fut);
+            busy.set(false);
+        }),
+    );
+
+    worker.send(crate::worker::WorkMsg::Oid4vpAuthenticate {
+        action_id,
+        network,
+        did,
+        qr_url: url,
+    });
 }
 
 /// Run the OID4VCI issuance flow with a known DID + URL. Counterpart

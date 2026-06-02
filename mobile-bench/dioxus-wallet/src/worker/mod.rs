@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, mpsc};
 
-use wallet_core::Network;
+use wallet_core::{DidId, Network};
 
 use crate::bridge::BridgeState;
 
@@ -64,6 +64,26 @@ pub enum WorkMsg {
         network: Network,
         seed: [u8; 32],
     },
+
+    /// Drive the OID4VP / SIOPv2 "Login with DID" Mode-A flow:
+    /// parse the QR URL → fetch the request object → mint a
+    /// DID-bound id_token via [`LoginCoordinator::mode_a`] +
+    /// [`IdTokenBuilder`] → POST it back. Returns the issuer's
+    /// `session_id` + `status`.
+    ///
+    /// Routed through the worker so the heavy state machine
+    /// (Wallet + indexer + http + JWS construction + POST) is
+    /// constructed on the worker thread's 8 MiB stack, not the
+    /// WebView dispatch thread's 256 KiB.
+    Oid4vpAuthenticate {
+        action_id: u64,
+        network: Network,
+        /// Holder DID the wallet authenticates as. Picked by the
+        /// UI's DID picker before dispatch.
+        did: DidId,
+        /// QR payload — the `openid4vp://…?request_uri=…` URL.
+        qr_url: String,
+    },
 }
 
 impl WorkMsg {
@@ -74,9 +94,9 @@ impl WorkMsg {
     #[allow(dead_code)]
     pub fn action_id(&self) -> u64 {
         match self {
-            Self::Noop { action_id } | Self::Bootstrap { action_id, .. } => {
-                *action_id
-            }
+            Self::Noop { action_id }
+            | Self::Bootstrap { action_id, .. }
+            | Self::Oid4vpAuthenticate { action_id, .. } => *action_id,
         }
     }
 }
@@ -108,6 +128,15 @@ pub enum WorkOutcome {
         #[allow(dead_code)] // Read once Sign/Update/Deactivate migrations land.
         controller_sk: [u8; 32],
     },
+    /// OID4VP / SIOPv2 authentication round-trip succeeded.
+    /// Carries the issuer's session correlation id + the literal
+    /// `status` string the issuer returned (Phase-1 mock-issuer
+    /// emits `"authenticated"`).
+    Oid4vpOk {
+        action_id: u64,
+        session_id: String,
+        status: String,
+    },
     Err {
         action_id: u64,
         msg: String,
@@ -119,6 +148,7 @@ impl WorkOutcome {
         match self {
             Self::NoopAck { action_id }
             | Self::BootstrapOk { action_id, .. }
+            | Self::Oid4vpOk { action_id, .. }
             | Self::Err { action_id, .. } => *action_id,
         }
     }
