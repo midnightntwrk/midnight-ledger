@@ -15,10 +15,44 @@ mod parser;
 mod respond;
 pub mod ports;
 
+// Phase-1 normative shapes — typed AuthorizationRequest /
+// AuthorizationResponse + parser/poster that match the OID4VP
+// 1.0 + SIOPv2 wire format. The legacy `parser::AuthRequest`
+// + `respond::PostResponseResult` are kept alongside until
+// Task 8 (UI wire-in) and Task 9 (legacy purge) finish.
+pub mod request;
+pub mod response;
+
+// Unified Phase-1 error taxonomy + JOSE-encoded id_token
+// primitives + the chain-of-responsibility builder pattern.
+// The IdTokenBuilder is the only builder in Phase 1; Phase 2
+// adds VpTokenBuilder + PresentationSubmissionBuilder as
+// sibling files.
+pub mod errors;
+pub mod id_token;
+pub mod builders;
+
 pub use jws::{build_id_token, IdTokenError};
 pub use parser::{parse_request_url, fetch_request_object, AuthRequest, Oid4vpParseError};
 pub use ports::{AuthnKey, DidAuthnDiscovery, DidSigner, DiscoverError, SignError};
+pub use request::{
+    AuthorizationRequest, PresentationDefinition, RequestParseError, ResponseMode,
+    ResponseType,
+};
 pub use respond::{post_response, PostResponseError, PostResponseResult};
+// `response::PostResponseError` shadows `respond::PostResponseError` and
+// `response::PostResponseResult` shadows `respond::PostResponseResult` —
+// they're the SAME type definitions, but live in two modules during the
+// transition. Re-export the new module's names with prefixes so callers
+// can pick the new types explicitly before Task 9 deletes the legacy.
+pub use response::{
+    AuthorizationResponse,
+    PostResponseError as NewPostResponseError,
+    PostResponseResult as NewPostResponseResult,
+    post_response as new_post_response,
+};
+pub use builders::{IdTokenBuilder, ResponseBuilder};
+pub use errors::LoginError;
 
 /// Drive the entire OID4VP / SIOPv2 authentication flow:
 /// parse the QR URL -> fetch the request object -> mint a
