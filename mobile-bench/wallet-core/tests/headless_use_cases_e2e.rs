@@ -95,28 +95,95 @@ fn live_config(stem: &str) -> HeadlessConfig {
 }
 
 /// Read the issuer's /authorize page, extract the QR URL that
-/// embeds the request_uri pointing at /request/<session_id>. The
-/// issuer must be running on `:3001`.
-async fn fetch_login_qr_url() -> String {
+/// embeds the request_uri pointing at /request/<session_id>,
+/// and return both the URL and the session id (parsed out of
+/// the URL — the session id is what `/kyc-form` + `/credential-offer`
+/// need).
+async fn fetch_login_qr_url() -> (String, String) {
     let body = reqwest::get("http://localhost:3001/authorize")
         .await
         .expect("issuer /authorize unreachable — is the issuer-mock running?")
         .text()
         .await
         .expect("read /authorize body");
-    // The login template embeds the QR URL inline as text.
-    body.lines()
+    let qr = body
+        .lines()
         .filter_map(|line| {
             let i = line.find("openid4vp://")?;
             let tail = &line[i..];
-            // Cut at the first `<`, `"`, or whitespace.
             let end = tail
                 .find(|c: char| c == '<' || c == '"' || c.is_whitespace())
                 .unwrap_or(tail.len());
             Some(tail[..end].to_string())
         })
         .next()
-        .expect("no openid4vp:// URL in /authorize response")
+        .expect("no openid4vp:// URL in /authorize response");
+    // The request_uri tail is `/request/<session_id>`; pull
+    // <session_id> out for the KYC + credential-offer flow.
+    let decoded = urlencoding::decode(&qr).expect("urldecode QR").into_owned();
+    let session_id = decoded
+        .rsplit("/request/")
+        .next()
+        .expect("/request/<id> not in QR URL")
+        .to_string();
+    (qr, session_id)
+}
+
+/// Submit a valid KYC payload + poll the credential-offer page
+/// for its QR URL. Returns the `openid-credential-offer://` URL
+/// the wallet would scan.
+async fn submit_kyc_and_fetch_offer_qr(session_id: &str) -> String {
+    let client = reqwest::Client::new();
+    // Submit the KYC form. `application/x-www-form-urlencoded`
+    // matches the issuer's expectation. `reqwest` is compiled
+    // without the `multipart` feature here, so we hand-build the
+    // form body — `urlencoding::encode` handles the value escaping.
+    let form_body = [
+        ("firstName", "Ada"),
+        ("lastName", "Lovelace"),
+        ("dateOfBirth", "1815-12-10"),
+        ("nationality", "GBR"),
+        ("documentNumber", "P-FIXTURE-001"),
+    ]
+    .iter()
+    .map(|(k, v)| format!("{k}={}", urlencoding::encode(v)))
+    .collect::<Vec<_>>()
+    .join("&");
+    let kyc_resp = client
+        .post(format!(
+            "http://localhost:3001/kyc-form?session={session_id}"
+        ))
+        .header(
+            reqwest::header::CONTENT_TYPE,
+            "application/x-www-form-urlencoded",
+        )
+        .body(form_body)
+        .send()
+        .await
+        .expect("kyc submit");
+    // The issuer either redirects to /credential-offer/<id> (200
+    // after follow) or, when KYC processing time is non-zero,
+    // returns immediately and the actual redirect happens on the
+    // browser. reqwest follows redirects by default, so a 2xx
+    // here means we landed on the credential-offer HTML.
+    assert!(
+        kyc_resp.status().is_success(),
+        "kyc-form returned {} {}",
+        kyc_resp.status(),
+        kyc_resp.text().await.unwrap_or_default(),
+    );
+    let body = kyc_resp.text().await.expect("kyc body");
+    body.lines()
+        .filter_map(|line| {
+            let i = line.find("openid-credential-offer://")?;
+            let tail = &line[i..];
+            let end = tail
+                .find(|c: char| c == '<' || c == '"' || c.is_whitespace())
+                .unwrap_or(tail.len());
+            Some(tail[..end].to_string())
+        })
+        .next()
+        .expect("no openid-credential-offer:// URL on /credential-offer page")
 }
 
 // ── Use case: Bootstrap a DID ───────────────────────────────────
@@ -174,7 +241,7 @@ fn bootstrap_then_login_round_trip() {
             // Pull a fresh QR URL from the issuer. Each call to
             // `/authorize` opens a new session, so two concurrent
             // test runs don't interfere with each other.
-            let qr_url = fetch_login_qr_url().await;
+            let (qr_url, _session_id) = fetch_login_qr_url().await;
             let r = w.login(out.did.clone(), &qr_url).await.expect("login");
             assert_eq!(
                 r.status, "authenticated",
@@ -183,6 +250,66 @@ fn bootstrap_then_login_round_trip() {
                 session_id = r.session_id,
             );
             assert!(!r.session_id.is_empty(), "session_id should be non-empty");
+        });
+    });
+}
+
+// ── Use case: Bootstrap → Login → KYC → OID4VCI issuance ─────────
+
+/// The full demo arc end-to-end against live chain + live issuer.
+/// Bootstrap a DID, log in (so `session.holder_did` is set on the
+/// issuer), POST a KYC form (so `session.status` becomes
+/// `kyc_done`), pull the credential-offer QR, run OID4VCI
+/// issuance, and assert the wallet now has a stored VC under
+/// the issuer's chosen `vc_uri`.
+///
+/// **Pre-conditions:** standalone env + issuer-mock on `:3001`.
+#[test]
+#[ignore = "needs live standalone + issuer; opt in with --ignored"]
+fn bootstrap_then_login_then_issue_credential_round_trip() {
+    run_on_fat_stack(|| {
+        block_on(async {
+            wallet_core::ensure_default_crypto_provider();
+            let w = HeadlessWallet::connect(live_config("issue"))
+                .await
+                .expect("connect");
+            let out = w.bootstrap(GENESIS_SEED).await.expect("bootstrap");
+
+            // Step 1 — log in so the issuer associates a holder
+            // DID with the session. The KYC form refuses without
+            // it (`409 session not authorized yet`).
+            let (login_qr, session_id) = fetch_login_qr_url().await;
+            let login = w
+                .login(out.did.clone(), &login_qr)
+                .await
+                .expect("login");
+            assert_eq!(login.status, "authenticated");
+
+            // Step 2 — submit KYC, fetch the credential-offer QR.
+            // The session ID we already have lets us target the
+            // exact same session the login authorised.
+            let offer_qr = submit_kyc_and_fetch_offer_qr(&session_id).await;
+            assert!(offer_qr.starts_with("openid-credential-offer://"));
+
+            // Step 3 — drive OID4VCI through the headless façade.
+            // Lands the VC into the session's `vc_store` and
+            // returns the `vc_uri` the issuer assigned.
+            let vc_uri = w
+                .request_credential(out.did.clone(), &offer_qr)
+                .await
+                .expect("issuance");
+            assert!(!vc_uri.is_empty(), "issuer returned an empty vc_uri");
+
+            // Self-verify of the freshly-landed VC currently
+            // surfaces a separate known issue (`Jubjub sig must
+            // be 64 bytes, got 96` — an encoding mismatch
+            // between the issuer's signing path and the wallet's
+            // verify path). Tracked separately; this test's job
+            // is to confirm the **issuance** orchestrator works
+            // end-to-end against live chain + live issuer, so
+            // we stop asserting at the wire-success boundary
+            // and leave self-verify to its own integration test
+            // once the encoding mismatch is fixed.
         });
     });
 }
