@@ -335,7 +335,17 @@ async fn handle_oid4vci_issuance(
         &*metrics,
         &*probe,
         "issuance",
-        oid4vci_run_issuance(&*http, &clock, &qr_url, &coordinator, &vc_store),
+        oid4vci_run_issuance(
+            &*http,
+            &clock,
+            wallet.js_bridge(),
+            &qr_url,
+            &coordinator,
+            &wallet,
+            &secret_store,
+            &did,
+            &vc_store,
+        ),
     )
     .await;
 

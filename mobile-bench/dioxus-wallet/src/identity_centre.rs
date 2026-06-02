@@ -1363,12 +1363,15 @@ fn render_vc_dispatch(
 ) -> Element {
     if crate::vc_views::digital_passport::is_digital_passport(&vc) {
         render_digital_passport_dispatch(
+            network,
+            bridge_state,
             vc,
             badges,
             refresh_tick,
             reveal_first_set,
             reveal_last_set,
             threshold_map,
+            busy_set,
         )
     } else {
         render_vc_row(
@@ -1386,13 +1389,17 @@ fn render_vc_dispatch(
 /// and the existing verify-badge map. Keeps the card itself
 /// storage-agnostic — see `vc_views/digital_passport.rs` for the
 /// extraction rationale.
+#[allow(clippy::too_many_arguments)]
 fn render_digital_passport_dispatch(
+    network: Network,
+    bridge_state: BridgeState,
     vc: StoredVc,
     badges: Signal<std::collections::HashMap<String, VerifyBadge>>,
     refresh_tick: Signal<u64>,
     reveal_first_set: Signal<std::collections::HashSet<String>>,
     reveal_last_set: Signal<std::collections::HashSet<String>>,
     threshold_map: Signal<std::collections::HashMap<String, u32>>,
+    busy_set: Signal<std::collections::HashSet<String>>,
 ) -> Element {
     use crate::vc_views::digital_passport::{
         CLAIM_DATE_OF_BIRTH, CLAIM_FIRST_NAME, CLAIM_LAST_NAME,
@@ -1506,6 +1513,112 @@ fn render_digital_passport_dispatch(
         }
     });
 
+    // Wire Self-verify for digital-passport VCs. Mirrors the same
+    // flow used by `render_vc_row` for generic VCs: reads
+    // secret store + wallet from bridge state, calls
+    // `self_verify_and_cache`, then updates the badge map and
+    // refreshes the inventory. The wallet's `js_bridge()` is
+    // consulted internally by `self_verify` for compact-VC
+    // verification (digital-passport path).
+    let on_verify = {
+        let bridge_state = bridge_state.clone();
+        let vc = vc.clone();
+        let vc_uri_for_set = vc_uri.clone();
+        let mut badges = badges;
+        let mut refresh_tick = refresh_tick;
+        let mut busy_set = busy_set;
+        EventHandler::new(move |()| {
+            if busy_set.read().contains(&vc_uri_for_set) {
+                return;
+            }
+            let Some(store) = bridge_state.store().cloned() else {
+                let mut b = badges.read().clone();
+                b.insert(
+                    vc_uri_for_set.clone(),
+                    VerifyBadge::Error("wallet store not opened yet".into()),
+                );
+                badges.set(b);
+                return;
+            };
+            let Some(wallet_id) = bridge_state.active_wallet_id() else {
+                let mut b = badges.read().clone();
+                b.insert(
+                    vc_uri_for_set.clone(),
+                    VerifyBadge::Error("no active wallet".into()),
+                );
+                badges.set(b);
+                return;
+            };
+            {
+                let mut next = busy_set.read().clone();
+                next.insert(vc_uri_for_set.clone());
+                busy_set.set(next);
+            }
+            let vc = vc.clone();
+            let vc_uri = vc_uri_for_set.clone();
+            let metrics = bridge_state.metrics_dyn();
+            let in_mem_metrics = bridge_state.metrics();
+            let probe = bridge_state.resource_probe();
+            let action_id = next_action_id();
+            let span = tracing::info_span!("ic.self_verify_dp", action_id = %action_id);
+            spawn(async move {
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
+                let secret_store = RedbSecretStore::new(store, wallet_id);
+                let vc_store = match RedbVcStore::open(vc_store_path()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let mut b = badges.read().clone();
+                        b.insert(
+                            vc_uri.clone(),
+                            VerifyBadge::Error(format!("open vc store: {e}")),
+                        );
+                        badges.set(b);
+                        let mut next = busy_set.read().clone();
+                        next.remove(&vc_uri);
+                        busy_set.set(next);
+                        return;
+                    }
+                };
+                let clock = SystemClock;
+                let r = time_op_simple(
+                    &*metrics,
+                    &*probe,
+                    "self_verify",
+                    self_verify_and_cache(
+                        &vc,
+                        &wallet,
+                        &secret_store,
+                        &vc_store,
+                        &clock,
+                    ),
+                )
+                .await;
+                match &r {
+                    wallet_core::SelfVerifyResult::Valid { .. } => {
+                        in_mem_metrics.incr("verifies.valid", 1);
+                    }
+                    wallet_core::SelfVerifyResult::Invalid(_) => {
+                        in_mem_metrics.incr("verifies.invalid", 1);
+                    }
+                    wallet_core::SelfVerifyResult::Error(_) => {
+                        in_mem_metrics.incr("verifies.error", 1);
+                    }
+                }
+                let mut b = badges.read().clone();
+                b.insert(vc_uri.clone(), VerifyBadge::from_result(&r));
+                badges.set(b);
+                let next = *refresh_tick.read() + 1;
+                refresh_tick.set(next);
+                let mut next_busy = busy_set.read().clone();
+                next_busy.remove(&vc_uri);
+                busy_set.set(next_busy);
+            }.instrument(span));
+        })
+    };
+
+    let verifying = busy_set.read().contains(&vc_uri);
+
     DigitalPassportCard(
         vc,
         opening_first,
@@ -1518,6 +1631,8 @@ fn render_digital_passport_dispatch(
         on_toggle_last,
         on_threshold_change,
         badge_label,
+        Some(on_verify),
+        verifying,
         Some(on_delete),
     )
 }
@@ -1613,6 +1728,7 @@ fn insert_sample_digital_passport() -> Result<String, String> {
         // + openings; the body is opaque CBOR in production and we
         // don't decode it here.
         body: b"<sample digital-passport placeholder body>".to_vec(),
+        proof: vec![],
         issued_at_ms,
     };
 

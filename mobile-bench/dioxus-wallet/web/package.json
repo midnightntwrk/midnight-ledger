@@ -15,6 +15,9 @@
     "@midnight-ntwrk/midnight-did-api": "file:../../../../midnight-did/packages/api",
     "@midnight-ntwrk/midnight-did-contract": "file:../../../../midnight-did/packages/contract",
     "@midnight-ntwrk/midnight-did-domain": "file:../../../../midnight-did/packages/domain",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport": "file:../../../../midnight-verifiable-credentials/packages/prototypes/credential-families/digital-passport",
+    "@midnight-ntwrk/midnight-did-credentials-openid": "file:../../../../midnight-verifiable-credentials/packages/protocols/openid",
+    "@midnight-ntwrk/midnight-did-credentials": "file:../../../../midnight-verifiable-credentials/packages/core/primitives/credentials",
     "@noble/hashes": "^2.2.0",
     "jsqr": "^1.4.0"
   },

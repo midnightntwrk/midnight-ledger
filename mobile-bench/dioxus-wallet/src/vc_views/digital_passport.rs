@@ -52,11 +52,12 @@ pub const PACKAGE_ID: &str = "midnight:vc:digital-passport";
 
 /// Match a `StoredVc` to the digital-passport family.
 ///
-/// **Phase 1 demo heuristic:** matches by `vc_uri` prefix
-/// `urn:vc:digital-passport:`. The dev-only sample insertion
-/// (Identity Centre, debug builds) emits this prefix and seeds the
-/// three openings under their canonical JSON-Pointer paths. In
-/// production the matcher would CBOR-decode `vc.body` and inspect
+/// Heuristic: matches by `vc_uri` prefix `urn:vc:digital-passport:`
+/// or any URI containing `:digital-passport:`. Both the
+/// passport-issuer OID4VCI flow (`digital_passport::request_credential`)
+/// and the dev-only sample inserter emit URIs with this namespace.
+///
+/// In production the matcher would CBOR-decode `vc.body` and inspect
 /// the `schemaRef.schemaId` field — landing alongside the upstream
 /// extraction.
 pub fn is_digital_passport(vc: &StoredVc) -> bool {
@@ -184,6 +185,8 @@ pub fn DigitalPassportCard(
     on_toggle_last: EventHandler<()>,
     on_threshold_change: EventHandler<u32>,
     verify_label: Option<String>,
+    on_verify: Option<EventHandler<()>>,
+    verifying: bool,
     on_delete: Option<EventHandler<String>>,
 ) -> Element {
     let first_name_revealed = if reveal_first {
@@ -380,11 +383,20 @@ pub fn DigitalPassportCard(
                 }
             }
 
-            // ── Footer (delete + verify badge + Phase 2 hint) ───
+            // ── Footer (verify + delete + badge + Phase 2 hint) ─
             footer { class: "footer-actions",
                 {
                     let vc_uri = vc.vc_uri.clone();
                     rsx! {
+                        if let Some(handler) = on_verify {
+                            button {
+                                class: "primary-button",
+                                disabled: verifying,
+                                title: "Verify the credential proof on-chain or via the JS bridge",
+                                onclick: move |_| handler.call(()),
+                                {if verifying { "Verifying…" } else { "Self-verify" }}
+                            }
+                        }
                         if let Some(handler) = on_delete {
                             button {
                                 class: "danger-button",
@@ -455,6 +467,7 @@ mod tests {
             holder_did: "did:midnight:holder".into(),
             format: "midnight-vc-compact".into(),
             body: vec![],
+            proof: vec![],
             issued_at_ms: 0,
         };
         assert!(is_digital_passport(&vc));
@@ -468,6 +481,7 @@ mod tests {
             holder_did: "did:midnight:holder".into(),
             format: "midnight-vc-compact".into(),
             body: vec![],
+            proof: vec![],
             issued_at_ms: 0,
         };
         assert!(!is_digital_passport(&vc));

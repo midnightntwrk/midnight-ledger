@@ -96,6 +96,29 @@ function bytesToHex(b) {
   return s;
 }
 
+/**
+ * Recursively convert a value to a JSON-safe form:
+ * - BigInt → decimal string
+ * - Uint8Array → hex string (0x-prefixed)
+ * - plain objects/arrays → recurse
+ * This mirrors the Rust side's deserialisation expectations
+ * (bigint fields arrive as strings, byte fields as hex).
+ */
+function bigIntSafe(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return value.toString(10);
+  if (value instanceof Uint8Array) return "0x" + bytesToHex(value);
+  if (Array.isArray(value)) return value.map(bigIntSafe);
+  if (typeof value === "object") {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = bigIntSafe(v);
+    }
+    return out;
+  }
+  return value;
+}
+
 // Lazy-load the WASM-touching contract layer. First call pays the
 // runtime import cost; subsequent calls hit the cached promise.
 let contractLayerPromise = null;
@@ -610,6 +633,84 @@ const methods = {
       error,
       elapsedMs: Date.now() - t0,
     };
+  },
+
+  /**
+   * Decode a Compact-value-encoded digital-passport credential.
+   *
+   * Takes an `EncodedCompactValue` object of shape
+   *   `{ encoding: "compact-value-v1.base64url", payload: "..." }`
+   * as returned by the Rust HTTP response (or a prior encode call),
+   * and returns the structured JSON fields
+   * (issuerVerificationMethodRef, holderBinding, schema, issuedAt, etc.).
+   *
+   * Uses `decodeDigitalPassportCredential` from the
+   * `@midnight-ntwrk/midnight-did-credentials-digital-passport` package,
+   * which internally calls `decodeCompactPayload` from
+   * `@midnight-ntwrk/midnight-did-credentials-openid` to unwrap the
+   * base64url encoding, then applies the credential descriptor to
+   * parse the binary fields into a plain JS object.
+   */
+  decodeDigitalPassportCredential: async (params) => {
+    const dpCred = await import(
+      "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+    );
+    const credential = dpCred.decodeDigitalPassportCredential(params.encoded);
+    // Convert bigint/Uint8Array values to JSON-safe strings so the
+    // Rust side can deserialise over JSON-RPC.
+    return { credential: bigIntSafe(credential) };
+  },
+
+  /**
+   * Decode a Compact-value-encoded digital-passport proof.
+   *
+   * Takes an `EncodedCompactValue` object of shape
+   *   `{ encoding: "compact-value-v1.base64url", payload: "..." }`
+   * and returns the structured JSON fields
+   * (signerVerificationMethodRef, createdAt, challengeHash, publicKey,
+   * signature).
+   */
+  decodeDigitalPassportProof: async (params) => {
+    const dpCred = await import(
+      "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+    );
+    const proof = dpCred.decodeDigitalPassportProof(params.encoded);
+    return { proof: bigIntSafe(proof) };
+  },
+
+  /**
+   * Verify a digital-passport issuance proof against a credential.
+   *
+   * Takes two `EncodedCompactValue` objects — one for the credential,
+   * one for the proof — decodes both, then runs pureCircuit checks:
+   *   1. `digitalPassportCredentialBodyRoot(credential)` → bodyRoot
+   *   2. `assertValidIssuanceContextProof(bodyRoot, proof)`
+   *
+   * Returns `{ valid: true }` if neither circuit assertion throws.
+   * Returns `{ valid: false, error: "..." }` if any assertion fails.
+   */
+  verifyDigitalPassportIssuanceProof: async (params) => {
+    const t0 = Date.now();
+    try {
+      const dpCred = await import(
+        "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+      );
+      const credential = dpCred.decodeDigitalPassportCredential(params.credentialEncoded);
+      const proof = dpCred.decodeDigitalPassportProof(params.proofEncoded);
+      const { pureCircuits } = dpCred;
+      // Compute the Merkle root of the credential body fields.
+      const bodyRoot = pureCircuits.digitalPassportCredentialBodyRoot(credential);
+      // Verify that the proof is a valid Schnorr issuance proof
+      // signed over this body root.
+      pureCircuits.assertValidIssuanceContextProof(bodyRoot, proof);
+      return { valid: true, elapsedMs: Date.now() - t0 };
+    } catch (e) {
+      return {
+        valid: false,
+        error: String(e?.message ?? e),
+        elapsedMs: Date.now() - t0,
+      };
+    }
   },
 
   contractLayerInfo: async () => {

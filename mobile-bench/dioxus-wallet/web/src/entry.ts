@@ -91,6 +91,28 @@ declare global {
        *  one-time "Allow Paste from <App>?" prompt before the
        *  first call. */
       pasteText(): Promise<{ text?: string; error?: string }>;
+      /** Decode a Compact-value-encoded digital-passport credential.
+       *  Takes an `EncodedCompactValue` object `{ encoding, payload }`
+       *  and returns the structured JSON fields (issuer DID contract
+       *  address, holder binding, schema, issuedAt, etc.). */
+      decodeDigitalPassportCredential(params: {
+        encoded: { encoding: string; payload: string };
+      }): Promise<{ credential: Record<string, unknown> }>;
+      /** Decode a Compact-value-encoded digital-passport proof.
+       *  Takes an `EncodedCompactValue` object `{ encoding, payload }`
+       *  and returns the structured JSON fields
+       *  (signerVerificationMethodRef, publicKey, signature, etc.). */
+      decodeDigitalPassportProof(params: {
+        encoded: { encoding: string; payload: string };
+      }): Promise<{ proof: Record<string, unknown> }>;
+      /** Verify a digital-passport issuance proof against a credential.
+       *  Decodes both compact values, computes the credential body root,
+       *  then checks the proof via `pureCircuits.assertValidIssuanceContextProof`.
+       *  Returns `{ valid: true }` on success or `{ valid: false, error }` on failure. */
+      verifyDigitalPassportIssuanceProof(params: {
+        credentialEncoded: { encoding: string; payload: string };
+        proofEncoded: { encoding: string; payload: string };
+      }): Promise<{ valid: boolean; error?: string; elapsedMs?: number }>;
     };
     __qrScanInProgress?: boolean;
     MIDNIGHT_PROOF_SERVER?: string;
@@ -647,6 +669,90 @@ async function pasteText(): Promise<{ text?: string; error?: string }> {
   }
 }
 
+/**
+ * Recursively convert a value to a JSON-safe form:
+ * - BigInt → decimal string
+ * - Uint8Array → hex string (0x-prefixed)
+ * - plain objects/arrays → recurse
+ */
+function bigIntSafeEntry(value: unknown): unknown {
+  if (value === null || value === undefined) return value;
+  if (typeof value === "bigint") return value.toString(10);
+  if (value instanceof Uint8Array) return "0x" + bytesToHex(value as Uint8Array);
+  if (Array.isArray(value)) return value.map(bigIntSafeEntry);
+  if (typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = bigIntSafeEntry(v);
+    }
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Decode a Compact-value-encoded digital-passport credential.
+ * Takes an `EncodedCompactValue` object `{ encoding, payload }` and
+ * returns the structured JSON fields (issuer DID contract address,
+ * holder binding, schema, issuedAt, etc.).
+ */
+async function decodeDigitalPassportCredential(params: {
+  encoded: { encoding: string; payload: string };
+}): Promise<{ credential: Record<string, unknown> }> {
+  const dpCred = await import(
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+  );
+  const credential = dpCred.decodeDigitalPassportCredential(params.encoded);
+  return { credential: bigIntSafeEntry(credential) as Record<string, unknown> };
+}
+
+/**
+ * Decode a Compact-value-encoded digital-passport proof.
+ * Takes an `EncodedCompactValue` object `{ encoding, payload }` and
+ * returns the structured JSON fields (signerVerificationMethodRef,
+ * publicKey, signature, etc.).
+ */
+async function decodeDigitalPassportProof(params: {
+  encoded: { encoding: string; payload: string };
+}): Promise<{ proof: Record<string, unknown> }> {
+  const dpCred = await import(
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+  );
+  const proof = dpCred.decodeDigitalPassportProof(params.encoded);
+  return { proof: bigIntSafeEntry(proof) as Record<string, unknown> };
+}
+
+/**
+ * Verify a digital-passport issuance proof against a credential.
+ * Decodes both compact values, computes the credential body root via
+ * `pureCircuits.digitalPassportCredentialBodyRoot`, then checks the
+ * proof via `pureCircuits.assertValidIssuanceContextProof`.
+ * Returns `{ valid: true }` on success or `{ valid: false, error }`.
+ */
+async function verifyDigitalPassportIssuanceProof(params: {
+  credentialEncoded: { encoding: string; payload: string };
+  proofEncoded: { encoding: string; payload: string };
+}): Promise<{ valid: boolean; error?: string; elapsedMs?: number }> {
+  const t0 = Date.now();
+  try {
+    const dpCred = await import(
+      "@midnight-ntwrk/midnight-did-credentials-digital-passport"
+    );
+    const credential = dpCred.decodeDigitalPassportCredential(params.credentialEncoded);
+    const proof = dpCred.decodeDigitalPassportProof(params.proofEncoded);
+    const { pureCircuits } = dpCred;
+    const bodyRoot = pureCircuits.digitalPassportCredentialBodyRoot(credential);
+    pureCircuits.assertValidIssuanceContextProof(bodyRoot, proof);
+    return { valid: true, elapsedMs: Date.now() - t0 };
+  } catch (e) {
+    return {
+      valid: false,
+      error: e instanceof Error ? e.message : String(e),
+      elapsedMs: Date.now() - t0,
+    };
+  }
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
@@ -658,6 +764,9 @@ window.midnightDidBundle = {
   prepareUnprovenCallTx,
   scanQr,
   pasteText,
+  decodeDigitalPassportCredential,
+  decodeDigitalPassportProof,
+  verifyDigitalPassportIssuanceProof,
 };
 
 console.log(

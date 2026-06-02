@@ -181,7 +181,11 @@ pub use unlock::{AlwaysOkUnlockGate, NeverOkUnlockGate};
 // ports to drive a single user-meaningful operation.
 
 pub use crate::did::{bootstrap_did_with_keys, derive_keys, BootstrapError, BootstrappedDid};
-pub use oid4vci_client::{run_issuance as oid4vci_run_issuance, IssuanceFlowError};
+pub use oid4vci_client::{
+    run_issuance as oid4vci_run_issuance, IssuanceFlowError,
+    CredentialConfiguration, CredentialFlowError, CredentialIssuerMetadata,
+    MetadataError, ProofTypeMetadata,
+};
 pub use vc_self_verify::{self_verify, self_verify_and_cache, InvalidReason, SelfVerifyResult};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use dust::syncer::{DustSyncer, SyncProgress};

@@ -29,8 +29,9 @@ const outdir = resolve(__dirname, "..", "assets", "web");
 // loaders rely on native module-URL resolution that the bundler
 // can't reproduce. Pure-JS dependencies (`compact-js`,
 // `midnight-js-contracts`, `midnight-js-network-id`, `effect`,
-// `platform-js`, `wallet-sdk-address-format`, ...) are bundled
-// into `midnight-did.js` so the import map only needs entries
+// `platform-js`, `wallet-sdk-address-format`, ...
+// `midnight-did-credentials-openid`, `midnight-did-credentials-digital-passport`)
+// are bundled into `midnight-did.js` so the import map only needs entries
 // for the WASM-bearing packages below. Marking pure-JS packages
 // external lets their bare sub-path imports (`effect/Function`,
 // `compact-js/effect/Contract`, `platform-js/effect/Configuration`)
@@ -83,15 +84,14 @@ const config = {
   // packages the entry imports but `web/package.json` doesn't list
   // directly (e.g. `@midnight-ntwrk/midnight-js-contracts`,
   // `@midnight-ntwrk/midnight-js-network-id`, `effect`, ...).
-  // Falls back to the workspace submodule when MIDNIGHT_DID_SRC is not set.
+  // Also look in the midnight-verifiable-credentials repo's tree for
+  // the credential-family / openid packages.
+  // Falls back to workspace submodules when env vars are not set.
   nodePaths: [
     (() => {
       const src =
         env.MIDNIGHT_DID_SRC ||
         resolve(__dirname, "../../../../midnight-did");
-      // pnpm nests deps in .pnpm/<name>@<ver>/node_modules/ —
-      // add the most common ones so esbuild can resolve them.
-      // The hoisted node_modules is already searched by default.
       const paths = [resolve(src, "node_modules")];
       const pnpmRoot = resolve(src, "node_modules", ".pnpm");
       try {
@@ -103,6 +103,31 @@ const config = {
           }
         }
       } catch (_) {}
+      return paths;
+    })(),
+    (() => {
+      const vcSrc =
+        env.MIDNIGHT_VC_SRC ||
+        resolve(__dirname, "../../../../midnight-verifiable-credentials");
+      const paths = [resolve(vcSrc, "node_modules")];
+      const pnpmRoot = resolve(vcSrc, "node_modules", ".pnpm");
+      try {
+        for (const entry of readdirSync(pnpmRoot)) {
+          if (entry.startsWith("@midnight-ntwrk+")) {
+            paths.push(
+              resolve(pnpmRoot, entry, "node_modules"),
+            );
+          }
+        }
+      } catch (_) {}
+      // Also add the workspace package directories themselves so
+      // esbuild can resolve `file:`-linked deps that point into the
+      // VC repo's nested workspace layout.
+      paths.push(
+        resolve(vcSrc, "packages", "protocols", "openid", "node_modules"),
+        resolve(vcSrc, "packages", "core", "primitives", "credentials", "node_modules"),
+        resolve(vcSrc, "packages", "prototypes", "credential-families", "digital-passport", "node_modules"),
+      );
       return paths;
     })(),
   ].flat(),

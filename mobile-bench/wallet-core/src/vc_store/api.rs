@@ -255,8 +255,9 @@ mod tests {
             vc_uri: "urn:uuid:abc-123".into(),
             issuer_did: "did:midnight:issuer".into(),
             holder_did: "did:midnight:alice".into(),
-            format: "midnight-vc-compact".into(),
+            format: "midnight_compact_vc".into(),
             body: vec![1, 2, 3, 4],
+            proof: vec![],
             issued_at_ms: 1_000_000,
         }
     }
@@ -318,6 +319,7 @@ mod tests {
                 holder_did: "did:midnight:h".into(),
                 format: "f".into(),
                 body: vec![i as u8],
+                proof: vec![],
                 issued_at_ms: i as u64,
             }).unwrap();
             // Note: "urn:a" gets order 2, "urn:b" order 0, "urn:c" order 1 below
@@ -399,5 +401,42 @@ mod tests {
         let md = store.get_metadata(&vc.vc_uri).unwrap().unwrap();
         assert_eq!(md.display_order, 7);
         assert_eq!(md.last_verify_outcome.as_deref(), Some("Valid"));
+    }
+
+    // ── Backward compatibility: pre-proof-field CBOR rows ───────────
+    //
+    // VCs written before the `proof` field was added have no
+    // `proof` key in their CBOR representation. `#[serde(default)]`
+    // ensures they deserialize with `proof = vec![]`.
+
+    /// Minimal struct matching the *old* StoredVc shape (no proof field)
+    /// so we can serialize CBOR that lacks the `proof` key.
+    #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+    struct OldStoredVc {
+        vc_uri: String,
+        issuer_did: String,
+        holder_did: String,
+        format: String,
+        body: Vec<u8>,
+        issued_at_ms: u64,
+    }
+
+    #[test]
+    fn proof_field_defaults_when_reading_old_cbor_rows() {
+        // Simulate a pre-proof-field VC written by an older wallet build.
+        let old = OldStoredVc {
+            vc_uri: "urn:uuid:legacy-1".into(),
+            issuer_did: "did:midnight:issuer".into(),
+            holder_did: "did:midnight:alice".into(),
+            format: "midnight_compact_vc".into(),
+            body: vec![0xDE, 0xAD, 0xBE, 0xEF],
+            issued_at_ms: 999_999,
+        };
+        let old_cbor = serde_cbor::to_vec(&old).expect("serialize old VC");
+        // Deserialize the legacy CBOR into the new StoredVc (which has `proof`).
+        let back: StoredVc = serde_cbor::from_slice(&old_cbor).expect("deserialize old CBOR into new StoredVc");
+        assert_eq!(back.vc_uri, "urn:uuid:legacy-1");
+        assert_eq!(back.body, vec![0xDE, 0xAD, 0xBE, 0xEF]);
+        assert!(back.proof.is_empty(), "proof should default to empty vec for legacy rows");
     }
 }

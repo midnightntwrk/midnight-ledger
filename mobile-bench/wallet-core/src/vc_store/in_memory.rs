@@ -146,8 +146,9 @@ mod tests {
             vc_uri: "urn:uuid:abc-123".into(),
             issuer_did: "did:midnight:issuer".into(),
             holder_did: "did:midnight:alice".into(),
-            format: "midnight-vc-compact".into(),
+            format: "midnight_compact_vc".into(),
             body: vec![1, 2, 3, 4],
+            proof: vec![],
             issued_at_ms: 1_000_000,
         }
     }
@@ -218,6 +219,7 @@ mod tests {
                     holder_did: "did:midnight:h".into(),
                     format: "f".into(),
                     body: vec![i as u8],
+                    proof: vec![],
                     issued_at_ms: i as u64,
                 })
                 .unwrap();
@@ -291,10 +293,12 @@ mod tests {
         let store = open_store();
         let vc_a = StoredVc {
             vc_uri: "urn:a".into(),
+            proof: vec![],
             ..sample_vc()
         };
         let vc_b = StoredVc {
             vc_uri: "urn:b".into(),
+            proof: vec![],
             ..sample_vc()
         };
         store.insert_vc(&vc_a).unwrap();

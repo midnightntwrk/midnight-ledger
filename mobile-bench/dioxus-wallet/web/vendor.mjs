@@ -36,15 +36,31 @@ const SOURCE = resolve(
   process.env.MIDNIGHT_DID_SRC ||
     resolve(__dirname, "../../../../midnight-did"),
 );
+
+// Built checkout of the midnight-verifiable-credentials repo
+// (submodule or standalone clone) with `pnpm install && pnpm build`
+// already run. Falls back to the workspace submodule at
+// ../../../../midnight-verifiable-credentials when MIDNIGHT_VC_SRC
+// is not set.
+const VC_SOURCE = resolve(
+  process.env.MIDNIGHT_VC_SRC ||
+    resolve(__dirname, "../../../../midnight-verifiable-credentials"),
+);
 // Where Wry's `mn-pkg://` handler reads from.
 const DEST = resolve(__dirname, "..", "assets", "web", "pkg");
 
 // Resolve a `@midnight-ntwrk/<pkg>` name to its directory in the
-// midnight-did checkout. Workspace packages (midnight-did-*) live
-// under `packages/<dir>/`, not in `node_modules/` — pnpm keeps them
-// out of the hoisted tree. Third-party deps (compact-runtime, etc.)
-// live in `node_modules/@midnight-ntwrk/`.
-function resolvePackage(source, pkg) {
+// midnight-did or midnight-verifiable-credentials checkout.
+// Workspace packages (midnight-did-*) live under `packages/<dir>/`,
+// not in `node_modules/` — pnpm keeps them out of the hoisted tree.
+// Third-party deps (compact-runtime, etc.) live in
+// `node_modules/@midnight-ntwrk/`.
+//
+// For packages from the VC repo, explicit workspace-relative paths
+// are provided because the VC repo uses a deeply nested layout
+// (packages/prototypes/credential-families/digital-passport, etc.)
+// that can't be derived from the scoped package name alone.
+function resolvePackage(source, pkg, altSource, altPaths) {
   // Workspace packages: @midnight-ntwrk/midnight-did-contract → packages/contract
   // midnight-did-jubjub-schnorr → packages/jubjub-schnorr
   let wsDir = pkg;
@@ -68,11 +84,39 @@ function resolvePackage(source, pkg) {
       }
     }
   } catch (_) {}
+  // If an alternate source (VC repo) and explicit paths are provided,
+  // search there too — after the primary source candidates.
+  if (altSource && Array.isArray(altPaths)) {
+    for (const relPath of altPaths) {
+      candidates.push(resolve(altSource, relPath));
+    }
+    candidates.push(resolve(altSource, 'node_modules', '@midnight-ntwrk', pkg));
+    // Also search the VC repo's pnpm store.
+    const altPnpmRoot = resolve(altSource, 'node_modules', '.pnpm');
+    try {
+      for (const entry of readdirSync(altPnpmRoot)) {
+        if (entry.startsWith(`@midnight-ntwrk+${pkg}@`)) {
+          candidates.push(
+            resolve(altPnpmRoot, entry, 'node_modules', '@midnight-ntwrk', pkg),
+          );
+        }
+      }
+    } catch (_) {}
+  }
   for (const c of candidates) {
     try { statSync(c); return c; } catch (_) {}
   }
   return null;
 }
+
+// Workspace-relative paths for VC packages inside the
+// midnight-verifiable-credentials repo. The nested layout can't be
+// derived from the package name alone so we list them explicitly.
+const VC_PACKAGE_PATHS = {
+  'midnight-did-credentials-digital-passport': 'packages/prototypes/credential-families/digital-passport',
+  'midnight-did-credentials-openid': 'packages/protocols/openid',
+  'midnight-did-credentials': 'packages/core/primitives/credentials',
+};
 
 // Pure-JS packages with their transitive Effect / wallet-sdk closure
 // (`midnight-js-contracts`, `midnight-js-network-id`) are *not*
@@ -92,6 +136,10 @@ const PACKAGES = [
   "compact-runtime",
   "onchain-runtime-v3",
   "ledger-v8",
+  // Verifiable-credentials packages (vendored from MIDNIGHT_VC_SRC)
+  "midnight-did-credentials-digital-passport",
+  "midnight-did-credentials-openid",
+  "midnight-did-credentials",
 ];
 
 function copyDirRecursive(src, dst) {
@@ -119,6 +167,7 @@ function copyDirRecursive(src, dst) {
 }
 
 console.log(`[vendor] source: ${SOURCE}`);
+console.log(`[vendor] vc-source: ${VC_SOURCE}`);
 console.log(`[vendor] dest:   ${DEST}`);
 
 rmSync(DEST, { recursive: true, force: true });
@@ -126,9 +175,10 @@ mkdirSync(DEST, { recursive: true });
 
 let total = 0;
 for (const pkg of PACKAGES) {
-  const src = resolvePackage(SOURCE, pkg);
+  const altPaths = VC_PACKAGE_PATHS[pkg];
+  const src = resolvePackage(SOURCE, pkg, VC_SOURCE, altPaths ? [altPaths] : undefined);
   if (!src) {
-    console.error(`[vendor] missing source: ${pkg} (checked packages/ and node_modules/@midnight-ntwrk/)`);
+    console.error(`[vendor] missing source: ${pkg} (checked packages/ and node_modules/@midnight-ntwrk/ in both midnight-did and midnight-verifiable-credentials)`);
     process.exit(1);
   }
   const dst = resolve(DEST, pkg);
@@ -184,20 +234,27 @@ const CJS_DEPS = [
 ];
 
 for (const dep of CJS_DEPS) {
-  // Try hoisted node_modules first, then pnpm store.
+  // Try hoisted node_modules in DID source first, then VC source,
+  // then pnpm store in each.
   let src = null;
-  const hoisted = resolve(SOURCE, "node_modules", dep);
-  try { statSync(hoisted); src = hoisted; } catch (_) {}
+  const sourceCandidates = [SOURCE, VC_SOURCE];
+  for (const s of sourceCandidates) {
+    const hoisted = resolve(s, "node_modules", dep);
+    try { statSync(hoisted); src = hoisted; break; } catch (_) {}
+  }
   if (!src) {
-    const pnpmRoot = resolve(SOURCE, "node_modules", ".pnpm");
-    try {
-      for (const entry of readdirSync(pnpmRoot)) {
-        if (entry.startsWith(`${dep}@`)) {
-          const candidate = resolve(pnpmRoot, entry, "node_modules", dep);
-          try { statSync(candidate); src = candidate; break; } catch (_) {}
+    for (const s of sourceCandidates) {
+      const pnpmRoot = resolve(s, "node_modules", ".pnpm");
+      try {
+        for (const entry of readdirSync(pnpmRoot)) {
+          if (entry.startsWith(`${dep}@`)) {
+            const candidate = resolve(pnpmRoot, entry, "node_modules", dep);
+            try { statSync(candidate); src = candidate; break; } catch (_) {}
+          }
         }
-      }
-    } catch (_) {}
+        if (src) break;
+      } catch (_) {}
+    }
   }
   if (!src) {
     console.error(`[vendor] missing CJS dep: ${dep}`);

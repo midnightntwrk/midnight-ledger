@@ -6,7 +6,7 @@
 //!     &probe,
 //!     "issuance",
 //!     async {
-//!         oid4vci_run_issuance(&http, &clock, &url, &wallet, &store, &did, &vc_store).await
+//!         oid4vci_run_issuance(&http, &clock, js_bridge, &url, &wallet, &store, &did, &vc_store).await
 //!     },
 //! ).await?;
 //! ```

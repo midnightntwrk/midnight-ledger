@@ -17,6 +17,9 @@
     "@midnight-ntwrk/midnight-js-contracts": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-contracts",
     "@midnight-ntwrk/midnight-js-types": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-types",
     "@midnight-ntwrk/midnight-js-network-id": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-network-id",
-    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider"
+    "@midnight-ntwrk/midnight-js-node-zk-config-provider": "file:/Users/ysh/iohk/midnight-did/node_modules/@midnight-ntwrk/midnight-js-node-zk-config-provider",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport": "file:../../../../../midnight-verifiable-credentials/packages/prototypes/credential-families/digital-passport",
+    "@midnight-ntwrk/midnight-did-credentials-openid": "file:../../../../../midnight-verifiable-credentials/packages/protocols/openid",
+    "@midnight-ntwrk/midnight-did-credentials": "file:../../../../../midnight-verifiable-credentials/packages/core/primitives/credentials"
   }
 }

@@ -3,13 +3,21 @@ use serde::{Deserialize, Serialize};
 /// Persisted VC envelope. `body` is the canonical signed bytes the
 /// issuer returned — the Compact serialization. `format` allows
 /// future non-Compact VC families to coexist.
+///
+/// `proof` holds the detached proof bytes for Compact-binary VCs
+/// (`format = "midnight_compact_vc"`). For CBOR-phase1 VCs the
+/// proof is embedded in `body` and `proof` is empty —
+/// `#[serde(default)]` ensures backward compatibility with rows
+/// written before this field was added.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredVc {
     pub vc_uri: String,
     pub issuer_did: String,
     pub holder_did: String,
-    pub format: String, // e.g. "midnight-vc-compact"
+    pub format: String, // e.g. "midnight_compact_vc"
     pub body: Vec<u8>,
+    #[serde(default)]
+    pub proof: Vec<u8>,
     pub issued_at_ms: u64,
 }
 
