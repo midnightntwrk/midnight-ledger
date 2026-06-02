@@ -84,6 +84,27 @@ pub enum WorkMsg {
         /// QR payload — the `openid4vp://…?request_uri=…` URL.
         qr_url: String,
     },
+
+    /// Drive the OID4VCI Pre-Authorized Code Flow:
+    /// parse the credential offer → POST /token (exchange
+    /// pre-auth code for access_token + c_nonce) → build a
+    /// DID-bound proof-of-possession JWS → POST /credential →
+    /// persist the issued VC into the wallet's redb vc store.
+    /// Returns the freshly-issued `vc_uri`.
+    ///
+    /// Same threading rationale as `Oid4vpAuthenticate`: the
+    /// state machine (Wallet + indexer + http + JWS PoP +
+    /// credential POST + redb insert) is well over the WebView
+    /// dispatch thread's stack.
+    Oid4vciIssuance {
+        action_id: u64,
+        network: Network,
+        /// Holder DID the wallet binds the issued credential to.
+        did: DidId,
+        /// QR payload — the
+        /// `openid-credential-offer://…` URL.
+        qr_url: String,
+    },
 }
 
 impl WorkMsg {
@@ -96,7 +117,8 @@ impl WorkMsg {
         match self {
             Self::Noop { action_id }
             | Self::Bootstrap { action_id, .. }
-            | Self::Oid4vpAuthenticate { action_id, .. } => *action_id,
+            | Self::Oid4vpAuthenticate { action_id, .. }
+            | Self::Oid4vciIssuance { action_id, .. } => *action_id,
         }
     }
 }
@@ -137,6 +159,14 @@ pub enum WorkOutcome {
         session_id: String,
         status: String,
     },
+    /// OID4VCI credential issuance finished — the VC has been
+    /// persisted to the wallet's vc_store. Carries the credential's
+    /// `vc_uri` so the click site can surface it in the success
+    /// banner / trigger the inventory refresh.
+    Oid4vciOk {
+        action_id: u64,
+        vc_uri: String,
+    },
     Err {
         action_id: u64,
         msg: String,
@@ -149,6 +179,7 @@ impl WorkOutcome {
             Self::NoopAck { action_id }
             | Self::BootstrapOk { action_id, .. }
             | Self::Oid4vpOk { action_id, .. }
+            | Self::Oid4vciOk { action_id, .. }
             | Self::Err { action_id, .. } => *action_id,
         }
     }

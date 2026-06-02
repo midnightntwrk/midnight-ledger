@@ -14,21 +14,19 @@
 //! + QR-2 contract against the running `IssuerDIDIT-mock` service
 //! end-to-end. Paste-URL only — no camera scanner yet.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use dioxus::prelude::*;
 use tracing::Instrument;
 
+// HTTP / OID4VCI / `time_op` imports moved to `worker/handlers.rs`
+// along with the OID4VP + OID4VCI flows (worker plan Tasks 3 & 4).
+// What stays here is the VC-inventory + self-verify surface that
+// still runs inline.
 use wallet_core::{
-    HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
-    SelfVerifyResult, StoredVc, SystemClock, oid4vci_run_issuance,
-    self_verify_and_cache, time_op, time_op_simple,
+    Metrics, Network, RedbVcStore, SelfVerifyResult, StoredVc, SystemClock,
+    self_verify_and_cache, time_op_simple,
 };
-// OID4VP coordinator + DID-port adapters live on the worker
-// thread now (worker-thread plan Task 3, commit 758a5fa3 +
-// THIS commit). The click site only sends a WorkMsg::
-// Oid4vpAuthenticate and registers an outcome handler.
 
 /// Monotonic per-session counter for Identity Centre action IDs.
 /// Rendered as hex so a 4-char string keeps the Logs-tab prefix
@@ -108,7 +106,12 @@ const VC_STORE_FILENAME: &str = "vcs.redb";
 /// the main wallet redb — under `Documents/midnight-dx-wallet/` on
 /// iOS, `~/.midnight/wallet-prototype/` on desktop, and
 /// `/data/data/<pkg>/files/midnight-dx-wallet/` on Android.
-fn vc_store_path() -> std::path::PathBuf {
+///
+/// `pub(crate)` so the worker module's OID4VCI handler can
+/// reach the same path the UI uses (otherwise a worker-side
+/// `RedbVcStore::open` would land in a different file from the
+/// `VcInventorySection` reader's).
+pub(crate) fn vc_store_path() -> std::path::PathBuf {
     let mut p = wallet_store_path();
     p.set_file_name(VC_STORE_FILENAME);
     p
@@ -216,6 +219,13 @@ fn run_oid4vp_authenticate(
 
 /// Run the OID4VCI issuance flow with a known DID + URL. Counterpart
 /// to `run_oid4vp_authenticate` for the credential-offer side.
+///
+/// Routed through the wallet-worker thread (worker plan Task
+/// 4). The click site only registers an outcome handler +
+/// sends a `WorkMsg::Oid4vciIssuance`; the heavy state machine
+/// (Wallet + indexer + http + JWS PoP + credential POST +
+/// redb insert) runs on the worker's 8 MiB stack instead of
+/// the Chromium WebView dispatch thread's 256 KiB.
 fn run_oid4vci_request(
     network: Network,
     bridge_state: BridgeState,
@@ -232,89 +242,73 @@ fn run_oid4vci_request(
             return;
         }
     };
-    let Some(store) = bridge_state.store().cloned() else {
+    // Defensive: surface a precise error here so we don't fire
+    // a WorkMsg the worker would immediately reject. The worker
+    // side re-checks for safety.
+    if bridge_state.store().is_none() {
         err_msg.set(Some("wallet store not opened yet".into()));
         return;
-    };
-    let Some(wallet_id) = bridge_state.active_wallet_id() else {
+    }
+    if bridge_state.active_wallet_id().is_none() {
         err_msg.set(Some("no active wallet".into()));
         return;
-    };
+    }
     busy.set(true);
     err_msg.set(None);
     ok_msg.set(None);
-    let metrics = bridge_state.metrics_dyn();
+
+    let Some(worker) = bridge_state.worker().cloned() else {
+        err_msg.set(Some("wallet worker not ready".into()));
+        busy.set(false);
+        return;
+    };
     let in_mem_metrics = bridge_state.metrics();
-    let probe = bridge_state.resource_probe();
-    let action_id = next_action_id();
-    let span = tracing::info_span!("ic.issuance", action_id = %action_id);
-    // Box::pin the OID4VCI state machine for the same reason
-    // Bootstrap (commit f1dffe5e) needed it on Android: the
-    // inline async block builds Wallet + RedbVcStore +
-    // HttpClient + run_issuance (token + JWS PoP + credential
-    // POST) — its state machine size matches Bootstrap's. On
-    // 2026-06-02 the un-boxed variant hung silently on the
-    // phone right after the /token POST succeeded; the very
-    // next sign_for_authentication → resolve_did never logged.
-    // Heap-allocating the state machine restores stable
-    // progress past the JWS step.
-    let fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
-        Box::pin(
-            async move {
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let secret_store = RedbSecretStore::new(store, wallet_id);
-                let vc_store = match RedbVcStore::open(vc_store_path()) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        err_msg.set(Some(format!("open vc store: {e}")));
-                        busy.set(false);
-                        return;
-                    }
-                };
-                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-                let http: Arc<dyn HttpClient> =
-                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-                let clock = SystemClock;
-                let result = time_op(
-                    &*metrics,
-                    &*probe,
-                    "issuance",
-                    oid4vci_run_issuance(
-                        &*http,
-                        &clock,
-                        &url,
-                        &wallet,
-                        &secret_store,
-                        &did,
-                        &vc_store,
-                    ),
-                )
-                .await;
-                match result {
-                    Ok(vc_uri) => {
-                        in_mem_metrics.incr("vcs.issued", 1);
-                        // Tell every mounted `VcInventorySection`
-                        // a row landed in `vcs.redb` — the
-                        // resource resubscribes via
-                        // `VC_INVENTORY_TICK`. Without this the
-                        // freshly-issued VC stays invisible
-                        // until the user switches tabs and back
-                        // (the symptom this lookup-time bump
-                        // fixes).
-                        bump_vc_inventory_tick();
-                        ok_msg.set(Some(format!("issued {vc_uri}")));
-                    }
-                    Err(e) => {
-                        in_mem_metrics.incr("vcs.issuance_failed", 1);
-                        err_msg.set(Some(format!("issue failed: {e}")));
-                    }
+    let action_id = crate::worker::next_action_id();
+
+    // Outcome handler captures the per-component signals +
+    // metrics counters + the cross-component VC inventory tick.
+    // Runs inside the App's outcome-pump `use_future` (Dioxus
+    // scope), so signal writes + the global-signal bump are
+    // valid.
+    crate::worker::router::register(
+        action_id,
+        Box::new(move |outcome| {
+            match outcome {
+                crate::worker::WorkOutcome::Oid4vciOk { vc_uri, .. } => {
+                    in_mem_metrics.incr("vcs.issued", 1);
+                    // Cross-tab refresh signal: the worker
+                    // persisted a row into vcs.redb; the
+                    // Credentials → inventory `use_resource`
+                    // resubscribes via this bump and reads the
+                    // new row on the next paint (commit
+                    // ea972c42 added this for the pre-worker
+                    // path; preserved here).
+                    bump_vc_inventory_tick();
+                    ok_msg.set(Some(format!("issued {vc_uri}")));
                 }
-                busy.set(false);
+                crate::worker::WorkOutcome::Err { msg, .. } => {
+                    in_mem_metrics.incr("vcs.issuance_failed", 1);
+                    err_msg.set(Some(msg));
+                }
+                other => {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        action_id,
+                        ?other,
+                        "OID4VCI handler received unexpected outcome",
+                    );
+                }
             }
-            .instrument(span),
-        );
-    spawn(fut);
+            busy.set(false);
+        }),
+    );
+
+    worker.send(crate::worker::WorkMsg::Oid4vciIssuance {
+        action_id,
+        network,
+        did,
+        qr_url: url,
+    });
 }
 
 /// Top-level Identity Centre panel. Renders the four sections

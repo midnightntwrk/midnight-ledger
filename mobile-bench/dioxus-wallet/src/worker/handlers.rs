@@ -21,13 +21,14 @@ use wallet_core::oid4vp_client::{
 };
 use wallet_core::secret_storage::redb_secret_store::RedbSecretStore;
 use wallet_core::{
-    DidId, HttpClient, MeteredHttpClient, ReqwestHttpClient, bootstrap_did_with_keys,
-    time_op,
+    DidId, HttpClient, MeteredHttpClient, RedbVcStore, ReqwestHttpClient,
+    bootstrap_did_with_keys, oid4vci_run_issuance, time_op,
 };
 
 use super::{BridgeState, Network, WorkMsg, WorkOutcome};
 use crate::app::metered_app_wallet_for;
 use crate::did_ports::{CachedWalletAuthnDiscovery, RedbDidSigner};
+use crate::identity_centre::vc_store_path;
 
 /// Dispatch a [`WorkMsg`] to its handler and return the
 /// [`WorkOutcome`]. Pure routing — no shared mutable state.
@@ -52,6 +53,12 @@ pub(super) async fn dispatch(state: &BridgeState, msg: WorkMsg) -> WorkOutcome {
             did,
             qr_url,
         } => handle_oid4vp_authenticate(state, action_id, network, did, qr_url).await,
+        WorkMsg::Oid4vciIssuance {
+            action_id,
+            network,
+            did,
+            qr_url,
+        } => handle_oid4vci_issuance(state, action_id, network, did, qr_url).await,
     }
 }
 
@@ -191,6 +198,81 @@ async fn handle_oid4vp_authenticate(
         Err(e) => WorkOutcome::Err {
             action_id,
             msg: format!("authenticate failed: {e}"),
+        },
+    }
+}
+
+/// Drive the OID4VCI Pre-Authorized Code Flow on the worker
+/// thread: token exchange → DID-bound proof-of-possession JWS
+/// → credential POST → persist the issued VC to the wallet's
+/// redb vc_store. Returns the freshly-issued `vc_uri`.
+///
+/// Currently still uses the legacy `oid4vci_run_issuance`,
+/// which internally calls `oid4vp_client::jws::build_id_token`
+/// (the sign-twice probe pattern). The OID4VCI port migration
+/// will swap that out for the new `IdTokenBuilder` + ports so
+/// the cost drops from "2 × resolve + 2 × sign" to
+/// "1 × resolve + 1 × sign" — same payoff Bootstrap +
+/// OID4VP already collected.
+async fn handle_oid4vci_issuance(
+    state: &BridgeState,
+    action_id: u64,
+    network: Network,
+    did: DidId,
+    qr_url: String,
+) -> WorkOutcome {
+    let Some(store) = state.store().cloned() else {
+        return WorkOutcome::Err {
+            action_id,
+            msg: "wallet store not opened yet".into(),
+        };
+    };
+    let Some(wallet_id) = state.active_wallet_id() else {
+        return WorkOutcome::Err {
+            action_id,
+            msg: "no active wallet".into(),
+        };
+    };
+    let metrics = state.metrics_dyn();
+    let probe = state.resource_probe();
+
+    let wallet = metered_app_wallet_for(network, metrics.clone(), probe.clone());
+    let secret_store = RedbSecretStore::new(store, wallet_id);
+    let vc_store = match RedbVcStore::open(vc_store_path()) {
+        Ok(v) => v,
+        Err(e) => {
+            return WorkOutcome::Err {
+                action_id,
+                msg: format!("open vc store: {e}"),
+            };
+        }
+    };
+    let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+    let http: Arc<dyn HttpClient> =
+        Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+    let clock = SystemClock;
+
+    let result = time_op(
+        &*metrics,
+        &*probe,
+        "issuance",
+        oid4vci_run_issuance(
+            &*http,
+            &clock,
+            &qr_url,
+            &wallet,
+            &secret_store,
+            &did,
+            &vc_store,
+        ),
+    )
+    .await;
+
+    match result {
+        Ok(vc_uri) => WorkOutcome::Oid4vciOk { action_id, vc_uri },
+        Err(e) => WorkOutcome::Err {
+            action_id,
+            msg: format!("issue failed: {e}"),
         },
     }
 }
