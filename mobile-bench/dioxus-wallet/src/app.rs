@@ -1269,7 +1269,13 @@ pub fn App() -> Element {
             .as_ref()
             .map(|w| w.seed_hex.clone());
         unlock_state.set(UnlockState::Opening);
-        spawn(async move {
+        // Box::pin keeps the unlock state machine off the
+        // Chromium WebView dispatch thread's ~256 KiB stack on
+        // Android. The async block inlines a WalletStore::open,
+        // a log-drainer spawn, find_or_create_wallet_for_network,
+        // and an auto-resolve loop — well above the small stack
+        // budget. Mirrors the Bootstrap fix (commit f1dffe5e).
+        spawn(Box::pin(async move {
             let path = wallet_store_path();
             match wallet_core::store::WalletStore::open(&path, &entered) {
                 Ok(store) => {
@@ -1421,7 +1427,11 @@ pub fn App() -> Element {
                     for did_str in dids_to_refresh {
                         let net = net;
                         let bridge = state.clone();
-                        spawn(async move {
+                        // Each iteration constructs a fresh Wallet
+                        // + indexer query future; box-pin so the
+                        // per-DID state machine lives on the heap
+                        // rather than the polling thread's stack.
+                        spawn(Box::pin(async move {
                             let w = app_wallet_for(net);
                             match w.resolve_did_full(&did_str).await {
                                 Ok(resolved) => {
@@ -1482,7 +1492,7 @@ pub fn App() -> Element {
                                     );
                                 }
                             }
-                        });
+                        }));
                     }
                 }
                 Err(e) => {
@@ -1491,7 +1501,7 @@ pub fn App() -> Element {
                     unlock_state.set(UnlockState::Failed(msg));
                 }
             }
-        });
+        }));
     };
 
     use_future(move || {
@@ -3913,7 +3923,13 @@ fn DidOperationBuilder(
         let mut loaded_set: std::collections::HashSet<String> =
             loaded_circuits.iter().cloned().collect();
         let mut counter_cursor: u32 = initial_counter;
-        spawn(async move {
+        // Box::pin — Create-DID inlines the heaviest pipeline in
+        // the app (Wallet + indexer + prover + multi-stage
+        // WizardStage stream + balance snapshots + persistent
+        // observations loop). Without heap-allocation the state
+        // machine overflows the Android WebView dispatch thread
+        // stack the moment Rust materialises it.
+        spawn(Box::pin(async move {
             use futures::StreamExt;
             use wallet_core::WizardStage;
             let wallet = app_wallet_for(network);
@@ -4126,7 +4142,7 @@ fn DidOperationBuilder(
                 Err(e) => tracing::warn!(error=%e, "post-batch resolve failed"),
             }
             running.set(false);
-        });
+        }));
     };
 
     let on_clear_batch = move |_: dioxus::events::MouseEvent| {
@@ -6898,7 +6914,12 @@ fn DidDetailView(
         let on_deactivated = on_deactivated.clone();
         let on_timing = on_timing.clone();
         let on_cost = on_cost.clone();
-        spawn(async move {
+        // Box::pin — Deactivate inlines `call_did_circuit` (prover
+        // + indexer + balance snapshot + cost tracking) inside a
+        // stream consumer; the state machine size matches Create
+        // DID, well over what the WebView dispatch thread's stack
+        // can hold. Mirrors the Bootstrap pattern.
+        spawn(Box::pin(async move {
             use futures::StreamExt;
             let w = app_wallet_for(network);
             let did_id = match wallet_core::DidId::parse(&did_str) {
@@ -6951,7 +6972,7 @@ fn DidDetailView(
                     succeeded,
                 });
             }
-        });
+        }));
     };
 
     // Auto-resolve on first mount if we don't have anything
