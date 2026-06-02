@@ -1,21 +1,50 @@
-//! Use-case service layer — the hexagonal core that consumes the
-//! port traits and exposes verb-shaped public methods.
+//! Use-case service layer — originally planned as the
+//! hexagonal core that consumes port traits and exposes
+//! verb-shaped public methods.
 //!
-//! See `docs/superpowers/specs/2026-05-29-hexagonal-headless-wallet-design.md`
-//! §2.2 for the full per-service API design and §2.3 for the port
-//! catalogue these services depend on.
+//! ## Status
 //!
-//! Wave A1 (this commit): module skeleton only. Each service file
-//! declares a `pub struct` with `Arc<dyn Port>` field placeholders +
-//! a constructor `new(...)`. No methods yet — the UI continues to
-//! drive the existing flows via `BridgeState` + `app_wallet_for()`.
-//! Wave C migrates one flow at a time into these services.
+//! **These services were never populated.** The wave-A1 commit
+//! shipped struct + constructor skeletons; wave C was meant to
+//! migrate flows in, but the codebase took a different path:
+//! the OID4VP and OID4VCI use cases ended up as **free-function
+//! orchestrators** living next to their protocol modules —
+//! `oid4vp_client::run_authentication` (driven by
+//! `LoginCoordinator + ResponseBuilder`) and
+//! `oid4vci_client::run_issuance` (driven by
+//! `CredentialCoordinator + ProofBuilder`). Bootstrap is
+//! `did::bootstrap_did_with_keys`. Each is "do one thing,
+//! testable, port-typed" — same architectural intent as the
+//! services, different shape.
+//!
+//! The structs in this directory are reachable from
+//! `wallet-core/src/lib.rs` so existing callers that imported
+//! them still compile, but none have method bodies. Fields are
+//! still `Arc<dyn Port>` placeholders with `#[allow(dead_code)]`
+//! suppressing the unused-field warning.
+//!
+//! ## What this means in practice
+//!
+//! - New use cases follow the **orchestrator-function +
+//!   coordinator** pattern (see `oid4vci_client::proof` for the
+//!   latest example). Don't add methods here.
+//! - Reading the audit at
+//!   `docs/superpowers/specs/2026-06-03-hex-architecture-audit.md`
+//!   §3 first will save you a wrong turn.
+//! - A cleanup pass that deletes these dead skeletons is
+//!   warranted, but lives in a separate commit because it
+//!   touches the public surface (and might affect downstream
+//!   `service::*` imports that exist for forward compatibility).
+//!
+//! Original design spec (kept for historical context):
+//! `docs/superpowers/specs/2026-05-29-hexagonal-headless-wallet-design.md`
+//! §2.2.
 
-// Stub structs hold `Arc<dyn Port>` fields they don't read yet —
-// wave C populates the method bodies. The `#![deny(warnings)]` at
-// the crate root would otherwise refuse these placeholders, so we
-// scope a `dead_code` allow here for the duration of waves A-B.
-// Wave G removes this attribute once every field has a consumer.
+// Stub structs hold `Arc<dyn Port>` fields they don't read.
+// `#![deny(warnings)]` at the crate root would otherwise refuse
+// the placeholders. See the module docstring for why these
+// services never landed; the lint scope here can drop once a
+// cleanup commit removes the dead surface.
 #![allow(dead_code)]
 
 mod builder;

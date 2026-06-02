@@ -165,6 +165,25 @@ abstract step.
 Health-check use case. Takes a network and pings the indexer /
 node / proof-server URLs.
 
+### Aside: the dead `service/` skeleton
+
+`wallet-core/src/service/` contains struct + constructor
+skeletons for a planned use-case layer (`Oid4vpService`,
+`Oid4vciService`, `BackupService`, etc.) — see
+`docs/superpowers/specs/2026-05-29-hexagonal-headless-wallet-design.md`
+§2.2 for the originally-planned API. The wave-C commit that
+would have populated method bodies never landed; the actual
+codebase took the **orchestrator-function + coordinator** path
+documented in §3 above instead.
+
+The 916 LoC of dead skeletons stays around under
+`#![allow(dead_code)]` so any tests / downstream consumers that
+named them keep compiling. A future cleanup commit can either
+delete them, or repurpose them as thin newtype wrappers around
+the coordinator functions if the verb-shaped API has UX value
+for downstream shells. See `service/mod.rs`'s docstring for the
+inventory + the audit's recommendation.
+
 ## 4. Strengths
 
 1. **Port surface is broad enough to cover every side effect.**
