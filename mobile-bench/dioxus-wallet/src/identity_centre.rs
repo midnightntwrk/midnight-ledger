@@ -23,8 +23,19 @@ use tracing::Instrument;
 use wallet_core::{
     HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
     SelfVerifyResult, StoredVc, SystemClock, oid4vci_run_issuance,
-    oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
+    self_verify_and_cache, time_op, time_op_simple,
 };
+// `oid4vp_run_authentication` is the LEGACY re-export still
+// shipping in wallet-core::lib; after Task 8 (this file) no one
+// in dioxus-wallet calls it anymore, and Task 9 deletes the
+// alias entirely. We import the new coordinator-driven path
+// through the full module name to avoid any confusion with the
+// legacy alias.
+use wallet_core::oid4vp_client::{
+    run_authentication as oid4vp_run_authentication_v2, IdTokenBuilder, LoginCoordinator,
+};
+
+use crate::did_ports::{CachedWalletAuthnDiscovery, RedbDidSigner};
 
 /// Monotonic per-session counter for Identity Centre action IDs.
 /// Rendered as hex so a 4-char string keeps the Logs-tab prefix
@@ -128,25 +139,50 @@ fn run_oid4vp_authenticate(
     let fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
         Box::pin(
             async move {
+                // Build the chain-op-metered wallet + persistent
+                // secret store + metered HTTP client. Same shape
+                // as the legacy path; the difference is what we
+                // hand to the orchestrator: instead of
+                // (wallet, store, clock) it's a LoginCoordinator
+                // pre-loaded with an IdTokenBuilder that owns
+                // typed DidAuthnDiscovery + DidSigner port
+                // implementations.
+                //
+                // Architectural payoff: this is now ONE indexer
+                // resolve + ONE sign per login (the legacy path
+                // was two of each). See the spec at
+                // docs/superpowers/specs/2026-06-02-login-with-did-architecture.md
+                // §"Architectural smells" 1.
                 let wallet =
                     metered_app_wallet_for(network, metrics.clone(), probe.clone());
                 let secret_store = RedbSecretStore::new(store, wallet_id);
                 let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
                 let http: Arc<dyn HttpClient> =
                     Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-                let clock = SystemClock;
+
+                // Phase-1 Mode-A coordinator: a single
+                // IdTokenBuilder. Phase-2 will register a
+                // VpTokenBuilder + PresentationSubmissionBuilder
+                // beside it via `LoginCoordinator::mode_b`
+                // without changing this call site.
+                let discovery =
+                    Arc::new(CachedWalletAuthnDiscovery::new(wallet))
+                        as Arc<dyn wallet_core::oid4vp_client::DidAuthnDiscovery>;
+                let signer = Arc::new(RedbDidSigner::new(secret_store))
+                    as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
+                let clock: Arc<dyn wallet_core::clock::Clock> = Arc::new(SystemClock);
+                let coordinator = LoginCoordinator::mode_a(IdTokenBuilder::new(
+                    discovery,
+                    signer,
+                    clock,
+                    did,
+                ));
+
                 let result = time_op(
                     &*metrics,
                     &*probe,
                     "oid4vp_authenticate",
-                    oid4vp_run_authentication(
-                        &*http,
-                        &clock,
-                        &url,
-                        &wallet,
-                        &secret_store,
-                        &did,
-                    ),
+                    oid4vp_run_authentication_v2(&*http, &coordinator, &url),
                 )
                 .await;
                 match result {
