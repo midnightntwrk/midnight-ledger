@@ -15,13 +15,11 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 
 use super::ResponseBuilder;
 use crate::clock::Clock;
 use crate::oid4vp_client::errors::LoginError;
-use crate::oid4vp_client::id_token::{encode_segment, IdTokenPayload, JwsHeader};
+use crate::oid4vp_client::id_token::sign_id_token_with_ports;
 use crate::oid4vp_client::ports::{DidAuthnDiscovery, DidSigner};
 use crate::oid4vp_client::request::AuthorizationRequest;
 use crate::oid4vp_client::response::AuthorizationResponse;
@@ -67,51 +65,27 @@ impl ResponseBuilder for IdTokenBuilder {
         req: &AuthorizationRequest,
         resp: &mut AuthorizationResponse,
     ) -> Result<(), LoginError> {
-        // ① Discover the kid + jwk — one indexer call (cached on
-        //    the adapter side).
-        let key = self
-            .discovery
-            .authn_key(&self.holder)
-            .await
-            .map_err(|e| LoginError::DiscoverFailed(e.to_string()))?;
-
-        // ② Compose JOSE header + claims. `sub_jwk` lives in the
-        //    payload per normative SIOPv2 — the legacy header
-        //    `jwk` placement is gone.
-        let iat = self.clock.now_ms() / 1_000;
-        let header = JwsHeader {
-            alg: "EdDSA",
-            typ: "JWT",
-            kid: &key.kid,
-        };
-        let payload = IdTokenPayload {
-            iss: self.holder.to_did_string(),
-            sub: self.holder.to_did_string(),
-            aud: req.client_id.clone(),
-            nonce: req.nonce.clone(),
-            iat,
-            exp: iat + self.lifetime_secs,
-            sub_jwk: Some(key.public_jwk),
-        };
-
-        let header_b64 = encode_segment(&header)
-            .map_err(|e| LoginError::Internal(format!("encode header: {e}")))?;
-        let payload_b64 = encode_segment(&payload)
-            .map_err(|e| LoginError::Internal(format!("encode payload: {e}")))?;
-        let sign_input = format!("{header_b64}.{payload_b64}");
-
-        // ③ Sign — one call. The kid we sign under is whatever
-        //    discovery returned, so the verifier's "kid matches
-        //    DID authentication-relation VM" check has a stable
-        //    target.
-        let sig = self
-            .signer
-            .sign(&key.kid, sign_input.as_bytes())
-            .await
-            .map_err(|e| LoginError::SignFailed(e.to_string()))?;
-        let sig_b64 = URL_SAFE_NO_PAD.encode(&sig);
-
-        resp.id_token = Some(format!("{sign_input}.{sig_b64}"));
+        // The single-resolve / single-sign discipline lives in
+        // [`sign_id_token_with_ports`] — see its docstring for
+        // the architectural rationale. The OID4VCI proof-of-
+        // possession path calls the same helper, so both flows
+        // emit the same wire shape and the verifier doesn't
+        // have to branch on which one minted the JWS.
+        //
+        // The id_token's `aud` is the RP's `client_id` (the
+        // verifier DID) and `nonce` is the request nonce — both
+        // travel through `AuthorizationRequest`.
+        let token = sign_id_token_with_ports(
+            &self.discovery,
+            &self.signer,
+            &self.clock,
+            &self.holder,
+            &req.client_id,
+            &req.nonce,
+            self.lifetime_secs,
+        )
+        .await?;
+        resp.id_token = Some(token);
         Ok(())
     }
 }
