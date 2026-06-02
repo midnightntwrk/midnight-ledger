@@ -207,13 +207,14 @@ async fn handle_oid4vp_authenticate(
 /// → credential POST → persist the issued VC to the wallet's
 /// redb vc_store. Returns the freshly-issued `vc_uri`.
 ///
-/// Currently still uses the legacy `oid4vci_run_issuance`,
-/// which internally calls `oid4vp_client::jws::build_id_token`
-/// (the sign-twice probe pattern). The OID4VCI port migration
-/// will swap that out for the new `IdTokenBuilder` + ports so
-/// the cost drops from "2 × resolve + 2 × sign" to
-/// "1 × resolve + 1 × sign" — same payoff Bootstrap +
-/// OID4VP already collected.
+/// Mirrors `handle_oid4vp_authenticate`: builds the same
+/// `CachedWalletAuthnDiscovery` + `RedbDidSigner` port pair and
+/// hands them to `oid4vci_run_issuance`. The 30 s discovery
+/// cache means back-to-back OID4VP login + OID4VCI issuance
+/// against the same DID re-uses one indexer roundtrip total
+/// (not two), and the JWS proof-of-possession now costs
+/// 1 × resolve + 1 × sign (down from the legacy 2 × resolve +
+/// 2 × sign probe pattern).
 async fn handle_oid4vci_issuance(
     state: &BridgeState,
     action_id: u64,
@@ -250,7 +251,13 @@ async fn handle_oid4vci_issuance(
     let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
     let http: Arc<dyn HttpClient> =
         Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-    let clock = SystemClock;
+
+    let discovery =
+        Arc::new(CachedWalletAuthnDiscovery::new(wallet))
+            as Arc<dyn wallet_core::oid4vp_client::DidAuthnDiscovery>;
+    let signer = Arc::new(RedbDidSigner::new(secret_store))
+        as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
+    let clock: Arc<dyn wallet_core::clock::Clock> = Arc::new(SystemClock);
 
     let result = time_op(
         &*metrics,
@@ -260,8 +267,8 @@ async fn handle_oid4vci_issuance(
             &*http,
             &clock,
             &qr_url,
-            &wallet,
-            &secret_store,
+            &discovery,
+            &signer,
             &did,
             &vc_store,
         ),

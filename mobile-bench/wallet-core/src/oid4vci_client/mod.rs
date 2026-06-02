@@ -22,12 +22,18 @@ pub use offer::{parse_offer_url, CredentialOffer, Grants, Oid4vciParseError, Pre
 pub use token::{request_token, Oid4vciTokenError, TokenResponse};
 
 /// Drive the full OID4VCI flow from a scanned QR URL.
+///
+/// Port-typed: the caller hands `Arc<dyn DidAuthnDiscovery>` +
+/// `Arc<dyn DidSigner>` — the same pair the OID4VP path
+/// (`LoginCoordinator::mode_a`) consumes. Sharing the adapters
+/// across both protocols means one DID-resolution cache covers
+/// every login + every issuance for the session.
 pub async fn run_issuance(
     http: &dyn crate::HttpClient,
-    clock: &dyn crate::Clock,
+    clock: &std::sync::Arc<dyn crate::Clock>,
     qr_url: &str,
-    wallet: &crate::wallet::Wallet,
-    secret_store: &dyn crate::secret_storage::SecretStorage,
+    discovery: &std::sync::Arc<dyn crate::oid4vp_client::DidAuthnDiscovery>,
+    signer: &std::sync::Arc<dyn crate::oid4vp_client::DidSigner>,
     holder_did: &crate::DidId,
     vc_store: &dyn crate::vc_store::VcStorage,
 ) -> Result<String, IssuanceFlowError> {
@@ -38,8 +44,8 @@ pub async fn run_issuance(
         clock,
         &offer.credential_issuer,
         &code,
-        wallet,
-        secret_store,
+        discovery,
+        signer,
         holder_did,
         vc_store,
     )
@@ -57,10 +63,13 @@ pub enum IssuanceFlowError {
 
 #[cfg(test)]
 mod flow_tests {
+    use std::sync::Arc;
+
     use super::*;
-    use crate::clock::FixedClock;
+    use crate::clock::{Clock, FixedClock};
     use crate::http::mock::MockHttpClient;
     use crate::test_support::{
+        stub_authn_discovery, stub_did_signer,
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
     use crate::vc_store::InMemoryVcStore;
@@ -110,12 +119,16 @@ mod flow_tests {
         let seed = [24u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
+        let discovery = stub_authn_discovery(wallet);
+        let signer = stub_did_signer(store);
         let vc_store = InMemoryVcStore::default();
-        let clock = FixedClock::new(1_700_000_001_000);
+        let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
 
-        let uri = run_issuance(&http, &clock, &qr, &wallet, &store, &did, &vc_store)
-            .await
-            .expect("ok");
+        let uri = run_issuance(
+            &http, &clock, &qr, &discovery, &signer, &did, &vc_store,
+        )
+        .await
+        .expect("ok");
         assert_eq!(uri, "urn:uuid:flow-1");
 
         let rec = http.recorded();

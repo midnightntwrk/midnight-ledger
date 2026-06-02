@@ -54,9 +54,10 @@ use wallet_core::oid4vp_client::{
     SignError, run_authentication,
 };
 use wallet_core::test_support::{
+    stub_authn_discovery, stub_did_signer,
     stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
 };
-use wallet_core::{DidId, VerificationMethodRef, Wallet};
+use wallet_core::DidId;
 
 const ISSUER_CLIENT_ID: &str = "did:midnight:issuer-mock";
 const RESPONSE_URI: &str = "https://issuer.local/authorize-response";
@@ -66,66 +67,12 @@ const RESPONSE_URI: &str = "https://issuer.local/authorize-response";
 const QR_URL: &str =
     "openid4vp://demo/?request_uri=https%3A%2F%2Fissuer.local%2Frequest%2Fabc";
 
-// ── Wallet-side adapters used by tests that need a real
-//    discovery / signer (the bootstrap fixture supplies a
-//    chain-state stub the Wallet's resolve_did can read). ───
-
-struct WalletDiscovery {
-    wallet: Wallet,
-}
-#[async_trait]
-impl DidAuthnDiscovery for WalletDiscovery {
-    async fn authn_key(&self, did: &DidId) -> Result<AuthnKey, DiscoverError> {
-        let doc = self
-            .wallet
-            .resolve_did(&did.to_did_string())
-            .await
-            .map_err(|e| DiscoverError::Resolve(e.to_string()))?;
-        let (kid, public_jwk) = match doc
-            .authentication
-            .first()
-            .ok_or_else(|| DiscoverError::NoAuthnKey(did.to_did_string()))?
-        {
-            VerificationMethodRef::Inline(vm) => {
-                (vm.id.clone(), vm.public_key_jwk.clone())
-            }
-            VerificationMethodRef::Id(id) => {
-                let vm = doc
-                    .verification_method
-                    .iter()
-                    .find(|v| v.id == *id)
-                    .ok_or_else(|| {
-                        DiscoverError::Resolve(format!(
-                            "authentication kid {id} not in verificationMethod[]"
-                        ))
-                    })?;
-                (vm.id.clone(), vm.public_key_jwk.clone())
-            }
-        };
-        Ok(AuthnKey { kid, public_jwk })
-    }
-}
-
-struct InMemorySigner {
-    store: wallet_core::secret_storage::InMemorySecretStore,
-}
-#[async_trait]
-impl DidSigner for InMemorySigner {
-    async fn sign(&self, kid: &str, payload: &[u8]) -> Result<Vec<u8>, SignError> {
-        use wallet_core::secret_storage::SecretStorage;
-        let key_ref = self
-            .store
-            .find_by_kid(kid)
-            .await
-            .ok_or_else(|| SignError::NoLocalSecret(kid.to_string()))?;
-        let out = self
-            .store
-            .sign(key_ref.uuid(), payload)
-            .await
-            .map_err(|e| SignError::Sign(e.to_string()))?;
-        Ok(out.signature)
-    }
-}
+// Real-path discovery + signer come from
+// `wallet_core::test_support::{stub_authn_discovery, stub_did_signer}`
+// — shared with the OID4VP unit tests in `oid4vp_client::mod` and
+// the OID4VCI tests in `oid4vci_client::credential`. That keeps the
+// adapter wiring documented once, instead of duplicated across
+// three test sites.
 
 // ── Test-only discovery / signer that fail on demand, for the
 //    wallet-short-circuit cases. ─────────────────────────────
@@ -163,8 +110,8 @@ async fn real_coordinator() -> LoginCoordinator {
     let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
     let store = stub_secret_store_with_bootstrapped_did(seed).await;
     LoginCoordinator::mode_a(IdTokenBuilder::new(
-        Arc::new(WalletDiscovery { wallet }),
-        Arc::new(InMemorySigner { store }),
+        stub_authn_discovery(wallet),
+        stub_did_signer(store),
         Arc::new(FixedClock::new(1_700_000_000_000)),
         did,
     ))
@@ -361,7 +308,7 @@ async fn wallet_sign_failure_short_circuits() {
     let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
     let coordinator = LoginCoordinator::mode_a(IdTokenBuilder::new(
         // Real discovery (returns OK); failing signer.
-        Arc::new(WalletDiscovery { wallet }),
+        stub_authn_discovery(wallet),
         Arc::new(FailingSigner(SignError::NoLocalSecret(
             "did:midnight:undeployed:abc#key-auth".into(),
         ))),

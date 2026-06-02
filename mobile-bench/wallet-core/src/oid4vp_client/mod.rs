@@ -17,29 +17,21 @@
 //!
 //! Architecture spec: `docs/superpowers/specs/2026-06-02-login-with-did-architecture.md`.
 //!
-//! ## Note on `jws.rs`
+//! ## JWS construction
 //!
-//! The pre-refactor `jws::build_id_token` (sign-twice probe
-//! pattern, JOSE-header self-asserted JWK) is still present for
-//! one reason: `oid4vci_client::credential::request_credential`
-//! uses it to construct the proof-of-possession JWS on the
-//! OID4VCI side. A follow-up task will migrate that flow to the
-//! new [`builders::IdTokenBuilder`] + ports, at which point
-//! `jws.rs` and the entire `did_auth` module can also be
-//! removed.
+//! Both OID4VP id_token signing and OID4VCI proof-of-possession
+//! signing go through [`id_token::sign_id_token_with_ports`].
+//! The legacy `jws::build_id_token` (sign-twice probe pattern,
+//! JOSE-header self-asserted JWK) was deleted once OID4VCI was
+//! migrated to the new ports — there's no longer any caller that
+//! needs the legacy shape.
 
-mod jws;
 pub mod ports;
 pub mod request;
 pub mod response;
 pub mod errors;
 pub mod id_token;
 pub mod builders;
-
-// Legacy `jws` re-export — kept for OID4VCI proof-of-possession
-// (see file-level note). All wallet-core / dioxus-wallet OID4VP
-// call sites use the new builders + coordinator now.
-pub use jws::{build_id_token, IdTokenError};
 
 pub use ports::{AuthnKey, DidAuthnDiscovery, DidSigner, DiscoverError, SignError};
 pub use request::{
@@ -150,83 +142,9 @@ mod flow_tests {
     use crate::clock::FixedClock;
     use crate::http::mock::MockHttpClient;
     use crate::test_support::{
+        stub_authn_discovery, stub_did_signer,
         stub_secret_store_with_bootstrapped_did, stub_wallet_with_bootstrapped_did,
     };
-
-    /// Wallet-core inherent adapter — wires the `Wallet`'s
-    /// `resolve_did` into [`DidAuthnDiscovery`]. Mirrors what
-    /// dioxus-wallet's `CachedWalletAuthnDiscovery` does, minus
-    /// the cache. Lives inside the test module because no other
-    /// wallet-core consumer needs it — the cache version is the
-    /// one production callers use.
-    struct WalletDiscovery {
-        wallet: crate::wallet::Wallet,
-    }
-    #[async_trait::async_trait]
-    impl DidAuthnDiscovery for WalletDiscovery {
-        async fn authn_key(
-            &self,
-            did: &crate::DidId,
-        ) -> Result<AuthnKey, DiscoverError> {
-            let doc = self
-                .wallet
-                .resolve_did(&did.to_did_string())
-                .await
-                .map_err(|e| DiscoverError::Resolve(e.to_string()))?;
-            let (kid, public_jwk) = match doc
-                .authentication
-                .first()
-                .ok_or_else(|| DiscoverError::NoAuthnKey(did.to_did_string()))?
-            {
-                crate::VerificationMethodRef::Inline(vm) => {
-                    (vm.id.clone(), vm.public_key_jwk.clone())
-                }
-                crate::VerificationMethodRef::Id(id) => {
-                    let vm = doc
-                        .verification_method
-                        .iter()
-                        .find(|v| v.id == *id)
-                        .ok_or_else(|| {
-                            DiscoverError::Resolve(format!(
-                                "authentication kid {id} not in verificationMethod[]"
-                            ))
-                        })?;
-                    (vm.id.clone(), vm.public_key_jwk.clone())
-                }
-            };
-            Ok(AuthnKey { kid, public_jwk })
-        }
-    }
-
-    /// Wallet-core inherent adapter — wraps `InMemorySecretStore`
-    /// in the [`DidSigner`] port. Mirrors dioxus-wallet's
-    /// `RedbDidSigner`; lives in the test module so the new
-    /// `run_authentication` can be tested without dragging in
-    /// dioxus-wallet's redb dep.
-    struct InMemorySigner {
-        store: crate::secret_storage::InMemorySecretStore,
-    }
-    #[async_trait::async_trait]
-    impl DidSigner for InMemorySigner {
-        async fn sign(
-            &self,
-            kid: &str,
-            payload: &[u8],
-        ) -> Result<Vec<u8>, SignError> {
-            use crate::secret_storage::SecretStorage;
-            let key_ref = self
-                .store
-                .find_by_kid(kid)
-                .await
-                .ok_or_else(|| SignError::NoLocalSecret(kid.to_string()))?;
-            let out = self
-                .store
-                .sign(key_ref.uuid(), payload)
-                .await
-                .map_err(|e| SignError::Sign(e.to_string()))?;
-            Ok(out.signature)
-        }
-    }
 
     #[tokio::test]
     async fn run_authentication_happy_path_via_coordinator() {
@@ -255,8 +173,8 @@ mod flow_tests {
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
 
         let coordinator = LoginCoordinator::mode_a(IdTokenBuilder::new(
-            Arc::new(WalletDiscovery { wallet }),
-            Arc::new(InMemorySigner { store }),
+            stub_authn_discovery(wallet),
+            stub_did_signer(store),
             Arc::new(FixedClock::new(1_700_000_000_000)),
             did,
         ));
@@ -310,8 +228,8 @@ mod flow_tests {
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
 
         let coordinator = LoginCoordinator::mode_a(IdTokenBuilder::new(
-            Arc::new(WalletDiscovery { wallet }),
-            Arc::new(InMemorySigner { store }),
+            stub_authn_discovery(wallet),
+            stub_did_signer(store),
             Arc::new(FixedClock::new(1_700_000_000_000)),
             did,
         ));

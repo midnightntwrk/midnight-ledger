@@ -220,6 +220,98 @@ pub async fn stub_secret_store_with_bootstrapped_did(
     store
 }
 
+/// Test helper: build a wallet-backed [`DidAuthnDiscovery`] for
+/// tests. Mirrors what `dioxus-wallet`'s
+/// `CachedWalletAuthnDiscovery` does in production, minus the
+/// cache (tests want every call observable).
+///
+/// Both OID4VP `run_authentication` tests and OID4VCI
+/// `request_credential` tests use this — keeps the adapter
+/// pattern in one place instead of duplicated across two test
+/// modules.
+pub fn stub_authn_discovery(
+    wallet: Wallet,
+) -> Arc<dyn crate::oid4vp_client::DidAuthnDiscovery> {
+    Arc::new(WalletDiscovery { wallet })
+}
+
+/// Test helper: wrap [`InMemorySecretStore`] in a [`DidSigner`].
+/// Mirrors `dioxus-wallet`'s `RedbDidSigner`.
+pub fn stub_did_signer(
+    store: InMemorySecretStore,
+) -> Arc<dyn crate::oid4vp_client::DidSigner> {
+    Arc::new(InMemorySigner { store })
+}
+
+struct WalletDiscovery {
+    wallet: Wallet,
+}
+#[async_trait]
+impl crate::oid4vp_client::DidAuthnDiscovery for WalletDiscovery {
+    async fn authn_key(
+        &self,
+        did: &crate::DidId,
+    ) -> Result<
+        crate::oid4vp_client::AuthnKey,
+        crate::oid4vp_client::DiscoverError,
+    > {
+        use crate::oid4vp_client::{AuthnKey, DiscoverError};
+        let doc = self
+            .wallet
+            .resolve_did(&did.to_did_string())
+            .await
+            .map_err(|e| DiscoverError::Resolve(e.to_string()))?;
+        let (kid, public_jwk) = match doc
+            .authentication
+            .first()
+            .ok_or_else(|| DiscoverError::NoAuthnKey(did.to_did_string()))?
+        {
+            crate::VerificationMethodRef::Inline(vm) => {
+                (vm.id.clone(), vm.public_key_jwk.clone())
+            }
+            crate::VerificationMethodRef::Id(id) => {
+                let vm = doc
+                    .verification_method
+                    .iter()
+                    .find(|v| v.id == *id)
+                    .ok_or_else(|| {
+                        DiscoverError::Resolve(format!(
+                            "authentication kid {id} not in verificationMethod[]"
+                        ))
+                    })?;
+                (vm.id.clone(), vm.public_key_jwk.clone())
+            }
+        };
+        Ok(AuthnKey { kid, public_jwk })
+    }
+}
+
+struct InMemorySigner {
+    store: InMemorySecretStore,
+}
+#[async_trait]
+impl crate::oid4vp_client::DidSigner for InMemorySigner {
+    async fn sign(
+        &self,
+        kid: &str,
+        payload: &[u8],
+    ) -> Result<Vec<u8>, crate::oid4vp_client::SignError> {
+        use crate::oid4vp_client::SignError;
+        use crate::secret_storage::SecretStorage;
+        let key_ref = self
+            .store
+            .find_by_kid(kid)
+            .await
+            .ok_or_else(|| SignError::NoLocalSecret(kid.to_string()))?;
+        let out = self
+            .store
+            .sign(key_ref.uuid(), payload)
+            .await
+            .map_err(|e| SignError::Sign(e.to_string()))?;
+        Ok(out.signature)
+    }
+}
+
 /// Test helper: stub wallet + a freshly-created DID with no
 /// verification methods attached. For testing the "no authn key"
 /// error path in `did_auth`.

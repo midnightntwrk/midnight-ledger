@@ -38,7 +38,6 @@ pub mod unlock;
 mod unshielded;
 mod wallet;
 pub mod vc_store;
-pub mod did_auth;
 pub mod oid4vp_client;
 pub mod oid4vci_client;
 pub mod vc_self_verify;
@@ -133,13 +132,21 @@ pub use tx::{DeployOutcome, TxError, WizardStage};
 pub use vc_store::{RedbVcStore, StoredVc, VcMetadata, VcOpening, VcStorage, VcStoreError};
 #[cfg(any(test, feature = "test-support"))]
 pub use vc_store::InMemoryVcStore;
-pub use did_auth::{sign_for_authentication, DidAuthError};
 // OID4VP entry point — dioxus-wallet calls
 // `oid4vp_client::run_authentication` directly through the
 // fully-qualified path (commit 758a5fa3); no lib-level alias
 // needed. The Login-with-DID Tasks 4-9 refactor removed the
 // `legacy_run_authentication` / `LegacyAuthFlowError`
 // transitional shims here.
+//
+// The legacy `did_auth::sign_for_authentication` (resolve+sign
+// in one call, used by the now-deleted `jws::build_id_token`)
+// is gone — replaced by the port pair
+// `oid4vp_client::{DidAuthnDiscovery, DidSigner}` + the shared
+// `oid4vp_client::id_token::sign_id_token_with_ports` helper.
+// Both OID4VP login and OID4VCI proof-of-possession go through
+// that helper now, so the wire shape and resolve/sign budget
+// are unified across the two protocols.
 pub use oid4vci_client::{run_issuance as oid4vci_run_issuance, IssuanceFlowError};
 pub use vc_self_verify::{self_verify, self_verify_and_cache, InvalidReason, SelfVerifyResult};
 pub use qr_scanner::{QrScanner, QrScanError, PasteUrlScanner};
