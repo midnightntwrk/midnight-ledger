@@ -82,6 +82,14 @@ pub struct BridgeState {
     /// deltas around bracketed operations. Stateless, share
     /// the `Arc`.
     pub resource_probe: Arc<RusageProbe>,
+    /// Dedicated worker-thread handle (8 MiB stack, single-
+    /// thread tokio rt). Set once at App::run before any UI
+    /// component mounts; from then on every heavy chain op
+    /// routes through `bridge_state.worker().send(WorkMsg::…)`
+    /// instead of `spawn(Box::pin(async move {…}))`. See
+    /// docs/superpowers/specs/2026-06-02-wallet-worker-thread.md
+    /// for the migration plan.
+    pub worker: Arc<OnceCell<crate::worker::AppWorker>>,
 }
 
 impl PartialEq for BridgeState {
@@ -93,6 +101,7 @@ impl PartialEq for BridgeState {
             && Arc::ptr_eq(&self.log_capture, &other.log_capture)
             && Arc::ptr_eq(&self.metrics, &other.metrics)
             && Arc::ptr_eq(&self.resource_probe, &other.resource_probe)
+            && Arc::ptr_eq(&self.worker, &other.worker)
     }
 }
 impl Eq for BridgeState {}
@@ -100,6 +109,22 @@ impl Eq for BridgeState {}
 impl BridgeState {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Install the worker handle. Called once at App::run after
+    /// [`crate::worker::AppWorker::spawn`]. Subsequent calls are
+    /// no-ops (matches the [`set_store`] / [`OnceCell`] pattern).
+    pub fn set_worker(&self, worker: crate::worker::AppWorker) {
+        let _ = self.worker.set(worker);
+    }
+
+    /// Borrow the worker handle. Returns `None` before
+    /// `set_worker` has fired (i.e. during the very early bridge
+    /// boot path, or in unit tests that drive BridgeState
+    /// without an App). Production click handlers can `.expect`
+    /// this — the App always sets it before any UI mounts.
+    pub fn worker(&self) -> Option<&crate::worker::AppWorker> {
+        self.worker.get()
     }
 
     /// Best-effort URL accessor for UI display. Returns `None` until

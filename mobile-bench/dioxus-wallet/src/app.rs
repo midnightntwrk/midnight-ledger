@@ -1248,8 +1248,78 @@ pub fn App() -> Element {
         if let Some(cap) = crate::logs::LOG_CAPTURE.get() {
             state.set_log_capture(cap.clone());
         }
+        // Spawn the wallet-worker thread (8 MiB stack,
+        // current-thread tokio rt) and install its handle into
+        // BridgeState. From here on, every heavy chain op
+        // routes through `bridge_state.worker()` instead of
+        // `spawn(Box::pin(async move {…}))`. See
+        // docs/superpowers/specs/2026-06-02-wallet-worker-thread.md.
+        state.set_worker(crate::worker::AppWorker::spawn());
         state
     });
+
+    // Outcome pump: read every WorkOutcome the worker emits and
+    // route it back to the click handler that originated the
+    // corresponding WorkMsg. Lives in a use_future so signal
+    // mutations inside the registered handlers happen on the
+    // Dioxus runtime (correct scope context). Runs for the App's
+    // lifetime; the worker channel closes only on process exit.
+    {
+        let bridge_state_for_pump = bridge_state;
+        use_future(move || async move {
+            let worker = match bridge_state_for_pump.read().worker().cloned() {
+                Some(w) => w,
+                None => {
+                    tracing::error!(
+                        target: "wallet_worker",
+                        "outcome pump: worker not installed in BridgeState",
+                    );
+                    return;
+                }
+            };
+
+            // Smoke-test the channel round-trip — fire a Noop and
+            // verify the matching NoopAck flows back through the
+            // router. Logs once at boot; never repeats.
+            let smoke_id = crate::worker::next_action_id();
+            worker.outcomes().register(
+                smoke_id,
+                Box::new(move |outcome| {
+                    tracing::info!(
+                        target: "wallet_worker",
+                        ?outcome,
+                        "outcome pump smoke test: round-trip ok",
+                    );
+                }),
+            );
+            worker.send(crate::worker::WorkMsg::Noop { action_id: smoke_id });
+
+            loop {
+                let outcome = match worker.recv_outcome().await {
+                    Some(o) => o,
+                    None => {
+                        tracing::warn!(
+                            target: "wallet_worker",
+                            "outcome channel closed; pump exiting",
+                        );
+                        return;
+                    }
+                };
+                let action_id = outcome.action_id();
+                if let Some(handler) = worker.outcomes().take(action_id) {
+                    handler(outcome);
+                } else {
+                    tracing::debug!(
+                        target: "wallet_worker",
+                        action_id,
+                        ?outcome,
+                        "outcome dropped — no registered handler (component unmounted?)",
+                    );
+                }
+            }
+        });
+    }
+
     let mut proof_server = use_signal::<Option<String>>(|| None);
 
     // Persistent wallet store lifecycle. Locked at boot —

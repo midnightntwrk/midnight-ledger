@@ -33,6 +33,12 @@ pub(crate) use qr_scanner_android::AndroidQrScanner as ActiveQrScanner;
 #[cfg(not(target_os = "android"))]
 pub(crate) use qr_scanner_fallback::FallbackQrScanner as ActiveQrScanner;
 
+// Wallet worker thread — central serialiser for heavy chain ops.
+// Boots once at App::run, lives until process exit. See
+// docs/superpowers/specs/2026-06-02-wallet-worker-thread.md for
+// the architecture rationale.
+pub(crate) mod worker;
+
 pub fn run() {
     // Two tracing layers ride together: the standard `fmt`
     // layer for stderr (developer feedback when running
@@ -60,7 +66,7 @@ pub fn run() {
     // what stderr shows.
     let stderr_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
         EnvFilter::new(
-            "warn,wallet_core=debug,dioxuswalletmain=info,bundle=info,eval-bridge=info,mn-pkg=info",
+            "warn,wallet_core=debug,dioxuswalletmain=info,bundle=info,eval-bridge=info,mn-pkg=info,wallet_worker=info",
         )
     });
     let _ = tracing_subscriber::registry()
