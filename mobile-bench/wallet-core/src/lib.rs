@@ -134,7 +134,19 @@ pub use vc_store::{RedbVcStore, StoredVc, VcMetadata, VcOpening, VcStorage, VcSt
 #[cfg(any(test, feature = "test-support"))]
 pub use vc_store::InMemoryVcStore;
 pub use did_auth::{sign_for_authentication, DidAuthError};
-pub use oid4vp_client::{run_authentication as oid4vp_run_authentication, AuthFlowError};
+// `oid4vp_run_authentication` is the original alias dioxus-wallet
+// imports. During the Login-with-DID architecture refactor
+// (Tasks 4-9; see
+// docs/superpowers/specs/2026-06-02-login-with-did-architecture.md)
+// we keep this alias pointed at the LEGACY orchestrator so existing
+// call sites compile unchanged. Task 8 migrates dioxus-wallet to
+// call `oid4vp_client::run_authentication` (the new coordinator-
+// driven entry point) directly; Task 9 deletes the legacy function
+// + this alias.
+pub use oid4vp_client::{
+    legacy_run_authentication as oid4vp_run_authentication,
+    LegacyAuthFlowError as AuthFlowError,
+};
 pub use oid4vci_client::{run_issuance as oid4vci_run_issuance, IssuanceFlowError};
 pub use vc_self_verify::{self_verify, self_verify_and_cache, InvalidReason, SelfVerifyResult};
 pub use qr_scanner::{QrScanner, QrScanError, PasteUrlScanner};
