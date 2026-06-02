@@ -144,7 +144,10 @@ fn network_id_str(net: Network) -> &'static str {
         Network::Preview => "preview",
         Network::QaNet => "qanet",
         Network::DevNet => "devnet",
-        Network::Undeployed => "undeployed",
+        // Both Undeployed variants are the same chain — DIDs
+        // minted under either MUST round-trip under either. The
+        // chain doesn't distinguish.
+        Network::Undeployed | Network::UndeployedYurii => "undeployed",
     }
 }
 
@@ -204,7 +207,23 @@ mod tests {
             let id = DidId::new(net, [0xaa; 32]);
             let s = id.to_did_string();
             let parsed = DidId::parse(&s).unwrap();
-            assert_eq!(parsed, id, "round-trip failed for {net:?}");
+            // `UndeployedYurii` (and any future endpoint-only
+            // variants of the standalone chain) serialize as
+            // `undeployed` — the wire only encodes the chain,
+            // not how the wallet reaches it. Parsing back
+            // therefore normalises to the canonical
+            // `Network::Undeployed`. Assert the chain identity
+            // is preserved (contract address + same
+            // `is_undeployed()` family).
+            if net.is_undeployed() {
+                assert!(
+                    parsed.network.is_undeployed(),
+                    "{net:?} should round-trip to an Undeployed-family variant",
+                );
+                assert_eq!(parsed.contract_address, id.contract_address);
+            } else {
+                assert_eq!(parsed, id, "round-trip failed for {net:?}");
+            }
         }
     }
 

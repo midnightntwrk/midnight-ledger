@@ -534,14 +534,15 @@ impl Wallet {
     }
 
     /// Demo wallet — uses [`UNDEPLOYED_GENESIS_SEED_HEX`] when the
-    /// network is [`Network::Undeployed`] (so the wallet starts with
-    /// real NIGHT + DUST balances on the local standalone stack),
-    /// and the public-knowledge [`DEMO_SEED_HEX`] for every other
-    /// network (where there's no funding implication). Both are
-    /// stable across launches so the dev UI shows the same public
-    /// keys.
+    /// network targets the standalone chain (either
+    /// [`Network::Undeployed`] or [`Network::UndeployedYurii`], both
+    /// of which point at the same docker-compose env and therefore
+    /// share the funded genesis seed), and the public-knowledge
+    /// [`DEMO_SEED_HEX`] for every other network (where there's no
+    /// funding implication). Both are stable across launches so the
+    /// dev UI shows the same public keys.
     pub fn demo(network: Network) -> Self {
-        let seed = if network == Network::Undeployed {
+        let seed = if network.is_undeployed() {
             UNDEPLOYED_GENESIS_SEED_HEX
         } else {
             DEMO_SEED_HEX

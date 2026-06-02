@@ -58,7 +58,14 @@ impl From<Network> for NetworkTag {
             Network::Preview => 3,
             Network::QaNet => 4,
             Network::DevNet => 5,
-            Network::Undeployed => 6,
+            // Both variants target the same standalone chain
+            // (same network_id, same address prefix, same funded
+            // genesis seed). Sharing the storage tag means a
+            // wallet bootstrapped under `Undeployed` is visible
+            // when the user later switches to `UndeployedYurii`
+            // and vice-versa — no "ghost" wallets created on
+            // endpoint flip.
+            Network::Undeployed | Network::UndeployedYurii => 6,
         })
     }
 }

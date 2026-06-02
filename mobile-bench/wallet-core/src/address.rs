@@ -37,7 +37,12 @@ pub fn unshielded_hrp(network: Network) -> &'static str {
         Network::Preview => "mn_addr_preview",
         Network::QaNet => "mn_addr_qanet",
         Network::DevNet => "mn_addr_devnet",
-        Network::Undeployed => "mn_addr_undeployed",
+        // Both Undeployed variants address the same standalone
+        // chain — addresses must encode identically so a key
+        // pair bound at `Undeployed` keeps working after the
+        // user switches to `UndeployedYurii` (same chain, just
+        // a different way to reach it).
+        Network::Undeployed | Network::UndeployedYurii => "mn_addr_undeployed",
     }
 }
 
@@ -53,7 +58,9 @@ pub fn shielded_hrp(network: Network) -> &'static str {
         Network::Preview => "mn_shield-addr_preview",
         Network::QaNet => "mn_shield-addr_qanet",
         Network::DevNet => "mn_shield-addr_devnet",
-        Network::Undeployed => "mn_shield-addr_undeployed",
+        // See `unshielded_hrp`: both Undeployed variants share
+        // the same chain ⇒ same HRP.
+        Network::Undeployed | Network::UndeployedYurii => "mn_shield-addr_undeployed",
     }
 }
 

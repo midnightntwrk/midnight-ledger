@@ -397,6 +397,7 @@ fn parse_network(s: &str) -> Result<Network, String> {
         "qanet" => Ok(Network::QaNet),
         "devnet" => Ok(Network::DevNet),
         "undeployed" => Ok(Network::Undeployed),
+        "undeployedyurii" => Ok(Network::UndeployedYurii),
         other => Err(format!("unknown network: {other}")),
     }
 }

@@ -815,36 +815,26 @@ pub(crate) fn app_wallet_for(net: Network) -> Wallet {
     //
     // Resolution order:
     //   1. `PROOF_SERVER_URL` OnceLock — populated at runtime by
-    //      `BridgeState::spawn_proof_server` (desktop / iOS path).
-    //   2. `MIDNIGHT_PROOF_SERVER_URL` env var captured at build
-    //      time via `option_env!()`. This is the Android / cross-
-    //      compile path: the APK's `.so` carries the operator's
-    //      tailnet proof-server URL baked in, since you can't set
-    //      process env vars on Android without Java glue.
-    //   3. Fall back to LocalProvingProvider (in-process Halo2 —
-    //      slow on phones, OK on desktop debug).
-    let build_time_url: Option<&'static str> =
-        option_env!("MIDNIGHT_PROOF_SERVER_URL");
-    let resolved_url: Option<String> = PROOF_SERVER_URL
+    //      `BridgeState::spawn_proof_server` (desktop / iOS path
+    //      spawns a host-local proof-server and stashes the URL
+    //      here; this takes precedence so dev can override per
+    //      session without rebuilding).
+    //   2. `network.config().proving_server_url` — every network
+    //      ships a sensible default URL (localhost for
+    //      `Undeployed`, the tailnet IP for `UndeployedYurii`,
+    //      etc.). This is the Android path: switching the
+    //      in-app network picker is enough to retarget the
+    //      proof-server; no APK rebuild required.
+    let resolved_url: String = PROOF_SERVER_URL
         .get()
         .cloned()
-        .or_else(|| build_time_url.map(String::from));
-    let with_url = if let Some(url) = resolved_url {
-        tracing::info!(
-            target: "dioxuswalletmain",
-            proof_server_url = %url,
-            "app_wallet_for: attaching proof-server URL",
-        );
-        base.with_proof_server_url(url)
-    } else {
-        tracing::info!(
-            target: "dioxuswalletmain",
-            "app_wallet_for: no proof-server URL (runtime OnceLock empty, \
-             MIDNIGHT_PROOF_SERVER_URL build-time env unset) — will use \
-             LocalProvingProvider",
-        );
-        base
-    };
+        .unwrap_or_else(|| net.config().proving_server_url.to_string());
+    tracing::info!(
+        target: "dioxuswalletmain",
+        proof_server_url = %resolved_url,
+        "app_wallet_for: attaching proof-server URL",
+    );
+    let with_url = base.with_proof_server_url(resolved_url);
     // Layer 2 / Phase 3: attach the persisted DUST syncer if the
     // store has been opened. `Wallet::sync_dust` will then resume
     // from `last_id + 1` instead of replaying ~534k events on
@@ -9363,6 +9353,7 @@ fn network_value(n: Network) -> &'static str {
         Network::QaNet => "qanet",
         Network::DevNet => "devnet",
         Network::Undeployed => "undeployed",
+        Network::UndeployedYurii => "undeployedyurii",
     }
 }
 
@@ -9374,6 +9365,7 @@ fn parse_network(s: &str) -> Option<Network> {
         "qanet" => Some(Network::QaNet),
         "devnet" => Some(Network::DevNet),
         "undeployed" => Some(Network::Undeployed),
+        "undeployedyurii" => Some(Network::UndeployedYurii),
         _ => None,
     }
 }
