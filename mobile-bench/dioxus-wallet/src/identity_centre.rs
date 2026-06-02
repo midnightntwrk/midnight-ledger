@@ -135,46 +135,57 @@ fn run_oid4vp_authenticate(
     let probe = bridge_state.resource_probe();
     let action_id = next_action_id();
     let span = tracing::info_span!("ic.oid4vp_authenticate", action_id = %action_id);
-    spawn(
-        async move {
-            let wallet =
-                metered_app_wallet_for(network, metrics.clone(), probe.clone());
-            let secret_store = RedbSecretStore::new(store, wallet_id);
-            let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-            let http: Arc<dyn HttpClient> =
-                Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-            let clock = SystemClock;
-            let result = time_op(
-                &*metrics,
-                &*probe,
-                "oid4vp_authenticate",
-                oid4vp_run_authentication(
-                    &*http,
-                    &clock,
-                    &url,
-                    &wallet,
-                    &secret_store,
-                    &did,
-                ),
-            )
-            .await;
-            match result {
-                Ok(r) => {
-                    in_mem_metrics.incr("oid4vp.ok", 1);
-                    ok_msg.set(Some(format!(
-                        "session_id={} status={}",
-                        r.session_id, r.status,
-                    )));
+    // Box::pin keeps the OID4VP state machine off the spawning
+    // thread's stack — same trick used by the Bootstrap flow
+    // (commit f1dffe5e). The future inlines a Wallet + indexer +
+    // HTTP client + run_authentication state machine; if it
+    // lands on the WebView dispatch thread (~256 KiB stack on
+    // Android) construction blows the guard page and triggers
+    // SIGSEGV at `Runtime::with_current_scope`. Today OID4VP
+    // happens to fit because run_authentication is smaller
+    // than Bootstrap, but the safety margin is tiny.
+    let fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
+        Box::pin(
+            async move {
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
+                let secret_store = RedbSecretStore::new(store, wallet_id);
+                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                let http: Arc<dyn HttpClient> =
+                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+                let clock = SystemClock;
+                let result = time_op(
+                    &*metrics,
+                    &*probe,
+                    "oid4vp_authenticate",
+                    oid4vp_run_authentication(
+                        &*http,
+                        &clock,
+                        &url,
+                        &wallet,
+                        &secret_store,
+                        &did,
+                    ),
+                )
+                .await;
+                match result {
+                    Ok(r) => {
+                        in_mem_metrics.incr("oid4vp.ok", 1);
+                        ok_msg.set(Some(format!(
+                            "session_id={} status={}",
+                            r.session_id, r.status,
+                        )));
+                    }
+                    Err(e) => {
+                        in_mem_metrics.incr("oid4vp.failed", 1);
+                        err_msg.set(Some(format!("authenticate failed: {e}")));
+                    }
                 }
-                Err(e) => {
-                    in_mem_metrics.incr("oid4vp.failed", 1);
-                    err_msg.set(Some(format!("authenticate failed: {e}")));
-                }
+                busy.set(false);
             }
-            busy.set(false);
-        }
-        .instrument(span),
-    );
+            .instrument(span),
+        );
+    spawn(fut);
 }
 
 /// Run the OID4VCI issuance flow with a known DID + URL. Counterpart
@@ -211,52 +222,64 @@ fn run_oid4vci_request(
     let probe = bridge_state.resource_probe();
     let action_id = next_action_id();
     let span = tracing::info_span!("ic.issuance", action_id = %action_id);
-    spawn(
-        async move {
-            let wallet =
-                metered_app_wallet_for(network, metrics.clone(), probe.clone());
-            let secret_store = RedbSecretStore::new(store, wallet_id);
-            let vc_store = match RedbVcStore::open(vc_store_path()) {
-                Ok(v) => v,
-                Err(e) => {
-                    err_msg.set(Some(format!("open vc store: {e}")));
-                    busy.set(false);
-                    return;
+    // Box::pin the OID4VCI state machine for the same reason
+    // Bootstrap (commit f1dffe5e) needed it on Android: the
+    // inline async block builds Wallet + RedbVcStore +
+    // HttpClient + run_issuance (token + JWS PoP + credential
+    // POST) — its state machine size matches Bootstrap's. On
+    // 2026-06-02 the un-boxed variant hung silently on the
+    // phone right after the /token POST succeeded; the very
+    // next sign_for_authentication → resolve_did never logged.
+    // Heap-allocating the state machine restores stable
+    // progress past the JWS step.
+    let fut: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + 'static>> =
+        Box::pin(
+            async move {
+                let wallet =
+                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
+                let secret_store = RedbSecretStore::new(store, wallet_id);
+                let vc_store = match RedbVcStore::open(vc_store_path()) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        err_msg.set(Some(format!("open vc store: {e}")));
+                        busy.set(false);
+                        return;
+                    }
+                };
+                let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
+                let http: Arc<dyn HttpClient> =
+                    Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
+                let clock = SystemClock;
+                let result = time_op(
+                    &*metrics,
+                    &*probe,
+                    "issuance",
+                    oid4vci_run_issuance(
+                        &*http,
+                        &clock,
+                        &url,
+                        &wallet,
+                        &secret_store,
+                        &did,
+                        &vc_store,
+                    ),
+                )
+                .await;
+                match result {
+                    Ok(vc_uri) => {
+                        in_mem_metrics.incr("vcs.issued", 1);
+                        ok_msg.set(Some(format!("issued {vc_uri}")));
+                    }
+                    Err(e) => {
+                        in_mem_metrics.incr("vcs.issuance_failed", 1);
+                        err_msg.set(Some(format!("issue failed: {e}")));
+                    }
                 }
-            };
-            let raw_http: Arc<dyn HttpClient> = Arc::new(ReqwestHttpClient::default());
-            let http: Arc<dyn HttpClient> =
-                Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
-            let clock = SystemClock;
-            let result = time_op(
-                &*metrics,
-                &*probe,
-                "issuance",
-                oid4vci_run_issuance(
-                    &*http,
-                    &clock,
-                    &url,
-                    &wallet,
-                    &secret_store,
-                    &did,
-                    &vc_store,
-                ),
-            )
-            .await;
-            match result {
-                Ok(vc_uri) => {
-                    in_mem_metrics.incr("vcs.issued", 1);
-                    ok_msg.set(Some(format!("issued {vc_uri}")));
-                }
-                Err(e) => {
-                    in_mem_metrics.incr("vcs.issuance_failed", 1);
-                    err_msg.set(Some(format!("issue failed: {e}")));
-                }
+                busy.set(false);
             }
-            busy.set(false);
-        }
-        .instrument(span),
-    );
+            .instrument(span),
+        );
+    spawn(fut);
 }
 
 /// Top-level Identity Centre panel. Renders the four sections

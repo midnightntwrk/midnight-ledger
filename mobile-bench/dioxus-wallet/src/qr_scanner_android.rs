@@ -91,10 +91,16 @@ impl QrScanner for AndroidQrScanner {
     }
 }
 
-/// Attach the current thread to the JVM, look up the
-/// `QrScanBridge` companion's `startScan(Activity, Long)` method,
-/// and invoke it. The `JNIEnv` is dropped before the function
-/// returns — caller may await freely after.
+/// Attach the current thread to the JVM, resolve the
+/// `QrScanBridge` class via the **Activity's class loader** (NOT
+/// the system class loader — `JNIEnv::find_class` from a
+/// non-Java-attached thread defaults to the bionic loader that
+/// only sees `/system/lib64`, so it can't find application
+/// classes; this is the canonical Android JNI footgun), then
+/// invoke the static `startScan(Activity, Long)` method.
+///
+/// The `JNIEnv` is dropped before the function returns — caller
+/// may await freely after.
 fn launch_kotlin_scan(token: u64) -> Result<(), String> {
     let ctx = ndk_context::android_context();
     if ctx.vm().is_null() || ctx.context().is_null() {
@@ -114,13 +120,41 @@ fn launch_kotlin_scan(token: u64) -> Result<(), String> {
     // Activity, owned by wry for the process lifetime.
     let activity = unsafe { JObject::from_raw(ctx.context().cast()) };
 
+    // Walk Activity → ClassLoader → loadClass(name) so we get the
+    // class through the app's dex-aware loader rather than the
+    // bionic system loader. Reference:
+    // https://developer.android.com/training/articles/perf-jni#faq:-why-didnt-findclass-find-my-class
+    let classloader = env
+        .call_method(
+            &activity,
+            "getClassLoader",
+            "()Ljava/lang/ClassLoader;",
+            &[],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| format!("activity.getClassLoader: {e}"))?;
+
+    let class_name = env
+        .new_string("io.iohk.midnight.wallet.QrScanBridge")
+        .map_err(|e| format!("new_string class name: {e}"))?;
+    let bridge_class_obj = env
+        .call_method(
+            &classloader,
+            "loadClass",
+            "(Ljava/lang/String;)Ljava/lang/Class;",
+            &[(&class_name).into()],
+        )
+        .and_then(|v| v.l())
+        .map_err(|e| format!("classLoader.loadClass(QrScanBridge): {e}"))?;
+    let bridge_class: JClass = bridge_class_obj.into();
+
     env.call_static_method(
-        "io/iohk/midnight/wallet/QrScanBridge",
+        bridge_class,
         "startScan",
         "(Landroid/app/Activity;J)V",
         &[(&activity).into(), (token as jlong).into()],
     )
-    .map_err(|e| format!("call_static_method: {e}"))?;
+    .map_err(|e| format!("QrScanBridge.startScan: {e}"))?;
 
     Ok(())
 }
