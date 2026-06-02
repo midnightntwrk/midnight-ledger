@@ -27,6 +27,13 @@ struct DioxusWalletApp: App {
     @_silgen_name("start_app") static func start_app()
 
     init() {
+        // Register the iOS-side QR scanner with the Rust core
+        // BEFORE handing control over. The Rust side stores the
+        // function pointer in a `OnceLock`; subsequent
+        // `IosQrScanner::scan` calls invoke through it. Registration
+        // before `start_app()` guarantees the pointer is in place
+        // before any UI surface that could call it appears.
+        iosqrInstall()
         // Hand control to Rust. `start_app()` calls `run()` which
         // launches the Dioxus mobile App. From here on the
         // SwiftUI scene is irrelevant — Rust owns the window.

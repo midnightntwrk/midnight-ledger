@@ -214,11 +214,13 @@ pub fn global_bridge() -> Option<Arc<dyn JsBridge>> {
 /// `mobile-bench/dioxus-wallet/web/src/entry.ts`. Returns the raw
 /// decoded payload (e.g. an `openid4vp://…` or
 /// `openid-credential-offer://…` URL) — the caller's responsible for
-/// parsing. The desktop/iOS [`crate::qr_scanner_fallback::FallbackQrScanner`]
+/// parsing. The desktop [`crate::qr_scanner_fallback::FallbackQrScanner`]
 /// is the canonical caller; Android uses
 /// [`crate::qr_scanner_android::AndroidQrScanner`] (ML Kit) and
-/// never touches this function, hence the `cfg(not(android))` gate.
-#[cfg(not(target_os = "android"))]
+/// iOS uses [`crate::qr_scanner_ios::IosQrScanner`] (AVCaptureSession)
+/// — both bypass this function, hence the `cfg(not(android | ios))`
+/// gate.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn scan_qr(bridge: &dyn JsBridge) -> Result<String, JsBridgeError> {
     #[derive(serde::Deserialize)]
     struct ScanResult {

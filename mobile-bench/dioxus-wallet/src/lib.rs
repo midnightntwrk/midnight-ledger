@@ -16,21 +16,27 @@ mod vc_views;
 #[cfg(feature = "js-bridge")]
 mod protocol;
 
-// QR scanner — Android uses native ML Kit via JNI; every other
-// target delegates to the WebView's `getUserMedia` path through
-// the JS bridge. `ActiveQrScanner` is the platform-resolved alias
-// the wallet code instantiates; the implementations live in the
-// two sibling modules below, each gated to its target. See
-// docs/superpowers/specs/2026-06-02-native-qr-scanner-android.md
-// for the full architecture.
+// QR scanner — each target binds the platform's native scanner:
+// Android uses Google ML Kit via JNI, iOS uses AVCaptureSession
+// via a Swift extern-C bridge. Desktop falls back to a paste-URL
+// prompt (no host camera path through Wry). `ActiveQrScanner` is
+// the platform-resolved alias the wallet code instantiates; the
+// implementations live in the sibling modules below, each gated
+// to its target. See:
+//   - docs/superpowers/specs/2026-06-02-native-qr-scanner-android.md
+//   - docs/superpowers/specs/2026-xx-xx-native-qr-scanner-ios-avfoundation.md
 #[cfg(target_os = "android")]
 mod qr_scanner_android;
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+mod qr_scanner_ios;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod qr_scanner_fallback;
 
 #[cfg(target_os = "android")]
 pub(crate) use qr_scanner_android::AndroidQrScanner as ActiveQrScanner;
-#[cfg(not(target_os = "android"))]
+#[cfg(target_os = "ios")]
+pub(crate) use qr_scanner_ios::IosQrScanner as ActiveQrScanner;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub(crate) use qr_scanner_fallback::FallbackQrScanner as ActiveQrScanner;
 
 // Wallet worker thread — central serialiser for heavy chain ops.
