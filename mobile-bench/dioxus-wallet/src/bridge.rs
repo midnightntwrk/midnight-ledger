@@ -1,6 +1,14 @@
-//! JS ↔ Rust bridge for the embedded WebView.
+//! JS ↔ Rust bridge for the embedded WebView **plus** the
+//! `BridgeState` aggregate that holds the shell's shared
+//! application state (the wallet store handle, the metrics
+//! pipeline, the wallet-worker handle, etc.). The two concerns
+//! grew together because the bridge RPC methods need to look at
+//! state, so they share a file — but `BridgeState` is the
+//! interesting one architecturally.
 //!
-//! Two responsibilities:
+//! ## Bridge: JS ↔ Rust JSON-RPC channel
+//!
+//! Two responsibilities for the bridge half:
 //!
 //! 1. **Local proof-server.** On desktop we spawn
 //!    `midnight-proof-server` on `127.0.0.1:0` at app startup. The JS
@@ -15,6 +23,29 @@
 //!    deliberately small — sign/derive operations the wallet keeps in
 //!    Rust because the seed never leaves Rust. The JS side wraps them
 //!    as `window.midnightWallet.<method>(...)` with promise semantics.
+//!
+//! ## BridgeState: shell-level application state
+//!
+//! `BridgeState` is a cheap-to-clone (Arc-wrapped fields)
+//! aggregate that carries the shell's mid-flight state — the
+//! handles every click handler, worker callback, and the
+//! outcome-pump `use_future` reach into. Today it bundles three
+//! distinct concerns:
+//!
+//! 1. **Persistence handles** — `store`, `active_wallet_id`,
+//!    `controller_secrets`.
+//! 2. **Observability** — `metrics`, `resource_probe`,
+//!    `log_capture`.
+//! 3. **Runtime infrastructure** — `worker`, `proof_server_url`.
+//!
+//! A clean future split would turn `BridgeState` into a façade
+//! over `Persistence`/`Observability`/`Runtime` sub-aggregates;
+//! the architectural payoff appears once we ship a second shell
+//! (iOS, react-native) where the `Runtime` mix changes and the
+//! Persistence/Observability layers stay common. Deferring the
+//! mechanical split until that lands — see the audit doc
+//! `docs/superpowers/specs/2026-06-03-hex-architecture-audit.md`
+//! §5.D for the rationale + entry-point inventory.
 
 use std::collections::HashMap;
 use std::sync::Arc;
