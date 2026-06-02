@@ -22,9 +22,8 @@ use tracing::Instrument;
 
 use wallet_core::{
     HttpClient, MeteredHttpClient, Metrics, Network, RedbVcStore, ReqwestHttpClient,
-    SelfVerifyResult, StoredVc, SystemClock, bootstrap_did_with_keys,
-    oid4vci_run_issuance, oid4vp_run_authentication, self_verify_and_cache, time_op,
-    time_op_simple,
+    SelfVerifyResult, StoredVc, SystemClock, oid4vci_run_issuance,
+    oid4vp_run_authentication, self_verify_and_cache, time_op, time_op_simple,
 };
 
 /// Monotonic per-session counter for Identity Centre action IDs.
@@ -50,27 +49,9 @@ fn next_action_id() -> String {
 /// telemetry sink. Falls back silently to the un-metered wallet
 /// if indexer-default construction fails (offline env / bad URL)
 /// — telemetry is a "nice to have", never a hard error path.
-fn metered_app_wallet_for(
-    network: Network,
-    metrics: std::sync::Arc<dyn Metrics>,
-    probe: std::sync::Arc<dyn wallet_core::ResourceProbe>,
-) -> wallet_core::Wallet {
-    match app_wallet_for(network).with_metering(metrics, probe) {
-        Ok(w) => w,
-        Err(e) => {
-            tracing::warn!(
-                target: "dioxus_wallet::identity_centre",
-                error = %e,
-                "with_metering failed — running un-metered chain-ops",
-            );
-            // `with_metering` consumed the wallet on failure; build a fresh one.
-            app_wallet_for(network)
-        }
-    }
-}
 use wallet_core::secret_storage::{SecretStorage, redb_secret_store::RedbSecretStore};
 
-use crate::app::{app_wallet_for, truncate_did, wallet_store_path};
+use crate::app::{metered_app_wallet_for, truncate_did, wallet_store_path};
 use crate::bridge::BridgeState;
 use crate::eval_bridge;
 
@@ -680,9 +661,9 @@ fn BootstrapSection(
     ic_did: Signal<Option<String>>,
     on_did_minted: EventHandler<(String, Network)>,
 ) -> Element {
-    let mut busy = use_signal(|| false);
-    let mut err_msg = use_signal::<Option<String>>(|| None);
-    let mut ok_msg = use_signal::<Option<String>>(|| None);
+    let busy = use_signal(|| false);
+    let err_msg = use_signal::<Option<String>>(|| None);
+    let ok_msg = use_signal::<Option<String>>(|| None);
     // Live activity feed shown under the Bootstrap button while
     // `busy == true`. Populated by polling
     // `BridgeState::log_capture().snapshot()` every 500 ms and
@@ -729,108 +710,79 @@ fn BootstrapSection(
     let bootstrap = {
         let bridge_state = bridge_state.clone();
         let mut ic_did = ic_did;
+        let mut busy_sig = busy;
+        let mut err_msg_sig = err_msg;
+        let mut ok_msg_sig = ok_msg;
+        let on_did_minted_eh = on_did_minted;
         move |_| {
-            if *busy.read() {
+            if *busy_sig.read() {
                 return;
             }
-            busy.set(true);
-            err_msg.set(None);
-            ok_msg.set(None);
-            let bridge_state = bridge_state.clone();
-            let action_id = next_action_id();
-            let span = tracing::info_span!("ic.bootstrap", action_id = %action_id);
-            // Box::pin moves the bootstrap state machine off the
-            // WebView dispatch thread's ~256 KiB stack. On Android
-            // the click is delivered via
-            // `RustWebViewClient.shouldInterceptRequest` on a
-            // Chromium foreground-pool thread; without this the
-            // inline `async move {...}` generator (Wallet +
-            // indexer/node/prover clients + bootstrap_did_with_keys
-            // futures) overflows before `spawn` is reached and the
-            // process SIGSEGVs at
-            // `dioxus_core::runtime::Runtime::with_current_scope`.
-            // See tombstone_04 (2026-06-01 23:54) for the canonical
-            // backtrace.
-            let fut: std::pin::Pin<
-                Box<dyn std::future::Future<Output = ()> + 'static>,
-            > = Box::pin(async move {
-                let Some(store) = bridge_state.store().cloned() else {
-                    err_msg.set(Some("wallet store not opened yet".into()));
-                    busy.set(false);
-                    return;
-                };
-                let Some(wallet_id) = bridge_state.active_wallet_id() else {
-                    err_msg.set(Some("no active wallet".into()));
-                    busy.set(false);
-                    return;
-                };
-                let metrics = bridge_state.metrics_dyn();
-                let in_mem_metrics = bridge_state.metrics();
-                let probe = bridge_state.resource_probe();
-                // Build a chain-op-metered Wallet so the
-                // indexer queries (chain_tip, contract_state)
-                // and prover calls (halo2 prove) under the
-                // hood also land in the aggregator as
-                // `indexer.*` / `prover.prove` ops. Falls
-                // back to un-metered if the default indexer
-                // fails to build (offline env).
-                let wallet =
-                    metered_app_wallet_for(network, metrics.clone(), probe.clone());
-                let mut secret_store = RedbSecretStore::new(store, wallet_id);
-                // Bracket the heaviest Identity-Centre op
-                // (HKDF + key import + on-chain DID write)
-                // so the Diagnostics tab can quantify how
-                // much wall + RSS / CPU it costs. The
-                // chain-op decorators provide the per-call
-                // breakdown for what runs underneath this.
-                let result = time_op(
-                    &*metrics,
-                    &*probe,
-                    "bootstrap_did",
-                    bootstrap_did_with_keys(&wallet, &mut secret_store, &DEMO_IC_SEED),
-                )
-                .await;
-                match result {
-                    Ok(b) => {
-                        in_mem_metrics.incr("dids.bootstrapped", 1);
-                        let did_str = b.did.to_did_string();
-                        // Persist the per-DID controller secret
-                        // so future Update / Deactivate circuits
-                        // can pull it from `BridgeState`. Same
-                        // path the Create-DID wizard uses.
-                        // Without this the new DID's Update /
-                        // Deactivate buttons stay disabled.
-                        bridge_state.remember_controller_secret(
-                            network,
-                            did_str.clone(),
-                            b.controller_sk,
-                        );
-                        // Notify the parent App so it can insert
-                        // a Pending entry into the live
-                        // `did_inventory` signal AND persist to
-                        // redb (the latter via
-                        // `persist_inventory_entry`). The Dids
-                        // tab renders from the signal, not from
-                        // a snapshot of redb, so a pure redb
-                        // write here wouldn't surface until the
-                        // next rehydration. The callback bridges
-                        // that gap.
-                        on_did_minted.call((did_str.clone(), network));
-                        ic_did.set(Some(did_str.clone()));
-                        ok_msg.set(Some(format!(
-                            "Bootstrapped {did_str}. Switch to the Dids \
-                             tab to see it; click Resolve there to fill \
-                             in counter / VM counts.",
-                        )));
+            busy_sig.set(true);
+            err_msg_sig.set(None);
+            ok_msg_sig.set(None);
+
+            // Reach the worker. If it's not installed yet
+            // (shouldn't happen post-App-boot), surface a clear
+            // error rather than silently spinning the busy
+            // indicator forever.
+            let Some(worker) = bridge_state.worker().cloned() else {
+                err_msg_sig.set(Some("wallet worker not ready".into()));
+                busy_sig.set(false);
+                return;
+            };
+            let in_mem_metrics = bridge_state.metrics();
+            let action_id = crate::worker::next_action_id();
+
+            // Register the outcome handler BEFORE sending so a
+            // very fast worker can't race the registration. The
+            // closure captures the signals + EventHandler by
+            // value; it runs inside the outcome-pump
+            // `use_future` (Dioxus scope), so signal writes +
+            // `on_did_minted.call()` are valid.
+            crate::worker::router::register(
+                action_id,
+                Box::new(move |outcome| {
+                    match outcome {
+                        crate::worker::WorkOutcome::BootstrapOk {
+                            did_str, ..
+                        } => {
+                            in_mem_metrics.incr("dids.bootstrapped", 1);
+                            on_did_minted_eh.call((did_str.clone(), network));
+                            ic_did.set(Some(did_str.clone()));
+                            ok_msg_sig.set(Some(format!(
+                                "Bootstrapped {did_str}. Switch to the Dids \
+                                 tab to see it; click Resolve there to fill \
+                                 in counter / VM counts.",
+                            )));
+                        }
+                        crate::worker::WorkOutcome::Err { msg, .. } => {
+                            in_mem_metrics.incr("dids.bootstrap_failed", 1);
+                            err_msg_sig.set(Some(msg));
+                        }
+                        // The worker only ever emits BootstrapOk
+                        // / Err for a Bootstrap action_id; the
+                        // other arms aren't reachable for this
+                        // registration. Log defensively in case
+                        // a future variant routes wrongly.
+                        other => {
+                            tracing::warn!(
+                                target: "wallet_worker",
+                                action_id,
+                                ?other,
+                                "Bootstrap handler received unexpected outcome",
+                            );
+                        }
                     }
-                    Err(e) => {
-                        in_mem_metrics.incr("dids.bootstrap_failed", 1);
-                        err_msg.set(Some(format!("bootstrap failed: {e}")));
-                    }
-                }
-                busy.set(false);
-            }.instrument(span));
-            spawn(fut);
+                    busy_sig.set(false);
+                }),
+            );
+
+            worker.send(crate::worker::WorkMsg::Bootstrap {
+                action_id,
+                network,
+                seed: DEMO_IC_SEED,
+            });
         }
     };
 

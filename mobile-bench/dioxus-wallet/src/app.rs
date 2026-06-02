@@ -752,6 +752,30 @@ mod preprod_live {
 /// Build the wallet handle this App uses for a given network.
 /// Vanilla builds delegate to `Wallet::demo` — same shared
 /// test seed everyone else uses. `preprod-live` builds swap
+/// Build a Wallet with chain-op metering attached. Falls back
+/// to an un-metered Wallet if `with_metering` fails (rare —
+/// usually a feature-flag mismatch). Moved here from
+/// `identity_centre.rs` so the worker module can construct
+/// metered wallets too without a circular dep.
+pub(crate) fn metered_app_wallet_for(
+    network: Network,
+    metrics: std::sync::Arc<dyn wallet_core::Metrics>,
+    probe: std::sync::Arc<dyn wallet_core::ResourceProbe>,
+) -> Wallet {
+    match app_wallet_for(network).with_metering(metrics, probe) {
+        Ok(w) => w,
+        Err(e) => {
+            tracing::warn!(
+                target: "dioxus_wallet::app",
+                error = %e,
+                "with_metering failed — running un-metered chain-ops",
+            );
+            // `with_metering` consumed the wallet on failure; build a fresh one.
+            app_wallet_for(network)
+        }
+    }
+}
+
 /// in the operator's manager-profile seed when `net` is
 /// PreProd; all other networks stay on `Wallet::demo`.
 ///
@@ -1254,7 +1278,13 @@ pub fn App() -> Element {
         // routes through `bridge_state.worker()` instead of
         // `spawn(Box::pin(async move {…}))`. See
         // docs/superpowers/specs/2026-06-02-wallet-worker-thread.md.
-        state.set_worker(crate::worker::AppWorker::spawn());
+        //
+        // The worker captures its own clone of `state`; because
+        // every BridgeState field is `Arc`-wrapped, the clone
+        // sees mutations the UI performs later
+        // (`set_store`, `set_active_wallet_id`, etc.) through
+        // shared atomic state.
+        state.set_worker(crate::worker::AppWorker::spawn(state.clone()));
         state
     });
 
@@ -1267,6 +1297,10 @@ pub fn App() -> Element {
     {
         let bridge_state_for_pump = bridge_state;
         use_future(move || async move {
+            tracing::info!(
+                target: "wallet_worker",
+                "outcome pump use_future started",
+            );
             let worker = match bridge_state_for_pump.read().worker().cloned() {
                 Some(w) => w,
                 None => {
@@ -1277,12 +1311,16 @@ pub fn App() -> Element {
                     return;
                 }
             };
+            tracing::info!(
+                target: "wallet_worker",
+                "outcome pump: worker handle acquired",
+            );
 
             // Smoke-test the channel round-trip — fire a Noop and
             // verify the matching NoopAck flows back through the
             // router. Logs once at boot; never repeats.
             let smoke_id = crate::worker::next_action_id();
-            worker.outcomes().register(
+            crate::worker::router::register(
                 smoke_id,
                 Box::new(move |outcome| {
                     tracing::info!(
@@ -1306,7 +1344,7 @@ pub fn App() -> Element {
                     }
                 };
                 let action_id = outcome.action_id();
-                if let Some(handler) = worker.outcomes().take(action_id) {
+                if let Some(handler) = crate::worker::router::take(action_id) {
                     handler(outcome);
                 } else {
                     tracing::debug!(

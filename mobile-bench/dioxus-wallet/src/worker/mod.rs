@@ -21,7 +21,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, mpsc};
 
-pub use router::OutcomeRouter;
+use wallet_core::Network;
+
+use crate::bridge::BridgeState;
 
 /// Process-local monotonic action token. Used to route a
 /// [`WorkOutcome`] back to the [`router::OutcomeHandler`] the
@@ -49,6 +51,19 @@ pub enum WorkMsg {
     /// invoked from a developer affordance for sanity-checking
     /// the channel.
     Noop { action_id: u64 },
+
+    /// Bootstrap a fresh Identity Centre DID — runs the upstream
+    /// `bootstrap_did_with_keys` pipeline (HKDF + key import +
+    /// on-chain DID write with the configured `controller_secret`).
+    /// `seed` is the 32-byte master used for the HKDF derive; today
+    /// every caller passes `DEMO_IC_SEED` ([42u8; 32]), but the
+    /// message-shape is ready for a future "user-supplied seed"
+    /// affordance without breaking the worker contract.
+    Bootstrap {
+        action_id: u64,
+        network: Network,
+        seed: [u8; 32],
+    },
 }
 
 impl WorkMsg {
@@ -59,7 +74,9 @@ impl WorkMsg {
     #[allow(dead_code)]
     pub fn action_id(&self) -> u64 {
         match self {
-            Self::Noop { action_id } => *action_id,
+            Self::Noop { action_id } | Self::Bootstrap { action_id, .. } => {
+                *action_id
+            }
         }
     }
 }
@@ -73,16 +90,36 @@ impl WorkMsg {
 /// emit on failure, so we keep it visible from day one to lock
 /// in the convention.
 #[derive(Debug, Clone)]
-#[allow(dead_code)] // Err arm — populated in Task 2 onwards.
 pub enum WorkOutcome {
-    NoopAck { action_id: u64 },
-    Err { action_id: u64, msg: String },
+    NoopAck {
+        action_id: u64,
+    },
+    BootstrapOk {
+        action_id: u64,
+        /// `to_did_string()` of the freshly-minted DID.
+        did_str: String,
+        /// 32-byte controller secret. Persisted into
+        /// [`BridgeState::controller_secrets`] by the worker
+        /// itself before this outcome flies; the UI side rarely
+        /// needs to read it (the secret is reachable via
+        /// `bridge_state.controller_secrets`), but we still
+        /// surface it on the outcome so the handler can update
+        /// caller-side caches if needed.
+        #[allow(dead_code)] // Read once Sign/Update/Deactivate migrations land.
+        controller_sk: [u8; 32],
+    },
+    Err {
+        action_id: u64,
+        msg: String,
+    },
 }
 
 impl WorkOutcome {
     pub fn action_id(&self) -> u64 {
         match self {
-            Self::NoopAck { action_id } | Self::Err { action_id, .. } => *action_id,
+            Self::NoopAck { action_id }
+            | Self::BootstrapOk { action_id, .. }
+            | Self::Err { action_id, .. } => *action_id,
         }
     }
 }
@@ -90,26 +127,38 @@ impl WorkOutcome {
 /// Worker handle held by the UI. `Clone` so it can be threaded
 /// through props / context without an outer `Arc`. The interior
 /// `Arc`'d channels are what make this cheap to clone.
+///
+/// `Send + Sync` — the only state here is mpsc channel handles
+/// (both halves are Send) plus an `Arc<Mutex<_>>` around the
+/// outcome receiver. The [`router`] module's `thread_local!`
+/// holds the actual outcome handlers; those are `!Send` and
+/// never touched off the UI thread.
 #[derive(Clone)]
 pub struct AppWorker {
     tx: mpsc::UnboundedSender<WorkMsg>,
     rx_back: Arc<Mutex<mpsc::UnboundedReceiver<WorkOutcome>>>,
-    outcomes: Arc<OutcomeRouter>,
 }
 
 impl AppWorker {
     /// Spawn the worker thread and return a handle. Call once at
     /// app boot and store the result in `BridgeState`.
     ///
+    /// `bridge_state` is the same handle the UI side carries — the
+    /// worker captures its own clone so handlers can read `store`,
+    /// `active_wallet_id`, `metrics`, etc. without re-threading
+    /// them through every `WorkMsg`. All BridgeState fields are
+    /// `Arc`-wrapped so the clone is cheap and points at the
+    /// same backing state the UI sees (and that the UI may
+    /// mutate, e.g. `set_store`, after the worker has started).
+    ///
     /// The worker owns a current-thread `tokio` runtime so chain
     /// ops can `.await` without bouncing back to the WebView
     /// event loop. Stack size is 8 MiB — well above what
     /// `Wallet` + indexer + prover + multi-stage wizard streams
     /// need.
-    pub fn spawn() -> Self {
+    pub fn spawn(bridge_state: BridgeState) -> Self {
         let (tx, mut rx) = mpsc::unbounded_channel::<WorkMsg>();
         let (tx_back, rx_back) = mpsc::unbounded_channel::<WorkOutcome>();
-        let outcomes = Arc::new(OutcomeRouter::default());
 
         std::thread::Builder::new()
             .name("wallet-worker".into())
@@ -125,7 +174,7 @@ impl AppWorker {
                         "wallet-worker thread alive (stack=8MiB, runtime=current-thread)",
                     );
                     while let Some(msg) = rx.recv().await {
-                        let outcome = handlers::dispatch(msg).await;
+                        let outcome = handlers::dispatch(&bridge_state, msg).await;
                         if tx_back.send(outcome).is_err() {
                             tracing::warn!(
                                 target: "wallet_worker",
@@ -145,7 +194,6 @@ impl AppWorker {
         Self {
             tx,
             rx_back: Arc::new(Mutex::new(rx_back)),
-            outcomes,
         }
     }
 
@@ -162,12 +210,6 @@ impl AppWorker {
                 "WorkMsg dropped — worker thread is gone",
             );
         }
-    }
-
-    /// Borrow the outcome router. Click handlers call
-    /// `router().register(action_id, handler)` before `send()`.
-    pub fn outcomes(&self) -> &Arc<OutcomeRouter> {
-        &self.outcomes
     }
 
     /// Lock the back-channel receiver. Used exclusively by the
