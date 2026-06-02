@@ -380,3 +380,86 @@ ports the survey flags. No mechanical migrations this session.
 - `docs/superpowers/specs/2026-06-02-wallet-worker-thread.md` —
   the worker-thread seam between `dioxus-wallet` and the heavy
   ops in `wallet-core`.
+
+## 9. Delivery summary — autonomous block of 2026-06-03
+
+The improvements scheduled in §6 + a few follow-ups that
+surfaced during execution, in commit order. Each commit cites
+this audit by section number.
+
+| Commit       | Title                                                                 | Audit cite |
+|--------------|-----------------------------------------------------------------------|------------|
+| `a57c3eb1` ⚠ | docs(arch): hex-architecture audit + improvement roadmap (this doc)   | —          |
+| `e67e5626`   | refactor(wallet-core): group lib.rs re-exports by hex-arch role       | §5.A       |
+| `9a3e5e21`   | feat(oid4vci): `CredentialCoordinator` + `ProofBuilder` trait          | §5.B       |
+| `a1ea2c0e`   | test(wallet-core): OID4VCI issuance e2e matrix mirroring OID4VP        | §5.B follow-up |
+| `212384d7`   | feat(wallet-core): add a curated `prelude` module                     | DX gap     |
+| `0c135238`   | docs(bridge): document the three concerns BridgeState bundles         | §5.D       |
+| `56b27134`   | docs(service): flag wallet-core/service/ as a never-populated skeleton | §3 aside  |
+| `e31f96f3`   | refactor(wallet-core): loosen `sign_id_token_with_ports` to `&dyn _`   | composability |
+
+⚠ `a57c3eb1` was signed with a malformed GPG signature
+(verifies as BAD) — transient GPG-agent state at commit time.
+The content is fine; subsequent commits sign cleanly. Force-push
+to re-sign is intentionally avoided because the commit had
+already been pushed to the personal fork.
+
+### Aggregate impact
+
+- **Tests**: 316 → 318 lib + 14 → 22 integration (OID4VCI suite
+  is the new 8). All pass; `cargo check -p dioxus-wallet
+  --target aarch64-linux-android` clean throughout.
+- **Lines of code**: roughly +900 (mostly tests + the audit doc
+  itself) and -80 (legacy re-export comments folded into
+  section headers).
+- **Surface added**: `oid4vci_client::{CredentialCoordinator,
+  ProofBuilder, IdTokenProofBuilder, ProofValue}`,
+  `wallet_core::prelude`.
+- **Surface loosened**: `sign_id_token_with_ports` accepts
+  `&dyn _` (was `&Arc<dyn _>`).
+
+### What did NOT change
+
+Per §7. In particular:
+
+- `app.rs` still 9 376 lines.
+- `BridgeState` still bundles three concerns (now documented).
+- The dead `service/` skeleton still compiles (now flagged).
+- Worker Task 5 (full `WalletStore::open` migration) still
+  reverted at commit `88001200` — needs on-device debugging
+  with the human present.
+- Phase-2 OID4VP modes (`mode_b`/`mode_c`) + Phase-2 OID4VCI
+  proof types (`ldp_vp`, `mso_mdoc`, EBSI) — the architecture
+  is ready, the builders are not. Future PRs.
+
+### Future-improvement candidates surfaced during this work
+
+Items spotted while executing the planned phases but
+deliberately deferred:
+
+1. **`WorkMsg` / `WorkOutcome` action_id extraction.** Every
+   variant carries `action_id: u64`. Extracting into
+   `WorkRequest { action_id, kind: WorkMsgKind }` orthogonalises
+   routing from message shape and removes the manual `match`
+   in `WorkMsg::action_id()`. Touches every constructor in
+   `dioxus-wallet/src/{worker,identity_centre,app}.rs`; safe
+   refactor but on the demo's critical path — defer until the
+   human is around to smoke-test.
+2. **`oid4vp_client::ports::SignError::Sign(String)`** — typed
+   error survey (audit §5.E) found this is the one remaining
+   port-level `String`-payload error. The platform-message
+   payload is opaque (hardware-wallet disconnect, key
+   corruption, EdDSA library error) — typing it would multiply
+   noise without information gain. Document the rationale
+   inline and call it done.
+3. **Service-skeleton cleanup.** `wallet-core/src/service/`
+   could shrink to zero (delete) or grow into thin wrappers
+   over the orchestrator functions (verb-shaped API). Either
+   answer is fine — the current dead-code-with-docs state is
+   the worst of both. A focused follow-up commit picks one
+   direction.
+4. **dioxus-wallet imports → prelude.** Now that
+   `wallet_core::prelude::*` exists, `dioxus-wallet/src/{app,
+   bridge, identity_centre, worker/handlers}.rs` could drop
+   ~50 lines of `use wallet_core::{…}` boilerplate. Mechanical
+   sweep, do once the human is around to review.
