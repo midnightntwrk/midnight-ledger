@@ -97,7 +97,7 @@ declare global {
        *  address, holder binding, schema, issuedAt, etc.). */
       decodeDigitalPassportCredential(params: {
         encoded: { encoding: string; payload: string };
-      }): Promise<{ credential: Record<string, unknown> }>;
+      }): Promise<{ issuerDid: string; credential: Record<string, unknown> }>;
       /** Decode a Compact-value-encoded digital-passport proof.
        *  Takes an `EncodedCompactValue` object `{ encoding, payload }`
        *  and returns the structured JSON fields
@@ -698,12 +698,21 @@ function bigIntSafeEntry(value: unknown): unknown {
  */
 async function decodeDigitalPassportCredential(params: {
   encoded: { encoding: string; payload: string };
-}): Promise<{ credential: Record<string, unknown> }> {
+}): Promise<{ issuerDid: string; credential: Record<string, unknown> }> {
   const dpCred = await import(
     "@midnight-ntwrk/midnight-did-credentials-digital-passport"
   );
   const credential = dpCred.decodeDigitalPassportCredential(params.encoded);
-  return { credential: bigIntSafeEntry(credential) as Record<string, unknown> };
+  // Extract issuer DID from the decoded credential's
+  // issuerVerificationMethodRef.didContractAddress.bytes
+  const didBytes = credential.issuerVerificationMethodRef.didContractAddress.bytes;
+  const didHex = Array.from(didBytes, (b: number) => b.toString(16).padStart(2, "0")).join("");
+  const network = window.MIDNIGHT_NETWORK ?? "undeployed";
+  const issuerDid = `did:midnight:${network.toLowerCase()}:${didHex}`;
+  return {
+    issuerDid,
+    credential: bigIntSafeEntry(credential) as Record<string, unknown>,
+  };
 }
 
 /**

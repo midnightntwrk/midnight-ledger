@@ -305,7 +305,10 @@ async fn decode_issuer_did(
 ) -> Result<DecodedCredential, CredentialFlowError> {
     use crate::js_bridge::JsBridgeExt;
     let params = serde_json::json!({
-        "payload": credential_payload_b64url,
+        "encoded": {
+            "encoding": "compact-value-v1.base64url",
+            "payload": credential_payload_b64url,
+        },
     });
     js_bridge
         .call::<_, DecodedCredential>("decodeDigitalPassportCredential", &params)
