@@ -251,13 +251,41 @@ pub(crate) fn verify(
         }
         (MidnightKeyType::EC, MidnightCurve::Jubjub) => {
             let pk = jubjub_public_point_from_jwk(public_jwk)?;
-            if signature.len() != JUBJUB_SIGNATURE_LENGTH_BYTES {
-                return Err(SecretStoreError::InvalidInput(format!(
-                    "Jubjub sig must be {JUBJUB_SIGNATURE_LENGTH_BYTES} bytes, got {}",
-                    signature.len(),
-                )));
+            // The wire carries one of two encodings:
+            //
+            //   - 64-byte compact (`point_compressed(32) ||
+            //     response_le(32)`) — what `jubjub_schnorr::encode`
+            //     emits. Used by Rust-to-Rust signers because the
+            //     compressed point is smaller.
+            //
+            //   - 96-byte upstream (`ann.x BE(32) || ann.y BE(32)
+            //     || response BE(32)`) — what
+            //     `jubjub_schnorr::encode_upstream` emits, matching
+            //     `@midnight-ntwrk/midnight-did-jubjub-schnorr`'s
+            //     `encodeJubjubSignature`. Used by every TS signer
+            //     (the issuer-mock's VC signing path is the
+            //     immediate caller).
+            //
+            // Dispatch on length so a wallet verifier accepts
+            // either side. Round-trip fixtures in
+            // `jubjub_schnorr::tests` cover both formats; an
+            // integration check that signs in Rust + verifies in
+            // JS (and vice versa) lives in
+            // `tests/jubjub_schnorr_interop.rs`.
+            let sig = match signature.len() {
+                JUBJUB_SIGNATURE_LENGTH_BYTES => jubjub_schnorr::decode(signature),
+                jubjub_schnorr::JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES => {
+                    jubjub_schnorr::decode_upstream(signature)
+                }
+                got => {
+                    return Err(SecretStoreError::InvalidInput(format!(
+                        "Jubjub sig must be {JUBJUB_SIGNATURE_LENGTH_BYTES} or \
+                         {} bytes, got {got}",
+                        jubjub_schnorr::JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES,
+                    )));
+                }
             }
-            let sig = jubjub_schnorr::decode(signature).ok_or_else(|| {
+            .ok_or_else(|| {
                 SecretStoreError::InvalidInput("Jubjub sig: malformed wire bytes".into())
             })?;
             Ok(jubjub_schnorr::verify_payload(&pk, payload, &sig))
@@ -487,6 +515,59 @@ mod tests {
             "Jubjub Schnorr sig wire size is {JUBJUB_SIGNATURE_LENGTH_BYTES} bytes",
         );
         assert!(verify(&pk, msg, &sig).unwrap());
+    }
+
+    #[test]
+    fn jubjub_verify_accepts_upstream_96_byte_encoding() {
+        // The TS issuer signs VCs via
+        // `@midnight-ntwrk/midnight-did-jubjub-schnorr`'s
+        // `encodeJubjubSignature` (96-byte upstream shape:
+        // `ann.x BE || ann.y BE || response BE`). The wallet's
+        // verify path must accept that shape — surfaced by
+        // `tests/headless_use_cases_e2e::bootstrap_then_login_then_issue_credential_round_trip`
+        // which hit `Jubjub sig must be 64 bytes, got 96` before
+        // this fix. Round-trip via the in-tree
+        // `encode_upstream` to assert the dispatch works
+        // hermetically (no live issuer in the loop).
+        let mut rng = deterministic_rng();
+        let (record, pk) =
+            generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap();
+        let msg = b"upstream-encoded jubjub schnorr";
+
+        // Reproduce the upstream encoding by decoding the compact
+        // form `sign` emitted, then re-encoding via `encode_upstream`.
+        let compact_sig = sign(&record, msg).unwrap();
+        let parsed = jubjub_schnorr::decode(&compact_sig).expect("decode compact");
+        let upstream_sig = jubjub_schnorr::encode_upstream(&parsed);
+        assert_eq!(
+            upstream_sig.len(),
+            jubjub_schnorr::JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES,
+        );
+        // Verifier accepts the 96-byte shape.
+        assert!(
+            verify(&pk, msg, &upstream_sig).unwrap(),
+            "verifier should accept upstream 96-byte encoding",
+        );
+    }
+
+    #[test]
+    fn jubjub_verify_rejects_unknown_signature_length() {
+        // Anything that isn't 64 or 96 bytes is rejected at the
+        // length check — no chance of an oversized blob silently
+        // truncating to a parseable sig.
+        let mut rng = deterministic_rng();
+        let (_record, pk) =
+            generate(MidnightKeyType::EC, MidnightCurve::Jubjub, &mut rng).unwrap();
+        let too_short = [0u8; 32];
+        let in_between = [0u8; 80];
+        let too_long = [0u8; 128];
+        for bad in [&too_short[..], &in_between[..], &too_long[..]] {
+            let err = verify(&pk, b"msg", bad).expect_err("must fail");
+            assert!(
+                matches!(err, SecretStoreError::InvalidInput(_)),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]

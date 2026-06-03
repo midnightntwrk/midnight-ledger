@@ -484,25 +484,32 @@ deliberately deferred:
    ~50 lines of `use wallet_core::{…}` boilerplate. Mechanical
    sweep, do once the human is around to review.
 
-5. **Jubjub-Schnorr signature wire-encoding mismatch.**
-   `vc_self_verify` calls
-   `secret_storage::curve_support::verify`, which uses
-   `jubjub_schnorr::decode` (64-byte compact format:
-   `point_compressed(32) || response_le(32)`). The issuer's
-   TS signer (`@midnight-ntwrk/midnight-did-jubjub-schnorr`)
-   emits 96 bytes (`ann.x BE(32) || ann.y BE(32) || response
-   BE(32)` — that's
-   `jubjub_schnorr::JUBJUB_SIGNATURE_UPSTREAM_LENGTH_BYTES`,
-   already documented in code as the upstream-compatible
-   shape). Result: every issuer-signed VC fails self-verify
-   with `Jubjub sig must be 64 bytes, got 96`.
-   Surfaced by
-   `tests/headless_use_cases_e2e::bootstrap_then_login_then_issue_credential_round_trip`
-   — exactly the kind of cross-stack bug the headless-wallet
-   capability was designed to find. Fix: add
-   `jubjub_schnorr::decode_upstream(&[u8; 96])` mirroring the
-   existing `encode_upstream`, and have `curve_support::verify`
-   dispatch on length (64 → compact, 96 → upstream). Plus a
-   round-trip test that signs in Rust + verifies in JS, and
-   vice-versa. Defer because it touches the cryptographic
-   verifier path and needs careful focus.
+5. **VC self-verify canonicalisation alignment.** Two
+   related issues surfaced by
+   `tests/headless_use_cases_e2e::bootstrap_then_login_then_issue_credential_round_trip`:
+   - **(fixed)** Jubjub-Schnorr signature wire-encoding
+     mismatch. The issuer's TS signer
+     (`@midnight-ntwrk/midnight-did-jubjub-schnorr`) emits 96
+     bytes (`ann.x BE || ann.y BE || response BE`); the
+     wallet's verifier called `jubjub_schnorr::decode`
+     (64-byte compact format). Fixed by length-dispatching
+     in `curve_support::verify` — 64 → `decode`, 96 →
+     `decode_upstream` (which already existed). Unit-test
+     coverage in
+     `secret_storage::curve_support::tests::jubjub_verify_accepts_upstream_96_byte_encoding`
+     + `jubjub_verify_rejects_unknown_signature_length`.
+   - **(open)** CBOR canonicalisation drift. With the
+     length-dispatch fix in, the verifier reaches the
+     crypto layer and surfaces
+     `Invalid(SignatureMismatch)` — the actual signature
+     bytes don't validate. Almost certainly the issuer's
+     `cborEncode(bodyNoProof)` (via `cbor-x`) doesn't
+     match the wallet's CBOR-encode of the same body
+     (Rust's `serde_cbor` and `cbor-x` differ on
+     deterministic-map ordering unless explicitly
+     aligned). Fix: a focused commit pinning canonical
+     ordering in both encoders, plus a shared test fixture
+     that asserts byte-equality on a known body, plus an
+     interop integration test that signs in Rust +
+     verifies in JS and vice versa. Defer until the
+     cross-stack canonicalisation is specced.

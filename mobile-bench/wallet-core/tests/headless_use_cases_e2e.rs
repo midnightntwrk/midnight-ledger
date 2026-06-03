@@ -300,16 +300,32 @@ fn bootstrap_then_login_then_issue_credential_round_trip() {
                 .expect("issuance");
             assert!(!vc_uri.is_empty(), "issuer returned an empty vc_uri");
 
-            // Self-verify of the freshly-landed VC currently
-            // surfaces a separate known issue (`Jubjub sig must
-            // be 64 bytes, got 96` — an encoding mismatch
-            // between the issuer's signing path and the wallet's
-            // verify path). Tracked separately; this test's job
-            // is to confirm the **issuance** orchestrator works
-            // end-to-end against live chain + live issuer, so
-            // we stop asserting at the wire-success boundary
-            // and leave self-verify to its own integration test
-            // once the encoding mismatch is fixed.
+            // Self-verify against the freshly-landed VC. The
+            // length-dispatch fix in `curve_support::verify`
+            // (`secret_storage` commit upstream) means the
+            // verifier now accepts the issuer's 96-byte upstream
+            // Jubjub-Schnorr encoding without rejecting on size.
+            // What still surfaces is `Invalid(SignatureMismatch)`
+            // — the actual cryptographic check fails, almost
+            // certainly because the CBOR canonicalization the
+            // wallet re-derives doesn't match the TS issuer's
+            // `cborEncode(bodyNoProof)` byte-for-byte (Rust's
+            // `serde_cbor` and the issuer's `cbor-x` make
+            // different deterministic-map-order choices unless
+            // hand-stabilised).
+            //
+            // Tracked separately; this test's job stays at
+            // "OID4VCI issuance landed a VC". Self-verify gets
+            // its own integration test once the canonicalization
+            // is aligned.
+            let verify = w.verify(&vc_uri).await.expect("verify");
+            // Assert it at least reaches the cryptographic
+            // verifier (no `Error(_)`) — that's the layer the
+            // length-dispatch fix unlocked.
+            assert!(
+                !matches!(verify, wallet_core::SelfVerifyResult::Error(_)),
+                "verify should reach the crypto layer; got {verify:?}",
+            );
         });
     });
 }
