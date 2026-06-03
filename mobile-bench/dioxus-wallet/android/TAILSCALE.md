@@ -82,20 +82,33 @@ The issuer (`IssuerDIDIT-mock`) lives on the laptop too. By default
 it emits QR codes that embed `http://localhost:3001/...` URLs —
 the phone can't reach those. Two options:
 
-1. **Set `BASE_URL` when starting the issuer** so the QR codes
-   embed the tailnet IP:
+1. **Set `PUBLIC_BASE_URL` when starting the issuer** so the QR
+   codes (and every URL the wallet fetches indirectly — the
+   `request_uri` in the OID4VP request, the `credential_issuer`
+   in the OID4VCI offer, the `redirect_to` after KYC) embed the
+   tailnet IP:
 
    ```bash
    cd /Users/ysh/iohk/midnight-identity-workspace/midnight-identity-solution-examples/IssuerDIDIT-mock
    source ~/.nvm/nvm.sh && nvm use 24
    COREPACK_ENABLE_STRICT=0 \
    INDEXER_URL=http://localhost:18088/api/v4/graphql \
-   BASE_URL="http://100.110.241.102:3001" \
+   NODE_WS_URL=ws://localhost:19944 \
+   PROOF_SERVER_URL=http://localhost:6300 \
+   PUBLIC_BASE_URL="http://100.110.241.102:3001" \
      nohup ./node_modules/.bin/tsx src/server.ts > /tmp/midnight-ssi-issuer.log 2>&1 &
    ```
 
-   (The issuer's `config.ts` reads `BASE_URL` — check there if the
-   variable name has drifted.)
+   **Important:** the variable is `PUBLIC_BASE_URL`, NOT
+   `BASE_URL` — the latter looks tempting but the issuer's
+   `config.ts` only honours the public-prefixed name (see its
+   zod schema). Setting `BASE_URL` alone makes the issuer's
+   own startup log look right (it prints whatever was passed)
+   but the indirect-request URLs the wallet fetches still point
+   at `localhost:3001`, which is unreachable from the phone and
+   surfaces as `authenticate failed: http error fetching
+   request_uri`. The login route is also mounted at
+   `/authorize`, not `/login`.
 
 2. **Scan the QR in your laptop browser, copy the URL by hand**,
    then paste it into the wallet's *Diagnostics → Bootstrap* tab
