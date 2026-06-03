@@ -123,6 +123,58 @@ async fn handle_bootstrap(
                 did_str.clone(),
                 b.controller_sk,
             );
+            // Persist the inventory row here too — same robustness
+            // argument as the controller secret. If the WebView
+            // gets killed between worker emit + UI re-render
+            // (which DOES happen post-bootstrap on Android due to
+            // the prover's RSS spike: ~95 MiB delta is enough to
+            // trigger an OS-side restart), an
+            // `on_did_minted`-only persist gets lost on the
+            // floor — the controller secret survives (worker
+            // wrote it synchronously above) but the Dids tab
+            // comes back empty even though the chain has the
+            // contract and the secret store has the
+            // `#key-auth` key. Writing both rows here makes the
+            // post-bootstrap state durable against arbitrary UI
+            // teardown.
+            //
+            // `vm_count = 2` mirrors the value the UI's
+            // `on_did_minted` handler also seeds with — the
+            // `bootstrap_did_with_keys` flow always attaches
+            // exactly the Ed25519 (auth) + Jubjub (assertion)
+            // pair before settling. The UI's
+            // `on_did_minted` handler still runs and re-inserts
+            // into `did_inventory` (the signal) so the new row
+            // appears immediately without waiting for a network
+            // switch / re-hydrate; the worker's write here is
+            // the durable backstop.
+            let inventory_row = wallet_core::store::DidInventoryEntry {
+                did: did_str.clone(),
+                network,
+                status: wallet_core::store::InventoryStatus::Active,
+                counter: None,
+                vm_count: Some(2),
+                service_count: Some(0),
+                last_block_height: None,
+                created_at: 0,
+                updated_at: 0,
+            };
+            // `store` was moved into `RedbSecretStore::new` above;
+            // pull a fresh handle off the bridge state for this
+            // write. `state.store()` returns `Option<&WalletStore>`
+            // and the inner store wraps an `Arc<Database>`, so
+            // re-acquiring it here is a cheap pointer copy.
+            if let Some(store_for_inv) = state.store() {
+                if let Err(e) = store_for_inv.put_did_inventory(inventory_row) {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        action_id,
+                        did = %did_str,
+                        error = %e,
+                        "persist DID inventory row failed on worker",
+                    );
+                }
+            }
             WorkOutcome::BootstrapOk {
                 action_id,
                 did_str,
