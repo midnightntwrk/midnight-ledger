@@ -27,7 +27,7 @@
 //!   load JSON IR -> compute commitment over inputs ++ encoded expected
 //!   outputs -> keygen -> prove -> verify against `[binding, commitment]`.
 
-use midnight_curves::{Fr as JubjubFr};
+use midnight_curves::Fr as JubjubFr;
 use midnight_zkir_v3::ir_types::IrValue;
 use transient_crypto::curve::Fr;
 

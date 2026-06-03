@@ -26,6 +26,9 @@ use crate::{
 /// Addition is supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -35,6 +38,11 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
     match (x, y) {
         (Native(a), Native(b)) => Ok(Native(*a + *b)),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(JubjubPoint(p + q)),
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(p + q)),
+        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(s + r)),
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(s + r)),
+
         _ => Err(anyhow::anyhow!(
             "Unsupported addition: {:?} + {:?}",
             x.get_type(),
@@ -47,6 +55,9 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
 /// Addition is supported on:
 ///   - `Native`
 ///   - `JubjubPoint`
+///   - `Secp256k1Point`
+///   - `Secp256k1Base`
+///   - `Secp256k1Scalar`
 ///
 /// # Errors
 ///
@@ -67,6 +78,20 @@ pub fn add_incircuit(
             let r = std_lib.jubjub().add(layouter, p, q)?;
             Ok(JubjubPoint(r))
         }
+
+        (Secp256k1Point(p), Secp256k1Point(q)) => {
+            let r = std_lib.secp256k1_curve().add(layouter, p, q)?;
+            Ok(Secp256k1Point(r))
+        }
+        (Secp256k1Base(a), Secp256k1Base(b)) => {
+            let r = (std_lib.secp256k1_curve().base_field_chip()).add(layouter, a, b)?;
+            Ok(Secp256k1Base(r))
+        }
+        (Secp256k1Scalar(a), Secp256k1Scalar(b)) => {
+            let r = (std_lib.secp256k1_curve().scalar_field_chip()).add(layouter, a, b)?;
+            Ok(Secp256k1Scalar(r))
+        }
+
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported addition: {:?} + {:?}",
             x.get_type(),
@@ -87,7 +112,7 @@ impl Add for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::JubjubSubgroup;
+    use midnight_curves::{JubjubSubgroup, secp256k1};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -109,6 +134,16 @@ mod tests {
         assert_eq!(
             result.unwrap_err().to_string(),
             "Unsupported addition: Native + JubjubPoint"
+        );
+
+        let [p, q] = core::array::from_fn(|_| secp256k1::Secp256k1::random(OsRng));
+        let [x, y] = core::array::from_fn(|_| secp256k1::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| secp256k1::Fq::random(OsRng));
+        assert_eq!(Secp256k1Point(p) + Secp256k1Point(q), Secp256k1Point(p + q));
+        assert_eq!(Secp256k1Base(x) + Secp256k1Base(y), Secp256k1Base(x + y));
+        assert_eq!(
+            Secp256k1Scalar(r) + Secp256k1Scalar(s),
+            Secp256k1Scalar(r + s)
         );
     }
 }

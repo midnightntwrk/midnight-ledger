@@ -67,10 +67,7 @@ pub struct TestResolver {
 }
 
 impl Resolver for TestResolver {
-    async fn resolve_key(
-        &self,
-        _: KeyLocation,
-    ) -> std::io::Result<Option<ProvingKeyMaterial>> {
+    async fn resolve_key(&self, _: KeyLocation) -> std::io::Result<Option<ProvingKeyMaterial>> {
         let mut pk = Vec::new();
         tagged_serialize(&self.pk, &mut pk)?;
         let mut vk = Vec::new();
@@ -90,17 +87,16 @@ pub struct TestParams;
 impl ParamsProverProvider for TestParams {
     async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
         const DIR: &str = env!("MIDNIGHT_PP");
-        ParamsProver::read(BufReader::new(File::open(format!("{DIR}/bls_midnight_2p{k}"))?))
+        ParamsProver::read(BufReader::new(File::open(format!(
+            "{DIR}/bls_midnight_2p{k}"
+        ))?))
     }
 }
 
 /// Build a `ProofPreimage` with the canonical empty transcripts and the given
 /// `inputs` and `communications_commitment`. Callers that don't need a
 /// commitment (e.g. negative-conformance tests) pass `None`.
-fn make_preimage(
-    inputs: Vec<Fr>,
-    communications_commitment: Option<(Fr, Fr)>,
-) -> ProofPreimage {
+fn make_preimage(inputs: Vec<Fr>, communications_commitment: Option<(Fr, Fr)>) -> ProofPreimage {
     ProofPreimage {
         binding_input: BINDING.into(),
         communications_commitment,
@@ -169,12 +165,8 @@ pub async fn assert_typed_output_roundtrip(
         )
         .await
         .expect("prove must succeed");
-    vk.verify(
-        &PARAMS_VERIFIER,
-        &proof,
-        [BINDING.into(), comm].into_iter(),
-    )
-    .expect("verify must succeed");
+    vk.verify(&PARAMS_VERIFIER, &proof, [BINDING.into(), comm].into_iter())
+        .expect("verify must succeed");
 }
 
 /// Negative-conformance helper. Loads the JSON IR, runs `preimage.check(&ir)`

@@ -321,6 +321,10 @@ pub enum Instruction {
     ///  - Native:       1 output
     ///  - JubjubPoint:  2 outputs (x and y coordinates)
     ///  - JubjubScalar: 1 output
+    ///
+    ///  - Secp256k1Point:  8 outputs (4 for x and 4 for y)
+    ///  - Secp256k1Base:   4 outputs (64-bits LE limbs)
+    ///  - Secp256k1Scalar: 4 outputs (64-bits LE limbs)
     Encode {
         /// The value to encode
         input: Operand,
@@ -336,6 +340,10 @@ pub enum Instruction {
     ///  - Native:       1 input
     ///  - JubjubPoint:  2 inputs (x and y coordinates)
     ///  - JubjubScalar: 1 input
+    ///
+    ///  - Secp256k1Point:  8 inputs (4 for x and 4 for y)
+    ///  - Secp256k1Base:   4 inputs (64-bits LE limbs)
+    ///  - Secp256k1Scalar: 4 inputs (64-bits LE limbs)
     ///
     /// It will also result in an error if the operands are not of type
     /// `Native`.
@@ -359,7 +367,12 @@ pub enum Instruction {
         cond: Operand,
     },
     /// Conditionally select a value. UB if `bit` is not `0` or `1`.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// Outputs one element, identical to `a` or `b`
     CondSelect {
@@ -382,7 +395,12 @@ pub enum Instruction {
         bits: u32,
     },
     /// Constrains two values `a` and `b` to be equal.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// No outputs
     ConstrainEq {
@@ -452,7 +470,7 @@ pub enum Instruction {
         /// The result of multiplication
         output: Identifier,
     },
-    /// Hashes a sequence of field elements to an embedded curve point.
+    /// Hashes a sequence of field elements to a Jubjub point.
     /// All inputs are required to be of type `Native`. Failure otherwise.
     ///
     /// Outputs 1 element, the point
@@ -521,7 +539,12 @@ pub enum Instruction {
         outputs: Vec<Identifier>,
     },
     /// Tests if `a` and `b` are equal.
-    /// Supported on types: `Native`, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One boolean output, `a == b`
     TestEq {
@@ -533,7 +556,12 @@ pub enum Instruction {
         output: Identifier,
     },
     /// Adds `a` and `b`.
-    /// Supported on types: `Native, `JubjubPoint`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `a + b`
     Add {
@@ -585,6 +613,16 @@ pub enum Instruction {
         /// The number of bits to compare
         bits: u32,
         /// The output variable name
+        output: Identifier,
+    },
+    /// Cast a Native value as a Jubjub scalar by reducing it modulo the Jubjub scalar
+    /// field order if necessary.
+    ///
+    /// NB: This instruction will be removed when the BigUint type becomes available.
+    JubjubScalarFromNative {
+        /// The native value to be converted.
+        native: Operand,
+        /// The output variable name.
         output: Identifier,
     },
     /// Off-circuit (preprocessing):
