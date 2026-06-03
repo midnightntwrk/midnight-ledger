@@ -26,11 +26,72 @@ use crate::DidId;
 // ---------------------------------------------------------------------------
 
 /// Top-level OID4VCI credential response from the passport issuer.
+///
+/// Per the OpenAPI for `POST /api/issuer/credentials`, the actual
+/// shape is:
+///
+/// ```json
+/// {
+///   "format": "midnight_compact_vc",
+///   "credential": { /* envelope */ },
+///   "c_nonce": "...",
+///   "credentialPrivateParts": {
+///     "claimValues": { "firstNameValuePadded": "...", … },
+///     "openings":    { "firstNameOpening": "...",     … }
+///   }
+/// }
+/// ```
+///
+/// The wallet-internal `VcOpening` rows the UI consumes use
+/// JSON-Pointer paths (`/credentialSubject/firstName`), so we
+/// re-key on the way in (see the mapping table in
+/// `request_credential`'s step 10).
 #[derive(Debug, Clone, Deserialize)]
 pub struct DigitalPassportResponse {
     pub credential: DigitalPassportCredential,
-    #[serde(default)]
-    pub openings: Vec<DigitalPassportOpening>,
+    #[serde(rename = "credentialPrivateParts")]
+    pub credential_private_parts: Option<CredentialPrivateParts>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CredentialPrivateParts {
+    #[serde(rename = "claimValues")]
+    pub claim_values: ClaimValues,
+    pub openings: ClaimOpenings,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClaimValues {
+    /// base64url-encoded 64-byte zero-padded UTF-8.
+    #[serde(rename = "firstNameValuePadded")]
+    pub first_name_value_padded: String,
+    #[serde(rename = "lastNameValuePadded")]
+    pub last_name_value_padded: String,
+    /// Days since 1970-01-01T00:00:00Z. The wallet's
+    /// `decode_days_since_epoch` reader expects 4 bytes u32 LE.
+    #[serde(rename = "dateOfBirthDays")]
+    pub date_of_birth_days: u32,
+    /// base64url-encoded 32-byte zero-padded UTF-8.
+    #[serde(rename = "documentNumberValue")]
+    pub document_number_value: String,
+    #[serde(rename = "issuingStateValue")]
+    pub issuing_state_value: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ClaimOpenings {
+    /// Each opening is a base64url-encoded 32-byte random value
+    /// — the blinding factor used in the commitment.
+    #[serde(rename = "firstNameOpening")]
+    pub first_name_opening: String,
+    #[serde(rename = "lastNameOpening")]
+    pub last_name_opening: String,
+    #[serde(rename = "dateOfBirthOpening")]
+    pub date_of_birth_opening: String,
+    #[serde(rename = "documentNumberOpening")]
+    pub document_number_opening: String,
+    #[serde(rename = "issuingStateOpening")]
+    pub issuing_state_opening: String,
 }
 
 /// The `credential` object inside the passport-issuer response.
@@ -276,19 +337,67 @@ pub async fn request_credential(
         issued_at_ms: clock.now_ms(),
     };
 
-    // 10. Map openings with /credentialSubject/{fieldName} convention
-    let openings: Vec<VcOpening> = response
-        .openings
-        .into_iter()
-        .map(|o| {
-            Ok(VcOpening {
-                vc_uri: vc.vc_uri.clone(),
-                claim_path: format!("/credentialSubject/{}", o.field_name),
-                plaintext: URL_SAFE_NO_PAD.decode(&o.plaintext_b64)?,
-                opening: URL_SAFE_NO_PAD.decode(&o.opening_b64)?,
-            })
-        })
-        .collect::<Result<_, base64::DecodeError>>()?;
+    // 10. Map credentialPrivateParts (claimValues + openings) to
+    //     the wallet's per-claim `VcOpening` rows. The UI side
+    //     (vc_views/digital_passport.rs) reads back by these
+    //     JSON-Pointer paths to render reveal toggles.
+    //
+    //     | Issuer field name             | Wallet claim_path                     | Plaintext encoding              |
+    //     |-------------------------------|---------------------------------------|---------------------------------|
+    //     | firstNameValuePadded          | /credentialSubject/firstName          | 64-byte zero-padded UTF-8       |
+    //     | lastNameValuePadded           | /credentialSubject/lastName           | 64-byte zero-padded UTF-8       |
+    //     | dateOfBirthDays               | /credentialSubject/dateOfBirth        | u32 LE bytes (days since epoch) |
+    //     | documentNumberValue           | /credentialSubject/documentNumber     | 32-byte zero-padded UTF-8       |
+    //     | issuingStateValue             | /credentialSubject/issuingState       | 32-byte zero-padded UTF-8       |
+    //
+    //     Openings come in base64url 32-byte form straight from
+    //     `<field>Opening` siblings under
+    //     `credentialPrivateParts.openings`.
+    let openings: Vec<VcOpening> = match response.credential_private_parts {
+        Some(parts) => {
+            let cv = &parts.claim_values;
+            let op = &parts.openings;
+            let mk = |path: &str, plaintext: Vec<u8>, opening_b64: &str| -> Result<VcOpening, base64::DecodeError> {
+                Ok(VcOpening {
+                    vc_uri: vc.vc_uri.clone(),
+                    claim_path: path.to_string(),
+                    plaintext,
+                    opening: URL_SAFE_NO_PAD.decode(opening_b64)?,
+                })
+            };
+            let mut out: Vec<VcOpening> = Vec::with_capacity(5);
+            out.push(mk(
+                "/credentialSubject/firstName",
+                URL_SAFE_NO_PAD.decode(&cv.first_name_value_padded)?,
+                &op.first_name_opening,
+            )?);
+            out.push(mk(
+                "/credentialSubject/lastName",
+                URL_SAFE_NO_PAD.decode(&cv.last_name_value_padded)?,
+                &op.last_name_opening,
+            )?);
+            // dateOfBirth: issuer sends an integer (days since
+            // 1970-01-01). The wallet's `decode_days_since_epoch`
+            // reader expects 4 little-endian bytes — re-pack.
+            out.push(mk(
+                "/credentialSubject/dateOfBirth",
+                cv.date_of_birth_days.to_le_bytes().to_vec(),
+                &op.date_of_birth_opening,
+            )?);
+            out.push(mk(
+                "/credentialSubject/documentNumber",
+                URL_SAFE_NO_PAD.decode(&cv.document_number_value)?,
+                &op.document_number_opening,
+            )?);
+            out.push(mk(
+                "/credentialSubject/issuingState",
+                URL_SAFE_NO_PAD.decode(&cv.issuing_state_value)?,
+                &op.issuing_state_opening,
+            )?);
+            out
+        }
+        None => Vec::new(),
+    };
 
     vc_store
         .insert_vc_with_openings(&vc, &openings)
