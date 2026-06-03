@@ -39,6 +39,7 @@ use std::time::{Duration, Instant};
 
 use async_trait::async_trait;
 
+use std::sync::Arc;
 use wallet_core::oid4vp_client::{AuthnKey, DidAuthnDiscovery, DiscoverError};
 use wallet_core::{DidId, VerificationMethodRef, Wallet};
 
@@ -53,12 +54,12 @@ struct Entry {
 /// `DidAuthnDiscovery` adapter that wraps the chain-op-capable
 /// `Wallet` and caches the picked authentication key per DID.
 pub struct CachedWalletAuthnDiscovery {
-    wallet: Wallet,
+    wallet: Arc<Wallet>,
     cache: Mutex<HashMap<String, Entry>>,
 }
 
 impl CachedWalletAuthnDiscovery {
-    pub fn new(wallet: Wallet) -> Self {
+    pub fn new(wallet: Arc<Wallet>) -> Self {
         Self {
             wallet,
             cache: Mutex::new(HashMap::new()),

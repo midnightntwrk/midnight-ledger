@@ -133,7 +133,7 @@ pub async fn request_credential(
     credential_configuration_id: &str,
     pre_authorized_code: &str,
     coordinator: &CredentialCoordinator,
-    wallet: &Wallet,
+    _wallet: &Wallet,
     secret_store: &dyn SecretStorage,
     holder_did: &DidId,
     vc_store: &dyn VcStorage,

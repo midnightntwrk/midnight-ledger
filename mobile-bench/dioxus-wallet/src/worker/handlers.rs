@@ -23,7 +23,7 @@ use wallet_core::secret_storage::redb_secret_store::RedbSecretStore;
 use wallet_core::store::WalletStore;
 use wallet_core::{
     DidId, HttpClient, MeteredHttpClient, RedbVcStore, ReqwestHttpClient,
-    bootstrap_did_with_keys, oid4vci_run_issuance, time_op,
+    Wallet, bootstrap_did_with_keys, oid4vci_run_issuance, time_op,
 };
 
 use crate::app::wallet_store_path;
@@ -231,7 +231,7 @@ async fn handle_oid4vp_authenticate(
         Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
 
     let discovery =
-        Arc::new(CachedWalletAuthnDiscovery::new(wallet))
+        Arc::new(CachedWalletAuthnDiscovery::new(Arc::new(wallet)))
             as Arc<dyn wallet_core::oid4vp_client::DidAuthnDiscovery>;
     let signer = Arc::new(RedbDidSigner::new(secret_store))
         as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
@@ -311,10 +311,13 @@ async fn handle_oid4vci_issuance(
     let http: Arc<dyn HttpClient> =
         Arc::new(MeteredHttpClient::new(raw_http, metrics.clone()));
 
+    // Arc-share Wallet so both discovery and run_issuance can
+    // hold a reference without fighting over ownership.
+    let wallet_arc: Arc<Wallet> = Arc::new(wallet);
     let discovery =
-        Arc::new(CachedWalletAuthnDiscovery::new(wallet))
+        Arc::new(CachedWalletAuthnDiscovery::new(wallet_arc.clone()))
             as Arc<dyn wallet_core::oid4vp_client::DidAuthnDiscovery>;
-    let signer = Arc::new(RedbDidSigner::new(secret_store))
+    let signer = Arc::new(RedbDidSigner::new(secret_store.clone()))
         as Arc<dyn wallet_core::oid4vp_client::DidSigner>;
     let clock: Arc<dyn wallet_core::clock::Clock> = Arc::new(SystemClock);
 
@@ -322,12 +325,13 @@ async fn handle_oid4vci_issuance(
     // proof. Other proof types (`ldp_vp`, `mso_mdoc`, EBSI)
     // would substitute a different `ProofBuilder` here without
     // touching `run_issuance` or `request_credential`.
+    let did_for_coordinator = did.clone();
     let coordinator = wallet_core::oid4vci_client::CredentialCoordinator::jwt(
         wallet_core::oid4vci_client::IdTokenProofBuilder::new(
             discovery,
             signer,
             clock.clone(),
-            did,
+            did_for_coordinator,
         ),
     );
 
@@ -337,11 +341,11 @@ async fn handle_oid4vci_issuance(
         "issuance",
         oid4vci_run_issuance(
             &*http,
-            &clock,
-            wallet.js_bridge(),
+            &*clock,
+            wallet_arc.js_bridge(),
             &qr_url,
             &coordinator,
-            &wallet,
+            &wallet_arc,
             &secret_store,
             &did,
             &vc_store,

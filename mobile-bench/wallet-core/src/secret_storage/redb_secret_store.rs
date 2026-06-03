@@ -34,6 +34,7 @@ use crate::secret_storage::{
 use crate::store::{KeyDerivation, KeyRow, StoreError, WalletId, WalletStore};
 
 /// `SecretStorage` impl backed by the unified `WalletStore`.
+#[derive(Clone)]
 pub struct RedbSecretStore {
     store: WalletStore,
     wallet_id: WalletId,
