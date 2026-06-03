@@ -11,6 +11,7 @@ mod format;
 mod logs;
 mod platform;
 mod proc_stats;
+mod session_persist;
 mod telemetry_panel;
 mod vc_views;
 #[cfg(feature = "js-bridge")]
