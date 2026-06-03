@@ -185,13 +185,17 @@ fn run_oid4vp_authenticate(
                     ..
                 } => {
                     in_mem_metrics.incr("oid4vp.ok", 1);
-                    ok_msg.set(Some(format!(
-                        "session_id={session_id} status={status}",
-                    )));
+                    if let Ok(mut w) = ok_msg.try_write() {
+                        *w = Some(format!(
+                            "session_id={session_id} status={status}",
+                        ));
+                    }
                 }
                 crate::worker::WorkOutcome::Err { msg, .. } => {
                     in_mem_metrics.incr("oid4vp.failed", 1);
-                    err_msg.set(Some(format!("authenticate failed: {msg}")));
+                    if let Ok(mut w) = err_msg.try_write() {
+                        *w = Some(format!("authenticate failed: {msg}"));
+                    }
                 }
                 // Worker only emits Oid4vpOk / Err for an
                 // Oid4vpAuthenticate action_id; log defensively
@@ -205,7 +209,9 @@ fn run_oid4vp_authenticate(
                     );
                 }
             }
-            busy.set(false);
+            if let Ok(mut w) = busy.try_write() {
+                *w = false;
+            }
         }),
     );
 
@@ -284,11 +290,15 @@ fn run_oid4vci_request(
                     // ea972c42 added this for the pre-worker
                     // path; preserved here).
                     bump_vc_inventory_tick();
-                    ok_msg.set(Some(format!("issued {vc_uri}")));
+                    if let Ok(mut w) = ok_msg.try_write() {
+                        *w = Some(format!("issued {vc_uri}"));
+                    }
                 }
                 crate::worker::WorkOutcome::Err { msg, .. } => {
                     in_mem_metrics.incr("vcs.issuance_failed", 1);
-                    err_msg.set(Some(msg));
+                    if let Ok(mut w) = err_msg.try_write() {
+                        *w = Some(msg);
+                    }
                 }
                 other => {
                     tracing::warn!(
@@ -299,7 +309,9 @@ fn run_oid4vci_request(
                     );
                 }
             }
-            busy.set(false);
+            if let Ok(mut w) = busy.try_write() {
+                *w = false;
+            }
         }),
     );
 
@@ -811,16 +823,26 @@ fn BootstrapSection(
                             } => {
                                 in_mem_metrics.incr("dids.bootstrapped", 1);
                                 on_did_minted_eh.call((did_str.clone(), network));
-                                ic_did.set(Some(did_str.clone()));
-                                ok_msg_sig.set(Some(format!(
-                                    "Bootstrapped {did_str}. Switch to the Dids \
-                                     tab to see it; click Resolve there to fill \
-                                     in counter / VM counts.",
-                                )));
+                                // Use try_write() instead of .set() to avoid
+                                // ValueDroppedError panic when the component
+                                // has already unmounted by the time the
+                                // worker thread delivers the outcome.
+                                if let Ok(mut w) = ic_did.try_write() {
+                                    *w = Some(did_str.clone());
+                                }
+                                if let Ok(mut w) = ok_msg_sig.try_write() {
+                                    *w = Some(format!(
+                                        "Bootstrapped {did_str}. Switch to the Dids \
+                                         tab to see it; click Resolve there to fill \
+                                         in counter / VM counts.",
+                                    ));
+                                }
                             }
                             crate::worker::WorkOutcome::Err { msg, .. } => {
                                 in_mem_metrics.incr("dids.bootstrap_failed", 1);
-                                err_msg_sig.set(Some(msg));
+                                if let Ok(mut w) = err_msg_sig.try_write() {
+                                    *w = Some(msg);
+                                }
                             }
                             // The worker only ever emits BootstrapOk
                             // / Err for a Bootstrap action_id; the
@@ -836,7 +858,9 @@ fn BootstrapSection(
                                 );
                             }
                         }
-                        busy_sig.set(false);
+                        if let Ok(mut w) = busy_sig.try_write() {
+                            *w = false;
+                        }
                     }),
                 );
 
