@@ -640,6 +640,65 @@ impl WalletStore {
         Ok(out)
     }
 
+    /// Drop every local trace of a DID — inventory row + multimap
+    /// entry + resolved-cache row + controller-secret row — without
+    /// touching the chain. Returns `true` if the inventory row was
+    /// present (i.e. there was something to forget); `false` is a
+    /// no-op signal for the caller.
+    ///
+    /// Wallet-side bookkeeping only. The DID's on-chain contract
+    /// remains untouched; this is the local equivalent of "I never
+    /// want to see this row again" rather than "deactivate the
+    /// document." For real networks the caller should refuse to
+    /// expose this operation in the UI — losing the controller
+    /// secret + inventory row means the DID is unrecoverable from
+    /// this wallet even though it's still on chain. For the
+    /// undeployed standalone the chain itself is throwaway, so
+    /// this is the sensible way to scrub a failed bootstrap
+    /// attempt.
+    pub fn forget_did(
+        &self,
+        network: Network,
+        did: &str,
+    ) -> Result<bool, StoreError> {
+        let net = NetworkTag::from(network).0;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let removed = {
+            let mut inv = txn
+                .open_table(DID_INVENTORY)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let was_present = inv
+                .remove((net, did))
+                .map_err(|e| StoreError::Backend(e.to_string()))?
+                .is_some();
+            let mut idx = txn
+                .open_multimap_table(DIDS_BY_NETWORK)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let _ = idx
+                .remove(net, did)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut cache = txn
+                .open_table(RESOLVED_CACHE)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let _ = cache
+                .remove((net, did))
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let mut secrets = txn
+                .open_table(CONTROLLER_SECRETS)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            let _ = secrets
+                .remove((net, did))
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            was_present
+        };
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(removed)
+    }
+
     // ── Resolved-DID cache ────────────────────────────────────────
 
     /// Persist the most-recent resolve for a DID. Caller
@@ -1351,6 +1410,53 @@ mod tests {
         assert_eq!(all[0].did, did);
         assert_eq!(all[0].status, InventoryStatus::Pending);
         assert!(all[0].created_at > 0);
+    }
+
+    #[test]
+    fn forget_did_drops_every_local_trace() {
+        // Seed inventory + resolved-cache + controller-secret rows
+        // for a single DID, then call `forget_did`. All three
+        // tables MUST come back empty (the multimap index too,
+        // which `list_did_inventory` walks indirectly).
+        let store = WalletStore::open_in_memory("pw").unwrap();
+        let did = "did:midnight:undeployed:7f7f7f7f";
+        store
+            .put_did_inventory(DidInventoryEntry {
+                did: did.to_string(),
+                network: Network::Undeployed,
+                status: InventoryStatus::Active,
+                counter: Some(3),
+                vm_count: Some(2),
+                service_count: Some(0),
+                last_block_height: Some(42),
+                created_at: 0,
+                updated_at: 0,
+            })
+            .unwrap();
+        store
+            .put_resolved_cache(
+                Network::Undeployed,
+                did,
+                "{\"document\":\"fixture\"}".to_string(),
+            )
+            .unwrap();
+        store
+            .put_controller_secret(Network::Undeployed, did, &[9u8; 32])
+            .unwrap();
+        // Sanity: state landed.
+        assert_eq!(store.list_did_inventory(Network::Undeployed).unwrap().len(), 1);
+        assert!(store.get_resolved_cache(Network::Undeployed, did).unwrap().is_some());
+        assert!(store.get_controller_secret(Network::Undeployed, did).unwrap().is_some());
+        // Forget.
+        let removed = store.forget_did(Network::Undeployed, did).unwrap();
+        assert!(removed, "forget_did should report `true` for a row that existed");
+        // Every linked table is now empty for this DID.
+        assert!(store.list_did_inventory(Network::Undeployed).unwrap().is_empty());
+        assert!(store.get_resolved_cache(Network::Undeployed, did).unwrap().is_none());
+        assert!(store.get_controller_secret(Network::Undeployed, did).unwrap().is_none());
+        // Second call is a no-op + reports `false`.
+        let removed_again = store.forget_did(Network::Undeployed, did).unwrap();
+        assert!(!removed_again, "second forget on a vanished row must report `false`");
     }
 
     #[test]

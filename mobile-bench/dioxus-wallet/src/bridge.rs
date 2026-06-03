@@ -374,6 +374,19 @@ impl BridgeState {
         }
     }
 
+    /// Drop the in-session controller-secret cache entry for a
+    /// DID. The persistent store row is owned by
+    /// `WalletStore::forget_did`; this just keeps the in-memory
+    /// shadow consistent so a subsequent `controller_secret_for_on`
+    /// re-reads from the (now empty) store rather than returning a
+    /// stale cached value. Used by the "Forget locally" path on
+    /// the DID detail view.
+    pub fn forget_controller_secret_on(&self, _network: Network, did: &str) {
+        if let Ok(mut g) = self.persistence.controller_secrets.lock() {
+            g.remove(did);
+        }
+    }
+
     /// Legacy network-less accessor — only checks the in-memory
     /// cache. Kept because some hot paths (e.g. the bridge RPC
     /// loop, where we don't have the network in scope cheaply)

@@ -2124,6 +2124,35 @@ pub fn App() -> Element {
                             log.push(ev);
                             session_log.set(log);
                         },
+                        on_forgotten: move |did: String| {
+                            // The store has already dropped its
+                            // rows for this DID (the detail view
+                            // calls `WalletStore::forget_did`
+                            // before invoking us). Sync the
+                            // in-memory signals so the inventory
+                            // page, resolver, and any open
+                            // session-log entries don't keep a
+                            // stale reference.
+                            let net = *network.read();
+                            let mut inv = did_inventory.read().clone();
+                            inv.remove(&did);
+                            did_inventory.set(inv);
+                            let mut cache = resolved_cache.read().clone();
+                            cache.remove(&did);
+                            resolved_cache.set(cache);
+                            let mut prev = previous_resolved_cache.read().clone();
+                            prev.remove(&did);
+                            previous_resolved_cache.set(prev);
+                            // Drop the in-session controller-secret
+                            // cache too so future ops on a re-minted
+                            // DID with the same id don't pick up
+                            // stale material. (Same-id collisions
+                            // are improbable but possible on
+                            // throwaway chains.)
+                            bridge_state.read().forget_controller_secret_on(net, &did);
+                            // Pop back to inventory.
+                            open_did.set(None);
+                        },
                     }
                 } else {
                     // Browse mode: Create DID button + inventory +
@@ -6999,6 +7028,15 @@ fn DidDetailView(
     on_timing: EventHandler<TimingRun>,
     on_cost: EventHandler<CostRun>,
     on_event: EventHandler<SessionEvent>,
+    /// Invoked AFTER the local store has dropped every trace of
+    /// this DID (inventory + resolved cache + controller secret).
+    /// The parent's handler clears matching signals + navigates
+    /// back to the inventory. Gated UI-side on
+    /// `network.is_undeployed()` so the button only shows up for
+    /// the throwaway local docker chain — losing the controller
+    /// secret on a real network means the on-chain DID becomes
+    /// unrecoverable from this wallet.
+    on_forgotten: EventHandler<String>,
 ) -> Element {
     use wallet_core::WizardStage;
 
@@ -7019,6 +7057,14 @@ fn DidDetailView(
     // explicitly backing up / restoring the secret. Toggled by the
     // "Secret" button in the segmented header capsule.
     let mut show_controller_secret = use_signal(|| false);
+    // Modal-confirm gate for "Forget locally". Hidden by default;
+    // only revealed when the network is undeployed (see button
+    // gating below). Forget drops every local trace of the DID
+    // without touching the chain — for the throwaway docker-compose
+    // standalone this is the sensible way to scrub a failed
+    // bootstrap attempt.
+    let mut confirm_forget = use_signal(|| false);
+    let mut forget_error = use_signal::<Option<String>>(|| None);
     // When true, render `DidOperationBuilder` instead of the
     // 8-tab view. Toggled by the "Update DID" button (which is
     // disabled unless we have the controller secret for this DID
@@ -7323,6 +7369,25 @@ fn DidDetailView(
                     },
                     {if *show_controller_secret.read() { "🔑 Hide" } else { "🔑 Secret" }}
                 }
+                // "Forget locally" — drops the inventory row, the
+                // resolved-cache row, and the controller secret
+                // for this DID without touching the chain. Gated
+                // on `network.is_undeployed()`: on a real network
+                // losing the controller secret means the on-chain
+                // DID becomes unrecoverable from this wallet. On
+                // the throwaway docker-compose standalone the
+                // chain itself is wiped on every `compose down -v`,
+                // so a local-only Forget is the right way to
+                // scrub a failed bootstrap attempt without
+                // littering the inventory with ghost rows.
+                if network.is_undeployed() {
+                    button {
+                        class: "btn-text",
+                        title: "Remove this DID from the wallet (local only — does not deactivate on chain)",
+                        onclick: move |_| confirm_forget.set(true),
+                        "🗑 Forget"
+                    }
+                }
             }
             if let Some(err) = resolve_error.read().as_ref() {
                 div { class: "wizard-outcome err",
@@ -7333,6 +7398,12 @@ fn DidDetailView(
             if let Some(err) = deactivate_error.read().as_ref() {
                 div { class: "wizard-outcome err",
                     div { class: "row label", "Deactivate failed" }
+                    div { class: "seed-blob", "{err}" }
+                }
+            }
+            if let Some(err) = forget_error.read().as_ref() {
+                div { class: "wizard-outcome err",
+                    div { class: "row label", "Forget failed" }
                     div { class: "seed-blob", "{err}" }
                 }
             }
@@ -7421,6 +7492,67 @@ fn DidDetailView(
                                 deactivate(evt);
                             },
                             "Deactivate"
+                        }
+                    }
+                }
+            }
+        }
+        // Modal confirm for "Forget locally". Same scrim + card +
+        // stop-propagation pattern as the Deactivate dialog. Confirm
+        // calls `WalletStore::forget_did` (drops inventory + cache +
+        // controller secret rows), then invokes `on_forgotten` so
+        // the parent can update its signals and pop back to the
+        // inventory.
+        if *confirm_forget.read() {
+            div { class: "dialog-scrim",
+                onclick: move |_| confirm_forget.set(false),
+                div { class: "dialog",
+                    onclick: move |evt: Event<MouseData>| evt.stop_propagation(),
+                    div { class: "dialog-title", "Forget this DID locally?" }
+                    div { class: "dialog-body",
+                        "This removes the DID from ",
+                        b { "this wallet" }
+                        " only — the on-chain document is untouched. The local controller secret, resolved cache, and inventory row are erased. Only available on the undeployed standalone chain, which is itself thrown away on every restart."
+                    }
+                    div { class: "dialog-actions",
+                        button { class: "btn-text",
+                            onclick: move |_| confirm_forget.set(false),
+                            "Cancel"
+                        }
+                        button { class: "btn-danger",
+                            onclick: {
+                                // Clone what the closure needs to
+                                // own up here — rsx! `if` arms
+                                // don't accept bare `let`
+                                // statements, so we hoist into the
+                                // attribute initialiser block
+                                // instead. The closure itself can
+                                // have any number of locals.
+                                let did_for_forget = did.clone();
+                                let bridge_for_forget = bridge_state.clone();
+                                move |_| {
+                                    forget_error.set(None);
+                                    confirm_forget.set(false);
+                                    let store = match bridge_for_forget.store() {
+                                        Some(s) => s,
+                                        None => {
+                                            forget_error.set(Some(
+                                                "persistent store not open — nothing to forget".into(),
+                                            ));
+                                            return;
+                                        }
+                                    };
+                                    match store.forget_did(network, &did_for_forget) {
+                                        Ok(_) => {
+                                            on_forgotten.call(did_for_forget.clone());
+                                        }
+                                        Err(e) => {
+                                            forget_error.set(Some(format!("store: {e}")));
+                                        }
+                                    }
+                                }
+                            },
+                            "Forget"
                         }
                     }
                 }
