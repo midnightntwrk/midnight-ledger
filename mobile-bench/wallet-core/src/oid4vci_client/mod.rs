@@ -225,21 +225,28 @@ mod flow_tests {
         );
 
         let seed = [24u8; 32];
+        // Two bootstrapped wallet/store pairs — one consumed by the
+        // stub-port chain (`stub_authn_discovery`/`stub_did_signer`
+        // take their argument by value), one held back for the
+        // `run_issuance` reference args. Deterministic: the same
+        // seed produces the same on-chain DID id from both calls.
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let discovery = stub_authn_discovery(wallet);
-        let signer = stub_did_signer(store);
+        let (w_for_stubs, _) = stub_wallet_with_bootstrapped_did(seed).await;
+        let s_for_stubs = stub_secret_store_with_bootstrapped_did(seed).await;
+        let discovery = stub_authn_discovery(w_for_stubs);
+        let signer = stub_did_signer(s_for_stubs);
         let vc_store = InMemoryVcStore::default();
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
         let coordinator = CredentialCoordinator::jwt(IdTokenProofBuilder::new(
             discovery,
             signer,
             clock.clone(),
-            did,
+            did.clone(),
         ));
 
         // Birth flow does not need the JS bridge — pass None.
-        let uri = run_issuance(&http, &clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store)
+        let uri = run_issuance(&http, &*clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store)
             .await
             .expect("ok");
         assert_eq!(uri, "urn:uuid:flow-1");
@@ -289,19 +296,21 @@ mod flow_tests {
         let seed = [24u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let discovery = stub_authn_discovery(wallet);
-        let signer = stub_did_signer(store);
+        let (w_for_stubs, _) = stub_wallet_with_bootstrapped_did(seed).await;
+        let s_for_stubs = stub_secret_store_with_bootstrapped_did(seed).await;
+        let discovery = stub_authn_discovery(w_for_stubs);
+        let signer = stub_did_signer(s_for_stubs);
         let vc_store = InMemoryVcStore::default();
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
         let coordinator = CredentialCoordinator::jwt(IdTokenProofBuilder::new(
             discovery,
             signer,
             clock.clone(),
-            did,
+            did.clone(),
         ));
 
         // Unknown config ID doesn't need a JS bridge either.
-        let err = run_issuance(&http, &clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store)
+        let err = run_issuance(&http, &*clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store)
             .await
             .expect_err("should fail");
         match err {
@@ -362,19 +371,21 @@ mod flow_tests {
         let seed = [77u8; 32];
         let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
         let store = stub_secret_store_with_bootstrapped_did(seed).await;
-        let discovery = stub_authn_discovery(wallet);
-        let signer = stub_did_signer(store);
+        let (w_for_stubs, _) = stub_wallet_with_bootstrapped_did(seed).await;
+        let s_for_stubs = stub_secret_store_with_bootstrapped_did(seed).await;
+        let discovery = stub_authn_discovery(w_for_stubs);
+        let signer = stub_did_signer(s_for_stubs);
         let vc_store = InMemoryVcStore::default();
         let clock: Arc<dyn Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
         let coordinator = CredentialCoordinator::jwt(IdTokenProofBuilder::new(
             discovery,
             signer,
             clock.clone(),
-            did,
+            did.clone(),
         ));
 
         let err = run_issuance(
-            &http, &clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store,
+            &http, &*clock, None, &qr, &coordinator, &wallet, &store, &did, &vc_store,
         )
         .await
         .expect_err("passport flow without JS bridge should fail");

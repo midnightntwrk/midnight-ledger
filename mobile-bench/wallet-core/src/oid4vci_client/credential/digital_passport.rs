@@ -465,10 +465,103 @@ mod tests {
         }
     }
 
+    /// Build a fresh wallet + secret-store pair bootstrapped to the
+    /// same DID, returning two copies — one for the stub-port
+    /// discovery/signer (those consume their `Wallet` /
+    /// `InMemorySecretStore` argument), and one for the
+    /// `request_credential` call's `&Wallet` / `&dyn SecretStorage`
+    /// references. Deterministic: same seed → same DID id from both
+    /// calls of the stub bootstrap helper.
+    async fn paired_wallets(
+        seed: [u8; 32],
+    ) -> (
+        crate::wallet::Wallet,
+        crate::secret_storage::InMemorySecretStore,
+        crate::wallet::Wallet,
+        crate::secret_storage::InMemorySecretStore,
+        crate::DidId,
+    ) {
+        let (w_for_call, did) = stub_wallet_with_bootstrapped_did(seed).await;
+        let s_for_call = stub_secret_store_with_bootstrapped_did(seed).await;
+        let (w_for_stubs, _) = stub_wallet_with_bootstrapped_did(seed).await;
+        let s_for_stubs = stub_secret_store_with_bootstrapped_did(seed).await;
+        (w_for_call, s_for_call, w_for_stubs, s_for_stubs, did)
+    }
+
+    /// Build a canonical 200-OK passport-issuer credential response
+    /// matching the shape in
+    /// `POST /api/issuer/credentials` OpenAPI:
+    /// `{ credential, credentialPrivateParts: { claimValues, openings } }`.
+    fn passport_response_with_claims(
+        body: &[u8],
+        proof: &[u8],
+        holder_did: &str,
+        first_name: &[u8],
+        last_name: &[u8],
+        dob_days: u32,
+        doc_number: &[u8],
+        issuing_state: &[u8],
+    ) -> serde_json::Value {
+        let pad64 = |s: &[u8]| -> String {
+            let mut out = [0u8; 64];
+            out[..s.len().min(64)].copy_from_slice(&s[..s.len().min(64)]);
+            URL_SAFE_NO_PAD.encode(out)
+        };
+        let pad32 = |s: &[u8]| -> String {
+            let mut out = [0u8; 32];
+            out[..s.len().min(32)].copy_from_slice(&s[..s.len().min(32)]);
+            URL_SAFE_NO_PAD.encode(out)
+        };
+        json!({
+            "credential": {
+                "credential": {
+                    "encoding": "compact-value-v1.base64url",
+                    "payload": URL_SAFE_NO_PAD.encode(body),
+                },
+                "credentialProof": {
+                    "encoding": "compact-value-v1.base64url",
+                    "payload": URL_SAFE_NO_PAD.encode(proof),
+                },
+                "holderBinding": {
+                    "holderDidMethod": {
+                        "did": holder_did,
+                        "methodId": "#key-assert",
+                        "keyType": "jubjub",
+                    }
+                }
+            },
+            "credentialPrivateParts": {
+                "claimValues": {
+                    "firstNameValuePadded":  pad64(first_name),
+                    "lastNameValuePadded":   pad64(last_name),
+                    "dateOfBirthDays":       dob_days,
+                    "documentNumberValue":   pad32(doc_number),
+                    "issuingStateValue":     pad32(issuing_state),
+                },
+                "openings": {
+                    "firstNameOpening":      URL_SAFE_NO_PAD.encode([0x11u8; 32]),
+                    "lastNameOpening":       URL_SAFE_NO_PAD.encode([0x22u8; 32]),
+                    "dateOfBirthOpening":    URL_SAFE_NO_PAD.encode([0x33u8; 32]),
+                    "documentNumberOpening": URL_SAFE_NO_PAD.encode([0x44u8; 32]),
+                    "issuingStateOpening":   URL_SAFE_NO_PAD.encode([0x55u8; 32]),
+                }
+            }
+        })
+    }
+
+    /// Drive the full happy path against the passport-issuer's
+    /// credentialPrivateParts response shape. Verifies:
+    ///   - `vc_uri` carries the digital-passport namespace prefix
+    ///   - the VC lands with body + proof bytes from the response
+    ///   - issuer_did is extracted via the JS bridge
+    ///   - holder_did is extracted from `holderBinding.holderDidMethod.did`
+    ///   - all FIVE `VcOpening` rows land under the
+    ///     `/credentialSubject/{name}` paths the
+    ///     `vc_views::digital_passport` UI reads back on reveal
+    ///   - `dateOfBirthDays` (integer) is re-packed as 4-byte u32 LE
     #[tokio::test]
     async fn request_credential_passport_round_trip() {
         let http = MockHttpClient::default();
-        // 1. /token
         http.push_json(
             200,
             &json!({
@@ -478,62 +571,36 @@ mod tests {
                 "expires_in": 600,
             }),
         );
-
-        // 2. /credential — passport-issuer response shape
-        let body_payload = URL_SAFE_NO_PAD.encode(b"PASSPORT_CREDENTIAL_BODY");
-        let proof_payload = URL_SAFE_NO_PAD.encode(b"PASSPORT_CREDENTIAL_PROOF");
-        let plaintext_b64 = URL_SAFE_NO_PAD.encode(b"1985-01-01");
-        let opening_b64 = URL_SAFE_NO_PAD.encode(b"opening-bytes");
-
         http.push_json(
             200,
-            &json!({
-                "credential": {
-                    "credential": {
-                        "encoding": "compact-value-v1.base64url",
-                        "payload": body_payload,
-                    },
-                    "credentialProof": {
-                        "encoding": "compact-value-v1.base64url",
-                        "payload": proof_payload,
-                    },
-                    "holderBinding": {
-                        "holderDidMethod": {
-                            "did": "did:midnight:holder123",
-                            "methodId": "#key-assert",
-                            "keyType": "jubjub",
-                        }
-                    }
-                },
-                "openings": [
-                    {
-                        "fieldName": "dateOfBirth",
-                        "plaintextB64": plaintext_b64,
-                        "openingB64": opening_b64,
-                    }
-                ]
-            }),
+            &passport_response_with_claims(
+                b"PASSPORT_CREDENTIAL_BODY",
+                b"PASSPORT_CREDENTIAL_PROOF",
+                "did:midnight:holder123",
+                b"Alice",
+                b"Anderson",
+                20_454, // 2025-12-31-ish — arbitrary fixture value
+                b"P12345",
+                b"USA",
+            ),
         );
 
         let seed = [23u8; 32];
-        let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
-        let store = stub_secret_store_with_bootstrapped_did(seed).await;
+        let (w_for_call, s_for_call, w_for_stubs, s_for_stubs, did) = paired_wallets(seed).await;
         let vc_store = InMemoryVcStore::default();
         let clock = FixedClock::new(1_700_000_001_000);
         let js_bridge = MockJsBridge {
             issuer_did: "did:midnight:issuer456".to_string(),
         };
-        // Build the coordinator with the canonical JWT proof builder
-        // — same pattern as the worker's handle_oid4vci_issuance.
-        let discovery = stub_authn_discovery(wallet);
-        let signer = stub_did_signer(store);
+        let discovery = stub_authn_discovery(w_for_stubs);
+        let signer = stub_did_signer(s_for_stubs);
         let clock_arc: Arc<dyn crate::clock::Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
         let coordinator = crate::oid4vci_client::CredentialCoordinator::jwt(
             crate::oid4vci_client::IdTokenProofBuilder::new(
                 discovery,
                 signer,
                 clock_arc,
-                did,
+                did.clone(),
             ),
         );
 
@@ -548,16 +615,14 @@ mod tests {
             "digital_passport_v1",
             "CODE-PASSPORT",
             &coordinator,
-            &wallet,
-            &store,
+            &w_for_call,
+            &s_for_call,
             &did,
             &vc_store,
         )
         .await
         .expect("ok");
 
-        // vc_uri should use the digital-passport namespace prefix
-        // so the UI can route it to DigitalPassportCard.
         assert!(vc_uri.starts_with("urn:vc:digital-passport:"));
 
         let landed = vc_store.get_vc(&vc_uri).unwrap().expect("present");
@@ -568,19 +633,247 @@ mod tests {
         assert_eq!(landed.format, "midnight_compact_vc");
         assert_eq!(landed.issued_at_ms, 1_700_000_001_000);
 
-        // Verify openings use /credentialSubject/{fieldName} convention
+        // All 5 openings present under the expected JSON-Pointer paths.
+        for path in &[
+            "/credentialSubject/firstName",
+            "/credentialSubject/lastName",
+            "/credentialSubject/dateOfBirth",
+            "/credentialSubject/documentNumber",
+            "/credentialSubject/issuingState",
+        ] {
+            let op = vc_store
+                .get_opening(&vc_uri, path)
+                .unwrap()
+                .unwrap_or_else(|| panic!("opening missing for {path}"));
+            assert_eq!(op.opening.len(), 32, "opening at {path} should be 32 bytes");
+        }
+
+        // First-name plaintext is the 64-byte zero-padded UTF-8 — the
+        // bytes "Alice" followed by 59 NUL bytes (the wallet's
+        // `decode_text_padded` strips the trailing NULs).
+        let first_op = vc_store
+            .get_opening(&vc_uri, "/credentialSubject/firstName")
+            .unwrap()
+            .unwrap();
+        assert_eq!(first_op.plaintext.len(), 64);
+        assert_eq!(&first_op.plaintext[..5], b"Alice");
+        assert_eq!(&first_op.plaintext[5..], &[0u8; 59][..]);
+
+        // DateOfBirth plaintext is u32 LE bytes (4 bytes, days since
+        // epoch) — `decode_days_since_epoch` reads this directly.
+        let dob_op = vc_store
+            .get_opening(&vc_uri, "/credentialSubject/dateOfBirth")
+            .unwrap()
+            .unwrap();
+        assert_eq!(dob_op.plaintext, 20_454u32.to_le_bytes().to_vec());
+
+        // Two HTTP calls: token + credential.
+        let rec = http.recorded();
+        assert_eq!(rec.len(), 2);
+        assert_eq!(rec[0].url, "https://passport-issuer.local/token");
+        assert!(rec[0].bearer.is_none());
+    }
+
+    /// Boundary: the issuer's `credentialPrivateParts` field is
+    /// absent (Option<…>::None on the wallet side). The wallet must
+    /// still store the VC body + proof (those are the cryptographic
+    /// anchors); only the opening rows are skipped. The UI will
+    /// surface "No opening stored — cannot reveal." for every claim.
+    #[tokio::test]
+    async fn request_credential_passport_no_private_parts_drops_only_openings() {
+        let http = MockHttpClient::default();
+        http.push_json(
+            200,
+            &json!({
+                "access_token": "AT",
+                "c_nonce": "CN",
+                "token_type": "Bearer",
+                "expires_in": 600,
+            }),
+        );
+        // Strip `credentialPrivateParts` entirely.
+        http.push_json(
+            200,
+            &json!({
+                "credential": {
+                    "credential": {
+                        "encoding": "compact-value-v1.base64url",
+                        "payload": URL_SAFE_NO_PAD.encode(b"BODY"),
+                    },
+                    "credentialProof": {
+                        "encoding": "compact-value-v1.base64url",
+                        "payload": URL_SAFE_NO_PAD.encode(b"PROOF"),
+                    },
+                    "holderBinding": {
+                        "holderDidMethod": {
+                            "did": "did:midnight:holder-no-parts",
+                            "methodId": "#key-assert",
+                            "keyType": "jubjub",
+                        }
+                    }
+                }
+            }),
+        );
+
+        let seed = [24u8; 32];
+        let (w_for_call, s_for_call, w_for_stubs, s_for_stubs, did) = paired_wallets(seed).await;
+        let vc_store = InMemoryVcStore::default();
+        let clock = FixedClock::new(1_700_000_002_000);
+        let js_bridge = MockJsBridge { issuer_did: "did:midnight:issuer-x".into() };
+        let coordinator = crate::oid4vci_client::CredentialCoordinator::jwt(
+            crate::oid4vci_client::IdTokenProofBuilder::new(
+                stub_authn_discovery(w_for_stubs),
+                stub_did_signer(s_for_stubs),
+                Arc::new(FixedClock::new(1_700_000_002_000)) as Arc<dyn crate::clock::Clock>,
+                did.clone(),
+            ),
+        );
+        let vc_uri = request_credential(
+            &http,
+            &clock,
+            &js_bridge,
+            "https://issuer.local",
+            "https://issuer.local/token",
+            "https://issuer.local/credential",
+            "midnight_compact_vc",
+            "digital_passport_v1",
+            "CODE",
+            &coordinator,
+            &w_for_call,
+            &s_for_call,
+            &did,
+            &vc_store,
+        )
+        .await
+        .expect("ok");
+
+        // VC + proof still land — issuance succeeds even without
+        // the optional private parts.
+        let landed = vc_store.get_vc(&vc_uri).unwrap().expect("present");
+        assert_eq!(landed.body, b"BODY");
+        assert_eq!(landed.proof, b"PROOF");
+        assert_eq!(landed.holder_did, "did:midnight:holder-no-parts");
+
+        // No openings were stored — the UI will show "No opening
+        // stored" for every claim.
+        for path in &[
+            "/credentialSubject/firstName",
+            "/credentialSubject/lastName",
+            "/credentialSubject/dateOfBirth",
+            "/credentialSubject/documentNumber",
+            "/credentialSubject/issuingState",
+        ] {
+            assert!(
+                vc_store.get_opening(&vc_uri, path).unwrap().is_none(),
+                "no opening for {path}",
+            );
+        }
+    }
+
+    /// Round-trip closure: the bytes the wallet stores under
+    /// `/credentialSubject/dateOfBirth` (u32 LE) must decode back
+    /// to the integer the issuer sent. Without this, the UI's
+    /// `decode_days_since_epoch` reader would render a wrong date.
+    #[tokio::test]
+    async fn date_of_birth_days_roundtrips_through_u32_le_bytes() {
+        let http = MockHttpClient::default();
+        http.push_json(200, &json!({
+            "access_token": "AT", "c_nonce": "CN",
+            "token_type": "Bearer", "expires_in": 600,
+        }));
+        http.push_json(
+            200,
+            &passport_response_with_claims(
+                b"B", b"P", "did:midnight:h",
+                b"f", b"l",
+                12_345u32, // arbitrary
+                b"d", b"i",
+            ),
+        );
+
+        let seed = [25u8; 32];
+        let (w_for_call, s_for_call, w_for_stubs, s_for_stubs, did) = paired_wallets(seed).await;
+        let vc_store = InMemoryVcStore::default();
+        let clock = FixedClock::new(1_700_000_003_000);
+        let js_bridge = MockJsBridge { issuer_did: "did:midnight:i".into() };
+        let coordinator = crate::oid4vci_client::CredentialCoordinator::jwt(
+            crate::oid4vci_client::IdTokenProofBuilder::new(
+                stub_authn_discovery(w_for_stubs),
+                stub_did_signer(s_for_stubs),
+                Arc::new(FixedClock::new(1_700_000_003_000)) as Arc<dyn crate::clock::Clock>,
+                did.clone(),
+            ),
+        );
+        let vc_uri = request_credential(
+            &http, &clock, &js_bridge,
+            "https://i.local", "https://i.local/t", "https://i.local/c",
+            "midnight_compact_vc", "digital_passport_v1", "CODE",
+            &coordinator, &w_for_call, &s_for_call, &did, &vc_store,
+        )
+        .await
+        .expect("ok");
+
         let op = vc_store
             .get_opening(&vc_uri, "/credentialSubject/dateOfBirth")
             .unwrap()
-            .expect("opening present");
-        assert_eq!(op.plaintext, b"1985-01-01");
-        assert_eq!(op.opening, b"opening-bytes");
+            .unwrap();
+        assert_eq!(op.plaintext.len(), 4, "exactly 4 bytes — u32 LE");
+        let mut buf = [0u8; 4];
+        buf.copy_from_slice(&op.plaintext);
+        assert_eq!(u32::from_le_bytes(buf), 12_345);
+    }
+
+    /// Just keep the original record-assertion fragment that
+    /// exercised the HTTP call shape — it's still useful and
+    /// independent of the rewritten happy path.
+    #[tokio::test]
+    async fn request_credential_passport_http_call_shape() {
+        let http = MockHttpClient::default();
+        http.push_json(200, &json!({
+            "access_token": "AT", "c_nonce": "CN",
+            "token_type": "Bearer", "expires_in": 600,
+        }));
+        http.push_json(
+            200,
+            &passport_response_with_claims(
+                b"B", b"P", "did:midnight:h",
+                b"f", b"l", 1u32, b"d", b"i",
+            ),
+        );
+
+        let seed = [26u8; 32];
+        let (w_for_call, s_for_call, w_for_stubs, s_for_stubs, did) = paired_wallets(seed).await;
+        let vc_store = InMemoryVcStore::default();
+        let clock = FixedClock::new(1_700_000_004_000);
+        let js_bridge = MockJsBridge { issuer_did: "did:midnight:i".into() };
+        let coordinator = crate::oid4vci_client::CredentialCoordinator::jwt(
+            crate::oid4vci_client::IdTokenProofBuilder::new(
+                stub_authn_discovery(w_for_stubs),
+                stub_did_signer(s_for_stubs),
+                Arc::new(FixedClock::new(1_700_000_004_000)) as Arc<dyn crate::clock::Clock>,
+                did.clone(),
+            ),
+        );
+        let _ = request_credential(
+            &http, &clock, &js_bridge,
+            "https://passport-issuer.local",
+            "https://passport-issuer.local/token",
+            "https://passport-issuer.local/credential",
+            "midnight_compact_vc", "digital_passport_v1", "CODE",
+            &coordinator, &w_for_call, &s_for_call, &did, &vc_store,
+        )
+        .await
+        .expect("ok");
 
         // Verify request body shape: midnight extension included
         let rec = http.recorded();
         assert_eq!(rec.len(), 2);
         assert_eq!(rec[0].url, "https://passport-issuer.local/token");
+        assert_eq!(rec[1].url, "https://passport-issuer.local/credential");
         assert!(rec[0].bearer.is_none());
+        // Credential endpoint MUST carry the Bearer access token
+        // returned by /token (no Bearer = issuer would 401).
+        assert_eq!(rec[1].bearer.as_deref(), Some("AT"));
 
         assert_eq!(rec[1].url, "https://passport-issuer.local/credential");
         assert_eq!(rec[1].bearer.as_deref(), Some("AT"));
@@ -635,30 +928,28 @@ mod tests {
         // Use a bootstrapped wallet/secret store so the Ed25519
         // #key-auth key exists for the JWS proof, but then
         // delete the #key-assert Jubjub key so the passport
-        // flow can't derive the holder public key.
+        // flow can't derive the holder public key. Two copies of
+        // each (via paired_wallets) so the stub-port chain (which
+        // consumes its argument) doesn't move the value the
+        // request_credential reference args need.
         let seed = [99u8; 32];
-        let (wallet, did) = stub_wallet_with_bootstrapped_did(seed).await;
-        let mut store = stub_secret_store_with_bootstrapped_did(seed).await;
+        let (w_for_call, mut s_for_call, w_for_stubs, s_for_stubs, did) = paired_wallets(seed).await;
         let did_str = did.to_did_string();
         let assert_kid = format!("{did_str}#key-assert");
-        let assert_ref = store.find_by_kid(&assert_kid).await.expect("key should exist");
-        store.delete_key(assert_ref.uuid()).await.expect("delete should work");
+        let assert_ref = s_for_call.find_by_kid(&assert_kid).await.expect("key should exist");
+        s_for_call.delete_key(assert_ref.uuid()).await.expect("delete should work");
 
         let vc_store = InMemoryVcStore::default();
         let clock = FixedClock::new(1_700_000_001_000);
         let js_bridge = MockJsBridge {
             issuer_did: "did:midnight:test".to_string(),
         };
-
-        let discovery = stub_authn_discovery(wallet);
-        let signer = stub_did_signer(store);
-        let clock_arc: Arc<dyn crate::clock::Clock> = Arc::new(FixedClock::new(1_700_000_001_000));
         let coordinator = crate::oid4vci_client::CredentialCoordinator::jwt(
             crate::oid4vci_client::IdTokenProofBuilder::new(
-                discovery,
-                signer,
-                clock_arc,
-                did,
+                stub_authn_discovery(w_for_stubs),
+                stub_did_signer(s_for_stubs),
+                Arc::new(FixedClock::new(1_700_000_001_000)) as Arc<dyn crate::clock::Clock>,
+                did.clone(),
             ),
         );
 
@@ -673,8 +964,8 @@ mod tests {
             "digital_passport_v1",
             "CODE",
             &coordinator,
-            &wallet,
-            &store,
+            &w_for_call,
+            &s_for_call,
             &did,
             &vc_store,
         )

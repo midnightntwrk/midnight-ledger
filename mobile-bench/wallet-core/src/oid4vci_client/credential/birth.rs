@@ -215,7 +215,7 @@ mod tests {
 
         let vc_uri = request_credential(
             &http,
-            &clock,
+            &*clock,
             "https://issuer.local",           // credential_issuer (aud)
             "https://issuer.local/token",       // token_endpoint
             "https://issuer.local/credential",  // credential_endpoint

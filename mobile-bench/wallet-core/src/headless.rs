@@ -235,9 +235,31 @@ impl HeadlessWallet {
             discovery,
             signer,
             self.clock.clone(),
-            holder,
+            holder.clone(),
         ));
-        Ok(run_issuance(&*self.http, &self.clock, qr_url, &coordinator, &self.vc_store).await?)
+        // The b753e399 merge added 4 more positional parameters to
+        // `run_issuance` so the inner `credential::digital_passport`
+        // dispatch arm can pull holder material directly. Headless
+        // doesn't drive the digital-passport flow today (no JS
+        // bridge in the headless harness), so we pass `None` for
+        // `js_bridge` — the birth-credential dispatch arm doesn't
+        // consult it and the digital-passport arm would surface
+        // `JsBridgeUnavailable` (which is the right behaviour for
+        // a JS-bridge-less harness anyway).
+        let guard = self.secret_store.lock().await;
+        let secret_store: &dyn SecretStorage = &*guard;
+        Ok(run_issuance(
+            &*self.http,
+            &*self.clock,
+            None,
+            qr_url,
+            &coordinator,
+            &*self.wallet,
+            secret_store,
+            &holder,
+            &self.vc_store,
+        )
+        .await?)
     }
 
     /// Verify a previously-issued VC against its issuer DID
