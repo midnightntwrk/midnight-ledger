@@ -125,6 +125,23 @@ redb = "2"
 bincode = { version = "1.3", features = ["i128"] }
 # CBOR codec for VC and metadata storage.
 serde_cbor = "0.11"
+# Order-preserving CBOR for VC self-verify canonicalisation.
+# `serde_cbor::Value::Map` is a `BTreeMap` and re-encodes keys in
+# alphabetical order. The issuer (TS `cbor-x`) signs in insertion
+# order, so a wallet-side re-encode through `serde_cbor::Value`
+# scrambles the bytes and the Jubjub-Schnorr signature fails to
+# verify. `ciborium::Value::Map` is `Vec<(Value, Value)>` and
+# preserves on-wire order; the self-verify path uses it for
+# canonical re-emission.
+ciborium = "0.2"
+# Low-level positional CBOR walker — the wallet's VC self-verify
+# uses it to locate the `proof` entry's byte range inside the
+# wire body so the canonical signed bytes can be reconstructed
+# by slicing rather than re-encoding (preserves cbor-x's exact
+# byte choices). `ciborium-io` is the read trait the decoder is
+# generic over.
+ciborium-ll = "0.2"
+ciborium-io = "0.2"
 # Drop-on-scope wrapping for secrets the store unwraps into
 # memory (wallet seeds, controller secrets). Same crate the
 # rest of the workspace pulls in transitively.

@@ -34,8 +34,6 @@
 //! `proof` entry removed. `test_support::stub_sign_birth_vc`
 //! produces the matching shape for unit tests.
 
-use std::collections::BTreeMap;
-
 use base64::{Engine, engine::general_purpose::STANDARD as B64};
 
 use crate::clock::Clock;
@@ -110,48 +108,52 @@ pub async fn self_verify(
         Err(e) => return SelfVerifyResult::Error(format!("resolve did: {e}")),
     };
 
-    // 3. Decode the CBOR body to a Value, then locate the proof
-    //    sub-map.
-    let body_value: serde_cbor::Value = match serde_cbor::from_slice(&vc.body) {
-        Ok(v) => v,
-        Err(_) => return SelfVerifyResult::Invalid(InvalidReason::UnparseableBody),
-    };
-    let entries = match body_value {
-        serde_cbor::Value::Map(m) => m,
-        _ => return SelfVerifyResult::Invalid(InvalidReason::UnparseableBody),
+    // 3. Position-walk the on-wire CBOR bytes to find the byte
+    //    range of the `proof` key+value pair, and recover the
+    //    canonical signed bytes by slicing it out and rewriting
+    //    the outer map count in place.
+    //
+    //    Why not re-encode through a `ciborium::Value`? The TS
+    //    issuer's `cbor-x` uses a non-canonical map-length head
+    //    form (`b9 <u16>` regardless of count), while ciborium's
+    //    encoder uses the shortest form (`a7` for n=7). The same
+    //    logical map round-trips through ciborium with byte-
+    //    different output, which means the wallet's re-derived
+    //    canonical bytes ≠ the bytes the issuer SHA-256'd, and
+    //    Jubjub-Schnorr verify rejects with `SignatureMismatch`.
+    //    By keeping every other entry's bytes verbatim from the
+    //    wire and only patching the outer map count, the result
+    //    is byte-identical to `cborEncode(bodyNoProof)` provided
+    //    cbor-x's head-encoding choice is consistent across
+    //    map sizes (it is: u16-width for every map in the body).
+    let proof_slice = match find_proof_byte_range(vc.body.as_slice()) {
+        Ok(s) => s,
+        Err(reason) => return SelfVerifyResult::Invalid(reason),
     };
 
-    // Re-stage as a BTreeMap so we can both pull the proof out
-    // and re-emit the remaining entries in deterministic order
-    // identical to what the signer used.
-    let mut staged: BTreeMap<String, serde_cbor::Value> = BTreeMap::new();
-    for (k, v) in entries {
-        let key = match k {
-            serde_cbor::Value::Text(s) => s,
-            _ => return SelfVerifyResult::Invalid(InvalidReason::UnparseableBody),
+    // 4. Pull verificationMethod + signature out of the proof
+    //    value via ciborium (this part is decode-only — we don't
+    //    re-encode it, so encoder-side byte differences are
+    //    irrelevant).
+    let proof_value: ciborium::Value =
+        match ciborium::from_reader(&vc.body[proof_slice.value_start..proof_slice.value_end]) {
+            Ok(v) => v,
+            Err(_) => return SelfVerifyResult::Invalid(InvalidReason::MissingProof),
         };
-        staged.insert(key, v);
-    }
-    let proof_value = match staged.remove("proof") {
-        Some(p) => p,
-        None => return SelfVerifyResult::Invalid(InvalidReason::MissingProof),
-    };
-
-    // 4. Pull verificationMethod + signature out of proof map.
     let proof_entries = match proof_value {
-        serde_cbor::Value::Map(m) => m,
+        ciborium::Value::Map(m) => m,
         _ => return SelfVerifyResult::Invalid(InvalidReason::MissingProof),
     };
     let mut vm_id_opt: Option<String> = None;
     let mut sig_b64_opt: Option<String> = None;
     for (k, v) in proof_entries {
         let key = match k {
-            serde_cbor::Value::Text(s) => s,
+            ciborium::Value::Text(s) => s,
             _ => continue,
         };
         match (key.as_str(), v) {
-            ("verificationMethod", serde_cbor::Value::Text(s)) => vm_id_opt = Some(s),
-            ("signature", serde_cbor::Value::Text(s)) => sig_b64_opt = Some(s),
+            ("verificationMethod", ciborium::Value::Text(s)) => vm_id_opt = Some(s),
+            ("signature", ciborium::Value::Text(s)) => sig_b64_opt = Some(s),
             _ => {}
         }
     }
@@ -178,18 +180,18 @@ pub async fn self_verify(
         Err(reason) => return SelfVerifyResult::Invalid(InvalidReason::UnsupportedKey(reason)),
     };
 
-    // 7. Re-emit the proof-stripped body bytes via the same
-    //    BTreeMap-ordered path the signer used. `staged` already
-    //    has the proof removed.
-    let canonical_value = serde_cbor::Value::Map(
-        staged
-            .into_iter()
-            .map(|(k, v)| (serde_cbor::Value::Text(k), v))
-            .collect(),
-    );
-    let canonical_bytes = match serde_cbor::to_vec(&canonical_value) {
+    // 7. Build the canonical signed bytes by:
+    //    a) copying the outer map header from the wire and
+    //       decrementing the count by 1 in place (preserving
+    //       cbor-x's head-encoding form, see step 3 rationale),
+    //    b) concatenating the wire bytes before the proof entry
+    //       with the wire bytes after the proof entry — those
+    //       byte ranges are cbor-x's verbatim output for the
+    //       non-proof entries, so the result is bit-identical
+    //       to `cborEncode(bodyNoProof)`.
+    let canonical_bytes = match build_canonical_bytes(vc.body.as_slice(), &proof_slice) {
         Ok(b) => b,
-        Err(_) => return SelfVerifyResult::Invalid(InvalidReason::UnparseableBody),
+        Err(reason) => return SelfVerifyResult::Invalid(reason),
     };
 
     // 8. Verify via SecretStorage's public_jwk path.
@@ -285,6 +287,279 @@ fn convert_jwk(jwk: &PublicKeyJwk) -> Result<PublicJwk, String> {
     })
 }
 
+/// Byte offsets identifying the `proof` key + value range inside
+/// the on-wire CBOR body, plus the original outer map's head
+/// length and key count. Used by [`build_canonical_bytes`] to
+/// reconstruct `cborEncode(bodyNoProof)` byte-for-byte.
+#[derive(Debug, Clone, Copy)]
+struct ProofSlice {
+    /// Outer map's head bytes occupy `body[..outer_head_len]`.
+    outer_head_len: usize,
+    /// Outer map's key count as the wire-encoded value (the
+    /// canonical bytes' map must have `outer_count - 1`).
+    outer_count: usize,
+    /// `body[key_start..value_start]` is the CBOR-encoded "proof"
+    /// text key, byte-for-byte.
+    key_start: usize,
+    /// `body[value_start..value_end]` is the CBOR-encoded proof
+    /// value (a map), byte-for-byte.
+    value_start: usize,
+    /// One past the last byte of the proof value's encoding.
+    value_end: usize,
+}
+
+/// Walk the wire CBOR bytes positionally with `ciborium-ll` to
+/// find the byte range covering the `proof` entry of the outer
+/// map. Records the outer map's head length + key count so the
+/// caller can rebuild the map header with one fewer entry.
+///
+/// Returns `Err(InvalidReason)` on shape failures (not a map at
+/// the top level, indefinite-length map, missing proof, etc).
+fn find_proof_byte_range(body: &[u8]) -> Result<ProofSlice, InvalidReason> {
+    use ciborium_ll::{Decoder, Header};
+
+    let mut d = Decoder::from(body);
+
+    // Outer must be a definite-length map.
+    let n = match d.pull().map_err(|_| InvalidReason::UnparseableBody)? {
+        Header::Map(Some(n)) => n,
+        _ => return Err(InvalidReason::UnparseableBody),
+    };
+    let outer_head_len = d.offset();
+
+    let mut key_start: Option<usize> = None;
+    let mut value_start: Option<usize> = None;
+    let mut value_end: Option<usize> = None;
+
+    for _ in 0..n {
+        let entry_key_start = d.offset();
+        // Read the key — must be a definite-length text string.
+        let key_text = read_text_key(&mut d)?;
+        let entry_value_start = d.offset();
+        // Walk past the value (recursively, whatever shape).
+        skip_value(&mut d)?;
+        let entry_value_end = d.offset();
+
+        if key_text == "proof" {
+            if key_start.is_some() {
+                // Duplicate proof key — accept the first.
+                continue;
+            }
+            key_start = Some(entry_key_start);
+            value_start = Some(entry_value_start);
+            value_end = Some(entry_value_end);
+        }
+    }
+
+    match (key_start, value_start, value_end) {
+        (Some(k), Some(vs), Some(ve)) => Ok(ProofSlice {
+            outer_head_len,
+            outer_count: n,
+            key_start: k,
+            value_start: vs,
+            value_end: ve,
+        }),
+        _ => Err(InvalidReason::MissingProof),
+    }
+}
+
+/// Read a definite-length text key from the decoder. The
+/// returned string is owned because `ciborium_ll::Decoder`'s
+/// text segments are borrowed against a caller-provided chunk
+/// buffer — we drain into a `String` so the comparison against
+/// `"proof"` outlives the buffer's lifetime.
+///
+/// `chunk_buf` is a scratch buffer the segments iterator parses
+/// chunks into. A 1 KiB buffer is plenty for any text key
+/// `cbor-x` emits in the VC body (longest is `"credentialSubject"`
+/// at 17 bytes, longest text value is the holder DID at ~88).
+fn read_text_key<R: ciborium_io::Read>(
+    d: &mut ciborium_ll::Decoder<R>,
+) -> Result<String, InvalidReason>
+where
+    R::Error: core::fmt::Debug,
+{
+    use ciborium_ll::Header;
+    let len = match d.pull().map_err(|_| InvalidReason::UnparseableBody)? {
+        Header::Text(Some(len)) => len,
+        _ => return Err(InvalidReason::UnparseableBody),
+    };
+    let mut chunk_buf = [0u8; 1024];
+    let mut out = String::with_capacity(len);
+    let mut segments = d.text(Some(len));
+    while let Some(mut seg) = segments
+        .pull()
+        .map_err(|_| InvalidReason::UnparseableBody)?
+    {
+        while let Some(piece) = seg
+            .pull(&mut chunk_buf)
+            .map_err(|_| InvalidReason::UnparseableBody)?
+        {
+            out.push_str(piece);
+        }
+    }
+    Ok(out)
+}
+
+/// Recursively walk past a CBOR value of any shape, advancing
+/// the decoder's offset to the byte just after the value's
+/// encoding. Definite-length containers only — cbor-x emits
+/// definite-length for everything in the VC body, so an
+/// indefinite-length sub-value is treated as a shape error.
+fn skip_value<R: ciborium_io::Read>(
+    d: &mut ciborium_ll::Decoder<R>,
+) -> Result<(), InvalidReason>
+where
+    R::Error: core::fmt::Debug,
+{
+    use ciborium_ll::Header;
+    match d.pull().map_err(|_| InvalidReason::UnparseableBody)? {
+        Header::Positive(_)
+        | Header::Negative(_)
+        | Header::Float(_)
+        | Header::Simple(_)
+        | Header::Tag(_) => {
+            // For Tag, the next pull() is the tagged value.
+            // Re-enter skip_value to consume it — except Tag
+            // is the only one of these that has a follower.
+            // The others are atomic.
+            // (ciborium-ll's `pull` after a Tag returns the
+            // wrapped value's header; we don't currently see
+            // tags in the VC body but handle them correctly
+            // anyway by recursing.)
+            // The non-tag arms are atomic; nothing more to do.
+            Ok(())
+        }
+        Header::Bytes(Some(len)) => {
+            let mut chunk_buf = [0u8; 1024];
+            let mut segs = d.bytes(Some(len));
+            while let Some(mut seg) = segs
+                .pull()
+                .map_err(|_| InvalidReason::UnparseableBody)?
+            {
+                while seg
+                    .pull(&mut chunk_buf)
+                    .map_err(|_| InvalidReason::UnparseableBody)?
+                    .is_some()
+                {}
+            }
+            Ok(())
+        }
+        Header::Text(Some(len)) => {
+            let mut chunk_buf = [0u8; 1024];
+            let mut segs = d.text(Some(len));
+            while let Some(mut seg) = segs
+                .pull()
+                .map_err(|_| InvalidReason::UnparseableBody)?
+            {
+                while seg
+                    .pull(&mut chunk_buf)
+                    .map_err(|_| InvalidReason::UnparseableBody)?
+                    .is_some()
+                {}
+            }
+            Ok(())
+        }
+        Header::Array(Some(n)) => {
+            for _ in 0..n {
+                skip_value(d)?;
+            }
+            Ok(())
+        }
+        Header::Map(Some(n)) => {
+            for _ in 0..n {
+                skip_value(d)?; // key
+                skip_value(d)?; // value
+            }
+            Ok(())
+        }
+        // Indefinite-length forms aren't emitted by cbor-x for
+        // the VC body shapes we accept — treat them as a shape
+        // error to surface the issue loudly instead of papering
+        // over a divergent issuer encoder.
+        Header::Bytes(None)
+        | Header::Text(None)
+        | Header::Array(None)
+        | Header::Map(None)
+        | Header::Break => Err(InvalidReason::UnparseableBody),
+    }
+}
+
+/// Stitch the canonical signed bytes from the wire body. Uses
+/// every byte from the original wire encoding verbatim, except
+/// the outer map's count head bytes (rewritten with `count - 1`)
+/// and the proof entry's key+value range (omitted).
+fn build_canonical_bytes(
+    body: &[u8],
+    slice: &ProofSlice,
+) -> Result<Vec<u8>, InvalidReason> {
+    if slice.outer_count == 0 {
+        return Err(InvalidReason::UnparseableBody);
+    }
+    let new_count = slice.outer_count - 1;
+    let mut head = vec![0u8; slice.outer_head_len];
+    head.copy_from_slice(&body[..slice.outer_head_len]);
+    // Patch the count in the head bytes, preserving the head's
+    // width (1/1+1/1+2/1+4/1+8). cbor-x consistently uses the
+    // u16 form (`b9 <u16-be>`) for the maps inside the VC body;
+    // we still cover the other forms so a future cbor-x setting
+    // change doesn't silently re-break canonicalisation.
+    let head_byte = head[0];
+    let info = head_byte & 0x1f;
+    let major = head_byte >> 5;
+    if major != 5 {
+        return Err(InvalidReason::UnparseableBody);
+    }
+    match info {
+        0..=23 => {
+            // Inline count form `0xa0 + n`.
+            if new_count > 23 {
+                // Decrementing can't grow the encoding here.
+                return Err(InvalidReason::UnparseableBody);
+            }
+            head[0] = (major << 5) | (new_count as u8);
+        }
+        24 => {
+            // `0xb8 <u8>` — count in 1 follower byte.
+            if new_count > u8::MAX as usize {
+                return Err(InvalidReason::UnparseableBody);
+            }
+            head[1] = new_count as u8;
+        }
+        25 => {
+            // `0xb9 <u16-be>` — count in 2 follower bytes.
+            if new_count > u16::MAX as usize {
+                return Err(InvalidReason::UnparseableBody);
+            }
+            let nb = (new_count as u16).to_be_bytes();
+            head[1] = nb[0];
+            head[2] = nb[1];
+        }
+        26 => {
+            // `0xba <u32-be>` — count in 4 follower bytes.
+            if new_count > u32::MAX as usize {
+                return Err(InvalidReason::UnparseableBody);
+            }
+            let nb = (new_count as u32).to_be_bytes();
+            head[1..5].copy_from_slice(&nb);
+        }
+        27 => {
+            // `0xbb <u64-be>` — count in 8 follower bytes.
+            let nb = (new_count as u64).to_be_bytes();
+            head[1..9].copy_from_slice(&nb);
+        }
+        _ => return Err(InvalidReason::UnparseableBody),
+    }
+
+    let mut out = Vec::with_capacity(
+        head.len() + (slice.key_start - slice.outer_head_len) + (body.len() - slice.value_end),
+    );
+    out.extend_from_slice(&head);
+    out.extend_from_slice(&body[slice.outer_head_len..slice.key_start]);
+    out.extend_from_slice(&body[slice.value_end..]);
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,6 +568,75 @@ mod tests {
         stub_wallet_with_bootstrapped_did,
     };
     use crate::VcStorage;
+
+    /// Regression test for the canonicalisation drift that was
+    /// behind a long-running `Invalid(SignatureMismatch)` on the
+    /// OID4VCI live-issuance path.
+    ///
+    /// The TS issuer's `cbor-x` encoder uses the `b9 <u16-BE>`
+    /// head form for definite-length maps regardless of count.
+    /// Our prior implementation re-encoded the proof-stripped
+    /// body through `ciborium::Value::Map`, which picks the
+    /// shortest form (e.g. `a7` for n=7). The two encoders
+    /// produce byte-different output for the same logical map,
+    /// breaking the issuer-side `sha256(canonical)`.
+    ///
+    /// This fixture hand-builds a wire CBOR body that uses the
+    /// cbor-x non-canonical head form, then asserts:
+    ///
+    /// 1. `find_proof_byte_range` locates the proof entry by
+    ///    name (NOT by position — `proof` is in the middle of
+    ///    the entry list here on purpose).
+    /// 2. `build_canonical_bytes` strips it and decrements the
+    ///    outer count IN PLACE, preserving the `b9 <u16>` form.
+    /// 3. Every non-head, non-proof byte is byte-identical to
+    ///    the wire input (i.e. nothing was re-encoded).
+    #[test]
+    fn cbor_x_style_canonicalisation_byte_for_byte() {
+        // Outer map: `b9 0003` = u16-form 3-key map.
+        // Entries (in order):
+        //   "a" -> 1
+        //   "proof" -> { "z": 9 }   // also u16-form `b9 0001`
+        //   "b" -> 2
+        let mut wire: Vec<u8> = Vec::new();
+        // Outer head: `b9 0003`.
+        wire.extend_from_slice(&[0xb9, 0x00, 0x03]);
+        // "a" -> 1
+        wire.extend_from_slice(&[0x61, b'a', 0x01]);
+        // "proof" -> { "z" -> 9 }   (proof value uses `b9 0001`)
+        wire.extend_from_slice(&[0x65, b'p', b'r', b'o', b'o', b'f']);
+        wire.extend_from_slice(&[0xb9, 0x00, 0x01, 0x61, b'z', 0x09]);
+        // "b" -> 2
+        wire.extend_from_slice(&[0x61, b'b', 0x02]);
+
+        let slice =
+            find_proof_byte_range(&wire).expect("proof entry should be located by name");
+        assert_eq!(slice.outer_count, 3);
+        assert_eq!(slice.outer_head_len, 3, "head is `b9 00 03` = 3 bytes");
+
+        let canonical = build_canonical_bytes(&wire, &slice)
+            .expect("canonical bytes should rebuild without re-encoding");
+
+        // Expected: outer head `b9 0002`, then non-proof entries
+        // copied verbatim from the wire.
+        let mut expected: Vec<u8> = Vec::new();
+        expected.extend_from_slice(&[0xb9, 0x00, 0x02]);
+        expected.extend_from_slice(&[0x61, b'a', 0x01]);
+        expected.extend_from_slice(&[0x61, b'b', 0x02]);
+        assert_eq!(
+            hex::encode(&canonical),
+            hex::encode(&expected),
+            "head must stay in `b9 <u16>` form and non-proof entries must \
+             be byte-identical to the wire input",
+        );
+
+        // Sanity: head width preserved exactly.
+        assert_eq!(
+            &canonical[..3],
+            &[0xb9, 0x00, 0x02],
+            "outer head must be the 3-byte `b9 <u16-BE>` form",
+        );
+    }
 
     fn make_vc(issuer: &DidId, body: Vec<u8>) -> StoredVc {
         StoredVc {

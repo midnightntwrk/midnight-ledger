@@ -300,31 +300,20 @@ fn bootstrap_then_login_then_issue_credential_round_trip() {
                 .expect("issuance");
             assert!(!vc_uri.is_empty(), "issuer returned an empty vc_uri");
 
-            // Self-verify against the freshly-landed VC. The
-            // length-dispatch fix in `curve_support::verify`
-            // (`secret_storage` commit upstream) means the
-            // verifier now accepts the issuer's 96-byte upstream
-            // Jubjub-Schnorr encoding without rejecting on size.
-            // What still surfaces is `Invalid(SignatureMismatch)`
-            // — the actual cryptographic check fails, almost
-            // certainly because the CBOR canonicalization the
-            // wallet re-derives doesn't match the TS issuer's
-            // `cborEncode(bodyNoProof)` byte-for-byte (Rust's
-            // `serde_cbor` and the issuer's `cbor-x` make
-            // different deterministic-map-order choices unless
-            // hand-stabilised).
-            //
-            // Tracked separately; this test's job stays at
-            // "OID4VCI issuance landed a VC". Self-verify gets
-            // its own integration test once the canonicalization
-            // is aligned.
+            // Self-verify the freshly-landed VC end-to-end. With
+            // both fixes in place — the Jubjub-Schnorr length
+            // dispatch (commit 626cbd1e) and the CBOR
+            // canonicalisation that preserves on-wire key order
+            // via `ciborium::Value::Map` — the wallet's
+            // re-encoded canonical bytes match the issuer's
+            // `cborEncode(bodyNoProof)` byte-for-byte, the
+            // verifier accepts the issuer's 96-byte upstream
+            // Jubjub-Schnorr signature, and the result is
+            // `Valid`.
             let verify = w.verify(&vc_uri).await.expect("verify");
-            // Assert it at least reaches the cryptographic
-            // verifier (no `Error(_)`) — that's the layer the
-            // length-dispatch fix unlocked.
             assert!(
-                !matches!(verify, wallet_core::SelfVerifyResult::Error(_)),
-                "verify should reach the crypto layer; got {verify:?}",
+                matches!(verify, wallet_core::SelfVerifyResult::Valid { .. }),
+                "expected Valid, got {verify:?}",
             );
         });
     });
