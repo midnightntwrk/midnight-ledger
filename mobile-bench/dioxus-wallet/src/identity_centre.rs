@@ -782,54 +782,69 @@ fn BootstrapSection(
             let in_mem_metrics = bridge_state.metrics();
             let action_id = crate::worker::next_action_id();
 
-            // Register the outcome handler BEFORE sending so a
-            // very fast worker can't race the registration. The
-            // closure captures the signals + EventHandler by
-            // value; it runs inside the outcome-pump
-            // `use_future` (Dioxus scope), so signal writes +
-            // `on_did_minted.call()` are valid.
-            crate::worker::router::register(
-                action_id,
-                Box::new(move |outcome| {
-                    match outcome {
-                        crate::worker::WorkOutcome::BootstrapOk {
-                            did_str, ..
-                        } => {
-                            in_mem_metrics.incr("dids.bootstrapped", 1);
-                            on_did_minted_eh.call((did_str.clone(), network));
-                            ic_did.set(Some(did_str.clone()));
-                            ok_msg_sig.set(Some(format!(
-                                "Bootstrapped {did_str}. Switch to the Dids \
-                                 tab to see it; click Resolve there to fill \
-                                 in counter / VM counts.",
-                            )));
+            // Thread-affinity invariant of `worker::router`: the
+            // register-side and the take-side must execute on the
+            // same Dioxus task-pool thread, because the router
+            // stores handlers in `thread_local!` storage. The
+            // outcome-pump (`use_future` in the parent App)
+            // already runs on the task pool — typically
+            // ThreadId(2). This `onclick` closure runs on the
+            // WebView dispatch thread — typically ThreadId(4) —
+            // so a bare `register + send` here lands the handler
+            // on the wrong thread, the worker emits its outcome,
+            // and the pump's `take` returns `None` ("outcome
+            // dropped — no registered handler" — see
+            // worker/router.rs).
+            //
+            // Wrap both register + send in `spawn(async move {…})`
+            // so the work runs on the task pool, matching where
+            // the pump pulls the outcome from. Same fix as the
+            // Unlock path; lock-step with the Worker Task 5
+            // remediation in commit fdba2182.
+            spawn(async move {
+                crate::worker::router::register(
+                    action_id,
+                    Box::new(move |outcome| {
+                        match outcome {
+                            crate::worker::WorkOutcome::BootstrapOk {
+                                did_str, ..
+                            } => {
+                                in_mem_metrics.incr("dids.bootstrapped", 1);
+                                on_did_minted_eh.call((did_str.clone(), network));
+                                ic_did.set(Some(did_str.clone()));
+                                ok_msg_sig.set(Some(format!(
+                                    "Bootstrapped {did_str}. Switch to the Dids \
+                                     tab to see it; click Resolve there to fill \
+                                     in counter / VM counts.",
+                                )));
+                            }
+                            crate::worker::WorkOutcome::Err { msg, .. } => {
+                                in_mem_metrics.incr("dids.bootstrap_failed", 1);
+                                err_msg_sig.set(Some(msg));
+                            }
+                            // The worker only ever emits BootstrapOk
+                            // / Err for a Bootstrap action_id; the
+                            // other arms aren't reachable for this
+                            // registration. Log defensively in case
+                            // a future variant routes wrongly.
+                            other => {
+                                tracing::warn!(
+                                    target: "wallet_worker",
+                                    action_id,
+                                    ?other,
+                                    "Bootstrap handler received unexpected outcome",
+                                );
+                            }
                         }
-                        crate::worker::WorkOutcome::Err { msg, .. } => {
-                            in_mem_metrics.incr("dids.bootstrap_failed", 1);
-                            err_msg_sig.set(Some(msg));
-                        }
-                        // The worker only ever emits BootstrapOk
-                        // / Err for a Bootstrap action_id; the
-                        // other arms aren't reachable for this
-                        // registration. Log defensively in case
-                        // a future variant routes wrongly.
-                        other => {
-                            tracing::warn!(
-                                target: "wallet_worker",
-                                action_id,
-                                ?other,
-                                "Bootstrap handler received unexpected outcome",
-                            );
-                        }
-                    }
-                    busy_sig.set(false);
-                }),
-            );
+                        busy_sig.set(false);
+                    }),
+                );
 
-            worker.send(crate::worker::WorkMsg::Bootstrap {
-                action_id,
-                network,
-                seed: DEMO_IC_SEED,
+                worker.send(crate::worker::WorkMsg::Bootstrap {
+                    action_id,
+                    network,
+                    seed: DEMO_IC_SEED,
+                });
             });
         }
     };
