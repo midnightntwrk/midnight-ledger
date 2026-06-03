@@ -73,6 +73,26 @@ impl Network {
         matches!(self, Network::Undeployed | Network::UndeployedYurii)
     }
 
+    /// True when two `Network` variants represent the same on-chain
+    /// identity — same DID namespace, same address HRP, same
+    /// network-id baked into tx signatures — even if they differ
+    /// in how the wallet reaches the chain (localhost vs tailnet).
+    ///
+    /// `Undeployed` and `UndeployedYurii` are aliases for the same
+    /// local docker-compose chain; a DID bootstrapped on one MUST
+    /// resolve cleanly on the other (the screenshot bug behind
+    /// audit §9 candidate #6 was the resolver's strict
+    /// `id.network != self.network` check rejecting this case).
+    /// Equality stays reflexive for every other (mainnet, testnet,
+    /// preprod, devnet) variant.
+    pub fn same_chain(self, other: Network) -> bool {
+        if self == other {
+            return true;
+        }
+        // Both flavours of the standalone are the same chain.
+        self.is_undeployed() && other.is_undeployed()
+    }
+
     /// Case-insensitive lookup against either `label()`
     /// ("PreProd") or `config().network_id` ("preprod"). Used
     /// by the backup-file importer (`store::backup`) to parse
@@ -177,6 +197,37 @@ mod tests {
                 seen.insert(n.config().indexer_http_url),
                 "duplicate indexer URL for {n:?}"
             );
+        }
+    }
+
+    #[test]
+    fn same_chain_treats_undeployed_variants_as_aliases() {
+        // The two flavours of the standalone chain are the same
+        // on-chain identity — DID resolve / address parsing /
+        // tx envelope networkId all share a value. Swapping the
+        // wallet picker from `Undeployed` (localhost) to
+        // `UndeployedYurii` (tailnet) MUST NOT make on-chain
+        // artefacts minted under the other variant inaccessible.
+        assert!(Network::Undeployed.same_chain(Network::UndeployedYurii));
+        assert!(Network::UndeployedYurii.same_chain(Network::Undeployed));
+        // Reflexive on the same variant.
+        assert!(Network::Undeployed.same_chain(Network::Undeployed));
+        assert!(Network::UndeployedYurii.same_chain(Network::UndeployedYurii));
+        // Other variants are still strictly distinct — flipping
+        // mainnet ↔ testnet would corrupt seeds.
+        for a in Network::ALL {
+            for b in Network::ALL {
+                if a == b {
+                    continue;
+                }
+                let both_undeployed = a.is_undeployed() && b.is_undeployed();
+                assert_eq!(
+                    a.same_chain(b),
+                    both_undeployed,
+                    "same_chain({a:?}, {b:?}) must be true only inside the \
+                     undeployed equivalence class"
+                );
+            }
         }
     }
 

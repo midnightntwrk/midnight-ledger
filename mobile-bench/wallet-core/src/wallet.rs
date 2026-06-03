@@ -1892,7 +1892,7 @@ impl Wallet {
         did: &str,
     ) -> Result<crate::DidDocument, crate::DidError> {
         let id = crate::DidId::parse(did)?;
-        if id.network != self.network {
+        if !id.network.same_chain(self.network) {
             return Err(crate::DidError::Indexer(format!(
                 "DID network {:?} does not match wallet network {:?}",
                 id.network, self.network
@@ -1937,7 +1937,7 @@ impl Wallet {
         did: &str,
     ) -> Result<crate::ResolvedDid, crate::DidError> {
         let id = crate::DidId::parse(did)?;
-        if id.network != self.network {
+        if !id.network.same_chain(self.network) {
             return Err(crate::DidError::Indexer(format!(
                 "DID network {:?} does not match wallet network {:?}",
                 id.network, self.network
