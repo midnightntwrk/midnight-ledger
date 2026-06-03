@@ -9091,7 +9091,7 @@ async fn rehydrate_for_network(
 
     // Wipe the in-memory controller-secret cache too —
     // hydration below repopulates it for the new network.
-    if let Ok(mut g) = bridge_state.controller_secrets.lock() {
+    if let Ok(mut g) = bridge_state.persistence.controller_secrets.lock() {
         g.clear();
     }
 

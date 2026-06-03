@@ -71,82 +71,148 @@ use crate::logs::LogCapture;
 /// WebView.
 pub type ControllerSecretStore = Arc<Mutex<HashMap<String, [u8; 32]>>>;
 
+// ─── Sub-state groups ────────────────────────────────────────────
+// `BridgeState` decomposes into three focused sub-states, one per
+// concern. Each is cheap-to-clone (every field is `Arc<…>`) and
+// rides as a value inside `BridgeState`. The previous flat layout
+// mixed persistence, observability, and runtime infrastructure
+// fields together; the audit doc
+// (`docs/superpowers/specs/2026-06-03-hex-architecture-audit.md`
+// §5.D) flagged this as a deferred decomposition. The split is
+// load-bearing once we ship a second shell where the `Runtime`
+// mix differs and the `Persistence` / `Observability` halves stay
+// common — until then it's a clarity refactor: each field is now
+// reachable under its concern, and a reader can tell at a glance
+// what surface a given click handler actually needs.
+//
+// The accessor methods on `BridgeState` stay as a façade so call
+// sites (~31 of them across `app.rs`, `identity_centre.rs`,
+// `worker/handlers.rs`) keep working with no edit. The one place
+// the field path appears externally (`app.rs:9094`'s
+// `bridge_state.controller_secrets.lock()`) is migrated to
+// `bridge_state.persistence.controller_secrets.lock()` in this
+// commit.
+
+/// Persistence-layer handles — the on-disk wallet store, the
+/// pinned wallet id, the per-DID controller-secret cache.
 #[derive(Clone, Default)]
-// `PartialEq` here lets `BridgeState` ride as a Dioxus
-// component prop (the `#[component]` macro requires Props
-// to be Eq). Two `BridgeState` values are equal iff every
-// inner `Arc` is pointer-equal — fine because the App
-// constructs exactly one `BridgeState` and clones it; we
-// never compare independently-built handles for content.
-pub struct BridgeState {
-    pub proof_server_url: Arc<OnceCell<String>>,
-    /// `did_string → 32-byte sk`. Cloning the BridgeState clones the
-    /// Arc, so the map is shared across the bridge loop, the UI, and
-    /// any future callers.
-    pub controller_secrets: ControllerSecretStore,
+pub struct Persistence {
     /// Persistent backing store. Set once at app startup via
-    /// [`set_store`]. When present, `remember_controller_secret`
-    /// writes through (best-effort — a store error is logged but
-    /// does not fail the in-memory cache update, so an unhealthy
-    /// disk doesn't break a freshly-deployed DID's signing path
-    /// for the current session). When absent, behaviour matches
-    /// the previous in-memory-only model.
+    /// [`BridgeState::set_store`]. When present,
+    /// `remember_controller_secret` writes through (best-effort —
+    /// a store error is logged but does not fail the in-memory
+    /// cache update). When absent, behaviour matches the previous
+    /// in-memory-only model.
     pub store: Arc<OnceCell<WalletStore>>,
     /// `WalletId` the rest of the UI binds against — Keys tab,
     /// Operation Builder VM picker, SignTab key picker. Set by
-    /// the App during hydration; one slot per
-    /// `(network, wallet)` swap. `None` means "no wallet active
-    /// for the current network yet" — pickers hide their lists.
+    /// the App during hydration; one slot per `(network, wallet)`
+    /// swap. `None` means "no wallet active for the current
+    /// network yet" — pickers hide their lists.
     pub active_wallet_id: Arc<Mutex<Option<WalletId>>>,
-    /// In-memory log ring + persist-channel handle. The Logs
-    /// tab reads via `snapshot()`; the App spawns the
-    /// drainer once the store is attached.
-    pub log_capture: Arc<OnceCell<LogCapture>>,
-    /// Process-wide telemetry aggregator. Populated once at
-    /// App boot with an `InMemoryMetrics` (or composite). Read
-    /// by a future Diagnostics tab via `metrics_snapshot()`;
-    /// written by `MeteredHttpClient` (HTTP latencies) and
-    /// `time_op` brackets around intensive operations
-    /// (issuance, self-verify, bootstrap).
-    pub metrics: Arc<InMemoryMetrics>,
-    /// POSIX `getrusage`-backed sampler — RSS + CPU-time
-    /// deltas around bracketed operations. Stateless, share
-    /// the `Arc`.
-    pub resource_probe: Arc<RusageProbe>,
-    /// Dedicated worker-thread handle (8 MiB stack, single-
-    /// thread tokio rt). Set once at App::run before any UI
-    /// component mounts; from then on every heavy chain op
-    /// routes through `bridge_state.worker().send(WorkMsg::…)`
-    /// instead of `spawn(Box::pin(async move {…}))`. See
-    /// docs/superpowers/specs/2026-06-02-wallet-worker-thread.md
-    /// for the migration plan.
-    pub worker: Arc<OnceCell<crate::worker::AppWorker>>,
+    /// `did_string → 32-byte sk`. Cloning the `Persistence` (and
+    /// therefore `BridgeState`) clones the `Arc`, so the map is
+    /// shared across the bridge loop, the UI, and any future
+    /// callers.
+    pub controller_secrets: ControllerSecretStore,
 }
 
-impl PartialEq for BridgeState {
+impl PartialEq for Persistence {
     fn eq(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.proof_server_url, &other.proof_server_url)
-            && Arc::ptr_eq(&self.controller_secrets, &other.controller_secrets)
-            && Arc::ptr_eq(&self.store, &other.store)
+        Arc::ptr_eq(&self.store, &other.store)
             && Arc::ptr_eq(&self.active_wallet_id, &other.active_wallet_id)
-            && Arc::ptr_eq(&self.log_capture, &other.log_capture)
-            && Arc::ptr_eq(&self.metrics, &other.metrics)
-            && Arc::ptr_eq(&self.resource_probe, &other.resource_probe)
-            && Arc::ptr_eq(&self.worker, &other.worker)
+            && Arc::ptr_eq(&self.controller_secrets, &other.controller_secrets)
     }
 }
-impl Eq for BridgeState {}
+impl Eq for Persistence {}
+
+/// Observability — metrics, resource sampling, captured logs.
+/// Everything a future Diagnostics tab needs to render a session
+/// dashboard.
+#[derive(Clone, Default)]
+pub struct Observability {
+    /// Process-wide telemetry aggregator. Populated once at App
+    /// boot with an `InMemoryMetrics` (or composite). Read by the
+    /// Diagnostics tab via `metrics_snapshot()`; written by
+    /// `MeteredHttpClient` (HTTP latencies) and `time_op` brackets
+    /// around intensive operations.
+    pub metrics: Arc<InMemoryMetrics>,
+    /// POSIX `getrusage`-backed sampler — RSS + CPU-time deltas
+    /// around bracketed operations. Stateless; share the `Arc`.
+    pub resource_probe: Arc<RusageProbe>,
+    /// In-memory log ring + persist-channel handle. The Logs tab
+    /// reads via `snapshot()`; the App spawns the drainer once
+    /// the store is attached.
+    pub log_capture: Arc<OnceCell<LogCapture>>,
+}
+
+impl PartialEq for Observability {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.metrics, &other.metrics)
+            && Arc::ptr_eq(&self.resource_probe, &other.resource_probe)
+            && Arc::ptr_eq(&self.log_capture, &other.log_capture)
+    }
+}
+impl Eq for Observability {}
+
+/// Runtime infrastructure — the wallet-worker thread and the
+/// embedded proof-server URL. Shell-specific (the worker thread
+/// + the desktop-only proof-server spawn live here today);
+/// changes when we ship a second shell (iOS host, react-native,
+/// headless CLI).
+#[derive(Clone, Default)]
+pub struct Runtime {
+    /// Dedicated worker-thread handle (8 MiB stack, single-thread
+    /// tokio rt). Set once at App::run before any UI component
+    /// mounts; from then on every heavy chain op routes through
+    /// `bridge_state.worker().send(WorkMsg::…)` instead of
+    /// `spawn(Box::pin(async move {…}))`. See
+    /// `docs/superpowers/specs/2026-06-02-wallet-worker-thread.md`
+    /// for the migration plan.
+    pub worker: Arc<OnceCell<crate::worker::AppWorker>>,
+    /// URL of the embedded local proof-server (set once at boot;
+    /// `None` on Android where the wallet uses the in-process
+    /// `LocalProvingProvider` instead).
+    pub proof_server_url: Arc<OnceCell<String>>,
+}
+
+impl PartialEq for Runtime {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.worker, &other.worker)
+            && Arc::ptr_eq(&self.proof_server_url, &other.proof_server_url)
+    }
+}
+impl Eq for Runtime {}
+
+#[derive(Clone, Default, PartialEq, Eq)]
+// `PartialEq` here lets `BridgeState` ride as a Dioxus component
+// prop (the `#[component]` macro requires Props to be Eq). Two
+// `BridgeState` values are equal iff every inner `Arc` is
+// pointer-equal — fine because the App constructs exactly one
+// `BridgeState` and clones it; we never compare independently-
+// built handles for content. The derived `PartialEq` delegates to
+// each sub-state's `PartialEq`, which in turn uses `Arc::ptr_eq`.
+pub struct BridgeState {
+    /// On-disk store + active wallet + controller-secret cache.
+    pub persistence: Persistence,
+    /// Metrics + resource probe + captured logs.
+    pub observability: Observability,
+    /// Wallet-worker handle + embedded-proof-server URL.
+    pub runtime: Runtime,
+}
 
 impl BridgeState {
     pub fn new() -> Self {
         Self::default()
     }
 
+    // ─── Runtime accessors ──────────────────────────────────────
+
     /// Install the worker handle. Called once at App::run after
     /// [`crate::worker::AppWorker::spawn`]. Subsequent calls are
     /// no-ops (matches the [`set_store`] / [`OnceCell`] pattern).
     pub fn set_worker(&self, worker: crate::worker::AppWorker) {
-        let _ = self.worker.set(worker);
+        let _ = self.runtime.worker.set(worker);
     }
 
     /// Borrow the worker handle. Returns `None` before
@@ -155,14 +221,16 @@ impl BridgeState {
     /// without an App). Production click handlers can `.expect`
     /// this — the App always sets it before any UI mounts.
     pub fn worker(&self) -> Option<&crate::worker::AppWorker> {
-        self.worker.get()
+        self.runtime.worker.get()
     }
 
     /// Best-effort URL accessor for UI display. Returns `None` until
     /// the local proof-server has finished booting.
     pub fn proof_server_url(&self) -> Option<String> {
-        self.proof_server_url.get().cloned()
+        self.runtime.proof_server_url.get().cloned()
     }
+
+    // ─── Persistence accessors ──────────────────────────────────
 
     /// Attach a `WalletStore`. Idempotent — subsequent calls
     /// after the first succeed are no-ops. Returns the store
@@ -170,8 +238,12 @@ impl BridgeState {
     /// or a previously-set one) so the caller doesn't need a
     /// follow-up read.
     pub fn set_store(&self, store: WalletStore) -> WalletStore {
-        let _ = self.store.set(store);
-        self.store.get().cloned().expect("just-set store reachable")
+        let _ = self.persistence.store.set(store);
+        self.persistence
+            .store
+            .get()
+            .cloned()
+            .expect("just-set store reachable")
     }
 
     /// Borrow the attached store, if any. Returns `None` before
@@ -180,7 +252,7 @@ impl BridgeState {
     #[allow(dead_code)] // Surfaced via [`Self::store`] for future bridge-RPC handlers
     /// that want to persist beyond controller secrets.
     pub fn store(&self) -> Option<&WalletStore> {
-        self.store.get()
+        self.persistence.store.get()
     }
 
     /// Pin the wallet the rest of the UI binds against. Called
@@ -189,7 +261,7 @@ impl BridgeState {
     /// best-effort — a poisoned mutex just leaves the prior
     /// value in place; the UI degrades to "no wallet active".
     pub fn set_active_wallet_id(&self, id: Option<WalletId>) {
-        if let Ok(mut g) = self.active_wallet_id.lock() {
+        if let Ok(mut g) = self.persistence.active_wallet_id.lock() {
             *g = id;
         }
     }
@@ -197,16 +269,19 @@ impl BridgeState {
     /// Snapshot the currently-active `WalletId`. `None` before
     /// the App has finished hydrating for the active network.
     pub fn active_wallet_id(&self) -> Option<WalletId> {
-        self.active_wallet_id
+        self.persistence
+            .active_wallet_id
             .lock()
             .ok()
             .and_then(|g| g.clone())
     }
 
+    // ─── Observability accessors ────────────────────────────────
+
     /// Attach the process-global `LogCapture` handle. Called
     /// once during App construction; later sets are no-ops.
     pub fn set_log_capture(&self, capture: LogCapture) {
-        let _ = self.log_capture.set(capture);
+        let _ = self.observability.log_capture.set(capture);
     }
 
     /// Borrow the captured-logs handle, if attached. The
@@ -214,14 +289,14 @@ impl BridgeState {
     /// pre-attach calls return `None` (the tab shows an
     /// empty state).
     pub fn log_capture(&self) -> Option<&LogCapture> {
-        self.log_capture.get()
+        self.observability.log_capture.get()
     }
 
     /// Borrow the telemetry aggregator. The future Diagnostics
     /// tab calls `.snapshot()` on this to render the
     /// counter / HTTP / op histograms.
     pub fn metrics(&self) -> Arc<InMemoryMetrics> {
-        self.metrics.clone()
+        self.observability.metrics.clone()
     }
 
     /// Composite sink: forwards every record to both the
@@ -231,14 +306,14 @@ impl BridgeState {
     /// the `Arc`s are cheap.
     pub fn metrics_dyn(&self) -> Arc<dyn Metrics> {
         Arc::new(CompositeMetrics::new(vec![
-            self.metrics.clone(),
+            self.observability.metrics.clone(),
             Arc::new(TracingMetrics),
         ]))
     }
 
     /// Borrow the shared resource probe.
     pub fn resource_probe(&self) -> Arc<RusageProbe> {
-        self.resource_probe.clone()
+        self.observability.resource_probe.clone()
     }
 
     /// Record the random sk minted for a freshly-deployed DID.
@@ -258,10 +333,10 @@ impl BridgeState {
     /// non-`preprod-live` profile rather than hiding the method.
     #[cfg_attr(not(feature = "preprod-live"), allow(dead_code))]
     pub fn remember_controller_secret(&self, network: Network, did: String, sk: [u8; 32]) {
-        if let Ok(mut g) = self.controller_secrets.lock() {
+        if let Ok(mut g) = self.persistence.controller_secrets.lock() {
             g.insert(did.clone(), sk);
         }
-        if let Some(store) = self.store.get() {
+        if let Some(store) = self.persistence.store.get() {
             if let Err(e) = store.put_controller_secret(network, &did, &sk) {
                 tracing::warn!(error=%e, did=%did, "persist controller secret failed");
             }
@@ -282,11 +357,11 @@ impl BridgeState {
         if let Some(found) = self.controller_secret_for(did) {
             return Some(found);
         }
-        let store = self.store.get()?;
+        let store = self.persistence.store.get()?;
         match store.get_controller_secret(network, did) {
             Ok(Some(sk)) => {
                 let bytes: [u8; 32] = *sk;
-                if let Ok(mut g) = self.controller_secrets.lock() {
+                if let Ok(mut g) = self.persistence.controller_secrets.lock() {
                     g.insert(did.to_string(), bytes);
                 }
                 Some(bytes)
@@ -306,7 +381,8 @@ impl BridgeState {
     /// knows the network should prefer
     /// [`controller_secret_for_on`].
     pub fn controller_secret_for(&self, did: &str) -> Option<[u8; 32]> {
-        self.controller_secrets
+        self.persistence
+            .controller_secrets
             .lock()
             .ok()
             .and_then(|g| g.get(did).copied())
@@ -318,13 +394,13 @@ impl BridgeState {
     /// the number of secrets hydrated (or 0 if no store is
     /// attached).
     pub fn hydrate_controller_secrets(&self, network: Network) -> usize {
-        let Some(store) = self.store.get() else {
+        let Some(store) = self.persistence.store.get() else {
             return 0;
         };
         match store.list_controller_secrets(network) {
             Ok(rows) => {
                 let n = rows.len();
-                if let Ok(mut g) = self.controller_secrets.lock() {
+                if let Ok(mut g) = self.persistence.controller_secrets.lock() {
                     for (did, sk) in rows {
                         let bytes: [u8; 32] = *sk;
                         g.insert(did, bytes);
@@ -355,6 +431,7 @@ pub async fn spawn_proof_server(state: &BridgeState) -> Result<String, String> {
     // handle on purpose so it lives until process exit.
     std::mem::forget(server);
     state
+        .runtime
         .proof_server_url
         .set(url.clone())
         .map_err(|_| "proof_server_url already set".to_string())?;
