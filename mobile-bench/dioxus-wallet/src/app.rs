@@ -1337,11 +1337,18 @@ pub fn App() -> Element {
                 if let Some(handler) = crate::worker::router::take(action_id) {
                     handler(outcome);
                 } else {
-                    tracing::debug!(
+                    // Promoted from `debug!` to `warn!` after
+                    // Worker Task 5 fix — a dropped outcome here
+                    // almost always means a click site forgot to
+                    // wrap its `register` + `send` in `spawn(...)`
+                    // (see router.rs thread-affinity invariant).
+                    // Surface it loudly so the regression is
+                    // immediately visible in logcat.
+                    tracing::warn!(
                         target: "wallet_worker",
                         action_id,
                         ?outcome,
-                        "outcome dropped — no registered handler (component unmounted?)",
+                        "outcome dropped — no registered handler (likely thread-affinity bug — see worker/router.rs)",
                     );
                 }
             }
@@ -1367,16 +1374,73 @@ pub fn App() -> Element {
             .as_ref()
             .map(|w| w.seed_hex.clone());
         unlock_state.set(UnlockState::Opening);
-        // Box::pin keeps the unlock state machine off the
-        // Chromium WebView dispatch thread's ~256 KiB stack on
-        // Android. The async block inlines a WalletStore::open,
-        // a log-drainer spawn, find_or_create_wallet_for_network,
-        // and an auto-resolve loop — well above the small stack
-        // budget. Mirrors the Bootstrap fix (commit f1dffe5e).
-        spawn(Box::pin(async move {
-            let path = wallet_store_path();
-            match wallet_core::store::WalletStore::open(&path, &entered) {
-                Ok(store) => {
+
+        // Route `WalletStore::open` through the wallet-worker
+        // thread — its async state machine (database create +
+        // every pending migration + per-network ledger snapshot
+        // decode) is the deepest one in the app on the
+        // preprod-live demo store (~534 k cached DUST events).
+        // The WebView dispatch thread's ~256 KiB stack overflows
+        // here; the worker thread (8 MiB stack) is the right
+        // home. Mirrors what the Bootstrap path did in commit
+        // `f1dffe5e`, just via the worker instead of an inline
+        // `Box::pin`.
+        //
+        // Tail of the pipeline (log-drainer spawn,
+        // `find_or_create_wallet_for_network`, DustSyncer
+        // registration, signal hydration, per-DID auto-resolve
+        // fan-out) runs in the outcome handler on the UI thread
+        // — those touch Dioxus `Signal`s which are `!Send` and
+        // can't move to the worker. The previous `spawn(Box::pin(…))`
+        // wrap on the tail is preserved for the per-DID
+        // resolve fan-out, which is the next deepest call here.
+        let Some(worker) = state.worker().cloned() else {
+            unlock_state.set(UnlockState::Failed(
+                "wallet worker not ready".into(),
+            ));
+            return;
+        };
+        let action_id = crate::worker::next_action_id();
+        let state_for_outcome = state.clone();
+        let mut unlock_state = unlock_state;
+        let mut did_inventory = did_inventory;
+        let mut resolved_cache = resolved_cache;
+        let mut previous_resolved_cache = previous_resolved_cache;
+        let mut active_tab = active_tab;
+        let mut open_did = open_did;
+        let mut last_did_id = last_did_id;
+        let mut last_resolved = last_resolved;
+
+        // `spawn` here is load-bearing: on Android the onclick
+        // event for the very first interactive screen (Unlock)
+        // fires on a different OS thread than the outcome pump's
+        // `use_future`. The router's `PENDING` is `thread_local!`,
+        // so a register done directly from the click body lands in
+        // the wrong slot and `take` returns `None`. Wrapping in
+        // `spawn` schedules the register + send on Dioxus' own
+        // task pool — the same pool the pump runs on — so both
+        // ends share the thread_local. See `worker/router.rs`
+        // module doc for the full invariant.
+        spawn(async move {
+            crate::worker::router::register(action_id, Box::new(move |outcome| {
+            let store = match outcome {
+                crate::worker::WorkOutcome::OpenStoreOk { store, .. } => store,
+                crate::worker::WorkOutcome::Err { msg, .. } => {
+                    tracing::warn!(error=%msg, "wallet store open failed");
+                    unlock_state.set(UnlockState::Failed(msg));
+                    return;
+                }
+                other => {
+                    tracing::warn!(
+                        target: "wallet_worker",
+                        ?other,
+                        "Unlock handler received unexpected outcome",
+                    );
+                    return;
+                }
+            };
+            let state = state_for_outcome;
+            {
                     state.set_store(store.clone());
 
                     // Spawn the log persistence drainer once
@@ -1493,8 +1557,11 @@ pub fn App() -> Element {
                             restored_session = true;
                         }
                     }
+                    // `path` is fixed (`wallet_store_path()`); the
+                    // worker already logged it. Skip re-logging here
+                    // to keep the post-open structured event focused
+                    // on what hydration produced.
                     tracing::info!(
-                        path=%path.display(),
                         network=?net,
                         wallet_id=?wallet_id,
                         hydrated_controller_secrets=n,
@@ -1592,14 +1659,14 @@ pub fn App() -> Element {
                             }
                         }));
                     }
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    tracing::warn!(error=%msg, path=%path.display(), "wallet store open failed");
-                    unlock_state.set(UnlockState::Failed(msg));
-                }
             }
         }));
+
+            worker.send(crate::worker::WorkMsg::OpenStore {
+                action_id,
+                passphrase: entered,
+            });
+        });
     };
 
     use_future(move || {

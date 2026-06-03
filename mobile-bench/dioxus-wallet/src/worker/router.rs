@@ -6,13 +6,27 @@
 //! capture Dioxus `Signal`s + `EventHandler`s, which are `!Send`
 //! (they hold `Rc` / `RefCell` to scope-bound storage). Putting
 //! them in an `Arc<Mutex<HashMap>>` would force a `Send` bound
-//! we can't satisfy. The router is only ever touched on the UI
-//! thread:
+//! we can't satisfy.
 //!
-//! - Click handlers call [`register`] from `onclick` closures.
-//! - The outcome pump (`use_future` in `App::run`) calls
-//!   [`take`] as soon as it pops a [`super::WorkOutcome`] off
-//!   the worker channel — also UI thread.
+//! ## Thread-affinity invariant
+//!
+//! Both [`register`] and [`take`] **must run on the same OS
+//! thread** — the one the outcome pump (`use_future` in
+//! `App::run`) executes on, which is also the thread Dioxus'
+//! `spawn` schedules tasks onto. Empirically (on the
+//! Pixel-Fold-API-35 emulator), the raw onclick event handler
+//! runs on a *different* thread than the pump's `use_future` —
+//! a registration done directly from an onclick body lands in
+//! the wrong `thread_local` and the subsequent `take` from the
+//! pump returns `None`, surfacing as "outcome dropped — no
+//! registered handler".
+//!
+//! Callers must therefore wrap their `register` + `worker.send`
+//! pair in `spawn(async { … })` so the work runs on Dioxus' own
+//! task pool. Every existing click site does this; new sites
+//! should follow the same pattern. The `Worker Task 5` re-attempt
+//! commit (this commit) is the canonical example —
+//! `app::App::run::on_unlock`.
 //!
 //! The worker thread never reaches into this module; it only
 //! emits outcomes onto the channel.

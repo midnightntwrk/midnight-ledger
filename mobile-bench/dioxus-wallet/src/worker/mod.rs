@@ -21,6 +21,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use tokio::sync::{Mutex, mpsc};
 
+use wallet_core::store::WalletStore;
 use wallet_core::{DidId, Network};
 
 use crate::bridge::BridgeState;
@@ -105,6 +106,29 @@ pub enum WorkMsg {
         /// `openid-credential-offer://…` URL.
         qr_url: String,
     },
+
+    /// Open the on-disk wallet store at
+    /// `crate::app::wallet_store_path()` with the supplied
+    /// passphrase. Returns a [`WorkOutcome::OpenStoreOk`] carrying
+    /// the [`WalletStore`] handle (which is `Clone + Send`, with
+    /// the heavy [`redb::Database`] behind an `Arc`), or a generic
+    /// [`WorkOutcome::Err`] on failure (wrong passphrase, bad file,
+    /// migration failure).
+    ///
+    /// Why a worker hop: `WalletStore::open` walks the entire
+    /// table tree to run pending migrations and decode the
+    /// per-network ledger snapshot. On a populated demo store
+    /// (preprod-live with ~534k DUST events cached) this is the
+    /// single deepest async state machine in the app — well over
+    /// the WebView dispatch thread's ~256 KiB stack budget.
+    /// Mirrors the Bootstrap path which moved
+    /// `bootstrap_did_with_keys` for the same reason.
+    OpenStore {
+        action_id: u64,
+        /// User-typed passphrase. Lives in memory only as long as
+        /// this message + the resulting `WalletStore` need it.
+        passphrase: String,
+    },
 }
 
 impl WorkMsg {
@@ -118,7 +142,8 @@ impl WorkMsg {
             Self::Noop { action_id }
             | Self::Bootstrap { action_id, .. }
             | Self::Oid4vpAuthenticate { action_id, .. }
-            | Self::Oid4vciIssuance { action_id, .. } => *action_id,
+            | Self::Oid4vciIssuance { action_id, .. }
+            | Self::OpenStore { action_id, .. } => *action_id,
         }
     }
 }
@@ -167,6 +192,23 @@ pub enum WorkOutcome {
         action_id: u64,
         vc_uri: String,
     },
+    /// [`WalletStore`] opened successfully. The handle is cheap
+    /// to `Clone` (interior `Arc<Database>`) and lives on the UI
+    /// thread once handed over. The UI's outcome handler is
+    /// responsible for calling [`BridgeState::set_store`] and
+    /// running the rest of the inline unlock pipeline
+    /// (`find_or_create_wallet_for_network`, DustSyncer
+    /// registration, inventory / resolved-cache hydration,
+    /// session-snap restore, per-DID auto-resolve fan-out) — the
+    /// signal writes in there are `!Send` and have to stay on
+    /// the UI thread anyway, so splitting at the
+    /// `WalletStore::open` boundary lets the worker take the
+    /// single biggest stack consumer while leaving the
+    /// signal-touching tail in place.
+    OpenStoreOk {
+        action_id: u64,
+        store: WalletStore,
+    },
     Err {
         action_id: u64,
         msg: String,
@@ -180,6 +222,7 @@ impl WorkOutcome {
             | Self::BootstrapOk { action_id, .. }
             | Self::Oid4vpOk { action_id, .. }
             | Self::Oid4vciOk { action_id, .. }
+            | Self::OpenStoreOk { action_id, .. }
             | Self::Err { action_id, .. } => *action_id,
         }
     }
