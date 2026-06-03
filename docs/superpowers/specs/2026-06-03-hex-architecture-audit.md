@@ -498,18 +498,24 @@ deliberately deferred:
      coverage in
      `secret_storage::curve_support::tests::jubjub_verify_accepts_upstream_96_byte_encoding`
      + `jubjub_verify_rejects_unknown_signature_length`.
-   - **(open)** CBOR canonicalisation drift. With the
-     length-dispatch fix in, the verifier reaches the
-     crypto layer and surfaces
-     `Invalid(SignatureMismatch)` — the actual signature
-     bytes don't validate. Almost certainly the issuer's
-     `cborEncode(bodyNoProof)` (via `cbor-x`) doesn't
-     match the wallet's CBOR-encode of the same body
-     (Rust's `serde_cbor` and `cbor-x` differ on
-     deterministic-map ordering unless explicitly
-     aligned). Fix: a focused commit pinning canonical
-     ordering in both encoders, plus a shared test fixture
-     that asserts byte-equality on a known body, plus an
-     interop integration test that signs in Rust +
-     verifies in JS and vice versa. Defer until the
-     cross-stack canonicalisation is specced.
+   - **(fixed)** CBOR canonicalisation drift. The issuer's
+     `cbor-x` emits the `b9 <u16-BE>` head form for
+     definite-length maps regardless of count; the
+     wallet's previous re-encode through
+     `ciborium::Value::Map` always picked the *shortest*
+     head (e.g. `a7` for n=7). Same logical map,
+     byte-different output → different sha256 → different
+     Schnorr challenge → `SignatureMismatch`. Fixed in
+     commit 5754e369 by routing the canonical-bytes
+     reconstruction through `ciborium-ll`'s positional
+     decoder: locate the `proof` entry's byte range in
+     the wire body, slice it out, decrement the outer
+     map count in place — preserving cbor-x's exact
+     head-encoding width. Every non-proof byte stays
+     verbatim from the wire, so the result is
+     byte-identical to `cborEncode(bodyNoProof)`.
+     Regression test `cbor_x_style_canonicalisation_byte_for_byte`
+     pins the head-preserving slicer; live
+     `bootstrap_then_login_then_issue_credential_round_trip`
+     now lands `Valid { vm_id }` end-to-end against
+     the live TS issuer.
