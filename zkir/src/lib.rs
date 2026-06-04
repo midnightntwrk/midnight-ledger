@@ -69,10 +69,8 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
         if let Some(binding_input) = overwrite_binding_input {
             preimage.binding_input = binding_input;
         }
-        Ok(preimage
-            .prove::<IrSource>(self.rng, self.params, self.resolver)
-            .await?
-            .0)
+        // Default: v1 proving pipeline (old zk-stdlib, end-to-end).
+        ir_v1::v1_prove(&preimage, self.rng, self.params, self.resolver).await
     }
     fn split(&mut self) -> Self {
         Self {

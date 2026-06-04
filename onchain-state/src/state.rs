@@ -885,6 +885,7 @@ impl<D: DB> Default for ContractState<D> {
 
 #[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable)]
 #[storable(base)]
+#[tag = "contract-operation[v6]"]
 #[non_exhaustive]
 pub struct ContractOperation {
     /// Verifier key for v1 (zk-stdlib v1) proofs. Historically called `v2`
@@ -926,26 +927,6 @@ impl Deserializable for ContractOperation {
         let ir = Deserializable::deserialize(reader, recursion_depth)?;
         let v3 = Deserializable::deserialize(reader, recursion_depth)?;
         Ok(ContractOperation { v2, ir, v3 })
-    }
-}
-
-/// Backwards-compatible deserialization helper. Contract operations serialized
-/// under the old tag (`contract-operation[v5]`) only contain `v2` and `ir`
-/// fields; the `v3` field is defaulted to `None`.
-#[derive(Serializable)]
-#[tag = "contract-operation[v5]"]
-struct OldContractOperation {
-    v2: Option<VerifierKey>,
-    ir: Option<Sp<IrBuf>>,
-}
-
-impl From<OldContractOperation> for ContractOperation {
-    fn from(old: OldContractOperation) -> Self {
-        ContractOperation {
-            v2: old.v2,
-            ir: old.ir,
-            v3: None,
-        }
     }
 }
 

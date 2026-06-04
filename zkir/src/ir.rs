@@ -35,7 +35,31 @@ use transient_crypto::proofs::{
     VerifierKey, Zkir,
 };
 
+type V1IrSource = zkir_old::IrSource;
+type V1MidnightPK = midnight_zk_stdlib_v1::MidnightPK<V1IrSource>;
+
 const PK_COMPRESSION_LEVEL: u32 = 6;
+
+/// A prover key that can hold either a v1 (zk-stdlib v1) or v2 (zk-stdlib v2)
+/// inner key. The v1 variant is the default for existing proving infrastructure;
+/// v2 is used for proofs generated against the new circuit backend.
+#[derive(Debug)]
+pub enum VersionedInnerPK {
+    /// Prover key backed by zk-stdlib v1 (pinned old crate).
+    V1(V1MidnightPK),
+    /// Prover key backed by zk-stdlib v2 (current).
+    V2(MidnightPK<IrSource>),
+}
+
+impl VersionedInnerPK {
+    /// Returns the k parameter (log2 of the domain size).
+    pub fn k(&self) -> u8 {
+        match self {
+            VersionedInnerPK::V1(pk) => pk.k(),
+            VersionedInnerPK::V2(pk) => pk.k(),
+        }
+    }
+}
 
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
@@ -113,7 +137,7 @@ pub enum IrMinorVersion {
 struct FacadeProverKey(Vec<u8>);
 
 impl Zkir for IrSource {
-    type ProverKey = MidnightPK<IrSource>;
+    type ProverKey = VersionedInnerPK;
 
     fn check(
         &self,
@@ -129,19 +153,33 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        use midnight_zk_stdlib::prove;
-
-        let params_k = params.get_params(pk.init()?.k()).await?;
-        let preproc = self.preprocess(preimage)?;
-        let pis = preproc.pis.clone();
-        let pi_skips = preproc.pi_skips.clone();
-
-        let pk = pk
+        let inner_pk = pk
             .init()
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
 
-        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
+        let v2_pk = match &*inner_pk {
+            VersionedInnerPK::V2(pk) => pk,
+            VersionedInnerPK::V1(_) => {
+                anyhow::bail!(
+                    "Zkir::prove called with a v1 prover key; \
+                     use the v1 proving pipeline (ir_v1::v1_prove) instead"
+                )
+            }
+        };
 
+        use midnight_zk_stdlib::prove;
+        let params_k = params.get_params(v2_pk.k()).await?;
+        let preproc = self.preprocess(preimage)?;
+        let pis = preproc.pis.clone();
+        let pi_skips = preproc.pi_skips.clone();
+        let proof = prove::<_, TranscriptHash>(
+            params_k.as_ref(),
+            v2_pk,
+            self,
+            &pis,
+            preproc,
+            rng,
+        )?;
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
     }
 
@@ -167,12 +205,17 @@ impl Zkir for IrSource {
        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
        let pk = setup_pk(self, &vk);
 
-       Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+       Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
     }
 
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
+        // Default: read as v1 (the existing key material is all v1).
         let mut reader = flate2::read::GzDecoder::new(reader);
-        MidnightPK::<Self>::read(&mut { reader }, SerdeFormat::RawBytesUnchecked)
+        let v1_pk = V1MidnightPK::read(
+            &mut { &mut reader },
+            midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+        )?;
+        Ok(VersionedInnerPK::V1(v1_pk))
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
@@ -180,7 +223,17 @@ impl Zkir for IrSource {
             writer,
             flate2::Compression::new(PK_COMPRESSION_LEVEL),
         );
-        pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
+        match pk {
+            VersionedInnerPK::V1(v1_pk) => {
+                v1_pk.write(
+                    &mut { &mut writer },
+                    midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+                )
+            }
+            VersionedInnerPK::V2(v2_pk) => {
+                v2_pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
+            }
+        }
     }
 
     fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
@@ -619,14 +672,21 @@ impl IrSource {
     ) -> Result<Proof> {
         use midnight_zk_stdlib::prove;
 
-        let params_k = params.get_params(pk.init()?.k()).await?;
-        let pis = preproc.pis.clone();
-
-        let pk = pk
+        let inner_pk = pk
             .init()
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
 
-        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), &pk, self, &pis, preproc, rng)?;
+        let v2_pk = match &*inner_pk {
+            VersionedInnerPK::V2(pk) => pk,
+            VersionedInnerPK::V1(_) => {
+                anyhow::bail!("prove_unchecked requires a v2 prover key")
+            }
+        };
+
+        let params_k = params.get_params(v2_pk.k()).await?;
+        let pis = preproc.pis.clone();
+
+        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
 
         Ok(Proof(proof))
     }
