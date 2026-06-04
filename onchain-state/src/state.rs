@@ -883,29 +883,99 @@ impl<D: DB> Default for ContractState<D> {
     }
 }
 
-#[derive(
-    Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
-)]
+#[derive(Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable)]
 #[storable(base)]
-#[tag = "contract-operation[v5]"]
 #[non_exhaustive]
 pub struct ContractOperation {
+    /// Verifier key for v1 (zk-stdlib v1) proofs. Historically called `v2`
+    /// because it was the second version of the contract-operation format.
     pub v2: Option<VerifierKey>,
     ir: Option<Sp<IrBuf>>,
+    /// Verifier key for v2 (zk-stdlib v2) proofs.
+    pub v3: Option<VerifierKey>,
+}
+
+impl Tagged for ContractOperation {
+    fn tag() -> std::borrow::Cow<'static, str> {
+        std::borrow::Cow::Borrowed("contract-operation[v6]")
+    }
+    fn tag_unique_factor() -> String {
+        "contract-operation[v6]".into()
+    }
 }
 tag_enforcement_test!(ContractOperation);
 
-impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: vk, ir }
+impl Serializable for ContractOperation {
+    fn serialize(&self, writer: &mut impl Write) -> io::Result<()> {
+        Serializable::serialize(&self.v2, writer)?;
+        Serializable::serialize(&self.ir, writer)?;
+        Serializable::serialize(&self.v3, writer)?;
+        Ok(())
     }
 
+    fn serialized_size(&self) -> usize {
+        Serializable::serialized_size(&self.v2)
+            + Serializable::serialized_size(&self.ir)
+            + Serializable::serialized_size(&self.v3)
+    }
+}
+
+impl Deserializable for ContractOperation {
+    fn deserialize(reader: &mut impl Read, recursion_depth: u32) -> io::Result<Self> {
+        let v2 = Deserializable::deserialize(reader, recursion_depth)?;
+        let ir = Deserializable::deserialize(reader, recursion_depth)?;
+        let v3 = Deserializable::deserialize(reader, recursion_depth)?;
+        Ok(ContractOperation { v2, ir, v3 })
+    }
+}
+
+/// Backwards-compatible deserialization helper. Contract operations serialized
+/// under the old tag (`contract-operation[v5]`) only contain `v2` and `ir`
+/// fields; the `v3` field is defaulted to `None`.
+#[derive(Serializable)]
+#[tag = "contract-operation[v5]"]
+struct OldContractOperation {
+    v2: Option<VerifierKey>,
+    ir: Option<Sp<IrBuf>>,
+}
+
+impl From<OldContractOperation> for ContractOperation {
+    fn from(old: OldContractOperation) -> Self {
+        ContractOperation {
+            v2: old.v2,
+            ir: old.ir,
+            v3: None,
+        }
+    }
+}
+
+impl ContractOperation {
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
+        ContractOperation { v2: vk, ir, v3: None }
+    }
+
+    /// Returns the latest verifier key, preferring v3 (zk-stdlib v2) over
+    /// v2 (zk-stdlib v1).
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v2.as_ref()
+        self.v3.as_ref().or(self.v2.as_ref())
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        &mut self.v2
+        if self.v3.is_some() {
+            &mut self.v3
+        } else {
+            &mut self.v2
+        }
+    }
+
+    /// Returns the v1 (zk-stdlib v1) verifier key.
+    pub fn v1_vk(&self) -> Option<&VerifierKey> {
+        self.v2.as_ref()
+    }
+
+    /// Returns the v2 (zk-stdlib v2) verifier key.
+    pub fn v2_vk(&self) -> Option<&VerifierKey> {
+        self.v3.as_ref()
     }
 }
 
@@ -921,9 +991,10 @@ impl Distribution<ContractOperation> for Standard {
             ContractOperation {
                 v2: Some(rng.r#gen()),
                 ir: None,
+                v3: None,
             }
         } else {
-            ContractOperation { v2: None, ir: None }
+            ContractOperation { v2: None, ir: None, v3: None }
         }
     }
 }
@@ -963,7 +1034,7 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None, ir: None }
+        ContractOperation { v2: None, ir: None, v3: None }
     }
 }
 

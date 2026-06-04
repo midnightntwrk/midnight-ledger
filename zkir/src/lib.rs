@@ -22,6 +22,7 @@ use transient_crypto::proofs::{
 };
 
 mod ir;
+mod ir_v1;
 mod ir_vm;
 
 pub use ir::{Instruction, IrMinorVersion, IrSource};
