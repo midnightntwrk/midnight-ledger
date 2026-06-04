@@ -35,6 +35,71 @@ use wallet_core::{
 /// after roughly 18 quintillion clicks.
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(0);
 
+/// Translate a raw bootstrap-error string into a user-facing message.
+///
+/// Wallet-core errors arrive as opaque strings ("submit: RPC error:
+/// User error: Invalid Transaction (1010)") that mean nothing to a
+/// demo operator. Pattern-match the well-known signatures and
+/// substitute a sentence describing what happened + what the next
+/// useful action is. Fall back to the raw string when we don't
+/// recognise it so power users / log readers still see the truth.
+///
+/// This is a tactical fix until the proper "mobile-friendly error
+/// surface" feature (see `docs/BACKLOG.md`) is built. The proper
+/// version groups errors by category, shows a one-line headline +
+/// optional details disclosure, and threads correlation IDs through
+/// to the Logs tab — none of which fits in a `String` substitution.
+pub(crate) fn humanize_bootstrap_error(raw: &str) -> String {
+    // 1010 / Custom error 196 = LedgerLackOfDust on standalone.
+    // The wallet seed is fresh; per-block DUST emission hasn't yet
+    // accrued enough to pay for the createDID contract write.
+    if raw.contains("Invalid Transaction (1010)")
+        || raw.contains("Custom error: 196")
+        || raw.to_lowercase().contains("lack of dust")
+    {
+        return "Not enough DUST yet — the test chain needs ~60-120 \
+                seconds of block emission before your wallet can mint \
+                a DID. Wait a minute and tap Bootstrap again.\n\n\
+                (Technical: chain returned `Invalid Transaction (1010)` \
+                = LedgerLackOfDust. The standalone Midnight env only \
+                pre-funds the genesis seed; every other seed accrues \
+                DUST one block at a time.)"
+            .to_string();
+    }
+    // 1010 / Custom error 200 family covers BadProof / ProofVerificationFailed.
+    if raw.contains("Custom error: 200") || raw.contains("BadProof") {
+        return "Proof verification failed on chain. This usually \
+                means the wallet is talking to a chain running newer \
+                LedgerParameters than the build expects.\n\n\
+                Try: tap Bootstrap again (the wallet refetches tip \
+                params on each retry). If it keeps failing, the \
+                APK probably needs to be rebuilt against the current \
+                workspace develop.\n\n\
+                (Technical: chain returned `Custom error: 200` = \
+                BadProof.)"
+            .to_string();
+    }
+    // Network-level reachability failures.
+    if raw.contains("Connection refused")
+        || raw.contains("dns error")
+        || raw.contains("connect timeout")
+        || raw.contains("Network is unreachable")
+    {
+        return format!(
+            "Couldn't reach the Midnight indexer / proof-server. \
+             Check that:\n\
+             • the laptop's docker-compose stack is up \
+             (`./scripts/run-demo.sh env-status`)\n\
+             • your phone is on the same tailnet as the laptop\n\
+             • the URLs in Diagnostics → Endpoints point at the \
+             laptop's tailnet IP (not localhost)\n\n\
+             (Technical: {raw})"
+        );
+    }
+    // No recognised pattern — pass through with a soft framing.
+    format!("Bootstrap failed.\n\n(Technical: {raw})")
+}
+
 /// Cross-component "VC inventory changed" tick.
 ///
 /// [`VcInventorySection`] subscribes to this in its
@@ -840,8 +905,9 @@ fn BootstrapSection(
                             }
                             crate::worker::WorkOutcome::Err { msg, .. } => {
                                 in_mem_metrics.incr("dids.bootstrap_failed", 1);
+                                let friendly = humanize_bootstrap_error(&msg);
                                 if let Ok(mut w) = err_msg_sig.try_write() {
-                                    *w = Some(msg);
+                                    *w = Some(friendly);
                                 }
                             }
                             // The worker only ever emits BootstrapOk
