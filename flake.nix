@@ -98,7 +98,7 @@
         rust-build = self.packages.${system}.rust-build-toolchain;
         ledger-version = (builtins.fromTOML (builtins.readFile ./ledger/Cargo.toml)).package.version;
         zswap-version = (builtins.fromTOML (builtins.readFile ./zswap/Cargo.toml)).package.version;
-        proof-server-version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).workspace.package.version;
+        proof-server-version = (builtins.fromTOML (builtins.readFile ./proof-server/Cargo.toml)).package.version;
         mkWasm = { name, crate-name, package-name, require-artifacts ? false, features ? [], experimental ? false }:
           self.lib.${system}.bagel-wasm {
             inherit name crate-name package-name features;
@@ -387,7 +387,7 @@
 
           packages.ledger = mkLedger { heavy-checks = true; };
 
-          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v3"; };
+          packages.onchain-runtime-wasm = mkWasm { name = "onchain-runtime-wasm"; crate-name = "midnight-onchain-runtime-wasm"; package-name = "onchain-runtime-v4"; };
 
           packages.ledger-wasm = mkWasm { name = "ledger-wasm"; crate-name = "midnight-ledger-wasm-v9"; package-name = "ledger-v9"; require-artifacts = true; };
           packages.zkir-wasm = mkWasm { name = "zkir-wasm"; crate-name = "midnight-zkir-wasm"; package-name = "zkir-v2"; require-artifacts = true; };

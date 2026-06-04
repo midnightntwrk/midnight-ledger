@@ -4,13 +4,15 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Unreleased (9.0)
+## Ledger 9.0.1.0-alpha.1
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
   ledger parameters.
 - feat: add support for ECDSA signatures
 - feat: add `UnlockToTreasury` system transaction, moving funds from the locked
   pool to the treasury.
+- feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
+  matching the new on-chain event format.
 - fix: correctly exclude the identity point during coin ciphertext decryption
 
 ## Unreleased (8.2)
@@ -21,6 +23,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - fix: fix potential panic in bridge fee processing
 - fix: address non-associativity of Dust event processing.
 - fix: tighten cost heuristic, no longer being overly conservative, moving less transactions to the fallible section.
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
 
 ## 8.1.0
 
