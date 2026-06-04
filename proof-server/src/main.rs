@@ -55,6 +55,18 @@ struct Args {
         env = "MIDNIGHT_PROOF_SERVER_NO_FETCH_PARAMS"
     )]
     no_fetch_params: bool,
+    #[arg(
+        long,
+        default_value_t = 256 * 1024,
+        env = "MIDNIGHT_PROOF_SERVER_MAX_PAYLOAD_SIZE"
+    )]
+    max_payload_size: usize,
+    #[arg(
+        long,
+        default_value_t = 2 * 1024 * 1024,
+        env = "MIDNIGHT_PROOF_SERVER_MAX_JSON_SIZE"
+    )]
+    max_json_size: usize,
 }
 
 #[actix_web::main]
@@ -91,10 +103,16 @@ async fn main() -> std::io::Result<()> {
         keys.into_iter().collect::<Result<Vec<_>, _>>()?;
     }
     let pool = WorkerPool::new(args.num_workers, args.job_capacity, args.job_timeout);
-    server(args.port, !args.no_fetch_params, pool)
-        .unwrap()
-        .0
-        .await
+    server(
+        args.port,
+        !args.no_fetch_params,
+        pool,
+        args.max_payload_size,
+        args.max_json_size,
+    )
+    .unwrap()
+    .0
+    .await
 }
 
 fn init_logging(verbose: bool) {

@@ -26,6 +26,8 @@ mod common {
     pub const DEFAULT_JOB_LIMIT: usize = 2;
     pub const REQUEST_TIMEOUT_SECS: u64 = 5;
     pub const LONG_REQUEST_TIMEOUT_SECS: u64 = 30;
+    pub const DEFAULT_REQUEST_SIZE: usize = 256 * 1024; // 256 KB
+    pub const DEFAULT_JSON_SIZE: usize = 2 * 1024 * 1024; // 2 MB
 
     static LOGGER_INIT: OnceLock<()> = OnceLock::new();
 
@@ -60,19 +62,38 @@ mod common {
             .expect("Failed to create HTTP client")
     }
 
-    pub fn start_server(num_workers: usize, job_limit: usize) -> TestServer {
-        start_server_impl(num_workers, job_limit, false)
+    pub fn start_server(
+        num_workers: usize,
+        job_limit: usize,
+        request_size: usize,
+        json_size: usize,
+    ) -> TestServer {
+        start_server_impl(num_workers, job_limit, false, request_size, json_size)
     }
 
     pub fn start_server_with_fetch_params(
         num_workers: usize,
         job_limit: usize,
         fetch_params: bool,
+        request_size: usize,
+        json_size: usize,
     ) -> TestServer {
-        start_server_impl(num_workers, job_limit, fetch_params)
+        start_server_impl(
+            num_workers,
+            job_limit,
+            fetch_params,
+            request_size,
+            json_size,
+        )
     }
 
-    fn start_server_impl(num_workers: usize, job_limit: usize, fetch_params: bool) -> TestServer {
+    fn start_server_impl(
+        num_workers: usize,
+        job_limit: usize,
+        fetch_params: bool,
+        request_size: usize,
+        json_size: usize,
+    ) -> TestServer {
         init_logger();
 
         let (tx, rx) = std::sync::mpsc::channel();
@@ -80,8 +101,8 @@ mod common {
         std::thread::spawn(move || {
             rt::System::new().block_on(async move {
                 let pool = WorkerPool::new(num_workers, job_limit, 600.0);
-                let (srv, bound_port) =
-                    server(0, fetch_params, pool).expect("Failed to start server");
+                let (srv, bound_port) = server(0, fetch_params, pool, request_size, json_size)
+                    .expect("Failed to start server");
                 tx.send((srv.handle(), bound_port))
                     .expect("Failed to send server handle");
                 srv.await.expect("Server error");
@@ -226,7 +247,12 @@ mod health_endpoints {
 
     #[tokio::test]
     async fn root_returns_ok_status() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/", server.base_url()))
@@ -244,7 +270,12 @@ mod health_endpoints {
 
     #[tokio::test]
     async fn health_returns_ok_status() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/health", server.base_url()))
@@ -262,7 +293,12 @@ mod health_endpoints {
 
     #[tokio::test]
     async fn version_returns_package_version() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/version", server.base_url()))
@@ -280,7 +316,12 @@ mod health_endpoints {
 
     #[tokio::test]
     async fn proof_versions_returns_supported_versions() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/proof-versions", server.base_url()))
@@ -310,7 +351,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn rejects_get_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/prove-tx", server.base_url()))
@@ -325,7 +371,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn rejects_empty_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/prove-tx", server.base_url()))
@@ -344,7 +395,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn rejects_json_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/prove-tx", server.base_url()))
@@ -364,7 +420,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn proves_valid_transaction() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_prove_tx_body().await;
 
         let response = HTTP_CLIENT
@@ -391,7 +452,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn rejects_repeated_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_prove_tx_body().await;
         let doubled_body: Vec<u8> = body.iter().chain(body.iter()).copied().collect();
 
@@ -418,7 +484,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn rejects_corrupted_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let mut body = serialize_prove_tx_body().await;
 
         let mut rng = StdRng::seed_from_u64(42);
@@ -441,7 +512,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn handles_concurrent_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, 10);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            10,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_prove_tx_body().await;
 
         let tasks: Vec<_> = (0..10)
@@ -470,7 +546,12 @@ mod prove_tx_endpoint {
 
     #[tokio::test]
     async fn health_check_works_under_load() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_zswap_body().await;
 
         let base_url = server.base_url();
@@ -506,7 +587,12 @@ mod ready_endpoint {
 
     #[tokio::test]
     async fn reports_correct_job_counts() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_zswap_body().await;
 
         let num_requests = DEFAULT_JOB_LIMIT - 1 + DEFAULT_NUM_WORKERS;
@@ -543,7 +629,12 @@ mod ready_endpoint {
 
     #[tokio::test]
     async fn reports_busy_when_overloaded() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_zswap_body().await;
 
         let num_requests = DEFAULT_JOB_LIMIT + DEFAULT_NUM_WORKERS;
@@ -578,7 +669,12 @@ mod ready_endpoint {
 
     #[tokio::test]
     async fn zero_capacity_allows_unlimited_jobs() {
-        let server = start_server(DEFAULT_NUM_WORKERS, 0);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            0,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
         let body = serialize_prove_tx_body().await;
 
         let base_url = server.base_url();
@@ -634,7 +730,12 @@ mod k_endpoint {
 
     #[tokio::test]
     async fn returns_k_value_for_valid_ir() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let ir = create_minimal_ir_source();
         let expected_k = ir.k();
@@ -660,7 +761,12 @@ mod k_endpoint {
 
     #[tokio::test]
     async fn rejects_empty_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/k", server.base_url()))
@@ -675,7 +781,12 @@ mod k_endpoint {
 
     #[tokio::test]
     async fn rejects_invalid_ir_format() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/k", server.base_url()))
@@ -699,7 +810,12 @@ mod k_endpoint {
 
     #[tokio::test]
     async fn rejects_get_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/k", server.base_url()))
@@ -721,7 +837,12 @@ mod check_endpoint {
 
     #[tokio::test]
     async fn rejects_empty_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/check", server.base_url()))
@@ -736,7 +857,12 @@ mod check_endpoint {
 
     #[tokio::test]
     async fn rejects_invalid_format() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/check", server.base_url()))
@@ -752,7 +878,12 @@ mod check_endpoint {
 
     #[tokio::test]
     async fn rejects_get_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/check", server.base_url()))
@@ -767,7 +898,12 @@ mod check_endpoint {
 
     #[tokio::test]
     async fn processes_valid_request() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let versioned_ppi = create_zswap_output_proof_preimage();
         let ir: Option<WrappedIr> = None;
@@ -803,7 +939,12 @@ mod prove_endpoint {
 
     #[tokio::test]
     async fn rejects_empty_body() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/prove", server.base_url()))
@@ -818,7 +959,12 @@ mod prove_endpoint {
 
     #[tokio::test]
     async fn rejects_invalid_format() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .post(format!("{}/prove", server.base_url()))
@@ -834,7 +980,12 @@ mod prove_endpoint {
 
     #[tokio::test]
     async fn rejects_get_requests() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/prove", server.base_url()))
@@ -849,7 +1000,12 @@ mod prove_endpoint {
 
     #[tokio::test]
     async fn processes_valid_request() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let versioned_ppi = create_zswap_output_proof_preimage();
         let data: Option<ProvingKeyMaterial> = None;
@@ -892,7 +1048,12 @@ mod fetch_params_endpoint {
 
     #[tokio::test]
     async fn not_available_by_default() {
-        let server = start_server(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT);
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/fetch-params/8", server.base_url()))
@@ -907,7 +1068,13 @@ mod fetch_params_endpoint {
 
     #[tokio::test]
     async fn rejects_invalid_k() {
-        let server = start_server_with_fetch_params(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT, true);
+        let server = start_server_with_fetch_params(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            true,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let response = HTTP_CLIENT
             .get(format!("{}/fetch-params/30", server.base_url()))
@@ -929,7 +1096,13 @@ mod fetch_params_endpoint {
 
     #[tokio::test]
     async fn accepts_valid_k() {
-        let server = start_server_with_fetch_params(DEFAULT_NUM_WORKERS, DEFAULT_JOB_LIMIT, true);
+        let server = start_server_with_fetch_params(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            true,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
 
         let client = build_client(60);
         let response = client
@@ -942,6 +1115,227 @@ mod fetch_params_endpoint {
 
         let text = response.text().await.expect("Failed to get response text");
         assert_eq!(text, "success");
+
+        stop_server(server).await;
+    }
+}
+
+mod request_limits {
+    use super::common::*;
+
+    const STRING_LIMIT_BYTES: usize = 256 * 1024; // 256 KB
+    const JSON_LIMIT_BYTES: usize = 2 * 1024 * 1024; // 2 MB
+    const BINARY_TEST_LIMIT_BYTES: usize = 1024; // 1 KB — small enough to test without large payloads
+
+    #[tokio::test]
+    async fn rejects_oversized_string_payload() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            STRING_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+
+        // Create a payload larger than 256 KB
+        let oversized_payload = vec![0u8; STRING_LIMIT_BYTES + 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .body(oversized_payload)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_string_payload_under_limit() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
+
+        // Create a payload exactly at the 256 KB limit
+        let payload = vec![0u8; STRING_LIMIT_BYTES];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .body(payload)
+            .send()
+            .await
+            .expect("Request failed");
+
+        // Should not be rejected for size (will fail for other reasons like invalid format)
+        assert_ne!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_json_payload() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            JSON_LIMIT_BYTES,
+        );
+
+        // Create a JSON payload larger than 2 MB
+        let large_string = "x".repeat(JSON_LIMIT_BYTES + 1);
+        let json_payload = format!(r#"{{"data":"{}"}}"#, large_string);
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .header("Content-Type", "application/json")
+            .body(json_payload)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_json_payload_under_limit() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            DEFAULT_REQUEST_SIZE,
+            DEFAULT_JSON_SIZE,
+        );
+
+        // Create a JSON payload just under 2 MB
+        let large_string = "x".repeat(JSON_LIMIT_BYTES - 100);
+        let json_payload = format!(r#"{{"data":"{}"}}"#, large_string);
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/ready", server.base_url()))
+            .header("Content-Type", "application/json")
+            .body(json_payload)
+            .send()
+            .await
+            .expect("Request failed");
+
+        // Should not be rejected for size (will fail for other reasons like method not allowed)
+        assert_ne!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_binary_payload_on_prove_tx() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            BINARY_TEST_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+        let oversized = vec![0u8; BINARY_TEST_LIMIT_BYTES + 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .body(oversized)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_binary_payload_on_prove() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            BINARY_TEST_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+        let oversized = vec![0u8; BINARY_TEST_LIMIT_BYTES + 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove", server.base_url()))
+            .body(oversized)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_binary_payload_on_check() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            BINARY_TEST_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+        let oversized = vec![0u8; BINARY_TEST_LIMIT_BYTES + 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/check", server.base_url()))
+            .body(oversized)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn rejects_oversized_binary_payload_on_k() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            BINARY_TEST_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+        let oversized = vec![0u8; BINARY_TEST_LIMIT_BYTES + 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/k", server.base_url()))
+            .body(oversized)
+            .send()
+            .await
+            .expect("Request failed");
+
+        assert_eq!(response.status(), 413);
+
+        stop_server(server).await;
+    }
+
+    #[tokio::test]
+    async fn accepts_binary_payload_within_limit() {
+        let server = start_server(
+            DEFAULT_NUM_WORKERS,
+            DEFAULT_JOB_LIMIT,
+            BINARY_TEST_LIMIT_BYTES,
+            DEFAULT_JSON_SIZE,
+        );
+        let payload = vec![0u8; BINARY_TEST_LIMIT_BYTES - 1];
+
+        let response = HTTP_CLIENT
+            .post(format!("{}/prove-tx", server.base_url()))
+            .body(payload)
+            .send()
+            .await
+            .expect("Request failed");
+
+        // Should not be rejected for size (will fail for other reasons like invalid format)
+        assert_ne!(response.status(), 413);
 
         stop_server(server).await;
     }
