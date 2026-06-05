@@ -1074,12 +1074,16 @@ mod proof_tests {
                { "op": "neg", "a": "%p0",  "output": "%p0_neg" },
                { "op": "neg", "a": "%b0",  "output": "%b0_neg" },
                { "op": "neg", "a": "%s0",  "output": "%s0_neg" },
+               { "op": "inv", "a": "%b0",  "output": "%b0_inv" },
+               { "op": "inv", "a": "%s0",  "output": "%s0_inv" },
                { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"    },
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b_prod_priv" },
                { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s_prod_priv" },
                { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p0_neg_priv" },
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_neg_priv" },
                { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_inv_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_inv_priv" },
                { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
                { "op": "constrain_eq", "a": "%b2",     "b": "%b2_rt"       },
                { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
@@ -1090,7 +1094,10 @@ mod proof_tests {
                { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
                { "op": "assert",       "cond": "%sp_eq" },
                { "op": "test_eq",      "a": "%s0_neg", "b": "%s0_neg_priv", "output": "%sn_eq" },
-               { "op": "assert",       "cond": "%sn_eq" }
+               { "op": "assert",       "cond": "%sn_eq" },
+               { "op": "constrain_eq", "a": "%b0_inv", "b": "%b0_inv_priv" },
+               { "op": "test_eq",      "a": "%s0_inv", "b": "%s0_inv_priv", "output": "%si_eq" },
+               { "op": "assert",       "cond": "%si_eq" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -1130,6 +1137,8 @@ mod proof_tests {
             encode(IrValue::Secp256k1Point(-p0)),
             encode(IrValue::Secp256k1Base(-b0)),
             encode(IrValue::Secp256k1Scalar(-s0)),
+            encode(IrValue::Secp256k1Base(Option::from(b0.invert()).unwrap())),
+            encode(IrValue::Secp256k1Scalar(Option::from(s0.invert()).unwrap())),
         ]
         .concat();
 
@@ -1152,6 +1161,46 @@ mod proof_tests {
                     vk: vk.clone(),
                     ir: ir.clone(),
                 },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_native_inv_proof() {
+        // Verifies native field inversion: v0 * inv(v0) == 1.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v0", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "inv", "a": "%v0",          "output": "%v0_inv" },
+               { "op": "mul", "a": "%v0", "b": "%v0_inv", "output": "%one"   },
+               { "op": "constrain_eq", "a": "%one", "b": "0x01" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![7.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver { pk, vk: vk.clone(), ir },
             )
             .await
             .unwrap();

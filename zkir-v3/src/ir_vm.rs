@@ -22,6 +22,7 @@ use crate::ir_instructions::encode::{
     encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
 use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
 use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
@@ -340,6 +341,11 @@ impl IrSource {
                 I::Neg { a, output } => {
                     let a = resolve_operand(&memory, a)?;
                     let result = neg_offcircuit(&a)?;
+                    memory.insert(output.clone(), result);
+                }
+                I::Inv { a, output } => {
+                    let a = resolve_operand(&memory, a)?;
+                    let result = inv_offcircuit(&a)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Not { a, output } => {
@@ -936,6 +942,11 @@ impl Relation for IrSource {
                 I::Neg { a, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let result = neg_incircuit(std, layouter, &a_val)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::Inv { a, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let result = inv_incircuit(std, layouter, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
