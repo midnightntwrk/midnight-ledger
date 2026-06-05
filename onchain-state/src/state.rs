@@ -890,10 +890,9 @@ impl<D: DB> Default for ContractState<D> {
 #[tag = "contract-operation[v6]"]
 #[non_exhaustive]
 pub struct ContractOperation {
-    /// Verifier key for v1 (zk-stdlib v1) proofs. Historically called `v2`
-    /// because it was the second version of the contract-operation format.
+    /// v1 (zk-stdlib v1) verifier key.
     pub v2: Option<VerifierKey>,
-    /// Verifier key for v2 (zk-stdlib v2) proofs.
+    /// v2 (zk-stdlib v2) verifier key.
     pub v3: Option<VerifierKey>,
     ir: Option<Sp<IrBuf>>,
 }
@@ -904,8 +903,7 @@ impl ContractOperation {
         ContractOperation { v2: vk, ir, v3: None }
     }
 
-    /// Returns the latest verifier key, preferring v3 (zk-stdlib v2) over
-    /// v2 (zk-stdlib v1).
+    /// Returns the latest verifier key, preferring v3 over v2.
     pub fn latest(&self) -> Option<&VerifierKey> {
         self.v3.as_ref().or(self.v2.as_ref())
     }
@@ -918,12 +916,12 @@ impl ContractOperation {
         }
     }
 
-    /// Returns the v1 (zk-stdlib v1) verifier key.
+    /// Returns the v1 verifier key.
     pub fn v1_vk(&self) -> Option<&VerifierKey> {
         self.v2.as_ref()
     }
 
-    /// Returns the v2 (zk-stdlib v2) verifier key.
+    /// Returns the v2 verifier key.
     pub fn v2_vk(&self) -> Option<&VerifierKey> {
         self.v3.as_ref()
     }

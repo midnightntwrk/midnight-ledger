@@ -40,19 +40,13 @@ type V1MidnightPK = midnight_zk_stdlib_v1::MidnightPK<V1IrSource>;
 
 const PK_COMPRESSION_LEVEL: u32 = 6;
 
-/// A prover key that can hold either a v1 (zk-stdlib v1) or v2 (zk-stdlib v2)
-/// inner key. The v1 variant is the default for existing proving infrastructure;
-/// v2 is used for proofs generated against the new circuit backend.
 #[derive(Debug)]
 pub enum VersionedInnerPK {
-    /// Prover key backed by zk-stdlib v1 (pinned old crate).
     V1(V1MidnightPK),
-    /// Prover key backed by zk-stdlib v2 (current).
     V2(MidnightPK<IrSource>),
 }
 
 impl VersionedInnerPK {
-    /// Returns the k parameter (log2 of the domain size).
     pub fn k(&self) -> u8 {
         match self {
             VersionedInnerPK::V1(pk) => pk.k(),
@@ -184,7 +178,6 @@ impl Zkir for IrSource {
     }
 
     fn k(&self) -> u8 {
-        // Use v1 optimal_k via the old crate for consistency.
         let old_ir = self.to_v1().expect("IrSource should round-trip to v1");
         use transient_crypto_old::proofs::Zkir as _;
         old_ir.k()
@@ -194,7 +187,7 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
-        // Default: v1 keygen.
+        // v1 keygen.
         let old_ir = self.to_v1()?;
         let v1_params = crate::ir_v1::V1Params(params);
         use transient_crypto_old::proofs::Zkir as _;
@@ -213,7 +206,7 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-        // Default: v1 keygen.
+        // v1 keygen.
         let old_ir = self.to_v1()?;
         let v1_params = crate::ir_v1::V1Params(params);
         use transient_crypto_old::proofs::Zkir as _;
@@ -590,19 +583,14 @@ impl Model {
 }
 
 impl IrSource {
-    /// Converts the current `IrSource` to the old (v1) `IrSource` via
-    /// tagged serialization round-trip. Uses `serialize_to_tagged` which
-    /// preserves the old `ir-source[v2]` format for V0 IRs.
+    /// Converts to the v1 `IrSource` via tagged serialization round-trip.
     pub fn to_v1(&self) -> io::Result<V1IrSource> {
         let mut buf = Vec::new();
         self.serialize_to_tagged(&mut buf)?;
         serialize_old::tagged_deserialize(&mut &buf[..])
     }
 
-    /// Performs key generation using the v2 (zk-stdlib v2) pipeline.
-    ///
-    /// This is NOT the default — use `Zkir::keygen` for v1 (default).
-    /// Intended for tests exercising the v2 proof flow.
+    /// v2 (zk-stdlib v2) key generation. Not the default; use `Zkir::keygen` for v1.
     pub async fn v2_keygen(
         &self,
         params: &impl ParamsProverProvider,

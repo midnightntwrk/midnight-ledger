@@ -11,22 +11,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Backwards-compatible v1 (zk-stdlib v1) proving pipeline.
-//!
-//! This module provides thin adapters from current types to the pinned old
-//! crates (`midnight-zkir` 2.1.0, `midnight-transient-crypto` 2.0.1) that
-//! use zk-stdlib v1. V1 is the default proving pipeline; v2 is only used
-//! in tests.
+//! V1 (zk-stdlib v1) proving and verification pipeline.
 
 use std::borrow::Cow;
 use std::io;
 
 type OldIrSource = zkir_old::IrSource;
 
-/// Adapter: current `Resolver` → old `Resolver`.
-///
-/// Key material bytes (prover key, verifier key, IR) are the same between
-/// v1 and v2 at the raw-bytes level, so no conversion is needed.
+/// Adapter: current `Resolver` → v1 `Resolver`.
 pub struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
 
 impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolver
@@ -46,10 +38,7 @@ impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolv
     }
 }
 
-/// Adapter: current `ParamsProverProvider` → old `ParamsProverProvider`.
-///
-/// The underlying KZG parameter files are identical; only the wrapper
-/// types differ, so we serialize and re-parse.
+/// Adapter: current `ParamsProverProvider` → v1 `ParamsProverProvider`.
 pub struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
 
 impl<P: transient_crypto::proofs::ParamsProverProvider>
@@ -70,10 +59,7 @@ impl<P: transient_crypto::proofs::ParamsProverProvider>
     }
 }
 
-/// Converts a current `ProofPreimage` into an old `ProofPreimage`.
-///
-/// This constructs the old type field-by-field via byte round-trips for
-/// `Fr` values, avoiding any cross-version serialize dependency.
+/// Converts a current `ProofPreimage` into a v1 `ProofPreimage`.
 pub fn preimage_to_v1(
     p: &transient_crypto::proofs::ProofPreimage,
 ) -> transient_crypto_old::proofs::ProofPreimage {
@@ -92,17 +78,12 @@ pub fn preimage_to_v1(
     }
 }
 
-/// Verifies a v1 proof using the old (zk-stdlib v1) verification pipeline.
-///
-/// The verifier key bytes and proof bytes are passed as current types; they
-/// are round-tripped through old types internally.
+/// Verifies a proof using the v1 (zk-stdlib v1) pipeline.
 pub fn v1_verify(
     vk: &transient_crypto::proofs::VerifierKey,
     proof: &transient_crypto::proofs::Proof,
     pis: impl Iterator<Item = transient_crypto::curve::Fr>,
 ) -> Result<(), transient_crypto::proofs::VerifyingError> {
-    // Get the original raw VK bytes (always in the format of the zk-stdlib
-    // version that generated them, even if the key has been initialized by v2).
     let raw = vk.original_bytes();
     let vk_buf = {
         let mut buf = Vec::new();
@@ -155,8 +136,7 @@ pub fn v1_mock_verify(
         .map_err(|e| anyhow::anyhow!("v1 mock verification failed: {e}"))
 }
 
-/// Runs the full v1 proving flow end-to-end using the old crate, returning
-/// a current `Proof`.
+/// Proves using the v1 (zk-stdlib v1) pipeline.
 pub async fn v1_prove(
     preimage: &transient_crypto::proofs::ProofPreimage,
     rng: impl rand::Rng + rand::CryptoRng,

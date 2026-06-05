@@ -543,9 +543,7 @@ impl VerifierKey {
         }
     }
 
-    /// Returns the original raw bytes that this verifier key was deserialized
-    /// from. These bytes are preserved even after initialization and are
-    /// always in the format of the zk-stdlib version that generated them.
+    /// Returns the original raw bytes, preserved even after initialization.
     pub fn original_bytes(&self) -> Vec<u8> {
         match &*self.0.lock().expect("mutex is not poisoned") {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {

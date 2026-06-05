@@ -11,11 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Unit tests exercising the v2 (zk-stdlib v2) proving and verification flow.
-//!
-//! These tests use `IrSource::v2_keygen` to generate v2 keys, then prove via
-//! the v2 branch of `Zkir::prove`, and verify with the current (v2)
-//! `VerifierKey::verify`.
+//! Tests for the v2 (zk-stdlib v2) proving and verification flow.
 
 #[cfg(test)]
 mod v2_proof_tests {
@@ -52,7 +48,6 @@ mod v2_proof_tests {
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
-        // v2 keygen
         let (pk, vk) = ir.v2_keygen(&TestParams).await.unwrap();
 
         let preimage = ProofPreimage {
@@ -65,7 +60,6 @@ mod v2_proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
 
-        // v2 prove (goes through Zkir::prove → VersionedInnerPK::V2 branch)
         let (proof, pis, _skips) = ir
             .prove(
                 &mut ChaCha20Rng::from_seed([42; 32]),
@@ -76,7 +70,6 @@ mod v2_proof_tests {
             .await
             .unwrap();
 
-        // v2 verify (current VerifierKey::verify)
         vk.verify(&PARAMS_VERIFIER, &proof, pis.into_iter())
             .unwrap();
     }
@@ -114,7 +107,6 @@ mod v2_proof_tests {
             .await
             .unwrap();
 
-        // Wrong statement should fail
         assert!(
             vk.verify(&PARAMS_VERIFIER, &proof, [43.into()].into_iter())
                 .is_err()
