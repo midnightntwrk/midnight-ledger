@@ -1,5 +1,9 @@
 # `base-crypto` Changelog
 
+## Version `1.1.0`
+
+- feat: add `within_bounds` on `RunningCost`
+
 ## Version `1.0.0`
 
 - version bump in preparation for full stablisation

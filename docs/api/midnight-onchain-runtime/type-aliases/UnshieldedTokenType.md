@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -13,7 +13,7 @@ type UnshieldedTokenType: {
 };
 ```
 
-Unshielded token type (or color), as a hex-encoded 35-byte string
+Unshielded token type (or color), as a hex-encoded 32-byte string
 
 ## Type declaration
 
