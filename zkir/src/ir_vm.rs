@@ -783,7 +783,7 @@ impl Relation for IrSource {
                         ecc_from_parts(std, layouter, idx(&memory, *a_x)?, idx(&memory, *a_y)?)?;
                     let b =
                         ecc_from_parts(std, layouter, idx(&memory, *b_x)?, idx(&memory, *b_y)?)?;
-                    let c = std.jubjub().add(layouter, &a, &b)?;
+                    let c = EccInstructions::add(std.jubjub(), layouter, &a, &b)?;
                     mem_push(std.jubjub().x_coordinate(&c), &mut memory)?;
                     mem_push(std.jubjub().y_coordinate(&c), &mut memory)?;
                 }

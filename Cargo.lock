@@ -312,7 +312,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -323,7 +323,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1724,7 +1724,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -2639,7 +2639,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -3119,9 +3119,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "7.0.0"
+version = "7.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1a87ddffe23ec9bc99afd943d69954dcfedf62484836bac5e176a65d72d89074"
+checksum = "52debf61bd3c87e5e197c4d7e4f28d8d7e47203ddf9560b242c1623b9f60bf1f"
 dependencies = [
  "base64 0.13.1",
  "ff",
@@ -3704,13 +3704,13 @@ dependencies = [
  "lru 0.18.0",
  "midnight-base-crypto 1.1.0",
  "midnight-base-crypto-derive 1.0.0",
- "midnight-circuits 7.0.0",
+ "midnight-circuits 7.2.0",
  "midnight-curves 0.3.0",
  "midnight-proofs 0.8.0",
  "midnight-serialize 1.1.0",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 2.1.0",
- "midnight-zk-stdlib 2.1.0",
+ "midnight-zk-stdlib 2.3.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3751,9 +3751,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zk-stdlib"
-version = "2.1.0"
+version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c8dba197cfbfa21f77d3ed0dd0198f8cc1999cce3f67f76a91295bca0541c87c"
+checksum = "82c69ba9fdd82b3a92da5040efb16f8ff50f2fa30eb88051fb15d4ee137ebf5e"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -3762,7 +3762,7 @@ dependencies = [
  "ff",
  "group",
  "hex-literal",
- "midnight-circuits 7.0.0",
+ "midnight-circuits 7.2.0",
  "midnight-curves 0.3.0",
  "midnight-proofs 0.8.0",
  "num-bigint",
@@ -3790,7 +3790,7 @@ dependencies = [
  "indicatif 0.18.4",
  "log",
  "midnight-base-crypto 1.1.0",
- "midnight-circuits 7.0.0",
+ "midnight-circuits 7.2.0",
  "midnight-proofs 0.7.1",
  "midnight-proofs 0.8.0",
  "midnight-serialize 1.0.0",
@@ -3798,7 +3798,7 @@ dependencies = [
  "midnight-transient-crypto 2.0.1",
  "midnight-transient-crypto 2.1.0",
  "midnight-zk-stdlib 1.1.0",
- "midnight-zk-stdlib 2.1.0",
+ "midnight-zk-stdlib 2.3.0",
  "midnight-zkir 2.1.0",
  "midnight-zkir 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "num-bigint",
@@ -4063,7 +4063,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4259,7 +4259,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7d8fae84b431384b68627d0f9b3b1245fcf9f46f6c0e3dc902e9dce64edd1967"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.45.0",
 ]
 
 [[package]]
@@ -5110,7 +5110,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -5123,7 +5123,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.12.1",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5182,7 +5182,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5664,7 +5664,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5922,7 +5922,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.4",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -6662,7 +6662,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]

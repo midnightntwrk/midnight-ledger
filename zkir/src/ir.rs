@@ -591,11 +591,12 @@ impl Model {
 
 impl IrSource {
     /// Converts the current `IrSource` to the old (v1) `IrSource` via
-    /// serialization round-trip.
+    /// tagged serialization round-trip. Uses `serialize_to_tagged` which
+    /// preserves the old `ir-source[v2]` format for V0 IRs.
     pub fn to_v1(&self) -> io::Result<V1IrSource> {
         let mut buf = Vec::new();
-        Serializable::serialize(self, &mut buf)?;
-        serialize_old::Deserializable::deserialize(&mut &buf[..], 0)
+        self.serialize_to_tagged(&mut buf)?;
+        serialize_old::tagged_deserialize(&mut &buf[..])
     }
 
     /// Retrieves a model representation of this circuit.
