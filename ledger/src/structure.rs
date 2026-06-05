@@ -69,7 +69,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPe
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{Proof, ProofPreimage};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 use zswap::ZSWAP_TREE_HEIGHT;
@@ -289,7 +288,10 @@ impl ProofPreimageVersioned {
 #[tag = "proof-versioned"]
 #[non_exhaustive]
 pub enum ProofVersioned {
+    /// A proof generated against the v1 (zk-stdlib v1) Zkir trait.
     V2(Proof),
+    /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
+    V3(Proof),
 }
 
 impl Serializable for ProofVersioned {
@@ -299,11 +301,17 @@ impl Serializable for ProofVersioned {
                 Serializable::serialize(&1u8, writer)?;
                 proof.serialize(writer)
             }
+            ProofVersioned::V3(proof) => {
+                Serializable::serialize(&2u8, writer)?;
+                proof.serialize(writer)
+            }
         }
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
+                proof.serialized_size() + 1
+            }
         }
     }
 }
@@ -317,6 +325,10 @@ impl Deserializable for ProofVersioned {
                 format!("invalid old discriminant for ProofVersioned: {discrim}"),
             )),
             1 => Ok(ProofVersioned::V2(Proof::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            2 => Ok(ProofVersioned::V3(Proof::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -385,13 +397,6 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        op: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -443,10 +448,15 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let vk = match &op.v2 {
+        let vk = match proof {
+            ProofVersioned::V2(_) => op.v1_vk(),
+            ProofVersioned::V3(_) => op.v2_vk(),
+        };
+
+        let vk = match vk {
             Some(vk) => vk,
             None => {
-                warn!("missing verifier key");
+                warn!("missing verifier key for proof version");
                 return Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
                     address: call.address,
                     operation: call.entry_point.clone(),
@@ -454,41 +464,30 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         };
 
-        if op.v2.is_some() && !matches!(proof, ProofVersioned::V2(_)) {
-            return Err(MalformedTransaction::<D>::UnsupportedProofVersion {
-                op_version: "V2".to_string(),
-            });
-        }
+        let inner_proof = match proof {
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
+        };
 
         match proof {
-            ProofVersioned::V2(proof) => match mode {
+            ProofVersioned::V2(_) => match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
+                    vk,
+                    pis.into_iter(),
+                )
+                .map_err(MalformedTransaction::<D>::InvalidProof),
+                _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+            },
+            ProofVersioned::V3(_) => match mode {
                 #[cfg(feature = "mock-verify")]
                 ProofVerificationMode::CalibratedMock => vk
                     .mock_verify(pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
                 _ => vk
-                    .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
+                    .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
             },
-        }
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        vk: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => vk
-                .mock_verify(pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => vk
-                .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
         }
     }
     fn estimated_tx_size<
@@ -531,15 +530,6 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -570,15 +560,6 @@ impl<D: DB> ProofKind<D> for () {
         _: &Self::Proof,
         _: Vec<Fr>,
         _: &ContractCall<Self, D>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
         _: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
@@ -2661,7 +2642,10 @@ impl<D: DB> ContractDeploy<D> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersion {
+    /// The v2 field in ContractOperation (v1 zk-stdlib verifier keys).
     V3,
+    /// The v3 field in ContractOperation (v2 zk-stdlib verifier keys).
+    V4,
 }
 
 impl Serializable for ContractOperationVersion {
@@ -2669,13 +2653,14 @@ impl Serializable for ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => Serializable::serialize(&2u8, writer),
+            V::V4 => Serializable::serialize(&3u8, writer),
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersion as V;
         match self {
-            V::V3 => 1,
+            V::V3 | V::V4 => 1,
         }
     }
 }
@@ -2701,6 +2686,7 @@ impl Deserializable for ContractOperationVersion {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(V::V3),
+            3u8 => Ok(V::V4),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -2714,12 +2700,14 @@ impl ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2.is_some(),
+            V::V4 => co.v3.is_some(),
         }
     }
     pub(crate) fn rm_from(&self, co: &mut ContractOperation) {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2 = None,
+            V::V4 => co.v3 = None,
         }
     }
 }
@@ -2727,7 +2715,10 @@ impl ContractOperationVersion {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
+    /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
     V3(transient_crypto::proofs::VerifierKey),
+    /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
+    V4(transient_crypto::proofs::VerifierKey),
 }
 
 impl ContractOperationVersionedVerifierKey {
@@ -2736,6 +2727,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(_) => V::V3,
+            VK::V4(_) => V::V4,
         }
     }
 
@@ -2743,6 +2735,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(vk) => co.v2 = Some(vk.clone()),
+            VK::V4(vk) => co.v3 = Some(vk.clone()),
         }
     }
 }
@@ -2755,13 +2748,17 @@ impl Serializable for ContractOperationVersionedVerifierKey {
                 Serializable::serialize(&2u8, writer)?;
                 Serializable::serialize(vk, writer)
             }
+            VK::V4(vk) => {
+                Serializable::serialize(&3u8, writer)?;
+                Serializable::serialize(vk, writer)
+            }
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
-            VK::V3(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V3(vk) | VK::V4(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }
@@ -2787,6 +2784,10 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(VK::V3(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            3u8 => Ok(VK::V4(Deserializable::deserialize(
                 reader,
                 recursion_depth,
             )?)),

@@ -636,10 +636,20 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                P::latest_proof_verify(
-                    &SPEND_VK,
-                    &self.proof,
+                let dust_op = onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let dust_call = crate::structure::ContractCall {
+                    address: coin_structure::contract::ContractAddress::default(),
+                    entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
+                    guaranteed_transcript: None,
+                    fallible_transcript: None,
+                    communication_commitment: Fr::default(),
+                    proof: self.proof.clone().into(),
+                };
+                P::proof_verify(
+                    &dust_op,
+                    &self.proof.clone().into(),
                     pis,
+                    &dust_call,
                     strictness.proof_verification_mode,
                 )
                 .map_err(|_| MalformedTransaction::InvalidDustSpendProof {

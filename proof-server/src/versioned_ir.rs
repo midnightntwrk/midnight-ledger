@@ -85,14 +85,11 @@ pub(crate) async fn prove(
 #[cfg(not(feature = "experimental"))]
 pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
-    ir_source: &[u8],
+    _ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    if let Ok(_ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
-        ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
-            .await
-            .map_err(|e| e.to_string())
-    } else {
-        Err("Unsupported ZKIR version".into())
-    }
+    let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok((proof, vec![]))
 }

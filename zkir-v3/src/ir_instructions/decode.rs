@@ -114,11 +114,10 @@ pub fn decode_incircuit(
                 for b in r_bits[252..].iter() {
                     std_lib.assert_false(layouter, b)?;
                 }
-                // SAFETY: AssignedScalarOfNativeCurve<C> is a newtype over
-                // Vec<AssignedBit<C::Base>>, so the transmute is sound.
-                // TODO: We are NOT proud of this, revisit when the API allows it.
+                // SAFETY: AssignedScalarOfNativeCurve<C> is { bits: Vec<AssignedBit>, enforced_canonical: bool }.
+                // We construct it field-by-field via transmute since the API doesn't expose a bits constructor.
                 let s: AssignedScalarOfNativeCurve<JubjubExtended> =
-                    unsafe { std::mem::transmute(r_bits[..252].to_vec()) };
+                    unsafe { std::mem::transmute((r_bits[..252].to_vec(), false)) };
 
                 Ok(CircuitValue::JubjubScalar(s))
             }
