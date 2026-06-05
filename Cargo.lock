@@ -3152,7 +3152,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-serialize 1.1.0",
  "midnight-storage-core 1.2.0",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3251,8 +3251,8 @@ dependencies = [
  "midnight-serialize 1.1.0",
  "midnight-storage",
  "midnight-storage-core 1.2.0",
- "midnight-transient-crypto 2.1.0",
- "midnight-zkir 2.1.0",
+ "midnight-transient-crypto 3.0.0",
+ "midnight-zkir 2.2.0",
  "midnight-zswap",
  "pastey 0.2.2",
  "pprof",
@@ -3287,7 +3287,7 @@ dependencies = [
  "midnight-onchain-runtime-wasm",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "midnight-zswap",
  "pastey 0.2.2",
  "rand 0.8.6",
@@ -3320,7 +3320,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3344,7 +3344,7 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "rand 0.8.6",
  "serde",
  "serde-wasm-bindgen",
@@ -3354,7 +3354,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "derive-where",
  "fake",
@@ -3364,7 +3364,7 @@ dependencies = [
  "midnight-onchain-state",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3387,7 +3387,7 @@ dependencies = [
  "midnight-onchain-vm",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3419,8 +3419,8 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
- "midnight-zkir 2.1.0",
+ "midnight-transient-crypto 3.0.0",
+ "midnight-zkir 2.2.0",
  "midnight-zkir-v3",
  "midnight-zswap",
  "rand 0.8.6",
@@ -3687,7 +3687,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-transient-crypto"
-version = "2.1.0"
+version = "3.0.0"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3709,7 +3709,7 @@ dependencies = [
  "midnight-proofs 0.8.0",
  "midnight-serialize 1.1.0",
  "midnight-storage-core 1.2.0",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.0",
  "pastey 0.2.2",
  "proptest",
@@ -3776,50 +3776,6 @@ dependencies = [
 [[package]]
 name = "midnight-zkir"
 version = "2.1.0"
-dependencies = [
- "actix-rt",
- "anyhow",
- "clap",
- "console 0.16.3",
- "const-hex",
- "env_logger",
- "flate2",
- "futures-executor",
- "group",
- "hex",
- "indicatif 0.18.4",
- "log",
- "midnight-base-crypto 1.1.0",
- "midnight-circuits 7.2.0",
- "midnight-proofs 0.7.1",
- "midnight-proofs 0.8.0",
- "midnight-serialize 1.0.0",
- "midnight-serialize 1.1.0",
- "midnight-transient-crypto 2.0.1",
- "midnight-transient-crypto 2.1.0",
- "midnight-zk-stdlib 1.1.0",
- "midnight-zk-stdlib 2.3.0",
- "midnight-zkir 2.1.0",
- "midnight-zkir 2.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "num-bigint",
- "pastey 0.2.2",
- "proptest",
- "proptest-derive",
- "rand 0.8.6",
- "rand_chacha 0.3.1",
- "serde",
- "serde_bytes",
- "serde_json",
- "serde_repr",
- "sha2 0.11.0",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
-name = "midnight-zkir"
-version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef44e11cfb43259ada31738fd4fb1835f1394bda29ed6c1ca45a35204a544d9a"
 dependencies = [
@@ -3842,6 +3798,50 @@ dependencies = [
 ]
 
 [[package]]
+name = "midnight-zkir"
+version = "2.2.0"
+dependencies = [
+ "actix-rt",
+ "anyhow",
+ "clap",
+ "console 0.16.3",
+ "const-hex",
+ "env_logger",
+ "flate2",
+ "futures-executor",
+ "group",
+ "hex",
+ "indicatif 0.18.4",
+ "log",
+ "midnight-base-crypto 1.1.0",
+ "midnight-circuits 7.2.0",
+ "midnight-proofs 0.7.1",
+ "midnight-proofs 0.8.0",
+ "midnight-serialize 1.0.0",
+ "midnight-serialize 1.1.0",
+ "midnight-transient-crypto 2.0.1",
+ "midnight-transient-crypto 3.0.0",
+ "midnight-zk-stdlib 1.1.0",
+ "midnight-zk-stdlib 2.3.0",
+ "midnight-zkir 2.1.0",
+ "midnight-zkir 2.2.0",
+ "num-bigint",
+ "pastey 0.2.2",
+ "proptest",
+ "proptest-derive",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "serde_repr",
+ "sha2 0.11.0",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "midnight-zkir-v3"
 version = "3.0.0-rc.1"
 dependencies = [
@@ -3861,7 +3861,7 @@ dependencies = [
  "midnight-curves 0.2.0",
  "midnight-proofs 0.7.1",
  "midnight-serialize 1.1.0",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 1.1.0",
  "midnight-zkir-v3",
  "num-bigint",
@@ -3890,7 +3890,7 @@ dependencies = [
  "hex",
  "js-sys",
  "midnight-serialize 1.1.0",
- "midnight-transient-crypto 2.1.0",
+ "midnight-transient-crypto 3.0.0",
  "midnight-zkir-v3",
  "rand 0.8.6",
  "serde_json",
@@ -3907,8 +3907,8 @@ dependencies = [
  "hex",
  "js-sys",
  "midnight-serialize 1.1.0",
- "midnight-transient-crypto 2.1.0",
- "midnight-zkir 2.1.0",
+ "midnight-transient-crypto 3.0.0",
+ "midnight-zkir 2.2.0",
  "rand 0.8.6",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3941,8 +3941,8 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-serialize 1.1.0",
  "midnight-storage",
- "midnight-transient-crypto 2.1.0",
- "midnight-zkir 2.1.0",
+ "midnight-transient-crypto 3.0.0",
+ "midnight-zkir 2.2.0",
  "pastey 0.2.2",
  "rand 0.8.6",
  "rayon",

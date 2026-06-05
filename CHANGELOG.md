@@ -4,7 +4,7 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
-## Ledger 9.0.1.0-alpha.1
+## Ledger 9.0.1.0-rc.1
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
   ledger parameters.
@@ -14,6 +14,13 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: expose the `contractLog` variant of `EventDetails` in the ledger-wasm
   matching the new on-chain event format.
 - fix: correctly exclude the identity point during coin ciphertext decryption
+- feat: `ContractOperation` extended with `v3` field for zk-stdlib v2 verifier keys
+- feat: `ProofVersioned::V3` variant for proofs generated against zk-stdlib v2
+- feat: `proof_verify` dynamically dispatches v1 or v2 verification based on
+  proof version (V2 → `v1_verify`, V3 → current `vk.verify`)
+- feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
+  for the new v3 verifier key field
+- feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
 
 ## Unreleased (8.2)
 
