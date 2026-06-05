@@ -123,7 +123,7 @@ mod proof_tests {
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
         let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let _vk_fmt = format!("{:#?}", &vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
@@ -428,7 +428,7 @@ mod proof_tests {
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
         let pk_fmt = format!("{:#?}", &pk);
-        let vk_fmt = format!("{:#?}", &vk);
+        let _vk_fmt = format!("{:#?}", &vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
