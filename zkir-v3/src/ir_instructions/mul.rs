@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(test)]
 use std::ops::Mul;
 
 use midnight_circuits::instructions::ArithInstructions;
@@ -84,6 +85,7 @@ pub fn mul_incircuit(
     }
 }
 
+#[cfg(test)]
 impl Mul for IrValue {
     type Output = Self;
 

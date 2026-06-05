@@ -11,6 +11,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(test)]
 use std::ops::Neg;
 
 use midnight_circuits::instructions::{ArithInstructions, EccInstructions as _};
@@ -97,6 +98,7 @@ pub fn neg_incircuit(
     }
 }
 
+#[cfg(test)]
 impl Neg for IrValue {
     type Output = Self;
 
