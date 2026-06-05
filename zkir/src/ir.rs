@@ -599,6 +599,21 @@ impl IrSource {
         serialize_old::tagged_deserialize(&mut &buf[..])
     }
 
+    /// Performs key generation using the v2 (zk-stdlib v2) pipeline.
+    ///
+    /// This is NOT the default — use `Zkir::keygen` for v1 (default).
+    /// Intended for tests exercising the v2 proof flow.
+    pub async fn v2_keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
+        use midnight_zk_stdlib::{setup_pk, setup_vk};
+        let k = midnight_zk_stdlib::optimal_k(self) as u8;
+        let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
+        let pk = setup_pk(self, &vk);
+        Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
+    }
+
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {
