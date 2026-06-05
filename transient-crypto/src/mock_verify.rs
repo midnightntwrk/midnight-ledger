@@ -31,7 +31,7 @@ use midnight_circuits::{
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
 };
-use midnight_zk_stdlib::Relation;
+use midnight_zk_stdlib::{MidnightPK, Relation};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};

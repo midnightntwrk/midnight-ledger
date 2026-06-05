@@ -69,7 +69,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPe
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{Proof, ProofPreimage};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 use zswap::ZSWAP_TREE_HEIGHT;
@@ -398,13 +397,6 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        op: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -501,36 +493,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             },
         }
     }
-    #[cfg(not(feature = "proof-verifying"))]
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _vk: &VerifierKey,
-        _proof: &Self::LatestProof,
-        _pis: Vec<Fr>,
-        _mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
-    #[cfg(feature = "proof-verifying")]
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        vk: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        // LatestProof is always a bare Proof, currently generated with v1.
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
-                vk,
-                pis.into_iter(),
-            )
-            .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => zkir_v2::ir_v1::v1_verify(vk, proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
-        }
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -571,15 +533,6 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -610,15 +563,6 @@ impl<D: DB> ProofKind<D> for () {
         _: &Self::Proof,
         _: Vec<Fr>,
         _: &ContractCall<Self, D>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
         _: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())

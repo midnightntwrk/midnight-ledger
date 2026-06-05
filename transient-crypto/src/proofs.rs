@@ -24,7 +24,7 @@ use midnight_proofs::{
     poly::kzg::params::{ParamsKZG, ParamsVerifierKZG},
     utils::SerdeFormat,
 };
-use midnight_zk_stdlib::{MidnightPK, MidnightVK, Relation, optimal_k};
+use midnight_zk_stdlib::{MidnightVK, Relation};
 #[cfg(feature = "proptest")]
 use proptest::arbitrary::Arbitrary;
 #[cfg(feature = "proptest")]
