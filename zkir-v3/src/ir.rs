@@ -587,7 +587,13 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Negates `a` in the prime field.
+    /// Negates `a`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `-a`
     Neg {

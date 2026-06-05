@@ -722,7 +722,7 @@ mod proof_tests {
 
     #[actix_rt::test]
     async fn test_jubjub_point_ops() {
-        // Exercises test_eq (asserted), constrain_eq, and cond_select on JubjubPoint
+        // Exercises test_eq (asserted), constrain_eq, cond_select, and neg on JubjubPoint
         // in a single circuit so every op is actively tested without dead values.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
@@ -739,7 +739,10 @@ mod proof_tests {
                { "op": "assert", "cond": "%v0" },
                { "op": "constrain_eq", "a": "%p0", "b": "%p1" },
                { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
-               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" },
+               { "op": "neg", "a": "%p0", "output": "%p0_neg" },
+               { "op": "private_input", "type": "Point<Jubjub>", "guard": null, "output": "%p0_neg_priv" },
+               { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -748,6 +751,7 @@ mod proof_tests {
 
         // p0 == p1 == generator, bit == 1
         let p = EmbeddedGroupAffine::generator();
+        let neg_p: EmbeddedGroupAffine = (-JubjubSubgroup::generator()).into();
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -758,7 +762,7 @@ mod proof_tests {
                 p.y().unwrap(),
                 1.into(),
             ],
-            private_transcript: vec![],
+            private_transcript: vec![neg_p.x().unwrap(), neg_p.y().unwrap()],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
@@ -1067,16 +1071,26 @@ mod proof_tests {
                { "op": "encode", "input": "%s2", "outputs": ["%s2_0","%s2_1","%s2_2","%s2_3"] },
                { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b2_0","%b2_1","%b2_2","%b2_3"], "output": "%b2_rt" },
                { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s2_0","%s2_1","%s2_2","%s2_3"], "output": "%s2_rt" },
+               { "op": "neg", "a": "%p0",  "output": "%p0_neg" },
+               { "op": "neg", "a": "%b0",  "output": "%b0_neg" },
+               { "op": "neg", "a": "%s0",  "output": "%s0_neg" },
                { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"    },
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b_prod_priv" },
                { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s_prod_priv" },
+               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_neg_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_neg_priv" },
                { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
                { "op": "constrain_eq", "a": "%b2",     "b": "%b2_rt"       },
                { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
+               { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" },
+               { "op": "constrain_eq", "a": "%b0_neg", "b": "%b0_neg_priv" },
                { "op": "test_eq",      "a": "%s2",     "b": "%s2_rt",    "output": "%s_eq"   },
                { "op": "assert",       "cond": "%s_eq" },
                { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
-               { "op": "assert",       "cond": "%sp_eq" }
+               { "op": "assert",       "cond": "%sp_eq" },
+               { "op": "test_eq",      "a": "%s0_neg", "b": "%s0_neg_priv", "output": "%sn_eq" },
+               { "op": "assert",       "cond": "%sn_eq" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -1113,6 +1127,9 @@ mod proof_tests {
             encode(IrValue::Secp256k1Point(p0 + p1)),
             encode(IrValue::Secp256k1Base(b0 * b1)),
             encode(IrValue::Secp256k1Scalar(s0 * s1)),
+            encode(IrValue::Secp256k1Point(-p0)),
+            encode(IrValue::Secp256k1Base(-b0)),
+            encode(IrValue::Secp256k1Scalar(-s0)),
         ]
         .concat();
 
