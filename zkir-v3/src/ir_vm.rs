@@ -302,9 +302,10 @@ impl IrSource {
                     let val = resolve_operand(&memory, input)?;
                     let encoded = encode_offcircuit(&val);
                     if encoded.len() != outputs.len() {
-                        return Err(anyhow::Error::msg(
-                            "Unexpected output length of encode instruction",
-                        ));
+                        return Err(anyhow::Error::msg(format!(
+                            "Unexpected output length of encode instruction: {:?}",
+                            val.get_type()
+                        )));
                     }
                     for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         memory.insert(out_id.clone(), enc_val);

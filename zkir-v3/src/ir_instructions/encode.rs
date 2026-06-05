@@ -13,10 +13,10 @@
 
 use midnight_circuits::{
     field::foreign::params::MultiEmulationParams as MEP,
-    instructions::{DecompositionInstructions, PublicInputInstructions},
+    instructions::{PublicInputInstructions, ZeroInstructions},
     types::{
-        AssignedBigUint, AssignedBit, AssignedField, AssignedForeignPoint, AssignedNative,
-        AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
+        AssignedBigUint, AssignedField, AssignedForeignPoint, AssignedNative, AssignedNativePoint,
+        AssignedScalarOfNativeCurve, Instantiable,
     },
 };
 use midnight_curves::{JubjubExtended, secp256k1};
@@ -25,35 +25,6 @@ use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
 use num_traits::Num;
 use transient_crypto::curve::Fr;
-
-/// Reduces the given biguint modulo the Jubjub scalar field order and returns the
-/// result as an `AssignedScalarOfNativeCurve<JubjubExtended>` of exactly 252 bits.
-pub fn jubjub_scalar_from_biguint(
-    std_lib: &ZkStdLib,
-    layouter: &mut impl Layouter<F>,
-    x: AssignedBigUint<F>,
-) -> Result<AssignedScalarOfNativeCurve<JubjubExtended>, Error> {
-    let jubjub_order = {
-        let p_str = "e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
-        let p = BigUint::from_str_radix(p_str, 16).unwrap();
-        std_lib.biguint().assign_fixed_biguint(layouter, p)?
-    };
-    let (_q, r) = std_lib.biguint().div_rem(layouter, &x, &jubjub_order)?;
-    // We will drop the most significant bits, they must be 0 because of the
-    // modular reduction, but just in case, let's assert it.
-    let r_bits = std_lib.biguint().to_le_bits(layouter, &r)?;
-    for b in r_bits[252..].iter() {
-        std_lib.assert_false(layouter, b)?;
-    }
-    // SAFETY: AssignedScalarOfNativeCurve<C> is a newtype over
-    // Vec<AssignedBit<C::Base>>, so the transmute is sound.
-    // TODO: We are NOT proud of this, revisit when the API allows it.
-    Ok(unsafe {
-        std::mem::transmute::<Vec<AssignedBit<F>>, AssignedScalarOfNativeCurve<JubjubExtended>>(
-            r_bits[..252].to_vec(),
-        )
-    })
-}
 
 use crate::{
     ir_instructions::F,
@@ -101,32 +72,17 @@ pub fn encode_incircuit(
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
         CircuitValue::JubjubScalar(s) => {
-            // Until we can use a further release of midnight-zk (currently v1.0.0),
-            // we must make sure that all ZKIR assigned Jubjub scalars have an internal
-            // representation of at most 252 bits (so that they are encoded into a
-            // single native field element).
-            // To this end, we manually reduce the received encoded value modulo
-            // the Jubjub order if ncessary.
+            // Jubjub::Scalar::NUM_BITS is incorrectly set to 255 (instead of 252)
+            // in midnight-curves v0.2.0. Consequently, Jubjub scalars are encoded
+            // unnecessarily as 2 native field values instead of one.
+            // We return the first only and make sure the rest (supposedly one more)
+            // are zero.
             let encoded = std_lib.jubjub().as_public_input(layouter, s)?;
-            if encoded.len() == 1 {
-                return Ok(encoded.into_iter().map(CircuitValue::Native).collect());
+            debug_assert_eq!(encoded.len(), 2);
+            for x in encoded[1..].iter() {
+                std_lib.assert_zero(layouter, x)?;
             }
-
-            let mut s_bits = vec![];
-            for chunk in encoded.iter() {
-                let chunk_bits = std_lib.assigned_to_le_bits(
-                    layouter,
-                    chunk,
-                    Some(254), // midnight-zk v1 makes batches of 254 bits
-                    true,
-                )?;
-                s_bits.extend(chunk_bits)
-            }
-            let x_big = std_lib.biguint().from_le_bits(layouter, &s_bits)?;
-            let s = jubjub_scalar_from_biguint(std_lib, layouter, x_big)?;
-
-            let encoded = std_lib.jubjub().as_public_input(layouter, &s)?;
-            Ok(encoded)
+            Ok(encoded[..1].to_vec())
         }
 
         CircuitValue::Secp256k1Point(p) => std_lib.secp256k1_curve().as_public_input(layouter, p),
@@ -138,4 +94,24 @@ pub fn encode_incircuit(
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
+}
+
+/// Reduces the given biguint modulo the Jubjub scalar field order and returns the
+/// result as an `AssignedScalarOfNativeCurve<JubjubExtended>` of exactly 252 bits.
+pub fn jubjub_scalar_from_biguint(
+    std_lib: &ZkStdLib,
+    layouter: &mut impl Layouter<F>,
+    x: AssignedBigUint<F>,
+) -> Result<AssignedScalarOfNativeCurve<JubjubExtended>, Error> {
+    let jubjub_order = {
+        let p_str = "e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
+        let p = BigUint::from_str_radix(p_str, 16).unwrap();
+        std_lib.biguint().assign_fixed_biguint(layouter, p)?
+    };
+    let (_q, r) = std_lib.biguint().div_rem(layouter, &x, &jubjub_order)?;
+
+    let r_le_bytes = std_lib.biguint().to_le_bytes(layouter, &r)?;
+    std_lib
+        .jubjub()
+        .scalar_from_reduced_le_bytes(layouter, &r_le_bytes)
 }
