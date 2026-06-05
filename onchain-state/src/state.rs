@@ -61,10 +61,13 @@ use transient_crypto::repr::FieldRepr;
 #[cfg(feature = "proptest")]
 fn proptest_valid<D: DB>(value: &StateValue<D>) -> bool {
     match value {
-        StateValue::Array(arr) => arr.len() <= 16,
+        StateValue::Array(arr) => arr.len() <= MAX_ARRAY_LENGTH,
         _ => true,
     }
 }
+
+/// The length limit for `StateValue::Array`. Currently 16 elements.
+pub const MAX_ARRAY_LENGTH: usize = 16;
 
 /// The size limit for Cell's. Currently 32 kiB
 pub const CELL_BOUND: usize = 1 << 15;
@@ -81,10 +84,10 @@ pub enum StateValue<D: DB = InMemoryDB> {
     Null,
     Cell(#[storable(child)] Sp<AlignedValue, D>),
     Map(HashMap<AlignedValue, StateValue<D>, D>),
-    /// A fixed size array, with `0 <= len <= 16`. The upper 5 bits of the
-    /// argument to the `new` opcode specify the length at creation time. The
-    /// underlying `storage::Array` type is not fixed length, but in the VM we
-    /// only allow size preserving operations.
+    /// A fixed size array, with `0 <= len <= MAX_ARRAY_LENGTH`. The upper 5 bits of
+    /// the argument to the `new` opcode specify the length at creation time.
+    /// The underlying `storage::Array` type is not fixed length, but in the VM
+    /// we only allow size preserving operations.
     Array(Array<StateValue<D>, D>),
     /// Merkle tree with `0 < height <= 32`.
     BoundedMerkleTree(
@@ -416,10 +419,10 @@ impl<D: DB> StateValue<D> {
                 }
             }
             StateValue::Array(arr) => {
-                if arr.len() > 16 {
+                if arr.len() > MAX_ARRAY_LENGTH {
                     return Err(std::io::Error::new(
                         std::io::ErrorKind::InvalidData,
-                        "Array eceeded maximum length of 16",
+                        format!("Array exceeded maximum length of {MAX_ARRAY_LENGTH}"),
                     ));
                 }
             }
