@@ -228,6 +228,7 @@
 - [signatureVerifyingKey](functions/signatureVerifyingKey.md)
 - [signData](functions/signData.md)
 - [signingKeyFromBip340](functions/signingKeyFromBip340.md)
+- [successorDustUtxo](functions/successorDustUtxo.md)
 - [transientCommit](functions/transientCommit.md)
 - [transientHash](functions/transientHash.md)
 - [unshieldedToken](functions/unshieldedToken.md)
