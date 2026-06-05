@@ -501,6 +501,17 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             },
         }
     }
+    #[cfg(not(feature = "proof-verifying"))]
+    #[allow(clippy::result_large_err)]
+    fn latest_proof_verify(
+        _vk: &VerifierKey,
+        _proof: &Self::LatestProof,
+        _pis: Vec<Fr>,
+        _mode: ProofVerificationMode,
+    ) -> Result<(), MalformedTransaction<D>> {
+        Ok(())
+    }
+    #[cfg(feature = "proof-verifying")]
     #[allow(clippy::result_large_err)]
     fn latest_proof_verify(
         vk: &VerifierKey,
