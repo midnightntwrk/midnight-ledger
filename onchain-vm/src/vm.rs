@@ -182,55 +182,28 @@ fn idx<D: DB>(
 ) -> Result<(VmValue<D>, CacheKey), OnchainProgramError<D>> {
     let cache_key = value.1.push_key(key);
     let cache_miss = !cache.visit(&cache_key);
-    match &value.0.value {
-        StateValue::Array(arr) => {
-            let idx: u8 = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
-            if idx as usize >= arr.len() {
-                Err(OnchainProgramError::TypeError(format!(
-                    "index out of bounds in idx: {} >= {}",
-                    idx,
-                    arr.len()
-                )))
-            } else {
-                let res = arr.get(idx as usize).unwrap();
-                if cached && cache_miss {
-                    Err(OnchainProgramError::CacheMiss)
-                } else {
-                    Ok((VmValue::new(value.0.strength, res.clone()), cache_key))
-                }
+    // The `cached` cache-presence check applies to Array and Map only;
+    // BoundedMerkleTree navigation bypasses it.
+    let bypass_cache_miss = matches!(&value.0.value, StateValue::BoundedMerkleTree(_));
+    let next = value.0.value.idx(key).map_err(|err| {
+        use IdxError::*;
+        match err {
+            InvalidArrayIndex(err) | InvalidMerkleTreePosition(err) => {
+                OnchainProgramError::Decode(err)
             }
+            ArrayIndexOutOfBounds { idx, len } => OnchainProgramError::TypeError(format!(
+                "index out of bounds in idx: {idx} >= {len}"
+            )),
+            MerkleTreePositionOutOfRange { .. } => OnchainProgramError::MissingKey,
+            NotIndexable => OnchainProgramError::TypeError(
+                "tried to idx, only map, array, and bmt are supported".to_string(),
+            ),
         }
-        StateValue::Map(map) => {
-            let res = map
-                .get(key)
-                .map(|sp| (*sp).clone())
-                .unwrap_or(StateValue::Null);
-            if cached && cache_miss {
-                Err(OnchainProgramError::CacheMiss)
-            } else {
-                Ok((VmValue::new(value.0.strength, res), cache_key))
-            }
-        }
-        StateValue::BoundedMerkleTree(tree) => {
-            let key = (&**AsRef::<Value>::as_ref(&key)).try_into()?;
-            if key >= (1u64 << tree.height() as u64) {
-                Err(OnchainProgramError::MissingKey)
-            } else {
-                Ok((
-                    match tree.index(key) {
-                        Some((hash, ())) => {
-                            VmValue::new(value.0.strength, StateValue::Cell(Sp::new(hash.into())))
-                        }
-                        None => VmValue::new(value.0.strength, StateValue::Null),
-                    },
-                    cache_key,
-                ))
-            }
-        }
-        _ => Err(OnchainProgramError::TypeError(
-            "tried to idx, only map, array, and bmt are supported".to_string(),
-        )),
+    })?;
+    if cached && cache_miss && !bypass_cache_miss {
+        return Err(OnchainProgramError::CacheMiss);
     }
+    Ok((VmValue::new(value.0.strength, next), cache_key))
 }
 
 #[derive(Debug)]
