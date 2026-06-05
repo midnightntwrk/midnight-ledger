@@ -199,9 +199,9 @@ pub trait Zkir: Any + Send + Sync + Debug + Sized {
     /// for backwards-compatible deserialization of old variants.
     fn load_prover_key_from_tagged(reader: impl Read + Seek) -> io::Result<ProverKey<Self>>;
 
-    /// TODO
+    /// Reads a raw (untagged) prover key from a byte stream.
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey>;
-    /// TODO
+    /// Writes a raw (untagged) prover key to a byte stream.
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()>;
 }
 
@@ -269,7 +269,7 @@ impl<T: Zkir> InnerProverKey<T> {
 }
 
 impl<T: Zkir> ProverKey<T> {
-    /// TODO
+    /// Constructs a `ProverKey` from an already-initialized raw inner key.
     pub fn from_raw(raw: T::ProverKey) -> Self {
         ProverKey(Arc::new(Mutex::new(InnerProverKey::Initialized(Arc::new(
             raw,
