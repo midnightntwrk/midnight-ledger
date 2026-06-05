@@ -184,16 +184,28 @@ impl Zkir for IrSource {
     }
 
     fn k(&self) -> u8 {
-        midnight_zk_stdlib::optimal_k(self) as u8
+        // Use v1 optimal_k via the old crate for consistency.
+        let old_ir = self.to_v1().expect("IrSource should round-trip to v1");
+        use transient_crypto_old::proofs::Zkir as _;
+        old_ir.k()
     }
 
     async fn keygen_vk(
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<VerifierKey, anyhow::Error> {
-        use midnight_zk_stdlib::setup_vk;
-        let vk = VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self));
-
+        // Default: v1 keygen.
+        let old_ir = self.to_v1()?;
+        let v1_params = crate::ir_v1::V1Params(params);
+        use transient_crypto_old::proofs::Zkir as _;
+        let old_vk = old_ir.keygen_vk(&v1_params).await?;
+        // Convert old VK → current VK via original bytes.
+        let raw = {
+            let mut buf = Vec::new();
+            serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+            buf
+        };
+        let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
         Ok(vk)
     }
 
@@ -201,11 +213,22 @@ impl Zkir for IrSource {
         &self,
         params: &impl ParamsProverProvider,
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
-       use midnight_zk_stdlib::{setup_pk, setup_vk};
-       let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
-       let pk = setup_pk(self, &vk);
-
-       Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
+        // Default: v1 keygen.
+        let old_ir = self.to_v1()?;
+        let v1_params = crate::ir_v1::V1Params(params);
+        use transient_crypto_old::proofs::Zkir as _;
+        let (old_pk, old_vk) = old_ir.keygen(&v1_params).await?;
+        // Extract the inner v1 MidnightPK from the old ProverKey.
+        let v1_inner_pk = old_pk.init()?;
+        let versioned_pk = VersionedInnerPK::V1((*v1_inner_pk).clone());
+        // Convert old VK → current VK via original bytes.
+        let raw = {
+            let mut buf = Vec::new();
+            serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+            buf
+        };
+        let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
+        Ok((ProverKey::from_raw(versioned_pk), vk))
     }
 
     fn read_raw_pk(reader: impl Read) -> io::Result<Self::ProverKey> {
@@ -567,6 +590,14 @@ impl Model {
 }
 
 impl IrSource {
+    /// Converts the current `IrSource` to the old (v1) `IrSource` via
+    /// serialization round-trip.
+    pub fn to_v1(&self) -> io::Result<V1IrSource> {
+        let mut buf = Vec::new();
+        Serializable::serialize(self, &mut buf)?;
+        serialize_old::Deserializable::deserialize(&mut &buf[..], 0)
+    }
+
     /// Retrieves a model representation of this circuit.
     pub fn model(&self) -> Model {
         Model {

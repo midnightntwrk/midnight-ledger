@@ -390,7 +390,9 @@ impl Distribution<VerifierKey> for Standard {
 
 impl From<MidnightVK> for VerifierKey {
     fn from(vk: MidnightVK) -> Self {
-        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk))))
+        let mut raw = Vec::new();
+        vk.write(&mut raw, SerdeFormat::Processed).expect("in-memory serialize");
+        VerifierKey(Arc::new(Mutex::new(InnerVerifierKey::Initialized(vk, raw))))
     }
 }
 
@@ -400,7 +402,8 @@ impl From<MidnightVK> for VerifierKey {
 pub(crate) enum InnerVerifierKey {
     Uninitialized(Vec<u8>),
     Invalid(Vec<u8>),
-    Initialized(MidnightVK),
+    /// Initialized VK with the original raw bytes preserved.
+    Initialized(MidnightVK, Vec<u8>),
 }
 
 impl Clone for VerifierKey {
@@ -516,7 +519,7 @@ impl VerifierKey {
     pub(crate) fn force_init(&self) -> Result<MidnightVK, VerifyingError> {
         let mut mutex = self.0.lock().expect("mutex is not poisoned");
         let data = match &*mutex {
-            InnerVerifierKey::Initialized(key) => {
+            InnerVerifierKey::Initialized(key, _) => {
                 return Ok(key.clone());
             }
             InnerVerifierKey::Invalid(_) => {
@@ -527,7 +530,7 @@ impl VerifierKey {
         let reader = &mut &data[..];
         let vk = MidnightVK::read(reader, SerdeFormat::Processed)
             .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
-        *mutex = InnerVerifierKey::Initialized(vk.clone());
+        *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
         Ok(vk)
     }
 
@@ -536,7 +539,19 @@ impl VerifierKey {
             InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
                 writer.write_all(data)
             }
-            InnerVerifierKey::Initialized(key) => key.write(&mut writer, SerdeFormat::Processed),
+            InnerVerifierKey::Initialized(key, _) => key.write(&mut writer, SerdeFormat::Processed),
+        }
+    }
+
+    /// Returns the original raw bytes that this verifier key was deserialized
+    /// from. These bytes are preserved even after initialization and are
+    /// always in the format of the zk-stdlib version that generated them.
+    pub fn original_bytes(&self) -> Vec<u8> {
+        match &*self.0.lock().expect("mutex is not poisoned") {
+            InnerVerifierKey::Uninitialized(data) | InnerVerifierKey::Invalid(data) => {
+                data.clone()
+            }
+            InnerVerifierKey::Initialized(_, original) => original.clone(),
         }
     }
 

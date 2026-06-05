@@ -101,10 +101,15 @@ pub fn v1_verify(
     proof: &transient_crypto::proofs::Proof,
     pis: impl Iterator<Item = transient_crypto::curve::Fr>,
 ) -> Result<(), transient_crypto::proofs::VerifyingError> {
-    // Convert current VerifierKey → old VerifierKey via bytes.
-    let mut vk_buf = Vec::new();
-    serialize::Serializable::serialize(vk, &mut vk_buf)
-        .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))?;
+    // Get the original raw VK bytes (always in the format of the zk-stdlib
+    // version that generated them, even if the key has been initialized by v2).
+    let raw = vk.original_bytes();
+    let vk_buf = {
+        let mut buf = Vec::new();
+        serialize::Serializable::serialize(&raw, &mut buf)
+            .map_err(|e| anyhow::anyhow!("vk raw serialize: {e}"))?;
+        buf
+    };
     let old_vk: transient_crypto_old::proofs::VerifierKey =
         serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
             .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
@@ -118,8 +123,6 @@ pub fn v1_verify(
             .expect("Fr round-trip")
     });
 
-    eprintln!("v1_verify: vk_buf len = {}, first bytes = {:?}", vk_buf.len(), &vk_buf[..std::cmp::min(32, vk_buf.len())]);
-    old_vk.init().map_err(|e| anyhow::anyhow!("v1 vk init failed (buf_len={}): {e}", vk_buf.len()))?;
     old_vk.verify(
         &transient_crypto_old::proofs::PARAMS_VERIFIER,
         &old_proof,
@@ -134,9 +137,13 @@ pub fn v1_mock_verify(
     vk: &transient_crypto::proofs::VerifierKey,
     pis: impl Iterator<Item = transient_crypto::curve::Fr>,
 ) -> Result<(), transient_crypto::proofs::VerifyingError> {
-    let mut vk_buf = Vec::new();
-    serialize::Serializable::serialize(vk, &mut vk_buf)
-        .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))?;
+    let raw = vk.original_bytes();
+    let vk_buf = {
+        let mut buf = Vec::new();
+        serialize::Serializable::serialize(&raw, &mut buf)
+            .map_err(|e| anyhow::anyhow!("vk raw serialize: {e}"))?;
+        buf
+    };
     let old_vk: transient_crypto_old::proofs::VerifierKey =
         serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
             .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
