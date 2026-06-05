@@ -1061,15 +1061,22 @@ mod proof_tests {
                { "op": "add", "a": "%p0", "b": "%p1", "output": "%p2" },
                { "op": "add", "a": "%b0", "b": "%b1", "output": "%b2" },
                { "op": "add", "a": "%s0", "b": "%s1", "output": "%s2" },
+               { "op": "mul", "a": "%b0", "b": "%b1", "output": "%b_prod" },
+               { "op": "mul", "a": "%s0", "b": "%s1", "output": "%s_prod" },
                { "op": "encode", "input": "%b2", "outputs": ["%b2_0","%b2_1","%b2_2","%b2_3"] },
                { "op": "encode", "input": "%s2", "outputs": ["%s2_0","%s2_1","%s2_2","%s2_3"] },
                { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b2_0","%b2_1","%b2_2","%b2_3"], "output": "%b2_rt" },
                { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s2_0","%s2_1","%s2_2","%s2_3"], "output": "%s2_rt" },
-               { "op": "private_input", "type": "Point<Secp256k1>", "guard": null, "output": "%p2_priv" },
-               { "op": "constrain_eq", "a": "%p2",    "b": "%p2_priv" },
-               { "op": "constrain_eq", "a": "%b2",    "b": "%b2_rt"   },
-               { "op": "test_eq",      "a": "%s2",    "b": "%s2_rt", "output": "%s_eq" },
-               { "op": "assert",       "cond": "%s_eq" }
+               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"    },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b_prod_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s_prod_priv" },
+               { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
+               { "op": "constrain_eq", "a": "%b2",     "b": "%b2_rt"       },
+               { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
+               { "op": "test_eq",      "a": "%s2",     "b": "%s2_rt",    "output": "%s_eq"   },
+               { "op": "assert",       "cond": "%s_eq" },
+               { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
+               { "op": "assert",       "cond": "%sp_eq" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -1102,7 +1109,12 @@ mod proof_tests {
         ]
         .concat();
 
-        let private_transcript = encode(IrValue::Secp256k1Point(p0 + p1));
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Secp256k1Point(p0 + p1)),
+            encode(IrValue::Secp256k1Base(b0 * b1)),
+            encode(IrValue::Secp256k1Scalar(s0 * s1)),
+        ]
+        .concat();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {

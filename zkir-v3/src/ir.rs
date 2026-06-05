@@ -572,7 +572,11 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Multiplies `a` and `b` in the prime field.
+    /// Multiplies `a` and `b`.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `a * b`
     Mul {
