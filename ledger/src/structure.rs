@@ -477,14 +477,28 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
         };
 
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => vk
-                .mock_verify(pis.into_iter())
+        match proof {
+            // V2 proofs were generated with zk-stdlib v1 → use v1 verification.
+            ProofVersioned::V2(_) => match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
+                    vk,
+                    pis.into_iter(),
+                )
                 .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => vk
-                .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
+                _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+            },
+            // V3 proofs were generated with zk-stdlib v2 → use v2 verification.
+            ProofVersioned::V3(_) => match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => vk
+                    .mock_verify(pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+                _ => vk
+                    .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+            },
         }
     }
     #[allow(clippy::result_large_err)]
@@ -494,15 +508,15 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         pis: Vec<Fr>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
+        // LatestProof is always a bare Proof, currently generated with v1.
         match mode {
             #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => vk
-                .mock_verify(pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => vk
-                .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
+            ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
+                vk,
+                pis.into_iter(),
+            )
+            .map_err(MalformedTransaction::<D>::InvalidProof),
+            _ => zkir_v2::ir_v1::v1_verify(vk, proof, pis.into_iter())
                 .map_err(MalformedTransaction::<D>::InvalidProof),
         }
     }

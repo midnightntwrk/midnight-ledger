@@ -11,11 +11,11 @@ default = ["proof-verifying"]
 proving = []
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
-proof-verifying = ["zswap/proof-verifying"]
+proof-verifying = ["zswap/proof-verifying", "dep:zkir_v2"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
 test-utilities = ["dep:reqwest", "dep:zkir_v2"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
-mock-verify = ["transient-crypto/mock-verify"]
+mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]

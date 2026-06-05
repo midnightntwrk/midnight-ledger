@@ -13,6 +13,7 @@ required-features = ["binary"]
 
 [features]
 binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
+mock-verify = ["transient-crypto-old/mock-verify"]
 proptest = [
   "dep:pastey",
   "dep:proptest",

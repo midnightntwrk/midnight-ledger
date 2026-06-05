@@ -27,7 +27,7 @@ type OldIrSource = zkir_old::IrSource;
 ///
 /// Key material bytes (prover key, verifier key, IR) are the same between
 /// v1 and v2 at the raw-bytes level, so no conversion is needed.
-pub(crate) struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
+pub struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
 
 impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolver
     for V1Resolver<'_, S>
@@ -50,7 +50,7 @@ impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolv
 ///
 /// The underlying KZG parameter files are identical; only the wrapper
 /// types differ, so we serialize and re-parse.
-pub(crate) struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
+pub struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
 
 impl<P: transient_crypto::proofs::ParamsProverProvider>
     transient_crypto_old::proofs::ParamsProverProvider for V1Params<'_, P>
@@ -74,7 +74,7 @@ impl<P: transient_crypto::proofs::ParamsProverProvider>
 ///
 /// This constructs the old type field-by-field via byte round-trips for
 /// `Fr` values, avoiding any cross-version serialize dependency.
-pub(crate) fn preimage_to_v1(
+pub fn preimage_to_v1(
     p: &transient_crypto::proofs::ProofPreimage,
 ) -> transient_crypto_old::proofs::ProofPreimage {
     let cvt = |f: transient_crypto::curve::Fr| -> transient_crypto_old::curve::Fr {
@@ -92,9 +92,65 @@ pub(crate) fn preimage_to_v1(
     }
 }
 
+/// Verifies a v1 proof using the old (zk-stdlib v1) verification pipeline.
+///
+/// The verifier key bytes and proof bytes are passed as current types; they
+/// are round-tripped through old types internally.
+pub fn v1_verify(
+    vk: &transient_crypto::proofs::VerifierKey,
+    proof: &transient_crypto::proofs::Proof,
+    pis: impl Iterator<Item = transient_crypto::curve::Fr>,
+) -> Result<(), transient_crypto::proofs::VerifyingError> {
+    // Convert current VerifierKey → old VerifierKey via bytes.
+    let mut vk_buf = Vec::new();
+    serialize::Serializable::serialize(vk, &mut vk_buf)
+        .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))?;
+    let old_vk: transient_crypto_old::proofs::VerifierKey =
+        serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
+            .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
+
+    // Convert proof.
+    let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
+
+    // Convert PIs.
+    let old_pis = pis.map(|f| {
+        transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+            .expect("Fr round-trip")
+    });
+
+    eprintln!("v1_verify: vk_buf len = {}, first bytes = {:?}", vk_buf.len(), &vk_buf[..std::cmp::min(32, vk_buf.len())]);
+    old_vk.init().map_err(|e| anyhow::anyhow!("v1 vk init failed (buf_len={}): {e}", vk_buf.len()))?;
+    old_vk.verify(
+        &transient_crypto_old::proofs::PARAMS_VERIFIER,
+        &old_proof,
+        old_pis,
+    )
+    .map_err(|e| anyhow::anyhow!("v1 verification failed: {e}"))
+}
+
+/// Mock-verifies a v1 proof (calibrated cost simulation).
+#[cfg(feature = "mock-verify")]
+pub fn v1_mock_verify(
+    vk: &transient_crypto::proofs::VerifierKey,
+    pis: impl Iterator<Item = transient_crypto::curve::Fr>,
+) -> Result<(), transient_crypto::proofs::VerifyingError> {
+    let mut vk_buf = Vec::new();
+    serialize::Serializable::serialize(vk, &mut vk_buf)
+        .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))?;
+    let old_vk: transient_crypto_old::proofs::VerifierKey =
+        serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
+            .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
+    let old_pis = pis.map(|f| {
+        transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+            .expect("Fr round-trip")
+    });
+    old_vk.mock_verify(old_pis)
+        .map_err(|e| anyhow::anyhow!("v1 mock verification failed: {e}"))
+}
+
 /// Runs the full v1 proving flow end-to-end using the old crate, returning
 /// a current `Proof`.
-pub(crate) async fn v1_prove(
+pub async fn v1_prove(
     preimage: &transient_crypto::proofs::ProofPreimage,
     rng: impl rand::Rng + rand::CryptoRng,
     params: &impl transient_crypto::proofs::ParamsProverProvider,
