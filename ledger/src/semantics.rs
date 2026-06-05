@@ -1532,13 +1532,11 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self))]
-    pub fn post_block_update(
+    pub fn prevalidate_post_block_update(
         &self,
-        tblock: Timestamp,
         detailed_block_fullness: NormalizedCost,
         overall_block_fullness: FixedPoint,
-    ) -> Result<Self, BlockLimitExceeded> {
-        let mut new_st = self.clone();
+    ) -> Result<(), BlockLimitExceeded> {
         let values = [
             &detailed_block_fullness.read_time,
             &detailed_block_fullness.compute_time,
@@ -1558,6 +1556,21 @@ impl<D: DB> LedgerState<D> {
             );
             return Err(BlockLimitExceeded);
         }
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    /// Applies fee-price adjustments and submodule `post_block_update` hooks.
+    ///
+    /// Caller must ensure [`prevalidate_post_block_update`](Self::prevalidate_post_block_update) succeeds first.
+    pub fn apply_post_block_update(
+        &self,
+        tblock: Timestamp,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
+    ) -> Self {
+        let mut new_st = self.clone();
         let fee_prices = self.parameters.fee_prices.update_from_fullness(
             detailed_block_fullness,
             overall_block_fullness,
@@ -1580,7 +1593,19 @@ impl<D: DB> LedgerState<D> {
             self.state_hash(),
             new_st.state_hash()
         );
-        Ok(new_st)
+        new_st
+    }
+
+    #[instrument(skip(self))]
+    pub fn post_block_update(
+        &self,
+        tblock: Timestamp,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
+    ) -> Result<Self, BlockLimitExceeded> {
+        self.prevalidate_post_block_update(detailed_block_fullness, overall_block_fullness)?;
+
+        Ok(self.apply_post_block_update(tblock, detailed_block_fullness, overall_block_fullness))
     }
 }
 

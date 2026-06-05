@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v8.1.0**](../README.md)
 
 ***
 
@@ -55,7 +55,7 @@ This may be used to identify which merkle tree updates are necessary.
 ### merkleTreeRoot
 
 ```ts
-readonly merkleTreeRoot: undefined | bigint;
+readonly merkleTreeRoot: bigint | undefined;
 ```
 
 The root of the commitment Merkle tree.
@@ -65,7 +65,7 @@ The root of the commitment Merkle tree.
 ### pendingOutputs
 
 ```ts
-readonly pendingOutputs: Map<string, [ShieldedCoinInfo, undefined | Date]>;
+readonly pendingOutputs: Map<string, [ShieldedCoinInfo, Date | undefined]>;
 ```
 
 The outputs that this wallet is expecting to receive in the future, with
@@ -76,7 +76,7 @@ an optional TTL attached.
 ### pendingSpends
 
 ```ts
-readonly pendingSpends: Map<string, [QualifiedShieldedCoinInfo, undefined | Date]>;
+readonly pendingSpends: Map<string, [QualifiedShieldedCoinInfo, Date | undefined]>;
 ```
 
 The spends that this wallet is expecting to be finalized on-chain in the
@@ -426,7 +426,7 @@ in-flight.
 
 ##### segment
 
-`undefined` | `number`
+`number` | `undefined`
 
 ##### ttl?
 
@@ -465,7 +465,7 @@ this coin as in-flight.
 
 ##### segment
 
-`undefined` | `number`
+`number` | `undefined`
 
 ##### output
 

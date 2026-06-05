@@ -39,6 +39,10 @@ pub struct IrSource {
     pub version: IrMinorVersion,
     /// The list of input identifiers for this circuit
     pub inputs: Vec<TypedIdentifier>,
+    /// The output types this circuit returns, positionally. The actual
+    /// values are produced by an `Instruction::Output` terminator whose
+    /// operand list is type-checked against this signature.
+    pub outputs: Vec<IrType>,
     /// Whether this IR should compile a communications commitment
     pub do_communications_commitment: bool,
     /// The sequence of instructions to run in-circuit
@@ -483,14 +487,6 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Outputs `val` from the circuit, including it in the communications
-    /// commitment.
-    ///
-    /// No outputs (at the level of the IR VM), despite the name
-    Output {
-        /// The variable or immediate to output
-        val: Operand,
-    },
     /// Calls a circuit-friendly hash function on a sequence of items.
     ///
     /// One output, `H(inputs)`
@@ -635,6 +631,15 @@ pub enum Instruction {
         val_t: IrType,
         /// The output variable name
         output: Identifier,
+    },
+    /// Circuit terminator. Produces the circuit's return values, in
+    /// signature order, and ends execution. The operand list is type-checked
+    /// against `IrSource::outputs` (length and per-position type), then each
+    /// operand is encoded via `encode_offcircuit` / `encode_incircuit` and
+    /// pushed into the outputs accumulator.
+    Output {
+        /// The values returned, one per `IrSource::outputs[i]`.
+        vals: Vec<Operand>,
     },
 }
 tag_enforcement_test!(Instruction);

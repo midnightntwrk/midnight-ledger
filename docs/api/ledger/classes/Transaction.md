@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0-rc.1**](../README.md)
+[**@midnight/ledger v8.1.0**](../README.md)
 
 ***
 
@@ -41,7 +41,7 @@ The binding randomness associated with this transaction
 ### fallibleOffer
 
 ```ts
-fallibleOffer: undefined | Map<number, ZswapOffer<P>>;
+fallibleOffer: Map<number, ZswapOffer<P>> | undefined;
 ```
 
 The fallible Zswap offer
@@ -61,7 +61,7 @@ transaction
 ### guaranteedOffer
 
 ```ts
-guaranteedOffer: undefined | ZswapOffer<P>;
+guaranteedOffer: ZswapOffer<P> | undefined;
 ```
 
 The guaranteed Zswap offer
@@ -81,7 +81,7 @@ transaction
 ### intents
 
 ```ts
-intents: undefined | Map<number, Intent<S, P, B>>;
+intents: Map<number, Intent<S, P, B>> | undefined;
 ```
 
 The intents contained in this transaction
@@ -102,8 +102,8 @@ transaction
 
 ```ts
 readonly rewards: 
-  | undefined
-| ClaimRewardsTransaction<S>;
+  | ClaimRewardsTransaction<S>
+  | undefined;
 ```
 
 The rewards this transaction represents, if applicable
@@ -186,7 +186,7 @@ Adds provided intent to the segment specified.
 
 ##### intent
 
-`undefined` | [`Intent`](Intent.md)\<`S`, `P`, `B`\>
+[`Intent`](Intent.md)\<`S`, `P`, `B`\> | `undefined`
 
 #### Returns
 
@@ -214,7 +214,7 @@ Adds Zswap offer to the segment specified.
 
 ##### offer
 
-`undefined` | [`UnprovenOffer`](../type-aliases/UnprovenOffer.md)
+[`UnprovenOffer`](../type-aliases/UnprovenOffer.md) | `undefined`
 
 #### Returns
 
