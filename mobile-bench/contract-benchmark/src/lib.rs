@@ -67,8 +67,12 @@ use zswap::{ZSWAP_EXPECTED_FILES, prove::ZswapResolver};
 /// Inclusive upper bound on `k`. Originally 20; raised to 21 to
 /// characterise the failure mode beyond the disk-spill unlock
 /// (advice_cosets remain heap-resident — see §10.8 / §11 in the
-/// architecture doc).
-pub const MAX_K: u32 = 21;
+/// architecture doc). Bumped to 22 in iteration 3 of the k21-plan
+/// so the S3 chunked-Pippenger fallback in midnight-zk:msm.rs can
+/// actually be exercised — at k=22 (n=2^22) the MSM falls off the
+/// blstrs fast path (gated at n ≤ 2^21 in patch 0005) and the
+/// chunked Pippenger keeps per-call peak heap bounded.
+pub const MAX_K: u32 = 22;
 /// Inclusive lower bound on `k`. `k = 1` corresponds to the minimal
 /// "assert(input == 1)" circuit — the smallest possible zkir program.
 pub const MIN_K: u32 = 1;
@@ -135,6 +139,7 @@ pub const HASHES_FOR_K: [u32; (MAX_K + 1) as usize] = [
     12_484, // k=19 (extrapolated by doubling; verified at runtime)
     24_967, // k=20 (extrapolated; verified at runtime)
     49_935, // k=21 (extrapolated by doubling; verified at runtime)
+    99_871, // k=22 (extrapolated by doubling; verified at runtime)
 ];
 
 #[derive(Debug, thiserror::Error)]
