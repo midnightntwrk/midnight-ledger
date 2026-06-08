@@ -76,9 +76,22 @@ jobs:
           SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
           TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}"
+          PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). Checking each registry directly means a newly added
+          # registry (npmjs) still gets published even when GH Packages — and the
+          # git tag — already exist from an earlier run.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd ledger-wasm
             cargo check
@@ -99,16 +112,18 @@ jobs:
             echo "Contents of result/lib:"
             ls -lah
             TGZ="midnight-ledger-v${SHORT_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
-            PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+            # Publish is idempotent per-registry: skips where the version already exists.
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
-            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi
@@ -127,9 +142,22 @@ jobs:
           VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
+          PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). Checking each registry directly means a newly added
+          # registry (npmjs) still gets published even when GH Packages — and the
+          # git tag — already exist from an earlier run.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd onchain-runtime-wasm
             cargo check
@@ -150,16 +178,18 @@ jobs:
             echo "Contents of result/lib:"
             ls -lah
             TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
-            PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+            # Publish is idempotent per-registry: skips where the version already exists.
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
-            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi
@@ -174,12 +204,28 @@ jobs:
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
+          # ZKIR's git tag tracks the zkir crate version, but the published npm
+          # package uses the zkir-wasm version — check existence against the wasm version.
           VERSION="${ZKIR_VERSION}"
           TAG_NAME="zkir-${VERSION}"
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
+          WASM_VERSION="${ZKIR_WASM_VERSION}"
+          SHORT_VERSION=$(echo "$WASM_VERSION" | awk -F. '{print $1}')
+          PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). Checking each registry directly means a newly added
+          # registry (npmjs) still gets published even when GH Packages — and the
+          # git tag — already exist from an earlier run.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd zkir-wasm
             cargo check
@@ -200,16 +246,18 @@ jobs:
             echo "Contents of result/lib:"
             ls -lah
             TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
-            PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+            # Publish is idempotent per-registry: skips where the version already exists.
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
-            # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-            echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
-              "$TGZ" https://registry.npmjs.org/ "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi

@@ -74,4 +74,10 @@ if is_published; then
   exit 0
 fi
 
-npm publish "$TGZ" --registry="$REG" --tag "$TAG"
+publish_args=(--registry="$REG" --tag "$TAG")
+# Scoped packages publish as 'restricted' by default on public npm; make the
+# first publish public. (GH Packages visibility is governed by the repo/org.)
+if [ "$REG_HOST" = "registry.npmjs.org" ]; then
+  publish_args+=(--access public)
+fi
+npm publish "$TGZ" "${publish_args[@]}"
