@@ -1,7 +1,7 @@
 [package]
 name = "midnight-zswap"
 edition = "2024"
-version = "9.0.0-rc.1"
+version = "9.0.0"
 license.workspace = true
 repository.workspace = true
 description = "Implementation of the Zswap shielded token atomic swap mechanism."
@@ -11,12 +11,12 @@ default = ["proof-verifying"]
 proof-verifying = []
 
 [dependencies]
-base-crypto = { version = "1.1.0-rc.1", path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
-coin-structure = { version = "2.1.0-rc.1", path = "../coin-structure", package = "midnight-coin-structure" }
+coin-structure = { version = "2.1.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-midnight-onchain-runtime = { version = "4.0.0-rc.1", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
+midnight-onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }
 
 # rand 0.9.0 is not yet supported by some of our dependencies, we will

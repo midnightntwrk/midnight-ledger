@@ -1,6 +1,6 @@
 [package]
 name = "midnight-ledger-v9"
-version = "0.1.0-rc.1"
+version = "0.1.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -19,10 +19,10 @@ mock-verify = ["transient-crypto/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
-coin-structure = { version = "2.1.0-rc.1", path = "../coin-structure", package = "midnight-coin-structure" }
-onchain-runtime = { version = "4.0.0-rc.1", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
-zswap = { version = "9.0.0-rc.1", path = "../zswap", package = "midnight-zswap" }
-base-crypto = { version = "1.1.0-rc.1", path = "../base-crypto", package = "midnight-base-crypto" }
+coin-structure = { version = "2.1.0", path = "../coin-structure", package = "midnight-coin-structure" }
+onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
+zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
+base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
