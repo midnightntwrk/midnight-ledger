@@ -94,8 +94,9 @@ jobs:
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # Use wasm version, as this will include pre-release tags
           VERSION="${LEDGER_WASM_VERSION}"
-          EPOCH_VERSION=$(grep '^name =' ledger/Cargo.toml | awk -F '"' '{print $2}' | grep -- -v | awk -F -v '{print $2}')
-          TAG_NAME="ledger-${EPOCH_VERSION}.${VERSION}"
+          SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
+          TAG_NAME="ledger-${VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
@@ -118,8 +119,8 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            TGZ="midnight-ledger-v${EPOCH_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
-            PKG="@midnightntwrk/ledger-v${EPOCH_VERSION}"
+            TGZ="midnight-ledger-v${SHORT_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
+            PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
             "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
               "$TGZ" https://npm.pkg.github.com/midnightntwrk "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
