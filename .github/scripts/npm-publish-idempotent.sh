@@ -35,8 +35,15 @@ fi
 
 REG_HOST="${REG#https://}"; REG_HOST="${REG_HOST%%/*}"
 
+# Scope of the package, e.g. "@midnightntwrk". setup-node writes a
+# `<scope>:registry=...` line into .npmrc, and for scoped packages npm resolves
+# the registry from that mapping and IGNORES --registry. Override the scope
+# registry explicitly so view/publish actually target $REG.
+SCOPE="${PKG%%/*}"
+SCOPE_REG_ARG="--${SCOPE}:registry=$REG"
+
 is_published() {
-  npm view "$PKG@$VER" version --registry="$REG" >/dev/null 2>&1
+  npm view "$PKG@$VER" version --registry="$REG" "$SCOPE_REG_ARG" >/dev/null 2>&1
 }
 
 if [ "${FORCE:-false}" = "true" ]; then
@@ -74,7 +81,7 @@ if is_published; then
   exit 0
 fi
 
-publish_args=(--registry="$REG" --tag "$TAG")
+publish_args=(--registry="$REG" "$SCOPE_REG_ARG" --tag "$TAG")
 # Scoped packages publish as 'restricted' by default on public npm; make the
 # first publish public. (GH Packages visibility is governed by the repo/org.)
 if [ "$REG_HOST" = "registry.npmjs.org" ]; then
