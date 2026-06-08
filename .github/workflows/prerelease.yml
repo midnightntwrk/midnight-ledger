@@ -96,7 +96,7 @@ jobs:
           VERSION="${LEDGER_WASM_VERSION}"
           SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
           if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
-          TAG_NAME="ledger-${VERSION}"
+          TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}"
 
           if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
             echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
