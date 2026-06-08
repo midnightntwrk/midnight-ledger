@@ -87,10 +87,13 @@ jobs:
           fi
           # Write the resolved token into the file npm actually reads: setup-node
           # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. Write the value directly (double quotes) rather than relying
-          # on npm's in-file ${VAR} expansion, which did not resolve here and left
-          # the auth token empty (ENEEDAUTH).
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "npmrc (tokens redacted):"
+          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -161,10 +164,13 @@ jobs:
           fi
           # Write the resolved token into the file npm actually reads: setup-node
           # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. Write the value directly (double quotes) rather than relying
-          # on npm's in-file ${VAR} expansion, which did not resolve here and left
-          # the auth token empty (ENEEDAUTH).
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "npmrc (tokens redacted):"
+          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -237,10 +243,13 @@ jobs:
           fi
           # Write the resolved token into the file npm actually reads: setup-node
           # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
-          # ignored. Write the value directly (double quotes) rather than relying
-          # on npm's in-file ${VAR} expansion, which did not resolve here and left
-          # the auth token empty (ENEEDAUTH).
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          echo "npmrc (tokens redacted):"
+          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
