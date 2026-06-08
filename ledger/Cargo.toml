@@ -11,11 +11,11 @@ default = ["proof-verifying"]
 proving = []
 # marker: if this enabled, your ledger *isn't* a stable build!
 unstable = []
-proof-verifying = ["zswap/proof-verifying"]
+proof-verifying = ["zswap/proof-verifying", "dep:zkir_v2"]
 # Warning: This *disables* a small amount of well-formedness checking for test setups!
 test-utilities = ["dep:reqwest", "dep:zkir_v2"]
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest"]
-mock-verify = ["transient-crypto/mock-verify"]
+mock-verify = ["transient-crypto/mock-verify", "zkir_v2/mock-verify"]
 fixed-point-custom-serde = [ "base-crypto/fixed-point-custom-serde" ]
 
 [dependencies]
@@ -23,7 +23,7 @@ coin-structure = { version = "2.1.0", path = "../coin-structure", package = "mid
 onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime" }
 zswap = { version = "9.0.0", path = "../zswap", package = "midnight-zswap" }
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-ledger-static = { version = "9.0.0", path = "../static", package = "midnight-ledger-static" }

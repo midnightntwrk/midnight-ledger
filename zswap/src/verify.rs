@@ -137,8 +137,7 @@ impl AuthorizedClaim<Proof> {
         for op in filter_invalid(prog.iter().cloned()) {
             op.field_repr(&mut statement);
         }
-        SIGN_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        zkir_v2::ir_v1::v1_verify(&SIGN_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -186,8 +185,7 @@ impl<D: DB> Input<Proof, D> {
         for op in with_outputs(prog.into_iter(), [true.into(), segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        SPEND_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        zkir_v2::ir_v1::v1_verify(&SPEND_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -254,8 +252,7 @@ impl<D: DB> Output<Proof, D> {
         for op in with_outputs(prog.into_iter(), [segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        OUTPUT_VK
-            .verify(&PARAMS_VERIFIER, &self.proof, statement.into_iter())
+        zkir_v2::ir_v1::v1_verify(&OUTPUT_VK, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
