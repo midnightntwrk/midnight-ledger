@@ -14,7 +14,6 @@
 use base_crypto::fab::AlignedValue;
 use base_crypto::hash::{HashOutput, persistent_commit};
 use base_crypto::rng::SplittableRng;
-use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use coin_structure::coin::Info as CoinInfo;
 use coin_structure::transfer::{Recipient, SenderEvidence};
@@ -25,12 +24,13 @@ use midnight_ledger::error::{
 };
 use midnight_ledger::semantics::TransactionResult;
 use midnight_ledger::structure::{
-    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Transaction,
+    ContractDeploy, INITIAL_PARAMETERS, ProofPreimageMarker, Signature, Transaction,
 };
 use midnight_ledger::test_utilities::PUBLIC_PARAMS;
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::error::TranscriptRejected;
 use onchain_runtime::ops::{Key, Op, key};
@@ -113,8 +113,8 @@ async fn composable() {
 
     // Part 1: Deploy inner
     println!(":: Part 1: Deploy inner");
-    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await);
-    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await);
+    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await, None);
+    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await, None);
     let auth_sk: HashOutput = rng.r#gen();
     let auth_pk = persistent_commit(b"mdn:ex:ci", auth_sk);
     let contract = ContractState::new(
@@ -155,7 +155,7 @@ async fn composable() {
         b"get",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await);
+    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await, None);
     let contract = ContractState::new(
         stval!([(b"".to_vec()), (addr_inner), (ep_hash)]),
         HashMap::new().insert(b"update"[..].into(), update_op.clone()),
@@ -533,15 +533,12 @@ async fn composable() {
         tx.well_formed(&state.ledger, strictness, state.time)
             .unwrap()
     };
-    match state.ledger.apply(&tx, &state.context()).1 {
-        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
-            res.get(&1),
-            Some(Err(TransactionInvalid::Transcript(
-                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-            )))
-        )),
-        r => panic!("unexpected transaction result: {r:?}"),
-    }
+    assert!(matches!(
+        state.ledger.apply(&tx, &state.context()).1,
+        TransactionResult::Failure(TransactionInvalid::Transcript(
+            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+        ))
+    ));
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -607,13 +604,13 @@ async fn composable() {
             key_location: KeyLocation(Cow::Borrowed("get")),
         };
         dbg!(&transcripts);
-        // Manually move things to the guaranteed section.
+        // Manually move things to the fallible section.
         let call_outer = ContractCallPrototype {
             address: addr_outer,
             entry_point: b"update"[..].into(),
             op: update_op.clone(),
-            guaranteed_public_transcript: transcripts[1].1.clone(),
-            fallible_public_transcript: None,
+            guaranteed_public_transcript: None,
+            fallible_public_transcript: transcripts[1].0.clone(),
             private_transcript_outputs: vec![b"malicious".to_vec().into(), cc_rand.into()],
             input: ().into(),
             output: ().into(),
@@ -634,7 +631,7 @@ async fn composable() {
 
         match tx.well_formed(&state.ledger, strictness, state.time) {
             Err(MalformedTransaction::SequencingCheckFailure(
-                SequencingCheckError::FallibleInGuaranteedContextViolation { .. },
+                SequencingCheckError::GuaranteedInFallibleContextViolation { .. },
             )) => (),
             Err(e) => panic!("{e:?}"),
             Ok(_) => panic!("succeeded unexpectedly"),
@@ -651,8 +648,8 @@ async fn guaranteed_in_fallible() {
 
     // Part 1: Deploy inner
     println!(":: Part 1: Deploy inner");
-    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await);
-    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await);
+    let get_op = ContractOperation::new(verifier_key(&RESOLVER, "get").await, None);
+    let set_op = ContractOperation::new(verifier_key(&RESOLVER, "set").await, None);
     let auth_sk: HashOutput = rng.r#gen();
     let auth_pk = persistent_commit(b"mdn:ex:ci", auth_sk);
     let contract = ContractState::new(
@@ -693,7 +690,7 @@ async fn guaranteed_in_fallible() {
         b"get",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await);
+    let update_op = ContractOperation::new(verifier_key(&RESOLVER, "update").await, None);
     let contract = ContractState::new(
         stval!([(b"".to_vec()), (addr_inner), (ep_hash)]),
         HashMap::new().insert(b"update"[..].into(), update_op.clone()),
@@ -1073,15 +1070,12 @@ async fn guaranteed_in_fallible() {
         tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0))
             .unwrap()
     };
-    match ledger_state.ledger.apply(&tx, &ledger_state.context()).1 {
-        TransactionResult::PartialSuccess(res, _) => assert!(matches!(
-            res.get(&1),
-            Some(Err(TransactionInvalid::Transcript(
-                TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
-            )))
-        )),
-        r => panic!("unexpected transaction result: {r:?}"),
-    }
+    assert!(matches!(
+        ledger_state.ledger.apply(&tx, &ledger_state.context()).1,
+        TransactionResult::Failure(TransactionInvalid::Transcript(
+            TranscriptRejected::Execution(OnchainProgramError::ReadMismatch { .. })
+        ))
+    ));
 
     // Part 7: Rejected (read mismatch & fallibility hacking)
     println!(":: Part 7: Rejected (read mismatch & fallibility hacking)");
@@ -1173,7 +1167,7 @@ async fn guaranteed_in_fallible() {
 
         match tx.well_formed(&ledger_state.ledger, strictness, Timestamp::from_secs(0)) {
             Err(MalformedTransaction::SequencingCheckFailure(
-                SequencingCheckError::FallibleInGuaranteedContextViolation { .. },
+                SequencingCheckError::GuaranteedInFallibleContextViolation { .. },
             )) => (),
             Err(e) => panic!("{e:?}"),
             Ok(_) => panic!("succeeded unexpectedly"),
@@ -1189,7 +1183,7 @@ async fn composable_funded() {
 
     // Part 1: Deploy burn
     println!(":: Part 1: Deploy burn");
-    let burn_op = ContractOperation::new(verifier_key(&RESOLVER, "burn").await);
+    let burn_op = ContractOperation::new(verifier_key(&RESOLVER, "burn").await, None);
     let contract = ContractState::new(
         stval!([]),
         HashMap::new().insert(b"burn"[..].into(), burn_op.clone()),
@@ -1220,7 +1214,7 @@ async fn composable_funded() {
         b"burn",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let send_to_burn_op = ContractOperation::new(verifier_key(&RESOLVER, "send_to_burn").await);
+    let send_to_burn_op = ContractOperation::new(verifier_key(&RESOLVER, "send_to_burn").await, None);
     let contract = ContractState::new(
         stval!([(addr_burn), (ep_hash)]),
         HashMap::new().insert(b"send_to_burn"[..].into(), send_to_burn_op.clone()),
@@ -1417,8 +1411,8 @@ async fn composable_funded() {
                     Vec::new(),
                     state.time,
                 ),
-                None,
-                [(1, offer)].into_iter().collect(),
+                Some(offer),
+                HashMap::new(),
             );
         dbg!(&pre_tx);
         tx_prove(rng.split(), &pre_tx, &RESOLVER).await.unwrap()

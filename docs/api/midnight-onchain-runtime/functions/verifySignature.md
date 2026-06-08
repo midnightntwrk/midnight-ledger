@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -19,7 +19,7 @@ Verifies if a signature is correct
 
 ### vk
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ### data
 
@@ -27,7 +27,7 @@ Verifies if a signature is correct
 
 ### signature
 
-`string`
+[`Signature`](../type-aliases/Signature.md)
 
 ## Returns
 

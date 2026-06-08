@@ -44,7 +44,7 @@ pub use base_crypto::fab::{
 };
 pub use base_crypto::hash::{HashOutput, persistent_commit};
 pub use base_crypto::rng::SplittableRng;
-pub use base_crypto::signatures::Signature;
+pub use base_crypto::schnorr::Signature;
 pub use base_crypto::time::Timestamp;
 pub use coin_structure::coin::{
     Info as CoinInfo, NIGHT, QualifiedInfo as QualifiedCoinInfo, TokenType, UnshieldedTokenType,
@@ -66,6 +66,7 @@ pub use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
 pub use midnight_ledger::test_utilities::{Tx, TxBound};
 pub use midnight_ledger::test_utilities::{test_intents, test_resolver};
 pub use midnight_ledger::verify::WellFormedStrictness;
+pub use midnight_ledger_v9 as midnight_ledger;
 pub use onchain_runtime::context::QueryContext;
 pub use onchain_runtime::ops::{Key, Op, key};
 pub use onchain_runtime::program_fragments::*;

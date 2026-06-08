@@ -29,7 +29,6 @@ pub mod zswap_wasm;
 
 use crate::dust::DustSecretKey;
 use base_crypto::hash::HashOutput;
-use base_crypto::signatures;
 use coin_structure::{
     coin::{
         PublicKey as CoinPublicKey, ShieldedTokenType, UnshieldedTokenType, UserAddress,
@@ -44,9 +43,10 @@ use conversions::{
 use js_sys::{Array, BigInt, Map, Reflect, Uint8Array};
 use ledger::{
     self,
-    dust::InitialNonce,
+    dust::{DustPublicKey, InitialNonce},
     structure::{FEE_TOKEN, IntentHash, ProofPreimageVersioned},
 };
+use onchain_runtime_wasm::conversions::PreSignature;
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde_wasm_bindgen::from_value;
@@ -66,7 +66,7 @@ pub mod onchain_runtime {
     pub use onchain_runtime_wasm::*;
 }
 
-pub(crate) use onchain_runtime::{from_value_hex_ser, to_value_hex_ser, token_type_to_value};
+pub(crate) use onchain_runtime::{to_value_hex_ser, token_type_to_value};
 
 #[wasm_bindgen(getter, js_name = "nativeToken")]
 pub fn native_token() -> Result<JsValue, JsError> {
@@ -159,13 +159,19 @@ pub fn dust_nonce(initial_nonce: String, seq: u64, sk: &DustSecretKey) -> Result
         return Err(JsError::new("seq exceeded u32 max"));
     }
     if seq == 0 {
-        return Err(JsError::new(
-            "for seq=0 we use DustPublicKey instead of DustSecretKey",
-        ));
+        return Err(JsError::new("for seq=0 use dustFirstNonce()"));
     }
     let initial_nonce = InitialNonce(from_hex_ser(&initial_nonce)?);
     let sk = sk.try_unwrap()?;
     let nonce = ledger::dust::dust_nonce(&initial_nonce, seq as u32, &sk);
+    Ok(fr_to_bigint(nonce))
+}
+
+#[wasm_bindgen(js_name = "dustFirstNonce")]
+pub fn dust_first_nonce(backing_night: String, dust_address: BigInt) -> Result<BigInt, JsError> {
+    let initial_nonce = InitialNonce(from_hex_ser(&backing_night)?);
+    let dust_address = DustPublicKey(bigint_to_fr(dust_address)?);
+    let nonce = ledger::dust::dust_first_nonce(&initial_nonce, &dust_address);
     Ok(fr_to_bigint(nonce))
 }
 
@@ -180,9 +186,14 @@ pub fn dust_initial_nonce(output_no: u64, intent_hash: String) -> Result<String,
 }
 
 #[wasm_bindgen(js_name = "addressFromKey")]
-pub fn address_from_key(key: &str) -> Result<String, JsError> {
-    let key: signatures::VerifyingKey = from_value_hex_ser(key)?;
-    to_value_hex_ser(&UserAddress::from(key))
+pub fn address_from_key(key: JsValue) -> Result<String, JsError> {
+    let addr: UserAddress = match from_value::<PreSignature>(key)? {
+        PreSignature::Schnorr(raw) => {
+            from_hex_ser::<base_crypto::schnorr::VerifyingKey>(&raw)?.into()
+        }
+        PreSignature::ECDSA(raw) => from_hex_ser::<base_crypto::ecdsa::VerifyingKey>(&raw)?.into(),
+    };
+    to_value_hex_ser(&addr)
 }
 
 #[wasm_bindgen(js_name = "createProvingTransactionPayload")]

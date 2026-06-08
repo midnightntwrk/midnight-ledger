@@ -11,64 +11,31 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[path = "common/mod.rs"]
+mod common;
+
 #[cfg(test)]
 mod proof_tests {
+    use super::common::{TestParams, TestResolver};
+    use group::Group;
+    use midnight_curves::JubjubSubgroup;
     use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
-    use rand::SeedableRng;
+    use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
     use serialize::randomised_serialization_test;
-    use serialize::{Deserializable, Serializable, tagged_serialize};
+    use serialize::{Deserializable, Serializable};
     use std::borrow::Cow;
     use std::collections::HashMap;
-    use std::fs::File;
-    use std::io::BufReader;
     use transient_crypto::curve::EmbeddedGroupAffine;
     use transient_crypto::hash::transient_hash;
     use transient_crypto::proofs::Proof;
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::{
-        KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
-        ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
+        KeyLocation, PARAMS_VERIFIER, ProofPreimage, VerifierKey, Zkir,
     };
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
-
-    struct TestResolver {
-        pk: ProverKey,
-        vk: VerifierKey,
-        ir: IrSource,
-    }
-
-    impl Resolver for TestResolver {
-        async fn resolve_key(
-            &self,
-            _key: KeyLocation,
-        ) -> std::io::Result<Option<ProvingKeyMaterial>> {
-            let mut pk = Vec::new();
-            tagged_serialize(&self.pk, &mut pk)?;
-            let mut vk = Vec::new();
-            tagged_serialize(&self.vk, &mut vk)?;
-            let mut ir = Vec::new();
-            tagged_serialize(&self.ir, &mut ir)?;
-            Ok(Some(ProvingKeyMaterial {
-                prover_key: pk,
-                verifier_key: vk,
-                ir_source: ir,
-            }))
-        }
-    }
-
-    struct TestParams;
-
-    impl ParamsProverProvider for TestParams {
-        async fn get_params(&self, k: u8) -> std::io::Result<ParamsProver> {
-            const DIR: &str = env!("MIDNIGHT_PP");
-            ParamsProver::read(BufReader::new(File::open(format!(
-                "{DIR}/bls_midnight_2p{k}"
-            ))?))
-        }
-    }
 
     #[actix_rt::test]
     async fn test_extension_attack() {
@@ -77,6 +44,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -116,6 +84,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -174,6 +143,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "hash_to_curve", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%p_0" }
@@ -228,6 +198,7 @@ mod proof_tests {
               { "name": "%v_1", "type": "Scalar<BLS12-381>" },
               { "name": "%v_2", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "transient_hash", "inputs": ["%v_0", "%v_1", "%v_2"], "output": "%v_3" },
@@ -272,15 +243,17 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_persistent_hash_proof() {
+    async fn test_std_hashes_proof() {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] }
+               { "op": "persistent_hash", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_1", "%v_2"] },
+               { "op": "keccak256", "alignment": [ { "tag": "atom", "value": { "tag": "bytes", "length": 1 } } ], "inputs": ["%v_0"], "outputs": ["%v_3", "%v_4"] }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -324,17 +297,20 @@ mod proof_tests {
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
            "inputs": [
-              { "name": "%p0_x", "type": "Scalar<BLS12-381>" },
-              { "name": "%p0_y", "type": "Scalar<BLS12-381>" },
+              { "name": "%p0", "type": "Point<Jubjub>" },
               { "name": "%s0", "type": "Scalar<BLS12-381>" },
-              { "name": "%s1", "type": "Scalar<BLS12-381>" }
+              { "name": "%s1", "type": "Scalar<Jubjub>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "inputs": ["%p0_x", "%p0_y"], "type": "Point<Jubjub>", "output": "%p0" },
-               { "op": "ec_mul", "a": "%p0", "scalar": "%s0", "output": "%p1" },
+               { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%s0"], "output": "%s0d" },
+               { "op": "encode", "input": "%s0d", "outputs": ["%s0e"] },
+               { "op": "ec_mul", "a": "%p0", "scalar": "%s0d", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
-               { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" }
+               { "op": "add", "a": "%p1", "b": "%p2", "output": "%p3" },
+               { "op": "private_input", "type": "Point<Jubjub>", "guard": null, "output": "%p4" },
+               { "op": "ec_mul", "a": "%p4", "scalar": "%s0d", "output": "%p5" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -357,11 +333,12 @@ mod proof_tests {
         pk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
         let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
-            inputs: vec![p.x().unwrap(), p.y().unwrap(), 42.into(), 63.into()],
-            private_transcript: vec![],
+            inputs: vec![p.x().unwrap(), p.y().unwrap(), (-1).into(), 63.into()],
+            private_transcript: vec![q.x().unwrap(), q.y().unwrap()],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
@@ -389,11 +366,12 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "div_mod_power_of_two", "val": "%v_0", "bits": 3, "outputs": ["%v_1", "%v_2"] },
-               { "op": "private_input", "guard": null, "output": "%v_3" },
-               { "op": "private_input", "guard": null, "output": "%v_4" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%v_3" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%v_4" },
                { "op": "constrain_eq", "a": "%v_1", "b": "%v_3" },
                { "op": "constrain_eq", "a": "%v_2", "b": "%v_4" },
                { "op": "reconstitute_field", "divisor": "%v_1", "modulus": "%v_2", "bits": 3, "output": "%v_5" },
@@ -447,6 +425,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "%v_0" }
@@ -476,6 +455,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x05", "output": "%v_2" },
@@ -521,6 +501,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "add", "a": "%v_0", "b": "0x01", "output": "%v_2" },
@@ -567,6 +548,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x42", "output": "%v_1" },
@@ -613,6 +595,7 @@ mod proof_tests {
               { "name": "%v_0", "type": "Scalar<BLS12-381>" },
               { "name": "%v_1", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_bits", "val": "%v_0", "bits": 8 },
@@ -658,6 +641,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0001" }
@@ -698,6 +682,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "constrain_eq", "a": "%v_0", "b": "0x0100" }
@@ -732,6 +717,228 @@ mod proof_tests {
             .unwrap();
     }
 
+    #[actix_rt::test]
+    async fn test_jubjub_point_ops() {
+        // Exercises test_eq (asserted), constrain_eq, and cond_select on JubjubPoint
+        // in a single circuit so every op is actively tested without dead values.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
+               { "op": "assert", "cond": "%v0" },
+               { "op": "constrain_eq", "a": "%p0", "b": "%p1" },
+               { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // p0 == p1 == generator, bit == 1
+        let p = EmbeddedGroupAffine::generator();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                p.x().unwrap(),
+                p.y().unwrap(),
+                1.into(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_test_eq_unequal() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "outputs": [
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "test_eq", "a": "%p0", "b": "%p1", "output": "%v0" },
+               { "op": "not", "a": "%v0", "output": "%v1" },
+               { "op": "assert", "cond": "%v1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_constrain_eq_fails_on_unequal() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" }
+           ],
+           "outputs": [
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "constrain_eq", "a": "%p0", "b": "%p1" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        // Different points: constrain_eq should fail
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+        let preimage_fail = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage_fail
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "constrain_eq on different JubjubPoints should fail"
+        );
+    }
+
+    #[actix_rt::test]
+    async fn test_jubjub_point_cond_select_fails_when_bit_zero() {
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%p0", "type": "Point<Jubjub>" },
+              { "name": "%p1", "type": "Point<Jubjub>" },
+              { "name": "%bit", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [
+           ],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let p = EmbeddedGroupAffine::generator();
+        let q: EmbeddedGroupAffine = JubjubSubgroup::random(OsRng).into();
+
+        // bit=0 selects p1 (!=p0), constrain_eq(p2, p0) should fail
+        let preimage_fail = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![
+                p.x().unwrap(),
+                p.y().unwrap(),
+                q.x().unwrap(),
+                q.y().unwrap(),
+                0.into(),
+            ],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let result = preimage_fail
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await;
+        assert!(
+            result.is_err(),
+            "cond_select with bit=0 should select p1, failing constrain_eq against p0"
+        );
+    }
+
     #[test]
     fn test_invalid_operand_no_percent_prefix() {
         // Variables without '%' prefix should fail to deserialize
@@ -740,6 +947,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "v_0" }
@@ -771,6 +979,7 @@ mod proof_tests {
            "inputs": [
               { "name": "%v_0", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "copy", "val": "0x1", "output": "%v_1" }
@@ -794,6 +1003,7 @@ mod proof_tests {
            "inputs": [
               { "name": "foo", "type": "Scalar<BLS12-381>" }
            ],
+           "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
                { "op": "assert", "cond": "foo" }

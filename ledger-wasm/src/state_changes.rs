@@ -30,6 +30,30 @@ pub struct ZswapStateChanges {
 
 #[wasm_bindgen]
 impl ZswapStateChanges {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        source: &str,
+        received_coins: Vec<JsValue>,
+        spent_coins: Vec<JsValue>,
+    ) -> Result<ZswapStateChanges, JsError> {
+        let source = from_hex_ser(source)?;
+        let received_coins = received_coins
+            .into_iter()
+            .map(value_to_qualified_shielded_coininfo)
+            .collect::<Result<Vec<_>, _>>()?;
+        let spent_coins = spent_coins
+            .into_iter()
+            .map(value_to_qualified_shielded_coininfo)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(ZswapStateChanges {
+            inner: LedgerZswapStateChanges {
+                source,
+                received_coins,
+                spent_coins,
+            },
+        })
+    }
+
     #[wasm_bindgen(getter)]
     pub fn source(&self) -> Result<String, JsError> {
         to_hex_ser(&self.inner.source)
@@ -52,6 +76,15 @@ impl ZswapStateChanges {
         }
         Ok(coins)
     }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.inner)
+        } else {
+            format!("{:#?}", &self.inner)
+        }
+    }
 }
 
 impl From<LedgerZswapStateChanges> for ZswapStateChanges {
@@ -69,6 +102,30 @@ pub struct DustStateChanges {
 
 #[wasm_bindgen]
 impl DustStateChanges {
+    #[wasm_bindgen(constructor)]
+    pub fn new(
+        source: &str,
+        received_utxos: Vec<JsValue>,
+        spent_utxos: Vec<JsValue>,
+    ) -> Result<DustStateChanges, JsError> {
+        let source = from_hex_ser(source)?;
+        let received_utxos = received_utxos
+            .into_iter()
+            .map(value_to_qdo)
+            .collect::<Result<Vec<_>, _>>()?;
+        let spent_utxos = spent_utxos
+            .into_iter()
+            .map(value_to_qdo)
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(DustStateChanges {
+            inner: LedgerDustStateChanges {
+                source,
+                received_utxos,
+                spent_utxos,
+            },
+        })
+    }
+
     #[wasm_bindgen(getter)]
     pub fn source(&self) -> Result<String, JsError> {
         to_hex_ser(&self.inner.source)
@@ -90,6 +147,15 @@ impl DustStateChanges {
             utxos.push(&qdo_to_value(utxo)?);
         }
         Ok(utxos)
+    }
+
+    #[wasm_bindgen(js_name = "toString")]
+    pub fn to_string(&self, compact: Option<bool>) -> String {
+        if compact.unwrap_or(false) {
+            format!("{:?}", &self.inner)
+        } else {
+            format!("{:#?}", &self.inner)
+        }
     }
 }
 

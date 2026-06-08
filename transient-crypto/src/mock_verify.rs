@@ -31,11 +31,11 @@ use midnight_circuits::{
     instructions::{AssignmentInstructions, PublicInputInstructions},
     types::AssignedNative,
 };
-use midnight_zk_stdlib::Relation;
+use midnight_zk_stdlib::{MidnightPK, Relation};
 use rand::Rng;
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serialize::{Deserializable, Serializable, Tagged, tagged_serialize};
+use serialize::{Deserializable, Serializable, Tagged, tagged_deserialize, tagged_serialize};
 use sha2::{Digest, Sha256};
 use std::borrow::Cow;
 use std::fs;
@@ -325,6 +325,7 @@ struct TestIr {
 }
 
 impl Relation for TestIr {
+    type Error = midnight_proofs::plonk::Error;
     type Instance = Vec<Fr>;
     type Witness = Self;
     fn format_instance(
@@ -355,6 +356,8 @@ impl Relation for TestIr {
 }
 
 impl Zkir for TestIr {
+    type ProverKey = MidnightPK<TestIr>;
+
     fn check(&self, _preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, ProvingError> {
         Ok(vec![])
     }
@@ -376,6 +379,39 @@ impl Zkir for TestIr {
             preimage.public_transcript_inputs.clone(),
             vec![],
         ))
+    }
+    fn k(&self) -> u8 {
+        midnight_zk_stdlib::optimal_k(self) as u8
+    }
+    async fn keygen_vk(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<VerifierKey, anyhow::Error> {
+        use midnight_zk_stdlib::setup_vk;
+        Ok(VerifierKey::from(setup_vk(params.get_params(self.k()).await?.as_ref(), self)))
+    }
+    async fn keygen(
+        &self,
+        params: &impl ParamsProverProvider,
+    ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
+        use midnight_zk_stdlib::{setup_pk, setup_vk};
+        let vk = setup_vk(params.get_params(self.k()).await?.as_ref(), self);
+        let pk = setup_pk(self, &vk);
+        Ok((ProverKey::from_raw(pk), VerifierKey::from(vk)))
+    }
+    fn load_ir_from_tagged(reader: impl std::io::Read + std::io::Seek) -> std::io::Result<Self> {
+        tagged_deserialize(reader)
+    }
+    fn load_prover_key_from_tagged(
+        reader: impl std::io::Read + std::io::Seek,
+    ) -> std::io::Result<ProverKey<Self>> {
+        tagged_deserialize(reader)
+    }
+    fn read_raw_pk(reader: impl std::io::Read) -> std::io::Result<Self::ProverKey> {
+        MidnightPK::<Self>::read(&mut { reader }, midnight_proofs::utils::SerdeFormat::RawBytesUnchecked)
+    }
+    fn write_raw_pk(writer: impl std::io::Write, pk: &Self::ProverKey) -> std::io::Result<()> {
+        pk.write(&mut { writer }, midnight_proofs::utils::SerdeFormat::RawBytesUnchecked)
     }
 }
 

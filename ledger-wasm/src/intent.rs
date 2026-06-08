@@ -15,11 +15,11 @@ use crate::contract::{ContractCallPrototype, ContractDeploy, MaintenanceUpdate};
 use crate::conversions::*;
 use crate::dust::DustActions;
 use crate::unshielded::UnshieldedOffer;
-use base_crypto::signatures::Signature;
 use base_crypto::time::Timestamp;
 use js_sys::{Date, Uint8Array};
 use ledger::structure::{
     ContractAction, ErasedIntent, Intent as LedgerIntent, ProofMarker, ProofPreimageMarker,
+    Signature,
 };
 use onchain_runtime_wasm::from_value_ser;
 use serialize::tagged_serialize;

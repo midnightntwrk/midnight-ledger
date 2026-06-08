@@ -168,11 +168,7 @@ impl TryFrom<&ValueAtom> for EmbeddedFr {
     type Error = InvalidBuiltinDecode;
 
     fn try_from(value: &ValueAtom) -> Result<EmbeddedFr, InvalidBuiltinDecode> {
-        if value.0.len() <= FR_BYTES {
-            EmbeddedFr::from_le_bytes(&value.0).ok_or(InvalidBuiltinDecode("EmbeddedFr"))
-        } else {
-            Err(InvalidBuiltinDecode("EmbeddedFr"))
-        }
+        EmbeddedFr::from_le_bytes_wide(&value.0).ok_or(InvalidBuiltinDecode("EmbeddedFr"))
     }
 }
 

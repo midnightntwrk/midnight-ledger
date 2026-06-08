@@ -13,24 +13,27 @@
 
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
 use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
 use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
 use super::ir::{Identifier, Instruction as I, IrSource, Operand};
 use anyhow::{anyhow, bail};
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
-use base_crypto::hash::persistent_hash;
+use base_crypto::hash::{HashOutput, persistent_hash};
 use base_crypto::repr::BinaryHashRepr;
 use group::Group;
-use midnight_circuits::instructions::RangeCheckInstructions;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
     ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
-    EqualityInstructions, PublicInputInstructions, ZeroInstructions,
+    PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{
-    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, InnerValue,
+    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
+    InnerValue,
 };
 use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
 use midnight_proofs::{
@@ -39,7 +42,8 @@ use midnight_proofs::{
 };
 use midnight_zk_stdlib::{Relation, ZkStdLib, ZkStdLibArch};
 use num_bigint::BigUint;
-use serialize::{Deserializable, Serializable, VecExt};
+use serialize::{Deserializable, Serializable, VecExt, tagged_deserialize, tagged_serialize};
+use sha3::{Digest, Keccak256};
 use std::cmp::Ordering;
 use std::collections::HashMap;
 use transient_crypto::curve::outer;
@@ -187,13 +191,6 @@ fn assemble_bytes(
     Ok(acc)
 }
 
-/// Converts a BLS12-381 scalar field element into a Jubjub scalar field element.
-/// TODO: Remove this function when IrType supports JubjubScalar.
-fn jubjub_scalar_from_native(native: outer::Scalar) -> Result<JubjubFr, anyhow::Error> {
-    let s: Option<JubjubFr> = JubjubFr::from_bytes(&native.to_bytes_le()).into();
-    s.ok_or(anyhow::Error::msg("Error converting Fr to JubjubScalar"))
-}
-
 impl IrSource {
     /// Performs a non-ZK run of a circuit, to ensure that constraints hold, and
     /// to produce a public input vector, and public input skip information.
@@ -201,17 +198,30 @@ impl IrSource {
         &self,
         preimage: &ProofPreimage,
     ) -> Result<Preprocessed, ProvingError> {
-        if preimage.inputs.len() != self.inputs.len() {
+        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
+
+        let mut idx = 0;
+        for input_id in self.inputs.iter() {
+            let w = input_id.val_t.encoded_len();
+            if idx + w > preimage.inputs.len() {
+                bail!(
+                    "Not enough raw inputs: ran out at index {} while decoding {:?}",
+                    idx,
+                    input_id.name
+                );
+            }
+            let value = decode_offcircuit(&preimage.inputs[idx..idx + w], &input_id.val_t)?;
+            memory.insert(input_id.name.clone(), value);
+            idx += w;
+        }
+        if idx != preimage.inputs.len() {
             bail!(
-                "Expected {} inputs, received {}",
-                self.inputs.len(),
+                "Expected {} raw inputs, received {}",
+                idx,
                 preimage.inputs.len()
             );
         }
-        let mut memory: HashMap<Identifier, IrValue> = HashMap::new();
-        for (id, input) in self.inputs.iter().zip(preimage.inputs.iter()) {
-            memory.insert(id.name.clone(), IrValue::Native(*input));
-        }
+
         let mut pis = vec![preimage.binding_input];
         if self.do_communications_commitment {
             pis.push(
@@ -332,21 +342,15 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::ConstrainEq { a, b } => {
-                    if resolve_operand(&memory, a)? != resolve_operand(&memory, b)? {
-                        bail!(
-                            "Failed equality constraint: {:?} != {:?}",
-                            resolve_operand(&memory, a)?,
-                            resolve_operand(&memory, b)?
-                        );
-                    }
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    constrain_eq_offcircuit(&a, &b)?;
                 }
                 I::CondSelect { bit, a, b, output } => {
-                    let (bit_val, a_val, b_val) = (
-                        resolve_operand_bool(&memory, bit)?,
-                        resolve_operand(&memory, a)?,
-                        resolve_operand(&memory, b)?,
-                    );
-                    memory.insert(output.clone(), if bit_val { a_val } else { b_val });
+                    let bit_val = resolve_operand_bool(&memory, bit)?;
+                    let a_val = resolve_operand(&memory, a)?;
+                    let b_val = resolve_operand(&memory, b)?;
+                    memory.insert(output.clone(), select_offcircuit(bit_val, &a_val, &b_val)?);
                 }
                 I::Assert { cond } => {
                     if !resolve_operand_bool(&memory, cond)? {
@@ -354,38 +358,49 @@ impl IrSource {
                     }
                 }
                 I::TestEq { a, b, output } => {
-                    let result = IrValue::Native(
-                        (resolve_operand(&memory, a)? == resolve_operand(&memory, b)?).into(),
-                    );
-                    memory.insert(output.clone(), result);
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = test_eq_offcircuit(&a, &b)?;
+                    memory.insert(output.clone(), IrValue::Native(result.into()));
                 }
-                I::PublicInput { guard, output } => {
+                I::PublicInput {
+                    guard,
+                    val_t,
+                    output,
+                } => {
                     let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => 0.into(),
+                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
+                            IrValue::default(val_t)
+                        }
                         _ => {
-                            public_transcript_outputs_idx += 1;
-                            preimage
-                                .public_transcript_outputs
-                                .get(public_transcript_outputs_idx - 1)
-                                .copied()
-                                .ok_or(anyhow!("Ran out of public transcript outputs"))?
+                            let w = val_t.encoded_len();
+                            let raw_outputs = &preimage.public_transcript_outputs
+                                [public_transcript_outputs_idx..public_transcript_outputs_idx + w];
+                            public_transcript_outputs_idx += w;
+                            decode_offcircuit(raw_outputs, val_t)?
                         }
                     };
-                    memory.insert(output.clone(), IrValue::Native(val));
+                    memory.insert(output.clone(), val);
                 }
-                I::PrivateInput { guard, output } => {
+                I::PrivateInput {
+                    guard,
+                    val_t,
+                    output,
+                } => {
                     let val = match guard {
-                        Some(guard) if !resolve_operand_bool(&memory, guard)? => 0.into(),
+                        Some(guard) if !resolve_operand_bool(&memory, guard)? => {
+                            IrValue::default(val_t)
+                        }
                         _ => {
-                            private_transcript_outputs_idx += 1;
-                            preimage
-                                .private_transcript
-                                .get(private_transcript_outputs_idx - 1)
-                                .copied()
-                                .ok_or(anyhow!("Ran out of private transcript outputs"))?
+                            let w = val_t.encoded_len();
+                            let raw_outputs = &preimage.private_transcript
+                                [private_transcript_outputs_idx
+                                    ..private_transcript_outputs_idx + w];
+                            private_transcript_outputs_idx += w;
+                            decode_offcircuit(raw_outputs, val_t)?
                         }
                     };
-                    memory.insert(output.clone(), IrValue::Native(val));
+                    memory.insert(output.clone(), val);
                 }
                 I::Copy { val, output } => {
                     let val = resolve_operand(&memory, val)?;
@@ -477,6 +492,11 @@ impl IrSource {
                     alignment,
                     inputs,
                     outputs,
+                }
+                | I::Keccak256 {
+                    alignment,
+                    inputs,
+                    outputs,
                 } => {
                     if outputs.len() != 2 {
                         bail!("PersistentHash requires exactly 2 outputs");
@@ -493,7 +513,11 @@ impl IrSource {
                     let mut repr = Vec::new();
                     ValueReprAlignedValue(value).binary_repr(&mut repr);
                     trace!(bytes = ?repr, "bytes decoded out-of-circuit");
-                    let hash = persistent_hash(&repr);
+                    let hash = match ins {
+                        I::PersistentHash { .. } => persistent_hash(&repr),
+                        I::Keccak256 { .. } => HashOutput(Keccak256::digest(&repr).into()),
+                        _ => unreachable!(),
+                    };
                     let hash_fields = hash.field_vec();
                     if hash_fields.len() >= 2 {
                         memory.insert(outputs[0].clone(), IrValue::Native(hash_fields[0]));
@@ -534,7 +558,6 @@ impl IrSource {
                         }
                     }
                 }
-                I::Output { val } => outputs.push(resolve_operand(&memory, val)?),
                 I::HashToCurve { inputs, output } => {
                     let inputs = inputs
                         .iter()
@@ -546,14 +569,34 @@ impl IrSource {
                 }
                 I::EcMul { a, scalar, output } => {
                     let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let c = IrValue::JubjubPoint(a * jubjub_scalar_from_native(s.0)?);
+                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let c = IrValue::JubjubPoint(a * s);
                     memory.insert(output.clone(), c);
                 }
                 I::EcMulGenerator { scalar, output } => {
-                    let s: Fr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let p = JubjubSubgroup::generator() * jubjub_scalar_from_native(s.0)?;
+                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
+                    let p = JubjubSubgroup::generator() * s;
                     memory.insert(output.clone(), IrValue::JubjubPoint(p));
+                }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        bail!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        );
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(&memory, val)?;
+                        if value.get_type() != *expected_t {
+                            bail!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            );
+                        }
+                        outputs.push(value);
+                    }
                 }
             }
         }
@@ -578,8 +621,10 @@ impl IrSource {
                 .ok_or(anyhow!("Expected communications randomness"))?;
             let mut comm_comm_inputs: Vec<Fr> = Vec::new();
             comm_comm_inputs.extend(preimage.inputs.iter());
-            for output in outputs.iter() {
-                comm_comm_inputs.push(output.clone().try_into()?);
+            for value in outputs.iter() {
+                for ir_val in encode_offcircuit(value) {
+                    comm_comm_inputs.push(ir_val.try_into()?);
+                }
             }
             if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
                 error!(
@@ -604,8 +649,8 @@ impl IrSource {
 
 impl Relation for IrSource {
     type Instance = Vec<outer::Scalar>;
-
     type Witness = Preprocessed;
+    type Error = midnight_proofs::plonk::Error;
 
     fn format_instance(
         instance: &Self::Instance,
@@ -759,11 +804,9 @@ impl Relation for IrSource {
                     let bit_val = resolve_operand(std, layouter, &memory, bit)?;
                     let bit: AssignedNative<_> = bit_val.try_into()?;
                     let bit: AssignedBit<outer::Scalar> = std.convert(layouter, &bit)?;
-                    let b_val = resolve_operand(std, layouter, &memory, b)?;
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let result = CircuitValue::Native(std.select(layouter, &bit, &a, &b)?);
+                    let b_val = resolve_operand(std, layouter, &memory, b)?;
+                    let result = select_incircuit(std, layouter, &bit, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::ConstrainBits { val, bits } => {
@@ -779,9 +822,7 @@ impl Relation for IrSource {
                 I::ConstrainEq { a, b } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    std.assert_equal(layouter, &a, &b)?;
+                    constrain_eq_incircuit(std, layouter, &a_val, &b_val)?;
                 }
                 I::ConstrainToBoolean { val } => {
                     // Yes, this does insert a constraint.
@@ -793,16 +834,19 @@ impl Relation for IrSource {
                     let val = resolve_operand(std, layouter, &memory, val)?;
                     mem_insert(output.clone(), val, &mut memory)?;
                 }
-                I::Impact { guard: _, inputs } => {
+                I::Impact { guard, inputs } => {
+                    let zero = std.assign_fixed(layouter, outer::Scalar::from(0))?;
+                    let guard: AssignedBit<_> = {
+                        let guard = resolve_operand(std, layouter, &memory, guard)?;
+                        let guard: AssignedNative<_> = guard.try_into()?;
+                        std.convert(layouter, &guard)?
+                    };
                     for input in inputs {
                         let val_assigned = resolve_operand(std, layouter, &memory, input)?;
                         let x: AssignedNative<_> = val_assigned.try_into()?;
-                        pi_push(x, &mut public_inputs)?;
+                        let guarded_x = std.select(layouter, &guard, &x, &zero)?;
+                        pi_push(guarded_x, &mut public_inputs)?;
                     }
-                }
-                I::Output { val } => {
-                    let val = resolve_operand(std, layouter, &memory, val)?;
-                    outputs.push(val);
                 }
                 I::TransientHash { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
@@ -815,6 +859,11 @@ impl Relation for IrSource {
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::PersistentHash {
+                    alignment,
+                    inputs,
+                    outputs,
+                }
+                | I::Keccak256 {
                     alignment,
                     inputs,
                     outputs,
@@ -832,7 +881,11 @@ impl Relation for IrSource {
                     }
                     let inputs = resolved_inputs;
                     let bytes = fab_decode_to_bytes(std, layouter, alignment, &inputs)?;
-                    let res_bytes = std.sha2_256(layouter, &bytes)?;
+                    let res_bytes = match ins {
+                        I::PersistentHash { .. } => std.sha2_256(layouter, &bytes)?,
+                        I::Keccak256 { .. } => std.keccak_256(layouter, &bytes)?,
+                        _ => unreachable!(),
+                    };
                     mem_insert(
                         outputs[0].clone(),
                         CircuitValue::Native(std.convert(layouter, &res_bytes[31])?),
@@ -847,9 +900,7 @@ impl Relation for IrSource {
                 I::TestEq { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let bit = std.is_equal(layouter, &a, &b)?;
+                    let bit = test_eq_incircuit(std, layouter, &a_val, &b_val)?;
                     let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
@@ -892,41 +943,30 @@ impl Relation for IrSource {
                     let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
-                I::PublicInput { guard, output } | I::PrivateInput { guard, output } => {
-                    let guard = match guard {
-                        Some(g) => Some(resolve_operand(std, layouter, &memory, g)?),
-                        None => None,
-                    };
+                I::PublicInput {
+                    guard: _,
+                    val_t,
+                    output,
+                }
+                | I::PrivateInput {
+                    guard: _,
+                    val_t,
+                    output,
+                } => {
                     let value = witness.as_ref().map_with_result(|preproc| {
-                        let x = preproc
+                        preproc
                             .memory
                             .get(output)
                             .cloned()
-                            .unwrap_or(IrValue::Native(0.into()));
-                        let x: Fr = x.try_into().map_err(|_| {
-                            Error::Synthesis(format!(
-                                "expected native value for public/private input {:?}",
+                            .ok_or(Error::Synthesis(format!(
+                                "Output {:?} not found in witness memory",
                                 output
-                            ))
-                        })?;
-                        Ok::<_, midnight_proofs::plonk::Error>(x.0)
+                            )))
                     })?;
-                    let value_cell = std.assign(layouter, value)?;
-                    // If `guard` is Some, then we want to ensure that
-                    // `value` is 0 if `guard` is 0
-                    // That is: guard == 0 -> value == 0
-                    // => value == 0 || guard
-                    if let Some(guard) = guard {
-                        let value_is_zero = std.is_zero(layouter, &value_cell)?;
-                        let guard: AssignedNative<_> = guard.try_into()?;
-                        let guard_bit = std.convert(layouter, &guard)?;
-                        let is_ok = std.or(layouter, &[value_is_zero, guard_bit])?;
-                        let is_ok_field = std.convert(layouter, &is_ok)?;
-                        std.assert_non_zero(layouter, &is_ok_field)?;
-                    }
+
                     mem_insert(
                         output.clone(),
-                        CircuitValue::Native(value_cell),
+                        assign_incircuit(std, layouter, val_t, &[value])?[0].clone(),
                         &mut memory,
                     )?;
                 }
@@ -987,8 +1027,7 @@ impl Relation for IrSource {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
                     let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
-                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
-                    let scalar = std.jubjub().convert(layouter, &scalar)?;
+                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
@@ -997,8 +1036,7 @@ impl Relation for IrSource {
                         .jubjub()
                         .assign_fixed(layouter, JubjubSubgroup::generator())?;
                     let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let scalar: AssignedNative<_> = scalar_val.try_into()?;
-                    let scalar = std.jubjub().convert(layouter, &scalar)?;
+                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
                     let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
                     mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
                 }
@@ -1016,6 +1054,26 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
+                I::Output { vals } => {
+                    if vals.len() != self.outputs.len() {
+                        return Err(Error::Synthesis(format!(
+                            "Output: signature declares {} return values but instruction has {}",
+                            self.outputs.len(),
+                            vals.len()
+                        )));
+                    }
+                    for (i, (val, expected_t)) in vals.iter().zip(self.outputs.iter()).enumerate() {
+                        let value = resolve_operand(std, layouter, &memory, val)?;
+                        if value.get_type() != *expected_t {
+                            return Err(Error::Synthesis(format!(
+                                "Output position {i}: signature declares {:?} but operand has runtime type {:?}",
+                                expected_t,
+                                value.get_type()
+                            )));
+                        }
+                        outputs.push(value);
+                    }
+                }
             }
         }
         if self.do_communications_commitment {
@@ -1032,14 +1090,18 @@ impl Relation for IrSource {
             let mut preimage = vec![comm_comm_rand];
             for id in &self.inputs {
                 if let Some(val) = memory.get(&id.name) {
-                    let x: AssignedNative<_> = val.clone().try_into()?;
-                    preimage.push(x);
+                    for cv in encode_incircuit(std, layouter, val)? {
+                        let x: AssignedNative<_> = cv.try_into()?;
+                        preimage.push(x);
+                    }
                 }
             }
 
-            for output in &outputs {
-                let x: AssignedNative<_> = output.clone().try_into()?;
-                preimage.push(x);
+            for value in &outputs {
+                for cv in encode_incircuit(std, layouter, value)? {
+                    let x: AssignedNative<_> = cv.try_into()?;
+                    preimage.push(x);
+                }
             }
 
             let comm_comm = std.poseidon(layouter, &preimage)?;
@@ -1061,7 +1123,9 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::Decode { val_t, .. } => target_types.contains(val_t),
+                I::Decode { val_t, .. }
+                | I::PublicInput { val_t, .. }
+                | I::PrivateInput { val_t, .. } => target_types.contains(val_t),
                 _ => false,
             });
 
@@ -1069,7 +1133,7 @@ impl Relation for IrSource {
         };
 
         let jubjub = self.instructions.iter().any(|op| {
-            involves_types(&[IrType::JubjubPoint]) || {
+            involves_types(&[IrType::JubjubPoint, IrType::JubjubScalar]) || {
                 matches!(
                     op,
                     I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
@@ -1089,27 +1153,36 @@ impl Relation for IrSource {
             .instructions
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
+        let keccak_256 = self
+            .instructions
+            .iter()
+            .any(|op| matches!(op, I::Keccak256 { .. }));
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,
             poseidon: poseidon || hash_to_curve,
             sha2_256,
             sha2_512: false,
-            keccak_256: false,
+            keccak_256,
             sha3_256: false,
             blake2b: false,
-            nr_pow2range_cols: 1,
+            nr_pow2range_cols: 4,
             secp256k1: false,
+            p256: false,
             bls12_381: false,
+            curve25519: false,
             base64: false,
             automaton: false,
         }
     }
 
     fn write_relation<W: std::io::Write>(&self, writer: &mut W) -> std::io::Result<()> {
-        Serializable::serialize(&self, writer)
+        let mut raw = Vec::new();
+        tagged_serialize(&self, &mut raw)?;
+        raw.serialize(writer)
     }
 
     fn read_relation<R: std::io::Read>(reader: &mut R) -> std::io::Result<Self> {
-        Deserializable::deserialize(reader, 0)
+        let raw: Vec<u8> = Deserializable::deserialize(reader, 0)?;
+        tagged_deserialize(&mut &raw[..])
     }
 }

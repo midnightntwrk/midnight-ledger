@@ -64,6 +64,19 @@ describe('Ledger API - StateBoundedMerkleTree', () => {
   });
 
   /**
+   * Test updating a StateBoundedMerkleTree out of bounds.
+   *
+   * @given A StateBoundedMerkleTree with height 1
+   * @when Updating index 10
+   * @then The update throws
+   */
+  test('should reject out-of-bounds update indices', () => {
+    const stateBoundedMerkleTree = new StateBoundedMerkleTree(1);
+
+    expect(() => stateBoundedMerkleTree.update(10n, Static.alignedValue)).toThrow();
+  });
+
+  /**
    * Test finding path for existing leaf.
    *
    * @given A StateBoundedMerkleTree with an updated value

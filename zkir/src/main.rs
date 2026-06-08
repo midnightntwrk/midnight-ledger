@@ -18,7 +18,7 @@ use base_crypto::data_provider::{self, MidnightDataProvider};
 use clap::{Parser, Subcommand};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use midnight_zkir::IrSource;
-use serialize::{tagged_deserialize, tagged_serialize};
+use serialize::tagged_serialize;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write};
@@ -85,10 +85,12 @@ fn maybe_bzkir(path: impl AsRef<Path>) -> anyhow::Result<IrSource> {
         Some(Some("zkir")) => {
             let ir = IrSource::load(BufReader::new(File::open(&path)?))?;
             let mut bzkir = BufWriter::new(File::create(path.as_ref().with_extension("bzkir"))?);
-            tagged_serialize(&ir, &mut bzkir)?;
+            ir.serialize_to_tagged(&mut bzkir)?;
             Ok(ir)
         }
-        _ => Ok(tagged_deserialize(&mut BufReader::new(File::open(path)?))?),
+        _ => Ok(IrSource::load_from_tagged(&mut BufReader::new(
+            File::open(path)?,
+        ))?),
     }
 }
 
@@ -221,7 +223,7 @@ async fn main() -> anyhow::Result<()> {
                     BufWriter::new(File::create(key_dir.join(file).with_extension("verifier"))?);
                 pb.enable_steady_tick(Duration::from_millis(100));
                 let (pk, vk) = ir.keygen(&pp).await?;
-                tagged_serialize(&pk, &mut pk_file)?;
+                IrSource::serialize_prover_key_to_tagged(ir.version, &pk, &mut pk_file)?;
                 tagged_serialize(&vk, &mut vk_file)?;
                 pb.finish();
                 overall.set_message(format!("{n}/{}", data.len()));
@@ -262,7 +264,7 @@ async fn main() -> anyhow::Result<()> {
             pb.set_message(format!("Compiling circuit {ir_file:?} (k={k})"));
             pb.enable_steady_tick(Duration::from_millis(100));
             let (pk, vk) = ir.keygen(&pp).await?;
-            tagged_serialize(&pk, &mut pk_file)?;
+            IrSource::serialize_prover_key_to_tagged(ir.version, &pk, &mut pk_file)?;
             tagged_serialize(&vk, &mut vk_file)?;
             pb.finish();
         }

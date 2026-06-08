@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-alpha.1**](../README.md)
 
 ***
 
@@ -26,6 +26,30 @@ new DustLocalState(params): DustLocalState;
 
 ## Properties
 
+### commitmentTreeFirstFree
+
+```ts
+readonly commitmentTreeFirstFree: bigint;
+```
+
+***
+
+### generatingTreeFirstFree
+
+```ts
+readonly generatingTreeFirstFree: bigint;
+```
+
+***
+
+### nullifiers
+
+```ts
+readonly nullifiers: Map<bigint, QualifiedDustOutput>;
+```
+
+***
+
 ### params
 
 ```ts
@@ -37,7 +61,7 @@ readonly params: DustParameters;
 ### syncTime
 
 ```ts
-readonly syncTime: Date;
+syncTime: Date;
 ```
 
 ***
@@ -409,7 +433,7 @@ replayEventsWithChanges(sk, events): DustLocalStateWithChanges;
 replayRawEvents(sk, rawEvents): DustLocalStateWithChanges;
 ```
 
-Replays a direct concatenation of serialized ledger events. Otherwise acts as `replayEventsWithChanges`.
+Replays a direct concatenation of serialized ledger events. Otherwise, acts as `replayEventsWithChanges`.
 
 #### Parameters
 
@@ -473,47 +497,6 @@ spend(
 
 ***
 
-### successorUtxo()
-
-```ts
-successorUtxo(
-   qdo, 
-   now, 
-   subtract_fee, 
-   new_commitment_index, 
-   sk): QualifiedDustOutput;
-```
-
-Returns a new UTXO with a reduced value and the sequential nonce
-
-#### Parameters
-
-##### qdo
-
-[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
-
-##### now
-
-`Date`
-
-##### subtract\_fee
-
-`bigint`
-
-##### new\_commitment\_index
-
-`bigint`
-
-##### sk
-
-[`DustSecretKey`](DustSecretKey.md)
-
-#### Returns
-
-[`QualifiedDustOutput`](../type-aliases/QualifiedDustOutput.md)
-
-***
-
 ### toString()
 
 ```ts
@@ -529,6 +512,24 @@ toString(compact?): string;
 #### Returns
 
 `string`
+
+***
+
+### updateGenerationTreeFromEvidence()
+
+```ts
+updateGenerationTreeFromEvidence(evidence): DustLocalState;
+```
+
+#### Parameters
+
+##### evidence
+
+[`DustGenerationTreeInsertionPath`](DustGenerationTreeInsertionPath.md)
+
+#### Returns
+
+`DustLocalState`
 
 ***
 

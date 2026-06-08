@@ -20,10 +20,11 @@ use crate::events::{Event, EventDetails, EventSource, ZswapPreimageEvidence};
 use crate::structure::TransactionHash;
 use crate::structure::UtxoMeta;
 use crate::structure::{
-    ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, Intent, IntentHash,
-    LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded, PedersenDowngradeable,
-    ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate, StandardTransaction,
-    SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState, VerifiedTransaction,
+    ClaimKind, ClaimRewardsTransaction, ContractAction, ErasedIntent, GUARANTEED_SEGMENT, Intent,
+    IntentHash, LedgerParameters, LedgerState, MAX_SUPPLY, OutputInstructionUnshielded,
+    PedersenDowngradeable, ProofKind, ReplayProtectionState, SignatureKind, SingleUpdate,
+    StandardTransaction, SystemTransaction, Transaction, UnshieldedOffer, Utxo, UtxoState,
+    VerifiedTransaction,
 };
 use crate::utils::{KeySortedIter, SortedIter};
 use crate::zswap::{WithZswapStateChanges, ZswapStateChanges};
@@ -121,6 +122,74 @@ pub enum ErasedTransactionResult {
     Failure,
 }
 
+/// The result of applying a transaction's guaranteed segment (segment 0).
+///
+/// Derefs to the post-guaranteed `LedgerState`, and can be consumed via
+/// [`apply_fallible`](GuaranteedApplyResult::apply_fallible) to execute the
+/// remaining fallible segments. Dropping this value without calling
+/// `apply_fallible` is the cheap validation path — deferred events are never
+/// materialized.
+pub struct GuaranteedApplyResult<D: DB> {
+    state: LedgerState<D>,
+    tx: VerifiedTransaction<D>,
+    deferred_events: Vec<DeferredEvent<D>>,
+}
+
+impl<D: DB> Deref for GuaranteedApplyResult<D> {
+    type Target = LedgerState<D>;
+    fn deref(&self) -> &LedgerState<D> {
+        &self.state
+    }
+}
+
+impl<D: DB> GuaranteedApplyResult<D> {
+    /// Materialize deferred events and execute the remaining fallible segments.
+    pub fn apply_fallible(
+        self,
+        context: &TransactionContext<D>,
+    ) -> (LedgerState<D>, TransactionResult<D>) {
+        let mut events: Vec<Event<D>> = self.deferred_events.into_iter().map(|f| f()).collect();
+        let mut new_st = self.state.clone();
+
+        let Transaction::Standard(stx) = &self.tx.inner else {
+            return (new_st, TransactionResult::Success(events));
+        };
+
+        let mut segment_success = std::collections::BTreeMap::new();
+        segment_success.insert(0, Ok(()));
+        let mut total_success = true;
+
+        for segment in stx.fallible_segments() {
+            match new_st.apply_section(stx, self.tx.hash, self.tx.fees, segment, context) {
+                Ok((state, deferred)) => {
+                    new_st = state;
+                    events.extend(deferred.into_iter().map(|f| f()));
+                    segment_success.insert(segment, Ok(()));
+                }
+                Err(e) => {
+                    segment_success.insert(segment, Err(e));
+                    total_success = false;
+                }
+            }
+        }
+
+        debug!(
+            "state transition: {:?} => {:?} [transaction {:?}; fallible]",
+            self.state.state_hash(),
+            new_st.state_hash(),
+            self.tx.hash,
+        );
+        (
+            new_st,
+            if total_success {
+                TransactionResult::Success(events)
+            } else {
+                TransactionResult::PartialSuccess(segment_success, events)
+            },
+        )
+    }
+}
+
 pub trait ZswapLocalStateExt<D: DB>: Sized {
     #[must_use]
     #[deprecated = "deprecated in favour of `replay_events`"]
@@ -202,7 +271,7 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
 
                 segments
                     .iter()
-                    .filter(|(segment, success)| *segment != 0 && *success)
+                    .filter(|(segment, success)| *segment != GUARANTEED_SEGMENT && *success)
                     .map(|(segment, _)| segment)
                     .try_fold(post_guaranteed, |st, segment| {
                         if let Some(fc) = stx.fallible_coins.get(segment) {
@@ -337,7 +406,8 @@ impl<D: DB> ZswapLocalStateExt<D> for ZswapLocalState<D> {
     }
 }
 
-type ApplySectionResult<D> = (LedgerState<D>, Vec<Event<D>>);
+type DeferredEvent<D> = Box<dyn FnOnce() -> Event<D>>;
+type ApplySectionResult<D> = (LedgerState<D>, Vec<DeferredEvent<D>>);
 
 pub type MaybeEvents<D> = (LedgerState<D>, Vec<Event<D>>);
 
@@ -464,6 +534,7 @@ impl<D: DB> LedgerState<D> {
             .copied()
             .unwrap_or(0);
         let unclaimed_rewards = self.unclaimed_block_rewards.ann().value;
+        let bridge_receiving = self.bridge_receiving.ann().value;
         let contract_value = self.contract.ann().value;
 
         // Ensure the total supply of NIGHT is conserved.
@@ -473,6 +544,7 @@ impl<D: DB> LedgerState<D> {
             + self.block_reward_pool
             + treasury_night
             + unclaimed_rewards
+            + bridge_receiving
             + contract_value;
 
         if total_night != MAX_SUPPLY {
@@ -585,7 +657,7 @@ impl<D: DB> LedgerState<D> {
                                 let fee = basis_points_of(
                                     state.parameters.cardano_to_midnight_bridge_fee_basis_points,
                                     *amount,
-                                );
+                                )?;
                                 (fee, amount - fee)
                             };
 
@@ -646,6 +718,34 @@ impl<D: DB> LedgerState<D> {
                     treasury,
                     ..self.clone()
                 };
+                state.check_night_balance_invariant()?;
+                let res = (state, vec![]);
+                Ok(res)
+            }
+            SystemTransaction::UnlockToTreasury { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to treasury rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to treasury");
+                let mut treasury = self.treasury.clone();
+                let native_token = treasury
+                    .get(&TokenType::Unshielded(NIGHT))
+                    .copied()
+                    .unwrap_or(0)
+                    .saturating_add(*amount);
+                treasury = treasury.insert(TokenType::Unshielded(NIGHT), native_token);
+                let state = LedgerState {
+                    locked_pool: self.locked_pool - *amount,
+                    treasury,
+                    ..self.clone()
+                };
+                state.check_night_balance_invariant()?;
                 let res = (state, vec![]);
                 Ok(res)
             }
@@ -816,10 +916,10 @@ impl<D: DB> LedgerState<D> {
                 let mut state = self.clone();
                 let mut dust_state = (*self.dust).clone();
                 let mut events = vec![];
-                let mut event_push = |content| {
+                let mut event_push = |content_fn: Box<dyn FnOnce() -> EventDetails<D>>| {
                     events.push(Event {
                         source: tx.event_source(),
-                        content,
+                        content: content_fn(),
                     })
                 };
                 for action in actions.iter() {
@@ -864,21 +964,21 @@ impl<D: DB> LedgerState<D> {
                                 .try_update_hash(*idx, gen_info.merkle_hash(), gen_info)
                                 .map_err(SystemTransactionError::MerkleTreeError)?
                                 .rehash();
-                            event_push(EventDetails::DustGenerationDtimeUpdate {
-                                update: dust_state
-                                    .generation
-                                    .generating_tree
-                                    .insertion_evidence(*idx)
+                            let tree_snapshot = dust_state.generation.generating_tree.clone();
+                            let idx = *idx;
+                            event_push(Box::new(move || EventDetails::DustGenerationDtimeUpdate {
+                                update: tree_snapshot
+                                    .insertion_evidence(idx)
                                     .expect("must be able to produce evidence for updated path"),
                                 block_time: tblock,
-                            });
+                            }));
                         }
                     }
                 }
                 state.dust = Sp::new(dust_state);
                 Ok((state, events))
             }
-            SystemTransaction::DistributeReserve(amount) => {
+            SystemTransaction::DistributeReserve { amount } => {
                 if *amount > self.reserve_pool {
                     error!(?amount, reserve_supply = ?self.reserve_pool, "[privileged] reserve distribution rejected due to insufficient reserve supply");
                     return Err(SystemTransactionError::IllegalReserveDistribution {
@@ -893,6 +993,31 @@ impl<D: DB> LedgerState<D> {
                 let new_st = LedgerState {
                     reserve_pool,
                     block_reward_pool,
+                    ..self.clone()
+                };
+
+                new_st.check_night_balance_invariant()?;
+
+                Ok((new_st, vec![]))
+            }
+            SystemTransaction::UnlockToReserve { amount } => {
+                if *amount > self.locked_pool {
+                    error!(?amount, supply = ?self.block_reward_pool, "[privileged] unlock to reserve rejected due to insufficient locked pool");
+                    return Err(SystemTransactionError::IllegalPayout {
+                        claimed_amount: None,
+                        supply: self.block_reward_pool,
+                        bridged_amount: Some(*amount),
+                        locked: self.locked_pool,
+                    });
+                }
+                info!(?amount, supply_before = ?self.block_reward_pool, "[privileged] unlock to reserve");
+
+                let locked_pool = self.locked_pool - *amount;
+                let reserve_pool = self.reserve_pool + *amount;
+
+                let new_st = LedgerState {
+                    reserve_pool,
+                    locked_pool,
                     ..self.clone()
                 };
 
@@ -932,12 +1057,13 @@ impl<D: DB> LedgerState<D> {
         &self,
         tx: &StandardTransaction<S, P, B, D>,
         transaction_hash: TransactionHash,
+        fees: u128,
         segment: u16,
         context: &TransactionContext<D>,
     ) -> Result<ApplySectionResult<D>, TransactionInvalid<D>> {
-        let mut events: Vec<Event<D>> = vec![];
+        let mut events: Vec<DeferredEvent<D>> = vec![];
         let mut state: LedgerState<D> = self.clone();
-        if segment == 0 {
+        if segment == GUARANTEED_SEGMENT {
             // Apply replay protection
             state.replay_protection = Sp::new(
                 state
@@ -954,7 +1080,7 @@ impl<D: DB> LedgerState<D> {
                     &mut com_indices,
                     transaction_hash,
                     segment,
-                    |event| events.push(event),
+                    |event| events.push(Box::new(move || event)),
                 )?;
             }
 
@@ -973,20 +1099,22 @@ impl<D: DB> LedgerState<D> {
                 if let Some(offer) = &intent.guaranteed_unshielded_offer {
                     state.utxo = Sp::new(state.utxo.apply_offer(offer, &erased, segment, context)?);
                     {
+                        let source = EventSource {
+                            transaction_hash,
+                            logical_segment: segment,
+                            physical_segment: *phys_seg,
+                        };
                         state.dust = Sp::new(state.dust.apply_offer(
                             offer,
                             &erased,
                             segment,
                             context,
-                            |content| {
-                                events.push(Event {
-                                    source: EventSource {
-                                        transaction_hash,
-                                        logical_segment: segment,
-                                        physical_segment: *phys_seg,
-                                    },
-                                    content,
-                                })
+                            |content_fn| {
+                                let source = source.clone();
+                                events.push(Box::new(move || Event {
+                                    source,
+                                    content: content_fn(),
+                                }))
                             },
                         )?);
                     }
@@ -1005,7 +1133,11 @@ impl<D: DB> LedgerState<D> {
                     },
                 )?;
                 state = res.0;
-                events.extend(res.1);
+                events.extend(
+                    res.1
+                        .into_iter()
+                        .map(|e| Box::new(move || e) as DeferredEvent<D>),
+                );
             }
             {
                 // process fees and dust actions first. This is not in the segment part of
@@ -1013,9 +1145,7 @@ impl<D: DB> LedgerState<D> {
                 //
                 // NOTE: The `unwrap_or` is safe here, as fees have already been
                 // checked during well-formedness.
-                let mut fees_remaining = Transaction::Standard(tx.clone())
-                    .fees(&self.parameters, true)
-                    .unwrap_or(0);
+                let mut fees_remaining = fees;
                 // apply spends first, to make sure registration outputs get the maximum dust they can.
                 let intents = tx.intents.sorted_iter().collect::<Vec<_>>();
                 for (phys_seg, time, dust_spend) in intents.iter().flat_map(|(phys_seg, i)| {
@@ -1023,20 +1153,22 @@ impl<D: DB> LedgerState<D> {
                         da.spends.iter_deref().map(move |s| (phys_seg, da.ctime, s))
                     })
                 }) {
+                    let source = EventSource {
+                        transaction_hash,
+                        physical_segment: **phys_seg,
+                        logical_segment: segment,
+                    };
                     state.dust = Sp::new(state.dust.apply_spend(
                         dust_spend,
                         time,
                         context,
                         &state.parameters.dust,
-                        |content| {
-                            events.push(Event {
-                                source: EventSource {
-                                    transaction_hash,
-                                    physical_segment: **phys_seg,
-                                    logical_segment: segment,
-                                },
-                                content,
-                            })
+                        |content_fn| {
+                            let source = source.clone();
+                            events.push(Box::new(move || Event {
+                                source,
+                                content: content_fn(),
+                            }))
                         },
                     )?);
                     fees_remaining = fees_remaining.saturating_sub(dust_spend.v_fee);
@@ -1046,6 +1178,11 @@ impl<D: DB> LedgerState<D> {
                     let erased = intent.erase_proofs().erase_signatures();
                     if let Some(da) = intent.dust_actions.as_ref() {
                         for reg in da.registrations.iter_deref() {
+                            let source = EventSource {
+                                transaction_hash,
+                                physical_segment: *phys_seg,
+                                logical_segment: segment,
+                            };
                             let (new_dust, new_fees_remaining) = state.dust.apply_registration(
                                 &context.ref_state.utxo,
                                 fees_remaining,
@@ -1054,15 +1191,12 @@ impl<D: DB> LedgerState<D> {
                                 &state.parameters.dust,
                                 da.ctime,
                                 context,
-                                |content| {
-                                    events.push(Event {
-                                        source: EventSource {
-                                            transaction_hash,
-                                            physical_segment: *phys_seg,
-                                            logical_segment: segment,
-                                        },
-                                        content,
-                                    })
+                                |content_fn| {
+                                    let source = source.clone();
+                                    events.push(Box::new(move || Event {
+                                        source,
+                                        content: content_fn(),
+                                    }))
                                 },
                             )?;
                             state.dust = Sp::new(new_dust);
@@ -1085,7 +1219,7 @@ impl<D: DB> LedgerState<D> {
                     &mut com_indices,
                     transaction_hash,
                     segment,
-                    |event| events.push(event),
+                    |event| events.push(Box::new(move || event)),
                 )?;
             }
 
@@ -1094,20 +1228,22 @@ impl<D: DB> LedgerState<D> {
                 if let Some(offer) = &intent.fallible_unshielded_offer {
                     state.utxo = Sp::new(state.utxo.apply_offer(offer, &erased, segment, context)?);
                     {
+                        let source = EventSource {
+                            transaction_hash,
+                            logical_segment: GUARANTEED_SEGMENT,
+                            physical_segment: segment,
+                        };
                         state.dust = Sp::new(state.dust.apply_offer(
                             offer,
                             &erased,
                             segment,
                             context,
-                            |content| {
-                                events.push(Event {
-                                    source: EventSource {
-                                        transaction_hash,
-                                        logical_segment: 0,
-                                        physical_segment: segment,
-                                    },
-                                    content,
-                                })
+                            |content_fn| {
+                                let source = source.clone();
+                                events.push(Box::new(move || Event {
+                                    source,
+                                    content: content_fn(),
+                                }))
                             },
                         )?);
                     }
@@ -1121,12 +1257,16 @@ impl<D: DB> LedgerState<D> {
                     &com_indices,
                     EventSource {
                         transaction_hash,
-                        logical_segment: 0,
+                        logical_segment: GUARANTEED_SEGMENT,
                         physical_segment: segment,
                     },
                 )?;
                 state = res.0;
-                events.extend(res.1);
+                events.extend(
+                    res.1
+                        .into_iter()
+                        .map(|e| Box::new(move || e) as DeferredEvent<D>),
+                );
             }
         }
 
@@ -1206,64 +1346,76 @@ impl<D: DB> LedgerState<D> {
         tx: &VerifiedTransaction<D>,
         context: &TransactionContext<D>,
     ) -> (Self, TransactionResult<D>) {
-        let res = match &tx.inner {
-            Transaction::Standard(stx) => {
-                let cloned_stx = stx.clone();
-                let segments = cloned_stx.segments();
-                let mut segment_success = std::collections::BTreeMap::new();
-                let mut events = Vec::new();
-                let mut total_success = true;
-                let mut new_st = self.clone();
-                for &segment in segments.iter() {
-                    match new_st.apply_section(stx, tx.hash, segment, context) {
-                        Ok(state) => {
-                            new_st = state.0;
-                            events.extend(state.1);
-                            segment_success.insert(segment, Ok(()));
-                        }
-                        Err(e) => {
-                            if segment == 0 {
-                                return (self.clone(), TransactionResult::Failure(e));
-                            } else {
-                                segment_success.insert(segment, Err(e));
-                                total_success = false;
-                            }
-                        }
-                    }
-                }
-
-                (
-                    new_st,
-                    if total_success {
-                        TransactionResult::Success(events)
-                    } else {
-                        TransactionResult::PartialSuccess(segment_success, events)
-                    },
-                )
-            }
-            Transaction::ClaimRewards(rewards) => claim_unshielded::<D>(
-                self,
-                rewards,
-                &context.block_context,
-                EventSource {
-                    transaction_hash: tx.hash,
-                    logical_segment: 0,
-                    physical_segment: 0,
-                },
-            ),
+        let res = {
+            let guaranteed = match self.apply_guaranteed_only(tx.clone(), context) {
+                Ok(g) => g,
+                Err(e) => return (self.clone(), TransactionResult::Failure(e)),
+            };
+            guaranteed.apply_fallible(context)
         };
-        debug!(
-            "state transition: {:?} => {:?} [transaction {:?}]",
-            self.state_hash(),
-            res.0.state_hash(),
-            tx.hash,
-        );
         debug!(
             "transaction result: {:?}",
             ErasedTransactionResult::from(&res.1)
         );
         trace!(?tx, "transaction details");
         res
+    }
+
+    #[instrument(skip(self, tx, context), fields(tx = ?tx.hash))]
+    pub fn apply_guaranteed_only(
+        &self,
+        tx: VerifiedTransaction<D>,
+        context: &TransactionContext<D>,
+    ) -> Result<GuaranteedApplyResult<D>, TransactionInvalid<D>> {
+        match &tx.inner {
+            Transaction::Standard(stx) => {
+                let (state, deferred_events) =
+                    self.apply_section(stx, tx.hash, tx.fees, 0, context)?;
+                debug!(
+                    "state transition: {:?} => {:?} [transaction {:?}; guaranteed]",
+                    self.state_hash(),
+                    state.state_hash(),
+                    tx.hash,
+                );
+                Ok(GuaranteedApplyResult {
+                    state,
+                    tx,
+                    deferred_events,
+                })
+            }
+            Transaction::ClaimRewards(rewards) => {
+                let (state, result) = claim_unshielded::<D>(
+                    self,
+                    rewards,
+                    &context.block_context,
+                    EventSource {
+                        transaction_hash: tx.hash,
+                        logical_segment: GUARANTEED_SEGMENT,
+                        physical_segment: GUARANTEED_SEGMENT,
+                    },
+                );
+                debug!(
+                    "state transition: {:?} => {:?} [transaction {:?}]",
+                    self.state_hash(),
+                    state.state_hash(),
+                    tx.hash,
+                );
+                match result {
+                    TransactionResult::Success(events) => Ok(GuaranteedApplyResult {
+                        state,
+                        tx,
+                        deferred_events: events
+                            .into_iter()
+                            .map(|e| Box::new(move || e) as DeferredEvent<D>)
+                            .collect(),
+                    }),
+                    TransactionResult::Failure(e) => Err(e),
+                    TransactionResult::PartialSuccess(..) => {
+                        unreachable!("claim_unshielded never returns PartialSuccess")
+                    }
+                }
+            }
+        }
     }
 
     fn apply_actions<P: ProofKind<D>>(
@@ -1362,6 +1514,28 @@ impl<D: DB> LedgerState<D> {
                         if res.contract.contains_key(&addr) {
                             return Err(TransactionInvalid::ContractAlreadyDeployed(addr));
                         }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) =
+                            crate::verify::check_entry_point_metadata_sizes(&deploy.initial_state, limit)
+                        {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
+                        }
                         res.contract = res.contract.insert(addr, deploy.initial_state.clone());
                         events.push(Event {
                             source: event_source.clone(),
@@ -1402,7 +1576,7 @@ impl<D: DB> LedgerState<D> {
                                         }
                                     };
                                     ver.rm_from(&mut op);
-                                    if op == ContractOperation::new(None) {
+                                    if op.v2.is_none() {
                                         cstate.operations = cstate.operations.remove(ep);
                                     } else {
                                         cstate.operations =
@@ -1412,7 +1586,7 @@ impl<D: DB> LedgerState<D> {
                                 SingleUpdate::VerifierKeyInsert(ep, vk) => {
                                     let mut op = match cstate.operations.get(ep) {
                                         Some(op) => (*op).clone(),
-                                        None => ContractOperation::new(None),
+                                        None => ContractOperation::new(None, None),
                                     };
                                     if vk.as_version().has(&op) {
                                         return Err(TransactionInvalid::VerifierKeyAlreadyPresent(
@@ -1425,6 +1599,28 @@ impl<D: DB> LedgerState<D> {
                                 }
                             }
                         }
+                        let limit = self.parameters.limits.max_contract_metadata_size;
+                        if let Err(e) =
+                            crate::verify::check_entry_point_metadata_sizes(&cstate, limit)
+                        {
+                            return Err(match e {
+                                crate::verify::MetadataSizeError::EntryPoint(entry_point, size) => {
+                                    TransactionInvalid::ContractMetadataTooLarge {
+                                        address: addr,
+                                        entry_point,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                                crate::verify::MetadataSizeError::Authority(size) => {
+                                    TransactionInvalid::ContractAuthorityMetadataTooLarge {
+                                        address: addr,
+                                        size,
+                                        limit,
+                                    }
+                                }
+                            });
+                        }
                         res.contract = res.contract.insert(addr, cstate);
                     }
                 }
@@ -1435,13 +1631,11 @@ impl<D: DB> LedgerState<D> {
     }
 
     #[instrument(skip(self))]
-    pub fn post_block_update(
+    pub fn prevalidate_post_block_update(
         &self,
-        tblock: Timestamp,
         detailed_block_fullness: NormalizedCost,
         overall_block_fullness: FixedPoint,
-    ) -> Result<Self, BlockLimitExceeded> {
-        let mut new_st = self.clone();
+    ) -> Result<(), BlockLimitExceeded> {
         let values = [
             &detailed_block_fullness.read_time,
             &detailed_block_fullness.compute_time,
@@ -1461,18 +1655,40 @@ impl<D: DB> LedgerState<D> {
             );
             return Err(BlockLimitExceeded);
         }
-        let fee_prices = self.parameters.fee_prices.update_from_fullness(
+
+        Ok(())
+    }
+
+    #[instrument(skip(self))]
+    /// Applies fee-price adjustments and submodule `post_block_update` hooks.
+    ///
+    /// Caller must ensure [`prevalidate_post_block_update`](Self::prevalidate_post_block_update) succeeds first.
+    pub fn apply_post_block_update(
+        &self,
+        tblock: Timestamp,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
+    ) -> Self {
+        let mut new_st = self.clone();
+        let mut fee_prices = self.parameters.fee_prices.update_from_fullness(
             detailed_block_fullness,
             overall_block_fullness,
             self.parameters.cost_dimension_min_ratio,
             self.parameters.price_adjustment_a_parameter,
         );
+        if fee_prices.overall_price < self.parameters.min_block_price {
+            fee_prices.overall_price = self.parameters.min_block_price;
+        }
         new_st.parameters = Sp::new(LedgerParameters {
             fee_prices,
             ..(*self.parameters).clone()
         });
         new_st.replay_protection = Sp::new(new_st.replay_protection.post_block_update(tblock));
-        new_st.zswap = Sp::new(new_st.zswap.post_block_update(tblock));
+        new_st.zswap = Sp::new(
+            new_st
+                .zswap
+                .post_block_update(tblock, self.parameters.global_ttl),
+        );
         new_st.dust = Sp::new(
             new_st
                 .dust
@@ -1483,21 +1699,32 @@ impl<D: DB> LedgerState<D> {
             self.state_hash(),
             new_st.state_hash()
         );
-        Ok(new_st)
+        new_st
+    }
+
+    #[instrument(skip(self))]
+    pub fn post_block_update(
+        &self,
+        tblock: Timestamp,
+        detailed_block_fullness: NormalizedCost,
+        overall_block_fullness: FixedPoint,
+    ) -> Result<Self, BlockLimitExceeded> {
+        self.prevalidate_post_block_update(detailed_block_fullness, overall_block_fullness)?;
+
+        Ok(self.apply_post_block_update(tblock, detailed_block_fullness, overall_block_fullness))
     }
 }
 
-const fn basis_points_of(points: u32, val: u128) -> u128 {
-    assert!(
-        points <= 10_000,
-        "cardano_to_midnight_bridge_fee_basis_points must not exceed 10_000"
-    );
+const fn basis_points_of(points: u32, val: u128) -> Result<u128, SystemTransactionError> {
+    if points > 10_000 {
+        return Err(SystemTransactionError::InvalidBasisPoints(points));
+    }
 
     // `val` should never be high enough to overflow but let's do it safely regardless
     let quotient = val / 10_000;
     let remainder = val % 10_000;
 
-    quotient * points as u128 + (remainder * points as u128) / 10_000
+    Ok(quotient * points as u128 + (remainder * points as u128) / 10_000)
 }
 
 fn claim_unshielded<D: DB>(
@@ -1613,10 +1840,10 @@ fn claim_unshielded<D: DB>(
     };
     let mut events = vec![];
     if let Some(dust_addr) = state.dust.generation.address_delegation.get(&address) {
-        let mut event_push = |content| {
+        let mut event_push = |content_fn: Box<dyn FnOnce() -> EventDetails<D>>| {
             events.push(Event {
                 source: event_source.clone(),
-                content,
+                content: content_fn(),
             })
         };
         let new_dust = match state.dust.fresh_dust_output(
@@ -1828,8 +2055,8 @@ impl SystemTransaction {
     fn event_source(&self) -> EventSource {
         EventSource {
             transaction_hash: self.transaction_hash(),
-            logical_segment: 0,
-            physical_segment: 0,
+            logical_segment: GUARANTEED_SEGMENT,
+            physical_segment: GUARANTEED_SEGMENT,
         }
     }
 }
@@ -1838,11 +2065,10 @@ impl SystemTransaction {
 mod tests {
     use crate::{
         annotation::NightAnn,
-        structure::{INITIAL_PARAMETERS, LedgerParameters},
+        structure::{INITIAL_PARAMETERS, LedgerParameters, SignatureVerifyingKey},
     };
 
     use super::*;
-    use base_crypto::signatures::VerifyingKey;
     use rand::{SeedableRng, rngs::StdRng};
     use storage::db::InMemoryDB;
     use zswap::ledger::State;
@@ -1854,7 +2080,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
         let state = LedgerState {
@@ -1908,7 +2134,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut bridge_receiving = Map::new();
         bridge_receiving = bridge_receiving.insert(UserAddress::from(vk.clone()), 1000);
         let state = LedgerState {
@@ -1963,7 +2189,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), MAX_SUPPLY);
@@ -2018,7 +2244,7 @@ mod tests {
         let mut rng = StdRng::seed_from_u64(0x42);
 
         let network_id = "a".to_string();
-        let vk: VerifyingKey = rng.r#gen();
+        let vk: SignatureVerifyingKey = SignatureVerifyingKey::Schnorr(rng.r#gen());
         let mut unclaimed_block_rewards: Map<UserAddress, u128, InMemoryDB, NightAnn> = Map::new();
         unclaimed_block_rewards =
             unclaimed_block_rewards.insert(UserAddress::from(vk.clone()), 200000);
@@ -2147,5 +2373,117 @@ mod tests {
 
         assert!(!state.utxos.contains_key(&a));
         assert!(state.utxos.contains_key(&b));
+    }
+
+    #[test]
+    fn bridge_transfer_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = 10_000_000_000;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after bridge transfer");
+
+        let expected_fee = basis_points_of(
+            INITIAL_PARAMETERS.cardano_to_midnight_bridge_fee_basis_points,
+            amount,
+        )
+        .unwrap();
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            amount - expected_fee
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            expected_fee
+        );
+        assert_eq!(new_state.locked_pool, 0);
+    }
+
+    #[test]
+    fn bridge_transfer_sub_minimum_passes_invariant() {
+        let mut rng = StdRng::seed_from_u64(0x42);
+        let target_address = UserAddress::from(SignatureVerifyingKey::Schnorr(rng.r#gen()));
+        let nonce = coin_structure::coin::Nonce(HashOutput(rng.r#gen()));
+        let amount: u128 = INITIAL_PARAMETERS.c_to_m_bridge_min_amount - 1;
+
+        let state: LedgerState<InMemoryDB> = LedgerState::with_genesis_settings(
+            "test",
+            INITIAL_PARAMETERS,
+            amount,
+            MAX_SUPPLY - amount,
+            0,
+        )
+        .expect("valid genesis");
+
+        let (new_state, _) = state
+            .apply_system_tx(
+                &SystemTransaction::DistributeNight(
+                    ClaimKind::CardanoBridge,
+                    vec![OutputInstructionUnshielded {
+                        amount,
+                        target_address,
+                        nonce,
+                    }],
+                ),
+                Timestamp::from_secs(1),
+            )
+            .expect("sub-minimum bridge transfer should succeed");
+
+        new_state
+            .check_night_balance_invariant()
+            .expect("invariant should hold after sub-minimum bridge transfer");
+
+        // Sub-minimum: entire amount goes to treasury as fee, nothing to bridge_receiving
+        assert_eq!(
+            new_state
+                .bridge_receiving
+                .get(&target_address)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert_eq!(
+            new_state
+                .treasury
+                .get(&TokenType::Unshielded(NIGHT))
+                .copied()
+                .unwrap_or(0),
+            amount
+        );
+        assert_eq!(new_state.locked_pool, 0);
     }
 }

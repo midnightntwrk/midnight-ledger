@@ -20,6 +20,7 @@ use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::{
@@ -60,8 +61,8 @@ async fn simple_merkle_tree() {
 
     // Part 1: Deploy
     let root = MerkleTree::<()>::blank(10).root();
-    let store_op = ContractOperation::new(verifier_key(&RESOLVER, "store").await);
-    let check_op = ContractOperation::new(verifier_key(&RESOLVER, "check").await);
+    let store_op = ContractOperation::new(verifier_key(&RESOLVER, "store").await, None);
+    let check_op = ContractOperation::new(verifier_key(&RESOLVER, "check").await, None);
     let contract = ContractState::new(
         stval!([[{MT(10) {}}, (0u64), {root => null}]]),
         HashMap::new()

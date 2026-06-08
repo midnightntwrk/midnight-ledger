@@ -1,5 +1,15 @@
 # `midnight-onchain-runtime` Changelog
 
+## Version `4.0.0`
+
+- feat: `ContractOperation` includes ir field
+- feat: add support for ECDSA signatures.
+- feat: Changed the structure of logged events according to events MIP (link tbd).
+
+## Unreleased (3.2)
+
+- fix: `communication_commitment` now hashes the value-only representation of its inputs.
+
 ## Version `3.1.0`
 
 - feat: add more flexibility to `findPathForLeaf`, allowing it to scan index

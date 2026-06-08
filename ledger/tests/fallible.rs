@@ -20,6 +20,7 @@ use midnight_ledger::structure::{ContractDeploy, INITIAL_PARAMETERS, Transaction
 use midnight_ledger::test_utilities::{Resolver, TestState, test_resolver, verifier_key};
 use midnight_ledger::test_utilities::{test_intents, tx_prove};
 use midnight_ledger::verify::WellFormedStrictness;
+use midnight_ledger_v9 as midnight_ledger;
 use onchain_runtime::context::QueryContext;
 use onchain_runtime::ops::{Key, Op, key};
 use onchain_runtime::program_fragments::*;
@@ -63,7 +64,7 @@ async fn fallible() {
 
     // Part 1: Deploy
     println!(":: Part 1: Deploy");
-    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await);
+    let count_op = ContractOperation::new(verifier_key(&RESOLVER, "count").await, None);
     let contract = ContractState::new(
         stval!([(0u64), (false), (0u64)]),
         HashMap::new().insert(b"count"[..].into(), count_op.clone()),
