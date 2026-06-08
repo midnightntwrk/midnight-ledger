@@ -65,7 +65,7 @@ jobs:
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
@@ -117,7 +117,7 @@ jobs:
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
@@ -168,7 +168,7 @@ jobs:
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
-          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
           GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
           FORCE: ${{ github.event.inputs.force }}
         run: |
