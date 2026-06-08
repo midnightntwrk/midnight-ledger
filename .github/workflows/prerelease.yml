@@ -85,11 +85,12 @@ jobs:
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
           fi
-          # Append to the file npm actually reads: setup-node points npm at
-          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
-          # npm expands ${NPM_TOKEN} from the env when it reads the file.
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. Write the value directly (double quotes) rather than relying
+          # on npm's in-file ${VAR} expansion, which did not resolve here and left
+          # the auth token empty (ENEEDAUTH).
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -158,11 +159,12 @@ jobs:
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
           fi
-          # Append to the file npm actually reads: setup-node points npm at
-          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
-          # npm expands ${NPM_TOKEN} from the env when it reads the file.
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. Write the value directly (double quotes) rather than relying
+          # on npm's in-file ${VAR} expansion, which did not resolve here and left
+          # the auth token empty (ENEEDAUTH).
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -233,11 +235,12 @@ jobs:
           if [ -z "${NPM_TOKEN:-}" ]; then
             echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
           fi
-          # Append to the file npm actually reads: setup-node points npm at
-          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
-          # npm expands ${NPM_TOKEN} from the env when it reads the file.
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. Write the value directly (double quotes) rather than relying
+          # on npm's in-file ${VAR} expansion, which did not resolve here and left
+          # the auth token empty (ENEEDAUTH).
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
