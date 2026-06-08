@@ -62,27 +62,6 @@ jobs:
             cd ..
             done
 
-      - name: Add tags for upstream crates
-        run: |
-          git config --global user.name 'MidnightCI'
-          git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          projects=("coin-structure" "base-crypto" "serialize" "storage" "transient-crypto")
-          for project in "${projects[@]}"; do
-            VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            VERSION=${!VAR_NAME}
-            TAG_NAME="${project}-${VERSION}"
-
-            # Check if the long version tag exists on the remote
-            if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-              echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ${project}."
-              continue
-            fi
-
-            # Create and push the new tag
-            git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
-          done
-
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
