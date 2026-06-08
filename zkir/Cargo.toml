@@ -36,8 +36,7 @@ midnight-zk-stdlib = { version = "^2.0.0" }
 transient-crypto-old = { package = "midnight-transient-crypto", version = "=2.0.1" }
 midnight-zk-stdlib-v1 = { package = "midnight-zk-stdlib", version = "^1.0.0" }
 midnight-proofs-v1 = { package = "midnight-proofs", version = "^0.7.0" }
-zkir-old = { package = "midnight-zkir", version = "=2.1.0" }
-serialize-old = { package = "midnight-serialize", version = "=1.0.0" }
+zkir-old = { package = "zkir", git = "https://github.com/midnightntwrk/midnight-ledger", tag = "crate-zkir-2.1.0" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"
