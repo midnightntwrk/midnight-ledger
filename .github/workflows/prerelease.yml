@@ -82,8 +82,14 @@ jobs:
           NPMJS_REG="https://registry.npmjs.org/"
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Append to the file npm actually reads: setup-node points npm at
+          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
+          # npm expands ${NPM_TOKEN} from the env when it reads the file.
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -149,8 +155,14 @@ jobs:
           NPMJS_REG="https://registry.npmjs.org/"
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Append to the file npm actually reads: setup-node points npm at
+          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
+          # npm expands ${NPM_TOKEN} from the env when it reads the file.
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -218,8 +230,14 @@ jobs:
           NPMJS_REG="https://registry.npmjs.org/"
 
           # Authenticate npmjs (GH Packages auth is configured by setup-node).
-          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at .npmrc read time
-          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> ~/.npmrc
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Append to the file npm actually reads: setup-node points npm at
+          # $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc would be ignored.
+          # npm expands ${NPM_TOKEN} from the env when it reads the file.
+          # shellcheck disable=SC2016  # ${NPM_TOKEN} expanded by npm at read time
+          echo '//registry.npmjs.org/:_authToken=${NPM_TOKEN}' >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
