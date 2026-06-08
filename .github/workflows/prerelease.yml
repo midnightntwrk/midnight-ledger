@@ -92,8 +92,6 @@ jobs:
           # against setup-node's npmrc lacking a trailing newline, which would
           # otherwise concatenate this onto its last line and corrupt both.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          echo "npmrc (tokens redacted):"
-          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -169,8 +167,6 @@ jobs:
           # against setup-node's npmrc lacking a trailing newline, which would
           # otherwise concatenate this onto its last line and corrupt both.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          echo "npmrc (tokens redacted):"
-          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
@@ -248,8 +244,6 @@ jobs:
           # against setup-node's npmrc lacking a trailing newline, which would
           # otherwise concatenate this onto its last line and corrupt both.
           printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
-          echo "npmrc (tokens redacted):"
-          sed -E 's/(_authToken=).*/\1[REDACTED]/' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}" || true
 
           # Build only if the version is missing from at least one target registry
           # (or FORCE is set). The "--<scope>:registry" override is required: for
