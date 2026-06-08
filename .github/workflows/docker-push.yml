@@ -12,10 +12,6 @@ on:
         required: true
       DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
         required: true
-      DOCKERHUB_MIDNIGHTNTWRK_USER:
-        required: true
-      DOCKERHUB_MIDNIGHTNTWRK_TOKEN:
-        required: true
 
 jobs:
   docker-amd64:
