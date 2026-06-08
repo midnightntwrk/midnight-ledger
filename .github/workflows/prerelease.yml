@@ -186,7 +186,8 @@ jobs:
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ZKIR_VERSION")
+          # Use wasm version, as this will include pre-release tags
+          VAR_NAME=$(echo "ZKIR_WASM_VERSION")
           VERSION=${!VAR_NAME}
           TAG_NAME="zkir-${VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
