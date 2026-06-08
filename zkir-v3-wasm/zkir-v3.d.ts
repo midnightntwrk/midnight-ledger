@@ -1,3 +1,4 @@
+import type { AlignedValue, Op } from '@midnight-ntwrk/onchain-runtime-v3';
 
 export type ProvingProvider = {
   check(
@@ -36,6 +37,14 @@ export function check(
 export function provingProvider(kmProvider: KeyMaterialProvider): ProvingProvider;
 
 export function jsonIrToBinary(json: String): Uint8Array;
+
+export function proofDataIntoSerializedPreimage(
+    input: AlignedValue,
+    output: AlignedValue,
+    public_transcript: Op<AlignedValue>[],
+    private_transcript_outputs: AlignedValue[],
+    key_location?: string,
+): Uint8Array;
 
 export class Zkir {
   static fromJson(json: string): Zkir;

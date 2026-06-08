@@ -19,7 +19,8 @@ use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
 use num_traits::Num;
-use transient_crypto::curve::Fr;
+use transient_crypto::curve::{FR_BYTES_STORED, Fr};
+use transient_crypto::repr::bytes_from_field_repr;
 
 use crate::{
     ir_instructions::F,
@@ -58,6 +59,38 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
                 "Expected exactly one value for JubjubScalar decoding",
             )),
         },
+        IrType::Opaque => {
+            // Canonical encoding: [byte_len, fr_0, ..., fr_{N-1}] where
+            // N = ceil(byte_len / FR_BYTES_STORED). Inverse of
+            // encode_offcircuit's Opaque arm.
+            if encoded.is_empty() {
+                return Err(anyhow::Error::msg(
+                    "Opaque decoding requires at least one Fr (the byte_len prefix)",
+                ));
+            }
+            let byte_len = u32::try_from(encoded[0])
+                .map_err(|_| anyhow::Error::msg("Opaque byte_len out of u32 range"))?
+                as usize;
+            let n_frs = byte_len.div_ceil(FR_BYTES_STORED);
+            if encoded.len() != 1 + n_frs {
+                return Err(anyhow::Error::msg(format!(
+                    "Opaque expected {} Frs total ({} for byte_len + {} for preimage), got {}",
+                    1 + n_frs,
+                    1,
+                    n_frs,
+                    encoded.len()
+                )));
+            }
+            // `bytes_from_field_repr` advances the cursor; pass a mutable
+            // reference to a slice over the preimage Frs.
+            let mut cursor = &encoded[1..];
+            let bytes = bytes_from_field_repr(&mut cursor, byte_len)
+                .ok_or_else(|| anyhow::Error::msg("Opaque preimage Frs malformed"))?;
+            if !cursor.is_empty() {
+                return Err(anyhow::Error::msg("Opaque preimage Frs not fully consumed"));
+            }
+            Ok(IrValue::opaque(bytes))
+        }
     }
 }
 
@@ -126,6 +159,17 @@ pub fn decode_incircuit(
                 "Expected exactly one value for JubjubScalar decoding".into(),
             )),
         },
+        IrType::Opaque => {
+            // In-circuit Opaque decoding is not implemented. No current call site needs this —
+            // Compact's emission doesn't use the `Decode` instruction on Opaque-typed values,
+            // we fail loudly until a downstream user actually requires it.
+            let _ = encoded;
+            Err(plonk::Error::Synthesis(
+                "decode_incircuit: IrType::Opaque is not implemented; \
+                 no current call site needs in-circuit Opaque decoding."
+                    .into(),
+            ))
+        }
     }
 }
 
