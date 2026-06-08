@@ -22,7 +22,7 @@ layout-v2 = ["layout-v1"]
 gc-v1 = ["layout-v2"]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { version = "1.1.0-rc.1", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 parity-db = { version = "0.5.2", optional = true }
 

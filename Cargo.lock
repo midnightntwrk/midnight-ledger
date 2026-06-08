@@ -2851,7 +2851,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-base-crypto"
-version = "1.1.0"
+version = "1.1.0-rc.1"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -2896,9 +2896,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-circuits"
-version = "6.1.0"
+version = "6.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "600f93b06229da9f000d5cb7649ef2d8e3f8058f2eae640b15a3a1d6dd29313b"
+checksum = "704fd24d6cd9f348945dded9bf6c8ebc3d302be605b93a4ce80893a85cd17de2"
 dependencies = [
  "base64 0.13.1",
  "blake2b_halo2",
@@ -2919,7 +2919,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-coin-structure"
-version = "2.1.0"
+version = "2.1.0-rc.1"
 dependencies = [
  "fake",
  "lazy_static",
@@ -2973,7 +2973,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-v9"
-version = "0.1.0"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "criterion",
@@ -3018,7 +3018,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm-v9"
-version = "0.1.0-alpha.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3047,7 +3047,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime"
-version = "4.0.0"
+version = "4.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
@@ -3078,7 +3078,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "4.0.0-alpha.1"
+version = "4.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3099,7 +3099,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-state"
-version = "4.0.0"
+version = "4.0.0-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -3120,7 +3120,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-vm"
-version = "4.0.0"
+version = "4.0.0-rc.1"
 dependencies = [
  "derive-where",
  "fake",
@@ -3144,7 +3144,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.0-alpha.1"
+version = "9.0.0-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3355,9 +3355,9 @@ dependencies = [
 
 [[package]]
 name = "midnight-zk-stdlib"
-version = "1.1.0"
+version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6171970a8cab445b0b81f2149ec57a7684c934be6e38d6cdbeda0845770a5b8"
+checksum = "0bc88011d4ddf888e98f27d7aa3d787a6832c5146575a6994323a1d23a7059cc"
 dependencies = [
  "base64 0.13.1",
  "bincode 2.0.1",
@@ -3497,7 +3497,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zswap"
-version = "9.0.0"
+version = "9.0.0-rc.1"
 dependencies = [
  "criterion",
  "derive-where",
