@@ -22,6 +22,9 @@ use crate::ir_instructions::encode::{
     encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
+use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
+use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
@@ -330,14 +333,19 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::Mul { a, b, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let b: Fr = resolve_operand(&memory, b)?.try_into()?;
-                    let result = IrValue::Native(a * b);
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = mul_offcircuit(&a, &b)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Neg { a, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let result = IrValue::Native(-a);
+                    let a = resolve_operand(&memory, a)?;
+                    let result = neg_offcircuit(&a)?;
+                    memory.insert(output.clone(), result);
+                }
+                I::Inv { a, output } => {
+                    let a = resolve_operand(&memory, a)?;
+                    let result = inv_offcircuit(&a)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Not { a, output } => {
@@ -928,15 +936,17 @@ impl Relation for IrSource {
                 I::Mul { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let result = CircuitValue::Native(std.mul(layouter, &a, &b, None)?);
+                    let result = mul_incircuit(std, layouter, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let result = CircuitValue::Native(std.neg(layouter, &a)?);
+                    let result = neg_incircuit(std, layouter, &a_val)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::Inv { a, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let result = inv_incircuit(std, layouter, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {

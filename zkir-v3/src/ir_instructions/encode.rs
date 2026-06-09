@@ -73,12 +73,11 @@ pub fn encode_incircuit(
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
         CircuitValue::JubjubScalar(s) => {
             // Jubjub::Scalar::NUM_BITS is incorrectly set to 255 (instead of 252)
-            // in midnight-curves v0.2.0. Consequently, Jubjub scalars are encoded
+            // in midnight-curves v0.2.0. Consequently, Jubjub scalars may be encoded
             // unnecessarily as 2 native field values instead of one.
             // We return the first only and make sure the rest (supposedly one more)
             // are zero.
             let encoded = std_lib.jubjub().as_public_input(layouter, s)?;
-            debug_assert_eq!(encoded.len(), 2);
             for x in encoded[1..].iter() {
                 std_lib.assert_zero(layouter, x)?;
             }

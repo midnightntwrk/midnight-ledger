@@ -572,7 +572,11 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Multiplies `a` and `b` in the prime field.
+    /// Multiplies `a` and `b`.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `a * b`
     Mul {
@@ -583,11 +587,30 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Negates `a` in the prime field.
+    /// Negates `a`.
+    /// Supported on types:
+    ///  - Native
+    ///  - JubjubPoint
+    ///  - Secp256k1Point
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
     ///
     /// One output `-a`
     Neg {
         /// The value to negate
+        a: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Inverts `a`, results in an error if `a` is zero.
+    /// Supported on types:
+    ///  - Native
+    ///  - Secp256k1Base
+    ///  - Secp256k1Scalar
+    ///
+    /// One output `a^(-1)`
+    Inv {
+        /// The value to invert
         a: Operand,
         /// The output variable name
         output: Identifier,

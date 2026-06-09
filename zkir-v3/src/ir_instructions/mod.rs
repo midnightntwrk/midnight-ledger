@@ -22,4 +22,7 @@ pub mod decode;
 pub mod ec_mul;
 pub mod encode;
 pub mod eq;
+pub mod inv;
+pub mod mul;
+pub mod neg;
 pub mod select;
