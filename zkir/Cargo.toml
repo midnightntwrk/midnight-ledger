@@ -24,7 +24,7 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
