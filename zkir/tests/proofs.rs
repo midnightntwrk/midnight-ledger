@@ -13,7 +13,8 @@
 
 #[cfg(test)]
 mod proof_tests {
-    use midnight_zkir::{IrSource, IrMinorVersion, Preprocessed};
+    use midnight_zkir::ir_v1::{v1_prove, v1_verify};
+    use midnight_zkir::{IrMinorVersion, IrSource, Preprocessed};
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
@@ -27,10 +28,9 @@ mod proof_tests {
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::Proof;
     use transient_crypto::proofs::{
-        KeyLocation, ParamsProver, ParamsProverProvider, ProofPreimage,
-        ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
+        KeyLocation, ParamsProver, ParamsProverProvider, ProofPreimage, ProvingKeyMaterial,
+        Resolver, VerifierKey, Zkir,
     };
-    use midnight_zkir::ir_v1::{v1_prove, v1_verify};
     use transient_crypto::repr::FieldRepr;
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
@@ -100,8 +100,7 @@ mod proof_tests {
             )
             .await;
         // Either proving should have failed, or verification should fail:
-        let verify =
-            proof.and_then(|proof| v1_verify(&vk, &proof, (0..N).map(Into::into)));
+        let verify = proof.and_then(|proof| v1_verify(&vk, &proof, (0..N).map(Into::into)));
         assert!(verify.is_err());
     }
 
@@ -138,23 +137,19 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
-            .unwrap();
-        assert!(
-            v1_verify(&vk, &proof, [43.into()].into_iter())
-                .is_err()
-        );
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
+        assert!(v1_verify(&vk, &proof, [43.into()].into_iter()).is_err());
     }
 
     #[actix_rt::test]
@@ -188,19 +183,18 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
-            .unwrap();
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -237,19 +231,18 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into(), x].into_iter())
-            .unwrap();
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into(), x].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -285,19 +278,18 @@ mod proof_tests {
                 key_location: KeyLocation(Cow::Borrowed("builtin")),
             };
             let proof = v1_prove(
-                    &preimage,
-                    &mut ChaCha20Rng::from_seed([42; 32]),
-                    &TestParams,
-                    &TestResolver {
-                        pk: pk.clone(),
-                        vk: vk.clone(),
-                        ir: ir.clone(),
-                    },
-                )
-                .await
-                .unwrap();
-            v1_verify(&vk, &proof, [42.into()].into_iter())
-                .unwrap();
+                &preimage,
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+            v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
         }
     }
 
@@ -332,19 +324,18 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
-            .unwrap();
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -389,19 +380,18 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
-            .unwrap();
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
@@ -443,19 +433,18 @@ mod proof_tests {
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
         let proof = v1_prove(
-                &preimage,
-                &mut ChaCha20Rng::from_seed([42; 32]),
-                &TestParams,
-                &TestResolver {
-                    pk: pk.clone(),
-                    vk: vk.clone(),
-                    ir: ir.clone(),
-                },
-            )
-            .await
-            .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
-            .unwrap();
+            &preimage,
+            &mut ChaCha20Rng::from_seed([42; 32]),
+            &TestParams,
+            &TestResolver {
+                pk: pk.clone(),
+                vk: vk.clone(),
+                ir: ir.clone(),
+            },
+        )
+        .await
+        .unwrap();
+        v1_verify(&vk, &proof, [42.into()].into_iter()).unwrap();
     }
 
     #[actix_rt::test]
