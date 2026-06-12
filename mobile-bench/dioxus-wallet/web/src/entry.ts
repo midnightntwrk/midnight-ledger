@@ -73,6 +73,37 @@ declare global {
        *  deserialise, balance, prove, and submit. */
       prepareUnprovenCallTx(params: PrepareUnprovenCallTxParams):
         Promise<PrepareUnprovenCallTxResult>;
+      /** Passport-vault analogue of `prepareUnprovenCallTx`. Builds an
+       *  unproven `depositFunds` / `claimFunds` (etc.) call tx for the
+       *  passport-vault contract; the Rust side balances/proves/submits
+       *  via the identical downstream pipeline. */
+      prepareVaultCallTx(params: PrepareVaultCallTxParams):
+        Promise<PrepareVaultCallTxResult>;
+      /** High-level passport-vault claim compose: deserialise the
+       *  credential bundle, read the on-chain policy, build the
+       *  selective-disclosure presentation + age proof, and compose
+       *  `claimFunds`. Returns the unproven tx for Rust to
+       *  balance/prove/submit. */
+      prepareVaultClaim(params: PrepareVaultClaimParams):
+        Promise<PrepareVaultCallTxResult>;
+      /** Decode the passport-vault contract's ledger fields from a
+       *  serialised `ContractState` hex (as returned by the indexer).
+       *  Used by the wallet's `vaultTotalLocked` bridge verb to show the
+       *  live locked total in the embedded dApp without a Compact
+       *  runtime in the browser. `totalLockedBaseUnits` is the current
+       *  escrow value (`escrowVault.value` when `hasDeposit`, else 0);
+       *  `totalDepositedBaseUnits` is the cumulative lifetime deposit. */
+      readVaultLedger(params: { contractStateHex: string }): Promise<{
+        totalLockedBaseUnits: string;
+        totalDepositedBaseUnits: string;
+        hasDeposit: boolean;
+      }>;
+      /** Enumerate the multi-lock vault's `locks` map + `lockCount` for
+       *  the dApp's lock list + claim selector. */
+      readVaultLocks(params: { contractStateHex: string }): Promise<{
+        lockCount: string;
+        locks: Array<Record<string, unknown>>;
+      }>;
       /** WebView-based QR scanner. Opens a full-viewport overlay with
        *  a back-facing camera preview, runs jsQR on every animation
        *  frame, resolves with `{ url }` on the first decode. Cancel
@@ -96,14 +127,19 @@ declare global {
        *  and returns the structured JSON fields (issuer DID contract
        *  address, holder binding, schema, issuedAt, etc.). */
       decodeDigitalPassportCredential(params: {
-        encoded: { encoding: string; payload: string };
-      }): Promise<{ issuerDid: string; credential: Record<string, unknown> }>;
+        encoded?: { encoding: string; payload: string };
+        encoding?: string;
+        payload?: string;
+        network?: string;
+      }): Promise<{ credential: Record<string, unknown>; issuerDid: string }>;
       /** Decode a Compact-value-encoded digital-passport proof.
        *  Takes an `EncodedCompactValue` object `{ encoding, payload }`
        *  and returns the structured JSON fields
        *  (signerVerificationMethodRef, publicKey, signature, etc.). */
       decodeDigitalPassportProof(params: {
-        encoded: { encoding: string; payload: string };
+        encoded?: { encoding: string; payload: string };
+        encoding?: string;
+        payload?: string;
       }): Promise<{ proof: Record<string, unknown> }>;
       /** Verify a digital-passport issuance proof against a credential.
        *  Decodes both compact values, computes the credential body root,
@@ -697,22 +733,54 @@ function bigIntSafeEntry(value: unknown): unknown {
  * holder binding, schema, issuedAt, etc.).
  */
 async function decodeDigitalPassportCredential(params: {
-  encoded: { encoding: string; payload: string };
-}): Promise<{ issuerDid: string; credential: Record<string, unknown> }> {
+  encoded?: { encoding: string; payload: string };
+  encoding?: string;
+  payload?: string;
+  network?: string;
+}): Promise<{ credential: Record<string, unknown>; issuerDid: string }> {
   const dpCred = await import(
     "@midnight-ntwrk/midnight-did-credentials-digital-passport"
   );
-  const credential = dpCred.decodeDigitalPassportCredential(params.encoded);
-  // Extract issuer DID from the decoded credential's
-  // issuerVerificationMethodRef.didContractAddress.bytes
-  const didBytes = credential.issuerVerificationMethodRef.didContractAddress.bytes;
-  const didHex = Array.from(didBytes, (b: number) => b.toString(16).padStart(2, "0")).join("");
-  const network = window.MIDNIGHT_NETWORK ?? "undeployed";
-  const issuerDid = `did:midnight:${network.toLowerCase()}:${didHex}`;
-  return {
-    issuerDid,
-    credential: bigIntSafeEntry(credential) as Record<string, unknown>,
-  };
+  const encoded = normaliseEncodedCompactValue(params);
+  const credential = dpCred.decodeDigitalPassportCredential(encoded);
+  const safe = bigIntSafeEntry(credential) as Record<string, any>;
+  // Derive the issuer DID string (VC-store metadata) from the issuer
+  // verification-method ref's contract address + the caller-supplied
+  // network tag. The on-chain claim trusts the issuer KEY (not this
+  // string), so a missing network only affects display.
+  const addrHex = String(
+    (safe?.issuerVerificationMethodRef as any)?.didContractAddress?.bytes ?? "",
+  ).replace(/^0x/, "");
+  const net = params.network ?? "undeployed";
+  const issuerDid = addrHex
+    ? `did:midnight:${net}:${addrHex}`
+    : "did:midnight:unknown";
+  return { credential: safe, issuerDid };
+}
+
+/** Normalise the various shapes callers pass for a Compact-value blob into
+ *  the `{ encoding, payload }` the digital-passport codec expects:
+ *  `{ encoded: {encoding,payload} }` | `{ encoding, payload }` | `{ payload }`. */
+function normaliseEncodedCompactValue(params: {
+  encoded?: { encoding: string; payload: string };
+  encoding?: string;
+  payload?: string;
+}): { encoding: string; payload: string } {
+  if (params.encoded && typeof params.encoded.payload === "string") {
+    return {
+      encoding: params.encoded.encoding ?? "compact-value-v1.base64url",
+      payload: params.encoded.payload,
+    };
+  }
+  if (typeof params.payload === "string") {
+    return {
+      encoding: params.encoding ?? "compact-value-v1.base64url",
+      payload: params.payload,
+    };
+  }
+  throw new Error(
+    "decodeDigitalPassportCredential: expected { encoded: { encoding, payload } } or { payload }",
+  );
 }
 
 /**
@@ -722,12 +790,16 @@ async function decodeDigitalPassportCredential(params: {
  * publicKey, signature, etc.).
  */
 async function decodeDigitalPassportProof(params: {
-  encoded: { encoding: string; payload: string };
+  encoded?: { encoding: string; payload: string };
+  encoding?: string;
+  payload?: string;
 }): Promise<{ proof: Record<string, unknown> }> {
   const dpCred = await import(
     "@midnight-ntwrk/midnight-did-credentials-digital-passport"
   );
-  const proof = dpCred.decodeDigitalPassportProof(params.encoded);
+  const proof = dpCred.decodeDigitalPassportProof(
+    normaliseEncodedCompactValue(params),
+  );
   return { proof: bigIntSafeEntry(proof) as Record<string, unknown> };
 }
 
@@ -762,6 +834,560 @@ async function verifyDigitalPassportIssuanceProof(params: {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────
+// Passport-vault contract compose layer.
+//
+// Generalises the DID-specific `prepareUnprovenCallTx` above to the
+// passport-vault contract so the wallet can build `depositFunds`
+// (lock) and `claimFunds` (unlock) call transactions in-WebView, then
+// hand the unproven tx to Rust for balance -> prove -> submit (the
+// same downstream pipeline `Wallet::call_did_circuit` already uses).
+//
+// The deposit shielded coin and the claim selective-disclosure
+// presentation are built by the caller (Rust / the dApp relay) and
+// passed in `circuitArgs`, encoded with `{ $bigint }` /
+// `{ $bytes: "<hex>" }` markers (see `reviveVaultValue`).
+// ───────────────────────────────────────────────────────────────────
+
+/** Params for `prepareVaultCallTx`. */
+export interface PrepareVaultCallTxParams {
+  /** Circuit id, e.g. "depositFunds" | "claimFunds" | "adminWithdraw". */
+  circuit: string;
+  circuitArgs: unknown[];
+  contractStateHex: string;
+  contractAddressHex: string;
+  zswapChainStateHex?: string | null;
+  ledgerParametersHex?: string | null;
+  coinPublicKeyHex: string;
+  encryptionPublicKeyHex: string;
+  networkId: string;
+  /** Private-state fields the circuit's witnesses read. `claimFunds`
+   *  supplies the holder date-of-birth witness; deposit uses the empty
+   *  state. Bytes use `{ $bytes }`, bigints `{ $bigint }`. */
+  privateState?: Record<string, unknown> | null;
+}
+
+export type PrepareVaultCallTxResult = PrepareUnprovenCallTxResult;
+
+/** Revive `{ $bigint: "<dec>" }` and `{ $bytes: "<hex>" }` markers into
+ *  JS `bigint` / `Uint8Array`. Generalises `reviveBigints` for the
+ *  richer passport-vault arg shapes (shielded coin, credential,
+ *  presentation, recipient). */
+function reviveVaultValue(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(reviveVaultValue);
+  const obj = value as Record<string, unknown>;
+  if (typeof obj.$bigint === "string") return BigInt(obj.$bigint);
+  if (typeof obj.$bytes === "string") return hexToBytes(obj.$bytes);
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) out[k] = reviveVaultValue(v);
+  return out;
+}
+
+let vaultContractLayerPromise: Promise<{
+  contractMod: Record<string, unknown>;
+  witnessesMod: Record<string, unknown>;
+  compactRuntime: typeof import("@midnight-ntwrk/compact-runtime");
+}> | null = null;
+
+function loadVaultContractLayer() {
+  if (!vaultContractLayerPromise) {
+    vaultContractLayerPromise = (async () => {
+      const [contractMod, witnessesMod, compactRuntime] = await Promise.all([
+        import(
+          "@input-output-hk/passport-vault-contract/managed/passport-vault/contract/index.js" as string
+        ),
+        import("@input-output-hk/passport-vault-contract/witnesses.js" as string),
+        import("@midnight-ntwrk/compact-runtime"),
+      ]);
+      return { contractMod, witnessesMod, compactRuntime };
+    })();
+  }
+  return vaultContractLayerPromise;
+}
+
+async function prepareVaultCallTx(
+  params: PrepareVaultCallTxParams,
+): Promise<PrepareVaultCallTxResult> {
+  const t0 = Date.now();
+  const { contractMod, witnessesMod, compactRuntime: cr } =
+    await loadVaultContractLayer();
+  const ledgerV8 = await import("@midnight-ntwrk/ledger-v8");
+  const compactJs = await import("@midnight-ntwrk/compact-js");
+
+  setNetworkId(
+    (params.networkId ?? "undeployed") as Parameters<typeof setNetworkId>[0],
+  );
+
+  const compiledContract = (compactJs as any).CompiledContract.make(
+    "passport-vault",
+    (contractMod as any).Contract,
+  ).pipe(
+    (compactJs as any).CompiledContract.withWitnesses(
+      (witnessesMod as any).witnesses,
+    ),
+    (compactJs as any).CompiledContract.withCompiledFileAssets("passport-vault"),
+  );
+
+  const zkConfigProvider = new WebViewZkConfigProvider(
+    pkgBaseUrlFor("passport-vault-contract/dist/managed/passport-vault"),
+  );
+
+  const contractState = (cr as any).ContractState.deserialize(
+    hexToBytes(params.contractStateHex),
+  );
+  let zswapChainState: unknown;
+  if (params.zswapChainStateHex) {
+    zswapChainState = (ledgerV8 as any).ZswapChainState.deserialize(
+      hexToBytes(params.zswapChainStateHex),
+    );
+  } else {
+    zswapChainState = new (ledgerV8 as any).ZswapChainState();
+  }
+  let ledgerParameters: unknown;
+  if (params.ledgerParametersHex) {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.deserialize(
+      hexToBytes(params.ledgerParametersHex),
+    );
+  } else {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.initialParameters();
+  }
+
+  const args = Array.isArray(params.circuitArgs)
+    ? (reviveVaultValue(params.circuitArgs) as unknown[])
+    : [];
+
+  // Deposit uses the empty private state; claim supplies the holder
+  // date-of-birth witness via `privateState`.
+  const initialPrivateState =
+    params.privateState != null
+      ? (reviveVaultValue(params.privateState) as Record<string, unknown>)
+      : (witnessesMod as any).emptyPassportVaultPrivateState();
+
+  let callTxData;
+  try {
+    callTxData = await (createUnprovenCallTxFromInitialStates as any)(
+      zkConfigProvider,
+      {
+        compiledContract,
+        circuitId: params.circuit,
+        contractAddress: params.contractAddressHex,
+        args,
+        coinPublicKey: params.coinPublicKeyHex,
+        initialContractState: contractState,
+        initialZswapChainState: zswapChainState,
+        ledgerParameters,
+        initialPrivateState,
+      },
+      params.encryptionPublicKeyHex,
+    );
+  } catch (e) {
+    const err = e instanceof Error ? e : new Error(String(e));
+    try {
+      await window.midnightWallet.bundleError({
+        kind: "prepareVaultCallTxFailed",
+        message: `${err.name}: ${err.message} (circuit=${params.circuit}, args=${args.length})`,
+        stack: err.stack || "",
+      });
+    } catch (_) {}
+    throw err;
+  }
+
+  const unprovenBytes: Uint8Array = callTxData.private.unprovenTx.serialize();
+  return {
+    circuit: params.circuit,
+    unprovenTxHex: bytesToHex(unprovenBytes),
+    unprovenTxBytes: unprovenBytes.length,
+    elapsedMs: Date.now() - t0,
+  };
+}
+
+/** Params for `prepareVaultClaim` — the high-level claim compose that
+ *  builds the digital-passport presentation in-WebView from a credential
+ *  bundle, then composes `claimFunds`. */
+export interface PrepareVaultClaimParams {
+  /** Which lock to claim from. Decimal string (Uint<64>). */
+  lockId: string;
+  /** The v3 credential bundle JSON assembled by the wallet from its
+   *  stored digital-passport credential (`assemble_credential_bundle`
+   *  in `bridge.rs`): `credential` + `credentialProof` (compact-value
+   *  encoded) + `privateParts` (claim values + openings). The holder
+   *  presentation key is derived in-WebView from the credential, not
+   *  carried in the bundle (explicit-DID holder binding). */
+  bundle: Record<string, any>;
+  contractStateHex: string;
+  contractAddressHex: string;
+  zswapChainStateHex?: string | null;
+  ledgerParametersHex?: string | null;
+  coinPublicKeyHex: string;
+  encryptionPublicKeyHex: string;
+  /** Recipient of the released UNSHIELDED NIGHT: the running wallet's
+   *  unshielded `UserAddress` as raw 32-byte payload hex. */
+  recipientUserAddressHex: string;
+  networkId: string;
+  /** Requested claim amount in base units (decimal string). */
+  amountBaseUnits: string;
+  /** Caller-supplied "current day" (days since epoch). Defaults to today. */
+  currentDay?: string;
+}
+
+/**
+ * Claim compose: this is what a wallet does at claim time. Deserialise
+ * the holder's credential bundle, read the vault's on-chain policy,
+ * build a digital-passport presentation that discloses exactly what the
+ * policy requires + proves the age predicate, sign it with the holder
+ * key, then compose the `claimFunds` call. Returns the unproven tx hex
+ * for the Rust side to balance/prove/submit. Ports the runner's
+ * `presentation.ts` + `credential-bundle.ts` + `claim-funds.ts` logic
+ * into the WebView so no browser dApp needs the Compact runtime.
+ */
+async function prepareVaultClaim(
+  params: PrepareVaultClaimParams,
+): Promise<PrepareVaultCallTxResult> {
+  const t0 = Date.now();
+  // NOTE: we deliberately do NOT import the bare
+  // `@input-output-hk/passport-vault-contract` entry. Its `index.js`
+  // re-exports `fixtures.js` + `simulator.js`, which pull Node built-ins
+  // (`node:crypto`, `node:util`, `node:buffer`) the WebView's native ESM
+  // loader can't resolve — that surfaces as "Importing a module script
+  // failed". The claim only needs the compiled circuits (`contract.js`)
+  // and `witnesses.js`; the single fixture helper we use
+  // (`signPassportProof`) is inlined below.
+  const [pvContractMod, pvWitnessesMod, dp, cr, compactJs, ledgerV8] =
+    await Promise.all([
+      import("@input-output-hk/passport-vault-contract/contract.js" as string),
+      import("@input-output-hk/passport-vault-contract/witnesses.js" as string),
+      import("@midnight-ntwrk/midnight-did-credentials-digital-passport"),
+      import("@midnight-ntwrk/compact-runtime"),
+      import("@midnight-ntwrk/compact-js"),
+      import("@midnight-ntwrk/ledger-v8"),
+    ]);
+  setNetworkId(
+    (params.networkId ?? "undeployed") as Parameters<typeof setNetworkId>[0],
+  );
+
+  // 1. Deserialise the bundle (port of credential-bundle.ts).
+  const b = params.bundle as any;
+  if (b?.version !== 3) {
+    throw new Error(
+      `unsupported credential bundle version ${b?.version}; re-issue with the current runner`,
+    );
+  }
+  const credential = (dp as any).decodeDigitalPassportCredential(b.credential);
+  const credentialProof = (dp as any).decodeDigitalPassportProof(b.credentialProof);
+  const cv = b.privateParts.claimValues;
+  const op = b.privateParts.openings;
+  const claimValues = {
+    firstNameValuePadded: hexToBytes(cv.firstNameValuePaddedHex),
+    lastNameValuePadded: hexToBytes(cv.lastNameValuePaddedHex),
+    dateOfBirthDays: BigInt(cv.dateOfBirthDays),
+    documentNumberValue: hexToBytes(cv.documentNumberValueHex),
+    issuingStateValue: hexToBytes(cv.issuingStateValueHex),
+  };
+  const openings = {
+    firstNameOpening: hexToBytes(op.firstNameOpeningHex),
+    lastNameOpening: hexToBytes(op.lastNameOpeningHex),
+    dateOfBirthOpening: hexToBytes(op.dateOfBirthOpeningHex),
+    documentNumberOpening: hexToBytes(op.documentNumberOpeningHex),
+    issuingStateOpening: hexToBytes(op.issuingStateOpeningHex),
+  };
+  // Holder presentation key. digital-passport uses explicit-DID holder
+  // binding (no committed holder key on-chain), so the presentation only
+  // needs a self-consistent Schnorr keypair whose signerVerificationMethodRef
+  // matches the credential's holder binding — the redeem capability is
+  // possession of the credential + openings, not this key. Derive a stable
+  // scalar from the credential so the same credential always presents the
+  // same key, and pull the ref straight from the decoded credential.
+  const JUBJUB_SUBGROUP_ORDER =
+    6554484396890773809930967563523245729705921265872317281365359162392183254199n;
+  let holderScalar =
+    BigInt("0x" + bytesToHex(credential.claimRoot)) % JUBJUB_SUBGROUP_ORDER;
+  if (holderScalar === 0n) holderScalar = 1n;
+  const holderSigner = {
+    label: "holder",
+    secretKey: holderScalar,
+    publicKey: (cr as any).ecMulGenerator(holderScalar),
+    verificationMethodRef: credential.holderBinding.holderVerificationMethodRef,
+  };
+
+  // 2. Read the chosen lock's on-chain policy, build the request.
+  const lockIdBig = BigInt(params.lockId);
+  const contractState = (cr as any).ContractState.deserialize(
+    hexToBytes(params.contractStateHex),
+  );
+  const view = (pvContractMod as any).ledger((contractState as any).data);
+  if (!view.locks.member(lockIdBig)) {
+    throw new Error(`lock ${params.lockId} does not exist on this vault`);
+  }
+  const lock = view.locks.lookup(lockIdBig);
+  const request = (pvContractMod as any).pureCircuits.passportPolicyRequestFor(
+    view.trustedIssuer,
+    lock.verifierChallengeHash,
+    lock.requireIssuingState,
+    lock.requireDocumentNumber,
+    lock.minimumAgeYears,
+  );
+
+  // 3. Build the selective-disclosure presentation + proof (port of
+  //    presentation.ts::buildPassportPresentation).
+  const ZERO_32 = new Uint8Array(32);
+  const ZERO_64 = new Uint8Array(64);
+  const presentation = {
+    version: 1n,
+    schema: credential.schema,
+    credentialClaimRoot: credential.claimRoot,
+    issuerVerificationMethodRef: credential.issuerVerificationMethodRef,
+    holderBinding: credential.holderBinding,
+    disclosed: {
+      revealFirstName: request.requireFirstNameDisclosure,
+      firstNameValuePadded: request.requireFirstNameDisclosure
+        ? claimValues.firstNameValuePadded
+        : ZERO_64,
+      firstNameOpening: request.requireFirstNameDisclosure
+        ? openings.firstNameOpening
+        : ZERO_32,
+      revealLastName: request.requireLastNameDisclosure,
+      lastNameValuePadded: request.requireLastNameDisclosure
+        ? claimValues.lastNameValuePadded
+        : ZERO_64,
+      lastNameOpening: request.requireLastNameDisclosure
+        ? openings.lastNameOpening
+        : ZERO_32,
+      // Follow the lock's policy: only prove the age predicate when the lock
+      // actually requires it (minAge > 0 → requireAgeOverThreshold). A zero
+      // threshold with the predicate on is rejected by the credential library.
+      proveAgeOverThreshold: request.requireAgeOverThreshold,
+      ageThresholdYears: request.requestedAgeThresholdYears,
+      revealDocumentNumber: request.requireDocumentNumberDisclosure,
+      documentNumberValue: request.requireDocumentNumberDisclosure
+        ? claimValues.documentNumberValue
+        : ZERO_32,
+      documentNumberOpening: request.requireDocumentNumberDisclosure
+        ? openings.documentNumberOpening
+        : ZERO_32,
+      revealIssuingState: request.requireIssuingStateDisclosure,
+      issuingStateValue: request.requireIssuingStateDisclosure
+        ? claimValues.issuingStateValue
+        : ZERO_32,
+      issuingStateOpening: request.requireIssuingStateDisclosure
+        ? openings.issuingStateOpening
+        : ZERO_32,
+    },
+  };
+  // Inline port of passport-vault-contract `fixtures.ts::signPassportProof`
+  // (presentation context) so the claim path doesn't need the vault
+  // package's bare `index.js` (see the import note above). Same raw-Schnorr
+  // recipe: build a partial proof with s=0, derive the presentation
+  // challenge over the body root, then finalise
+  // s = nonce + challenge * holderSecret (mod subgroup order). Both the
+  // body root and the challenge use the bundled `dp.pureCircuits`, so they
+  // are computed against one consistent digital-passport build.
+  const presentationBodyRoot = (dp as any).pureCircuits.digitalPassportPresentationBodyRoot(
+    presentation,
+  );
+  const presentationNonce = 17n;
+  const partialPresentationProof = {
+    signerVerificationMethodRef: holderSigner.verificationMethodRef,
+    createdAt: BigInt(Math.floor(Date.now() / 1000)),
+    challengeHash: request.verifierChallengeHash,
+    publicKey: holderSigner.publicKey,
+    signature: { r: (cr as any).ecMulGenerator(presentationNonce), s: 0n },
+  };
+  const presentationChallenge = (dp as any).pureCircuits.presentationProofChallenge(
+    presentationBodyRoot,
+    partialPresentationProof,
+  );
+  let presentationS =
+    (presentationNonce + presentationChallenge * holderSigner.secretKey) %
+    JUBJUB_SUBGROUP_ORDER;
+  if (presentationS < 0n) presentationS += JUBJUB_SUBGROUP_ORDER;
+  const presentationProof = {
+    ...partialPresentationProof,
+    signature: { r: partialPresentationProof.signature.r, s: presentationS },
+  };
+
+  // 4. Assemble claimFunds args + private state, then compose.
+  const MS_PER_DAY = 86_400_000;
+  const currentDay = params.currentDay
+    ? BigInt(params.currentDay)
+    : BigInt(Math.floor(Date.now() / MS_PER_DAY));
+  const requestedAmount = BigInt(params.amountBaseUnits);
+  // claimFunds releases UNSHIELDED NIGHT to a `UserAddress` (32-byte payload),
+  // not to a zswap coin key.
+  const recipient = { bytes: hexToBytes(params.recipientUserAddressHex) };
+  const args = [
+    lockIdBig,
+    credential,
+    credentialProof,
+    presentation,
+    presentationProof,
+    currentDay,
+    requestedAmount,
+    recipient,
+  ];
+
+  const compiledContract = (compactJs as any).CompiledContract.make(
+    "passport-vault",
+    (pvContractMod as any).Contract,
+  ).pipe(
+    (compactJs as any).CompiledContract.withWitnesses(
+      (pvWitnessesMod as any).witnesses,
+    ),
+    (compactJs as any).CompiledContract.withCompiledFileAssets("passport-vault"),
+  );
+  const zkConfigProvider = new WebViewZkConfigProvider(
+    pkgBaseUrlFor("passport-vault-contract/dist/managed/passport-vault"),
+  );
+  let zswapChainState: unknown;
+  if (params.zswapChainStateHex) {
+    zswapChainState = (ledgerV8 as any).ZswapChainState.deserialize(
+      hexToBytes(params.zswapChainStateHex),
+    );
+  } else {
+    zswapChainState = new (ledgerV8 as any).ZswapChainState();
+  }
+  let ledgerParameters: unknown;
+  if (params.ledgerParametersHex) {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.deserialize(
+      hexToBytes(params.ledgerParametersHex),
+    );
+  } else {
+    ledgerParameters = (ledgerV8 as any).LedgerParameters.initialParameters();
+  }
+
+  const callTxData = await (createUnprovenCallTxFromInitialStates as any)(
+    zkConfigProvider,
+    {
+      compiledContract,
+      circuitId: "claimFromLock",
+      contractAddress: params.contractAddressHex,
+      args,
+      coinPublicKey: params.coinPublicKeyHex,
+      initialContractState: contractState,
+      initialZswapChainState: zswapChainState,
+      ledgerParameters,
+      initialPrivateState: {
+        holderDateOfBirthDays: claimValues.dateOfBirthDays,
+        holderDateOfBirthOpening: openings.dateOfBirthOpening,
+      },
+    },
+    params.encryptionPublicKeyHex,
+  );
+  const unprovenBytes: Uint8Array = callTxData.private.unprovenTx.serialize();
+  return {
+    circuit: "claimFromLock",
+    unprovenTxHex: bytesToHex(unprovenBytes),
+    unprovenTxBytes: unprovenBytes.length,
+    elapsedMs: Date.now() - t0,
+  };
+}
+
+/** Decode the passport-vault ledger from a serialised `ContractState`
+ *  hex blob. The browser has no Compact runtime, so the wallet fetches
+ *  the contract state from the indexer (Rust) and asks the bundle to
+ *  decode it via the vendored contract module's `ledger(...)` reader —
+ *  the same decoder the runner/integration tests use. */
+async function readVaultLedger(params: {
+  contractStateHex: string;
+}): Promise<{
+  totalLockedBaseUnits: string;
+  totalDepositedBaseUnits: string;
+  hasDeposit: boolean;
+}> {
+  const { contractMod, compactRuntime: cr } = await loadVaultContractLayer();
+  const contractState = (cr as any).ContractState.deserialize(
+    hexToBytes(params.contractStateHex),
+  );
+  // `ledger()` accepts a `StateValue | ChargedState`; `ContractState`
+  // exposes the charged state under `.data` (matches the runner +
+  // integration-test usage `ledger(state.data)`).
+  const led = (contractMod as any).ledger(contractState.data);
+  // Unshielded vault: the contract's NIGHT balance lives in the ledger, not a
+  // contract field. Locked = totalDeposited − totalReleased (both audit
+  // counters maintained by deposit/claim/withdraw).
+  const totalDeposited: bigint =
+    led.totalDeposited != null ? BigInt(led.totalDeposited) : 0n;
+  const totalReleased: bigint =
+    led.totalReleased != null ? BigInt(led.totalReleased) : 0n;
+  const locked: bigint =
+    totalDeposited > totalReleased ? totalDeposited - totalReleased : 0n;
+  return {
+    totalLockedBaseUnits: locked.toString(),
+    totalDepositedBaseUnits: totalDeposited.toString(),
+    hasDeposit: locked > 0n,
+  };
+}
+
+/** Enumerate the multi-lock vault's `locks` map + `lockCount` from a
+ *  serialised `ContractState` hex. Drives the dApp's lock list (each
+ *  lock's policy + remaining pool) and the claim selector. All numeric
+ *  fields are decimal strings; `Bytes<32>` fields are hex. */
+async function readVaultLocks(params: {
+  contractStateHex: string;
+}): Promise<{
+  lockCount: string;
+  locks: Array<{
+    lockId: string;
+    lockerHex: string;
+    minimumAgeYears: string;
+    requireIssuingState: boolean;
+    requiredIssuingStateHex: string;
+    requireDocumentNumber: boolean;
+    requiredDocumentNumberHex: string;
+    maxClaimAmount: string;
+    verifierChallengeHashHex: string;
+    totalDeposited: string;
+    totalReleased: string;
+    lockedRemaining: string;
+  }>;
+}> {
+  const { contractMod, compactRuntime: cr } = await loadVaultContractLayer();
+  const contractState = (cr as any).ContractState.deserialize(
+    hexToBytes(params.contractStateHex),
+  );
+  const led = (contractMod as any).ledger(contractState.data);
+  const locks: any[] = [];
+  // Reading `locks` / `lockCount` against a contract whose on-chain ledger
+  // layout isn't the multi-lock one (e.g. an OLD single-lock passport-vault
+  // address) throws a cryptic `asMap()` error. Surface a clear, actionable
+  // message instead so the dApp can tell the user to redeploy / repoint.
+  try {
+  for (const [lockId, rec] of led.locks) {
+    const dep = BigInt(rec.totalDeposited ?? 0n);
+    const rel = BigInt(rec.totalReleased ?? 0n);
+    const remaining = dep > rel ? dep - rel : 0n;
+    locks.push({
+      lockId: lockId.toString(),
+      lockerHex: bytesToHex(rec.locker),
+      minimumAgeYears: BigInt(rec.minimumAgeYears).toString(),
+      requireIssuingState: !!rec.requireIssuingState,
+      requiredIssuingStateHex: bytesToHex(rec.requiredIssuingState),
+      requireDocumentNumber: !!rec.requireDocumentNumber,
+      requiredDocumentNumberHex: bytesToHex(rec.requiredDocumentNumber),
+      maxClaimAmount: BigInt(rec.maxClaimAmount).toString(),
+      verifierChallengeHashHex: bytesToHex(rec.verifierChallengeHash),
+      totalDeposited: dep.toString(),
+      totalReleased: rel.toString(),
+      lockedRemaining: remaining.toString(),
+    });
+  }
+  // Sort by lock id ascending for a stable UI order.
+  locks.sort((a, b) =>
+    BigInt(a.lockId) < BigInt(b.lockId) ? -1 : BigInt(a.lockId) > BigInt(b.lockId) ? 1 : 0,
+  );
+  const lockCount =
+    led.lockCount != null ? BigInt(led.lockCount).toString() : locks.length.toString();
+  return { lockCount, locks };
+  } catch (e) {
+    throw new Error(
+      "not a multi-lock passport vault at this address (on-chain ledger layout " +
+        "mismatch — likely an old single-lock contract). Deploy the current " +
+        "passport-vault and set MIDNIGHT_VAULT_CONTRACT_ADDRESS to the new address. " +
+        `(${e instanceof Error ? e.message : String(e)})`,
+    );
+  }
+}
+
 window.midnightDidBundle = {
   version: "0.1.0",
   did: midnightDid,
@@ -771,6 +1397,10 @@ window.midnightDidBundle = {
   bridgeProbe,
   bridgeWitnessTest,
   prepareUnprovenCallTx,
+  prepareVaultCallTx,
+  prepareVaultClaim,
+  readVaultLedger,
+  readVaultLocks,
   scanQr,
   pasteText,
   decodeDigitalPassportCredential,

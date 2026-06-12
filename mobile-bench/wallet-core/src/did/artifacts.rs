@@ -1,5 +1,8 @@
-//! Compiled `did.compact` artifacts vendored from
-//! `midnight-did/contract/dist/managed/did/`.
+//! Compiled `did.compact` circuit artifacts, embedded via `include_bytes!`
+//! from `contracts/midnight-did/`. That dir is gitignored and regenerated on
+//! every `cargo build` by `wallet-core/build.rs`, which copies the blobs from
+//! `midnight-did/packages/contract/src/managed/did/{keys,zkir}` (override with
+//! `MIDNIGHT_DID_MANAGED_DIR`).
 //!
 //! Two bundle shapes coexist:
 //!

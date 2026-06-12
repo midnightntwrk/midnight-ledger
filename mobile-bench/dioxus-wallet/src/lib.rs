@@ -272,6 +272,10 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/compact-runtime":               "mn-pkg://localhost/compact-runtime/dist/index.js",
     "@midnight-ntwrk/onchain-runtime-v3":            "mn-pkg://localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "mn-pkg://localhost/ledger-v8/midnight_ledger_wasm.js",
+    "@input-output-hk/passport-vault-contract":       "mn-pkg://localhost/passport-vault-contract/dist/index.js",
+    "@input-output-hk/passport-vault-contract/":      "mn-pkg://localhost/passport-vault-contract/dist/",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport":  "mn-pkg://localhost/midnight-did-credentials-digital-passport/dist/index.js",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport/": "mn-pkg://localhost/midnight-did-credentials-digital-passport/dist/",
     "object-inspect":                                "mn-pkg://localhost/object-inspect/index.js",
     "@noble/hashes/":                                "mn-pkg://localhost/@noble/hashes/esm/",
     "@noble/hashes/crypto":                           "mn-pkg://localhost/@noble/hashes/esm/crypto.js"
@@ -288,6 +292,10 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     "@midnight-ntwrk/compact-runtime":               "http://mn-pkg.localhost/compact-runtime/dist/index.js",
     "@midnight-ntwrk/onchain-runtime-v3":            "http://mn-pkg.localhost/onchain-runtime-v3/midnight_onchain_runtime_wasm.js",
     "@midnight-ntwrk/ledger-v8":                     "http://mn-pkg.localhost/ledger-v8/midnight_ledger_wasm.js",
+    "@input-output-hk/passport-vault-contract":       "http://mn-pkg.localhost/passport-vault-contract/dist/index.js",
+    "@input-output-hk/passport-vault-contract/":      "http://mn-pkg.localhost/passport-vault-contract/dist/",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport":  "http://mn-pkg.localhost/midnight-did-credentials-digital-passport/dist/index.js",
+    "@midnight-ntwrk/midnight-did-credentials-digital-passport/": "http://mn-pkg.localhost/midnight-did-credentials-digital-passport/dist/",
     "object-inspect":                                "http://mn-pkg.localhost/object-inspect/index.js",
     "@noble/hashes/":                                "http://mn-pkg.localhost/@noble/hashes/esm/",
     "@noble/hashes/crypto":                           "http://mn-pkg.localhost/@noble/hashes/esm/crypto.js"
@@ -306,11 +314,61 @@ fn with_js_bridge_inner(cfg: DxCfg) -> DxCfg {
     // env() values resolve to 0, so the meta is harmless to
     // include unconditionally.
     let viewport_meta = r#"<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">"#;
-    let bundle_script = format!("{viewport_meta}\n{error_reporter}\n{import_map}\n{bundle_module}");
-    cfg.with_custom_head(bundle_script).with_custom_protocol(
-        "mn-pkg".to_string(),
-        protocol::build_handler(),
-    )
+    // Relay between an embedded dApp (the passport-vault dApp rendered
+    // in an iframe — see the Dapp screen) and the wallet's JS bridge.
+    // The dApp installs a `window.midnight` host shim (see
+    // `passport-vault-dapp/lib/midnight/mobile-bench-host.ts`) whose
+    // connector methods post `{ __type:"mn-host-req", id, method, args }`
+    // to this top document; we forward to
+    // `window.midnightWallet.call(method, args)` and post the result
+    // back as `{ __type:"mn-host-res", id, result|error }`.
+    let dapp_relay = r#"
+<script>
+(function () {
+  window.addEventListener("message", async (ev) => {
+    const d = ev.data;
+    if (!d || d.__type !== "mn-host-req" || typeof d.id !== "number") return;
+    // Hardening: only accept requests from an embedded child frame (the dApp
+    // iframe) - never the top document itself or unrelated windows - and target
+    // replies back at that frame, using its origin when the scheme exposes one.
+    // The dApp iframe is the only frame the wallet hosts, so a child-frame
+    // source is a robust check that does not depend on the iframe's origin
+    // (which varies with MIDNIGHT_DAPP_URL).
+    let fromChildFrame = false;
+    try {
+      for (let i = 0; i < window.frames.length; i++) {
+        if (window.frames[i] === ev.source) { fromChildFrame = true; break; }
+      }
+    } catch (_) {}
+    // Safe fallback: if frame enumeration is unavailable, still reject only
+    // self-posts (the relay's own window) - never the cross-window dApp iframe -
+    // so this hardening can't break legitimate dApp -> wallet messaging.
+    if (!fromChildFrame && ev.source && ev.source !== window) fromChildFrame = true;
+    if (!fromChildFrame) return;
+    const replyOrigin = (ev.origin && ev.origin !== "null") ? ev.origin : "*";
+    const reply = (msg) => {
+      try { ev.source.postMessage(msg, replyOrigin); } catch (_) {}
+    };
+    try {
+      for (let i = 0; i < 600 && !(window.midnightWallet && window.midnightWallet.call); i++) {
+        await new Promise((r) => setTimeout(r, 50));
+      }
+      if (!(window.midnightWallet && window.midnightWallet.call)) {
+        throw new Error("wallet bridge unavailable");
+      }
+      const result = await window.midnightWallet.call(d.method, d.args || {});
+      reply({ __type: "mn-host-res", id: d.id, result });
+    } catch (e) {
+      reply({ __type: "mn-host-res", id: d.id, error: (e && e.message) || String(e) });
+    }
+  });
+})();
+</script>"#;
+    let bundle_script = format!(
+        "{viewport_meta}\n{error_reporter}\n{dapp_relay}\n{import_map}\n{bundle_module}"
+    );
+    cfg.with_custom_head(bundle_script)
+        .with_custom_protocol("mn-pkg".to_string(), protocol::build_handler())
 }
 
 #[cfg(any(target_os = "android", target_os = "ios"))]

@@ -22,7 +22,7 @@ use crate::store::envelope::SecretEnvelope;
 
 /// The on-disk schema this binary expects. Migration runs
 /// `0..SCHEMA_VERSION` closures at `open()`.
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 8;
 
 // ── Wallet identity ────────────────────────────────────────────
 
@@ -179,6 +179,16 @@ pub(crate) const LOGS: TableDefinition<i64, &'static [u8]> = TableDefinition::ne
 /// cold-replay that PreProd's ~534k-event history requires.
 pub(crate) const DUST_SYNC: TableDefinition<u8, &'static [u8]> =
     TableDefinition::new("dust_sync");
+
+/// Persisted SHIELDED (zswap) sync snapshot — keyed by network tag.
+/// Value is a bincoded `ShieldedSyncRowV1`. The `ShieldedSyncer`
+/// writes here as it folds `zswapLedgerEvents` from the indexer; the
+/// next launch hydrates this row and resumes from `last_id + 1`. The
+/// `state_bytes` are the tagged-serialised `zswap::local::State`
+/// (owned coins + the commitment Merkle tree) the deposit balancer
+/// spends from.
+pub(crate) const SHIELDED_SYNC: TableDefinition<u8, &'static [u8]> =
+    TableDefinition::new("shielded_sync");
 
 // ── Row types ─────────────────────────────────────────────────
 
@@ -384,6 +394,17 @@ pub(crate) struct ResolvedCacheRowV1 {
 /// on a crash).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub(crate) struct DustSyncRowV1 {
+    pub last_id: i64,
+    pub state_bytes: Vec<u8>,
+    pub updated_at: i64,
+}
+
+/// SHIELDED (zswap) sync row, version 1. Same shape as
+/// `DustSyncRowV1`: `state_bytes` is the tagged-serialised
+/// `zswap::local::State<DefaultDB>`, `last_id` the
+/// `zswapLedgerEvents` checkpoint.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub(crate) struct ShieldedSyncRowV1 {
     pub last_id: i64,
     pub state_bytes: Vec<u8>,
     pub updated_at: i64,

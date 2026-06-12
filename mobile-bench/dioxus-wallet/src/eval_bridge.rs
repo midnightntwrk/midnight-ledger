@@ -123,7 +123,27 @@ async fn run_one(req: EvalRequest) {
             const r = await _fn(_p);
             return r;
         }} catch (e) {{
-            return {{ error: String(e?.stack || e?.message || e) }};
+            // WebKit/JSC `e.stack` is bare stack frames with NO message
+            // prefix, so the old `e.stack || e.message` dropped the real
+            // reason — e.g. a Compact `assert` message like "Requested
+            // amount exceeds the remaining vault balance". Surface the
+            // name+message FIRST (so callers and the dApp's friendly-error
+            // mapper see the actual cause), then append a short stack for
+            // debugging.
+            let _msg = "", _stack = "";
+            if (e instanceof Error) {{
+                _msg = e.name + ": " + (e.message || "(no message)");
+                _stack = e.stack || "";
+            }} else if (e && typeof e === "object") {{
+                _msg = (e.message != null) ? String(e.message) : JSON.stringify(e);
+                _stack = (e.stack != null) ? String(e.stack) : "";
+            }} else {{
+                _msg = String(e);
+            }}
+            if (_stack) {{
+                _msg += " | " + String(_stack).split("\n").slice(0, 6).join(" | ");
+            }}
+            return {{ error: _msg }};
         }}"#,
     );
     let outcome = match tokio::time::timeout(EVAL_TIMEOUT, document::eval(&snippet)).await {

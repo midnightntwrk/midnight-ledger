@@ -440,4 +440,33 @@ for (const [pkg, stem] of WBINDGEN_ENTRIES) {
   rewriteWbindgenEntry(resolve(DEST, pkg), stem);
 }
 
+// Passport-vault contract (from the midnight-identity-solution-examples
+// repo, not midnight-did / VC). Vendored whole `dist/` so its
+// `managed/passport-vault/{keys,zkir}` blobs are served over `mn-pkg://`
+// for the WebView ZK config provider used by the deposit/claim compose
+// path (see entry.ts `prepareVaultCallTx`). Keep in sync with
+// `build.mjs` externals + the import map in `lib.rs`.
+const SOLUTION_SOURCE = resolve(
+  process.env.MIDNIGHT_SOLUTION_SRC ||
+    resolve(__dirname, "../../../../midnight-identity-solution-examples"),
+);
+{
+  const pvSrc = resolve(
+    SOLUTION_SOURCE,
+    "packages/contracts/vault/dist",
+  );
+  try {
+    statSync(pvSrc);
+    copyDirRecursive(pvSrc, resolve(DEST, "passport-vault-contract", "dist"));
+    total++;
+    console.log(`[vendor]   ✓ passport-vault-contract ← ${pvSrc}`);
+  } catch (_e) {
+    console.error(
+      `[vendor] missing passport-vault-contract dist at ${pvSrc} — run ` +
+      `'npm run build -w @input-output-hk/passport-vault-contract' first`,
+    );
+    process.exit(1);
+  }
+}
+
 console.log(`[vendor] copied ${total} package(s).`);

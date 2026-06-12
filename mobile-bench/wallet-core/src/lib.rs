@@ -44,7 +44,9 @@ pub mod telemetry;
 mod tx;
 pub mod ui_port;
 pub mod unlock;
+mod shielded;
 mod unshielded;
+mod vault;
 mod wallet;
 pub mod vc_store;
 pub mod oid4vp_client;
@@ -76,7 +78,8 @@ pub use dust::DustError;
 pub use unshielded::{TokenType, UnshieldedError, UnshieldedUtxo, UtxoId, UtxoSet};
 pub use tx::{DeployOutcome, TxError, WizardStage};
 pub use wallet::{
-    BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, Wallet, WalletError,
+    BalanceSnapshot, DEMO_SEED_HEX, UNDEPLOYED_GENESIS_SEED_HEX, VaultCreateLockOutcome,
+    VaultLockPolicy, Wallet, WalletError,
 };
 pub use vc_store::{StoredVc, VcMetadata, VcOpening};
 
@@ -189,6 +192,9 @@ pub use oid4vci_client::{
 pub use vc_self_verify::{self_verify, self_verify_and_cache, InvalidReason, SelfVerifyResult};
 pub use probe::{ProbeError, ProbeResult, ProbeStatus, probe_connectivity};
 pub use dust::syncer::{DustSyncer, SyncProgress};
+pub use shielded::{
+    ShieldedError, ShieldedSyncProgress, ShieldedSyncer, SpendableCoin, spendable_coins,
+};
 // OID4VP entry point — dioxus-wallet calls
 // `oid4vp_client::run_authentication` directly through the
 // fully-qualified path (commit 758a5fa3); no lib-level alias.

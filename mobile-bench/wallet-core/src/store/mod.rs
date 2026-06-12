@@ -66,7 +66,8 @@ pub use schema::{InventoryStatus, KeyDerivation, LogLevel};
 use schema::{
     CONTROLLER_SECRETS, DID_INVENTORY, DIDS_BY_NETWORK, DUST_SYNC, DidInventoryRowV1,
     DustSyncRowV1, KEYS, KEYS_BY_WALLET, KeyRowV1, LOGS, LogRowV1, META, RESOLVED_CACHE,
-    ResolvedCacheRowV1, SESSION_CURRENT_KEY, SESSIONS, SessionRowV1, WALLETS, WalletRowV1,
+    ResolvedCacheRowV1, SESSION_CURRENT_KEY, SESSIONS, SHIELDED_SYNC, SessionRowV1,
+    ShieldedSyncRowV1, WALLETS, WalletRowV1,
 };
 
 use crate::secret_storage::{
@@ -1041,6 +1042,86 @@ impl WalletStore {
         Ok(())
     }
 
+    /// Persisted SHIELDED (zswap) sync snapshot for `network`.
+    /// `None` if no row written yet. The bytes are the
+    /// tagged-serialised `zswap::local::State<DefaultDB>`; the
+    /// `ShieldedSyncer` rehydrates and resumes from `last_id + 1`.
+    pub fn get_shielded_sync(
+        &self,
+        network: crate::Network,
+    ) -> Result<Option<ShieldedSyncSnapshot>, StoreError> {
+        let tag: NetworkTag = network.into();
+        let txn = self
+            .db
+            .begin_read()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let table = txn
+            .open_table(SHIELDED_SYNC)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let v = table
+            .get(tag.0)
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        let Some(g) = v else { return Ok(None) };
+        let row: ShieldedSyncRowV1 = Bincoded::decode(g.value())?;
+        Ok(Some(ShieldedSyncSnapshot {
+            last_id: row.last_id,
+            state_bytes: row.state_bytes,
+            updated_at: row.updated_at,
+        }))
+    }
+
+    /// Persist a SHIELDED sync snapshot. Replaces the existing row
+    /// (single row per network); idempotent.
+    pub fn put_shielded_sync(
+        &self,
+        network: crate::Network,
+        snapshot: &ShieldedSyncSnapshot,
+    ) -> Result<(), StoreError> {
+        let tag: NetworkTag = network.into();
+        let row = ShieldedSyncRowV1 {
+            last_id: snapshot.last_id,
+            state_bytes: snapshot.state_bytes.clone(),
+            updated_at: snapshot.updated_at,
+        };
+        let bincoded = Bincoded::encode(&row)?;
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(SHIELDED_SYNC)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .insert(tag.0, bincoded.as_slice())
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
+    /// Drop the SHIELDED sync snapshot for `network` (next call
+    /// falls back to a full cold replay from `last_id = 0`).
+    pub fn clear_shielded_sync(&self, network: crate::Network) -> Result<(), StoreError> {
+        let tag: NetworkTag = network.into();
+        let txn = self
+            .db
+            .begin_write()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        {
+            let mut table = txn
+                .open_table(SHIELDED_SYNC)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+            table
+                .remove(tag.0)
+                .map_err(|e| StoreError::Backend(e.to_string()))?;
+        }
+        txn.commit()
+            .map_err(|e| StoreError::Backend(e.to_string()))?;
+        Ok(())
+    }
+
     /// One-shot stats snapshot — table row counts + schema
     /// version. Lets the UI render a Settings card without
     /// holding the file open.
@@ -1141,6 +1222,20 @@ pub struct DustSyncSnapshot {
     pub state_bytes: Vec<u8>,
     /// Unix-ms of the last write. Surface in the UI's
     /// "last synced" hint.
+    pub updated_at: i64,
+}
+
+/// SHIELDED (zswap) sync snapshot exposed to callers. Mirrors
+/// `ShieldedSyncRowV1`. `state_bytes` is the tagged-serialised
+/// `zswap::local::State<DefaultDB>`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ShieldedSyncSnapshot {
+    /// `zswapLedgerEvents` id consumed up to. Next sync resumes
+    /// from `last_id + 1`.
+    pub last_id: i64,
+    /// Tagged-serialised `zswap::local::State<DefaultDB>`.
+    pub state_bytes: Vec<u8>,
+    /// Unix-ms of the last write.
     pub updated_at: i64,
 }
 

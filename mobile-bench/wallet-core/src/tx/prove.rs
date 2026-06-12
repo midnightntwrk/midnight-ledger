@@ -20,6 +20,7 @@ use zswap::ZSWAP_EXPECTED_FILES;
 
 use crate::artifacts::dust::dust_resolver;
 use crate::did::artifacts::circuit_artifacts;
+use crate::vault::artifacts::vault_circuit_artifacts;
 use super::TxError;
 use super::build::UnprovenTx;
 
@@ -29,6 +30,11 @@ use super::build::UnprovenTx;
 /// `prepareUnprovenCallTx` emits the bare circuit name instead
 /// — both shapes are handled below.
 const DID_KEY_LOCATION_PREFIX: &str = "midnight/did/";
+
+/// The `KeyLocation` prefix passport-vault circuits embed when not
+/// bare. Mirrors [`DID_KEY_LOCATION_PREFIX`] so the shared resolver
+/// can serve both contracts' prover keys.
+const VAULT_KEY_LOCATION_PREFIX: &str = "midnight/passport-vault/";
 
 /// Final proved-and-sealed tx — same shape as
 /// `test_utilities::TxBound<S, D>`. The chain expects this exact
@@ -69,8 +75,16 @@ fn build_resolver() -> Result<Resolver, TxError> {
                 // the prefix if present, then look up.
                 let name = path
                     .strip_prefix(DID_KEY_LOCATION_PREFIX)
+                    .or_else(|| path.strip_prefix(VAULT_KEY_LOCATION_PREFIX))
                     .unwrap_or(&path);
-                let Some(art) = circuit_artifacts(name) else {
+                // Resolve against the DID registry first, then the
+                // passport-vault registry. Circuit names don't collide
+                // across the two contracts, so one resolver serves both
+                // (the `createUnprovenCallTxFromInitialStates` path emits
+                // bare names like `depositFunds` / `setVerificationMethod`).
+                let Some(art) = circuit_artifacts(name)
+                    .or_else(|| vault_circuit_artifacts(name))
+                else {
                     return Ok(None);
                 };
                 Ok(Some(ProvingKeyMaterial {
