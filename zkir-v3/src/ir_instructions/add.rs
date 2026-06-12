@@ -13,7 +13,7 @@
 
 use std::ops::Add;
 
-use midnight_circuits::instructions::{ArithInstructions, EccInstructions};
+use midnight_circuits::instructions::ArithInstructions;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 
@@ -64,7 +64,7 @@ pub fn add_incircuit(
             Ok(Native(r))
         }
         (JubjubPoint(p), JubjubPoint(q)) => {
-            let r = std_lib.jubjub().add(layouter, p, q)?;
+            let r = midnight_circuits::instructions::EccInstructions::add(std_lib.jubjub(), layouter, p, q)?;
             Ok(JubjubPoint(r))
         }
         _ => Err(plonk::Error::Synthesis(format!(

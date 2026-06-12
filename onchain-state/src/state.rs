@@ -887,25 +887,43 @@ impl<D: DB> Default for ContractState<D> {
     Serializable, Clone, Hash, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, Storable,
 )]
 #[storable(base)]
-#[tag = "contract-operation[v5]"]
+#[tag = "contract-operation[v6]"]
 #[non_exhaustive]
 pub struct ContractOperation {
+    /// v1 (zk-stdlib v1) verifier key.
     pub v2: Option<VerifierKey>,
+    /// v2 (zk-stdlib v2) verifier key.
+    pub v3: Option<VerifierKey>,
     ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: vk, ir }
+        ContractOperation { v2: vk, ir, v3: None }
     }
 
+    /// Returns the latest verifier key, preferring v3 over v2.
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v2.as_ref()
+        self.v3.as_ref().or(self.v2.as_ref())
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        &mut self.v2
+        if self.v3.is_some() {
+            &mut self.v3
+        } else {
+            &mut self.v2
+        }
+    }
+
+    /// Returns the v1 verifier key.
+    pub fn v1_vk(&self) -> Option<&VerifierKey> {
+        self.v2.as_ref()
+    }
+
+    /// Returns the v2 verifier key.
+    pub fn v2_vk(&self) -> Option<&VerifierKey> {
+        self.v3.as_ref()
     }
 }
 
@@ -921,9 +939,10 @@ impl Distribution<ContractOperation> for Standard {
             ContractOperation {
                 v2: Some(rng.r#gen()),
                 ir: None,
+                v3: None,
             }
         } else {
-            ContractOperation { v2: None, ir: None }
+            ContractOperation { v2: None, ir: None, v3: None }
         }
     }
 }
@@ -963,7 +982,7 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None, ir: None }
+        ContractOperation { v2: None, ir: None, v3: None }
     }
 }
 
