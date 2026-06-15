@@ -4,6 +4,10 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- breaking: unify the construction of signing envelopes
+
 ## Ledger 9.0.1.0-rc.1
 
 - feat: add explicit price floor, denominated in full blocks, and governed by
