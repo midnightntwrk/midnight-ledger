@@ -13,7 +13,7 @@
 
 #[cfg(test)]
 mod proof_tests {
-    use midnight_zkir::{IrSource, IrMinorVersion, Preprocessed};
+    use midnight_zkir::{IrSource, Preprocessed};
     use rand::SeedableRng;
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
@@ -27,10 +27,9 @@ mod proof_tests {
     #[cfg(feature = "proptest")]
     use transient_crypto::proofs::Proof;
     use transient_crypto::proofs::{
-        KeyLocation, ParamsProver, ParamsProverProvider, ProofPreimage,
+        KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use midnight_zkir::ir_v1::{v1_prove, v1_verify};
     use transient_crypto::repr::FieldRepr;
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
@@ -47,11 +46,11 @@ mod proof_tests {
             _key: KeyLocation,
         ) -> std::io::Result<Option<ProvingKeyMaterial>> {
             let mut pk = Vec::new();
-            IrSource::serialize_prover_key_to_tagged(IrMinorVersion::V0, &self.pk, &mut pk)?;
+            tagged_serialize(&self.pk, &mut pk)?;
             let mut vk = Vec::new();
             tagged_serialize(&self.vk, &mut vk)?;
             let mut ir = Vec::new();
-            self.ir.serialize_to_tagged(&mut ir)?;
+            tagged_serialize(&self.ir, &mut ir)?;
             Ok(Some(ProvingKeyMaterial {
                 prover_key: pk,
                 verifier_key: vk,
@@ -101,7 +100,7 @@ mod proof_tests {
             .await;
         // Either proving should have failed, or verification should fail:
         let verify =
-            proof.and_then(|proof| v1_verify(&vk, &proof, (0..N).map(Into::into)));
+            proof.and_then(|proof| vk.verify(&PARAMS_VERIFIER, &proof, (0..N).map(Into::into)));
         assert!(verify.is_err());
     }
 
@@ -123,11 +122,13 @@ mod proof_tests {
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
         let pk_fmt = format!("{:#?}", &pk);
-        let _vk_fmt = format!("{:#?}", &vk);
+        let vk_fmt = format!("{:#?}", &vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
+        vk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(vk_fmt == format!("{:#?}", &vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -137,8 +138,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -149,10 +150,10 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
         assert!(
-            v1_verify(&vk, &proof, [43.into()].into_iter())
+            vk.verify(&PARAMS_VERIFIER, &proof, [43.into()].into_iter())
                 .is_err()
         );
     }
@@ -187,8 +188,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -199,7 +200,7 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
     }
 
@@ -236,8 +237,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -248,7 +249,7 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into(), x].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into(), x].into_iter())
             .unwrap();
     }
 
@@ -284,8 +285,8 @@ mod proof_tests {
                 public_transcript_outputs: vec![],
                 key_location: KeyLocation(Cow::Borrowed("builtin")),
             };
-            let proof = v1_prove(
-                    &preimage,
+            let (proof, _) = preimage
+                .prove::<IrSource>(
                     &mut ChaCha20Rng::from_seed([42; 32]),
                     &TestParams,
                     &TestResolver {
@@ -296,7 +297,7 @@ mod proof_tests {
                 )
                 .await
                 .unwrap();
-            v1_verify(&vk, &proof, [42.into()].into_iter())
+            vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
                 .unwrap();
         }
     }
@@ -331,8 +332,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -343,7 +344,7 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
     }
 
@@ -388,8 +389,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -400,7 +401,7 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
     }
 
@@ -428,11 +429,13 @@ mod proof_tests {
         Serializable::serialize(&pk, &mut pk_data).unwrap();
         Serializable::serialize(&vk, &mut vk_data).unwrap();
         let pk_fmt = format!("{:#?}", &pk);
-        let _vk_fmt = format!("{:#?}", &vk);
+        let vk_fmt = format!("{:#?}", &vk);
         let pk: ProverKey = Deserializable::deserialize(&mut &pk_data[..], 0).unwrap();
         let vk: VerifierKey = Deserializable::deserialize(&mut &vk_data[..], 0).unwrap();
         pk.init().unwrap();
+        vk.init().unwrap();
         dbg!(pk_fmt == format!("{:#?}", &pk));
+        dbg!(vk_fmt == format!("{:#?}", &vk));
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -442,8 +445,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -454,7 +457,7 @@ mod proof_tests {
             )
             .await
             .unwrap();
-        v1_verify(&vk, &proof, [42.into()].into_iter())
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
             .unwrap();
     }
 

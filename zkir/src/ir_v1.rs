@@ -16,7 +16,7 @@
 use std::borrow::Cow;
 use std::io;
 
-type OldIrSource = zkir_old::IrSource;
+use crate::ir::IrSource;
 
 /// Adapter: current `Resolver` → v1 `Resolver`.
 pub struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
@@ -145,7 +145,7 @@ pub async fn v1_prove(
 ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
     let old_preimage = preimage_to_v1(preimage);
     let (old_proof, _skips) = old_preimage
-        .prove::<OldIrSource>(rng, &V1Params(params), &V1Resolver(resolver))
+        .prove::<IrSource>(rng, &V1Params(params), &V1Resolver(resolver))
         .await?;
     Ok(transient_crypto::proofs::Proof(old_proof.0))
 }
