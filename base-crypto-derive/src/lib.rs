@@ -20,8 +20,7 @@ use quote::{format_ident, quote};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
 use syn::{
-    ConstParam, Data, DataStruct, DeriveInput, Fields, GenericParam, Generics, Ident, Index,
-    TypeParam, parse_macro_input,
+    ConstParam, Data, DataStruct, DeriveInput, Fields, GenericParam, Generics, Ident, Index, PathArguments, Type, TypeParam, parse_macro_input
 };
 
 fn generic_variants(
@@ -45,7 +44,7 @@ fn generic_variants(
             }) => GenericParam::Type(TypeParam {
                 attrs: Vec::new(),
                 ident,
-                colon_token,
+colon_token,
                 bounds,
                 eq_token: None,
                 default: None,
@@ -146,6 +145,66 @@ pub fn field_repr(tokens: TokenStream) -> TokenStream {
             }
         }
     })
+}
+
+#[proc_macro_derive(Envelope, attributes(envelope))]
+pub fn envelope(tokens: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(tokens as DeriveInput);
+    let name = input.ident;
+    let (generic_bounded, generic_idents, _type_params) = generic_variants(input.generics.clone());
+    let generic_where = input.generics.where_clause;
+    let where_predicates = generic_where.as_ref().map(|wh| wh.predicates.clone());
+    let fields = match input.data {
+        Data::Struct(DataStruct { fields: Fields::Named(fields), .. }) => fields.named.into_iter().map(|field| {
+                let ident = field.ident.expect("named field must have a name!");
+                quote!(#ident)
+        }).collect::<Vec<_>>(),
+
+        _ => panic!("Only named structs can currently derive Envelope"),
+    };
+    let targets: Vec<Type> = input
+        .attrs
+        .iter()
+        .filter(|attr| attr.path().is_ident("envelope"))
+        .map(|attr| attr.parse_args::<Type>())
+        .collect::<syn::Result<_>>()
+        .unwrap_or_else(|e| panic!("{}", e));
+    if targets.is_empty() {
+        panic!("`Envelope` derivation requires at least one `#[envelope(Type)]` attribute.");
+    }
+    let constructors: Vec<proc_macro2::TokenStream> = targets.iter().map(|target| {
+        let Type::Path(tp) = target else {
+            panic!("Expected 'path' type as `Envelope` target");
+        };
+        let mut path = tp.path.clone();
+        if let Some(last) = path.segments.last_mut() {
+            // turn `Foo<T>` args into `Foo::<T>`
+            match &mut last.arguments {
+                PathArguments::AngleBracketed(args) => {
+                    args.colon2_token = Some(Default::default());
+                }
+                _ => {}
+            }
+        }
+        quote!(#path)
+    }).collect();
+
+    let impls = targets.iter().zip(constructors.iter()).map(|(target, constructor)| {
+        quote! {
+            impl<#generic_bounded> Envelope<#target> for #name<#(#generic_idents),*>
+                where
+                   #where_predicates
+                #generic_where
+            {
+                fn into_envelope(&self) -> #target {
+                    #constructor {
+                        #(#fields: self.#fields.into_envelope(),)*
+                    }
+                }
+            }
+        }
+    });
+    TokenStream::from(quote! { #(#impls)* })
 }
 
 #[proc_macro_derive(BinaryHashRepr)]

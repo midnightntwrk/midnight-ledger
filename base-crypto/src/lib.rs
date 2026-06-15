@@ -31,6 +31,7 @@ pub mod repr;
 pub mod rng;
 pub mod schnorr;
 pub mod time;
+pub mod envelope;
 
 #[deprecated = "`signatures` has been renamed to `schnorr` due to the addition of new signature schemes. Please prefer `schnorr`."]
 pub use schnorr as signatures;
