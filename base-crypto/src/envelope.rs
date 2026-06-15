@@ -13,8 +13,11 @@
 
 //! This module deals with cryptographic envelopes, specifically through the `[Envelope]` trait.
 
-use std::{io::{self, Write}, marker::PhantomData};
 use serialize::{Serializable, Tagged, tagged_serialize};
+use std::{
+    io::{self, Write},
+    marker::PhantomData,
+};
 
 pub use derive::Envelope;
 
@@ -29,20 +32,25 @@ pub use derive::Envelope;
 /// The primary benefit of the `Envelope` trait is it's support for `#[derive(Envelope)]`, which
 /// ensures that the cryptographic envelope does not become detached from the source type by making
 /// any misalignment a compilation error.
-///
-/// An example of how an `Envelope` 
 pub trait Envelope<T> {
     /// Converts this value into its envelope.
     fn into_envelope(&self) -> T;
 
     /// Writes the serialization of the envelope into a bytestring.
-    fn envelope_data(&self) -> Vec<u8> where T: Serializable + Tagged {
+    fn envelope_data(&self) -> Vec<u8>
+    where
+        T: Serializable + Tagged,
+    {
         let mut output = Vec::new();
-        self.envelope_write(&mut output).expect("in-memory serialization should succeed");
+        self.envelope_write(&mut output)
+            .expect("in-memory serialization should succeed");
         output
     }
     /// Writes the serialization of the envelope into a [Write]r.
-    fn envelope_write(&self, writer: impl Write) -> io::Result<()> where T: Serializable + Tagged{
+    fn envelope_write(&self, writer: impl Write) -> io::Result<()>
+    where
+        T: Serializable + Tagged,
+    {
         tagged_serialize(&self.into_envelope(), writer)
     }
 }
@@ -61,8 +69,8 @@ impl<T> Envelope<PhantomData<T>> for T {
 
 #[cfg(test)]
 mod tests {
+    use serialize::{Deserializable, Serializable, Tagged};
     use std::marker::PhantomData;
-    use serialize::{Serializable, Deserializable, Tagged};
 
     use super::Envelope;
 
@@ -97,8 +105,23 @@ mod tests {
 
     #[test]
     fn test_envelope() {
-        let foo = Foo { bar: Bar(42), baz: Baz(64) };
-        assert_eq!(BarEnvelope { bar: Bar(42), baz: PhantomData }, foo.into_envelope());
-        assert_eq!(BazEnvelope { bar: PhantomData, baz: Baz(64) }, foo.into_envelope());
+        let foo = Foo {
+            bar: Bar(42),
+            baz: Baz(64),
+        };
+        assert_eq!(
+            BarEnvelope {
+                bar: Bar(42),
+                baz: PhantomData
+            },
+            foo.into_envelope()
+        );
+        assert_eq!(
+            BazEnvelope {
+                bar: PhantomData,
+                baz: Baz(64)
+            },
+            foo.into_envelope()
+        );
     }
 }

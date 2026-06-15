@@ -311,9 +311,7 @@ impl Serializable for ProofVersioned {
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
-                proof.serialized_size() + 1
-            }
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
         }
     }
 }
@@ -473,11 +471,10 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         match proof {
             ProofVersioned::V2(_) => match mode {
                 #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
-                    vk,
-                    pis.into_iter(),
-                )
-                .map_err(MalformedTransaction::<D>::InvalidProof),
+                ProofVerificationMode::CalibratedMock => {
+                    zkir_v2::ir_v1::v1_mock_verify(vk, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof)
+                }
                 _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
             },
@@ -658,11 +655,14 @@ struct OutputInstructionUnshieldedWithTokenType {
 impl OutputInstructionUnshielded {
     pub fn to_hash_data(self, tt: UnshieldedTokenType) -> Vec<u8> {
         let mut data = Vec::new();
-        tagged_serialize(&OutputInstructionUnshieldedWithTokenType {
-            token_type: tt,
-            instruction: self,
-        }, &mut data)
-            .expect("In-memory serialization should succeed");
+        tagged_serialize(
+            &OutputInstructionUnshieldedWithTokenType {
+                token_type: tt,
+                instruction: self,
+            },
+            &mut data,
+        )
+        .expect("In-memory serialization should succeed");
         data
     }
 
@@ -868,7 +868,7 @@ pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: S
 tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-signing-envelope[v8]"]
+#[tag = "intent-signing-envelope[v8]"]
 #[phantom(D)]
 pub struct IntentSigningEnvelope<D: DB> {
     pub segment: u16,
@@ -884,7 +884,12 @@ tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
 // be used on the erased intent. This is not enforced at a type level due to the limitations of the
 // `Envelope` derive macro, which is considered required as the automated nature of this will flag
 // envelope mismatches.
-struct InnerIntentPedersenEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
+struct InnerIntentPedersenEnvelope<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Clone,
+    D: DB,
+> {
     guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     actions: storage::storage::Array<ContractAction<P, D>, D>,
@@ -895,15 +900,21 @@ struct InnerIntentPedersenEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: Stor
 tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-pedersen-challenge-envelope[v8]"]
+#[tag = "intent-pedersen-challenge-envelope[v8]"]
 #[phantom(D)]
 struct IntentPedersenEnvelope<D: DB> {
     segment: u16,
     intent: InnerIntentPedersenEnvelope<(), (), Pedersen, D>,
 }
-tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
+tag_enforcement_test!(IntentPedersenEnvelope<InMemoryDB>);
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Serializable + PedersenDowngradeable<D>, D: DB> Intent<S, P, B, D> {
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D>,
+    D: DB,
+> Intent<S, P, B, D>
+{
     pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
         let mut data = Vec::new();
         let envelope = IntentPedersenEnvelope {
@@ -2896,7 +2907,7 @@ tag_enforcement_test!(MaintenanceUpdate<InMemoryDB>);
 
 #[derive(Serializable)]
 #[phantom(D)]
-#[tag = "contract-maintenance-update[v2]"]
+#[tag = "contract-maintenance-update-signing-envelope[v2]"]
 struct MaintenanceUpdateSigningEnvelope<D: DB> {
     address: ContractAddress,
     updates: storage::storage::Array<SingleUpdate, D>,

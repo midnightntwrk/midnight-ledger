@@ -14,7 +14,7 @@
 use std::io::Read;
 
 use base_crypto::envelope::Envelope;
-use serialize::{Serializable, Tagged, Deserializable};
+use serialize::{Deserializable, Serializable, Tagged};
 use storage::{Storable, arena::Sp, db::DB, storage::HashMap};
 
 #[allow(unused)]
@@ -87,7 +87,7 @@ impl<K: Ord + Serializable + Storable<D>, V: Storable<D>, D: DB> KeySortedIter
 #[tag = "option-envelope"]
 pub enum OptionEnvelope<T> {
     Some(T),
-    None
+    None,
 }
 
 impl<A: Envelope<B> + Storable<D>, B, D: DB> Envelope<OptionEnvelope<B>> for Option<Sp<A, D>> {

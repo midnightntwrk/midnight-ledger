@@ -17,7 +17,9 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol, TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState
+    ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker,
+    SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol,
+    TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
 use crate::verify::{StateReference, WellFormedStrictness};
 use base_crypto::{
@@ -634,7 +636,8 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                let dust_op = onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let dust_op =
+                    onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
                 let dust_call = crate::structure::ContractCall {
                     address: coin_structure::contract::ContractAddress::default(),
                     entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
