@@ -34,6 +34,7 @@ pub use derive::Envelope;
 /// any misalignment a compilation error.
 pub trait Envelope<T> {
     /// Converts this value into its envelope.
+    #[allow(clippy::wrong_self_convention)]
     fn into_envelope(&self) -> T;
 
     /// Writes the serialization of the envelope into a bytestring.

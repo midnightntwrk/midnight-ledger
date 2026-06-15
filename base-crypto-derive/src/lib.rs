@@ -188,11 +188,8 @@ pub fn envelope(tokens: TokenStream) -> TokenStream {
             let mut path = tp.path.clone();
             if let Some(last) = path.segments.last_mut() {
                 // turn `Foo<T>` args into `Foo::<T>`
-                match &mut last.arguments {
-                    PathArguments::AngleBracketed(args) => {
-                        args.colon2_token = Some(Default::default());
-                    }
-                    _ => {}
+                if let PathArguments::AngleBracketed(args) = &mut last.arguments {
+                    args.colon2_token = Some(Default::default());
                 }
             }
             quote!(#path)

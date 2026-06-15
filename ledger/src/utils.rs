@@ -98,3 +98,14 @@ impl<A: Envelope<B> + Storable<D>, B, D: DB> Envelope<OptionEnvelope<B>> for Opt
         }
     }
 }
+
+// Technical means to get around not being able to blanket-impl `Envelope` for `Option`
+#[derive(Serializable, Clone)]
+#[tag = "vec-envelope"]
+pub struct VecEnvelope<T>(pub Vec<T>);
+
+impl<A: Envelope<B> + Storable<D>, B, D: DB> Envelope<VecEnvelope<B>> for storage::storage::Array<A, D> {
+    fn into_envelope(&self) -> VecEnvelope<B> {
+        VecEnvelope(self.iter_deref().map(A::into_envelope).collect())
+    }
+}

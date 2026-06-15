@@ -15,6 +15,7 @@ use crate::annotation::NightAnn;
 use crate::dust::DUST_GENERATION_INFO_SIZE;
 use crate::dust::DUST_SPEND_PIS;
 use crate::dust::DUST_SPEND_PROOF_SIZE;
+use crate::dust::DustActionsSigningEnvelope;
 use crate::dust::{DustActions, DustParameters, DustState, INITIAL_DUST_PARAMETERS};
 use crate::error::FeeCalculationError;
 use crate::error::InvariantViolation;
@@ -855,13 +856,13 @@ tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 #[tag = "inner-intent-signing-envelope[v8]"]
 #[phantom(D)]
 // Note: This signing envelope is *not* just the erased intent in order to not count the number of
-// signatures in unshielded offers. For this same reason, no wrapper is required for dust/contract
+// signatures in unshielded offers. For this same reason, no wrapper is required for contract
 // actions; these *already* have erased the signatures/proofs from them.
 pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     pub fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     pub actions: storage::storage::Array<ContractAction<P, D>, D>,
-    pub dust_actions: Option<Sp<DustActions<S, P, D>, D>>,
+    pub dust_actions: OptionEnvelope<DustActionsSigningEnvelope<S, P, D>>,
     pub ttl: Timestamp,
     pub binding_commitment: B,
 }
@@ -893,7 +894,7 @@ struct InnerIntentPedersenEnvelope<
     guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
     actions: storage::storage::Array<ContractAction<P, D>, D>,
-    dust_actions: Option<Sp<DustActions<S, P, D>, D>>,
+    dust_actions: OptionEnvelope<DustActions<S, P, D>>,
     ttl: Timestamp,
     binding_commitment: PhantomData<B>,
 }

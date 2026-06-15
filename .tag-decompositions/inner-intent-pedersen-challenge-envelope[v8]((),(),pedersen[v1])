@@ -1,1 +1,1 @@
-((option-envelope(unshielded-offer-signing-envelope[v2](())),option-envelope(unshielded-offer-signing-envelope[v2](())),mpt-array[v1](contract-action[v8](())),option(dust-actions[v2]((),())),timestamp,()))
+((option-envelope(unshielded-offer-signing-envelope[v2](())),option-envelope(unshielded-offer-signing-envelope[v2](())),mpt-array[v1](contract-action[v8](())),option-envelope(dust-actions[v2]((),())),timestamp,()))
