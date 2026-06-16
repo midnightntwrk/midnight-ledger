@@ -68,7 +68,7 @@
     "testcontainers": "11.5.1",
     "typescript": "6.0.2",
     "vite-plugin-wasm": "3.5.0",
-    "vitest": "3.2.6",
+    "vitest": "4.1.9",
     "vitest-ctrf-json-reporter": "0.0.2"
   },
   "files": [
