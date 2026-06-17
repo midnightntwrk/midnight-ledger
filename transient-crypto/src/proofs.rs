@@ -508,11 +508,15 @@ impl Serializable for VerifierKey {
 }
 
 impl VerifierKey {
-    /// Creates a verifier key that is pre-marked as invalid (cannot be initialized
-    /// with the v2 `MidnightVK::read`). Used for v1-only VKs that should only be
-    /// verified through `ir_v1::v1_verify`.
-    pub fn new_v1_only(data: Vec<u8>) -> Self {
-        Self(Arc::new(Mutex::new(InnerVerifierKey::Invalid(data))))
+    /// Marks this verifier key as v1-only, preventing initialization with the
+    /// v2 `MidnightVK::read`. V1 VKs should only be verified through
+    /// `ir_v1::v1_verify`.
+    pub fn mark_v1_only(&self) {
+        let mut mutex = self.0.lock().expect("mutex is not poisoned");
+        if let InnerVerifierKey::Uninitialized(data) = &*mutex {
+            let data = data.clone();
+            *mutex = InnerVerifierKey::Invalid(data);
+        }
     }
 
     /// Initializes the lazy verifier key

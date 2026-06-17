@@ -129,6 +129,20 @@ pub enum IrMinorVersion {
 #[tag = "prover-key[v7](ir-source[v2])"]
 struct FacadeProverKey(Vec<u8>);
 
+/// Converts a v1 `VerifierKey` to the current format, pre-marked as v1-only
+/// (cannot be initialized with v2 `MidnightVK::read`).
+fn v1_vk_to_current(
+    old_vk: &transient_crypto_old::proofs::VerifierKey,
+) -> Result<VerifierKey, anyhow::Error> {
+    let mut buf = Vec::new();
+    serialize_old::Serializable::serialize(old_vk, &mut buf)?;
+    // Deserialize to extract the inner bytes (stripping the length prefix),
+    // then mark as v1-only so force_init() won't try to parse with v2 format.
+    let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &buf[..], 0)?;
+    vk.mark_v1_only();
+    Ok(vk)
+}
+
 impl Zkir for IrSource {
     type ProverKey = VersionedInnerPK;
 
@@ -229,9 +243,7 @@ impl Zkir for IrSource {
                 let v1_params = crate::ir_v1::V1Params(params);
                 use transient_crypto_old::proofs::Zkir as _;
                 let old_vk = v1_ir.keygen_vk(&v1_params).await?;
-                let mut raw = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut raw)?;
-                Ok(VerifierKey::new_v1_only(raw))
+                Ok(v1_vk_to_current(&old_vk)?)
             }
             IrMinorVersion::V1 => {
                 use midnight_zk_stdlib::setup_vk;
@@ -254,9 +266,7 @@ impl Zkir for IrSource {
                 let (old_pk, old_vk) = v1_ir.keygen(&v1_params).await?;
                 let v1_inner_pk = old_pk.init()?;
                 let versioned_pk = VersionedInnerPK::V1((*v1_inner_pk).clone());
-                let mut raw = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut raw)?;
-                Ok((ProverKey::from_raw(versioned_pk), VerifierKey::new_v1_only(raw)))
+                Ok((ProverKey::from_raw(versioned_pk), v1_vk_to_current(&old_vk)?))
             }
             IrMinorVersion::V1 => self.v2_keygen(params).await,
         }
