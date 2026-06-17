@@ -30,7 +30,7 @@ mod proof_tests {
         KeyLocation, PARAMS_VERIFIER, ParamsProver, ParamsProverProvider, ProofPreimage,
         ProvingKeyMaterial, Resolver, VerifierKey, Zkir,
     };
-    use midnight_zkir::ir_v1::{v1_prove, v1_verify};
+    use midnight_zkir::ir_v1::v1_verify;
     use transient_crypto::repr::FieldRepr;
 
     type ProverKey = transient_crypto::proofs::ProverKey<IrSource>;
@@ -138,8 +138,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -188,8 +188,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -237,8 +237,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -285,8 +285,8 @@ mod proof_tests {
                 public_transcript_outputs: vec![],
                 key_location: KeyLocation(Cow::Borrowed("builtin")),
             };
-            let proof = v1_prove(
-                    &preimage,
+            let (proof, _) = preimage
+                .prove::<IrSource>(
                     &mut ChaCha20Rng::from_seed([42; 32]),
                     &TestParams,
                     &TestResolver {
@@ -332,8 +332,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -389,8 +389,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {
@@ -443,8 +443,8 @@ mod proof_tests {
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
         };
-        let proof = v1_prove(
-                &preimage,
+        let (proof, _) = preimage
+            .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
                 &TestResolver {

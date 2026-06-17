@@ -142,17 +142,3 @@ pub fn v1_mock_verify(
     old_vk.mock_verify(old_pis)
         .map_err(|e| anyhow::anyhow!("v1 mock verification failed: {e}"))
 }
-
-/// Proves using the v1 (zk-stdlib v1) pipeline.
-pub async fn v1_prove(
-    preimage: &transient_crypto::proofs::ProofPreimage,
-    rng: impl rand::Rng + rand::CryptoRng,
-    params: &impl transient_crypto::proofs::ParamsProverProvider,
-    resolver: &impl transient_crypto::proofs::Resolver,
-) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
-    let old_preimage = preimage_to_v1(preimage);
-    let (old_proof, _skips) = old_preimage
-        .prove::<V1IrSource>(rng, &V1Params(params), &V1Resolver(resolver))
-        .await?;
-    Ok(transient_crypto::proofs::Proof(old_proof.0))
-}
