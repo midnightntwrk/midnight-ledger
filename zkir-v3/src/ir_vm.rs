@@ -14,9 +14,17 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
-use crate::ir_instructions::decode::{decode_incircuit, decode_offcircuit};
-use crate::ir_instructions::encode::{encode_incircuit, encode_offcircuit};
+use crate::ir_instructions::decode::{
+    decode_incircuit, decode_offcircuit, native_to_jubjub_scalar,
+};
+use crate::ir_instructions::ec_mul::{ec_mul_incircuit, ec_mul_offcircuit};
+use crate::ir_instructions::encode::{
+    encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
+};
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::inv::{inv_incircuit, inv_offcircuit};
+use crate::ir_instructions::mul::{mul_incircuit, mul_offcircuit};
+use crate::ir_instructions::neg::{neg_incircuit, neg_offcircuit};
 use crate::ir_instructions::select::{select_incircuit, select_offcircuit};
 use crate::ir_types::{CircuitValue, IrType, IrValue};
 
@@ -28,14 +36,11 @@ use base_crypto::repr::BinaryHashRepr;
 use group::Group;
 use midnight_circuits::instructions::{
     ArithInstructions, AssertionInstructions, AssignmentInstructions, BinaryInstructions,
-    ControlFlowInstructions, ConversionInstructions, DecompositionInstructions, EccInstructions,
+    ControlFlowInstructions, ConversionInstructions, DecompositionInstructions,
     PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
-use midnight_circuits::types::{
-    AssignedBit, AssignedByte, AssignedNative, AssignedNativePoint, AssignedScalarOfNativeCurve,
-    InnerValue,
-};
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup};
+use midnight_circuits::types::{AssignedBit, AssignedByte, AssignedNative, InnerValue};
+use midnight_curves::{JubjubSubgroup, secp256k1};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -300,9 +305,10 @@ impl IrSource {
                     let val = resolve_operand(&memory, input)?;
                     let encoded = encode_offcircuit(&val);
                     if encoded.len() != outputs.len() {
-                        return Err(anyhow::Error::msg(
-                            "Unexpected output length of encode instruction",
-                        ));
+                        return Err(anyhow::Error::msg(format!(
+                            "Unexpected output length of encode instruction: {:?}",
+                            val.get_type()
+                        )));
                     }
                     for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         memory.insert(out_id.clone(), enc_val);
@@ -327,14 +333,19 @@ impl IrSource {
                     memory.insert(output.clone(), result);
                 }
                 I::Mul { a, b, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let b: Fr = resolve_operand(&memory, b)?.try_into()?;
-                    let result = IrValue::Native(a * b);
+                    let a = resolve_operand(&memory, a)?;
+                    let b = resolve_operand(&memory, b)?;
+                    let result = mul_offcircuit(&a, &b)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Neg { a, output } => {
-                    let a: Fr = resolve_operand(&memory, a)?.try_into()?;
-                    let result = IrValue::Native(-a);
+                    let a = resolve_operand(&memory, a)?;
+                    let result = neg_offcircuit(&a)?;
+                    memory.insert(output.clone(), result);
+                }
+                I::Inv { a, output } => {
+                    let a = resolve_operand(&memory, a)?;
+                    let result = inv_offcircuit(&a)?;
                     memory.insert(output.clone(), result);
                 }
                 I::Not { a, output } => {
@@ -478,6 +489,11 @@ impl IrSource {
                         .into();
                     memory.insert(output.clone(), IrValue::Native(result));
                 }
+                I::JubjubScalarFromNative { native, output } => {
+                    let x: Fr = resolve_operand(&memory, native)?.try_into()?;
+                    let s = native_to_jubjub_scalar(&x);
+                    memory.insert(output.clone(), IrValue::JubjubScalar(s));
+                }
                 I::TransientHash { inputs, output } => {
                     let result = transient_hash(
                         &inputs
@@ -568,15 +584,22 @@ impl IrSource {
                     memory.insert(output.clone(), IrValue::JubjubPoint(point.0));
                 }
                 I::EcMul { a, scalar, output } => {
-                    let a: JubjubSubgroup = resolve_operand(&memory, a)?.try_into()?;
-                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let c = IrValue::JubjubPoint(a * s);
-                    memory.insert(output.clone(), c);
+                    let p = resolve_operand(&memory, a)?;
+                    let s = resolve_operand(&memory, scalar)?;
+                    let r = ec_mul_offcircuit(&p, &s)?;
+                    memory.insert(output.clone(), r);
                 }
                 I::EcMulGenerator { scalar, output } => {
-                    let s: JubjubFr = resolve_operand(&memory, scalar)?.try_into()?;
-                    let p = JubjubSubgroup::generator() * s;
-                    memory.insert(output.clone(), IrValue::JubjubPoint(p));
+                    let s = resolve_operand(&memory, scalar)?;
+                    let p = match s.get_type() {
+                        IrType::JubjubScalar => IrValue::JubjubPoint(JubjubSubgroup::generator()),
+                        IrType::Secp256k1Scalar => {
+                            IrValue::Secp256k1Point(secp256k1::Secp256k1::generator())
+                        }
+                        t => bail!("Unsupported EcMulGenerator for scalar of type {t:?}"),
+                    };
+                    let r = ec_mul_offcircuit(&p, &s)?;
+                    memory.insert(output.clone(), r);
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
@@ -913,15 +936,17 @@ impl Relation for IrSource {
                 I::Mul { a, b, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
                     let b_val = resolve_operand(std, layouter, &memory, b)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let b: AssignedNative<_> = b_val.try_into()?;
-                    let result = CircuitValue::Native(std.mul(layouter, &a, &b, None)?);
+                    let result = mul_incircuit(std, layouter, &a_val, &b_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Neg { a, output } => {
                     let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let a: AssignedNative<_> = a_val.try_into()?;
-                    let result = CircuitValue::Native(std.neg(layouter, &a)?);
+                    let result = neg_incircuit(std, layouter, &a_val)?;
+                    mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::Inv { a, output } => {
+                    let a_val = resolve_operand(std, layouter, &memory, a)?;
+                    let result = inv_incircuit(std, layouter, &a_val)?;
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::Not { a, output } => {
@@ -942,6 +967,14 @@ impl Relation for IrSource {
                     let bit = std.lower_than(layouter, &a, &b, u32::max(*bits + *bits % 2, 4))?;
                     let result = CircuitValue::Native(std.convert(layouter, &bit)?);
                     mem_insert(output.clone(), result, &mut memory)?;
+                }
+                I::JubjubScalarFromNative { native, output } => {
+                    let x: AssignedNative<_> =
+                        resolve_operand(std, layouter, &memory, native)?.try_into()?;
+                    let x_bytes = std.assigned_to_le_bytes(layouter, &x, None)?;
+                    let x_big = std.biguint().from_le_bytes(layouter, &x_bytes)?;
+                    let s = jubjub_scalar_from_biguint(std, layouter, x_big)?;
+                    mem_insert(output.clone(), CircuitValue::JubjubScalar(s), &mut memory)?;
                 }
                 I::PublicInput {
                     guard: _,
@@ -1024,21 +1057,30 @@ impl Relation for IrSource {
                     mem_insert(output.clone(), result, &mut memory)?;
                 }
                 I::EcMul { a, scalar, output } => {
-                    let a_val = resolve_operand(std, layouter, &memory, a)?;
-                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let a: AssignedNativePoint<JubjubExtended> = a_val.try_into()?;
-                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
-                    let b = std.jubjub().msm(layouter, &[scalar], &[a])?;
-                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
+                    let p = resolve_operand(std, layouter, &memory, a)?;
+                    let s = resolve_operand(std, layouter, &memory, scalar)?;
+                    let r = ec_mul_incircuit(std, layouter, &p, &s)?;
+                    mem_insert(output.clone(), r, &mut memory)?;
                 }
                 I::EcMulGenerator { scalar, output } => {
-                    let g: AssignedNativePoint<JubjubExtended> = std
-                        .jubjub()
-                        .assign_fixed(layouter, JubjubSubgroup::generator())?;
-                    let scalar_val = resolve_operand(std, layouter, &memory, scalar)?;
-                    let scalar: AssignedScalarOfNativeCurve<_> = scalar_val.try_into()?;
-                    let b = std.jubjub().msm(layouter, &[scalar], &[g])?;
-                    mem_insert(output.clone(), CircuitValue::JubjubPoint(b), &mut memory)?;
+                    let s = resolve_operand(std, layouter, &memory, scalar)?;
+                    let p = match s.get_type() {
+                        IrType::JubjubScalar => CircuitValue::JubjubPoint(
+                            std.jubjub()
+                                .assign_fixed(layouter, JubjubSubgroup::generator())?,
+                        ),
+                        IrType::Secp256k1Scalar => CircuitValue::Secp256k1Point(
+                            std.secp256k1_curve()
+                                .assign_fixed(layouter, secp256k1::Secp256k1::generator())?,
+                        ),
+                        t => {
+                            return Err(Error::Synthesis(format!(
+                                "Unsupported EcMulGenerator for scalar of type {t:?}"
+                            )));
+                        }
+                    };
+                    let r = ec_mul_incircuit(std, layouter, &p, &s)?;
+                    mem_insert(output.clone(), r, &mut memory)?;
                 }
                 I::HashToCurve { inputs, output } => {
                     let mut resolved_inputs = Vec::new();
@@ -1122,6 +1164,8 @@ impl Relation for IrSource {
                 .iter()
                 .any(|id| target_types.contains(&id.val_t));
 
+            // We can figure out if a type is used in the circuit by looking at the entry
+            // points, currenty: Decode, PublicInput or PrivateInput.
             let types_in_instructions = self.instructions.iter().any(|op| match op {
                 I::Decode { val_t, .. }
                 | I::PublicInput { val_t, .. }
@@ -1132,41 +1176,28 @@ impl Relation for IrSource {
             types_in_inputs || types_in_instructions
         };
 
-        let jubjub = self.instructions.iter().any(|op| {
-            involves_types(&[IrType::JubjubPoint, IrType::JubjubScalar]) || {
-                matches!(
-                    op,
-                    I::EcMul { .. } | I::EcMulGenerator { .. } | I::HashToCurve { .. }
-                )
-            }
-        });
-        let hash_to_curve = self
-            .instructions
-            .iter()
-            .any(|op| matches!(op, I::HashToCurve { .. }));
-        let poseidon = self.do_communications_commitment
-            || self
-                .instructions
-                .iter()
-                .any(|op| matches!(op, I::TransientHash { .. }));
-        let sha2_256 = self
-            .instructions
-            .iter()
-            .any(|op| matches!(op, I::PersistentHash { .. }));
-        let keccak_256 = self
-            .instructions
-            .iter()
-            .any(|op| matches!(op, I::Keccak256 { .. }));
+        let involves_instructions = |match_predicate: &dyn Fn(&I) -> bool| -> bool {
+            self.instructions.iter().any(match_predicate)
+        };
+
         ZkStdLibArch {
-            jubjub: jubjub || hash_to_curve,
-            poseidon: poseidon || hash_to_curve,
-            sha2_256,
+            jubjub: involves_types(&[IrType::JubjubPoint, IrType::JubjubScalar])
+                || involves_instructions(&|op| matches!(op, I::HashToCurve { .. })),
+            poseidon: self.do_communications_commitment
+                || involves_instructions(&|op| {
+                    matches!(op, I::TransientHash { .. } | I::HashToCurve { .. })
+                }),
+            sha2_256: involves_instructions(&|op| matches!(op, I::PersistentHash { .. })),
             sha2_512: false,
-            keccak_256,
+            keccak_256: involves_instructions(&|op| matches!(op, I::Keccak256 { .. })),
             sha3_256: false,
             blake2b: false,
             nr_pow2range_cols: 4,
-            secp256k1: false,
+            secp256k1: involves_types(&[
+                IrType::Secp256k1Point,
+                IrType::Secp256k1Base,
+                IrType::Secp256k1Scalar,
+            ]),
             bls12_381: false,
             base64: false,
             automaton: false,

@@ -17,9 +17,12 @@ mod common;
 #[cfg(test)]
 mod proof_tests {
     use super::common::{TestParams, TestResolver};
-    use group::Group;
-    use midnight_curves::JubjubSubgroup;
-    use midnight_zkir_v3::{Identifier, IrSource, Preprocessed, ir_types::IrValue};
+    use group::{Group, ff::Field};
+    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_zkir_v3::{
+        Identifier, IrSource, Preprocessed, ir_instructions::encode::encode_offcircuit,
+        ir_types::IrValue,
+    };
     use rand::{SeedableRng, rngs::OsRng};
     use rand_chacha::ChaCha20Rng;
     #[cfg(feature = "proptest")]
@@ -304,7 +307,7 @@ mod proof_tests {
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "decode", "type": "Scalar<Jubjub>", "inputs": ["%s0"], "output": "%s0d" },
+               { "op": "jubjub_scalar_from_native", "native": "%s0", "output": "%s0d" },
                { "op": "encode", "input": "%s0d", "outputs": ["%s0e"] },
                { "op": "ec_mul", "a": "%p0", "scalar": "%s0d", "output": "%p1" },
                { "op": "ec_mul_generator", "scalar": "%s1", "output": "%p2" },
@@ -719,7 +722,7 @@ mod proof_tests {
 
     #[actix_rt::test]
     async fn test_jubjub_point_ops() {
-        // Exercises test_eq (asserted), constrain_eq, and cond_select on JubjubPoint
+        // Exercises test_eq (asserted), constrain_eq, cond_select, and neg on JubjubPoint
         // in a single circuit so every op is actively tested without dead values.
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
@@ -736,7 +739,10 @@ mod proof_tests {
                { "op": "assert", "cond": "%v0" },
                { "op": "constrain_eq", "a": "%p0", "b": "%p1" },
                { "op": "cond_select", "bit": "%bit", "a": "%p0", "b": "%p1", "output": "%p2" },
-               { "op": "constrain_eq", "a": "%p2", "b": "%p0" }
+               { "op": "constrain_eq", "a": "%p2", "b": "%p0" },
+               { "op": "neg", "a": "%p0", "output": "%p0_neg" },
+               { "op": "private_input", "type": "Point<Jubjub>", "guard": null, "output": "%p0_neg_priv" },
+               { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
@@ -745,6 +751,7 @@ mod proof_tests {
 
         // p0 == p1 == generator, bit == 1
         let p = EmbeddedGroupAffine::generator();
+        let neg_p: EmbeddedGroupAffine = (-JubjubSubgroup::generator()).into();
         let preimage = ProofPreimage {
             binding_input: 42.into(),
             communications_commitment: None,
@@ -755,7 +762,7 @@ mod proof_tests {
                 p.y().unwrap(),
                 1.into(),
             ],
-            private_transcript: vec![],
+            private_transcript: vec![neg_p.x().unwrap(), neg_p.y().unwrap()],
             public_transcript_inputs: vec![],
             public_transcript_outputs: vec![],
             key_location: KeyLocation(Cow::Borrowed("builtin")),
@@ -1017,5 +1024,187 @@ mod proof_tests {
             "Error message: {}",
             err
         );
+    }
+
+    #[actix_rt::test]
+    async fn test_secp256k1_proof() {
+        // Single circuit exercising all three Secp256k1 types.
+        // Base and Scalar values are decoded from native limbs, added, then
+        // encoded back; a round-trip decode verifies encode is its inverse.
+        // Points are typed inputs; their sum is checked via a private input.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%id",   "type": "Point<Secp256k1>"  },
+              { "name": "%p0",   "type": "Point<Secp256k1>"  },
+              { "name": "%p1",   "type": "Point<Secp256k1>"  },
+              { "name": "%b0_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%b0_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%b0_2", "type": "Scalar<BLS12-381>" },
+              { "name": "%b0_3", "type": "Scalar<BLS12-381>" },
+              { "name": "%b1_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%b1_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%b1_2", "type": "Scalar<BLS12-381>" },
+              { "name": "%b1_3", "type": "Scalar<BLS12-381>" },
+              { "name": "%s0_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%s0_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%s0_2", "type": "Scalar<BLS12-381>" },
+              { "name": "%s0_3", "type": "Scalar<BLS12-381>" },
+              { "name": "%s1_0", "type": "Scalar<BLS12-381>" },
+              { "name": "%s1_1", "type": "Scalar<BLS12-381>" },
+              { "name": "%s1_2", "type": "Scalar<BLS12-381>" },
+              { "name": "%s1_3", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b0_0","%b0_1","%b0_2","%b0_3"], "output": "%b0" },
+               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b1_0","%b1_1","%b1_2","%b1_3"], "output": "%b1" },
+               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s0_0","%s0_1","%s0_2","%s0_3"], "output": "%s0" },
+               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s1_0","%s1_1","%s1_2","%s1_3"], "output": "%s1" },
+               { "op": "add", "a": "%p0", "b": "%p1", "output": "%p2" },
+               { "op": "add", "a": "%b0", "b": "%b1", "output": "%b2" },
+               { "op": "add", "a": "%s0", "b": "%s1", "output": "%s2" },
+               { "op": "mul", "a": "%b0", "b": "%b1", "output": "%b_prod" },
+               { "op": "mul", "a": "%s0", "b": "%s1", "output": "%s_prod" },
+               { "op": "encode", "input": "%b2", "outputs": ["%b2_0","%b2_1","%b2_2","%b2_3"] },
+               { "op": "encode", "input": "%s2", "outputs": ["%s2_0","%s2_1","%s2_2","%s2_3"] },
+               { "op": "decode", "type": "Base<Secp256k1>",   "inputs": ["%b2_0","%b2_1","%b2_2","%b2_3"], "output": "%b2_rt" },
+               { "op": "decode", "type": "Scalar<Secp256k1>", "inputs": ["%s2_0","%s2_1","%s2_2","%s2_3"], "output": "%s2_rt" },
+               { "op": "neg", "a": "%p0",  "output": "%p0_neg" },
+               { "op": "neg", "a": "%b0",  "output": "%b0_neg" },
+               { "op": "neg", "a": "%s0",  "output": "%s0_neg" },
+               { "op": "inv", "a": "%b0",  "output": "%b0_inv" },
+               { "op": "inv", "a": "%s0",  "output": "%s0_inv" },
+               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p2_priv"    },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b_prod_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s_prod_priv" },
+               { "op": "private_input", "type": "Point<Secp256k1>",  "guard": null, "output": "%p0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_neg_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_neg_priv" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%b0_inv_priv" },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%s0_inv_priv" },
+               { "op": "constrain_eq", "a": "%p2",     "b": "%p2_priv"     },
+               { "op": "constrain_eq", "a": "%b2",     "b": "%b2_rt"       },
+               { "op": "constrain_eq", "a": "%b_prod", "b": "%b_prod_priv" },
+               { "op": "constrain_eq", "a": "%p0_neg", "b": "%p0_neg_priv" },
+               { "op": "constrain_eq", "a": "%b0_neg", "b": "%b0_neg_priv" },
+               { "op": "test_eq",      "a": "%s2",     "b": "%s2_rt",    "output": "%s_eq"   },
+               { "op": "assert",       "cond": "%s_eq" },
+               { "op": "test_eq",      "a": "%s_prod", "b": "%s_prod_priv", "output": "%sp_eq" },
+               { "op": "assert",       "cond": "%sp_eq" },
+               { "op": "test_eq",      "a": "%s0_neg", "b": "%s0_neg_priv", "output": "%sn_eq" },
+               { "op": "assert",       "cond": "%sn_eq" },
+               { "op": "constrain_eq", "a": "%b0_inv", "b": "%b0_inv_priv" },
+               { "op": "test_eq",      "a": "%s0_inv", "b": "%s0_inv_priv", "output": "%si_eq" },
+               { "op": "assert",       "cond": "%si_eq" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let id = secp256k1::Secp256k1::identity();
+        let p0 = secp256k1::Secp256k1::random(OsRng);
+        let p1 = secp256k1::Secp256k1::random(OsRng);
+        let b0 = secp256k1::Fp::random(OsRng);
+        let b1 = secp256k1::Fp::random(OsRng);
+        let s0 = secp256k1::Fq::random(OsRng);
+        let s1 = secp256k1::Fq::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        // p0, p1 are typed Point<Secp256k1> inputs (8 limbs each);
+        // b0, b1, s0, s1 are passed as raw native limbs (4 each) for decode.
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Secp256k1Point(id)),
+            encode(IrValue::Secp256k1Point(p0)),
+            encode(IrValue::Secp256k1Point(p1)),
+            encode(IrValue::Secp256k1Base(b0)),
+            encode(IrValue::Secp256k1Base(b1)),
+            encode(IrValue::Secp256k1Scalar(s0)),
+            encode(IrValue::Secp256k1Scalar(s1)),
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Secp256k1Point(p0 + p1)),
+            encode(IrValue::Secp256k1Base(b0 * b1)),
+            encode(IrValue::Secp256k1Scalar(s0 * s1)),
+            encode(IrValue::Secp256k1Point(-p0)),
+            encode(IrValue::Secp256k1Base(-b0)),
+            encode(IrValue::Secp256k1Scalar(-s0)),
+            encode(IrValue::Secp256k1Base(Option::from(b0.invert()).unwrap())),
+            encode(IrValue::Secp256k1Scalar(Option::from(s0.invert()).unwrap())),
+        ]
+        .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
+    async fn test_native_inv_proof() {
+        // Verifies native field inversion: v0 * inv(v0) == 1.
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%v0", "type": "Scalar<BLS12-381>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "inv", "a": "%v0",          "output": "%v0_inv" },
+               { "op": "mul", "a": "%v0", "b": "%v0_inv", "output": "%one"   },
+               { "op": "constrain_eq", "a": "%one", "b": "0x01" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs: vec![7.into()],
+            private_transcript: vec![],
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver { pk, vk: vk.clone(), ir },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
     }
 }
