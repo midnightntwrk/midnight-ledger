@@ -2,6 +2,11 @@ name: Publish Ledger Release
 
 on:
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Overwrite existing GH Packages versions (delete-then-republish). Public npm cannot be overwritten and will error."
+        type: boolean
+        default: false
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,20 +18,6 @@ jobs:
     steps:
       - name: Checkout Code
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8  #v5.0.0
-
-      - name: Setup GitHub Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
-
-      - name: Setup API Credentials
-        uses: extractions/netrc@c3879108aae6b4ed5c4eb60854ae04f06d2f2f68 # v3.0.0
-        with:
-          machine: api.github.com
-          username: ${{ secrets.GH_USERNAME }}
-          password: ${{ secrets.GH_PASSWORD }}
 
       - name: Install Dependencies
         run: |
@@ -40,7 +31,7 @@ jobs:
         with:
           always-auth: true
           registry-url: https://npm.pkg.github.com/
-          scope: '@midnight-ntwrk'
+          scope: '@midnightntwrk'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
 
@@ -64,50 +55,52 @@ jobs:
         run: |
           for project in ledger-wasm ledger onchain-runtime-wasm onchain-runtime zkir zkir-wasm coin-structure base-crypto serialize storage transient-crypto; do
             cd "$project"
-            VERSION=$((grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml)| awk -F '"' '{print $2}')
+            VERSION=$( (grep '^version =' Cargo.toml || grep '^package.version =' ../Cargo.toml) | awk -F '"' '{print $2}')
             echo "$project version: $VERSION"
             VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            echo "$VAR_NAME=$VERSION" >> $GITHUB_ENV
+            echo "$VAR_NAME=$VERSION" >> "$GITHUB_ENV"
             cd ..
             done
-
-      - name: Add tags for upstream crates
-        run: |
-          git config --global user.name 'MidnightCI'
-          git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          projects=("coin-structure" "base-crypto" "serialize" "storage" "transient-crypto")
-          for project in "${projects[@]}"; do
-            VAR_NAME=$(echo "${project^^}_VERSION" | tr '-' '_')
-            VERSION=${!VAR_NAME}
-            SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1 "." $2}')
-            TAG_NAME="${project}-${VERSION}"
-            SHORT_TAG_NAME="${project}-${SHORT_VERSION}"
-
-            # Check if the long version tag exists on the remote
-            if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-              echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ${project}."
-              continue
-            fi
-
-            # Create and push the new tag
-            git tag "${TAG_NAME}"
-            git push origin "${TAG_NAME}"
-          done
 
       - name: Build and Publish Ledger
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # Use wasm version, as this will include pre-release tags
-          VAR_NAME=$(echo "LEDGER_WASM_VERSION")
-          VERSION=${!VAR_NAME}
-          EPOCH_VERSION=$(grep '^name =' ledger/Cargo.toml | awk -F '"' '{print $2}' | grep -- -v | awk -F -v '{print $2}')
-          TAG_NAME="ledger-${EPOCH_VERSION}.${VERSION}"
+          VERSION="${LEDGER_WASM_VERSION}"
+          SHORT_VERSION=$(awk -F'"' '/packages\.ledger-wasm =/{for(i=1;i<=NF;i++) if($i ~ /^ledger-v[0-9]+$/){sub(/^ledger-v/,"",$i); print $i; exit}}' flake.nix)
+          if [ -z "$SHORT_VERSION" ]; then echo "::error::could not derive ledger package epoch from flake.nix"; exit 1; fi
+          TAG_NAME="ledger-${SHORT_VERSION}.${VERSION}"
+          PKG="@midnightntwrk/ledger-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd ledger-wasm
             cargo check
@@ -127,11 +120,19 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-ledger-v"${EPOCH_VERSION}"-${{ env.LEDGER_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/ledger-v"${EPOCH_VERSION}"@${{ env.LEDGER_WASM_VERSION }}
+            TGZ="midnight-ledger-v${SHORT_VERSION}-${{ env.LEDGER_WASM_VERSION }}.tgz"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.LEDGER_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for ledger."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi
@@ -140,17 +141,41 @@ jobs:
       - name: Build and Publish Onchain Runtime
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
           # Use wasm version, as this will include pre-release tags
-          VAR_NAME=$(echo "ONCHAIN_RUNTIME_WASM_VERSION")
-          VERSION=${!VAR_NAME}
+          VERSION="${ONCHAIN_RUNTIME_WASM_VERSION}"
           SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
           TAG_NAME="onchain-runtime-${VERSION}"
+          PKG="@midnightntwrk/onchain-runtime-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd onchain-runtime-wasm
             cargo check
@@ -170,11 +195,19 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-onchain-runtime-v"${SHORT_VERSION}"-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/onchain-runtime-v"${SHORT_VERSION}"@${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}
+            TGZ="midnight-onchain-runtime-v${SHORT_VERSION}-${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}.tgz"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ONCHAIN_RUNTIME_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for onchain runtime."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi
@@ -183,16 +216,43 @@ jobs:
       - name: Build and Publish ZKIR
         env:
           NODE_AUTH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          NPM_TOKEN: ${{ secrets.MIDNIGHTCI_NPMJS_TOKEN }}
+          GH_TOKEN: ${{ secrets.MIDNIGHTCI_PACKAGES_WRITE }}
+          FORCE: ${{ github.event.inputs.force }}
         run: |
           git config --global user.name 'MidnightCI'
           git config --global user.email 'midnight-automation+midnightci@iohk.io'
-          VAR_NAME=$(echo "ZKIR_VERSION")
-          VERSION=${!VAR_NAME}
+          # ZKIR's git tag tracks the zkir crate version, but the published npm
+          # package uses the zkir-wasm version — check existence against the wasm version.
+          VERSION="${ZKIR_VERSION}"
           TAG_NAME="zkir-${VERSION}"
-          SHORT_VERSION=$(echo "$VERSION" | awk -F. '{print $1}')
+          WASM_VERSION="${ZKIR_WASM_VERSION}"
+          SHORT_VERSION=$(echo "$WASM_VERSION" | awk -F. '{print $1}')
+          PKG="@midnightntwrk/zkir-v${SHORT_VERSION}"
+          SCOPE="${PKG%%/*}"
+          GH_REG="https://npm.pkg.github.com/midnightntwrk"
+          NPMJS_REG="https://registry.npmjs.org/"
 
-          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
-            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          # Authenticate npmjs (GH Packages auth is configured by setup-node).
+          if [ -z "${NPM_TOKEN:-}" ]; then
+            echo "::error::MIDNIGHTCI_NPMJS_TOKEN is not set — cannot authenticate to npmjs"; exit 1
+          fi
+          # Write the resolved token into the file npm actually reads: setup-node
+          # points npm at $NPM_CONFIG_USERCONFIG (in RUNNER_TEMP), so ~/.npmrc is
+          # ignored. The value is written directly (not npm's ${VAR} expansion,
+          # which left the token empty -> ENEEDAUTH). The leading newline guards
+          # against setup-node's npmrc lacking a trailing newline, which would
+          # otherwise concatenate this onto its last line and corrupt both.
+          printf '\n//registry.npmjs.org/:_authToken=%s\n' "${NPM_TOKEN}" >> "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+          # Build only if the version is missing from at least one target registry
+          # (or FORCE is set). The "--<scope>:registry" override is required: for
+          # scoped packages npm uses the scope->registry mapping in .npmrc and
+          # ignores --registry, so without it both checks hit GH Packages.
+          if [ "${FORCE:-false}" != "true" ] \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$GH_REG"    "--${SCOPE}:registry=$GH_REG"    >/dev/null 2>&1 \
+             && npm view "$PKG@$WASM_VERSION" version --registry="$NPMJS_REG" "--${SCOPE}:registry=$NPMJS_REG" >/dev/null 2>&1; then
+            echo "$PKG@$WASM_VERSION already published to GH Packages and npmjs — skipping build/publish."
           else
             cd zkir-wasm
             cargo check
@@ -212,11 +272,19 @@ jobs:
             cd result/lib
             echo "Contents of result/lib:"
             ls -lah
-            npm publish midnight-zkir-v"${SHORT_VERSION}"-${{ env.ZKIR_WASM_VERSION }}.tgz --registry=https://npm.pkg.github.com/midnight-ntwrk --tag rc
-            npm dist-tag add @midnight-ntwrk/zkir-v"${SHORT_VERSION}"@${{ env.ZKIR_WASM_VERSION }}
+            TGZ="midnight-zkir-v${SHORT_VERSION}-${{ env.ZKIR_WASM_VERSION }}.tgz"
+            # Publish is idempotent per-registry: skips where the version already exists.
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$GH_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
+            "${GITHUB_WORKSPACE}/.github/scripts/npm-publish-idempotent.sh" \
+              "$TGZ" "$NPMJS_REG" "$PKG" "${{ env.ZKIR_WASM_VERSION }}"
             cd ../..
+          fi
 
-            # Create and push the new tag
+          # Create and push the new tag only if it does not already exist.
+          if git ls-remote --tags origin | grep -qE "refs/tags/${TAG_NAME}(\^\{\})?$"; then
+            echo "Tag ${TAG_NAME} already exists on remote. Skipping tagging for zkir."
+          else
             git tag "${TAG_NAME}"
             git push origin "${TAG_NAME}"
           fi
@@ -228,5 +296,5 @@ jobs:
     secrets:
       MIDNIGHTBOT_PACKAGES_WRITE: ${{ secrets.MIDNIGHTBOT_PACKAGES_WRITE }}
       ATTIC_CACHE_TOKEN: ${{ secrets.ATTIC_CACHE_TOKEN }}
-      GH_USERNAME: ${{ secrets.GH_USERNAME }}
-      GH_PASSWORD: ${{ secrets.GH_PASSWORD }}
+      DOCKERHUB_MIDNIGHTNTWRK_USER: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_USER }}
+      DOCKERHUB_MIDNIGHTNTWRK_TOKEN: ${{ secrets.DOCKERHUB_MIDNIGHTNTWRK_TOKEN }}

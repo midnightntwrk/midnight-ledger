@@ -1,16 +1,5 @@
 # `zkir` Changelog
 
-## Unreleased
-
-- feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
-- feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
-- test: pin prover/verifier key SHA-256 hashes for every precompile in
-  `zkir-precompiles/` and add a V0/V1 smoke fixture in
-  `zkir/tests/precompile_hashes.rs`, catching silent drift in `IrMinorVersion::V0`
-  keys (which must stay byte-identical to pre-#154). Refresh after an
-  intentional key change with
-  `UPDATE_ZKIR_HASHES=1 cargo test -p midnight-zkir --test precompile_hashes`.
-
 ## Version `2.2.0`
 
 - feat: dual v1/v2 proving and verification pipeline
@@ -21,7 +10,6 @@
   - `LocalProvingProvider` uses `ir_v1::v1_prove` (old pipeline end-to-end)
 - feat: `ir_v1` module with `v1_prove`, `v1_verify`, `v1_mock_verify` and
   adapters (`V1Params`, `V1Resolver`, `preimage_to_v1`)
-- test: `proofs_v2.rs` exercises the v2 proving/verification flow
 
 ## Version `2.1.0`
 
