@@ -74,7 +74,7 @@ mod proof_tests {
     #[actix_rt::test]
     async fn test_extension_attack() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 2, "minor": 1 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [

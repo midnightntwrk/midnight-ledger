@@ -39,7 +39,7 @@ mod v2_proof_tests {
     #[actix_rt::test]
     async fn v2_prove_and_verify_minimal() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 2, "minor": 1 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
@@ -77,7 +77,7 @@ mod v2_proof_tests {
     #[actix_rt::test]
     async fn v2_prove_wrong_statement_fails() {
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 2, "minor": 1 },
            "num_inputs": 1,
            "do_communications_commitment": false,
            "instructions": [
@@ -118,7 +118,7 @@ mod v2_proof_tests {
         use transient_crypto::hash::transient_hash;
 
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 2, "minor": 1 },
            "num_inputs": 3,
            "do_communications_commitment": false,
            "instructions": [
@@ -161,7 +161,7 @@ mod v2_proof_tests {
         use transient_crypto::curve::EmbeddedGroupAffine;
 
         let ir_raw = r#"{
-           "version": { "major": 2, "minor": 0 },
+           "version": { "major": 2, "minor": 1 },
            "num_inputs": 4,
            "do_communications_commitment": false,
            "instructions": [

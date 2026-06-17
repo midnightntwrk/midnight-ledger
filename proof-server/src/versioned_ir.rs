@@ -72,18 +72,15 @@ pub(crate) async fn prove(
     if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
         match ir_v2.version {
             zkir_v2::IrMinorVersion::V0 => {
-                // V0 circuits use the v1 proving pipeline.
                 let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
                     .await
                     .map_err(|e| e.to_string())?;
                 Ok((proof, vec![]))
             }
-            _ => {
-                // V1+ circuits use the v2 proving pipeline.
-                ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
-                    .await
-                    .map_err(|e| e.to_string())
-            }
+            _ => ppi
+                .prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+                .await
+                .map_err(|e| e.to_string()),
         }
     } else if let Ok(_ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(ir_source) {
         ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
@@ -109,10 +106,9 @@ pub(crate) async fn prove(
                 .map_err(|e| e.to_string())?;
             Ok((proof, vec![]))
         }
-        _ => {
-            ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
-                .await
-                .map_err(|e| e.to_string())
-        }
+        _ => ppi
+            .prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+            .await
+            .map_err(|e| e.to_string()),
     }
 }

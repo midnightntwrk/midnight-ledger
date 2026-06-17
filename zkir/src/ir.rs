@@ -147,6 +147,13 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
+        if self.version == IrMinorVersion::V0 {
+            anyhow::bail!(
+                "Zkir::prove is not supported for V0 circuits; \
+                 use ir_v1::v1_prove for the v1 proving pipeline"
+            );
+        }
+
         let inner_pk = pk
             .init()
             .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
@@ -155,8 +162,7 @@ impl Zkir for IrSource {
             VersionedInnerPK::V2(pk) => pk,
             VersionedInnerPK::V1(_) => {
                 anyhow::bail!(
-                    "Zkir::prove called with a v1 prover key; \
-                     use the v1 proving pipeline (ir_v1::v1_prove) instead"
+                    "Zkir::prove called with a v1 prover key on a V1+ circuit"
                 )
             }
         };
