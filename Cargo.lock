@@ -954,6 +954,7 @@ dependencies = [
  "encode_unicode",
  "libc",
  "once_cell",
+ "unicode-width",
  "windows-sys 0.59.0",
 ]
 
@@ -2551,6 +2552,19 @@ dependencies = [
 
 [[package]]
 name = "indicatif"
+version = "0.17.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "183b3088984b400f4cfac3620d5e076c84da5364016b4f49473de574b2586235"
+dependencies = [
+ "console 0.15.11",
+ "number_prefix",
+ "portable-atomic",
+ "unicode-width",
+ "web-time",
+]
+
+[[package]]
+name = "indicatif"
 version = "0.18.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "25470f23803092da7d239834776d653104d551bc4d7eacaf31e6837854b8e9eb"
@@ -3006,6 +3020,7 @@ dependencies = [
  "flate2",
  "futures",
  "group",
+ "indicatif 0.17.11",
  "k256",
  "lazy_static",
  "midnight-base-crypto-derive 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -3037,7 +3052,7 @@ dependencies = [
  "flate2",
  "futures",
  "group",
- "indicatif",
+ "indicatif 0.18.4",
  "k256",
  "lazy_static",
  "midnight-base-crypto 1.1.0",
@@ -3237,7 +3252,7 @@ dependencies = [
  "midnight-storage",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir 2.2.0",
  "midnight-zswap",
  "pastey 0.2.2",
  "pprof",
@@ -3405,7 +3420,7 @@ dependencies = [
  "midnight-serialize 1.1.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir 2.2.0",
  "midnight-zkir-v3",
  "midnight-zswap",
  "rand 0.8.6",
@@ -3760,6 +3775,30 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir"
+version = "2.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ef44e11cfb43259ada31738fd4fb1835f1394bda29ed6c1ca45a35204a544d9a"
+dependencies = [
+ "anyhow",
+ "const-hex",
+ "group",
+ "hex",
+ "midnight-base-crypto 1.0.0",
+ "midnight-circuits 6.2.0",
+ "midnight-proofs 0.7.1",
+ "midnight-serialize 1.0.0",
+ "midnight-transient-crypto 2.0.1",
+ "midnight-zk-stdlib 1.2.0",
+ "rand 0.8.6",
+ "rand_chacha 0.3.1",
+ "serde",
+ "serde_bytes",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
+name = "midnight-zkir"
 version = "2.2.0"
 dependencies = [
  "actix-rt",
@@ -3772,10 +3811,9 @@ dependencies = [
  "futures-executor",
  "group",
  "hex",
- "indicatif",
+ "indicatif 0.18.4",
  "log",
  "midnight-base-crypto 1.1.0",
- "midnight-circuits 6.2.0",
  "midnight-circuits 7.2.0",
  "midnight-proofs 0.7.1",
  "midnight-proofs 0.8.0",
@@ -3785,7 +3823,8 @@ dependencies = [
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 1.2.0",
  "midnight-zk-stdlib 2.3.0",
- "midnight-zkir",
+ "midnight-zkir 2.1.0",
+ "midnight-zkir 2.2.0",
  "num-bigint",
  "pastey 0.2.2",
  "proptest",
@@ -3815,7 +3854,7 @@ dependencies = [
  "futures-executor",
  "group",
  "hex",
- "indicatif",
+ "indicatif 0.18.4",
  "log",
  "midnight-base-crypto 1.1.0",
  "midnight-circuits 7.2.0",
@@ -3869,7 +3908,7 @@ dependencies = [
  "js-sys",
  "midnight-serialize 1.1.0",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir 2.2.0",
  "rand 0.8.6",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -3903,7 +3942,7 @@ dependencies = [
  "midnight-serialize 1.1.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
- "midnight-zkir",
+ "midnight-zkir 2.2.0",
  "pastey 0.2.2",
  "rand 0.8.6",
  "rayon",
@@ -4116,6 +4155,12 @@ dependencies = [
  "hermit-abi",
  "libc",
 ]
+
+[[package]]
+name = "number_prefix"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "objc2"

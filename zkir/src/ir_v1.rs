@@ -11,12 +11,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! V1 (zk-stdlib v1) proving and verification pipeline.
+//! Compatibility layer for the v1 (zk-stdlib v1) pipeline.
+//!
+//! `V1IrSource` is the old `zkir_old::IrSource` type, which implements
+//! `transient_crypto_old::proofs::Zkir` (including the v1 `Relation` trait).
+//! Our `IrSource` delegates to it via serialization round-trip (`to_v1()`).
+//!
+//! This module also provides adapter types and helper functions for bridging
+//! the current (v2) proving/verification types to the v1 pipeline.
 
 use std::borrow::Cow;
 use std::io;
 
-use crate::ir::IrSource;
+pub type V1IrSource = zkir_old::IrSource;
 
 /// Adapter: current `Resolver` → v1 `Resolver`.
 pub struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
@@ -145,7 +152,7 @@ pub async fn v1_prove(
 ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
     let old_preimage = preimage_to_v1(preimage);
     let (old_proof, _skips) = old_preimage
-        .prove::<IrSource>(rng, &V1Params(params), &V1Resolver(resolver))
+        .prove::<V1IrSource>(rng, &V1Params(params), &V1Resolver(resolver))
         .await?;
     Ok(transient_crypto::proofs::Proof(old_proof.0))
 }

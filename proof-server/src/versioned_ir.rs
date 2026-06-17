@@ -69,10 +69,22 @@ pub(crate) async fn prove(
     ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    if let Ok(_ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
-        ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
-            .await
-            .map_err(|e| e.to_string())
+    if let Ok(ir_v2) = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source)) {
+        match ir_v2.version {
+            zkir_v2::IrMinorVersion::V0 => {
+                // V0 circuits use the v1 proving pipeline.
+                let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Ok((proof, vec![]))
+            }
+            _ => {
+                // V1+ circuits use the v2 proving pipeline.
+                ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        }
     } else if let Ok(_ir_v3) = tagged_deserialize::<zkir_v3::IrSource>(ir_source) {
         ppi.prove::<zkir_v3::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
             .await
@@ -85,11 +97,22 @@ pub(crate) async fn prove(
 #[cfg(not(feature = "experimental"))]
 pub(crate) async fn prove(
     ppi: Arc<ProofPreimage>,
-    _ir_source: &[u8],
+    ir_source: &[u8],
     resolver: &Resolver,
 ) -> Result<(Proof, Vec<Option<usize>>), String> {
-    let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
-        .await
+    let ir = zkir_v2::IrSource::load_from_tagged(Cursor::new(ir_source))
         .map_err(|e| e.to_string())?;
-    Ok((proof, vec![]))
+    match ir.version {
+        zkir_v2::IrMinorVersion::V0 => {
+            let proof = zkir_v2::ir_v1::v1_prove(&ppi, OsRng, &*PUBLIC_PARAMS, resolver)
+                .await
+                .map_err(|e| e.to_string())?;
+            Ok((proof, vec![]))
+        }
+        _ => {
+            ppi.prove::<zkir_v2::IrSource>(OsRng, &*PUBLIC_PARAMS, resolver)
+                .await
+                .map_err(|e| e.to_string())
+        }
+    }
 }
