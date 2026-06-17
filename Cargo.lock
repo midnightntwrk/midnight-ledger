@@ -3057,7 +3057,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto 1.1.0",
  "midnight-base-crypto-derive 1.0.0",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "pastey 0.2.2",
  "proptest",
  "proptest-derive",
@@ -3150,7 +3150,7 @@ dependencies = [
  "lazy_static",
  "midnight-base-crypto 1.1.0",
  "midnight-coin-structure",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
@@ -3248,7 +3248,7 @@ dependencies = [
  "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-vm",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 3.0.0",
@@ -3273,7 +3273,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-ledger-wasm-v9"
-version = "0.1.0-alpha.1"
+version = "0.1.0-rc.1"
 dependencies = [
  "anyhow",
  "getrandom 0.2.17",
@@ -3285,7 +3285,7 @@ dependencies = [
  "midnight-ledger-v9",
  "midnight-onchain-runtime",
  "midnight-onchain-runtime-wasm",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "midnight-zswap",
@@ -3318,7 +3318,7 @@ dependencies = [
  "midnight-onchain-runtime",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
@@ -3333,7 +3333,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-onchain-runtime-wasm"
-version = "4.0.0-alpha.1"
+version = "4.0.0-rc.1"
 dependencies = [
  "getrandom 0.2.17",
  "getrandom 0.3.4",
@@ -3342,7 +3342,7 @@ dependencies = [
  "midnight-base-crypto 1.1.0",
  "midnight-coin-structure",
  "midnight-onchain-runtime",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "rand 0.8.6",
@@ -3362,7 +3362,7 @@ dependencies = [
  "midnight-base-crypto 1.1.0",
  "midnight-coin-structure",
  "midnight-onchain-state",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
@@ -3385,7 +3385,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-onchain-state",
  "midnight-onchain-vm",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "pastey 0.2.2",
@@ -3399,7 +3399,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-proof-server"
-version = "9.0.0-alpha.1"
+version = "9.0.0-rc.1"
 dependencies = [
  "actix-cors",
  "actix-web",
@@ -3417,7 +3417,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-ledger-v9",
  "midnight-onchain-runtime",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",
@@ -3494,12 +3494,12 @@ dependencies = [
 
 [[package]]
 name = "midnight-serialize"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "crypto",
  "konst 0.4.3",
  "lazy_static",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-serialize-macros 1.0.0",
  "pastey 0.2.2",
  "proptest",
@@ -3540,7 +3540,7 @@ dependencies = [
  "hashbrown 0.17.0",
  "midnight-base-crypto 1.1.0",
  "midnight-onchain-state",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage-core 1.2.0",
  "os_pipe",
  "parking_lot",
@@ -3574,7 +3574,7 @@ dependencies = [
  "konst 0.4.3",
  "lru 0.18.0",
  "midnight-base-crypto 1.1.0",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage-core 1.2.0",
  "midnight-storage-macros 1.0.0",
  "parity-db",
@@ -3624,7 +3624,7 @@ name = "midnight-storage-macros"
 version = "1.0.0"
 dependencies = [
  "derive-where",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-serialize-macros 1.0.0",
  "midnight-storage-core 1.2.0",
  "pastey 0.2.2",
@@ -3707,7 +3707,7 @@ dependencies = [
  "midnight-circuits 7.2.0",
  "midnight-curves 0.3.0",
  "midnight-proofs 0.8.0",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage-core 1.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.0",
@@ -3818,7 +3818,7 @@ dependencies = [
  "midnight-proofs 0.7.1",
  "midnight-proofs 0.8.0",
  "midnight-serialize 1.0.0",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-transient-crypto 2.0.1",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 1.2.0",
@@ -3843,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "midnight-zkir-v3"
-version = "3.0.0-rc.1"
+version = "3.0.0"
 dependencies = [
  "actix-rt",
  "anyhow",
@@ -3860,7 +3860,7 @@ dependencies = [
  "midnight-circuits 7.2.0",
  "midnight-curves 0.3.0",
  "midnight-proofs 0.8.0",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zk-stdlib 2.3.0",
  "midnight-zkir-v3",
@@ -3889,7 +3889,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "js-sys",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir-v3",
  "rand 0.8.6",
@@ -3906,7 +3906,7 @@ dependencies = [
  "getrandom 0.3.4",
  "hex",
  "js-sys",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",
  "rand 0.8.6",
@@ -3939,7 +3939,7 @@ dependencies = [
  "midnight-coin-structure",
  "midnight-ledger-static",
  "midnight-onchain-runtime",
- "midnight-serialize 1.1.0",
+ "midnight-serialize 1.2.0",
  "midnight-storage",
  "midnight-transient-crypto 3.0.0",
  "midnight-zkir 2.2.0",

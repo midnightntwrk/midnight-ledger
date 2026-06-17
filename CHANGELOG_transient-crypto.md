@@ -1,10 +1,5 @@
 # `transient-crypto` Changelog
 
-## Unreleased
-
-- fix: rehashing serde deserialized `MerkleTree`s
-- fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
-
 ## Version `3.0.0`
 
 - breaking: upgrade to `midnight-zk-stdlib` v2 / `midnight-circuits` v7
@@ -15,6 +10,9 @@
 - feat: `VerifierKey` preserves `original_bytes()` across initialization for
   v1/v2 round-tripping
 - feat: `VerifierKey::Initialized` variant now retains the original raw bytes
+- fix: rehashing serde deserialized `MerkleTree`s
+- fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
+
 
 ## Version `2.1.0`
 

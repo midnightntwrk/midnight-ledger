@@ -11,9 +11,9 @@ default = ["proof-verifying"]
 proof-verifying = ["dep:zkir_v2"]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
-coin-structure = { version = "2.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
+coin-structure = { version = "2.1.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
 midnight-onchain-runtime = { version = "4.0.0", path = "../onchain-runtime", package = "midnight-onchain-runtime", features = [ "vendored" ] }
