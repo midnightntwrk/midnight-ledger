@@ -44,8 +44,6 @@ use onchain_runtime::{
 };
 use rand::{CryptoRng, Rng};
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "proof-verifying")]
-use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
@@ -82,8 +80,8 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
     pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
-            .expect("Zswap Output VK should be valid");
+        zkir_v2::load_vk_from_tagged(std::io::Cursor::new(SPEND_VK_RAW))
+            .expect("Dust Spend VK should be valid");
 }
 
 pub struct DustResolver(pub MidnightDataProvider);

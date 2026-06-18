@@ -635,13 +635,12 @@ impl<D: DB> TestState<D> {
 }
 
 pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<VerifierKey> {
-    use serialize::tagged_deserialize;
     use transient_crypto::proofs::Resolver;
     let proof_data = resolver
         .resolve_key(KeyLocation(std::borrow::Cow::Borrowed(name)))
         .await
         .ok()??;
-    tagged_deserialize(&mut &proof_data.verifier_key[..]).ok()
+    zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&proof_data.verifier_key[..])).ok()
 }
 
 pub fn test_resolver(test_name: &'static str) -> Resolver {

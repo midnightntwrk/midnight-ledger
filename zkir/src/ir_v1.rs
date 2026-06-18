@@ -24,7 +24,6 @@
 //! the current (v2) proving/verification types to the v1 pipeline.
 
 use std::borrow::Cow;
-use std::io;
 
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use ff::PrimeField;
@@ -61,11 +60,6 @@ type OldEmbeddedAffine = transient_crypto_old::curve::embedded::Affine;
 /// Both are BLS12-381 Fq with identical byte representations.
 fn cvt(s: transient_crypto::curve::outer::Scalar) -> OldScalar {
     OldScalar::from_repr(s.to_repr()).expect("BLS12-381 Fq round-trip")
-}
-
-/// Converts a current `Fr` to the old `Fr`.
-fn cvt_fr(f: transient_crypto::curve::Fr) -> transient_crypto_old::curve::Fr {
-    transient_crypto_old::curve::Fr(cvt(f.0))
 }
 
 /// The v1 preprocessed witness data, using old scalar types.
@@ -587,10 +581,408 @@ impl Relation for IrSource {
     }
 }
 
-// --- Adapters for bridging current and v1 types ---
+// --- serialize_old trait impls (required by old Zkir supertrait bounds) ---
+
+impl serialize_old::Tagged for IrSource {
+    fn tag() -> Cow<'static, str> {
+        Cow::Borrowed("ir-source[v2]")
+    }
+    fn tag_unique_factor() -> String {
+        "ir-source[v2]".into()
+    }
+}
+
+impl serialize_old::Deserializable for IrSource {
+    fn deserialize(
+        reader: &mut impl std::io::Read,
+        recursion_depth: u32,
+    ) -> std::io::Result<Self> {
+        use super::ir::OldIrSource;
+        let old: OldIrSource = serialize::Deserializable::deserialize(reader, recursion_depth)?;
+        Ok(old.into())
+    }
+}
+
+// --- v1 preprocess (operates entirely in old types) ---
+
+type OldFr = transient_crypto_old::curve::Fr;
+type OldProvingError = transient_crypto_old::proofs::ProvingError;
+
+/// The old `Alignment` type from base-crypto v1.0.0.
+type OldAlignment = base_crypto_old::fab::Alignment;
+
+/// Converts a current `Alignment` to the old base-crypto `Alignment` via serialization.
+/// Both versions use the same SCALE encoding format.
+fn cvt_alignment(a: &base_crypto::fab::Alignment) -> OldAlignment {
+    let mut buf = Vec::new();
+    serialize::Serializable::serialize(a, &mut buf).expect("in-memory serialize");
+    serialize_old::Deserializable::deserialize(&mut &buf[..], 0).expect("alignment round-trip")
+}
+
+/// Software execution of the IR using old types. Equivalent to `IrSource::preprocess`
+/// but operates entirely in the v1 type system.
+fn v1_preprocess(
+    ir: &IrSource,
+    preimage: &transient_crypto_old::proofs::ProofPreimage,
+) -> Result<V1Preprocessed, OldProvingError> {
+    use anyhow::{anyhow, bail};
+    use std::cmp::Ordering;
+    use transient_crypto_old::curve::{EmbeddedGroupAffine, FR_BITS, FR_BYTES_STORED};
+    use transient_crypto_old::hash::{hash_to_curve, transient_commit, transient_hash};
+
+    if preimage.inputs.len() != ir.num_inputs as usize {
+        bail!(
+            "Expected {} inputs, received {}",
+            ir.num_inputs,
+            preimage.inputs.len()
+        );
+    }
+    let mut memory: Vec<OldFr> = preimage.inputs.clone();
+    let mut pis = vec![preimage.binding_input];
+    if ir.do_communications_commitment {
+        pis.push(
+            preimage
+                .communications_commitment
+                .ok_or(anyhow!("Expected communications commitment"))?
+                .0,
+        );
+    }
+    let mut pi_skips = Vec::new();
+    let mut public_transcript_inputs_idx: usize = 0;
+    let mut public_transcript_outputs_idx: usize = 0;
+    let mut private_transcript_outputs_idx: usize = 0;
+    let mut outputs = Vec::new();
+    let idx = |memory: &[OldFr], i: u32| {
+        memory
+            .get(i as usize)
+            .copied()
+            .ok_or(anyhow!("index out of bounds: {i}"))
+    };
+    let idx_bool = |memory: &[OldFr], i: u32| {
+        idx(memory, i).and_then(|val| {
+            if val == 0.into() {
+                Ok(false)
+            } else if val == 1.into() {
+                Ok(true)
+            } else {
+                bail!("Expected boolean, found: {val:?}");
+            }
+        })
+    };
+    let idx_point = |memory: &[OldFr], x: u32, y: u32| {
+        let x = idx(memory, x)?;
+        let y = idx(memory, y)?;
+        EmbeddedGroupAffine::new(x, y)
+            .ok_or(anyhow!("Elliptic curve point not on curve: ({x:?}, {y:?})"))
+    };
+    let idx_bits = |memory: &[OldFr], i: u32, constrain: Option<u32>| {
+        idx(memory, i).and_then(|val| {
+            let mut bits = val
+                .0
+                .to_bytes_le()
+                .into_iter()
+                .flat_map(|byte| {
+                    [0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80]
+                        .into_iter()
+                        .map(move |mask| byte & mask != 0)
+                })
+                .collect::<Vec<_>>();
+            if let Some(n) = constrain {
+                if n as usize >= FR_BITS {
+                    bail!("Excessive bit bound");
+                }
+                if bits[n as usize..].iter().any(|b| *b) {
+                    bail!("Bit bound failed: {val:?} is not {n}-bit");
+                }
+                bits.truncate(n as usize);
+            }
+            Ok(bits)
+        })
+    };
+    let from_point =
+        |p: EmbeddedGroupAffine| [p.x().unwrap_or(0.into()), p.y().unwrap_or(0.into())];
+    fn from_bits<I: DoubleEndedIterator<Item = bool>>(bits: I) -> OldFr {
+        bits.rev()
+            .fold(0.into(), |acc, bit| acc * 2.into() + bit.into())
+    }
+    for ins in ir.instructions.iter() {
+        match ins {
+            I::Add { a, b } => memory.push(idx(&memory, *a)? + idx(&memory, *b)?),
+            I::Mul { a, b } => memory.push(idx(&memory, *a)? * idx(&memory, *b)?),
+            I::Neg { a } => memory.push(-idx(&memory, *a)?),
+            I::Not { a } => memory.push((!idx_bool(&memory, *a)?).into()),
+            I::ConstrainEq { a, b } => {
+                if idx(&memory, *a)? != idx(&memory, *b)? {
+                    bail!(
+                        "Failed equality constraint: {:?} != {:?}",
+                        idx(&memory, *a)?,
+                        idx(&memory, *b)?
+                    );
+                }
+            }
+            I::CondSelect { bit, a, b } => {
+                let (bit, a, b) = (
+                    idx_bool(&memory, *bit)?,
+                    idx(&memory, *a)?,
+                    idx(&memory, *b)?,
+                );
+                memory.push(if bit { a } else { b })
+            }
+            I::Assert { cond } => {
+                if !idx_bool(&memory, *cond)? {
+                    bail!("Failed direct assertion");
+                }
+            }
+            I::TestEq { a, b } => {
+                memory.push((idx(&memory, *a)? == idx(&memory, *b)?).into())
+            }
+            I::PublicInput { guard } => {
+                let val = match guard {
+                    Some(guard) if !idx_bool(&memory, *guard)? => 0.into(),
+                    _ => {
+                        public_transcript_outputs_idx += 1;
+                        preimage
+                            .public_transcript_outputs
+                            .get(public_transcript_outputs_idx - 1)
+                            .copied()
+                            .ok_or(anyhow!("Ran out of public transcript outputs"))?
+                    }
+                };
+                memory.push(val);
+            }
+            I::DeclarePubInput { var } => {
+                pis.push(idx(&memory, *var)?);
+                public_transcript_inputs_idx += 1;
+            }
+            I::PrivateInput { guard } => match guard {
+                Some(guard) if !idx_bool(&memory, *guard)? => memory.push(0.into()),
+                _ => {
+                    memory.push(
+                        preimage
+                            .private_transcript
+                            .get(private_transcript_outputs_idx)
+                            .copied()
+                            .ok_or(anyhow!("Ran out of private transcript outputs"))?,
+                    );
+                    private_transcript_outputs_idx += 1;
+                }
+            },
+            I::Copy { var } => memory.push(idx(&memory, *var)?),
+            I::ConstrainToBoolean { var } => drop(idx_bool(&memory, *var)?),
+            I::ConstrainBits { var, bits } => drop(idx_bits(&memory, *var, Some(*bits))?),
+            I::DivModPowerOfTwo { var, bits } => {
+                if *bits as usize > FR_BYTES_STORED * 8 {
+                    bail!("Excessive bit count");
+                }
+                let var_bits = idx_bits(&memory, *var, None)?;
+                memory.push(from_bits(var_bits[*bits as usize..].iter().copied()));
+                memory.push(from_bits(var_bits[..*bits as usize].iter().copied()));
+            }
+            I::ReconstituteField {
+                divisor,
+                modulus,
+                bits,
+            } => {
+                if *bits as usize > FR_BYTES_STORED * 8 {
+                    bail!("Excessive bit count");
+                }
+                let fr_max = OldFr::from(-1);
+                let max_bits = idx_bits(&[fr_max], 0, None)?;
+                let modulus_bits = idx_bits(&memory, *modulus, Some(*bits))?;
+                let divisor_bits =
+                    idx_bits(&memory, *divisor, Some(FR_BITS as u32 - *bits))?;
+                let cmp = modulus_bits
+                    .iter()
+                    .chain(divisor_bits.iter())
+                    .rev()
+                    .zip(max_bits[..FR_BITS].iter().rev())
+                    .map(|(ab, max)| ab.cmp(max))
+                    .fold(Ordering::Equal, |prefix, local| {
+                        if prefix.is_eq() { local } else { prefix }
+                    });
+                if cmp.is_gt() {
+                    bail!("Reconstituted element overflows field");
+                }
+                let power =
+                    (0..*bits).fold(OldFr::from(1), |acc, _| OldFr::from(2) * acc);
+                memory.push(power * idx(&memory, *divisor)? + idx(&memory, *modulus)?);
+            }
+            I::LessThan { a, b, bits } => memory.push(
+                (from_bits(idx_bits(&memory, *a, Some(*bits))?.into_iter())
+                    < from_bits(idx_bits(&memory, *b, Some(*bits))?.into_iter()))
+                .into(),
+            ),
+            I::TransientHash { inputs } => memory.push(transient_hash(
+                &inputs
+                    .iter()
+                    .map(|i| idx(&memory, *i))
+                    .collect::<Result<Vec<_>, _>>()?,
+            )),
+            I::PersistentHash { alignment, inputs } => {
+                use base_crypto_old::repr::BinaryHashRepr;
+                use transient_crypto_old::fab::{AlignmentExt as _, ValueReprAlignedValue};
+                use transient_crypto_old::repr::FieldRepr as _;
+                let old_alignment = cvt_alignment(alignment);
+                let inputs = inputs
+                    .iter()
+                    .map(|i| idx(&memory, *i))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let value = old_alignment.parse_field_repr(&inputs).ok_or_else(|| {
+                    anyhow!("Inputs did not match alignment")
+                })?;
+                let mut repr = Vec::new();
+                ValueReprAlignedValue(value).binary_repr(&mut repr);
+                let hash = base_crypto_old::hash::persistent_hash(&repr);
+                memory.extend(hash.field_vec());
+            }
+            I::PiSkip { guard, count } => match guard {
+                Some(guard) if !idx_bool(&memory, *guard)? => {
+                    pi_skips.push(Some(*count as usize));
+                    public_transcript_inputs_idx -= *count as usize;
+                }
+                _ => {
+                    pi_skips.push(None);
+                    for i in 0..(*count as usize) {
+                        let idx = public_transcript_inputs_idx - *count as usize + i;
+                        let expected =
+                            preimage.public_transcript_inputs.get(idx).copied();
+                        let computed = Some(pis[pis.len() - *count as usize + i]);
+                        if expected != computed {
+                            bail!(
+                                "Public transcript input mismatch for input {idx}"
+                            );
+                        }
+                    }
+                }
+            },
+            I::LoadImm { imm } => {
+                // Convert current Fr to old Fr (same field, different crate version)
+                memory.push(transient_crypto_old::curve::Fr(cvt(imm.0)));
+            }
+            I::Output { var } => outputs.push(idx(&memory, *var)?),
+            I::EcAdd { a_x, a_y, b_x, b_y } => memory.extend(from_point(
+                idx_point(&memory, *a_x, *a_y)? + idx_point(&memory, *b_x, *b_y)?,
+            )),
+            I::HashToCurve { inputs } => {
+                let inputs = inputs
+                    .iter()
+                    .map(|var| idx(&memory, *var))
+                    .collect::<Result<Vec<_>, _>>()?;
+                memory.extend(from_point(hash_to_curve(&inputs)))
+            }
+            I::EcMul { a_x, a_y, scalar } => memory.extend(from_point(
+                idx_point(&memory, *a_x, *a_y)? * idx(&memory, *scalar)?,
+            )),
+            I::EcMulGenerator { scalar } => memory.extend(from_point(
+                EmbeddedGroupAffine::generator() * idx(&memory, *scalar)?,
+            )),
+        }
+    }
+    if preimage.public_transcript_inputs.len() != public_transcript_inputs_idx
+        || preimage.public_transcript_outputs.len() != public_transcript_outputs_idx
+        || preimage.private_transcript.len() != private_transcript_outputs_idx
+    {
+        bail!("Transcripts not fully consumed");
+    }
+    if ir.do_communications_commitment {
+        let comm_comm = preimage
+            .communications_commitment
+            .ok_or(anyhow!("Expected communications randomness"))?;
+        let mut comm_comm_inputs: Vec<OldFr> = Vec::new();
+        comm_comm_inputs.extend(preimage.inputs.iter());
+        comm_comm_inputs.extend(outputs.iter());
+        if comm_comm.0 != transient_commit(&comm_comm_inputs[..], comm_comm.1) {
+            bail!("Communications commitment mismatch");
+        }
+    }
+    Ok(V1Preprocessed {
+        memory: memory.into_iter().map(|x| x.0).collect(),
+        pis: pis.into_iter().map(|x| x.0).collect(),
+        pi_skips,
+        binding_input: preimage.binding_input.0,
+        comm_comm: preimage
+            .communications_commitment
+            .map(|(comm, rand)| (comm.0, rand.0)),
+    })
+}
+
+// --- Old Zkir impl (v1 pipeline) ---
+
+impl transient_crypto_old::proofs::Zkir for IrSource {
+    fn check(
+        &self,
+        preimage: &transient_crypto_old::proofs::ProofPreimage,
+    ) -> Result<Vec<Option<usize>>, OldProvingError> {
+        Ok(v1_preprocess(self, preimage)?.pi_skips)
+    }
+
+    async fn prove(
+        &self,
+        rng: impl rand::Rng + rand::CryptoRng,
+        params: &impl transient_crypto_old::proofs::ParamsProverProvider,
+        pk: transient_crypto_old::proofs::ProverKey<Self>,
+        preimage: &transient_crypto_old::proofs::ProofPreimage,
+    ) -> Result<
+        (
+            transient_crypto_old::proofs::Proof,
+            Vec<transient_crypto_old::curve::Fr>,
+            Vec<Option<usize>>,
+        ),
+        OldProvingError,
+    > {
+        let preproc = v1_preprocess(self, preimage)?;
+        let pis = preproc.pis.clone();
+        let pi_skips = preproc.pi_skips.clone();
+        let v1_pis: Vec<OldScalar> = preproc.pis.clone();
+
+        let pk = pk
+            .init()
+            .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
+
+        let params_k = params.get_params(pk.k()).await?;
+        let proof = midnight_zk_stdlib_v1::prove::<_, transient_crypto_old::proofs::TranscriptHash>(
+            params_k.as_ref(),
+            &pk,
+            self,
+            &v1_pis,
+            preproc,
+            rng,
+        )
+        .map_err(|e| anyhow::anyhow!("v1 prove: {e}"))?;
+
+        let old_pis = pis
+            .into_iter()
+            .map(transient_crypto_old::curve::Fr)
+            .collect();
+
+        Ok((transient_crypto_old::proofs::Proof(proof), old_pis, pi_skips))
+    }
+}
+
+// --- Adapters for bridging current types to the v1 pipeline ---
+
+/// Converts a current `ProofPreimage` into a v1 `ProofPreimage`.
+pub(crate) fn preimage_to_v1(
+    p: &transient_crypto::proofs::ProofPreimage,
+) -> transient_crypto_old::proofs::ProofPreimage {
+    let cvt_fr = |f: transient_crypto::curve::Fr| -> transient_crypto_old::curve::Fr {
+        transient_crypto_old::curve::Fr(cvt(f.0))
+    };
+    transient_crypto_old::proofs::ProofPreimage {
+        inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
+        private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
+        public_transcript_inputs: p.public_transcript_inputs.iter().copied().map(cvt_fr).collect(),
+        public_transcript_outputs: p.public_transcript_outputs.iter().copied().map(cvt_fr).collect(),
+        binding_input: cvt_fr(p.binding_input),
+        communications_commitment: p.communications_commitment.map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
+        key_location: transient_crypto_old::proofs::KeyLocation(std::borrow::Cow::Owned(
+            p.key_location.0.to_string(),
+        )),
+    }
+}
 
 /// Adapter: current `Resolver` → v1 `Resolver`.
-pub struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
+pub(crate) struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
 
 impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolver
     for V1Resolver<'_, S>
@@ -598,7 +990,7 @@ impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolv
     async fn resolve_key(
         &self,
         key: transient_crypto_old::proofs::KeyLocation,
-    ) -> io::Result<Option<transient_crypto_old::proofs::ProvingKeyMaterial>> {
+    ) -> std::io::Result<Option<transient_crypto_old::proofs::ProvingKeyMaterial>> {
         let current_key = transient_crypto::proofs::KeyLocation(key.0);
         let result = self.0.resolve_key(current_key).await?;
         Ok(result.map(|m| transient_crypto_old::proofs::ProvingKeyMaterial {
@@ -610,7 +1002,7 @@ impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolv
 }
 
 /// Adapter: current `ParamsProverProvider` → v1 `ParamsProverProvider`.
-pub struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
+pub(crate) struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
 
 impl<P: transient_crypto::proofs::ParamsProverProvider>
     transient_crypto_old::proofs::ParamsProverProvider for V1Params<'_, P>
@@ -618,7 +1010,7 @@ impl<P: transient_crypto::proofs::ParamsProverProvider>
     async fn get_params(
         &self,
         k: u8,
-    ) -> io::Result<transient_crypto_old::proofs::ParamsProver> {
+    ) -> std::io::Result<transient_crypto_old::proofs::ParamsProver> {
         let current = self.0.get_params(k).await?;
         let mut buf = Vec::new();
         midnight_proofs::poly::kzg::params::ParamsKZG::write_custom(
@@ -630,157 +1022,3 @@ impl<P: transient_crypto::proofs::ParamsProverProvider>
     }
 }
 
-/// Converts a current `ProofPreimage` into a v1 `ProofPreimage`.
-pub fn preimage_to_v1(
-    p: &transient_crypto::proofs::ProofPreimage,
-) -> transient_crypto_old::proofs::ProofPreimage {
-    transient_crypto_old::proofs::ProofPreimage {
-        inputs: p.inputs.iter().copied().map(cvt_fr).collect(),
-        private_transcript: p.private_transcript.iter().copied().map(cvt_fr).collect(),
-        public_transcript_inputs: p.public_transcript_inputs.iter().copied().map(cvt_fr).collect(),
-        public_transcript_outputs: p
-            .public_transcript_outputs
-            .iter()
-            .copied()
-            .map(cvt_fr)
-            .collect(),
-        binding_input: cvt_fr(p.binding_input),
-        communications_commitment: p.communications_commitment.map(|(a, b)| (cvt_fr(a), cvt_fr(b))),
-        key_location: transient_crypto_old::proofs::KeyLocation(Cow::Owned(
-            p.key_location.0.to_string(),
-        )),
-    }
-}
-
-/// Verifies a proof using the v1 (zk-stdlib v1) pipeline.
-pub fn v1_verify(
-    vk: &transient_crypto::proofs::VerifierKey,
-    proof: &transient_crypto::proofs::Proof,
-    pis: impl Iterator<Item = transient_crypto::curve::Fr>,
-) -> Result<(), transient_crypto::proofs::VerifyingError> {
-    let raw = vk.original_bytes();
-    let vk_buf = {
-        let mut buf = Vec::new();
-        serialize::Serializable::serialize(&raw, &mut buf)
-            .map_err(|e| anyhow::anyhow!("vk raw serialize: {e}"))?;
-        buf
-    };
-    let old_vk: transient_crypto_old::proofs::VerifierKey =
-        serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
-            .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
-
-    let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
-
-    let old_pis = pis.map(|f| cvt_fr(f));
-
-    old_vk
-        .verify(
-            &transient_crypto_old::proofs::PARAMS_VERIFIER,
-            &old_proof,
-            old_pis,
-        )
-        .map_err(|e| anyhow::anyhow!("v1 verification failed: {e}"))
-}
-
-/// Mock-verifies a v1 proof (calibrated cost simulation).
-#[cfg(feature = "mock-verify")]
-pub fn v1_mock_verify(
-    vk: &transient_crypto::proofs::VerifierKey,
-    pis: impl Iterator<Item = transient_crypto::curve::Fr>,
-) -> Result<(), transient_crypto::proofs::VerifyingError> {
-    let raw = vk.original_bytes();
-    let vk_buf = {
-        let mut buf = Vec::new();
-        serialize::Serializable::serialize(&raw, &mut buf)
-            .map_err(|e| anyhow::anyhow!("vk raw serialize: {e}"))?;
-        buf
-    };
-    let old_vk: transient_crypto_old::proofs::VerifierKey =
-        serialize_old::Deserializable::deserialize(&mut &vk_buf[..], 0)
-            .map_err(|e| anyhow::anyhow!("vk deserialize as v1: {e}"))?;
-    let old_pis = pis.map(|f| cvt_fr(f));
-    old_vk
-        .mock_verify(old_pis)
-        .map_err(|e| anyhow::anyhow!("v1 mock verification failed: {e}"))
-}
-
-use transient_crypto_old::proofs::ParamsProverProvider as V1ParamsProverProvider;
-
-/// Returns the v1 k value for a circuit using the v1 cost model.
-pub fn v1_k(ir: &IrSource) -> u8 {
-    midnight_zk_stdlib_v1::MidnightCircuit::from_relation(ir).min_k() as u8
-}
-
-/// Performs v1 key generation, returning a v1 verifier key (old type).
-pub async fn v1_keygen_vk(
-    ir: &IrSource,
-    params: &impl transient_crypto::proofs::ParamsProverProvider,
-) -> Result<transient_crypto_old::proofs::VerifierKey, anyhow::Error> {
-    let v1_params = V1Params(params);
-    let k = v1_k(ir);
-    let vk = midnight_zk_stdlib_v1::setup_vk(v1_params.get_params(k).await?.as_ref(), ir);
-    Ok(transient_crypto_old::proofs::VerifierKey::from(vk))
-}
-
-/// Performs v1 key generation, returning both prover and verifier keys (old types).
-pub async fn v1_keygen(
-    ir: &IrSource,
-    params: &impl transient_crypto::proofs::ParamsProverProvider,
-) -> Result<
-    (
-        midnight_zk_stdlib_v1::MidnightPK<IrSource>,
-        transient_crypto_old::proofs::VerifierKey,
-    ),
-    anyhow::Error,
-> {
-    let v1_params = V1Params(params);
-    let k = v1_k(ir);
-    let vk = midnight_zk_stdlib_v1::setup_vk(v1_params.get_params(k).await?.as_ref(), ir);
-    let pk = midnight_zk_stdlib_v1::setup_pk(ir, &vk);
-    Ok((pk, transient_crypto_old::proofs::VerifierKey::from(vk)))
-}
-
-/// Proves using the v1 (zk-stdlib v1) pipeline directly on `IrSource`.
-pub async fn v1_prove(
-    ir: &IrSource,
-    rng: impl rand::Rng + rand::CryptoRng,
-    params: &impl transient_crypto::proofs::ParamsProverProvider,
-    pk: &midnight_zk_stdlib_v1::MidnightPK<IrSource>,
-    preimage: &transient_crypto::proofs::ProofPreimage,
-) -> Result<
-    (
-        transient_crypto::proofs::Proof,
-        Vec<transient_crypto::curve::Fr>,
-        Vec<Option<usize>>,
-    ),
-    transient_crypto::proofs::ProvingError,
-> {
-    let v1_params = V1Params(params);
-    let params_k = v1_params
-        .get_params(pk.k())
-        .await
-        .map_err(|e| anyhow::anyhow!("params: {e}"))?;
-
-    let preproc = ir.preprocess(preimage)?;
-    let pis = preproc.pis.clone();
-    let pi_skips = preproc.pi_skips.clone();
-    let v1_preproc = V1Preprocessed::from_current(&preproc);
-    let v1_pis: Vec<OldScalar> = v1_preproc.pis.clone();
-
-    let proof = midnight_zk_stdlib_v1::prove::<_, transient_crypto_old::proofs::TranscriptHash>(
-        params_k.as_ref(),
-        pk,
-        ir,
-        &v1_pis,
-        v1_preproc,
-        rng,
-    )
-    .map_err(|e| anyhow::anyhow!("v1 prove: {e}"))?;
-
-    let current_pis = pis
-        .into_iter()
-        .map(transient_crypto::curve::Fr)
-        .collect();
-
-    Ok((transient_crypto::proofs::Proof(proof), current_pis, pi_skips))
-}

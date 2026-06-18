@@ -446,8 +446,6 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
         let vk = match proof {
             ProofVersioned::V2(_) => op.v1_vk(),
             ProofVersioned::V3(_) => op.v2_vk(),
@@ -464,30 +462,30 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         };
 
+        // Serialize the VK with the correct tag for its version.
+        // V2 proofs use v1 VKs (verifier-key[v6]), V3 proofs use v2 VKs (verifier-key[v7]).
+        let tag = match proof {
+            ProofVersioned::V2(_) => "verifier-key[v6]",
+            ProofVersioned::V3(_) => "verifier-key[v7]",
+        };
+        let mut tagged_vk = Vec::new();
+        write!(&mut tagged_vk, "midnight:{tag}:")
+            .and_then(|()| serialize::Serializable::serialize(vk, &mut tagged_vk))
+            .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))
+            .map_err(MalformedTransaction::<D>::InvalidProof)?;
+
         let inner_proof = match proof {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
         };
 
-        match proof {
-            ProofVersioned::V2(_) => match mode {
-                #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
-                    vk,
-                    pis.into_iter(),
-                )
+        match mode {
+            #[cfg(feature = "mock-verify")]
+            ProofVerificationMode::CalibratedMock => {
+                zkir_v2::mock_verify(&tagged_vk, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof)
+            }
+            _ => zkir_v2::verify(&tagged_vk, inner_proof, pis.into_iter())
                 .map_err(MalformedTransaction::<D>::InvalidProof),
-                _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-            },
-            ProofVersioned::V3(_) => match mode {
-                #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => vk
-                    .mock_verify(pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-                _ => vk
-                    .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof),
-            },
         }
     }
     fn estimated_tx_size<

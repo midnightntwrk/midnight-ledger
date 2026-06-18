@@ -22,11 +22,91 @@ use transient_crypto::proofs::{
 };
 
 mod ir;
-pub mod ir_v1;
+pub(crate) mod ir_v1;
 mod ir_vm;
 
 pub use ir::{Instruction, IrMinorVersion, IrSource, VersionedInnerPK};
 pub use ir_vm::Preprocessed;
+
+/// The tag used by v1 (old) verifier keys.
+const V1_VK_TAG: &str = "verifier-key[v6]";
+
+/// Deserializes a `VerifierKey` from tagged bytes, accepting both the v1 tag
+/// (`verifier-key[v6]`) and the v2 tag (`verifier-key[v7]`).
+pub fn load_vk_from_tagged(mut reader: impl std::io::Read + std::io::Seek) -> std::io::Result<transient_crypto::proofs::VerifierKey> {
+    let tag = serialize::peek_tag(&mut reader)?;
+    if tag == V1_VK_TAG {
+        // v1 VK: deserialize with the old tag, then convert to current type.
+        let old_vk: transient_crypto_old::proofs::VerifierKey =
+            serialize_old::tagged_deserialize(&mut reader)?;
+        let mut buf = Vec::new();
+        serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+        serialize::Deserializable::deserialize(&mut &buf[..], 0)
+    } else {
+        serialize::tagged_deserialize(&mut reader)
+    }
+}
+
+/// Verifies a proof against a statement, dispatching to the correct pipeline
+/// based on the verifier key tag.
+///
+/// Tagged VK bytes with `verifier-key[v6]` are verified using the v1 pipeline;
+/// `verifier-key[v7]` uses the v2 pipeline.
+pub fn verify(
+    tagged_vk: &[u8],
+    proof: &Proof,
+    pis: impl Iterator<Item = Fr>,
+) -> Result<(), anyhow::Error> {
+    let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
+    if tag == V1_VK_TAG {
+        let old_vk: transient_crypto_old::proofs::VerifierKey =
+            serialize_old::tagged_deserialize(&mut &tagged_vk[..])?;
+        let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
+        let old_pis = pis.map(|f| transient_crypto_old::curve::Fr(
+            ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
+                .expect("BLS12-381 Fq round-trip"),
+        ));
+        old_vk
+            .verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &old_proof,
+                old_pis,
+            )
+            .map_err(|e| anyhow::anyhow!("v1 verification failed: {e}"))
+    } else {
+        let vk: transient_crypto::proofs::VerifierKey =
+            serialize::tagged_deserialize(&mut &tagged_vk[..])?;
+        vk.verify(
+            &transient_crypto::proofs::PARAMS_VERIFIER,
+            proof,
+            pis,
+        )
+    }
+}
+
+/// Mock-verifies a proof (calibrated cost simulation).
+#[cfg(feature = "mock-verify")]
+pub fn mock_verify(
+    tagged_vk: &[u8],
+    pis: impl Iterator<Item = Fr>,
+) -> Result<(), anyhow::Error> {
+    let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
+    if tag == V1_VK_TAG {
+        let old_vk: transient_crypto_old::proofs::VerifierKey =
+            serialize_old::tagged_deserialize(&mut &tagged_vk[..])?;
+        let old_pis = pis.map(|f| transient_crypto_old::curve::Fr(
+            ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
+                .expect("BLS12-381 Fq round-trip"),
+        ));
+        old_vk
+            .mock_verify(old_pis)
+            .map_err(|e| anyhow::anyhow!("v1 mock verification failed: {e}"))
+    } else {
+        let vk: transient_crypto::proofs::VerifierKey =
+            serialize::tagged_deserialize(&mut &tagged_vk[..])?;
+        vk.mock_verify(pis)
+    }
+}
 
 /// Implements `ProvingProvider` locally
 pub struct LocalProvingProvider<
@@ -69,10 +149,39 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
         if let Some(binding_input) = overwrite_binding_input {
             preimage.binding_input = binding_input;
         }
-        Ok(preimage
-            .prove::<IrSource>(self.rng, self.params, self.resolver)
+
+        // Resolve to determine the IR version.
+        let proving_data = self
+            .resolver
+            .resolve_key(preimage.key_location.clone())
             .await?
-            .0)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "attempted to prove '{}' without circuit data!",
+                    preimage.key_location.0
+                )
+            })?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
+
+        match ir.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                // V0/V1: use the old pipeline entirely (old types, old tagged_deserialize).
+                let old_preimage = ir_v1::preimage_to_v1(&preimage);
+                let v1_resolver = ir_v1::V1Resolver(self.resolver);
+                let v1_params = ir_v1::V1Params(self.params);
+                let (proof, _) = old_preimage
+                    .prove::<IrSource>(self.rng, &v1_params, &v1_resolver)
+                    .await?;
+                Ok(Proof(proof.0))
+            }
+            _ => {
+                // V2+: use the current pipeline.
+                Ok(preimage
+                    .prove::<IrSource>(self.rng, self.params, self.resolver)
+                    .await?
+                    .0)
+            }
+        }
     }
     fn split(&mut self) -> Self {
         Self {

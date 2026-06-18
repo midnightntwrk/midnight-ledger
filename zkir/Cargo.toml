@@ -13,7 +13,7 @@ required-features = ["binary"]
 
 [features]
 binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
-mock-verify = ["transient-crypto-old/mock-verify"]
+mock-verify = ["transient-crypto-old/mock-verify", "transient-crypto/mock-verify"]
 proptest = [
   "dep:pastey",
   "dep:proptest",
@@ -33,10 +33,11 @@ midnight-circuits = { version = "^7.0.0" }
 midnight-zk-stdlib = { version = "^2.0.0" }
 
 # Pinned pre-zk-stdlib-v2 versions for backwards-compatible v1 proving.
-transient-crypto-old = { package = "midnight-transient-crypto", version = "=2.0.1" }
+transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
 midnight-zk-stdlib-v1 = { package = "midnight-zk-stdlib", version = "^1.0.0" }
 midnight-proofs-v1 = { package = "midnight-proofs", version = "^0.7.0" }
 midnight-circuits-v1 = { package = "midnight-circuits", version = "^6.0.0" }
+base-crypto-old = { package = "midnight-base-crypto", version = "=1.0.0" }
 serialize-old = { package = "midnight-serialize", version = "=1.0.0" }
 ff = "^0.13.0"
 

@@ -130,20 +130,6 @@ pub enum IrMinorVersion {
 #[tag = "prover-key[v7](ir-source[v2])"]
 struct FacadeProverKey(Vec<u8>);
 
-/// Converts a v1 `VerifierKey` to the current format, pre-marked as v1-only
-/// (cannot be initialized with v2 `MidnightVK::read`).
-fn v1_vk_to_current(
-    old_vk: &transient_crypto_old::proofs::VerifierKey,
-) -> Result<VerifierKey, anyhow::Error> {
-    let mut buf = Vec::new();
-    serialize_old::Serializable::serialize(old_vk, &mut buf)?;
-    // Deserialize to extract the inner bytes (stripping the length prefix),
-    // then mark as v1-only so force_init() won't try to parse with v2 format.
-    let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &buf[..], 0)?;
-    vk.mark_v1_only();
-    Ok(vk)
-}
-
 impl Zkir for IrSource {
     type ProverKey = VersionedInnerPK;
 
@@ -161,20 +147,16 @@ impl Zkir for IrSource {
         pk: ProverKey<Self>,
         preimage: &ProofPreimage,
     ) -> Result<(Proof, Vec<Fr>, Vec<Option<usize>>), ProvingError> {
-        let inner_pk = pk
-            .init()
-            .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
         match self.version {
             IrMinorVersion::V0 | IrMinorVersion::V1 => {
-                let v1_pk = match &*inner_pk {
-                    VersionedInnerPK::V1(pk) => pk,
-                    VersionedInnerPK::V2(_) => {
-                        anyhow::bail!("Zkir::prove called with a v2 prover key on a v1 circuit")
-                    }
-                };
-                crate::ir_v1::v1_prove(self, rng, params, v1_pk, preimage).await
+                anyhow::bail!(
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for proving"
+                )
             }
             IrMinorVersion::V2 => {
+                let inner_pk = pk
+                    .init()
+                    .map_err(|_| anyhow::anyhow!("Could not init pk"))?;
                 let v2_pk = match &*inner_pk {
                     VersionedInnerPK::V2(pk) => pk,
                     VersionedInnerPK::V1(_) => {
@@ -201,7 +183,10 @@ impl Zkir for IrSource {
 
     fn k(&self) -> u8 {
         match self.version {
-            IrMinorVersion::V0 | IrMinorVersion::V1 => crate::ir_v1::v1_k(self),
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                use transient_crypto_old::proofs::Zkir as V1Zkir;
+                V1Zkir::k(self)
+            }
             IrMinorVersion::V2 => midnight_zk_stdlib::optimal_k(self) as u8,
         }
     }
@@ -212,8 +197,9 @@ impl Zkir for IrSource {
     ) -> Result<VerifierKey, anyhow::Error> {
         match self.version {
             IrMinorVersion::V0 | IrMinorVersion::V1 => {
-                let old_vk = crate::ir_v1::v1_keygen_vk(self, params).await?;
-                Ok(v1_vk_to_current(&old_vk)?)
+                anyhow::bail!(
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for keygen_vk"
+                )
             }
             IrMinorVersion::V2 => {
                 use midnight_zk_stdlib::setup_vk;
@@ -230,9 +216,9 @@ impl Zkir for IrSource {
     ) -> Result<(ProverKey<Self>, VerifierKey), anyhow::Error> {
         match self.version {
             IrMinorVersion::V0 | IrMinorVersion::V1 => {
-                let (v1_pk, old_vk) = crate::ir_v1::v1_keygen(self, params).await?;
-                let versioned_pk = VersionedInnerPK::V1(v1_pk);
-                Ok((ProverKey::from_raw(versioned_pk), v1_vk_to_current(&old_vk)?))
+                anyhow::bail!(
+                    "V0/V1 circuits must use transient_crypto_old::proofs::Zkir for keygen"
+                )
             }
             IrMinorVersion::V2 => self.v2_keygen(params).await,
         }

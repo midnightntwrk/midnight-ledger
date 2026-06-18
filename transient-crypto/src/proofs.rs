@@ -371,10 +371,10 @@ simple_arbitrary!(VerifierKey);
 
 impl Tagged for VerifierKey {
     fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("verifier-key[v6]")
+        Cow::Borrowed("verifier-key[v7]")
     }
     fn tag_unique_factor() -> String {
-        "verifier-key[v6]".into()
+        "verifier-key[v7]".into()
     }
 }
 tag_enforcement_test!(VerifierKey);
@@ -508,17 +508,6 @@ impl Serializable for VerifierKey {
 }
 
 impl VerifierKey {
-    /// Marks this verifier key as v1-only, preventing initialization with the
-    /// v2 `MidnightVK::read`. V1 VKs should only be verified through
-    /// `ir_v1::v1_verify`.
-    pub fn mark_v1_only(&self) {
-        let mut mutex = self.0.lock().expect("mutex is not poisoned");
-        if let InnerVerifierKey::Uninitialized(data) = &*mutex {
-            let data = data.clone();
-            *mutex = InnerVerifierKey::Invalid(data);
-        }
-    }
-
     /// Initializes the lazy verifier key
     pub fn init(&self) -> Result<(), VerifyingError> {
         self.force_init()?;
@@ -539,16 +528,10 @@ impl VerifierKey {
             InnerVerifierKey::Uninitialized(data) => data.clone(),
         };
         let reader = &mut &data[..];
-        match MidnightVK::read(reader, SerdeFormat::Processed) {
-            Ok(vk) if reader.is_empty() => {
-                *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
-                Ok(vk)
-            }
-            _ => {
-                *mutex = InnerVerifierKey::Invalid(data);
-                Err(anyhow::anyhow!("problem reading the verifier key"))
-            }
-        }
+        let vk = MidnightVK::read(reader, SerdeFormat::Processed)
+            .map_err(|_| anyhow::anyhow!("problem reading the verifier key"))?;
+        *mutex = InnerVerifierKey::Initialized(vk.clone(), data);
+        Ok(vk)
     }
 
     fn inner_serialize<W: std::io::Write>(&self, mut writer: W) -> std::io::Result<()> {
@@ -778,7 +761,17 @@ impl ProofPreimage {
         let prover_key =
             Z::load_prover_key_from_tagged(io::Cursor::new(&proof_data.prover_key[..]))?;
         let (proof, pis, pi_skips) = ir.prove(rng, params, prover_key, self).await?;
-        debug!("proof created");
+        debug!("proof created; verifying to make sure");
+        let k = verifier_key.force_init()?.k();
+        if let Err(e) = verifier_key.verify(
+            &params.get_params(k).await?.as_verifier(),
+            &proof,
+            pis.iter().copied(),
+        ) {
+            error!(error = ?e, ?pis, ?ir, "self-verification failed! This may be a bug, check that your keys match!");
+            return Err(e);
+        }
+        debug!("proof ok");
         Ok((proof, pi_skips))
     }
 }

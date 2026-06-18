@@ -21,7 +21,6 @@ use onchain_runtime_wasm::state::{
 };
 use rand::rngs::OsRng;
 use serialize::Serializable;
-use serialize::tagged_deserialize;
 use storage::db::InMemoryDB;
 use transient_crypto::proofs::KeyLocation;
 use transient_crypto::proofs::ProofPreimage;
@@ -350,8 +349,8 @@ impl ContractOperationVersionedVerifierKey {
                     "superceded contract operation version: {version}"
                 )));
             }
-            "v3" => V::V3(tagged_deserialize(&mut &raw_vk[..])?),
-            "v4" => V::V4(tagged_deserialize(&mut &raw_vk[..])?),
+            "v3" => V::V3(zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&raw_vk[..]))?),
+            "v4" => V::V4(zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&raw_vk[..]))?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"

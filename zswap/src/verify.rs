@@ -64,13 +64,14 @@ const SIGN_VK_RAW: &[u8] = include_bytes!("../static/sign.verifier");
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
     pub static ref OUTPUT_VK: VerifierKey =
-        tagged_deserialize(&mut OUTPUT_VK_RAW.to_vec().as_slice())
+        zkir_v2::load_vk_from_tagged(std::io::Cursor::new(OUTPUT_VK_RAW))
             .expect("Zswap Output VK should be valid");
     pub static ref SPEND_VK: VerifierKey =
-        tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
+        zkir_v2::load_vk_from_tagged(std::io::Cursor::new(SPEND_VK_RAW))
             .expect("Zswap Spend VK should be valid");
-    pub static ref SIGN_VK: VerifierKey = tagged_deserialize(&mut SIGN_VK_RAW.to_vec().as_slice())
-        .expect("Zswap Sign VK should be valid");
+    pub static ref SIGN_VK: VerifierKey =
+        zkir_v2::load_vk_from_tagged(std::io::Cursor::new(SIGN_VK_RAW))
+            .expect("Zswap Sign VK should be valid");
 }
 
 #[cfg(feature = "proof-verifying")]
@@ -137,7 +138,7 @@ impl AuthorizedClaim<Proof> {
         for op in filter_invalid(prog.iter().cloned()) {
             op.field_repr(&mut statement);
         }
-        zkir_v2::ir_v1::v1_verify(&SIGN_VK, &self.proof, statement.into_iter())
+        zkir_v2::verify(SIGN_VK_RAW, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -185,7 +186,7 @@ impl<D: DB> Input<Proof, D> {
         for op in with_outputs(prog.into_iter(), [true.into(), segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        zkir_v2::ir_v1::v1_verify(&SPEND_VK, &self.proof, statement.into_iter())
+        zkir_v2::verify(SPEND_VK_RAW, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
@@ -252,7 +253,7 @@ impl<D: DB> Output<Proof, D> {
         for op in with_outputs(prog.into_iter(), [segment.into()].into_iter()) {
             op.field_repr(&mut statement);
         }
-        zkir_v2::ir_v1::v1_verify(&OUTPUT_VK, &self.proof, statement.into_iter())
+        zkir_v2::verify(OUTPUT_VK_RAW, &self.proof, statement.into_iter())
             .map_err(MalformedOffer::InvalidProof)
     }
 }
