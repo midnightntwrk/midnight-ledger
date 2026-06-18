@@ -1169,10 +1169,12 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
-    async fn test_coordinate_extraction_proof() {
+    async fn test_coordinates_proof() {
         // Exercises affine coordinates polymorphically across the
         // supported curve point types. Each extracted coordinate is
         // checked against a private input carrying the expected value.
+        // A point is then reconstructed from the extracted coordinates
+        // and compared to the original point.
         use midnight_zkir_v3::ir_instructions::into_coordinates::into_coordinates_offcircuit;
 
         let ir_raw = r#"{
@@ -1193,7 +1195,11 @@ mod proof_tests {
                { "op": "constrain_eq", "a": "%jx", "b": "%jx_exp" },
                { "op": "constrain_eq", "a": "%jy", "b": "%jy_exp" },
                { "op": "constrain_eq", "a": "%sx", "b": "%sx_exp" },
-               { "op": "constrain_eq", "a": "%sy", "b": "%sy_exp" }
+               { "op": "constrain_eq", "a": "%sy", "b": "%sy_exp" },
+               { "op": "from_coordinates", "inputs": ["%jx", "%jy"], "output": "%jp_reconstructed" },
+               { "op": "from_coordinates", "inputs": ["%sx", "%sy"], "output": "%sp_reconstructed" },
+               { "op": "constrain_eq", "a": "%jp_reconstructed", "b": "%jp" },
+               { "op": "constrain_eq", "a": "%sp_reconstructed", "b": "%sp" }
            ]
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
