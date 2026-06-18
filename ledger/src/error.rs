@@ -241,6 +241,8 @@ pub enum TransactionInvalid<D: DB> {
         size: u64,
         limit: u64,
     },
+    IrNotFound(EntryPointBuf),
+    IrAlreadyPresent(EntryPointBuf),
 }
 
 impl<D: DB> Display for TransactionInvalid<D> {
@@ -338,6 +340,8 @@ impl<D: DB> Display for TransactionInvalid<D> {
                 formatter,
                 "contract {address:?} authority metadata size ({size} bytes) exceeds limit ({limit} bytes)"
             ),
+            IrNotFound(ep) => write!(formatter, "the IR for {ep:?} was not present"),
+            IrAlreadyPresent(ep) => write!(formatter, "the IR for {ep:?} was already present"),
         }
     }
 }
@@ -423,8 +427,15 @@ impl Error for FeeCalculationError {}
 pub enum MalformedContractDeploy {
     NonZeroBalance(std::collections::BTreeMap<TokenType, u128>),
     IncorrectChargedState,
-    MetadataTooLarge { entry_point: EntryPointBuf, size: u64, limit: u64 },
-    AuthorityMetadataTooLarge { size: u64, limit: u64 },
+    MetadataTooLarge {
+        entry_point: EntryPointBuf,
+        size: u64,
+        limit: u64,
+    },
+    AuthorityMetadataTooLarge {
+        size: u64,
+        limit: u64,
+    },
 }
 
 impl Display for MalformedContractDeploy {

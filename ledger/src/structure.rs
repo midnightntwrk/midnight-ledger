@@ -40,6 +40,7 @@ use introspection_derive::Introspection;
 use onchain_runtime::context::{BlockContext, CallContext, ClaimedContractCallsValue, Effects};
 use onchain_runtime::state::ChargedState;
 use onchain_runtime::state::ContractOperation;
+use onchain_runtime::state::IrBuf;
 use onchain_runtime::state::{ContractMaintenanceAuthority, ContractState, EntryPointBuf};
 use onchain_runtime::transcript::Transcript;
 use rand::{CryptoRng, Rng};
@@ -309,9 +310,7 @@ impl Serializable for ProofVersioned {
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => {
-                proof.serialized_size() + 1
-            }
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
         }
     }
 }
@@ -405,6 +404,8 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
     >(
         tx: &Transaction<S, Self, B, D>,
     ) -> usize;
+    /// Extracts which contract operation version a proof should be verified against, if known.
+    fn proof_version_to_operation_version(p: &Self::Proof) -> Option<ContractOperationVersion>;
 }
 
 impl From<Proof> for ProofVersioned {
@@ -471,11 +472,10 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         match proof {
             ProofVersioned::V2(_) => match mode {
                 #[cfg(feature = "mock-verify")]
-                ProofVerificationMode::CalibratedMock => zkir_v2::ir_v1::v1_mock_verify(
-                    vk,
-                    pis.into_iter(),
-                )
-                .map_err(MalformedTransaction::<D>::InvalidProof),
+                ProofVerificationMode::CalibratedMock => {
+                    zkir_v2::ir_v1::v1_mock_verify(vk, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof)
+                }
                 _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
             },
@@ -497,6 +497,12 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         tx.serialized_size()
+    }
+    fn proof_version_to_operation_version(proof: &Self::Proof) -> Option<ContractOperationVersion> {
+        Some(match proof {
+            ProofVersioned::V2(_) => ContractOperationVersion::V3,
+            ProofVersioned::V3(_) => ContractOperationVersion::V4,
+        })
     }
 }
 
@@ -537,6 +543,9 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
         tx: &Transaction<S, Self, B, D>,
     ) -> usize {
         <()>::estimated_tx_size(&tx.erase_proofs())
+    }
+    fn proof_version_to_operation_version(_: &Self::Proof) -> Option<ContractOperationVersion> {
+        None
     }
 }
 
@@ -595,6 +604,9 @@ impl<D: DB> ProofKind<D> for () {
             + zswap_inputs * zswap::INPUT_PROOF_SIZE
             + zswap_outputs * zswap::OUTPUT_PROOF_SIZE
             + dust_spends * DUST_SPEND_PROOF_SIZE
+    }
+    fn proof_version_to_operation_version(_: &Self::Proof) -> Option<ContractOperationVersion> {
+        None
     }
 }
 
@@ -829,7 +841,7 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
 #[derive(Storable)]
-#[tag = "intent[v8]"]
+#[tag = "intent[v9]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
 pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1182,7 +1194,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
         bytes_churned: 1_000_000,
     },
     block_withdrawal_minimum_multiple: FixedPoint::from_u64_div(1, 2),
-    max_contract_metadata_size: 10 * 1024 * 1024,
+    max_contract_metadata_size: 50_000,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Storable)]
@@ -1272,7 +1284,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
         write_factor: FixedPoint::ONE,
     },
     global_ttl: Duration::from_secs(3600),
-    cardano_to_midnight_bridge_fee_basis_points: 500,
+    cardano_to_midnight_bridge_fee_basis_points: 100,
     cost_dimension_min_ratio: FixedPoint::from_u64_div(1, 4),
     price_adjustment_a_parameter: FixedPoint::from_u64_div(100, 1),
     c_to_m_bridge_min_amount: 1000,
@@ -1282,7 +1294,7 @@ pub const INITIAL_PARAMETERS: LedgerParameters = LedgerParameters {
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone; S, B, P)]
-#[tag = "transaction[v11]"]
+#[tag = "transaction[v12]"]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
 #[allow(clippy::large_enum_variant)]
 pub enum Transaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
@@ -1566,7 +1578,7 @@ pub const GUARANTEED_SEGMENT: Segment = 0;
 #[derive(Storable)]
 #[storable(db = D)]
 #[derive_where(Clone, Debug; S, P, B)]
-#[tag = "standard-transaction[v11]"]
+#[tag = "standard-transaction[v12]"]
 pub struct StandardTransaction<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
     pub network_id: String,
     pub intents: HashMap<Segment, Intent<S, P, B, D>, D>,
@@ -1858,17 +1870,27 @@ where
     fn validation_cost_impl(
         &self,
         model: &TransactionCostModel,
-        per_call_vk_read: impl Fn(&ContractAddress, &EntryPointBuf) -> RunningCost,
+        per_call_vk_read: impl Fn(
+            &ContractAddress,
+            &EntryPointBuf,
+            Option<ContractOperationVersion>,
+        ) -> RunningCost,
     ) -> SyntheticCost {
         match self {
             Transaction::Standard(stx) => {
                 let unique_calls = self
                     .calls()
-                    .map(|(_, call)| (call.address, call.entry_point))
+                    .map(|(_, call)| {
+                        (
+                            call.address,
+                            call.entry_point,
+                            P::proof_version_to_operation_version(&call.proof),
+                        )
+                    })
                     .collect::<BTreeSet<_>>();
                 let mut cost = model.baseline_cost;
-                for (address, entry_point) in &unique_calls {
-                    cost += per_call_vk_read(address, entry_point);
+                for (address, entry_point, version) in &unique_calls {
+                    cost += per_call_vk_read(address, entry_point, version.clone());
                 }
                 let offers = stx
                     .guaranteed_coins
@@ -1938,7 +1960,7 @@ where
         let per_call = model.cell_read(VERIFIER_KEY_SIZE as u64)
             + model.map_index(EXPECTED_CONTRACT_DEPTH)
             + model.map_index(EXPECTED_OPERATIONS_DEPTH);
-        self.validation_cost_impl(model, |_, _| per_call)
+        self.validation_cost_impl(model, |_, _, _| per_call)
     }
 
     pub fn validation_cost_with_state(
@@ -1946,7 +1968,7 @@ where
         model: &TransactionCostModel,
         ledger: &LedgerState<D>,
     ) -> SyntheticCost {
-        self.validation_cost_impl(model, |address, entry_point| {
+        self.validation_cost_impl(model, |address, entry_point, ver| {
             let (vk_size, ops_log_size) = ledger
                 .index(*address)
                 .and_then(|cstate| {
@@ -1954,11 +1976,20 @@ where
                     // ceil(log2(n)): number of bits needed to distinguish n entries
                     let ops_log_size = (usize::BITS - n.saturating_sub(1).leading_zeros()) as usize;
                     cstate.operations.get(entry_point).map(|op| {
-                        let vk_size = op
-                            .v2
-                            .as_ref()
-                            .map(|vk| vk.serialized_size())
-                            .unwrap_or(VERIFIER_KEY_SIZE);
+                        let vk_size = match ver {
+                            Some(ContractOperationVersion::V3) => {
+                                op.v2.as_ref().map(|vk| vk.serialized_size())
+                            }
+                            Some(ContractOperationVersion::V4) => {
+                                op.v3.as_ref().map(|vk| vk.serialized_size())
+                            }
+                            None => op
+                                .v3
+                                .as_ref()
+                                .or(op.v2.as_ref())
+                                .map(|vk| vk.serialized_size()),
+                        }
+                        .unwrap_or(VERIFIER_KEY_SIZE);
                         (vk_size, ops_log_size)
                     })
                 })
@@ -2145,9 +2176,25 @@ where
                                         + model.cell_delete(VERIFIER_KEY_SIZE as u64)
                                         + model.map_insert(1, true)
                                 }
-                                SingleUpdate::VerifierKeyInsert(..) => {
+                                SingleUpdate::VerifierKeyInsert(ep, vk) => {
                                     f_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, false)
-                                        + model.cell_write(VERIFIER_KEY_SIZE as u64, false)
+                                        + model.cell_write(
+                                            (ep.serialized_size() + vk.serialized_size()) as u64,
+                                            false,
+                                        )
+                                        + model.map_insert(1, true)
+                                }
+                                SingleUpdate::IrRemove(ep) => {
+                                    f_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                                        + model.cell_delete(ep.serialized_size() as u64)
+                                        + model.map_insert(1, true)
+                                }
+                                SingleUpdate::IrInsert(ep, ir) => {
+                                    f_cost += model.map_insert(EXPECTED_OPERATIONS_DEPTH, true)
+                                        + model.cell_write(
+                                            (ep.serialized_size() + ir.serialized_size()) as u64,
+                                            false,
+                                        )
                                         + model.map_insert(1, true)
                                 }
                             }
@@ -2280,9 +2327,21 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<u128, FeeCalculationError> {
         let model = &params.cost_model;
-        let mut validation_cost = self.validation_cost_impl(model, |address, entry_point| {
+        let mut validation_cost = self.validation_cost_impl(model, |address, entry_point, ver| {
             let vk_size = get_op(*address, entry_point)
-                .and_then(|op| op.v2.as_ref().map(|vk| vk.serialized_size()))
+                .and_then(|op| match ver {
+                    Some(ContractOperationVersion::V3) => {
+                        op.v2.as_ref().map(|vk| vk.serialized_size())
+                    }
+                    Some(ContractOperationVersion::V4) => {
+                        op.v3.as_ref().map(|vk| vk.serialized_size())
+                    }
+                    None => op
+                        .v3
+                        .as_ref()
+                        .or(op.v2.as_ref())
+                        .map(|vk| vk.serialized_size()),
+                })
                 .unwrap_or(VERIFIER_KEY_SIZE);
             model.cell_read(vk_size as u64)
                 + model.map_index(EXPECTED_CONTRACT_DEPTH)
@@ -2801,7 +2860,7 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serializable, Storable)]
 #[storable(base)]
-#[tag = "maintenance-update-single-update[v2]"]
+#[tag = "maintenance-update-single-update[v3]"]
 pub enum SingleUpdate {
     /// Replaces the authority for this contract.
     /// Any subsequent updates in this update sequence are still carried out.
@@ -2812,6 +2871,10 @@ pub enum SingleUpdate {
     /// This operations *does not* replace existing keys, which must first be
     /// explicitly removed.
     VerifierKeyInsert(EntryPointBuf, ContractOperationVersionedVerifierKey),
+    /// Removes the IR associated with a given version and entry point.
+    IrRemove(EntryPointBuf),
+    /// Inserts new IR associated with a given version and entry point.
+    IrInsert(EntryPointBuf, IrBuf),
 }
 tag_enforcement_test!(SingleUpdate);
 
@@ -2830,7 +2893,7 @@ impl SignaturesValue {
 
 #[derive(Storable)]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-#[tag = "contract-maintenance-update[v2]"]
+#[tag = "contract-maintenance-update[v3]"]
 #[storable(db = D)]
 pub struct MaintenanceUpdate<D: DB> {
     pub address: ContractAddress,
@@ -2867,7 +2930,7 @@ impl<D: DB> MaintenanceUpdate<D> {
 
 #[derive(Storable)]
 #[storable(db = D)]
-#[tag = "contract-action[v8]"]
+#[tag = "contract-action[v9]"]
 #[derive_where(Clone, PartialEq, Eq; P)]
 pub enum ContractAction<P: ProofKind<D>, D: DB> {
     Call(#[storable(child)] Sp<ContractCall<P, D>, D>),

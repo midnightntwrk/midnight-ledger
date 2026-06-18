@@ -1070,15 +1070,15 @@ export type ErasedTransactionResult = {
 /**
  * A single update instruction in a {@link MaintenanceUpdate}.
  */
-export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyInsert;
+export type SingleUpdate = ReplaceAuthority | VerifierKeyRemove | VerifierKeyInsert | IrRemove | IrInsert;
 
 /**
  * The version associated with a {@link ContractOperation}
  */
 export class ContractOperationVersion {
-  constructor(version: 'v3');
+  constructor(version: 'v3' | 'v4');
 
-  readonly version: 'v3';
+  readonly version: 'v3' | 'v4';
 
   toString(compact?: boolean): string;
 }
@@ -1087,9 +1087,9 @@ export class ContractOperationVersion {
  * A versioned verifier key to be associated with a {@link ContractOperation}.
  */
 export class ContractOperationVersionedVerifierKey {
-  constructor(version: 'v3', rawVk: Uint8Array);
+  constructor(version: 'v3' | 'v4', rawVk: Uint8Array);
 
-  readonly version: 'v3';
+  readonly version: 'v3' | 'v4';
   readonly rawVk: Uint8Array;
 
   toString(compact?: boolean): string;
@@ -1129,6 +1129,29 @@ export class VerifierKeyInsert {
 
   readonly operation: string | Uint8Array;
   readonly vk: ContractOperationVersionedVerifierKey;
+
+  toString(compact?: boolean): string;
+}
+
+/**
+ * An update instruction to remove IR metadata of a specific operation.
+ */
+export class IrRemove {
+  constructor(operation: string | Uint8Array);
+
+  readonly operation: string | Uint8Array;
+
+  toString(compact?: boolean): string;
+}
+
+/**
+ * An update instruction to insert IR metadata at a specific operation.
+ */
+export class IrInsert {
+  constructor(operation: string | Uint8Array, ir: Uint8Array);
+
+  readonly operation: string | Uint8Array;
+  readonly ir: Uint8Array;
 
   toString(compact?: boolean): string;
 }
