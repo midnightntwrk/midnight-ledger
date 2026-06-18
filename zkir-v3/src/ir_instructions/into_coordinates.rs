@@ -36,7 +36,7 @@ use crate::{
 ///
 /// Errors if the input is not a supported type, or if it is the identity of a
 /// Weierstrass curve (which has no affine coordinates).
-pub fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow::Error> {
+pub fn into_coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow::Error> {
     use IrValue::*;
     match point {
         JubjubPoint(p) => {
@@ -72,7 +72,7 @@ pub fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), any
 /// # Errors
 ///
 /// Errors if the input is not a supported type.
-pub fn coordinates_incircuit(
+pub fn into_coordinates_incircuit(
     std_lib: &ZkStdLib,
     layouter: &mut impl Layouter<F>,
     point: &CircuitValue,
@@ -115,21 +115,23 @@ mod tests {
         let p = JubjubSubgroup::random(OsRng);
         let (x, y) = Into::<JubjubExtended>::into(p).coordinates().unwrap();
         assert_eq!(
-            coordinates_offcircuit(&JubjubPoint(p)).unwrap(),
+            into_coordinates_offcircuit(&JubjubPoint(p)).unwrap(),
             (Native(Fr(x)), Native(Fr(y)))
         );
 
         let p = secp256k1::Secp256k1::random(OsRng);
         let (x, y) = p.coordinates().unwrap();
         assert_eq!(
-            coordinates_offcircuit(&Secp256k1Point(p)).unwrap(),
+            into_coordinates_offcircuit(&Secp256k1Point(p)).unwrap(),
             (Secp256k1Base(x), Secp256k1Base(y))
         );
 
         // The Secp256k1 identity has no affine coordinates.
-        assert!(coordinates_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err());
+        assert!(
+            into_coordinates_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err()
+        );
 
         // Coordinate extraction on a scalar is unsupported.
-        assert!(coordinates_offcircuit(&Native(Fr::from(1))).is_err());
+        assert!(into_coordinates_offcircuit(&Native(Fr::from(1))).is_err());
     }
 }

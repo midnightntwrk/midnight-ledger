@@ -489,7 +489,7 @@ pub enum Instruction {
     /// * Secp256k1Point
     ///
     /// Outputs 2 elements, the coordinates (x, y)
-    Coordinates {
+    IntoCoordinates {
         /// The point whose coordinate are extracted
         point: Operand,
         /// The output variable names (x, y)
