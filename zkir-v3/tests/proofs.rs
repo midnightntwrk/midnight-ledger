@@ -1169,6 +1169,91 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
+    async fn test_coordinate_extraction_proof() {
+        // Exercises `x_coordinate` / `y_coordinate` polymorphically on both a
+        // Jubjub point (coordinates are native field elements) and a Secp256k1
+        // point (coordinates are base field elements). Each extracted coordinate
+        // is checked against a private input carrying the expected value.
+        use midnight_zkir_v3::ir_instructions::coordinates::{
+            x_coordinate_offcircuit, y_coordinate_offcircuit,
+        };
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%jp", "type": "Point<Jubjub>"    },
+              { "name": "%sp", "type": "Point<Secp256k1>" }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "x_coordinate", "point": "%jp", "output": "%jx" },
+               { "op": "y_coordinate", "point": "%jp", "output": "%jy" },
+               { "op": "x_coordinate", "point": "%sp", "output": "%sx" },
+               { "op": "y_coordinate", "point": "%sp", "output": "%sy" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jx_exp" },
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jy_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%sx_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%sy_exp" },
+               { "op": "constrain_eq", "a": "%jx", "b": "%jx_exp" },
+               { "op": "constrain_eq", "a": "%jy", "b": "%jy_exp" },
+               { "op": "constrain_eq", "a": "%sx", "b": "%sx_exp" },
+               { "op": "constrain_eq", "a": "%sy", "b": "%sy_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let jp = JubjubSubgroup::random(OsRng);
+        let sp = secp256k1::Secp256k1::random(OsRng);
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::JubjubPoint(jp)),
+            encode(IrValue::Secp256k1Point(sp)),
+        ]
+        .concat();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(x_coordinate_offcircuit(&IrValue::JubjubPoint(jp)).unwrap()),
+            encode(y_coordinate_offcircuit(&IrValue::JubjubPoint(jp)).unwrap()),
+            encode(x_coordinate_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap()),
+            encode(y_coordinate_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap()),
+        ]
+        .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
     async fn test_native_inv_proof() {
         // Verifies native field inversion: v0 * inv(v0) == 1.
         let ir_raw = r#"{

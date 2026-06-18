@@ -14,6 +14,10 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
+use crate::ir_instructions::coordinates::{
+    x_coordinate_incircuit, x_coordinate_offcircuit, y_coordinate_incircuit,
+    y_coordinate_offcircuit,
+};
 use crate::ir_instructions::decode::{
     decode_incircuit, decode_offcircuit, native_to_jubjub_scalar,
 };
@@ -601,6 +605,16 @@ impl IrSource {
                     let r = ec_mul_offcircuit(&p, &s)?;
                     memory.insert(output.clone(), r);
                 }
+                I::XCoordinate { point, output } => {
+                    let p = resolve_operand(&memory, point)?;
+                    let x = x_coordinate_offcircuit(&p)?;
+                    memory.insert(output.clone(), x);
+                }
+                I::YCoordinate { point, output } => {
+                    let p = resolve_operand(&memory, point)?;
+                    let y = y_coordinate_offcircuit(&p)?;
+                    memory.insert(output.clone(), y);
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1095,6 +1109,16 @@ impl Relation for IrSource {
                         CircuitValue::JubjubPoint(point),
                         &mut memory,
                     )?;
+                }
+                I::XCoordinate { point, output } => {
+                    let p = resolve_operand(std, layouter, &memory, point)?;
+                    let x = x_coordinate_incircuit(std, layouter, &p)?;
+                    mem_insert(output.clone(), x, &mut memory)?;
+                }
+                I::YCoordinate { point, output } => {
+                    let p = resolve_operand(std, layouter, &memory, point)?;
+                    let y = y_coordinate_incircuit(std, layouter, &p)?;
+                    mem_insert(output.clone(), y, &mut memory)?;
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {

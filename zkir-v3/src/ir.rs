@@ -480,6 +480,32 @@ pub enum Instruction {
         /// The resulting point
         output: Identifier,
     },
+    /// Extracts the affine x-coordinate of an elliptic curve point.
+    /// 
+    /// Supported on types: 
+    /// * JubjubPoint
+    /// * Secp256k1Point (the identity is rejected).
+    ///
+    /// Outputs 1 element, the x-coordinate
+    XCoordinate {
+        /// The point whose x-coordinate is extracted
+        point: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
+    /// Extracts the affine y-coordinate of an elliptic curve point.
+    /// 
+    /// Supported on types: 
+    /// * JubjubPoint
+    /// * Secp256k1Point (the identity is rejected).
+    ///
+    /// Outputs 1 element, the y-coordinate
+    YCoordinate {
+        /// The point whose y-coordinate is extracted
+        point: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`
