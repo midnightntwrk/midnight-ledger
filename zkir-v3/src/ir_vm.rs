@@ -14,12 +14,10 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
-use crate::ir_instructions::decode::{
-    decode_incircuit, decode_offcircuit, native_to_jubjub_scalar,
-};
 use crate::ir_instructions::ec_mul::{ec_mul_incircuit, ec_mul_offcircuit};
 use crate::ir_instructions::encode::{
-    encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
+    decode_offcircuit, encode_incircuit, encode_offcircuit, jubjub_scalar_from_biguint,
+    native_to_jubjub_scalar,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::from_coordinates::{
@@ -319,18 +317,6 @@ impl IrSource {
                     for (out_id, enc_val) in outputs.iter().zip(encoded) {
                         memory.insert(out_id.clone(), enc_val);
                     }
-                }
-                I::Decode {
-                    inputs,
-                    val_t,
-                    output,
-                } => {
-                    let raw_inputs = inputs
-                        .iter()
-                        .map(|inp_id| resolve_operand(&memory, inp_id)?.try_into())
-                        .collect::<Result<Vec<Fr>, _>>()?;
-                    let decoded = decode_offcircuit(&raw_inputs, val_t)?;
-                    memory.insert(output.clone(), decoded);
                 }
                 I::Add { a, b, output } => {
                     let a = resolve_operand(&memory, a)?;
@@ -824,18 +810,6 @@ impl Relation for IrSource {
                         mem_insert(out_id.clone(), enc_val, &mut memory)?;
                     }
                 }
-                I::Decode {
-                    inputs,
-                    val_t,
-                    output,
-                } => {
-                    let raw_inputs = inputs
-                        .iter()
-                        .map(|inp_id| resolve_operand(std, layouter, &memory, inp_id)?.try_into())
-                        .collect::<Result<Vec<AssignedNative<_>>, Error>>()?;
-                    let decoded = decode_incircuit(std, layouter, &raw_inputs, val_t)?;
-                    mem_insert(output.clone(), decoded, &mut memory)?;
-                }
                 I::Assert { cond } => {
                     let cond_val = resolve_operand(std, layouter, &memory, cond)?;
                     let cond: AssignedNative<_> = cond_val.try_into()?;
@@ -1195,11 +1169,11 @@ impl Relation for IrSource {
                 .any(|id| target_types.contains(&id.val_t));
 
             // We can figure out if a type is used in the circuit by looking at the entry
-            // points, currenty: Decode, PublicInput or PrivateInput.
+            // points, currently: PublicInput or PrivateInput.
             let types_in_instructions = self.instructions.iter().any(|op| match op {
-                I::Decode { val_t, .. }
-                | I::PublicInput { val_t, .. }
-                | I::PrivateInput { val_t, .. } => target_types.contains(val_t),
+                I::PublicInput { val_t, .. } | I::PrivateInput { val_t, .. } => {
+                    target_types.contains(val_t)
+                }
                 _ => false,
             });
 

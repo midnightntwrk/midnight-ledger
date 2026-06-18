@@ -331,34 +331,6 @@ pub enum Instruction {
         /// The output variable names
         outputs: Vec<Identifier>,
     },
-    /// Decodes the given raw Fr elements as a value of the given type.
-    ///
-    /// This operation will result in an error if the number of inputs
-    /// is not the exact number of raw Fr elements required to represent a
-    /// value of the given type:
-    ///
-    ///  - Native:       1 input
-    ///  - JubjubPoint:  2 inputs (x and y coordinates)
-    ///  - JubjubScalar: 1 input
-    ///
-    ///  - Secp256k1Point:  8 inputs (4 for x and 4 for y)
-    ///  - Secp256k1Base:   4 inputs (64-bits LE limbs)
-    ///  - Secp256k1Scalar: 4 inputs (64-bits LE limbs)
-    ///
-    /// It will also result in an error if the operands are not of type
-    /// `Native`.
-    ///
-    /// The circuit may become unsatisfiable if the inputs do not encode
-    /// a valid value of the given type.
-    Decode {
-        /// The inputs to decode
-        inputs: Vec<Operand>,
-        /// The type to decode as
-        #[serde(rename = "type")]
-        val_t: IrType,
-        /// The output variable name
-        output: Identifier,
-    },
     /// Assert that `cond` has value `1`. UB if `cond` is not `0` or `1`.
     ///
     /// No outputs

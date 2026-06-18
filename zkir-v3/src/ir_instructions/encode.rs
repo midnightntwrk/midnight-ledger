@@ -19,7 +19,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{JubjubExtended, secp256k1};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, secp256k1};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
@@ -28,8 +28,9 @@ use transient_crypto::curve::Fr;
 
 use crate::{
     ir_instructions::F,
-    ir_types::{CircuitValue, IrValue},
+    ir_types::{CircuitValue, IrType, IrValue},
 };
+use anyhow::anyhow;
 
 /// Encodes the given off-circuit value as a vector of IrValue::Native.
 pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
@@ -38,14 +39,9 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
         IrValue::JubjubScalar(s) => {
             let encoded = AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s);
-            // In ZKIRv3, an assigned scalar can only originate from:
-            //   (i)  a circuit input, or
-            //   (ii) a `decode` instruction.
-            //
-            // Circuit inputs yield canonical assigned scalars (whose internal
-            // representation uses at most 252 bits). The `decode` path is carefully
-            // implemented in [crate::ir_instructions::decode::decode_incircuit] to
-            // also produce canonical assigned scalars.
+            // In ZKIRv3, an assigned scalar can only originate from a circuit
+            // input (PublicInput or PrivateInput), which yields canonical assigned
+            // scalars (whose internal representation uses at most 252 bits).
             assert_eq!(encoded.len(), 1);
             encoded
         }
@@ -93,6 +89,52 @@ pub fn encode_incircuit(
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
+}
+
+/// Decodes the given Fr values as an IrValue of the given type.
+///
+/// # Errors
+///
+/// Returns an error if the provided raw values cannot be decoded as the given type.
+pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyhow::Error> {
+    let encoded: Vec<F> = encoded.iter().map(|f| f.0).collect();
+    match val_t {
+        IrType::Native => AssignedNative::<F>::from_public_input(&encoded)
+            .map(Fr)
+            .map(IrValue::Native),
+
+        IrType::JubjubPoint => AssignedNativePoint::<JubjubExtended>::from_public_input(&encoded)
+            .map(IrValue::JubjubPoint),
+
+        IrType::JubjubScalar => {
+            AssignedScalarOfNativeCurve::<JubjubExtended>::from_public_input(&encoded)
+                .map(IrValue::JubjubScalar)
+        }
+
+        IrType::Secp256k1Point => {
+            AssignedForeignPoint::<F, secp256k1::Secp256k1, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Point)
+        }
+
+        IrType::Secp256k1Base => {
+            AssignedField::<F, secp256k1::Fp, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Base)
+        }
+
+        IrType::Secp256k1Scalar => {
+            AssignedField::<F, secp256k1::Fq, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Scalar)
+        }
+    }
+    .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
+}
+
+/// Converts a native field element to a Jubjub scalar by reducing modulo
+/// the Jubjub scalar field order if necessary.
+pub fn native_to_jubjub_scalar(native: &Fr) -> JubjubFr {
+    let mut bytes = [0u8; 64];
+    bytes[..32].copy_from_slice(&native.0.to_bytes_le());
+    JubjubFr::from_bytes_wide(&bytes)
 }
 
 /// Reduces the given biguint modulo the Jubjub scalar field order and returns the
