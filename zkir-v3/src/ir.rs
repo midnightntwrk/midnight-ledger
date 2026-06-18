@@ -480,11 +480,13 @@ pub enum Instruction {
         /// The resulting point
         output: Identifier,
     },
-    /// Extracts the affine x-coordinate of an elliptic curve point.
-    /// 
-    /// Supported on types: 
+    /// The affine x-coordinate of the given elliptic curve point.
+    /// On Weierstrass curves the identity has no affine coordinates, so
+    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
+    ///
+    /// Supported on types:
     /// * JubjubPoint
-    /// * Secp256k1Point (the identity is rejected).
+    /// * Secp256k1Point
     ///
     /// Outputs 1 element, the x-coordinate
     XCoordinate {
@@ -493,11 +495,13 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
-    /// Extracts the affine y-coordinate of an elliptic curve point.
-    /// 
-    /// Supported on types: 
+    /// The affine y-coordinate of the given elliptic curve point.
+    /// On Weierstrass curves the identity has no affine coordinates, so
+    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
+    ///
+    /// Supported on types:
     /// * JubjubPoint
-    /// * Secp256k1Point (the identity is rejected).
+    /// * Secp256k1Point
     ///
     /// Outputs 1 element, the y-coordinate
     YCoordinate {

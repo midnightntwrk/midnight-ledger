@@ -14,10 +14,10 @@
 use group::Group;
 use midnight_circuits::{
     ecc::curves::CircuitCurve,
-    instructions::{AssertionInstructions as _, EccInstructions as _},
+    instructions::{EccInstructions, ZeroInstructions},
 };
 
-use midnight_curves::{JubjubExtended, secp256k1};
+use midnight_curves::JubjubExtended;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
 use transient_crypto::curve::Fr;
@@ -34,16 +34,14 @@ use crate::{
 ///
 /// # Errors
 ///
-/// Errors if the input is not a supported type, or if it is the Secp256k1
-/// identity (which has no affine coordinates).
+/// Errors if the input is not a supported type, or if it is the identity of a
+/// Weierstrass curve (which has no affine coordinates).
 fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow::Error> {
     use IrValue::*;
     match point {
         JubjubPoint(p) => {
             let p_ext: JubjubExtended = (*p).into();
-            let (x, y) = p_ext
-                .coordinates()
-                .expect("Jubjub points have affine coordinates");
+            let (x, y) = p_ext.coordinates().unwrap();
             Ok((Native(Fr(x)), Native(Fr(y))))
         }
         Secp256k1Point(p) => {
@@ -52,9 +50,7 @@ fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow:
                     "Cannot extract coordinates of the Secp256k1 identity"
                 ));
             }
-            let (x, y) = p
-                .coordinates()
-                .expect("non-identity points have coordinates");
+            let (x, y) = p.coordinates().unwrap();
             Ok((Secp256k1Base(x), Secp256k1Base(y)))
         }
         _ => Err(anyhow::anyhow!(
@@ -81,7 +77,9 @@ pub fn y_coordinate_offcircuit(point: &IrValue) -> Result<IrValue, anyhow::Error
 ///   - `JubjubPoint`    -> `(Native, Native)`
 ///   - `Secp256k1Point` -> `(Secp256k1Base, Secp256k1Base)`
 ///
-/// For Secp256k1 this constrains the point to not be the identity.
+/// For Weierstrass curves this constrains the point to not be the identity
+/// (which has no affine coordinates), making the circuit unsatisfiable on the
+/// identity.
 ///
 /// # Errors
 ///
@@ -101,7 +99,8 @@ fn coordinates_incircuit(
             ))
         }
         Secp256k1Point(p) => {
-            let curve = std_lib.assert_false(layouter, p.is_zero());
+            let curve = std_lib.secp256k1_curve();
+            curve.assert_non_zero(layouter, p)?;
             Ok((
                 Secp256k1Base(curve.x_coordinate(p)),
                 Secp256k1Base(curve.y_coordinate(p)),
@@ -136,7 +135,7 @@ pub fn y_coordinate_incircuit(
 
 #[cfg(test)]
 mod tests {
-    use midnight_curves::JubjubSubgroup;
+    use midnight_curves::{JubjubSubgroup, secp256k1};
     use rand_chacha::rand_core::OsRng;
 
     use super::*;
@@ -145,7 +144,6 @@ mod tests {
     fn test_coordinates() {
         use IrValue::*;
 
-        // Jubjub: coordinates are native field values.
         let p = JubjubSubgroup::random(OsRng);
         let p_ext: JubjubExtended = p.into();
         let (ex, ey) = p_ext.coordinates().unwrap();
@@ -158,7 +156,6 @@ mod tests {
             Native(Fr(ey))
         );
 
-        // Secp256k1: coordinates are base field values.
         let q = secp256k1::Secp256k1::random(OsRng);
         let (eqx, eqy) = q.coordinates().unwrap();
         assert_eq!(

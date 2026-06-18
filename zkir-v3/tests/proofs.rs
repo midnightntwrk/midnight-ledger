@@ -1170,10 +1170,9 @@ mod proof_tests {
 
     #[actix_rt::test]
     async fn test_coordinate_extraction_proof() {
-        // Exercises `x_coordinate` / `y_coordinate` polymorphically on both a
-        // Jubjub point (coordinates are native field elements) and a Secp256k1
-        // point (coordinates are base field elements). Each extracted coordinate
-        // is checked against a private input carrying the expected value.
+        // Exercises `x_coordinate` / `y_coordinate` polymorphically across the
+        // supported curve point types. Each extracted coordinate is
+        // checked against a private input carrying the expected value.
         use midnight_zkir_v3::ir_instructions::coordinates::{
             x_coordinate_offcircuit, y_coordinate_offcircuit,
         };
@@ -1285,7 +1284,11 @@ mod proof_tests {
             .prove::<IrSource>(
                 &mut ChaCha20Rng::from_seed([42; 32]),
                 &TestParams,
-                &TestResolver { pk, vk: vk.clone(), ir },
+                &TestResolver {
+                    pk,
+                    vk: vk.clone(),
+                    ir,
+                },
             )
             .await
             .unwrap();
