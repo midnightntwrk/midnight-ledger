@@ -49,7 +49,7 @@ mod proof_tests {
 
     fn vk_tagged_bytes(vk: &transient_crypto_old::proofs::VerifierKey) -> Vec<u8> {
         let mut buf = Vec::new();
-        serialize_old::tagged_serialize(vk, &mut buf).expect("vk serialize");
+        serialize::tagged_serialize(vk, &mut buf).expect("vk serialize");
         buf
     }
 
@@ -279,9 +279,9 @@ mod proof_tests {
         let vk_kzg2 = ir.keygen_vk(&TestParams).await.unwrap();
         assert_eq!(&vk_kzg1, &vk_kzg2);
         let mut bytes = Vec::new();
-        serialize_old::tagged_serialize(&vk_kzg1, &mut bytes).unwrap();
+        serialize::tagged_serialize(&vk_kzg1, &mut bytes).unwrap();
         let vk_kzg3: transient_crypto_old::proofs::VerifierKey =
-            serialize_old::tagged_deserialize(&mut &bytes[..]).unwrap();
+            serialize::tagged_deserialize(&mut &bytes[..]).unwrap();
         assert_eq!(&vk_kzg1, &vk_kzg3);
     }
 

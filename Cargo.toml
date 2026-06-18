@@ -62,5 +62,13 @@ lto = true
 codegen-units = 1
 panic = "abort"
 
+# Because we pull in older, crates.io versions of `transient-crypto`, we need
+# to force these to resolve locally for a local build. These patches not being
+# present in consumer builds is fine, as they don't/shouldn't *want* the local
+# packages.
+[patch.crates-io]
+midnight-base-crypto = { path = "base-crypto" }
+midnight-serialize = { path = "serialize" }
+
 [workspace.metadata.spellcheck]
 config = ".spellcheck/cargo-spellcheck.toml"

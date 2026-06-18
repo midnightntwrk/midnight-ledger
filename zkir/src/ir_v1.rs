@@ -23,8 +23,6 @@
 //! This module also provides adapter types and helper functions for bridging
 //! the current (v2) proving/verification types to the v1 pipeline.
 
-use std::borrow::Cow;
-
 use base_crypto::fab::{Alignment, AlignmentAtom, AlignmentSegment};
 use ff::PrimeField;
 use group::Group;
@@ -581,43 +579,10 @@ impl Relation for IrSource {
     }
 }
 
-// --- serialize_old trait impls (required by old Zkir supertrait bounds) ---
-
-impl serialize_old::Tagged for IrSource {
-    fn tag() -> Cow<'static, str> {
-        Cow::Borrowed("ir-source[v2]")
-    }
-    fn tag_unique_factor() -> String {
-        "ir-source[v2]".into()
-    }
-}
-
-impl serialize_old::Deserializable for IrSource {
-    fn deserialize(
-        reader: &mut impl std::io::Read,
-        recursion_depth: u32,
-    ) -> std::io::Result<Self> {
-        use super::ir::OldIrSource;
-        let old: OldIrSource = serialize::Deserializable::deserialize(reader, recursion_depth)?;
-        Ok(old.into())
-    }
-}
-
 // --- v1 preprocess (operates entirely in old types) ---
 
 type OldFr = transient_crypto_old::curve::Fr;
 type OldProvingError = transient_crypto_old::proofs::ProvingError;
-
-/// The old `Alignment` type from base-crypto v1.0.0.
-type OldAlignment = base_crypto_old::fab::Alignment;
-
-/// Converts a current `Alignment` to the old base-crypto `Alignment` via serialization.
-/// Both versions use the same SCALE encoding format.
-fn cvt_alignment(a: &base_crypto::fab::Alignment) -> OldAlignment {
-    let mut buf = Vec::new();
-    serialize::Serializable::serialize(a, &mut buf).expect("in-memory serialize");
-    serialize_old::Deserializable::deserialize(&mut &buf[..], 0).expect("alignment round-trip")
-}
 
 /// Software execution of the IR using old types. Equivalent to `IrSource::preprocess`
 /// but operates entirely in the v1 type system.
@@ -819,20 +784,18 @@ fn v1_preprocess(
                     .collect::<Result<Vec<_>, _>>()?,
             )),
             I::PersistentHash { alignment, inputs } => {
-                use base_crypto_old::repr::BinaryHashRepr;
-                use transient_crypto_old::fab::{AlignmentExt as _, ValueReprAlignedValue};
+                use base_crypto::repr::BinaryHashRepr;
+                use transient_crypto_old::fab::{AlignmentExt, ValueReprAlignedValue};
                 use transient_crypto_old::repr::FieldRepr as _;
-                let old_alignment = cvt_alignment(alignment);
                 let inputs = inputs
                     .iter()
                     .map(|i| idx(&memory, *i))
                     .collect::<Result<Vec<_>, _>>()?;
-                let value = old_alignment.parse_field_repr(&inputs).ok_or_else(|| {
-                    anyhow!("Inputs did not match alignment")
-                })?;
+                let value = AlignmentExt::parse_field_repr(alignment, &inputs)
+                    .ok_or_else(|| anyhow!("Inputs did not match alignment"))?;
                 let mut repr = Vec::new();
                 ValueReprAlignedValue(value).binary_repr(&mut repr);
-                let hash = base_crypto_old::hash::persistent_hash(&repr);
+                let hash = base_crypto::hash::persistent_hash(&repr);
                 memory.extend(hash.field_vec());
             }
             I::PiSkip { guard, count } => match guard {
@@ -978,26 +941,6 @@ pub(crate) fn preimage_to_v1(
         key_location: transient_crypto_old::proofs::KeyLocation(std::borrow::Cow::Owned(
             p.key_location.0.to_string(),
         )),
-    }
-}
-
-/// Adapter: current `Resolver` → v1 `Resolver`.
-pub(crate) struct V1Resolver<'a, S: transient_crypto::proofs::Resolver>(pub &'a S);
-
-impl<S: transient_crypto::proofs::Resolver> transient_crypto_old::proofs::Resolver
-    for V1Resolver<'_, S>
-{
-    async fn resolve_key(
-        &self,
-        key: transient_crypto_old::proofs::KeyLocation,
-    ) -> std::io::Result<Option<transient_crypto_old::proofs::ProvingKeyMaterial>> {
-        let current_key = transient_crypto::proofs::KeyLocation(key.0);
-        let result = self.0.resolve_key(current_key).await?;
-        Ok(result.map(|m| transient_crypto_old::proofs::ProvingKeyMaterial {
-            prover_key: m.prover_key,
-            verifier_key: m.verifier_key,
-            ir_source: m.ir_source,
-        }))
     }
 }
 

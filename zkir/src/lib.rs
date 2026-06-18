@@ -16,6 +16,7 @@ extern crate tracing;
 
 use base_crypto::rng::SplittableRng;
 use rand::{CryptoRng, Rng};
+use std::io::Write;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProvingProvider, Resolver,
@@ -38,9 +39,9 @@ pub fn load_vk_from_tagged(mut reader: impl std::io::Read + std::io::Seek) -> st
     if tag == V1_VK_TAG {
         // v1 VK: deserialize with the old tag, then convert to current type.
         let old_vk: transient_crypto_old::proofs::VerifierKey =
-            serialize_old::tagged_deserialize(&mut reader)?;
+            serialize::tagged_deserialize(&mut reader)?;
         let mut buf = Vec::new();
-        serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+        serialize::Serializable::serialize(&old_vk, &mut buf)?;
         serialize::Deserializable::deserialize(&mut &buf[..], 0)
     } else {
         serialize::tagged_deserialize(&mut reader)
@@ -60,7 +61,7 @@ pub fn verify(
     let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
     if tag == V1_VK_TAG {
         let old_vk: transient_crypto_old::proofs::VerifierKey =
-            serialize_old::tagged_deserialize(&mut &tagged_vk[..])?;
+            serialize::tagged_deserialize(&mut &tagged_vk[..])?;
         let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
         let old_pis = pis.map(|f| transient_crypto_old::curve::Fr(
             ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
@@ -93,7 +94,7 @@ pub fn mock_verify(
     let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
     if tag == V1_VK_TAG {
         let old_vk: transient_crypto_old::proofs::VerifierKey =
-            serialize_old::tagged_deserialize(&mut &tagged_vk[..])?;
+            serialize::tagged_deserialize(&mut &tagged_vk[..])?;
         let old_pis = pis.map(|f| transient_crypto_old::curve::Fr(
             ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
                 .expect("BLS12-381 Fq round-trip"),
@@ -165,14 +166,29 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
 
         match ir.version {
             IrMinorVersion::V0 | IrMinorVersion::V1 => {
-                // V0/V1: use the old pipeline entirely (old types, old tagged_deserialize).
+                // V0/V1: use the old Zkir trait directly with pre-resolved data.
+                use transient_crypto_old::proofs::Zkir as V1Zkir;
                 let old_preimage = ir_v1::preimage_to_v1(&preimage);
-                let v1_resolver = ir_v1::V1Resolver(self.resolver);
                 let v1_params = ir_v1::V1Params(self.params);
-                let (proof, _) = old_preimage
-                    .prove::<IrSource>(self.rng, &v1_params, &v1_resolver)
-                    .await?;
-                Ok(Proof(proof.0))
+                let vk = load_vk_from_tagged(std::io::Cursor::new(&proving_data.verifier_key[..]))?;
+                let pk: transient_crypto_old::proofs::ProverKey<IrSource> =
+                    serialize::tagged_deserialize(&mut &proving_data.prover_key[..])?;
+                let (proof, pis, _) =
+                    ir.prove(self.rng, &v1_params, pk, &old_preimage).await?;
+                // Self-verify
+                let mut tagged_vk = Vec::new();
+                write!(&mut tagged_vk, "midnight:{}:", V1_VK_TAG)?;
+                serialize::Serializable::serialize(&vk, &mut tagged_vk)?;
+                let proof = Proof(proof.0.clone());
+                let pis: Vec<Fr> = pis.iter().map(|f| {
+                    Fr(ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
+                        .expect("Fr round-trip"))
+                }).collect();
+                if let Err(e) = verify(&tagged_vk, &proof, pis.into_iter()) {
+                    error!(error = ?e, "v1 self-verification failed!");
+                    return Err(e);
+                }
+                Ok(proof)
             }
             _ => {
                 // V2+: use the current pipeline.

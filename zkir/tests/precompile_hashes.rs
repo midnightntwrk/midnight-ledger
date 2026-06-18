@@ -105,9 +105,9 @@ async fn produce_key_bytes(ir: &IrSource, params: &TestParams) -> (Vec<u8>, Vec<
             use transient_crypto_old::proofs::Zkir as V1Zkir;
             let (pk, vk) = V1Zkir::keygen(ir, params).await.expect("v1 keygen");
             let mut pk_bytes = Vec::new();
-            serialize_old::tagged_serialize(&pk, &mut pk_bytes).expect("serialize prover key");
+            serialize::tagged_serialize(&pk, &mut pk_bytes).expect("serialize prover key");
             let mut vk_bytes = Vec::new();
-            serialize_old::tagged_serialize(&vk, &mut vk_bytes).expect("serialize verifier key");
+            serialize::tagged_serialize(&vk, &mut vk_bytes).expect("serialize verifier key");
             (pk_bytes, vk_bytes)
         }
         IrMinorVersion::V2 | _ => {
