@@ -299,6 +299,7 @@ impl ContractOperationVersion {
                 )));
             }
             "v3" => V::V3,
+            "v4" => V::V4,
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -312,6 +313,7 @@ impl ContractOperationVersion {
         use ledger::structure::ContractOperationVersion as V;
         match &self.0 {
             V::V3 => "v3",
+            V::V4 => "v4",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -349,6 +351,7 @@ impl ContractOperationVersionedVerifierKey {
                 )));
             }
             "v3" => V::V3(tagged_deserialize(&mut &raw_vk[..])?),
+            "v4" => V::V4(tagged_deserialize(&mut &raw_vk[..])?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -362,6 +365,7 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         match &self.0 {
             V::V3(..) => "v3",
+            V::V4(..) => "v4",
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         .to_owned()
@@ -372,7 +376,7 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         let mut buf = Vec::new();
         match &self.0 {
-            V::V3(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V3(vk) | V::V4(vk) => Serializable::serialize(vk, &mut buf)?,
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         Ok(Uint8Array::from(&buf[..]))
