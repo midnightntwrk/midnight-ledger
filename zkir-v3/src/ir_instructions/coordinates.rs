@@ -36,7 +36,7 @@ use crate::{
 ///
 /// Errors if the input is not a supported type, or if it is the identity of a
 /// Weierstrass curve (which has no affine coordinates).
-fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow::Error> {
+pub fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow::Error> {
     use IrValue::*;
     match point {
         JubjubPoint(p) => {
@@ -60,18 +60,6 @@ fn coordinates_offcircuit(point: &IrValue) -> Result<(IrValue, IrValue), anyhow:
     }
 }
 
-/// Extracts off-circuit the affine x-coordinate of an elliptic curve point.
-/// See [`coordinates_offcircuit`].
-pub fn x_coordinate_offcircuit(point: &IrValue) -> Result<IrValue, anyhow::Error> {
-    Ok(coordinates_offcircuit(point)?.0)
-}
-
-/// Extracts off-circuit the affine y-coordinate of an elliptic curve point.
-/// See [`coordinates_offcircuit`].
-pub fn y_coordinate_offcircuit(point: &IrValue) -> Result<IrValue, anyhow::Error> {
-    Ok(coordinates_offcircuit(point)?.1)
-}
-
 /// Extracts in-circuit the affine `(x, y)` coordinates of an elliptic curve
 /// point as a pair of assigned base field values. Supported on:
 ///   - `JubjubPoint`    -> `(Native, Native)`
@@ -84,7 +72,7 @@ pub fn y_coordinate_offcircuit(point: &IrValue) -> Result<IrValue, anyhow::Error
 /// # Errors
 ///
 /// Errors if the input is not a supported type.
-fn coordinates_incircuit(
+pub fn coordinates_incircuit(
     std_lib: &ZkStdLib,
     layouter: &mut impl Layouter<F>,
     point: &CircuitValue,
@@ -113,26 +101,6 @@ fn coordinates_incircuit(
     }
 }
 
-/// Extracts in-circuit the affine x-coordinate of an elliptic curve point.
-/// See [`coordinates_incircuit`].
-pub fn x_coordinate_incircuit(
-    std_lib: &ZkStdLib,
-    layouter: &mut impl Layouter<F>,
-    point: &CircuitValue,
-) -> Result<CircuitValue, plonk::Error> {
-    Ok(coordinates_incircuit(std_lib, layouter, point)?.0)
-}
-
-/// Extracts in-circuit the affine y-coordinate of an elliptic curve point.
-/// See [`coordinates_incircuit`].
-pub fn y_coordinate_incircuit(
-    std_lib: &ZkStdLib,
-    layouter: &mut impl Layouter<F>,
-    point: &CircuitValue,
-) -> Result<CircuitValue, plonk::Error> {
-    Ok(coordinates_incircuit(std_lib, layouter, point)?.1)
-}
-
 #[cfg(test)]
 mod tests {
     use midnight_curves::{JubjubSubgroup, secp256k1};
@@ -145,34 +113,23 @@ mod tests {
         use IrValue::*;
 
         let p = JubjubSubgroup::random(OsRng);
-        let p_ext: JubjubExtended = p.into();
-        let (ex, ey) = p_ext.coordinates().unwrap();
+        let (x, y) = Into::<JubjubExtended>::into(p).coordinates().unwrap();
         assert_eq!(
-            x_coordinate_offcircuit(&JubjubPoint(p)).unwrap(),
-            Native(Fr(ex))
-        );
-        assert_eq!(
-            y_coordinate_offcircuit(&JubjubPoint(p)).unwrap(),
-            Native(Fr(ey))
+            coordinates_offcircuit(&JubjubPoint(p)).unwrap(),
+            (Native(Fr(x)), Native(Fr(y)))
         );
 
-        let q = secp256k1::Secp256k1::random(OsRng);
-        let (eqx, eqy) = q.coordinates().unwrap();
+        let p = secp256k1::Secp256k1::random(OsRng);
+        let (x, y) = p.coordinates().unwrap();
         assert_eq!(
-            x_coordinate_offcircuit(&Secp256k1Point(q)).unwrap(),
-            Secp256k1Base(eqx)
-        );
-        assert_eq!(
-            y_coordinate_offcircuit(&Secp256k1Point(q)).unwrap(),
-            Secp256k1Base(eqy)
+            coordinates_offcircuit(&Secp256k1Point(p)).unwrap(),
+            (Secp256k1Base(x), Secp256k1Base(y))
         );
 
         // The Secp256k1 identity has no affine coordinates.
-        assert!(
-            x_coordinate_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err()
-        );
+        assert!(coordinates_offcircuit(&Secp256k1Point(secp256k1::Secp256k1::identity())).is_err());
 
         // Coordinate extraction on a scalar is unsupported.
-        assert!(x_coordinate_offcircuit(&Native(Fr::from(1))).is_err());
+        assert!(coordinates_offcircuit(&Native(Fr::from(1))).is_err());
     }
 }

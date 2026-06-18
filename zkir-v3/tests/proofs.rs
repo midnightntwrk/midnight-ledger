@@ -1170,12 +1170,10 @@ mod proof_tests {
 
     #[actix_rt::test]
     async fn test_coordinate_extraction_proof() {
-        // Exercises `x_coordinate` / `y_coordinate` polymorphically across the
+        // Exercises affine coordinates polymorphically across the
         // supported curve point types. Each extracted coordinate is
         // checked against a private input carrying the expected value.
-        use midnight_zkir_v3::ir_instructions::coordinates::{
-            x_coordinate_offcircuit, y_coordinate_offcircuit,
-        };
+        use midnight_zkir_v3::ir_instructions::coordinates::coordinates_offcircuit;
 
         let ir_raw = r#"{
            "version": { "major": 3, "minor": 0 },
@@ -1186,10 +1184,8 @@ mod proof_tests {
            "outputs": [],
            "do_communications_commitment": false,
            "instructions": [
-               { "op": "x_coordinate", "point": "%jp", "output": "%jx" },
-               { "op": "y_coordinate", "point": "%jp", "output": "%jy" },
-               { "op": "x_coordinate", "point": "%sp", "output": "%sx" },
-               { "op": "y_coordinate", "point": "%sp", "output": "%sy" },
+               { "op": "coordinates", "point": "%jp", "outputs": ["%jx", "%jy"] },
+               { "op": "coordinates", "point": "%sp", "outputs": ["%sx", "%sy"] },
                { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jx_exp" },
                { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%jy_exp" },
                { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%sx_exp" },
@@ -1218,13 +1214,11 @@ mod proof_tests {
         ]
         .concat();
 
-        let private_transcript: Vec<transient_crypto::curve::Fr> = [
-            encode(x_coordinate_offcircuit(&IrValue::JubjubPoint(jp)).unwrap()),
-            encode(y_coordinate_offcircuit(&IrValue::JubjubPoint(jp)).unwrap()),
-            encode(x_coordinate_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap()),
-            encode(y_coordinate_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap()),
-        ]
-        .concat();
+        let (px, py) = coordinates_offcircuit(&IrValue::JubjubPoint(jp)).unwrap();
+        let (sx, sy) = coordinates_offcircuit(&IrValue::Secp256k1Point(sp)).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> =
+            [encode(px), encode(py), encode(sx), encode(sy)].concat();
 
         let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
         let preimage = ProofPreimage {

@@ -480,7 +480,7 @@ pub enum Instruction {
         /// The resulting point
         output: Identifier,
     },
-    /// The affine x-coordinate of the given elliptic curve point.
+    /// The affine coordinate of the given elliptic curve point.
     /// On Weierstrass curves the identity has no affine coordinates, so
     /// extracting them errors off-circuit and is unsatisfiable in-circuit.
     ///
@@ -488,27 +488,12 @@ pub enum Instruction {
     /// * JubjubPoint
     /// * Secp256k1Point
     ///
-    /// Outputs 1 element, the x-coordinate
-    XCoordinate {
-        /// The point whose x-coordinate is extracted
+    /// Outputs 2 elements, the coordinates (x, y)
+    Coordinates {
+        /// The point whose coordinate are extracted
         point: Operand,
-        /// The output variable name
-        output: Identifier,
-    },
-    /// The affine y-coordinate of the given elliptic curve point.
-    /// On Weierstrass curves the identity has no affine coordinates, so
-    /// extracting them errors off-circuit and is unsatisfiable in-circuit.
-    ///
-    /// Supported on types:
-    /// * JubjubPoint
-    /// * Secp256k1Point
-    ///
-    /// Outputs 1 element, the y-coordinate
-    YCoordinate {
-        /// The point whose y-coordinate is extracted
-        point: Operand,
-        /// The output variable name
-        output: Identifier,
+        /// The output variable names (x, y)
+        outputs: (Identifier, Identifier),
     },
     /// Divides with remainder by a power of two (number of bits).
     ///

@@ -14,10 +14,7 @@
 use crate::ir_instructions::add::{add_incircuit, add_offcircuit};
 use crate::ir_instructions::assign::assign_incircuit;
 use crate::ir_instructions::constrain_eq::{constrain_eq_incircuit, constrain_eq_offcircuit};
-use crate::ir_instructions::coordinates::{
-    x_coordinate_incircuit, x_coordinate_offcircuit, y_coordinate_incircuit,
-    y_coordinate_offcircuit,
-};
+use crate::ir_instructions::coordinates::{coordinates_incircuit, coordinates_offcircuit};
 use crate::ir_instructions::decode::{
     decode_incircuit, decode_offcircuit, native_to_jubjub_scalar,
 };
@@ -605,15 +602,11 @@ impl IrSource {
                     let r = ec_mul_offcircuit(&p, &s)?;
                     memory.insert(output.clone(), r);
                 }
-                I::XCoordinate { point, output } => {
+                I::Coordinates { point, outputs } => {
                     let p = resolve_operand(&memory, point)?;
-                    let x = x_coordinate_offcircuit(&p)?;
-                    memory.insert(output.clone(), x);
-                }
-                I::YCoordinate { point, output } => {
-                    let p = resolve_operand(&memory, point)?;
-                    let y = y_coordinate_offcircuit(&p)?;
-                    memory.insert(output.clone(), y);
+                    let coordinates = coordinates_offcircuit(&p)?;
+                    memory.insert(outputs.0.clone(), coordinates.0);
+                    memory.insert(outputs.1.clone(), coordinates.1);
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
@@ -1110,15 +1103,11 @@ impl Relation for IrSource {
                         &mut memory,
                     )?;
                 }
-                I::XCoordinate { point, output } => {
+                I::Coordinates { point, outputs } => {
                     let p = resolve_operand(std, layouter, &memory, point)?;
-                    let x = x_coordinate_incircuit(std, layouter, &p)?;
-                    mem_insert(output.clone(), x, &mut memory)?;
-                }
-                I::YCoordinate { point, output } => {
-                    let p = resolve_operand(std, layouter, &memory, point)?;
-                    let y = y_coordinate_incircuit(std, layouter, &p)?;
-                    mem_insert(output.clone(), y, &mut memory)?;
+                    let coordinates = coordinates_incircuit(std, layouter, &p)?;
+                    mem_insert(outputs.0.clone(), coordinates.0, &mut memory)?;
+                    mem_insert(outputs.1.clone(), coordinates.1, &mut memory)?;
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
