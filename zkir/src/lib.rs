@@ -109,8 +109,8 @@ pub fn mock_verify(
 pub struct LocalProvingProvider<
     'a,
     R: Rng + CryptoRng + SplittableRng,
-    S: transient_crypto_old::proofs::Resolver,
-    P: transient_crypto_old::proofs::ParamsProverProvider,
+    S,
+    P,
 > {
     /// The randomness to use for proving
     pub rng: R,
@@ -118,6 +118,57 @@ pub struct LocalProvingProvider<
     pub resolver: &'a S,
     /// The parameters provider to use
     pub params: &'a P,
+}
+
+impl<
+        'a,
+        R: Rng + CryptoRng + SplittableRng,
+        S: transient_crypto::proofs::Resolver,
+        P: transient_crypto::proofs::ParamsProverProvider,
+    > transient_crypto::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
+{
+    async fn check(
+        &self,
+        preimage: &transient_crypto::proofs::ProofPreimage,
+    ) -> Result<Vec<Option<usize>>, anyhow::Error> {
+        let proving_data = self
+            .resolver
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "attempted to check proof for '{}' without circuit data!",
+                    preimage.key_location.0
+                )
+            })?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
+        use transient_crypto::proofs::Zkir as V0Zkir;
+        ir.check(preimage)
+    }
+
+    async fn prove(
+        self,
+        preimage: &transient_crypto::proofs::ProofPreimage,
+        overwrite_binding_input: Option<transient_crypto::curve::Fr>,
+    ) -> Result<transient_crypto::proofs::Proof, anyhow::Error> {
+        let mut preimage = preimage.clone();
+        if let Some(binding_input) = overwrite_binding_input {
+            preimage.binding_input = binding_input;
+        }
+
+        let (proof, _) = preimage
+            .prove::<IrSource>(self.rng, self.params, self.resolver)
+            .await?;
+        Ok(proof)
+    }
+
+    fn split(&mut self) -> Self {
+        Self {
+            rng: self.rng.split(),
+            resolver: self.resolver,
+            params: self.params,
+        }
+    }
 }
 
 impl<
