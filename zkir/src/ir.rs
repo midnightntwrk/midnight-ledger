@@ -16,6 +16,8 @@
 use anyhow::Result;
 use base_crypto::fab::Alignment;
 use midnight_proofs::dev::cost_model::CircuitModel;
+use midnight_proofs::utils::SerdeFormat;
+use midnight_zk_stdlib::MidnightPK;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -23,13 +25,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{
-    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_serialize,
+    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_deserialize,
+    tagged_serialize,
 };
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
-use midnight_proofs::utils::SerdeFormat;
-use midnight_zk_stdlib::MidnightPK;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash,
     VerifierKey, Zkir,
@@ -234,17 +235,13 @@ impl Zkir for IrSource {
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
-        let mut writer = flate2::write::GzEncoder::new(
-            writer,
-            flate2::Compression::new(PK_COMPRESSION_LEVEL),
-        );
+        let mut writer =
+            flate2::write::GzEncoder::new(writer, flate2::Compression::new(PK_COMPRESSION_LEVEL));
         match pk {
-            VersionedInnerPK::V1(v1_pk) => {
-                v1_pk.write(
-                    &mut { &mut writer },
-                    midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
-                )
-            }
+            VersionedInnerPK::V1(v1_pk) => v1_pk.write(
+                &mut { &mut writer },
+                midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+            ),
             VersionedInnerPK::V2(v2_pk) => {
                 v2_pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
             }
@@ -591,7 +588,10 @@ impl IrSource {
         let k = midnight_zk_stdlib::optimal_k(self) as u8;
         let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
-        Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
+        Ok((
+            ProverKey::from_raw(VersionedInnerPK::V2(pk)),
+            VerifierKey::from(vk),
+        ))
     }
 
     /// Retrieves a model representation of this circuit.

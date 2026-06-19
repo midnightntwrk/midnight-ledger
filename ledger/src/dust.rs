@@ -17,11 +17,13 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol, TransactionHash,
-    UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker,
+    SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol,
+    TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
+use crate::utils::VecEnvelope;
 use crate::verify::{StateReference, WellFormedStrictness};
+use base_crypto::envelope::Envelope;
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
@@ -47,6 +49,7 @@ use serde::{Deserialize, Serialize};
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::marker::PhantomData;
 #[cfg(test)]
 use storage::db::InMemoryDB;
 use storage::{
@@ -634,7 +637,8 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                let dust_op = onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let dust_op =
+                    onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
                 let dust_call = crate::structure::ContractCall {
                     address: coin_structure::contract::ContractAddress::default(),
                     entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
@@ -661,18 +665,31 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Clone, PartialEq, Eq, Debug; S)]
 #[storable(db = D)]
+#[envelope(DustRegistrationSigningEnvelope<S, D>)]
 #[tag = "dust-registration[v2]"]
 pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
     pub night_key: SignatureVerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
     #[allow(clippy::type_complexity)]
-    pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
+    pub signature: Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-registration-signing-envelope[v8]"]
+#[phantom(D)]
+pub struct DustRegistrationSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    pub night_key: SignatureVerifyingKey,
+    pub dust_address: Option<Sp<DustPublicKey, D>>,
+    pub allow_fee_payment: u128,
+    #[allow(clippy::type_complexity)]
+    pub signature: PhantomData<Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>>,
+}
+tag_enforcement_test!(DustRegistrationSigningEnvelope<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     pub(crate) fn erase_signatures(&self) -> DustRegistration<(), D> {
@@ -709,10 +726,11 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Debug)]
 #[derive_where(Clone, PartialEq, Eq; S, P)]
 #[storable(db = D)]
+#[envelope(DustActionsSigningEnvelope<S, P, D>)]
 #[tag = "dust-actions[v2]"]
 pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub spends: storage::storage::Array<DustSpend<P, D>, D>,
@@ -720,6 +738,16 @@ pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub ctime: Timestamp,
 }
 tag_enforcement_test!(DustActions<(), (), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-actions-signing-envelope[v2]"]
+#[phantom(D)]
+pub struct DustActionsSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
+    pub spends: storage::storage::Array<DustSpend<P, D>, D>,
+    pub registrations: VecEnvelope<DustRegistrationSigningEnvelope<S, D>>,
+    pub ctime: Timestamp,
+}
+tag_enforcement_test!(DustActionsSigningEnvelope<(), (), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustActions<S, ProofPreimageMarker, D> {
     pub(crate) async fn prove(
@@ -1820,6 +1848,11 @@ impl<D: DB> DustLocalState<D> {
 
     pub fn process_ttls(&self, time: Timestamp) -> Self {
         let mut state = self.clone();
+        // Rebuild `night_indices` from the UTXOs that survive this pass, so it
+        // stays bounded to nights still backing a live UTXO. `night_indices` is
+        // only ever consulted via a held UTXO's `backing_night`, so entries for
+        // dropped UTXOs are unreachable and safe to prune here.
+        let mut night_indices = HashMap::new();
         state.dust_utxos = state
             .dust_utxos
             .iter()
@@ -1835,10 +1868,12 @@ impl<D: DB> DustLocalState<D> {
                 if v_new == 0 && time > utxo.utxo.ctime {
                     None
                 } else {
+                    night_indices = night_indices.insert(utxo.utxo.backing_night, gen_idx);
                     Some((nul, utxo))
                 }
             })
             .collect();
+        state.night_indices = night_indices;
         state
     }
 
@@ -1962,13 +1997,15 @@ impl<D: DB> DustLocalState<D> {
                         acc.result.commitment_tree_first_free += 1;
                         let maybe_change = if let Some(utxo) = acc.result.dust_utxos.get(nullifier)
                         {
-                            if let Some(gen_idx) =
-                                acc.result.night_indices.get(&utxo.utxo.backing_night)
+                            if let Some(gen_info) = acc
+                                .result
+                                .night_indices
+                                .get(&utxo.utxo.backing_night)
+                                .and_then(|gen_idx| acc.result.generating_tree.index(*gen_idx))
+                                .map(|(_, gen_info)| *gen_info)
                             {
-                                let gen_info =
-                                    acc.result.generating_tree.index(*gen_idx).unwrap().1;
                                 let v_pre_spend = DustOutput::from(utxo.utxo).updated_value(
-                                    gen_info,
+                                    &gen_info,
                                     *declared_time,
                                     &acc.result.params,
                                 );
