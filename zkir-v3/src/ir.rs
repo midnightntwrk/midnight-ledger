@@ -482,6 +482,21 @@ pub enum Instruction {
         /// The output variable names
         output: Identifier,
     },
+    /// Transforms the given value into its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    IntoBytes32 {
+        /// The element to be converted
+        input: Operand,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`

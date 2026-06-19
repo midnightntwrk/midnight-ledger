@@ -23,6 +23,7 @@ use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
 use crate::ir_instructions::from_coordinates::{
     from_coordinates_incircuit, from_coordinates_offcircuit,
 };
+use crate::ir_instructions::into_bytes32::{into_bytes32_incircuit, into_bytes32_offcircuit};
 use crate::ir_instructions::into_coordinates::{
     into_coordinates_incircuit, into_coordinates_offcircuit,
 };
@@ -605,6 +606,11 @@ impl IrSource {
                     let p = from_coordinates_offcircuit(&x, &y)?;
                     memory.insert(output.clone(), p);
                 }
+                I::IntoBytes32 { input, output } => {
+                    let x = resolve_operand(&memory, input)?;
+                    let bytes = into_bytes32_offcircuit(&x)?;
+                    memory.insert(output.clone(), bytes);
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1099,6 +1105,11 @@ impl Relation for IrSource {
                     let y = resolve_operand(std, layouter, &memory, &inputs.1)?;
                     let p = from_coordinates_incircuit(std, layouter, &x, &y)?;
                     mem_insert(output.clone(), p, &mut memory)?;
+                }
+                I::IntoBytes32 { input, output } => {
+                    let x = resolve_operand(std, layouter, &memory, input)?;
+                    let bytes = into_bytes32_incircuit(std, layouter, &x)?;
+                    mem_insert(output.clone(), bytes, &mut memory)?;
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {

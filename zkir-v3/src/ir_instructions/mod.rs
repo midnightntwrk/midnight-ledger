@@ -22,6 +22,7 @@ pub mod ec_mul;
 pub mod encode;
 pub mod eq;
 pub mod from_coordinates;
+pub mod into_bytes32;
 pub mod into_coordinates;
 pub mod inv;
 pub mod mul;
