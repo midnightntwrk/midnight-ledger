@@ -18,6 +18,7 @@ use crate::result_mode::ResultMode;
 use crate::state_value_ext::*;
 use crate::vm_value::*;
 use base_crypto::cost_model::{CostDuration, RunningCost};
+use base_crypto::fab::ValueSlice;
 use base_crypto::fab::{AlignedValue, Alignment, InvalidBuiltinDecode, Value};
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use rpds::{HashTrieMap, Vector};
@@ -34,8 +35,12 @@ use ValueStrength::*;
 // Maps initial stack positions to which parts of those stack objects are currently cached.
 struct Cache(Vec<InnerCache>);
 
-/// The size limit of the argument of the `log` instruction. Currently 512 kb
+/// The size limit of the argument of the `log` instruction. Currently 512 kB
 pub const MAX_LOG_SIZE: u64 = 1 << 19;
+
+/// The size limit over which `log` events are silently swallowed. This allows us to vary this
+/// without it being a technically breaking change. Currently 1 kB
+pub const MAX_LOG_EMITTED: u64 = 1 << 10;
 
 impl Cache {
     fn visit(&mut self, key: &CacheKey) -> bool {
@@ -231,6 +236,43 @@ fn idx<D: DB>(
             "tried to idx, only map, array, and bmt are supported".to_string(),
         )),
     }
+}
+
+impl TryFrom<&ValueSlice> for LogEventType {
+    type Error = InvalidBuiltinDecode;
+    fn try_from(value: &ValueSlice) -> Result<Self, Self::Error> {
+        u8::try_from(value)?.try_into()
+    }
+}
+
+fn try_decode_event<D: DB>(value: &StateValue<D>) -> Option<VersionedLogItem<D>> {
+    let arr = match value {
+        StateValue::Array(arr) => arr,
+        _ => return None,
+    };
+    if arr.len() != 3 {
+        return None;
+    }
+    let version_raw: &AlignedValue = arr.get(0)?.as_cell_ref().ok()?;
+    let version = u32::try_from(&*version_raw.as_slice()).ok()?;
+    let event_type_raw: &AlignedValue = arr.get(1)?.as_cell_ref().ok()?;
+    let event_type = LogEventType::try_from(&*event_type_raw.as_slice()).ok()?;
+    let data = arr.get(2)?.clone();
+    Some(VersionedLogItem {
+        version,
+        event_type,
+        data,
+    })
+}
+
+fn decode_event<D: DB>(value: StateValue<D>) -> Option<VersionedLogItem<D>> {
+    let candidate = try_decode_event(&value).unwrap_or_else(|| VersionedLogItem {
+        version: 0,
+        event_type: LogEventType::Misc,
+        data: value,
+    });
+    Sp::new(candidate.data.clone()).serialize_to_node_list_bounded(MAX_LOG_EMITTED)?;
+    Some(candidate)
 }
 
 #[derive(Debug)]
@@ -555,7 +597,7 @@ fn run_program_internal<M: ResultMode<D>, D: DB>(
                         bytes_deleted: size,
                     },
                 )?;
-                if let Some(event) = M::process_log(&val) {
+                if let Some(event) = decode_event(val).and_then(M::process_log) {
                     events.push(event);
                 }
             }

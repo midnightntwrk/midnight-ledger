@@ -66,6 +66,7 @@ pub use midnight_ledger::test_utilities::{TestState, tx_prove_bind};
 pub use midnight_ledger::test_utilities::{Tx, TxBound};
 pub use midnight_ledger::test_utilities::{test_intents, test_resolver};
 pub use midnight_ledger::verify::WellFormedStrictness;
+pub use midnight_ledger_v9 as midnight_ledger;
 pub use onchain_runtime::context::QueryContext;
 pub use onchain_runtime::ops::{Key, Op, key};
 pub use onchain_runtime::program_fragments::*;

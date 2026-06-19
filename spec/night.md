@@ -113,6 +113,7 @@ impl<S> UnshieldedOffer<S> {
     fn well_formed(self, segment_id: u16, parent: ErasedIntent) -> Result<()> {
         assert!(self.inputs.is_sorted());
         assert!(self.outputs.is_sorted());
+        assert!(self.outputs.all(|o| o.value != 0));
         assert!(self.inputs.len() == self.signatures.len());
         assert!(self.inputs.no_duplicates());
         for (inp, sig) in self.inputs.iter().zip(self.signatures.iter()) {

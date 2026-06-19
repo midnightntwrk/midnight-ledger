@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-rc.1**](../README.md)
 
 ***
 
@@ -18,7 +18,7 @@ new SignatureEnabled(data): SignatureEnabled;
 
 ##### data
 
-`string`
+[`Signature`](../type-aliases/Signature.md)
 
 #### Returns
 
@@ -30,6 +30,14 @@ new SignatureEnabled(data): SignatureEnabled;
 
 ```ts
 readonly instance: "signature";
+```
+
+***
+
+### value
+
+```ts
+readonly value: Signature;
 ```
 
 ## Methods

@@ -21,22 +21,21 @@ use crate::primitive::MultiSet;
 use crate::structure::{
     BindingKind, ClaimRewardsTransaction, ContractAction, ContractCall, ContractDeploy,
     ErasedIntent, FEE_TOKEN, GUARANTEED_SEGMENT, Intent, LedgerParameters, LedgerState,
-    MaintenanceUpdate, PedersenDowngradeable, ProofKind, SingleUpdate, StandardTransaction,
-    Transaction, UnshieldedOffer,
+    MaintenanceUpdate, PedersenDowngradeable, ProofKind, Signature, SignatureVerifyingKey,
+    SingleUpdate, StandardTransaction, Transaction, UnshieldedOffer,
 };
 use crate::structure::{SignatureKind, VerifiedTransaction};
 use crate::utils::SortedIter;
 use crate::verify::MalformedTransaction::IntentSignatureVerificationFailure;
 use base_crypto::hash::HashOutput;
-use base_crypto::schnorr::VerifyingKey;
 use base_crypto::time::{Duration, Timestamp};
 use coin_structure::coin::PublicAddress;
 use coin_structure::coin::{Commitment, Nullifier, TokenType};
 use coin_structure::contract::ContractAddress;
 use onchain_runtime::ops::Op;
 use onchain_runtime::state::{
-    ChargedState, ContractMaintenanceAuthority, ContractOperation, ContractState, EntryPoint,
-    EntryPointBuf,
+    ChargedState, ContractMaintenanceAuthority, ContractMaintenanceVerifyingKey, ContractOperation,
+    ContractState, EntryPoint, EntryPointBuf,
 };
 use onchain_runtime::transcript::Transcript;
 use serialize::{Serializable, Tagged};
@@ -84,7 +83,7 @@ pub trait StateReference<D: DB> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn dust_spend_check(
@@ -95,6 +94,12 @@ pub trait StateReference<D: DB> {
             DustParameters,
             MerkleTreeDigest,
             MerkleTreeDigest,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>>;
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
         ) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>>;
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>>;
@@ -155,7 +160,7 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.dust.generationless_fee_availability(
@@ -192,6 +197,17 @@ impl<D: DB> StateReference<D> for LedgerState<D> {
             .map(|x| x.0)
             .unwrap_or_default();
         check(params, commitment_root, generation_root)
+    }
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        check(&|contract, entry_point| {
+            self.index(contract)
+                .and_then(|cstate| cstate.operations.get(entry_point).map(|op| (*op).clone()))
+        })
     }
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
         if self.network_id == network {
@@ -270,7 +286,7 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn generationless_fee_availability_check(
         &self,
         parent_intent: &ErasedIntent<D>,
-        night_key: &VerifyingKey,
+        night_key: &SignatureVerifyingKey,
         check: impl FnOnce(u128) -> Result<(), MalformedTransaction<D>>,
     ) -> Result<(), MalformedTransaction<D>> {
         let availability = self.new_state.dust.generationless_fee_availability(
@@ -333,6 +349,18 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
             check(params_new, commitment_root_new, generation_root_new)
         }
     }
+    fn fees_check(
+        &self,
+        check: impl FnOnce(
+            &dyn Fn(ContractAddress, &EntryPointBuf) -> Option<ContractOperation>,
+        ) -> Result<(), MalformedTransaction<D>>,
+    ) -> Result<(), MalformedTransaction<D>> {
+        check(&|contract, entry_point| {
+            self.new_state
+                .index(contract)
+                .and_then(|cstate| cstate.operations.get(entry_point).map(|op| (*op).clone()))
+        })
+    }
     fn network_check(&self, network: &str) -> Result<(), MalformedTransaction<D>> {
         if self.new_state.network_id == network {
             Ok(())
@@ -346,6 +374,28 @@ impl<D: DB> StateReference<D> for RevalidationReference<D> {
     fn ref_state_hash(&self) -> ArenaHash<D::Hasher> {
         self.new_state.state_hash()
     }
+}
+
+pub(crate) enum MetadataSizeError {
+    EntryPoint(EntryPointBuf, u64),
+    Authority(u64),
+}
+
+pub(crate) fn check_entry_point_metadata_sizes<D: DB>(
+    state: &ContractState<D>,
+    limit: u64,
+) -> Result<(), MetadataSizeError> {
+    let auth_size = state.maintenance_authority.serialized_size() as u64;
+    if auth_size > limit {
+        return Err(MetadataSizeError::Authority(auth_size));
+    }
+    for entry in state.operations.iter() {
+        let size = entry.0.serialized_size() as u64 + entry.1.serialized_size() as u64;
+        if size > limit {
+            return Err(MetadataSizeError::EntryPoint((*entry.0).clone(), size));
+        }
+    }
+    Ok(())
 }
 
 impl<D: DB> ContractStateExt<D> for ContractState<D> {
@@ -446,6 +496,10 @@ impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
         let outs = Vec::from(&self.outputs);
         if !outs.is_sorted() {
             return Err(MalformedTransaction::OutputsNotSorted(outs));
+        }
+
+        if let Some(o) = outs.iter().find(|o| o.value == 0) {
+            return Err(MalformedTransaction::ZeroValueUtxo(o.clone()));
         }
 
         if !no_duplicates(&ins) {
@@ -604,18 +658,21 @@ where
                     stx.pedersen_check()
                 })?;
 
-                ref_state.param_check(false, |params| {
-                    let fees = match self.fees(params, true) {
-                        Ok(fees) => fees,
-                        Err(e) => {
-                            if strictness.enforce_balancing {
-                                return Err(MalformedTransaction::FeeCalculation(e));
-                            } else {
-                                0
+                let mut fees = 0;
+                ref_state.param_check(true, |params| {
+                    ref_state.fees_check(|get_op| {
+                        fees = match self.fees_with_impl(params, get_op, true) {
+                            Ok(fees) => fees,
+                            Err(e) => {
+                                if strictness.enforce_balancing {
+                                    return Err(MalformedTransaction::FeeCalculation(e));
+                                } else {
+                                    0
+                                }
                             }
-                        }
-                    };
-                    stx.balancing_check(strictness, fees)
+                        };
+                        stx.balancing_check(strictness, fees)
+                    })
                 })?;
 
                 for segment_intent in stx.intents.sorted_iter() {
@@ -634,6 +691,7 @@ where
                 Ok(VerifiedTransaction {
                     inner: self.erase_proofs().erase_signatures(),
                     hash: self.transaction_hash(),
+                    fees,
                 })
             }
             Transaction::ClaimRewards(mtx) => {
@@ -647,6 +705,7 @@ where
                 Ok(VerifiedTransaction {
                     inner: self.erase_proofs().erase_signatures(),
                     hash: self.transaction_hash(),
+                    fees: 0,
                 })
             }
         }
@@ -1695,7 +1754,10 @@ where
 }
 
 impl<D: DB> ContractDeploy<D> {
-    pub(crate) fn well_formed(&self) -> Result<(), MalformedTransaction<D>> {
+    pub(crate) fn well_formed(
+        &self,
+        ref_state: &impl StateReference<D>,
+    ) -> Result<(), MalformedTransaction<D>> {
         self.initial_state.well_formed(self.address())?;
 
         // Or we could change the types. Current (pre-this-ticket) ContractState could be renamed to
@@ -1716,6 +1778,24 @@ impl<D: DB> ContractDeploy<D> {
                 MalformedContractDeploy::IncorrectChargedState,
             ));
         }
+        ref_state.param_check(false, |params| {
+            let limit = params.limits.max_contract_metadata_size;
+            if let Err(e) = check_entry_point_metadata_sizes(&self.initial_state, limit) {
+                return Err(MalformedTransaction::MalformedContractDeploy(match e {
+                    MetadataSizeError::EntryPoint(entry_point, size) => {
+                        MalformedContractDeploy::MetadataTooLarge {
+                            entry_point,
+                            size,
+                            limit,
+                        }
+                    }
+                    MetadataSizeError::Authority(size) => {
+                        MalformedContractDeploy::AuthorityMetadataTooLarge { size, limit }
+                    }
+                }));
+            }
+            Ok(())
+        })?;
         Ok(())
     }
 }
@@ -1729,7 +1809,7 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
     ) -> Result<(), MalformedTransaction<D>> {
         match self {
             ContractAction::Call(call) => call.well_formed(ref_state, strictness, parent),
-            ContractAction::Deploy(deploy) => deploy.well_formed(),
+            ContractAction::Deploy(deploy) => deploy.well_formed(ref_state),
             ContractAction::Maintain(upd) => upd.well_formed(ref_state, strictness),
         }
     }
@@ -1923,6 +2003,25 @@ impl<P: ProofKind<D>, D: DB> ContractCall<P, D> {
         hasher.update(&binding_input[..]);
         Fr::from_le_bytes(&hasher.finalize()[..31])
             .expect("Trimmed persistent hash should fall in Fr")
+    }
+}
+
+trait ContractMaintenanceVerifyingKeyExt {
+    fn verify(&self, data: &[u8], sig: &Signature) -> bool;
+}
+
+impl ContractMaintenanceVerifyingKeyExt for ContractMaintenanceVerifyingKey {
+    fn verify(&self, msg: &[u8], sig: &Signature) -> bool {
+        match (self, sig) {
+            (ContractMaintenanceVerifyingKey::Schnorr(vk), Signature::Schnorr(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::Schnorr(_), _) => false,
+            (ContractMaintenanceVerifyingKey::ECDSA(vk), Signature::ECDSA(sig)) => {
+                vk.verify(msg, sig)
+            }
+            (ContractMaintenanceVerifyingKey::ECDSA(_), _) => false,
+        }
     }
 }
 

@@ -132,6 +132,22 @@ impl Mul<CostDuration> for f64 {
     }
 }
 
+impl Mul<FixedPoint> for CostDuration {
+    type Output = CostDuration;
+    fn mul(self, rhs: FixedPoint) -> Self::Output {
+        let lhs = FixedPoint::from_u64_div(self.0, 1);
+        CostDuration((lhs * rhs).into_atomic_units(1).min(u64::MAX as u128) as u64)
+    }
+}
+
+impl Mul<CostDuration> for FixedPoint {
+    type Output = CostDuration;
+    fn mul(self, rhs: CostDuration) -> Self::Output {
+        let rhs = FixedPoint::from_u64_div(rhs.0, 1);
+        CostDuration((self * rhs).into_atomic_units(1).min(u64::MAX as u128) as u64)
+    }
+}
+
 impl Div for CostDuration {
     type Output = FixedPoint;
     fn div(self, rhs: Self) -> Self::Output {
@@ -456,6 +472,14 @@ impl RunningCost {
     /// The longest time spent in this cost
     pub fn max_time(&self) -> CostDuration {
         CostDuration::max(self.read_time, self.compute_time)
+    }
+
+    /// Checks if a `RunningCost` falls within a bound.
+    pub fn within_bounds(&self, bounds: &RunningCost) -> bool {
+        self.read_time <= bounds.read_time
+            && self.compute_time <= bounds.compute_time
+            && self.bytes_written <= bounds.bytes_written
+            && self.bytes_deleted <= bounds.bytes_deleted
     }
 }
 

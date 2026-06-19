@@ -1,9 +1,15 @@
 # `zkir` Changelog
 
-## Unreleased
+## Version `2.2.0`
 
-- feat: IR version 2.1, functionally identical to 2.0, but with additional optimizations
-- feat: add JubjubPoint support to `TestEq`, `ConstrainEq`, and `CondSelect`
+- feat: dual v1/v2 proving and verification pipeline
+  - `VersionedInnerPK` enum holds either v1 (zk-stdlib v1) or v2 (zk-stdlib v2)
+    prover keys; `read_raw_pk` defaults to v1
+  - `IrSource::v2_keygen` for explicit v2 key generation (tests only)
+  - Default `keygen`/`keygen_vk`/`k` delegate to v1 via pinned old crates
+  - `LocalProvingProvider` uses `ir_v1::v1_prove` (old pipeline end-to-end)
+- feat: `ir_v1` module with `v1_prove`, `v1_verify`, `v1_mock_verify` and
+  adapters (`V1Params`, `V1Resolver`, `preimage_to_v1`)
 
 ## Version `2.1.0`
 

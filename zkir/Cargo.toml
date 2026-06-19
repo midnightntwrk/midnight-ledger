@@ -1,6 +1,6 @@
 [package]
 name = "midnight-zkir"
-version = "2.1.0"
+version = "2.2.0"
 edition = "2024"
 license.workspace = true
 repository.workspace = true
@@ -13,6 +13,7 @@ required-features = ["binary"]
 
 [features]
 binary = ["dep:log", "dep:tracing-subscriber", "dep:clap", "dep:env_logger", "dep:tokio", "dep:indicatif", "dep:console", "dep:futures-executor"]
+mock-verify = ["transient-crypto-old/mock-verify"]
 proptest = [
   "dep:pastey",
   "dep:proptest",
@@ -23,13 +24,20 @@ proptest = [
 ]
 
 [dependencies]
-base-crypto = { version = "1.0.0", path = "../base-crypto", package = "midnight-base-crypto" }
+base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }
-transient-crypto = { version = "2.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
+transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto", features = ["cli"] }
 
-midnight-proofs = { version = "^0.7.0" }
-midnight-circuits = { version = "^6.2.0" }
-midnight-zk-stdlib = { version = "^1.2.0" }
+midnight-proofs = { version = "^0.8.0" }
+midnight-circuits = { version = "^7.0.0" }
+midnight-zk-stdlib = { version = "^2.0.0" }
+
+# Pinned pre-zk-stdlib-v2 versions for backwards-compatible v1 proving.
+transient-crypto-old = { package = "midnight-transient-crypto", version = "=2.0.1" }
+midnight-zk-stdlib-v1 = { package = "midnight-zk-stdlib", version = "^1.0.0" }
+midnight-proofs-v1 = { package = "midnight-proofs", version = "^0.7.0" }
+zkir-old = { package = "midnight-zkir", version = "=2.1.0" }
+serialize-old = { package = "midnight-serialize", version = "=1.0.0" }
 
 group = "^0.13.0"
 const-hex = "^1.14.0"
@@ -38,6 +46,7 @@ serde_bytes = { version = "^0.11.0" }
 serde_json = { version = "^1.0.0" }
 serde_repr = "^0.1.20"
 anyhow = "^1.0.102"
+flate2 = "^1.1.2"
 hex = "^0.4.3"
 # rand 0.9.0 is not yet supported by some of our dependencies, we will
 # stick with 0.8.0 for now.
@@ -62,3 +71,5 @@ proptest-derive = { version = "0.8", optional = true }
 [dev-dependencies]
 midnight-zkir = { path = ".", features = ["proptest"] }
 actix-rt = "^2.9.0"
+sha2 = "^0.11.0"
+

@@ -1,4 +1,4 @@
-[**@midnight-ntwrk/onchain-runtime v3.1.0**](../README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](../README.md)
 
 ***
 
@@ -7,7 +7,24 @@
 # Type Alias: Signature
 
 ```ts
-type Signature: string;
+type Signature: {
+  tag: SignatureKind;
+  value: string;
+};
 ```
 
-A hex-encoded signature BIP-340 signature, with a 3-byte version prefix
+A hex-encoded signature annotated with its kind
+
+## Type declaration
+
+### tag
+
+```ts
+tag: SignatureKind;
+```
+
+### value
+
+```ts
+value: string;
+```

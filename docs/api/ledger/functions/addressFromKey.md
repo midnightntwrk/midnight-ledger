@@ -1,4 +1,4 @@
-[**@midnight/ledger v8.1.0**](../README.md)
+[**@midnight/ledger v0.1.0-rc.1**](../README.md)
 
 ***
 
@@ -16,7 +16,7 @@ Converts a bare signature public key to its corresponding address.
 
 ### key
 
-`string`
+[`SignatureVerifyingKey`](../type-aliases/SignatureVerifyingKey.md)
 
 ## Returns
 
