@@ -99,3 +99,63 @@ pub fn from_bytes32_incircuit(
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use group::ff::Field;
+    use midnight_curves::secp256k1;
+    use rand_chacha::rand_core::OsRng;
+    use transient_crypto::curve::Fr;
+
+    use super::*;
+    use crate::ir_instructions::into_bytes32::into_bytes32_offcircuit;
+
+    // Starts from a random value, converts it into bytes (so as to obtain a
+    // valid, canonical 32-byte representation), then goes from those bytes
+    // back into a value and into bytes again, checking that the
+    // re-serialized bytes match the ones we started from.
+    #[test]
+    fn test_from_bytes32_roundtrip() {
+        use IrValue::*;
+
+        let x = Native(Fr(F::random(OsRng)));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Native, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+
+        let x = Secp256k1Base(secp256k1::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+
+        let x = Secp256k1Scalar(secp256k1::Fq::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        let y = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap();
+        let bytes2: [u8; 32] = into_bytes32_offcircuit(&y).unwrap().try_into().unwrap();
+        assert_eq!(bytes2, bytes);
+    }
+
+    // Non-canonical (out-of-range) bytes are accepted and reduced modulo
+    // each field's characteristic, rather than rejected.
+    #[test]
+    fn test_from_bytes32_reduces_non_canonical_input() {
+        let bytes = [0xffu8; 32];
+        let mut buffer = [0u8; 64];
+        buffer[..32].copy_from_slice(&bytes);
+
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Native, &bytes).unwrap(),
+            IrValue::Native(Fr(F::from_uniform_bytes(&buffer)))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Secp256k1Base, &bytes).unwrap(),
+            IrValue::Secp256k1Base(secp256k1::Fp::from_uniform_bytes(&buffer))
+        );
+        assert_eq!(
+            from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &bytes).unwrap(),
+            IrValue::Secp256k1Scalar(secp256k1::Fq::from_uniform_bytes(&buffer))
+        );
+    }
+}

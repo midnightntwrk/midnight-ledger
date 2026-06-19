@@ -1227,6 +1227,115 @@ mod proof_tests {
     }
 
     #[actix_rt::test]
+    async fn test_bytes32_proof() {
+        // Exercises into_bytes32 / from_bytes32 across all three currently
+        // supported types (Native, Secp256k1Base, Secp256k1Scalar):
+        //   1. Round-trips a typed value through into_bytes32 then
+        //      from_bytes32 and checks it matches the original.
+        //   2. Converts a fixed, non-canonical 32-byte string (all 0xff,
+        //      which exceeds every one of these fields' moduli) via
+        //      from_bytes32 and checks the in-circuit result against the
+        //      off-circuit reference implementation, exercising the
+        //      modular-reduction behavior documented on the instruction.
+        use midnight_zkir_v3::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+        use midnight_zkir_v3::ir_types::IrType;
+
+        let ir_raw = r#"{
+           "version": { "major": 3, "minor": 0 },
+           "inputs": [
+              { "name": "%native",      "type": "Scalar<BLS12-381>" },
+              { "name": "%secp_base",   "type": "Base<Secp256k1>"   },
+              { "name": "%secp_scalar", "type": "Scalar<Secp256k1>" },
+              { "name": "%raw",         "type": "Bytes<32>"         }
+           ],
+           "outputs": [],
+           "do_communications_commitment": false,
+           "instructions": [
+               { "op": "into_bytes32", "input": "%native",      "output": "%native_bytes" },
+               { "op": "into_bytes32", "input": "%secp_base",   "output": "%base_bytes"   },
+               { "op": "into_bytes32", "input": "%secp_scalar", "output": "%scalar_bytes" },
+
+               { "op": "from_bytes32", "bytes": "%native_bytes", "type": "Scalar<BLS12-381>", "output": "%native_back" },
+               { "op": "from_bytes32", "bytes": "%base_bytes",   "type": "Base<Secp256k1>",   "output": "%base_back"   },
+               { "op": "from_bytes32", "bytes": "%scalar_bytes", "type": "Scalar<Secp256k1>", "output": "%scalar_back" },
+
+               { "op": "constrain_eq", "a": "%native_back", "b": "%native"      },
+               { "op": "constrain_eq", "a": "%base_back",   "b": "%secp_base"   },
+               { "op": "constrain_eq", "a": "%scalar_back", "b": "%secp_scalar" },
+
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<BLS12-381>", "output": "%raw_native" },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Base<Secp256k1>",   "output": "%raw_base"   },
+               { "op": "from_bytes32", "bytes": "%raw", "type": "Scalar<Secp256k1>", "output": "%raw_scalar" },
+
+               { "op": "private_input", "type": "Scalar<BLS12-381>", "guard": null, "output": "%raw_native_exp" },
+               { "op": "private_input", "type": "Base<Secp256k1>",   "guard": null, "output": "%raw_base_exp"   },
+               { "op": "private_input", "type": "Scalar<Secp256k1>", "guard": null, "output": "%raw_scalar_exp" },
+
+               { "op": "constrain_eq", "a": "%raw_native", "b": "%raw_native_exp" },
+               { "op": "constrain_eq", "a": "%raw_base",   "b": "%raw_base_exp"   },
+               { "op": "constrain_eq", "a": "%raw_scalar", "b": "%raw_scalar_exp" }
+           ]
+        }"#;
+        let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
+
+        let native_val: transient_crypto::curve::Fr = rand::random();
+        let base_val = secp256k1::Fp::random(OsRng);
+        let scalar_val = secp256k1::Fq::random(OsRng);
+        let raw_bytes = [0xffu8; 32];
+
+        let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
+            encode_offcircuit(&v)
+                .into_iter()
+                .map(|x| x.try_into().unwrap())
+                .collect()
+        };
+
+        let inputs: Vec<transient_crypto::curve::Fr> = [
+            encode(IrValue::Native(native_val)),
+            encode(IrValue::Secp256k1Base(base_val)),
+            encode(IrValue::Secp256k1Scalar(scalar_val)),
+            encode(IrValue::Bytes32(raw_bytes)),
+        ]
+        .concat();
+
+        let raw_native_exp = from_bytes32_offcircuit(&IrType::Native, &raw_bytes).unwrap();
+        let raw_base_exp = from_bytes32_offcircuit(&IrType::Secp256k1Base, &raw_bytes).unwrap();
+        let raw_scalar_exp = from_bytes32_offcircuit(&IrType::Secp256k1Scalar, &raw_bytes).unwrap();
+
+        let private_transcript: Vec<transient_crypto::curve::Fr> = [
+            encode(raw_native_exp),
+            encode(raw_base_exp),
+            encode(raw_scalar_exp),
+        ]
+        .concat();
+
+        let (pk, vk) = ir.keygen(&TestParams).await.unwrap();
+        let preimage = ProofPreimage {
+            binding_input: 42.into(),
+            communications_commitment: None,
+            inputs,
+            private_transcript,
+            public_transcript_inputs: vec![],
+            public_transcript_outputs: vec![],
+            key_location: KeyLocation(Cow::Borrowed("builtin")),
+        };
+        let (proof, _) = preimage
+            .prove::<IrSource>(
+                &mut ChaCha20Rng::from_seed([42; 32]),
+                &TestParams,
+                &TestResolver {
+                    pk: pk.clone(),
+                    vk: vk.clone(),
+                    ir: ir.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        vk.verify(&PARAMS_VERIFIER, &proof, [42.into()].into_iter())
+            .unwrap();
+    }
+
+    #[actix_rt::test]
     async fn test_native_inv_proof() {
         // Verifies native field inversion: v0 * inv(v0) == 1.
         let ir_raw = r#"{

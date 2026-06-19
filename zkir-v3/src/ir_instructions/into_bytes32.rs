@@ -90,3 +90,31 @@ pub fn into_bytes32_incircuit(
         ))),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use group::ff::Field;
+    use midnight_curves::secp256k1;
+    use rand_chacha::rand_core::OsRng;
+    use transient_crypto::curve::Fr;
+
+    use super::*;
+    use crate::ir_instructions::from_bytes32::from_bytes32_offcircuit;
+
+    #[test]
+    fn test_into_bytes32_roundtrip() {
+        use IrValue::*;
+
+        let x = Native(Fr(F::random(OsRng)));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Secp256k1Base(secp256k1::Fp::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+
+        let x = Secp256k1Scalar(secp256k1::Fq::random(OsRng));
+        let bytes: [u8; 32] = into_bytes32_offcircuit(&x).unwrap().try_into().unwrap();
+        assert_eq!(from_bytes32_offcircuit(&x.get_type(), &bytes).unwrap(), x);
+    }
+}
