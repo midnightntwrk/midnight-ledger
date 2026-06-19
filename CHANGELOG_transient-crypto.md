@@ -1,6 +1,6 @@
 # `transient-crypto` Changelog
 
-## Unreleased
+## Version `2.2.0`
 
 - fix: rehashing serde deserialized `MerkleTree`s
 - fix: reject out-of-bounds `MerkleTree` update indices instead of updating the rightmost leaf
