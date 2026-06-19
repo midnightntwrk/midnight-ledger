@@ -4,6 +4,11 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 
 # Change Log
 
+## Unreleased
+
+- feat: replace `parallelism_factor` with free floating factors for validation-cost, guaranteed application cost, and fallible application cost, part of the parameters. These apply only to the compute cost, and the `validation_cost` function now has the pre-applied, unlike before.
+- breaking: unify the construction of signing envelopes
+
 ## Ledger 9.0.1.0-rc.1
 
 - feat: add explicit price floor, denominated in full blocks, and governed by

@@ -1,8 +1,13 @@
 # `base-crypto` Changelog
 
+## Unreleased
+
+- feat: add `Mul` implementation of `CostDuration` and `FixedPoint`
+
 ## Version `1.1.0`
 
 - feat: add `within_bounds` on `RunningCost`
+- feat: add `Envelope` trait derive macro, for building signing envelopes
 
 ## Version `1.0.0`
 

@@ -2996,7 +2996,7 @@ dependencies = [
  "indicatif 0.17.11",
  "k256",
  "lazy_static",
- "midnight-base-crypto-derive 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-base-crypto-derive 1.0.0",
  "midnight-serialize",
  "pastey 0.1.1",
  "rand 0.8.6",
@@ -3029,7 +3029,7 @@ dependencies = [
  "k256",
  "lazy_static",
  "midnight-base-crypto 1.1.0",
- "midnight-base-crypto-derive 1.0.0",
+ "midnight-base-crypto-derive 1.1.0",
  "midnight-serialize",
  "pastey 0.2.2",
  "proptest",
@@ -3050,21 +3050,21 @@ dependencies = [
 [[package]]
 name = "midnight-base-crypto-derive"
 version = "1.0.0"
-dependencies = [
- "proc-macro2",
- "quote 1.0.45",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "midnight-base-crypto-derive"
-version = "1.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "62d0904a6357c953a55316b0ea7fac93d971f2d00c94d51e082817ae24872126"
 dependencies = [
  "proc-macro2",
  "quote 1.0.45",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "midnight-base-crypto-derive"
+version = "1.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote 1.0.45",
+ "syn 2.0.117",
 ]
 
 [[package]]
@@ -3626,7 +3626,7 @@ dependencies = [
  "lazy_static",
  "lru 0.16.4",
  "midnight-base-crypto 1.0.0",
- "midnight-base-crypto-derive 1.0.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "midnight-base-crypto-derive 1.0.0",
  "midnight-circuits 6.2.0",
  "midnight-curves 0.2.0",
  "midnight-proofs 0.7.1",
@@ -3662,7 +3662,7 @@ dependencies = [
  "lazy_static",
  "lru 0.18.0",
  "midnight-base-crypto 1.1.0",
- "midnight-base-crypto-derive 1.0.0",
+ "midnight-base-crypto-derive 1.1.0",
  "midnight-circuits 7.2.0",
  "midnight-curves 0.3.0",
  "midnight-proofs 0.8.0",
