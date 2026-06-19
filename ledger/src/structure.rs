@@ -466,10 +466,10 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     }
                 })?;
                 let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
-                let old_pis = pis.into_iter().map(|f| transient_crypto_old::curve::Fr(
-                    ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
-                        .expect("BLS12-381 Fq round-trip"),
-                ));
+                let old_pis = pis.into_iter().map(|f|
+                    transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
+                        .expect("Fr round-trip")
+                );
                 match mode {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk

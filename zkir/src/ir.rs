@@ -57,7 +57,7 @@ impl VersionedInnerPK {
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v3]"]
+#[tag = "ir-source[v2-generic]"]
 pub struct IrSource {
     /// The minor version of this IR.
     pub version: IrMinorVersion,
@@ -601,7 +601,7 @@ impl IrSource {
     }
 
     /// Attempts to load from a tagged source, accepting both
-    /// `ir-source[v3]` (current, with version field) and `ir-source[v2]`
+    /// `ir-source[v2-generic]` (current, with version field) and `ir-source[v2]`
     /// (legacy, no version field).
     pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
         let tag = peek_tag(&mut reader)?;
