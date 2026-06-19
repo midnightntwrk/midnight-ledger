@@ -925,7 +925,7 @@ impl transient_crypto_old::proofs::Zkir for IrSource {
 // --- Adapters for bridging current types to the v1 pipeline ---
 
 /// Converts a current `ProofPreimage` into a v1 `ProofPreimage`.
-pub(crate) fn preimage_to_v1(
+pub fn preimage_to_v1(
     p: &transient_crypto::proofs::ProofPreimage,
 ) -> transient_crypto_old::proofs::ProofPreimage {
     let cvt_fr = |f: transient_crypto::curve::Fr| -> transient_crypto_old::curve::Fr {
@@ -945,7 +945,7 @@ pub(crate) fn preimage_to_v1(
 }
 
 /// Adapter: current `ParamsProverProvider` → v1 `ParamsProverProvider`.
-pub(crate) struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
+pub struct V1Params<'a, P: transient_crypto::proofs::ParamsProverProvider>(pub &'a P);
 
 impl<P: transient_crypto::proofs::ParamsProverProvider>
     transient_crypto_old::proofs::ParamsProverProvider for V1Params<'_, P>

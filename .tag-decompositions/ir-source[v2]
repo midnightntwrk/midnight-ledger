@@ -1,1 +1,1 @@
-((u32,bool,vec(ir-instruction[v2])))
+((ir-minor-version[v2],u32,bool,vec(ir-instruction[v2])))

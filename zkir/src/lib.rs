@@ -21,7 +21,7 @@ use transient_crypto::curve::Fr;
 use transient_crypto::proofs::Proof;
 
 mod ir;
-pub(crate) mod ir_v1;
+pub mod ir_v1;
 mod ir_vm;
 
 pub use ir::{Instruction, IrMinorVersion, IrSource, VersionedInnerPK};
