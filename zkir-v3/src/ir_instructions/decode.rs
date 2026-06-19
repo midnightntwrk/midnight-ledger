@@ -11,20 +11,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use midnight_circuits::instructions::{DecompositionInstructions, EccInstructions};
-use midnight_circuits::types::AssignedScalarOfNativeCurve;
-use midnight_circuits::{ecc::curves::CircuitCurve, types::AssignedNative};
-use midnight_curves::{Fr as JubjubFr, JubjubExtended};
+use midnight_circuits::field::foreign::params::MultiEmulationParams as MEP;
+use midnight_circuits::types::{AssignedField, AssignedNative};
+use midnight_circuits::types::{
+    AssignedForeignPoint, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
+};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
+use midnight_proofs::circuit::Value;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
-use num_bigint::BigUint;
-use num_traits::Num;
 use transient_crypto::curve::Fr;
 
+use crate::ir_instructions::assign::assign_incircuit;
+use crate::ir_instructions::constrain_eq::constrain_eq_incircuit;
+use crate::ir_instructions::encode::encode_incircuit;
 use crate::{
     ir_instructions::F,
     ir_types::{CircuitValue, IrType, IrValue},
 };
+use anyhow::anyhow;
 
 /// Decodes the given Fr values as an IrValue value of the given type.
 ///
@@ -33,32 +38,36 @@ use crate::{
 /// This function returns an error if the provided raw values cannot be
 /// decoded as the given type.
 pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyhow::Error> {
+    let encoded: Vec<F> = encoded.iter().map(|f| f.0).collect();
     match val_t {
-        IrType::Native => match encoded {
-            [x] => Ok(IrValue::Native(*x)),
-            _ => Err(anyhow::Error::msg(
-                "Expected exactly one value for Native decoding",
-            )),
-        },
-        IrType::JubjubPoint => match encoded {
-            [x, y] => {
-                let p = JubjubExtended::from_xy(x.0, y.0).ok_or_else(|| {
-                    anyhow::Error::msg("Failed to decode Jubjub point from coordinates")
-                })?;
-                Ok(IrValue::JubjubPoint(p.into_subgroup()))
-            }
-            _ => Err(anyhow::Error::msg(
-                "Expected exactly two values for JubjubPoint decoding",
-            )),
-        },
+        IrType::Native => AssignedNative::from_public_input(&encoded)
+            .map(Fr)
+            .map(IrValue::Native),
 
-        IrType::JubjubScalar => match encoded {
-            [x] => Ok(IrValue::JubjubScalar(native_to_jubjub_scalar(x))),
-            _ => Err(anyhow::Error::msg(
-                "Expected exactly one value for JubjubScalar decoding",
-            )),
-        },
+        IrType::JubjubPoint => AssignedNativePoint::<JubjubExtended>::from_public_input(&encoded)
+            .map(IrValue::JubjubPoint),
+
+        IrType::JubjubScalar => {
+            AssignedScalarOfNativeCurve::<JubjubExtended>::from_public_input(&encoded)
+                .map(IrValue::JubjubScalar)
+        }
+
+        IrType::Secp256k1Point => {
+            AssignedForeignPoint::<F, k256::K256, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Point)
+        }
+
+        IrType::Secp256k1Base => {
+            AssignedField::<F, k256::Fp, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Base)
+        }
+
+        IrType::Secp256k1Scalar => {
+            AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
+                .map(IrValue::Secp256k1Scalar)
+        }
     }
+    .ok_or_else(|| anyhow!("Failed to decode {encoded:?} as {val_t:?}"))
 }
 
 /// Decodes the given in-circuit `Native` values as CircuitValue value of the
@@ -74,58 +83,38 @@ pub fn decode_incircuit(
     encoded: &[AssignedNative<F>],
     val_t: &IrType,
 ) -> Result<CircuitValue, plonk::Error> {
-    match val_t {
-        IrType::Native => match encoded {
-            [x] => Ok(CircuitValue::Native(x.clone())),
-            _ => Err(plonk::Error::Synthesis(
-                "Expected exactly one value for Native decoding".into(),
-            )),
-        },
-        IrType::JubjubPoint => match encoded {
-            [x, y] => {
-                let p = std_lib.jubjub().point_from_coordinates(layouter, x, y)?;
-                Ok(CircuitValue::JubjubPoint(p))
-            }
-            _ => Err(plonk::Error::Synthesis(
-                "Expected exactly two values for JubjubPoint decoding".into(),
-            )),
-        },
-        IrType::JubjubScalar => match encoded {
-            [x] => {
-                // Until we can use a further release of midnight-zk (currently v1.0.0),
-                // we must make sure that all ZKIR assigned Jubjub scalars have an internal
-                // representation of at most 252 bits (so that they are encoded into a
-                // single native field element).
-                // To this end, we manually reduce the received encoded value modulo
-                // the Jubjub order.
-                let jubjub_order = {
-                    let p_str = "e7db4ea6533afa906673b0101343b00a6682093ccc81082d0970e5ed6f72cb7";
-                    let p = BigUint::from_str_radix(p_str, 16).unwrap();
-                    std_lib.biguint().assign_fixed_biguint(layouter, p)?
-                };
-                let r = {
-                    let x_bytes = std_lib.assigned_to_le_bytes(layouter, x, None)?;
-                    let x_big = std_lib.biguint().from_le_bytes(layouter, &x_bytes)?;
-                    let (_q, r) = std_lib.biguint().div_rem(layouter, &x_big, &jubjub_order)?;
-                    r
-                };
-                // We will drop the most significant bits, so we make sure they are 0.
-                let r_bits = std_lib.biguint().to_le_bits(layouter, &r)?;
-                for b in r_bits[252..].iter() {
-                    std_lib.assert_false(layouter, b)?;
-                }
-                // SAFETY: AssignedScalarOfNativeCurve<C> is { bits: Vec<AssignedBit>, enforced_canonical: bool }.
-                // We construct it field-by-field via transmute since the API doesn't expose a bits constructor.
-                let s: AssignedScalarOfNativeCurve<JubjubExtended> =
-                    unsafe { std::mem::transmute((r_bits[..252].to_vec(), false)) };
+    // We witness the decoded value, encode it in-circuit and constraint the output of such
+    // encoding to be equal to the `encoded` inputs to this function.
+    // This guarantees that `decode` is the inverse of `encode` on the image of `encode`,
+    // and that `decode` leads to an unsatisfiable circuit if given a vector of scalars that
+    // is not in the image of `encode`.
 
-                Ok(CircuitValue::JubjubScalar(s))
-            }
-            _ => Err(plonk::Error::Synthesis(
-                "Expected exactly one value for JubjubScalar decoding".into(),
-            )),
-        },
+    let encoded_val: Value<Vec<F>> = Value::from_iter(encoded.iter().map(|x| x.value().copied()));
+    let decoded_val = encoded_val
+        .map_with_result(|v| {
+            decode_offcircuit(&v.iter().map(|f| Fr(*f)).collect::<Vec<_>>(), val_t)
+        })
+        .map_err(|e| plonk::Error::Synthesis(format!("{e:?}")))?;
+    let decoded = assign_incircuit(std_lib, layouter, val_t, &[decoded_val])?[0].clone();
+    let encoding_of_decoded = encode_incircuit(std_lib, layouter, &decoded)?;
+
+    if encoding_of_decoded.len() != encoded.len() {
+        return Err(plonk::Error::Synthesis(format!(
+            "Cannot decode {} elements as {val_t:?}",
+            encoded.len()
+        )));
     }
+
+    for (x, expected) in encoding_of_decoded.iter().zip(encoded) {
+        constrain_eq_incircuit(
+            std_lib,
+            layouter,
+            x,
+            &CircuitValue::Native(expected.clone()),
+        )?;
+    }
+
+    Ok(decoded)
 }
 
 /// Converts a native field element to a Jubjub scalar by reducing modulo
