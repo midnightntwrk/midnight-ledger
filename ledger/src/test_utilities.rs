@@ -63,7 +63,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness};
 #[cfg(feature = "proving")]
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 #[cfg(feature = "proving")]
 use transient_crypto::proofs::{ProverKey, ProvingProvider, Resolver as ResolverT, WrappedIr};
 #[cfg(feature = "proving")]
@@ -640,13 +639,16 @@ impl<D: DB> TestState<D> {
     }
 }
 
-pub async fn verifier_key(resolver: &Resolver, name: &'static str) -> Option<VerifierKey> {
+pub async fn verifier_key(
+    resolver: &Resolver,
+    name: &'static str,
+) -> Option<transient_crypto_old::proofs::VerifierKey> {
     use transient_crypto::proofs::Resolver;
     let proof_data = resolver
         .resolve_key(KeyLocation(std::borrow::Cow::Borrowed(name)))
         .await
         .ok()??;
-    zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&proof_data.verifier_key[..])).ok()
+    serialize::tagged_deserialize(&mut &proof_data.verifier_key[..]).ok()
 }
 
 pub fn test_resolver(test_name: &'static str) -> Resolver {

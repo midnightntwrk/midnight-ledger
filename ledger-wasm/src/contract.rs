@@ -349,8 +349,8 @@ impl ContractOperationVersionedVerifierKey {
                     "superceded contract operation version: {version}"
                 )));
             }
-            "v3" => V::V3(zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&raw_vk[..]))?),
-            "v4" => V::V4(zkir_v2::load_vk_from_tagged(std::io::Cursor::new(&raw_vk[..]))?),
+            "v3" => V::V3(serialize::tagged_deserialize(&mut &raw_vk[..])?),
+            "v4" => V::V4(serialize::tagged_deserialize(&mut &raw_vk[..])?),
             _ => {
                 return Err(JsError::new(&format!(
                     "unknown contract operation version: {version}"
@@ -375,7 +375,8 @@ impl ContractOperationVersionedVerifierKey {
         use ledger::structure::ContractOperationVersionedVerifierKey as V;
         let mut buf = Vec::new();
         match &self.0 {
-            V::V3(vk) | V::V4(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V3(vk) => Serializable::serialize(vk, &mut buf)?,
+            V::V4(vk) => Serializable::serialize(vk, &mut buf)?,
             _ => unreachable!("non exhaustive pattern should be exhaustive in this scope"),
         }
         Ok(Uint8Array::from(&buf[..]))

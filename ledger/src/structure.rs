@@ -447,46 +447,60 @@ impl<D: DB> ProofKind<D> for ProofMarker {
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
-        let vk = match proof {
-            ProofVersioned::V2(_) => op.v1_vk(),
-            ProofVersioned::V3(_) => op.v2_vk(),
-        };
-
-        let vk = match vk {
-            Some(vk) => vk,
-            None => {
-                warn!("missing verifier key for proof version");
-                return Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
-                    address: call.address,
-                    operation: call.entry_point.clone(),
-                });
-            }
-        };
-
-        // Serialize the VK with the correct tag for its version.
-        // V2 proofs use v1 VKs (verifier-key[v6]), V3 proofs use v2 VKs (verifier-key[v7]).
-        let tag = match proof {
-            ProofVersioned::V2(_) => "verifier-key[v6]",
-            ProofVersioned::V3(_) => "verifier-key[v7]",
-        };
-        let mut tagged_vk = Vec::new();
-        write!(&mut tagged_vk, "midnight:{tag}:")
-            .and_then(|()| serialize::Serializable::serialize(vk, &mut tagged_vk))
-            .map_err(|e| anyhow::anyhow!("vk serialize: {e}"))
-            .map_err(MalformedTransaction::<D>::InvalidProof)?;
+        use transient_crypto::proofs::PARAMS_VERIFIER;
 
         let inner_proof = match proof {
             ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
         };
 
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => {
-                zkir_v2::mock_verify(&tagged_vk, pis.into_iter())
-                    .map_err(MalformedTransaction::<D>::InvalidProof)
+        match proof {
+            ProofVersioned::V2(_) => {
+                let vk = op.v1_vk().ok_or_else(|| {
+                    warn!("missing v1 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
+                let old_pis = pis.into_iter().map(|f| transient_crypto_old::curve::Fr(
+                    ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
+                        .expect("BLS12-381 Fq round-trip"),
+                ));
+                match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(old_pis)
+                        .map_err(|e| anyhow::anyhow!("v1 mock verification: {e}"))
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(
+                            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                            &old_proof,
+                            old_pis,
+                        )
+                        .map_err(|e| anyhow::anyhow!("v1 verification: {e}"))
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                }
             }
-            _ => zkir_v2::verify(&tagged_vk, inner_proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
+            ProofVersioned::V3(_) => {
+                let vk = op.v2_vk().ok_or_else(|| {
+                    warn!("missing v2 verifier key");
+                    MalformedTransaction::<D>::VerifierKeyNotPresent {
+                        address: call.address,
+                        operation: call.entry_point.clone(),
+                    }
+                })?;
+                match mode {
+                    #[cfg(feature = "mock-verify")]
+                    ProofVerificationMode::CalibratedMock => vk
+                        .mock_verify(pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                    _ => vk
+                        .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof),
+                }
+            }
         }
     }
     fn estimated_tx_size<
@@ -2782,7 +2796,7 @@ impl ContractOperationVersion {
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
     /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
-    V3(transient_crypto::proofs::VerifierKey),
+    V3(transient_crypto_old::proofs::VerifierKey),
     /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
     V4(transient_crypto::proofs::VerifierKey),
 }
@@ -2824,7 +2838,8 @@ impl Serializable for ContractOperationVersionedVerifierKey {
     fn serialized_size(&self) -> usize {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
-            VK::V3(vk) | VK::V4(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V3(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V4(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }

@@ -13,6 +13,9 @@ proof-verifying = ["dep:zkir_v2"]
 [dependencies]
 base-crypto = { version = "1.1.0", path = "../base-crypto", package = "midnight-base-crypto" }
 transient-crypto = { version = "3.0.0", path = "../transient-crypto", package = "midnight-transient-crypto" }
+transient-crypto-old = { package = "midnight-transient-crypto", version = "^2.0.0" }
+ff = "^0.13.0"
+anyhow = "^1.0.102"
 coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
 serialize = { version = "1.0.0", path = "../serialize", package = "midnight-serialize" }

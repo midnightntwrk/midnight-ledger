@@ -57,7 +57,7 @@ impl VersionedInnerPK {
 /// A low-level IR allowing the prover to populate circuit witnesses.
 #[cfg_attr(feature = "proptest", derive(Arbitrary))]
 #[derive(Default, Clone, Debug, PartialEq, Serialize, Deserialize, Serializable)]
-#[tag = "ir-source[v2]"]
+#[tag = "ir-source[v3]"]
 pub struct IrSource {
     /// The minor version of this IR.
     pub version: IrMinorVersion,
@@ -600,27 +600,24 @@ impl IrSource {
         }
     }
 
-    /// Attempts to load from a tagged source with tag `ir-source[v2]`.
-    ///
-    /// Tries to deserialize as `IrSource` (with version field) first, falling
-    /// back to `OldIrSource` (V0 format, no version field) for backwards
-    /// compatibility.
+    /// Attempts to load from a tagged source, accepting both
+    /// `ir-source[v3]` (current, with version field) and `ir-source[v2]`
+    /// (legacy, no version field).
     pub fn load_from_tagged<R: Read + Seek>(mut reader: R) -> io::Result<Self> {
         let tag = peek_tag(&mut reader)?;
-        let expected_tag = IrSource::tag();
-        if tag != *expected_tag {
-            return Err(io::Error::new(
+        let expected_tag_new = IrSource::tag();
+        let expected_tag_old = OldIrSource::tag();
+        if tag == *expected_tag_new {
+            serialize::tagged_deserialize(&mut reader)
+        } else if tag == *expected_tag_old {
+            serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
+        } else {
+            Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("expected '{expected_tag}', got '{tag}'."),
-            ));
-        }
-        let pos = reader.stream_position()?;
-        match serialize::tagged_deserialize::<IrSource>(&mut reader) {
-            Ok(ir) => Ok(ir),
-            Err(_) => {
-                reader.seek(std::io::SeekFrom::Start(pos))?;
-                serialize::tagged_deserialize::<OldIrSource>(reader).map(Into::into)
-            }
+                format!(
+                    "expected one of '{expected_tag_new}' or '{expected_tag_old}', got '{tag}'."
+                ),
+            ))
         }
     }
 

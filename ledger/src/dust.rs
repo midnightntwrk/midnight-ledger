@@ -63,8 +63,6 @@ use transient_crypto::commitment::Pedersen;
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::hash::{degrade_to_transient, transient_commit};
 use transient_crypto::merkle_tree::MerkleTreeCollapsedUpdate;
-#[cfg(feature = "proof-verifying")]
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{ProvingKeyMaterial, ProvingProvider};
 use transient_crypto::{
     curve::Fr,
@@ -82,8 +80,8 @@ const SPEND_VK_RAW: &[u8] = include_bytes!("../static/dust/spend.verifier");
 
 #[cfg(feature = "proof-verifying")]
 lazy_static! {
-    pub static ref SPEND_VK: VerifierKey =
-        zkir_v2::load_vk_from_tagged(std::io::Cursor::new(SPEND_VK_RAW))
+    pub static ref SPEND_VK: transient_crypto_old::proofs::VerifierKey =
+        serialize::tagged_deserialize(&mut SPEND_VK_RAW.to_vec().as_slice())
             .expect("Dust Spend VK should be valid");
 }
 

@@ -38,7 +38,6 @@ use serialize::{Deserializable, tagged_deserialize, tagged_serialize};
 use storage::db::{DB, InMemoryDB};
 use storage::storage::HashMap;
 use transient_crypto::commitment::PedersenRandomness;
-use transient_crypto::proofs::VerifierKey;
 
 fn update_tx<R: Rng + CryptoRng, D: DB>(
     rng: &mut R,
@@ -128,7 +127,7 @@ fn maintenance() {
     let mut state: TestState<InMemoryDB> = TestState::new(&mut rng);
     let mut strictness = WellFormedStrictness::default();
     strictness.enforce_balancing = false;
-    let fake_vk = VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0).unwrap();
+    let fake_vk = transient_crypto_old::proofs::VerifierKey::deserialize(&mut &b"\x00\x00\x00\x00"[..], 0).unwrap();
 
     let committee_sks: Vec<_> = (0..4)
         .map(|_| base_crypto::schnorr::SigningKey::sample(&mut rng))

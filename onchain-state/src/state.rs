@@ -891,7 +891,7 @@ impl<D: DB> Default for ContractState<D> {
 #[non_exhaustive]
 pub struct ContractOperation {
     /// v1 (zk-stdlib v1) verifier key.
-    pub v2: Option<VerifierKey>,
+    pub v2: Option<transient_crypto_old::proofs::VerifierKey>,
     /// v2 (zk-stdlib v2) verifier key.
     pub v3: Option<VerifierKey>,
     ir: Option<Sp<IrBuf>>,
@@ -899,25 +899,21 @@ pub struct ContractOperation {
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
+    pub fn new(vk: Option<transient_crypto_old::proofs::VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
         ContractOperation { v2: vk, ir, v3: None }
     }
 
-    /// Returns the latest verifier key, preferring v3 over v2.
+    /// Returns the latest (v2) verifier key.
     pub fn latest(&self) -> Option<&VerifierKey> {
-        self.v3.as_ref().or(self.v2.as_ref())
+        self.v3.as_ref()
     }
 
     pub fn latest_mut(&mut self) -> &mut Option<VerifierKey> {
-        if self.v3.is_some() {
-            &mut self.v3
-        } else {
-            &mut self.v2
-        }
+        &mut self.v3
     }
 
     /// Returns the v1 verifier key.
-    pub fn v1_vk(&self) -> Option<&VerifierKey> {
+    pub fn v1_vk(&self) -> Option<&transient_crypto_old::proofs::VerifierKey> {
         self.v2.as_ref()
     }
 
@@ -953,7 +949,7 @@ impl FieldRepr for ContractOperation {
             Some(ref vk) => {
                 writer.write(&[0x01.into()]);
                 let mut bytes: Vec<u8> = Vec::new();
-                <VerifierKey as Serializable>::serialize(vk, &mut bytes)
+                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(vk, &mut bytes)
                     .expect("VerifierKey is serializable");
                 bytes.field_repr(writer);
             }
@@ -965,7 +961,7 @@ impl FieldRepr for ContractOperation {
         match self.v2 {
             Some(ref vk) => {
                 let mut bytes: Vec<u8> = Vec::new();
-                <VerifierKey as Serializable>::serialize(vk, &mut bytes)
+                <transient_crypto_old::proofs::VerifierKey as Serializable>::serialize(vk, &mut bytes)
                     .expect("VerifierKey is serializable");
                 1 + bytes.into_iter().fold(0, |acc, b| acc + b.field_size())
             }
