@@ -25,8 +25,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{
-    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_deserialize,
-    tagged_serialize,
+    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_serialize,
 };
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
