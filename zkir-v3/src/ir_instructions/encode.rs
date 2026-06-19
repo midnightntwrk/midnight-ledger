@@ -13,7 +13,7 @@
 
 use midnight_circuits::{
     field::foreign::params::MultiEmulationParams as MEP,
-    instructions::{PublicInputInstructions, ZeroInstructions},
+    instructions::{DecompositionInstructions, PublicInputInstructions, ZeroInstructions},
     types::{
         AssignedBigUint, AssignedField, AssignedForeignPoint, AssignedNative, AssignedNativePoint,
         AssignedScalarOfNativeCurve, Instantiable,
@@ -36,6 +36,18 @@ use anyhow::anyhow;
 pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
     let encoded = match value {
         IrValue::Native(x) => AssignedNative::<F>::as_public_input(&x.0),
+        IrValue::Bytes32(bs) => {
+            let mut low: [u8; 32] = *bs;
+            low[31] = 0;
+
+            let mut high = [0u8; 32];
+            high[0] = bs[31];
+
+            vec![
+                F::from_bytes_le(&low).unwrap(),
+                F::from_bytes_le(&high).unwrap(),
+            ]
+        }
         IrValue::JubjubPoint(p) => AssignedNativePoint::<JubjubExtended>::as_public_input(p),
         IrValue::JubjubScalar(s) => {
             let encoded = AssignedScalarOfNativeCurve::<JubjubExtended>::as_public_input(s);
@@ -66,6 +78,10 @@ pub fn encode_incircuit(
 ) -> Result<Vec<CircuitValue>, Error> {
     let encoded = match value {
         CircuitValue::Native(x) => std_lib.as_public_input(layouter, x),
+        CircuitValue::Bytes32(bs) => Ok(vec![
+            std_lib.assigned_from_le_bytes(layouter, &bs[..31])?,
+            bs[31].clone().into(),
+        ]),
         CircuitValue::JubjubPoint(p) => std_lib.jubjub().as_public_input(layouter, p),
         CircuitValue::JubjubScalar(s) => {
             // Jubjub::Scalar::NUM_BITS is incorrectly set to 255 (instead of 252)
@@ -102,6 +118,23 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
         IrType::Native => AssignedNative::<F>::from_public_input(&encoded)
             .map(Fr)
             .map(IrValue::Native),
+
+        IrType::Bytes32 => {
+            if encoded.len() != 2 {
+                None
+            } else {
+                let mut bytes = encoded[0].to_bytes_le();
+                assert_eq!(bytes[31], 0);
+
+                let high = encoded[1].to_bytes_le();
+                for b in high.iter().skip(1) {
+                    assert_eq!(*b, 0);
+                }
+
+                bytes[31] = high[0];
+                Some(IrValue::Bytes32(bytes))
+            }
+        }
 
         IrType::JubjubPoint => AssignedNativePoint::<JubjubExtended>::from_public_input(&encoded)
             .map(IrValue::JubjubPoint),
