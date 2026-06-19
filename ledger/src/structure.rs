@@ -2074,8 +2074,8 @@ where
                             None => op
                                 .v3
                                 .as_ref()
-                                .or(op.v2.as_ref())
-                                .map(|vk| vk.serialized_size()),
+                                .map(|vk| vk.serialized_size())
+                                .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
                         }
                         .unwrap_or(VERIFIER_KEY_SIZE);
                         (vk_size, ops_log_size)
@@ -2424,8 +2424,8 @@ where
                     None => op
                         .v3
                         .as_ref()
-                        .or(op.v2.as_ref())
-                        .map(|vk| vk.serialized_size()),
+                        .map(|vk| vk.serialized_size())
+                        .or_else(|| op.v2.as_ref().map(|vk| vk.serialized_size())),
                 })
                 .unwrap_or(VERIFIER_KEY_SIZE);
             model.cell_read(vk_size as u64)
