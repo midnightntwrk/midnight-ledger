@@ -121,8 +121,8 @@ impl TryFrom<&IrSource> for OldIrSource {
 #[non_exhaustive]
 pub enum IrMinorVersion {
     V0,
-    #[default]
     V1,
+    #[default]
     V2,
 }
 

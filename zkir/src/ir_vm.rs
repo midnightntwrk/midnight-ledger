@@ -606,7 +606,7 @@ impl Relation for IrSource {
         for ins in self.instructions.iter() {
             match ins {
                 I::Assert { cond } => std.assert_non_zero(layouter, idx(&memory, *cond)?)?,
-                I::CondSelect { bit, a, b } if self.version != IrMinorVersion::V2 => {
+                I::CondSelect { bit, a, b } if self.version == IrMinorVersion::V0 => {
                     let bit = std.is_zero(layouter, idx(&memory, *bit)?)?;
                     // Note that b comes first here, because the is_zero negates the bit.
                     // The negation is to ensure the bit bound. This may be
@@ -621,7 +621,7 @@ impl Relation for IrSource {
                         std.select(layouter, &bit, idx(&memory, *a)?, idx(&memory, *b)?)?;
                     mem_push(result, &mut memory)?;
                 }
-                I::ConstrainBits { var, bits } if self.version != IrMinorVersion::V2 => {
+                I::ConstrainBits { var, bits } if self.version == IrMinorVersion::V0 => {
                     drop(std.assigned_to_le_bits(
                         layouter,
                         idx(&memory, *var)?,
@@ -731,7 +731,7 @@ impl Relation for IrSource {
                     divisor,
                     modulus,
                     bits,
-                } if self.version != IrMinorVersion::V2 => {
+                } if self.version == IrMinorVersion::V0 => {
                     let divisor_bits = std.assigned_to_le_bits(
                         layouter,
                         idx(&memory, *divisor)?,
@@ -864,8 +864,8 @@ impl Relation for IrSource {
             .iter()
             .any(|op| matches!(op, I::PersistentHash { .. }));
         let nr_pow2range_cols = match self.version {
-            IrMinorVersion::V0 | IrMinorVersion::V1 => 1,
-            IrMinorVersion::V2 => 4,
+            IrMinorVersion::V0 => 1,
+            IrMinorVersion::V1 | IrMinorVersion::V2 => 4,
         };
         ZkStdLibArch {
             jubjub: jubjub || hash_to_curve,

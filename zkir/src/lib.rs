@@ -16,11 +16,9 @@ extern crate tracing;
 
 use base_crypto::rng::SplittableRng;
 use rand::{CryptoRng, Rng};
-use std::io::Write;
+use serialize::Tagged;
 use transient_crypto::curve::Fr;
-use transient_crypto::proofs::{
-    ParamsProverProvider, Proof, ProofPreimage, ProvingProvider, Resolver,
-};
+use transient_crypto::proofs::Proof;
 
 mod ir;
 pub(crate) mod ir_v1;
@@ -29,14 +27,11 @@ mod ir_vm;
 pub use ir::{Instruction, IrMinorVersion, IrSource, VersionedInnerPK};
 pub use ir_vm::Preprocessed;
 
-/// The tag used by v1 (old) verifier keys.
-const V1_VK_TAG: &str = "verifier-key[v6]";
-
 /// Deserializes a `VerifierKey` from tagged bytes, accepting both the v1 tag
 /// (`verifier-key[v6]`) and the v2 tag (`verifier-key[v7]`).
 pub fn load_vk_from_tagged(mut reader: impl std::io::Read + std::io::Seek) -> std::io::Result<transient_crypto::proofs::VerifierKey> {
     let tag = serialize::peek_tag(&mut reader)?;
-    if tag == V1_VK_TAG {
+    if tag == transient_crypto_old::proofs::VerifierKey::tag() {
         // v1 VK: deserialize with the old tag, then convert to current type.
         let old_vk: transient_crypto_old::proofs::VerifierKey =
             serialize::tagged_deserialize(&mut reader)?;
@@ -59,7 +54,7 @@ pub fn verify(
     pis: impl Iterator<Item = Fr>,
 ) -> Result<(), anyhow::Error> {
     let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
-    if tag == V1_VK_TAG {
+    if tag == transient_crypto_old::proofs::VerifierKey::tag() {
         let old_vk: transient_crypto_old::proofs::VerifierKey =
             serialize::tagged_deserialize(&mut &tagged_vk[..])?;
         let old_proof = transient_crypto_old::proofs::Proof(proof.0.clone());
@@ -92,7 +87,7 @@ pub fn mock_verify(
     pis: impl Iterator<Item = Fr>,
 ) -> Result<(), anyhow::Error> {
     let tag = serialize::peek_tag(&mut std::io::Cursor::new(tagged_vk))?;
-    if tag == V1_VK_TAG {
+    if tag == transient_crypto_old::proofs::VerifierKey::tag() {
         let old_vk: transient_crypto_old::proofs::VerifierKey =
             serialize::tagged_deserialize(&mut &tagged_vk[..])?;
         let old_pis = pis.map(|f| transient_crypto_old::curve::Fr(
@@ -109,12 +104,13 @@ pub fn mock_verify(
     }
 }
 
-/// Implements `ProvingProvider` locally
+/// Implements `transient_crypto_old::proofs::ProvingProvider` locally,
+/// delegating to the v1 (zk-stdlib v1) proving pipeline.
 pub struct LocalProvingProvider<
     'a,
     R: Rng + CryptoRng + SplittableRng,
-    S: Resolver,
-    P: ParamsProverProvider,
+    S: transient_crypto_old::proofs::Resolver,
+    P: transient_crypto_old::proofs::ParamsProverProvider,
 > {
     /// The randomness to use for proving
     pub rng: R,
@@ -124,10 +120,17 @@ pub struct LocalProvingProvider<
     pub params: &'a P,
 }
 
-impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvider> ProvingProvider
-    for LocalProvingProvider<'a, R, S, P>
+impl<
+        'a,
+        R: Rng + CryptoRng + SplittableRng,
+        S: transient_crypto_old::proofs::Resolver,
+        P: transient_crypto_old::proofs::ParamsProverProvider,
+    > transient_crypto_old::proofs::ProvingProvider for LocalProvingProvider<'a, R, S, P>
 {
-    async fn check(&self, preimage: &ProofPreimage) -> Result<Vec<Option<usize>>, anyhow::Error> {
+    async fn check(
+        &self,
+        preimage: &transient_crypto_old::proofs::ProofPreimage,
+    ) -> Result<Vec<Option<usize>>, anyhow::Error> {
         let proving_data = self
             .resolver
             .resolve_key(preimage.key_location.clone())
@@ -139,66 +142,26 @@ impl<'a, R: Rng + CryptoRng + SplittableRng, S: Resolver, P: ParamsProverProvide
                 )
             })?;
         let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
-        preimage.check(&ir)
+        use transient_crypto_old::proofs::Zkir as V1Zkir;
+        ir.check(preimage)
     }
+
     async fn prove(
         self,
-        preimage: &ProofPreimage,
-        overwrite_binding_input: Option<Fr>,
-    ) -> Result<Proof, anyhow::Error> {
+        preimage: &transient_crypto_old::proofs::ProofPreimage,
+        overwrite_binding_input: Option<transient_crypto_old::curve::Fr>,
+    ) -> Result<transient_crypto_old::proofs::Proof, anyhow::Error> {
         let mut preimage = preimage.clone();
         if let Some(binding_input) = overwrite_binding_input {
             preimage.binding_input = binding_input;
         }
 
-        // Resolve to determine the IR version.
-        let proving_data = self
-            .resolver
-            .resolve_key(preimage.key_location.clone())
-            .await?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "attempted to prove '{}' without circuit data!",
-                    preimage.key_location.0
-                )
-            })?;
-        let ir = IrSource::load_from_tagged(std::io::Cursor::new(&proving_data.ir_source[..]))?;
-
-        match ir.version {
-            IrMinorVersion::V0 | IrMinorVersion::V1 => {
-                // V0/V1: use the old Zkir trait directly with pre-resolved data.
-                use transient_crypto_old::proofs::Zkir as V1Zkir;
-                let old_preimage = ir_v1::preimage_to_v1(&preimage);
-                let v1_params = ir_v1::V1Params(self.params);
-                let vk = load_vk_from_tagged(std::io::Cursor::new(&proving_data.verifier_key[..]))?;
-                let pk: transient_crypto_old::proofs::ProverKey<IrSource> =
-                    serialize::tagged_deserialize(&mut &proving_data.prover_key[..])?;
-                let (proof, pis, _) =
-                    ir.prove(self.rng, &v1_params, pk, &old_preimage).await?;
-                // Self-verify
-                let mut tagged_vk = Vec::new();
-                write!(&mut tagged_vk, "midnight:{}:", V1_VK_TAG)?;
-                serialize::Serializable::serialize(&vk, &mut tagged_vk)?;
-                let proof = Proof(proof.0.clone());
-                let pis: Vec<Fr> = pis.iter().map(|f| {
-                    Fr(ff::PrimeField::from_repr(ff::PrimeField::to_repr(&f.0))
-                        .expect("Fr round-trip"))
-                }).collect();
-                if let Err(e) = verify(&tagged_vk, &proof, pis.into_iter()) {
-                    error!(error = ?e, "v1 self-verification failed!");
-                    return Err(e);
-                }
-                Ok(proof)
-            }
-            _ => {
-                // V2+: use the current pipeline.
-                Ok(preimage
-                    .prove::<IrSource>(self.rng, self.params, self.resolver)
-                    .await?
-                    .0)
-            }
-        }
+        let (proof, _) = preimage
+            .prove::<IrSource>(self.rng, self.params, self.resolver)
+            .await?;
+        Ok(proof)
     }
+
     fn split(&mut self) -> Self {
         Self {
             rng: self.rng.split(),
