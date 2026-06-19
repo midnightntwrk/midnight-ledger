@@ -894,13 +894,18 @@ pub struct ContractOperation {
     pub v2: Option<VerifierKey>,
     /// v2 (zk-stdlib v2) verifier key.
     pub v3: Option<VerifierKey>,
-    ir: Option<Sp<IrBuf>>,
+    /// The IR associated with this contract operation.
+    pub ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
     pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: vk, ir, v3: None }
+        ContractOperation {
+            v2: vk,
+            ir,
+            v3: None,
+        }
     }
 
     /// Returns the latest verifier key, preferring v3 over v2.
@@ -942,7 +947,11 @@ impl Distribution<ContractOperation> for Standard {
                 v3: None,
             }
         } else {
-            ContractOperation { v2: None, ir: None, v3: None }
+            ContractOperation {
+                v2: None,
+                ir: None,
+                v3: None,
+            }
         }
     }
 }
@@ -982,7 +991,11 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None, ir: None, v3: None }
+        ContractOperation {
+            v2: None,
+            ir: None,
+            v3: None,
+        }
     }
 }
 
