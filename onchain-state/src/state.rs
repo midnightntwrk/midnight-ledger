@@ -894,7 +894,8 @@ pub struct ContractOperation {
     pub v2: Option<transient_crypto_old::proofs::VerifierKey>,
     /// v2 (zk-stdlib v2) verifier key.
     pub v3: Option<VerifierKey>,
-    ir: Option<Sp<IrBuf>>,
+    /// The IR associated with this contract operation.
+    pub ir: Option<Sp<IrBuf>>,
 }
 tag_enforcement_test!(ContractOperation);
 
@@ -938,7 +939,11 @@ impl Distribution<ContractOperation> for Standard {
                 v3: None,
             }
         } else {
-            ContractOperation { v2: None, ir: None, v3: None }
+            ContractOperation {
+                v2: None,
+                ir: None,
+                v3: None,
+            }
         }
     }
 }
@@ -978,7 +983,11 @@ impl Debug for ContractOperation {
 
 impl<F> Dummy<F> for ContractOperation {
     fn dummy_with_rng<R: rand::Rng + ?Sized>(_config: &F, _rng: &mut R) -> Self {
-        ContractOperation { v2: None, ir: None, v3: None }
+        ContractOperation {
+            v2: None,
+            ir: None,
+            v3: None,
+        }
     }
 }
 
