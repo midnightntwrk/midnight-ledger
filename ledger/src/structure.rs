@@ -702,7 +702,7 @@ pub struct CardanoBridge {
 tag_enforcement_test!(CardanoBridge);
 
 #[derive(Clone, Debug, PartialEq, Serializable, Storable)]
-#[tag = "system-transaction[v8]"]
+#[tag = "system-transaction[v9]"]
 #[storable(base)]
 #[non_exhaustive]
 // TODO: Getting `Box` to serialize is a pain right now. Revisit later.
@@ -1069,11 +1069,13 @@ impl<D: DB> Default for ReplayProtectionState<D> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable, Serialize, Deserialize)]
-#[tag = "transaction-cost-model[v4]"]
+#[tag = "transaction-cost-model[v5]"]
 pub struct TransactionCostModel {
     pub runtime_cost_model: onchain_runtime::cost_model::CostModel,
-    pub parallelism_factor: u64,
     pub baseline_cost: RunningCost,
+    pub validation_factor: FixedPoint,
+    pub guaranteed_factor: FixedPoint,
+    pub fallible_factor: FixedPoint,
 }
 
 impl TransactionCostModel {
@@ -1204,13 +1206,16 @@ tag_enforcement_test!(TransactionCostModel);
 
 pub const INITIAL_TRANSACTION_COST_MODEL: TransactionCostModel = TransactionCostModel {
     runtime_cost_model: onchain_runtime::cost_model::INITIAL_COST_MODEL,
-    parallelism_factor: 4,
     baseline_cost: RunningCost {
         compute_time: CostDuration::from_picoseconds(100_000_000),
         read_time: CostDuration::ZERO,
         bytes_written: 0,
         bytes_deleted: 0,
     },
+    // NOTE: Carry-over from old parallelism_factor: 4
+    validation_factor: FixedPoint::from_u64_div(1, 4),
+    guaranteed_factor: FixedPoint::ONE,
+    fallible_factor: FixedPoint::ONE,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Serializable)]
@@ -1254,7 +1259,7 @@ pub const INITIAL_LIMITS: TransactionLimits = TransactionLimits {
     feature = "fixed-point-custom-serde",
     derive(serde::Serialize, serde::Deserialize)
 )]
-#[tag = "ledger-parameters[v7]"]
+#[tag = "ledger-parameters[v8]"]
 #[storable(base)]
 pub struct LedgerParameters {
     pub cost_model: TransactionCostModel,
@@ -1925,7 +1930,7 @@ where
         model: &TransactionCostModel,
         per_call_vk_read: impl Fn(&ContractAddress, &EntryPointBuf) -> RunningCost,
     ) -> SyntheticCost {
-        match self {
+        let mut result = match self {
             Transaction::Standard(stx) => {
                 let unique_calls = self
                     .calls()
@@ -1996,7 +2001,9 @@ where
                 ..RunningCost::ZERO
             } + model.baseline_cost)
                 .into(),
-        }
+        };
+        result.compute_time = result.compute_time * model.validation_factor;
+        result
     }
 
     pub fn validation_cost(&self, model: &TransactionCostModel) -> SyntheticCost {
@@ -2278,12 +2285,13 @@ where
                 g_cost += model.map_insert(EXPECTED_UTXO_DEPTH, false);
             }
         }
+        g_cost.compute_time = g_cost.compute_time * model.guaranteed_factor;
+        f_cost.compute_time = f_cost.compute_time * model.fallible_factor;
         (g_cost.into(), (g_cost + f_cost).into())
     }
 
     pub fn time_to_dismiss(&self, model: &TransactionCostModel) -> CostDuration {
-        let mut validation_cost = self.validation_cost(model);
-        validation_cost.compute_time = validation_cost.compute_time / model.parallelism_factor;
+        let validation_cost = self.validation_cost(model);
         let guaranteed_cost = self.application_cost(model).0;
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         CostDuration::max(cost_to_dismiss.compute_time, cost_to_dismiss.read_time)
@@ -2294,9 +2302,7 @@ where
         params: &LedgerParameters,
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
-        let mut validation_cost = self.validation_cost(&params.cost_model);
-        validation_cost.compute_time =
-            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let validation_cost = self.validation_cost(&params.cost_model);
         let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
@@ -2319,9 +2325,7 @@ where
         ledger: &LedgerState<D>,
         enforce_time_to_dismiss: bool,
     ) -> Result<SyntheticCost, FeeCalculationError> {
-        let mut validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
-        validation_cost.compute_time =
-            validation_cost.compute_time / params.cost_model.parallelism_factor;
+        let validation_cost = self.validation_cost_with_state(&params.cost_model, ledger);
         let (guaranteed_cost, application_cost) = self.application_cost(&params.cost_model);
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
@@ -2345,7 +2349,7 @@ where
         enforce_time_to_dismiss: bool,
     ) -> Result<u128, FeeCalculationError> {
         let model = &params.cost_model;
-        let mut validation_cost = self.validation_cost_impl(model, |address, entry_point| {
+        let validation_cost = self.validation_cost_impl(model, |address, entry_point| {
             let vk_size = get_op(*address, entry_point)
                 .and_then(|op| op.v2.as_ref().map(|vk| vk.serialized_size()))
                 .unwrap_or(VERIFIER_KEY_SIZE);
@@ -2353,8 +2357,6 @@ where
                 + model.map_index(EXPECTED_CONTRACT_DEPTH)
                 + model.map_index(EXPECTED_OPERATIONS_DEPTH)
         });
-        validation_cost.compute_time =
-            validation_cost.compute_time / params.cost_model.parallelism_factor;
         let (guaranteed_cost, application_cost) = self.application_cost(model);
         let cost_to_dismiss = guaranteed_cost + validation_cost;
         let time_to_dismiss = CostDuration::max(
@@ -3246,7 +3248,7 @@ impl<D: DB> Default for UtxoState<D> {
 #[derive(Storable)]
 #[derive_where(Clone, Debug, PartialEq, Eq)]
 #[storable(db = D)]
-#[tag = "ledger-state[v17]"]
+#[tag = "ledger-state[v18]"]
 #[must_use]
 pub struct LedgerState<D: DB> {
     pub network_id: String,

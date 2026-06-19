@@ -1214,7 +1214,8 @@ async fn composable_funded() {
         b"burn",
         HashOutput(*b"midnight:entry-point\0\0\0\0\0\0\0\0\0\0\0\0"),
     );
-    let send_to_burn_op = ContractOperation::new(verifier_key(&RESOLVER, "send_to_burn").await, None);
+    let send_to_burn_op =
+        ContractOperation::new(verifier_key(&RESOLVER, "send_to_burn").await, None);
     let contract = ContractState::new(
         stval!([(addr_burn), (ep_hash)]),
         HashMap::new().insert(b"send_to_burn"[..].into(), send_to_burn_op.clone()),

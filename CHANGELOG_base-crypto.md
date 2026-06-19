@@ -1,5 +1,9 @@
 # `base-crypto` Changelog
 
+## Unreleased
+
+- feat: add `Mul` implementation of `CostDuration` and `FixedPoint`
+
 ## Version `1.1.0`
 
 - feat: add `within_bounds` on `RunningCost`
