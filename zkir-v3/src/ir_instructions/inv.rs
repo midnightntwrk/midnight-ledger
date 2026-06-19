@@ -78,11 +78,11 @@ pub fn inv_incircuit(
             Ok(Native(r))
         }
         Secp256k1Base(a) => {
-            let r = (std_lib.secp256k1_curve().base_field_chip()).inv(layouter, a)?;
+            let r = (std_lib.secp256k1().base_field_chip()).inv(layouter, a)?;
             Ok(Secp256k1Base(r))
         }
         Secp256k1Scalar(a) => {
-            let r = (std_lib.secp256k1_curve().scalar_field_chip()).inv(layouter, a)?;
+            let r = (std_lib.secp256k1().scalar_field_chip()).inv(layouter, a)?;
             Ok(Secp256k1Scalar(r))
         }
 
@@ -96,7 +96,7 @@ pub fn inv_incircuit(
 #[cfg(test)]
 mod tests {
     use group::ff::Field;
-    use midnight_curves::secp256k1;
+    use midnight_curves::k256;
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -112,13 +112,13 @@ mod tests {
             Native(Fr(x.0.invert().unwrap()))
         );
 
-        let x = secp256k1::Fp::random(OsRng);
+        let x = k256::Fp::random(OsRng);
         assert_eq!(
             inv_offcircuit(&Secp256k1Base(x)).unwrap(),
             Secp256k1Base(x.invert().unwrap())
         );
 
-        let x = secp256k1::Fq::random(OsRng);
+        let x = k256::Fq::random(OsRng);
         assert_eq!(
             inv_offcircuit(&Secp256k1Scalar(x)).unwrap(),
             Secp256k1Scalar(x.invert().unwrap())

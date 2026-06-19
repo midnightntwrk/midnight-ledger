@@ -19,7 +19,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, Instantiable,
     },
 };
-use midnight_curves::{JubjubExtended, secp256k1};
+use midnight_curves::{JubjubExtended, k256};
 use midnight_proofs::{circuit::Layouter, plonk::Error};
 use midnight_zk_stdlib::ZkStdLib;
 use num_bigint::BigUint;
@@ -51,10 +51,10 @@ pub fn encode_offcircuit(value: &IrValue) -> Vec<IrValue> {
         }
 
         IrValue::Secp256k1Point(p) => {
-            AssignedForeignPoint::<F, secp256k1::Secp256k1, MEP>::as_public_input(p)
+            AssignedForeignPoint::<F, k256::K256, MEP>::as_public_input(p)
         }
-        IrValue::Secp256k1Base(s) => AssignedField::<F, secp256k1::Fp, MEP>::as_public_input(s),
-        IrValue::Secp256k1Scalar(s) => AssignedField::<F, secp256k1::Fq, MEP>::as_public_input(s),
+        IrValue::Secp256k1Base(s) => AssignedField::<F, k256::Fp, MEP>::as_public_input(s),
+        IrValue::Secp256k1Scalar(s) => AssignedField::<F, k256::Fq, MEP>::as_public_input(s),
     };
     encoded
         .into_iter()
@@ -84,12 +84,12 @@ pub fn encode_incircuit(
             Ok(encoded[..1].to_vec())
         }
 
-        CircuitValue::Secp256k1Point(p) => std_lib.secp256k1_curve().as_public_input(layouter, p),
+        CircuitValue::Secp256k1Point(p) => std_lib.secp256k1().as_public_input(layouter, p),
         CircuitValue::Secp256k1Base(s) => {
-            (std_lib.secp256k1_curve().base_field_chip()).as_public_input(layouter, s)
+            (std_lib.secp256k1().base_field_chip()).as_public_input(layouter, s)
         }
         CircuitValue::Secp256k1Scalar(s) => {
-            (std_lib.secp256k1_curve().scalar_field_chip()).as_public_input(layouter, s)
+            (std_lib.secp256k1().scalar_field_chip()).as_public_input(layouter, s)
         }
     }?;
     Ok(encoded.into_iter().map(CircuitValue::Native).collect())
@@ -112,5 +112,5 @@ pub fn jubjub_scalar_from_biguint(
     let r_le_bytes = std_lib.biguint().to_le_bytes(layouter, &r)?;
     std_lib
         .jubjub()
-        .scalar_from_reduced_le_bytes(layouter, &r_le_bytes)
+        .scalar_from_le_bytes(layouter, &r_le_bytes)
 }

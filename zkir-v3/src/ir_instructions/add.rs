@@ -40,9 +40,9 @@ pub fn add_offcircuit(x: &IrValue, y: &IrValue) -> Result<IrValue, anyhow::Error
         (Native(a), Native(b)) => Ok(Native(*a + *b)),
         (JubjubPoint(p), JubjubPoint(q)) => Ok(JubjubPoint(p + q)),
 
-        (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(p + q)),
-        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(s + r)),
-        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(s + r)),
+        (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(*p + *q)),
+        (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(*s + *r)),
+        (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(*s + *r)),
 
         _ => Err(anyhow::anyhow!(
             "Unsupported addition: {:?} + {:?}",
@@ -81,15 +81,15 @@ pub fn add_incircuit(
         }
 
         (Secp256k1Point(p), Secp256k1Point(q)) => {
-            let r = std_lib.secp256k1_curve().add(layouter, p, q)?;
+            let r = midnight_circuits::instructions::EccInstructions::add(std_lib.secp256k1(), layouter, p, q)?;
             Ok(Secp256k1Point(r))
         }
         (Secp256k1Base(a), Secp256k1Base(b)) => {
-            let r = (std_lib.secp256k1_curve().base_field_chip()).add(layouter, a, b)?;
+            let r = (std_lib.secp256k1().base_field_chip()).add(layouter, a, b)?;
             Ok(Secp256k1Base(r))
         }
         (Secp256k1Scalar(a), Secp256k1Scalar(b)) => {
-            let r = (std_lib.secp256k1_curve().scalar_field_chip()).add(layouter, a, b)?;
+            let r = (std_lib.secp256k1().scalar_field_chip()).add(layouter, a, b)?;
             Ok(Secp256k1Scalar(r))
         }
 
@@ -114,7 +114,7 @@ impl Add for IrValue {
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -138,9 +138,9 @@ mod tests {
             "Unsupported addition: Native + JubjubPoint"
         );
 
-        let [p, q] = core::array::from_fn(|_| secp256k1::Secp256k1::random(OsRng));
-        let [x, y] = core::array::from_fn(|_| secp256k1::Fp::random(OsRng));
-        let [r, s] = core::array::from_fn(|_| secp256k1::Fq::random(OsRng));
+        let [p, q] = core::array::from_fn(|_| k256::K256::random(OsRng));
+        let [x, y] = core::array::from_fn(|_| k256::Fp::random(OsRng));
+        let [r, s] = core::array::from_fn(|_| k256::Fq::random(OsRng));
         assert_eq!(Secp256k1Point(p) + Secp256k1Point(q), Secp256k1Point(p + q));
         assert_eq!(Secp256k1Base(x) + Secp256k1Base(y), Secp256k1Base(x + y));
         assert_eq!(

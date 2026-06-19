@@ -18,7 +18,7 @@ mod common;
 mod proof_tests {
     use super::common::{TestParams, TestResolver};
     use group::{Group, ff::Field};
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use midnight_zkir_v3::{
         Identifier, IrSource, Preprocessed, ir_instructions::encode::encode_offcircuit,
         ir_types::IrValue,
@@ -1102,13 +1102,13 @@ mod proof_tests {
         }"#;
         let ir = IrSource::load(ir_raw.as_bytes()).unwrap();
 
-        let id = secp256k1::Secp256k1::identity();
-        let p0 = secp256k1::Secp256k1::random(OsRng);
-        let p1 = secp256k1::Secp256k1::random(OsRng);
-        let b0 = secp256k1::Fp::random(OsRng);
-        let b1 = secp256k1::Fp::random(OsRng);
-        let s0 = secp256k1::Fq::random(OsRng);
-        let s1 = secp256k1::Fq::random(OsRng);
+        let id = k256::K256::identity();
+        let p0 = k256::K256::random(OsRng);
+        let p1 = k256::K256::random(OsRng);
+        let b0 = k256::Fp::random(OsRng);
+        let b1 = k256::Fp::random(OsRng);
+        let s0 = k256::Fq::random(OsRng);
+        let s1 = k256::Fq::random(OsRng);
 
         let encode = |v: IrValue| -> Vec<transient_crypto::curve::Fr> {
             encode_offcircuit(&v)

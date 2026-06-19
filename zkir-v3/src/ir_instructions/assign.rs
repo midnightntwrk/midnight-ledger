@@ -12,7 +12,7 @@
 // limitations under the License.
 
 use midnight_circuits::instructions::AssignmentInstructions;
-use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, secp256k1};
+use midnight_curves::{Fr as JubjubFr, JubjubSubgroup, k256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -78,20 +78,20 @@ pub fn assign_incircuit(
             .map(|xs| xs.into_iter().map(CircuitValue::JubjubScalar).collect()),
 
         IrType::Secp256k1Point => std_lib
-            .secp256k1_curve()
-            .assign_many(layouter, &convert_values::<secp256k1::Secp256k1>(values)?)
+            .secp256k1()
+            .assign_many(layouter, &convert_values::<k256::K256>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Point).collect()),
 
         IrType::Secp256k1Base => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .base_field_chip()
-            .assign_many(layouter, &convert_values::<secp256k1::Fp>(values)?)
+            .assign_many(layouter, &convert_values::<k256::Fp>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Base).collect()),
 
         IrType::Secp256k1Scalar => std_lib
-            .secp256k1_curve()
+            .secp256k1()
             .scalar_field_chip()
-            .assign_many(layouter, &convert_values::<secp256k1::Fq>(values)?)
+            .assign_many(layouter, &convert_values::<k256::Fq>(values)?)
             .map(|xs| xs.into_iter().map(CircuitValue::Secp256k1Scalar).collect()),
     }
 }

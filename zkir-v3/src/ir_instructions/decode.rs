@@ -16,7 +16,7 @@ use midnight_circuits::types::{AssignedField, AssignedNative};
 use midnight_circuits::types::{
     AssignedForeignPoint, AssignedNativePoint, AssignedScalarOfNativeCurve, Instantiable,
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, secp256k1};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, k256};
 use midnight_proofs::circuit::Value;
 use midnight_proofs::{circuit::Layouter, plonk};
 use midnight_zk_stdlib::ZkStdLib;
@@ -53,17 +53,17 @@ pub fn decode_offcircuit(encoded: &[Fr], val_t: &IrType) -> Result<IrValue, anyh
         }
 
         IrType::Secp256k1Point => {
-            AssignedForeignPoint::<F, secp256k1::Secp256k1, MEP>::from_public_input(&encoded)
+            AssignedForeignPoint::<F, k256::K256, MEP>::from_public_input(&encoded)
                 .map(IrValue::Secp256k1Point)
         }
 
         IrType::Secp256k1Base => {
-            AssignedField::<F, secp256k1::Fp, MEP>::from_public_input(&encoded)
+            AssignedField::<F, k256::Fp, MEP>::from_public_input(&encoded)
                 .map(IrValue::Secp256k1Base)
         }
 
         IrType::Secp256k1Scalar => {
-            AssignedField::<F, secp256k1::Fq, MEP>::from_public_input(&encoded)
+            AssignedField::<F, k256::Fq, MEP>::from_public_input(&encoded)
                 .map(IrValue::Secp256k1Scalar)
         }
     }

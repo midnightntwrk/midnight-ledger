@@ -73,13 +73,13 @@ pub fn test_eq_incircuit(
         (JubjubPoint(p), JubjubPoint(q)) => std_lib.jubjub().is_equal(layouter, p, q),
 
         (Secp256k1Point(p), Secp256k1Point(q)) => {
-            std_lib.secp256k1_curve().is_equal(layouter, p, q)
+            std_lib.secp256k1().is_equal(layouter, p, q)
         }
         (Secp256k1Base(s), Secp256k1Base(r)) => {
-            (std_lib.secp256k1_curve().base_field_chip()).is_equal(layouter, s, r)
+            (std_lib.secp256k1().base_field_chip()).is_equal(layouter, s, r)
         }
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => {
-            (std_lib.secp256k1_curve().scalar_field_chip()).is_equal(layouter, s, r)
+            (std_lib.secp256k1().scalar_field_chip()).is_equal(layouter, s, r)
         }
         _ => Err(plonk::Error::Synthesis(format!(
             "Unsupported test_eq: {:?} == {:?}",
@@ -93,7 +93,7 @@ pub fn test_eq_incircuit(
 mod tests {
     use group::Group;
     use group::ff::Field;
-    use midnight_curves::{JubjubSubgroup, secp256k1};
+    use midnight_curves::{JubjubSubgroup, k256};
     use rand_chacha::rand_core::OsRng;
     use transient_crypto::curve::Fr;
 
@@ -108,9 +108,9 @@ mod tests {
         assert!(test_eq_offcircuit(&JubjubPoint(p), &JubjubPoint(p)).unwrap());
         assert!(test_eq_offcircuit(&Native(x), &JubjubPoint(p)).is_err());
 
-        let p = secp256k1::Secp256k1::random(OsRng);
-        let s = secp256k1::Fp::random(OsRng);
-        let r = secp256k1::Fq::random(OsRng);
+        let p = k256::K256::random(OsRng);
+        let s = k256::Fp::random(OsRng);
+        let r = k256::Fq::random(OsRng);
         assert!(test_eq_offcircuit(&Secp256k1Point(p), &Secp256k1Point(p)).unwrap());
         assert!(test_eq_offcircuit(&Secp256k1Base(s), &Secp256k1Base(s)).unwrap());
         assert!(test_eq_offcircuit(&Secp256k1Scalar(r), &Secp256k1Scalar(r)).unwrap());

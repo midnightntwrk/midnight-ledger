@@ -73,13 +73,13 @@ pub fn select_incircuit(
         }
 
         (Secp256k1Point(p), Secp256k1Point(q)) => Ok(Secp256k1Point(
-            std_lib.secp256k1_curve().select(layouter, bit, p, q)?,
+            std_lib.secp256k1().select(layouter, bit, p, q)?,
         )),
         (Secp256k1Base(s), Secp256k1Base(r)) => Ok(Secp256k1Base(
-            (std_lib.secp256k1_curve().base_field_chip()).select(layouter, bit, s, r)?,
+            (std_lib.secp256k1().base_field_chip()).select(layouter, bit, s, r)?,
         )),
         (Secp256k1Scalar(s), Secp256k1Scalar(r)) => Ok(Secp256k1Scalar(
-            (std_lib.secp256k1_curve().scalar_field_chip()).select(layouter, bit, s, r)?,
+            (std_lib.secp256k1().scalar_field_chip()).select(layouter, bit, s, r)?,
         )),
 
         _ => Err(plonk::Error::Synthesis(format!(

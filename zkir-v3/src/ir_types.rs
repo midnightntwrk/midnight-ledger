@@ -18,7 +18,7 @@ use midnight_circuits::{
         AssignedScalarOfNativeCurve, InnerValue,
     },
 };
-use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, secp256k1};
+use midnight_curves::{Fr as JubjubFr, JubjubExtended, JubjubSubgroup, k256};
 use midnight_proofs::{circuit::Value, plonk::Error};
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
@@ -87,13 +87,13 @@ pub enum IrValue {
     JubjubScalar(JubjubFr),
 
     /// Secp256k1 point.
-    Secp256k1Point(secp256k1::Secp256k1),
+    Secp256k1Point(k256::K256),
 
     /// Secp256k1 base field value.
-    Secp256k1Base(secp256k1::Fp),
+    Secp256k1Base(k256::Fp),
 
     /// Secp256k1 scalar field value.
-    Secp256k1Scalar(secp256k1::Fq),
+    Secp256k1Scalar(k256::Fq),
 }
 
 impl IrValue {
@@ -115,9 +115,9 @@ impl IrValue {
             IrType::JubjubPoint => IrValue::JubjubPoint(JubjubSubgroup::default()),
             IrType::JubjubScalar => IrValue::JubjubScalar(JubjubFr::default()),
 
-            IrType::Secp256k1Point => IrValue::Secp256k1Point(secp256k1::Secp256k1::default()),
-            IrType::Secp256k1Base => IrValue::Secp256k1Base(secp256k1::Fp::default()),
-            IrType::Secp256k1Scalar => IrValue::Secp256k1Scalar(secp256k1::Fq::default()),
+            IrType::Secp256k1Point => IrValue::Secp256k1Point(k256::K256::default()),
+            IrType::Secp256k1Base => IrValue::Secp256k1Base(k256::Fp::default()),
+            IrType::Secp256k1Scalar => IrValue::Secp256k1Scalar(k256::Fq::default()),
         }
     }
 }
@@ -131,9 +131,9 @@ pub enum CircuitValue {
     JubjubPoint(AssignedNativePoint<JubjubExtended>),
     JubjubScalar(AssignedScalarOfNativeCurve<JubjubExtended>),
 
-    Secp256k1Point(AssignedForeignPoint<F, secp256k1::Secp256k1, MEP>),
-    Secp256k1Base(AssignedField<F, secp256k1::Fp, MEP>),
-    Secp256k1Scalar(AssignedField<F, secp256k1::Fq, MEP>),
+    Secp256k1Point(AssignedForeignPoint<F, k256::K256, MEP>),
+    Secp256k1Base(AssignedField<F, k256::Fp, MEP>),
+    Secp256k1Scalar(AssignedField<F, k256::Fq, MEP>),
 }
 
 impl CircuitValue {
@@ -201,9 +201,9 @@ impl_enum_from_try_from!(IrValue, anyhow::Error, anyhow::Error::msg;
     JubjubPoint => JubjubSubgroup,
     JubjubScalar => JubjubFr,
 
-    Secp256k1Point => secp256k1::Secp256k1,
-    Secp256k1Base => secp256k1::Fp,
-    Secp256k1Scalar => secp256k1::Fq,
+    Secp256k1Point => k256::K256,
+    Secp256k1Base => k256::Fp,
+    Secp256k1Scalar => k256::Fq,
 );
 
 // Derives implementations, for every basic type T:
@@ -214,7 +214,7 @@ impl_enum_from_try_from!(CircuitValue, Error, Error::Synthesis;
     JubjubPoint => AssignedNativePoint<JubjubExtended>,
     JubjubScalar => AssignedScalarOfNativeCurve<JubjubExtended>,
 
-    Secp256k1Point => AssignedForeignPoint<F, secp256k1::Secp256k1, MEP>,
-    Secp256k1Base => AssignedField<F, secp256k1::Fp, MEP>,
-    Secp256k1Scalar => AssignedField<F, secp256k1::Fq, MEP>,
+    Secp256k1Point => AssignedForeignPoint<F, k256::K256, MEP>,
+    Secp256k1Base => AssignedField<F, k256::Fp, MEP>,
+    Secp256k1Scalar => AssignedField<F, k256::Fq, MEP>,
 );

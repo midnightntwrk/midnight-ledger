@@ -40,7 +40,7 @@ use midnight_circuits::instructions::{
     PublicInputInstructions, RangeCheckInstructions, ZeroInstructions,
 };
 use midnight_circuits::types::{AssignedBit, AssignedByte, AssignedNative, InnerValue};
-use midnight_curves::{JubjubSubgroup, secp256k1};
+use midnight_curves::{JubjubSubgroup, k256};
 use midnight_proofs::{
     circuit::{Layouter, Value},
     plonk::Error,
@@ -594,7 +594,7 @@ impl IrSource {
                     let p = match s.get_type() {
                         IrType::JubjubScalar => IrValue::JubjubPoint(JubjubSubgroup::generator()),
                         IrType::Secp256k1Scalar => {
-                            IrValue::Secp256k1Point(secp256k1::Secp256k1::generator())
+                            IrValue::Secp256k1Point(k256::K256::generator())
                         }
                         t => bail!("Unsupported EcMulGenerator for scalar of type {t:?}"),
                     };
@@ -672,8 +672,8 @@ impl IrSource {
 
 impl Relation for IrSource {
     type Instance = Vec<outer::Scalar>;
-
     type Witness = Preprocessed;
+    type Error = midnight_proofs::plonk::Error;
 
     fn format_instance(
         instance: &Self::Instance,
@@ -1070,8 +1070,8 @@ impl Relation for IrSource {
                                 .assign_fixed(layouter, JubjubSubgroup::generator())?,
                         ),
                         IrType::Secp256k1Scalar => CircuitValue::Secp256k1Point(
-                            std.secp256k1_curve()
-                                .assign_fixed(layouter, secp256k1::Secp256k1::generator())?,
+                            std.secp256k1()
+                                .assign_fixed(layouter, k256::K256::generator())?,
                         ),
                         t => {
                             return Err(Error::Synthesis(format!(
@@ -1198,7 +1198,9 @@ impl Relation for IrSource {
                 IrType::Secp256k1Base,
                 IrType::Secp256k1Scalar,
             ]),
+            p256: false,
             bls12_381: false,
+            curve25519: false,
             base64: false,
             automaton: false,
         }
