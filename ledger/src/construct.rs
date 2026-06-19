@@ -14,14 +14,15 @@
 use crate::dust::{DUST_GENERATION_INFO_SIZE, DustActions};
 use crate::error::{MalformedTransaction, PartitionFailure};
 use crate::structure::{
-    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent, LedgerParameters,
-    MIN_PROOF_SIZE, MaintenanceUpdate, ProofPreimageMarker, ProofPreimageVersioned, Signature,
-    SignatureKind, SignaturesValue, SigningKey, SingleUpdate, StandardTransaction, Transaction,
-    TransactionCostModel, UnshieldedOffer,
+    ContractAction, ContractCall, ContractDeploy, GUARANTEED_SEGMENT, Intent,
+    IntentSigningEnvelope, LedgerParameters, MIN_PROOF_SIZE, MaintenanceUpdate,
+    ProofPreimageMarker, ProofPreimageVersioned, Signature, SignatureKind, SignaturesValue,
+    SigningKey, SingleUpdate, StandardTransaction, Transaction, TransactionCostModel,
+    UnshieldedOffer,
 };
 use crate::structure::{
     EXPECTED_CONTRACT_DEPTH, EXPECTED_OPERATIONS_DEPTH, EXPECTED_UTXO_DEPTH,
-    FRESH_DUST_COMMITMENT_HASHES, SegIntent, UTXO_SIZE, VERIFIER_KEY_SIZE,
+    FRESH_DUST_COMMITMENT_HASHES, UTXO_SIZE, VERIFIER_KEY_SIZE,
 };
 use crate::structure::{PedersenDowngradeable, ProofKind};
 use base_crypto::cost_model::CostDuration;
@@ -383,12 +384,14 @@ impl<
             .erase_signatures()
             .data_to_sign(segment_id);
 
-        let mut sign_unshielded_offers =
-            |unshielded_offer: &mut Option<Sp<UnshieldedOffer<S, D>, D>>,
-             signing_keys: &[SigningKey]|
-             -> Result<(), MalformedTransaction<D>> {
-                if let Some(offer) = unshielded_offer {
-                    let signatures: Vec<<S as SignatureKind<D>>::Signature<SegIntent<D>>> = offer
+        let mut sign_unshielded_offers = |unshielded_offer: &mut Option<
+            Sp<UnshieldedOffer<S, D>, D>,
+        >,
+                                          signing_keys: &[SigningKey]|
+         -> Result<(), MalformedTransaction<D>> {
+            if let Some(offer) = unshielded_offer {
+                let signatures: Vec<<S as SignatureKind<D>>::Signature<IntentSigningEnvelope<D>>> =
+                    offer
                         .inputs
                         .iter()
                         .zip(signing_keys)
@@ -400,12 +403,12 @@ impl<
                         })
                         .collect::<Result<Vec<_>, _>>()?;
 
-                    let mut new = (*offer).deref().clone();
-                    new.add_signatures(signatures);
-                    *unshielded_offer = Some(Sp::new(new.clone()));
-                }
-                Ok(())
-            };
+                let mut new = (*offer).deref().clone();
+                new.add_signatures(signatures);
+                *unshielded_offer = Some(Sp::new(new.clone()));
+            }
+            Ok(())
+        };
 
         sign_unshielded_offers(
             &mut self.guaranteed_unshielded_offer,
@@ -995,7 +998,10 @@ fn per_tx_cost_reserve<D: DB>(
 }
 
 pub fn communication_commitment(input: AlignedValue, output: AlignedValue, rand: Fr) -> Fr {
-    transient_commit(&AlignedValue::concat([&input, &output]), rand)
+    transient_commit(
+        &ValueReprAlignedValue(AlignedValue::concat([&input, &output])),
+        rand,
+    )
 }
 
 pub type TranscriptPair<D> = (Option<Transcript<D>>, Option<Transcript<D>>);

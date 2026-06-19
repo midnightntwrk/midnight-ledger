@@ -1,8 +1,8 @@
-[**@midnight/ledger v0.1.0-alpha.1**](README.md)
+[**@midnight/ledger v0.1.0-rc.1**](README.md)
 
 ***
 
-# @midnight/ledger v0.1.0-alpha.1
+# @midnight/ledger v0.1.0-rc.1
 
 ## Classes
 
@@ -228,6 +228,7 @@
 - [signatureVerifyingKey](functions/signatureVerifyingKey.md)
 - [signData](functions/signData.md)
 - [signingKeyFromBip340](functions/signingKeyFromBip340.md)
+- [successorDustUtxo](functions/successorDustUtxo.md)
 - [transientCommit](functions/transientCommit.md)
 - [transientHash](functions/transientHash.md)
 - [unshieldedToken](functions/unshieldedToken.md)

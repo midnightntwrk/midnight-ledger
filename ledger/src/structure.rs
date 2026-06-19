@@ -15,15 +15,18 @@ use crate::annotation::NightAnn;
 use crate::dust::DUST_GENERATION_INFO_SIZE;
 use crate::dust::DUST_SPEND_PIS;
 use crate::dust::DUST_SPEND_PROOF_SIZE;
+use crate::dust::DustActionsSigningEnvelope;
 use crate::dust::{DustActions, DustParameters, DustState, INITIAL_DUST_PARAMETERS};
 use crate::error::FeeCalculationError;
 use crate::error::InvariantViolation;
 use crate::error::MalformedTransaction;
+use crate::utils::OptionEnvelope;
 use crate::verify::ProofVerificationMode;
 use base_crypto::BinaryHashRepr;
 use base_crypto::cost_model::RunningCost;
 use base_crypto::cost_model::price_adjustment_function;
 use base_crypto::cost_model::{CostDuration, FeePrices, FixedPoint, SyntheticCost};
+use base_crypto::envelope::Envelope;
 use base_crypto::hash::HashOutput;
 use base_crypto::hash::PERSISTENT_HASH_BYTES;
 use base_crypto::hash::persistent_hash;
@@ -69,7 +72,6 @@ use transient_crypto::commitment::{Pedersen, PedersenRandomness, PureGeneratorPe
 use transient_crypto::curve::FR_BYTES;
 use transient_crypto::curve::Fr;
 use transient_crypto::proofs::KeyLocation;
-use transient_crypto::proofs::VerifierKey;
 use transient_crypto::proofs::{Proof, ProofPreimage};
 use transient_crypto::repr::{FieldRepr, FromFieldRepr};
 use zswap::ZSWAP_TREE_HEIGHT;
@@ -289,7 +291,10 @@ impl ProofPreimageVersioned {
 #[tag = "proof-versioned"]
 #[non_exhaustive]
 pub enum ProofVersioned {
+    /// A proof generated against the v1 (zk-stdlib v1) Zkir trait.
     V2(Proof),
+    /// A proof generated against the v2 (zk-stdlib v2) Zkir trait.
+    V3(Proof),
 }
 
 impl Serializable for ProofVersioned {
@@ -299,11 +304,15 @@ impl Serializable for ProofVersioned {
                 Serializable::serialize(&1u8, writer)?;
                 proof.serialize(writer)
             }
+            ProofVersioned::V3(proof) => {
+                Serializable::serialize(&2u8, writer)?;
+                proof.serialize(writer)
+            }
         }
     }
     fn serialized_size(&self) -> usize {
         match self {
-            ProofVersioned::V2(proof) => proof.serialized_size() + 1,
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof.serialized_size() + 1,
         }
     }
 }
@@ -317,6 +326,10 @@ impl Deserializable for ProofVersioned {
                 format!("invalid old discriminant for ProofVersioned: {discrim}"),
             )),
             1 => Ok(ProofVersioned::V2(Proof::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            2 => Ok(ProofVersioned::V3(Proof::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -385,13 +398,6 @@ pub trait ProofKind<D: DB>: Ord + Storable<D> + Serializable + Deserializable + 
         call: &ContractCall<Self, D>,
         mode: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>>;
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        op: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>>;
     /// Provides the transaction size, real for proven transactions, and crudely
     /// estimated for unproven.
     fn estimated_tx_size<
@@ -443,10 +449,15 @@ impl<D: DB> ProofKind<D> for ProofMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         use transient_crypto::proofs::PARAMS_VERIFIER;
 
-        let vk = match &op.v2 {
+        let vk = match proof {
+            ProofVersioned::V2(_) => op.v1_vk(),
+            ProofVersioned::V3(_) => op.v2_vk(),
+        };
+
+        let vk = match vk {
             Some(vk) => vk,
             None => {
-                warn!("missing verifier key");
+                warn!("missing verifier key for proof version");
                 return Err(MalformedTransaction::<D>::VerifierKeyNotPresent {
                     address: call.address,
                     operation: call.entry_point.clone(),
@@ -454,41 +465,29 @@ impl<D: DB> ProofKind<D> for ProofMarker {
             }
         };
 
-        if op.v2.is_some() && !matches!(proof, ProofVersioned::V2(_)) {
-            return Err(MalformedTransaction::<D>::UnsupportedProofVersion {
-                op_version: "V2".to_string(),
-            });
-        }
+        let inner_proof = match proof {
+            ProofVersioned::V2(proof) | ProofVersioned::V3(proof) => proof,
+        };
 
         match proof {
-            ProofVersioned::V2(proof) => match mode {
+            ProofVersioned::V2(_) => match mode {
+                #[cfg(feature = "mock-verify")]
+                ProofVerificationMode::CalibratedMock => {
+                    zkir_v2::ir_v1::v1_mock_verify(vk, pis.into_iter())
+                        .map_err(MalformedTransaction::<D>::InvalidProof)
+                }
+                _ => zkir_v2::ir_v1::v1_verify(vk, inner_proof, pis.into_iter())
+                    .map_err(MalformedTransaction::<D>::InvalidProof),
+            },
+            ProofVersioned::V3(_) => match mode {
                 #[cfg(feature = "mock-verify")]
                 ProofVerificationMode::CalibratedMock => vk
                     .mock_verify(pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
                 _ => vk
-                    .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
+                    .verify(&PARAMS_VERIFIER, inner_proof, pis.into_iter())
                     .map_err(MalformedTransaction::<D>::InvalidProof),
             },
-        }
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        vk: &VerifierKey,
-        proof: &Self::LatestProof,
-        pis: Vec<Fr>,
-        mode: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        use transient_crypto::proofs::PARAMS_VERIFIER;
-
-        match mode {
-            #[cfg(feature = "mock-verify")]
-            ProofVerificationMode::CalibratedMock => vk
-                .mock_verify(pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
-            _ => vk
-                .verify(&PARAMS_VERIFIER, proof, pis.into_iter())
-                .map_err(MalformedTransaction::<D>::InvalidProof),
         }
     }
     fn estimated_tx_size<
@@ -531,15 +530,6 @@ impl<D: DB> ProofKind<D> for ProofPreimageMarker {
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
     }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
     fn estimated_tx_size<
         S: SignatureKind<D>,
         B: Storable<D> + PedersenDowngradeable<D> + Serializable,
@@ -570,15 +560,6 @@ impl<D: DB> ProofKind<D> for () {
         _: &Self::Proof,
         _: Vec<Fr>,
         _: &ContractCall<Self, D>,
-        _: ProofVerificationMode,
-    ) -> Result<(), MalformedTransaction<D>> {
-        Ok(())
-    }
-    #[allow(clippy::result_large_err)]
-    fn latest_proof_verify(
-        _: &VerifierKey,
-        _: &Self::LatestProof,
-        _: Vec<Fr>,
         _: ProofVerificationMode,
     ) -> Result<(), MalformedTransaction<D>> {
         Ok(())
@@ -665,17 +646,24 @@ pub struct OutputInstructionUnshielded {
 }
 tag_enforcement_test!(OutputInstructionUnshielded);
 
+#[derive(Serializable)]
+#[tag = "output-instruction-unshielded-with-token-type[v1]"]
+struct OutputInstructionUnshieldedWithTokenType {
+    token_type: UnshieldedTokenType,
+    instruction: OutputInstructionUnshielded,
+}
+
 impl OutputInstructionUnshielded {
     pub fn to_hash_data(self, tt: UnshieldedTokenType) -> Vec<u8> {
         let mut data = Vec::new();
-        data.extend(b"midnight:hash-output-instruction-unshielded:");
-        Serializable::serialize(&tt, &mut data).expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.amount, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.target_address, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.nonce, &mut data)
-            .expect("In-memory serialization should succeed");
+        tagged_serialize(
+            &OutputInstructionUnshieldedWithTokenType {
+                token_type: tt,
+                instruction: self,
+            },
+            &mut data,
+        )
+        .expect("In-memory serialization should succeed");
         data
     }
 
@@ -749,18 +737,8 @@ pub enum SystemTransaction {
 }
 tag_enforcement_test!(SystemTransaction);
 
-#[derive(Storable)]
-#[derive_where(Clone, PartialEq, Eq)]
-#[storable(db = D)]
-pub struct SegIntent<D: DB>(u16, ErasedIntent<D>);
-
-impl<D: DB> SegIntent<D> {
-    pub fn into_inner(&self) -> (u16, ErasedIntent<D>) {
-        (self.0, self.1.clone())
-    }
-}
-
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
+#[envelope(UnshieldedOfferSigningEnvelope<S, D>)]
 #[tag = "unshielded-offer[v2]"]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
 #[storable(db = D)]
@@ -772,9 +750,20 @@ pub struct UnshieldedOffer<S: SignatureKind<D>, D: DB> {
     pub outputs: storage::storage::Array<UtxoOutput, D>,
     // Note that for S = (), this has a fixed point of ().
     // This signs the intent, and the segment ID
-    pub signatures: storage::storage::Array<S::Signature<SegIntent<D>>, D>,
+    pub signatures: storage::storage::Array<S::Signature<IntentSigningEnvelope<D>>, D>,
 }
 tag_enforcement_test!(UnshieldedOffer<(), InMemoryDB>);
+
+#[derive(Storable)]
+#[tag = "unshielded-offer-signing-envelope[v2]"]
+#[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord; S)]
+#[storable(db = D)]
+pub struct UnshieldedOfferSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    pub inputs: storage::storage::Array<UtxoSpend, D>,
+    pub outputs: storage::storage::Array<UtxoOutput, D>,
+    pub signatures: PhantomData<storage::storage::Array<S::Signature<IntentSigningEnvelope<D>>, D>>,
+}
+tag_enforcement_test!(UnshieldedOfferSigningEnvelope<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> fmt::Debug for UnshieldedOffer<S, D> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -792,7 +781,7 @@ impl<S: SignatureKind<D>, D: DB> fmt::Debug for UnshieldedOffer<S, D> {
 impl<S: SignatureKind<D>, D: DB> UnshieldedOffer<S, D> {
     pub fn add_signatures(
         &mut self,
-        signatures: Vec<<S as SignatureKind<D>>::Signature<SegIntent<D>>>,
+        signatures: Vec<<S as SignatureKind<D>>::Signature<IntentSigningEnvelope<D>>>,
     ) {
         for signature in signatures {
             self.signatures = self.signatures.push(signature);
@@ -847,11 +836,13 @@ impl rand::distributions::Distribution<IntentHash> for rand::distributions::Stan
 
 pub type ErasedIntent<D> = Intent<(), (), Pedersen, D>;
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
+#[envelope(InnerIntentSigningEnvelope<S, P, B, D>)]
+#[envelope(InnerIntentPedersenEnvelope<S, P, B, D>)]
 #[tag = "intent[v8]"]
 #[derive_where(Clone, PartialEq, Eq; S, B, P)]
 #[storable(db = D)]
-pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
+pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, D: DB> {
     pub guaranteed_unshielded_offer: Option<Sp<UnshieldedOffer<S, D>, D>>,
     pub fallible_unshielded_offer: Option<Sp<UnshieldedOffer<S, D>, D>>,
     pub actions: storage::storage::Array<ContractAction<P, D>, D>,
@@ -861,11 +852,77 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
 }
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
-impl<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> Intent<S, P, B, D> {
-    pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
-        let mut data = ContractAction::challenge_pre_for(Vec::from(&self.actions).as_slice());
-        let _ = Serializable::serialize(&segment_id, &mut data);
+#[derive(Serializable)]
+#[tag = "inner-intent-signing-envelope[v8]"]
+#[phantom(D)]
+// Note: This signing envelope is *not* just the erased intent in order to not count the number of
+// signatures in unshielded offers. For this same reason, no wrapper is required for contract
+// actions; these *already* have erased the signatures/proofs from them.
+pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D>, D: DB> {
+    pub guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    pub fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    pub actions: storage::storage::Array<ContractAction<P, D>, D>,
+    pub dust_actions: OptionEnvelope<DustActionsSigningEnvelope<S, P, D>>,
+    pub ttl: Timestamp,
+    pub binding_commitment: B,
+}
+tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
+#[derive(Serializable)]
+#[tag = "intent-signing-envelope[v8]"]
+#[phantom(D)]
+pub struct IntentSigningEnvelope<D: DB> {
+    pub segment: u16,
+    pub intent: InnerIntentSigningEnvelope<(), (), Pedersen, D>,
+}
+tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "inner-intent-pedersen-challenge-envelope[v8]"]
+#[phantom(D)]
+// Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
+// binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
+// be used on the erased intent. This is not enforced at a type level due to the limitations of the
+// `Envelope` derive macro, which is considered required as the automated nature of this will flag
+// envelope mismatches.
+struct InnerIntentPedersenEnvelope<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Clone,
+    D: DB,
+> {
+    guaranteed_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    fallible_unshielded_offer: OptionEnvelope<UnshieldedOfferSigningEnvelope<S, D>>,
+    actions: storage::storage::Array<ContractAction<P, D>, D>,
+    dust_actions: OptionEnvelope<DustActions<S, P, D>>,
+    ttl: Timestamp,
+    binding_commitment: PhantomData<B>,
+}
+tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "intent-pedersen-challenge-envelope[v8]"]
+#[phantom(D)]
+struct IntentPedersenEnvelope<D: DB> {
+    segment: u16,
+    intent: InnerIntentPedersenEnvelope<(), (), Pedersen, D>,
+}
+tag_enforcement_test!(IntentPedersenEnvelope<InMemoryDB>);
+
+impl<
+    S: SignatureKind<D>,
+    P: ProofKind<D>,
+    B: Storable<D> + Serializable + PedersenDowngradeable<D>,
+    D: DB,
+> Intent<S, P, B, D>
+{
+    pub fn challenge_pre_for(&self, segment_id: u16) -> Vec<u8> {
+        let mut data = Vec::new();
+        let envelope = IntentPedersenEnvelope {
+            segment: segment_id,
+            intent: self.erase_proofs().erase_signatures().into_envelope(),
+        };
+        tagged_serialize(&envelope, &mut data).expect("in-memory serialization must succeed");
         data
     }
 }
@@ -888,20 +945,6 @@ impl<S: SignatureKind<D> + Debug, P: ProofKind<D>, B: Storable<D>, D: DB> fmt::D
             .field("binding_commitment", &Symbol("<binding commitment>"))
             .finish()
     }
-}
-
-fn to_hash_data<D: DB>(intent: Intent<(), (), Pedersen, D>, mut data: Vec<u8>) -> Vec<u8> {
-    Serializable::serialize(&intent.guaranteed_unshielded_offer, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.fallible_unshielded_offer, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.actions, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.ttl, &mut data)
-        .expect("In-memory serialization should succeed");
-    Serializable::serialize(&intent.binding_commitment, &mut data)
-        .expect("In-memory serialization should succeed");
-    data
 }
 
 impl<
@@ -992,10 +1035,12 @@ impl<
 impl<D: DB> Intent<(), (), Pedersen, D> {
     pub fn data_to_sign(&self, segment_id: u16) -> Vec<u8> {
         let mut data = Vec::new();
-        data.extend(b"midnight:hash-intent:");
-        Serializable::serialize(&segment_id, &mut data)
-            .expect("In-memory serialization should succeed");
-        to_hash_data::<D>(self.clone(), data)
+        let envelope = IntentSigningEnvelope {
+            segment: segment_id,
+            intent: self.into_envelope(),
+        };
+        tagged_serialize(&envelope, &mut data).expect("in-memory serialization must succeed");
+        data
     }
 }
 
@@ -1764,9 +1809,10 @@ impl<S: SignatureKind<D>, P: ProofKind<D> + Serializable + Deserializable, B: St
 
 type ErasedClaimRewardsTransaction<D> = ClaimRewardsTransaction<(), D>;
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Clone, PartialEq, Eq; S)]
 #[storable(db = D)]
+#[envelope(ClaimRewardsTransactionSigningEnvelope<S, D>)]
 #[tag = "claim-rewards-transaction[v2]"]
 pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub network_id: String,
@@ -1777,6 +1823,18 @@ pub struct ClaimRewardsTransaction<S: SignatureKind<D>, D: DB> {
     pub kind: ClaimKind,
 }
 tag_enforcement_test!(ClaimRewardsTransaction<(), InMemoryDB>);
+
+#[derive(Serializable)]
+#[phantom(S, D)]
+#[tag = "claim-rewards-transaction-signing-envelope[v2]"]
+struct ClaimRewardsTransactionSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    network_id: String,
+    value: u128,
+    owner: SignatureVerifyingKey,
+    nonce: Nonce,
+    signature: PhantomData<S::Signature<ErasedClaimRewardsTransaction<D>>>,
+    kind: ClaimKind,
+}
 
 impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
     pub fn add_signature(&self, signature: Signature) -> ClaimRewardsTransaction<Signature, D> {
@@ -1804,19 +1862,7 @@ impl<S: SignatureKind<D>, D: DB> ClaimRewardsTransaction<S, D> {
 
 impl<D: DB> ClaimRewardsTransaction<(), D> {
     pub fn data_to_sign(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(b"midnight:sig-claim_rewards_transaction:");
-        Self::to_hash_data(self.clone(), data)
-    }
-
-    pub fn to_hash_data(rewards: ClaimRewardsTransaction<(), D>, mut data: Vec<u8>) -> Vec<u8> {
-        Serializable::serialize(&rewards.value, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&rewards.owner, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&rewards.nonce, &mut data)
-            .expect("In-memory serialization should succeed");
-        data
+        <Self as Envelope<ClaimRewardsTransactionSigningEnvelope<_, _>>>::envelope_data(self)
     }
 }
 
@@ -2663,7 +2709,10 @@ impl<D: DB> ContractDeploy<D> {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersion {
+    /// The v2 field in ContractOperation (v1 zk-stdlib verifier keys).
     V3,
+    /// The v3 field in ContractOperation (v2 zk-stdlib verifier keys).
+    V4,
 }
 
 impl Serializable for ContractOperationVersion {
@@ -2671,13 +2720,14 @@ impl Serializable for ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => Serializable::serialize(&2u8, writer),
+            V::V4 => Serializable::serialize(&3u8, writer),
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersion as V;
         match self {
-            V::V3 => 1,
+            V::V3 | V::V4 => 1,
         }
     }
 }
@@ -2703,6 +2753,7 @@ impl Deserializable for ContractOperationVersion {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(V::V3),
+            3u8 => Ok(V::V4),
             _ => Err(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
                 format!("Unknown discriminant {}", disc[0]),
@@ -2716,12 +2767,14 @@ impl ContractOperationVersion {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2.is_some(),
+            V::V4 => co.v3.is_some(),
         }
     }
     pub(crate) fn rm_from(&self, co: &mut ContractOperation) {
         use ContractOperationVersion as V;
         match self {
             V::V3 => co.v2 = None,
+            V::V4 => co.v3 = None,
         }
     }
 }
@@ -2729,7 +2782,10 @@ impl ContractOperationVersion {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum ContractOperationVersionedVerifierKey {
+    /// A v1 (zk-stdlib v1) verifier key, stored in ContractOperation.v2.
     V3(transient_crypto::proofs::VerifierKey),
+    /// A v2 (zk-stdlib v2) verifier key, stored in ContractOperation.v3.
+    V4(transient_crypto::proofs::VerifierKey),
 }
 
 impl ContractOperationVersionedVerifierKey {
@@ -2738,6 +2794,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(_) => V::V3,
+            VK::V4(_) => V::V4,
         }
     }
 
@@ -2745,6 +2802,7 @@ impl ContractOperationVersionedVerifierKey {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
             VK::V3(vk) => co.v2 = Some(vk.clone()),
+            VK::V4(vk) => co.v3 = Some(vk.clone()),
         }
     }
 }
@@ -2757,13 +2815,17 @@ impl Serializable for ContractOperationVersionedVerifierKey {
                 Serializable::serialize(&2u8, writer)?;
                 Serializable::serialize(vk, writer)
             }
+            VK::V4(vk) => {
+                Serializable::serialize(&3u8, writer)?;
+                Serializable::serialize(vk, writer)
+            }
         }
     }
 
     fn serialized_size(&self) -> usize {
         use ContractOperationVersionedVerifierKey as VK;
         match self {
-            VK::V3(vk) => 1 + Serializable::serialized_size(vk),
+            VK::V3(vk) | VK::V4(vk) => 1 + Serializable::serialized_size(vk),
         }
     }
 }
@@ -2789,6 +2851,10 @@ impl Deserializable for ContractOperationVersionedVerifierKey {
                 format!("Invalid old discriminant {}", disc[0]),
             )),
             2u8 => Ok(VK::V3(Deserializable::deserialize(
+                reader,
+                recursion_depth,
+            )?)),
+            3u8 => Ok(VK::V4(Deserializable::deserialize(
                 reader,
                 recursion_depth,
             )?)),
@@ -2829,7 +2895,8 @@ impl SignaturesValue {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
+#[envelope(MaintenanceUpdateSigningEnvelope<D>)]
 #[derive_where(Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[tag = "contract-maintenance-update[v2]"]
 #[storable(db = D)]
@@ -2840,6 +2907,17 @@ pub struct MaintenanceUpdate<D: DB> {
     pub signatures: storage::storage::Array<SignaturesValue, D>,
 }
 tag_enforcement_test!(MaintenanceUpdate<InMemoryDB>);
+
+#[derive(Serializable)]
+#[phantom(D)]
+#[tag = "contract-maintenance-update-signing-envelope[v2]"]
+struct MaintenanceUpdateSigningEnvelope<D: DB> {
+    address: ContractAddress,
+    updates: storage::storage::Array<SingleUpdate, D>,
+    counter: u32,
+    signatures: PhantomData<storage::storage::Array<SignaturesValue, D>>,
+}
+tag_enforcement_test!(MaintenanceUpdateSigningEnvelope<InMemoryDB>);
 
 impl<D: DB> Debug for MaintenanceUpdate<D> {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -2854,15 +2932,7 @@ impl<D: DB> Debug for MaintenanceUpdate<D> {
 
 impl<D: DB> MaintenanceUpdate<D> {
     pub fn data_to_sign(&self) -> Vec<u8> {
-        let mut data = Vec::new();
-        data.extend(b"midnight:contract-update:");
-        Serializable::serialize(&self.address, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.updates, &mut data)
-            .expect("In-memory serialization should succeed");
-        Serializable::serialize(&self.counter, &mut data)
-            .expect("In-memory serialization should succeed");
-        data
+        <Self as Envelope<MaintenanceUpdateSigningEnvelope<D>>>::envelope_data(self)
     }
 }
 
@@ -2919,32 +2989,6 @@ impl<P: ProofKind<D>, D: DB> ContractAction<P, D> {
             .into_iter()
             .map(ContractAction::erase_proof)
             .collect()
-    }
-
-    pub fn challenge_pre_for(calls: &[ContractAction<P, D>]) -> Vec<u8> {
-        let mut data = Vec::new();
-        for cd in calls.iter() {
-            match cd {
-                ContractAction::Call(call) => {
-                    data.push(0u8);
-                    let _ = Serializable::serialize(&call.address, &mut data);
-                    let _ = Serializable::serialize(&call.entry_point, &mut data);
-
-                    let _ = Serializable::serialize(&call.guaranteed_transcript, &mut data);
-
-                    let _ = Serializable::serialize(&call.fallible_transcript, &mut data);
-                }
-                ContractAction::Deploy(deploy) => {
-                    data.push(1u8);
-                    let _ = Serializable::serialize(&deploy, &mut data);
-                }
-                ContractAction::Maintain(upd) => {
-                    data.push(2u8);
-                    let _ = Serializable::serialize(&upd, &mut data);
-                }
-            }
-        }
-        data
     }
 }
 

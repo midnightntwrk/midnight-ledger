@@ -17,11 +17,13 @@ use crate::error::{
 use crate::events::{Event, EventDetails};
 use crate::semantics::TransactionContext;
 use crate::structure::{
-    ErasedIntent, IntentHash, ProofKind, ProofMarker, ProofPreimageMarker, SPECKS_PER_DUST,
-    STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol, TransactionHash,
-    UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
+    ErasedIntent, IntentHash, IntentSigningEnvelope, ProofKind, ProofMarker, ProofPreimageMarker,
+    SPECKS_PER_DUST, STARS_PER_NIGHT, SignatureKind, SignatureVerifyingKey, Symbol,
+    TransactionHash, UnshieldedOffer, Utxo, UtxoSpend, UtxoState,
 };
+use crate::utils::VecEnvelope;
 use crate::verify::{StateReference, WellFormedStrictness};
+use base_crypto::envelope::Envelope;
 use base_crypto::{
     MemWrite,
     hash::{HashOutput, PERSISTENT_HASH_BYTES, PersistentHashWriter, persistent_commit},
@@ -49,6 +51,7 @@ use serialize::tagged_deserialize;
 use serialize::{Deserializable, Serializable, Tagged, tag_enforcement_test};
 use std::error::Error;
 use std::fmt::{self, Debug, Display, Formatter};
+use std::marker::PhantomData;
 #[cfg(test)]
 use storage::db::InMemoryDB;
 use storage::{
@@ -636,10 +639,21 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                P::latest_proof_verify(
-                    &SPEND_VK,
-                    &self.proof,
+                let dust_op =
+                    onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let dust_call = crate::structure::ContractCall {
+                    address: coin_structure::contract::ContractAddress::default(),
+                    entry_point: onchain_runtime::state::EntryPointBuf(vec![]),
+                    guaranteed_transcript: None,
+                    fallible_transcript: None,
+                    communication_commitment: Fr::default(),
+                    proof: self.proof.clone().into(),
+                };
+                P::proof_verify(
+                    &dust_op,
+                    &self.proof.clone().into(),
                     pis,
+                    &dust_call,
                     strictness.proof_verification_mode,
                 )
                 .map_err(|_| MalformedTransaction::InvalidDustSpendProof {
@@ -653,18 +667,31 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Clone, PartialEq, Eq, Debug; S)]
 #[storable(db = D)]
+#[envelope(DustRegistrationSigningEnvelope<S, D>)]
 #[tag = "dust-registration[v2]"]
 pub struct DustRegistration<S: SignatureKind<D>, D: DB> {
     pub night_key: SignatureVerifyingKey,
     pub dust_address: Option<Sp<DustPublicKey, D>>,
     pub allow_fee_payment: u128,
     #[allow(clippy::type_complexity)]
-    pub signature: Option<Sp<S::Signature<(u16, ErasedIntent<D>)>, D>>,
+    pub signature: Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>,
 }
 tag_enforcement_test!(DustRegistration<(), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-registration-signing-envelope[v8]"]
+#[phantom(D)]
+pub struct DustRegistrationSigningEnvelope<S: SignatureKind<D>, D: DB> {
+    pub night_key: SignatureVerifyingKey,
+    pub dust_address: Option<Sp<DustPublicKey, D>>,
+    pub allow_fee_payment: u128,
+    #[allow(clippy::type_complexity)]
+    pub signature: PhantomData<Option<Sp<S::Signature<IntentSigningEnvelope<D>>, D>>>,
+}
+tag_enforcement_test!(DustRegistrationSigningEnvelope<(), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     pub(crate) fn erase_signatures(&self) -> DustRegistration<(), D> {
@@ -701,10 +728,11 @@ impl<S: SignatureKind<D>, D: DB> DustRegistration<S, D> {
     }
 }
 
-#[derive(Storable)]
+#[derive(Storable, Envelope)]
 #[derive_where(Debug)]
 #[derive_where(Clone, PartialEq, Eq; S, P)]
 #[storable(db = D)]
+#[envelope(DustActionsSigningEnvelope<S, P, D>)]
 #[tag = "dust-actions[v2]"]
 pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub spends: storage::storage::Array<DustSpend<P, D>, D>,
@@ -712,6 +740,16 @@ pub struct DustActions<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
     pub ctime: Timestamp,
 }
 tag_enforcement_test!(DustActions<(), (), InMemoryDB>);
+
+#[derive(Serializable)]
+#[tag = "dust-actions-signing-envelope[v2]"]
+#[phantom(D)]
+pub struct DustActionsSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, D: DB> {
+    pub spends: storage::storage::Array<DustSpend<P, D>, D>,
+    pub registrations: VecEnvelope<DustRegistrationSigningEnvelope<S, D>>,
+    pub ctime: Timestamp,
+}
+tag_enforcement_test!(DustActionsSigningEnvelope<(), (), InMemoryDB>);
 
 impl<S: SignatureKind<D>, D: DB> DustActions<S, ProofPreimageMarker, D> {
     pub(crate) async fn prove(
@@ -1313,8 +1351,8 @@ pub const INITIAL_DUST_PARAMETERS: DustParameters = DustParameters {
 #[storable(base)]
 #[tag = "dust-wallet-utxo-state[v1]"]
 pub struct DustWalletUtxoState {
-    utxo: QualifiedDustOutput,
-    pending_until: Option<Timestamp>,
+    pub utxo: QualifiedDustOutput,
+    pub pending_until: Option<Timestamp>,
 }
 tag_enforcement_test!(DustWalletUtxoState);
 
@@ -1361,7 +1399,7 @@ pub struct DustLocalState<D: DB> {
     pub commitment_tree: MerkleTree<(), D>,
     pub commitment_tree_first_free: u64,
     night_indices: HashMap<InitialNonce, u64, D>,
-    dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
+    pub dust_utxos: HashMap<DustNullifier, DustWalletUtxoState, D>,
     pub sync_time: Timestamp,
     pub params: DustParameters,
 }
@@ -1497,35 +1535,6 @@ impl<D: DB> DustLocalState<D> {
         let mut state = self.clone();
         state.dust_utxos = state.dust_utxos.remove(nullifier);
         Ok(state)
-    }
-
-    pub fn successor_utxo(
-        &self,
-        utxo: &QualifiedDustOutput,
-        now: &Timestamp,
-        subtract_fee: u128,
-        new_commitment_index: u64,
-        sk: &DustSecretKey,
-    ) -> Result<QualifiedDustOutput, DustLocalStateError> {
-        let gen_idx = self.night_indices.get(&utxo.backing_night).ok_or(
-            DustLocalStateError::BackingNightNotFound {
-                backing_night: utxo.backing_night,
-            },
-        )?;
-
-        let gen_info = self.generating_tree.index(*gen_idx).unwrap().1;
-        let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, &self.params);
-        let v_now = v_pre_spend.saturating_sub(subtract_fee);
-        let qdo_new = QualifiedDustOutput {
-            backing_night: utxo.backing_night,
-            ctime: *now,
-            initial_value: v_now,
-            seq: utxo.seq + 1,
-            nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
-            owner: utxo.owner,
-            mt_index: new_commitment_index,
-        };
-        Ok(qdo_new)
     }
 
     pub fn generation_info(&self, qdo: &QualifiedDustOutput) -> Option<DustGenerationInfo> {
@@ -2067,6 +2076,29 @@ impl<D: DB> DustLocalState<D> {
         res.result.commitment_tree = res.result.commitment_tree.rehash();
         res.result.generating_tree = res.result.generating_tree.rehash();
         Ok(res)
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn successor_utxo(
+    utxo: &QualifiedDustOutput,
+    now: &Timestamp,
+    subtract_fee: u128,
+    new_commitment_index: u64,
+    gen_info: &DustGenerationInfo,
+    sk: &DustSecretKey,
+    params: &DustParameters,
+) -> QualifiedDustOutput {
+    let v_pre_spend = DustOutput::from(*utxo).updated_value(gen_info, *now, params);
+    let v_now = v_pre_spend.saturating_sub(subtract_fee);
+    QualifiedDustOutput {
+        backing_night: utxo.backing_night,
+        ctime: *now,
+        initial_value: v_now,
+        seq: utxo.seq + 1,
+        nonce: dust_nonce(&utxo.backing_night, utxo.seq + 1, sk),
+        owner: utxo.owner,
+        mt_index: new_commitment_index,
     }
 }
 

@@ -625,7 +625,7 @@ mod k_endpoint {
 
     fn create_minimal_ir_source() -> zkir_v2::IrSource {
         zkir_v2::IrSource {
-            version: Default::default(),
+            version: zkir_v2::IrMinorVersion::V0,
             num_inputs: 1,
             do_communications_commitment: false,
             instructions: std::sync::Arc::new(vec![]),
