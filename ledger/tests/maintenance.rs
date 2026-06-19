@@ -501,7 +501,7 @@ fn maintenance() {
             .get(&EntryPointBuf(b"foo"[..].to_owned()))
             .expect("foo operation should still be present");
         assert!(foo.ir.is_some());
-        assert!(foo.latest().is_some());
+        assert!(foo.v2.is_some());
         assert!(
             cstate
                 .operations

@@ -39,9 +39,10 @@ use midnight_proofs_v1::{
     plonk::Error,
 };
 use midnight_zk_stdlib_v1::{Relation, ZkStdLib, ZkStdLibArch};
-use serialize::VecExt;
+use serialize::{VecExt, peek_tag, Serializable, Deserializable, Tagged};
 use transient_crypto::curve::{FR_BITS, FR_BYTES_STORED};
 use transient_crypto::fab::AlignmentExt;
+use std::io::{self, Read, Seek};
 
 use super::ir::{IrSource, Instruction as I};
 
@@ -605,6 +606,10 @@ fn preimage_from_v1(
 
 // --- Old Zkir impl (v1 pipeline) ---
 
+#[derive(Serializable)]
+#[tag = "prover-key[v7](ir-source[v2])"]
+struct FacadeProverKey(Vec<u8>);
+
 impl transient_crypto_old::proofs::Zkir for IrSource {
     fn check(
         &self,
@@ -655,6 +660,35 @@ impl transient_crypto_old::proofs::Zkir for IrSource {
             .collect();
 
         Ok((transient_crypto_old::proofs::Proof(proof), old_pis, pi_skips))
+    }
+
+    fn load_ir_from_tagged(reader: impl Read + Seek) -> io::Result<Self> {
+        Self::load_from_tagged(reader)
+    }
+
+    fn load_prover_key_from_tagged(mut reader: impl Read + Seek) -> io::Result<transient_crypto_old::proofs::ProverKey<Self>> {
+        use transient_crypto_old::proofs::ProverKey;
+        let tag = peek_tag(&mut reader)?;
+        let expected_tag_new = <ProverKey<IrSource>>::tag();
+        let expected_tag_old = FacadeProverKey::tag();
+        if tag == expected_tag_new {
+            serialize::tagged_deserialize(&mut reader)
+        } else if tag == expected_tag_old {
+            let FacadeProverKey(data) = serialize::tagged_deserialize::<FacadeProverKey>(reader)?;
+            let mut header = Vec::new();
+            Serializable::serialize(&(data.len() as u32), &mut header)?;
+            let mut header_cursor = &header[..];
+            let mut data_cursor = &data[..];
+            let mut reader = Read::chain(&mut header_cursor, &mut data_cursor);
+            Deserializable::deserialize(&mut reader, 0)
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "expected one of '{expected_tag_new}' or '{expected_tag_old}', got '{tag}'."
+                ),
+            ))
+        }
     }
 }
 
