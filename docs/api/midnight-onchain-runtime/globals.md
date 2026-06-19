@@ -1,8 +1,8 @@
-[**@midnight-ntwrk/onchain-runtime v4.0.0-alpha.1**](README.md)
+[**@midnight-ntwrk/onchain-runtime v4.0.0-rc.2**](README.md)
 
 ***
 
-# @midnight-ntwrk/onchain-runtime v4.0.0-alpha.1
+# @midnight-ntwrk/onchain-runtime v4.0.0-rc.2
 
 ## Classes
 

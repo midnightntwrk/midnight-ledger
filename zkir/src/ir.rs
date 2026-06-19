@@ -16,6 +16,8 @@
 use anyhow::Result;
 use base_crypto::fab::Alignment;
 use midnight_proofs::dev::cost_model::CircuitModel;
+use midnight_proofs::utils::SerdeFormat;
+use midnight_zk_stdlib::MidnightPK;
 #[cfg(feature = "proptest")]
 use proptest_derive::Arbitrary;
 use rand::{CryptoRng, Rng};
@@ -23,13 +25,12 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "proptest")]
 use serialize::randomised_serialization_test;
 use serialize::{
-    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_serialize,
+    Deserializable, Serializable, Tagged, peek_tag, tag_enforcement_test, tagged_deserialize,
+    tagged_serialize,
 };
 use std::io::{self, Read, Seek, Write};
 use std::sync::Arc;
 use transient_crypto::curve::Fr;
-use midnight_proofs::utils::SerdeFormat;
-use midnight_zk_stdlib::MidnightPK;
 use transient_crypto::proofs::{
     ParamsProverProvider, Proof, ProofPreimage, ProverKey, ProvingError, TranscriptHash,
     VerifierKey, Zkir,
@@ -166,14 +167,7 @@ impl Zkir for IrSource {
         let preproc = self.preprocess(preimage)?;
         let pis = preproc.pis.clone();
         let pi_skips = preproc.pi_skips.clone();
-        let proof = prove::<_, TranscriptHash>(
-            params_k.as_ref(),
-            v2_pk,
-            self,
-            &pis,
-            preproc,
-            rng,
-        )?;
+        let proof = prove::<_, TranscriptHash>(params_k.as_ref(), v2_pk, self, &pis, preproc, rng)?;
         Ok((Proof(proof), pis.into_iter().map(Fr).collect(), pi_skips))
     }
 
@@ -197,7 +191,7 @@ impl Zkir for IrSource {
             let old_vk = old_ir.keygen_vk(&v1_params).await?;
             let raw = {
                 let mut buf = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+                Serializable::serialize(&old_vk, &mut buf)?;
                 buf
             };
             let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
@@ -205,7 +199,10 @@ impl Zkir for IrSource {
         } else {
             use midnight_zk_stdlib::setup_vk;
             let k = midnight_zk_stdlib::optimal_k(self) as u8;
-            Ok(VerifierKey::from(setup_vk(params.get_params(k).await?.as_ref(), self)))
+            Ok(VerifierKey::from(setup_vk(
+                params.get_params(k).await?.as_ref(),
+                self,
+            )))
         }
     }
 
@@ -221,7 +218,7 @@ impl Zkir for IrSource {
             let versioned_pk = VersionedInnerPK::V1((*v1_inner_pk).clone());
             let raw = {
                 let mut buf = Vec::new();
-                serialize_old::Serializable::serialize(&old_vk, &mut buf)?;
+                Serializable::serialize(&old_vk, &mut buf)?;
                 buf
             };
             let vk: VerifierKey = serialize::Deserializable::deserialize(&mut &raw[..], 0)?;
@@ -242,17 +239,13 @@ impl Zkir for IrSource {
     }
 
     fn write_raw_pk(writer: impl Write, pk: &Self::ProverKey) -> io::Result<()> {
-        let mut writer = flate2::write::GzEncoder::new(
-            writer,
-            flate2::Compression::new(PK_COMPRESSION_LEVEL),
-        );
+        let mut writer =
+            flate2::write::GzEncoder::new(writer, flate2::Compression::new(PK_COMPRESSION_LEVEL));
         match pk {
-            VersionedInnerPK::V1(v1_pk) => {
-                v1_pk.write(
-                    &mut { &mut writer },
-                    midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
-                )
-            }
+            VersionedInnerPK::V1(v1_pk) => v1_pk.write(
+                &mut { &mut writer },
+                midnight_proofs_v1::utils::SerdeFormat::RawBytesUnchecked,
+            ),
             VersionedInnerPK::V2(v2_pk) => {
                 v2_pk.write(&mut { writer }, SerdeFormat::RawBytesUnchecked)
             }
@@ -594,7 +587,7 @@ impl IrSource {
     pub fn to_v1(&self) -> io::Result<V1IrSource> {
         let mut buf = Vec::new();
         self.serialize_to_tagged(&mut buf)?;
-        serialize_old::tagged_deserialize(&mut &buf[..])
+        tagged_deserialize(&mut &buf[..])
     }
 
     /// v2 (zk-stdlib v2) key generation. Not the default; use `Zkir::keygen` for v1.
@@ -606,7 +599,10 @@ impl IrSource {
         let k = midnight_zk_stdlib::optimal_k(self) as u8;
         let vk = setup_vk(params.get_params(k).await?.as_ref(), self);
         let pk = setup_pk(self, &vk);
-        Ok((ProverKey::from_raw(VersionedInnerPK::V2(pk)), VerifierKey::from(vk)))
+        Ok((
+            ProverKey::from_raw(VersionedInnerPK::V2(pk)),
+            VerifierKey::from(vk),
+        ))
     }
 
     /// Retrieves a model representation of this circuit.

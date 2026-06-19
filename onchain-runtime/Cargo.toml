@@ -12,7 +12,7 @@ vendored = []
 proptest = ["dep:proptest", "dep:proptest-derive", "coin-structure/proptest", "onchain-runtime-state/proptest", "onchain-vm/proptest"]
 
 [dependencies]
-coin-structure = { version = "2.1.0", path = "../coin-structure", package = "midnight-coin-structure" }
+coin-structure = { version = "3.0.0", path = "../coin-structure", package = "midnight-coin-structure" }
 onchain-runtime-state = { version = "4.0.0", path = "../onchain-state", package = "midnight-onchain-state" }
 onchain-vm = { version = "4.0.0", path = "../onchain-vm", package = "midnight-onchain-vm" }
 storage = { version = "2.0.0", path = "../storage", package = "midnight-storage" }
