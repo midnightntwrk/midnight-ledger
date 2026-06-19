@@ -868,7 +868,7 @@ pub struct Intent<S: SignatureKind<D>, P: ProofKind<D>, B: Storable<D> + Clone, 
 tag_enforcement_test!(Intent<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-signing-envelope[v8]"]
+#[tag = "inner-intent-signing-envelope[v9]"]
 #[phantom(D)]
 // Note: This signing envelope is *not* just the erased intent in order to not count the number of
 // signatures in unshielded offers. For this same reason, no wrapper is required for contract
@@ -884,7 +884,7 @@ pub struct InnerIntentSigningEnvelope<S: SignatureKind<D>, P: ProofKind<D>, B: S
 tag_enforcement_test!(InnerIntentSigningEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-signing-envelope[v8]"]
+#[tag = "intent-signing-envelope[v9]"]
 #[phantom(D)]
 pub struct IntentSigningEnvelope<D: DB> {
     pub segment: u16,
@@ -893,7 +893,7 @@ pub struct IntentSigningEnvelope<D: DB> {
 tag_enforcement_test!(IntentSigningEnvelope<InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "inner-intent-pedersen-challenge-envelope[v8]"]
+#[tag = "inner-intent-pedersen-challenge-envelope[v9]"]
 #[phantom(D)]
 // Note: The pedersen envelope differs from the signing envelope in that it *fully* erases the
 // binding commitment. Otherwise, it follows the same rules as the signing envelope, and should only
@@ -916,7 +916,7 @@ struct InnerIntentPedersenEnvelope<
 tag_enforcement_test!(InnerIntentPedersenEnvelope<(), (), Pedersen, InMemoryDB>);
 
 #[derive(Serializable)]
-#[tag = "intent-pedersen-challenge-envelope[v8]"]
+#[tag = "intent-pedersen-challenge-envelope[v9]"]
 #[phantom(D)]
 struct IntentPedersenEnvelope<D: DB> {
     segment: u16,
@@ -2976,7 +2976,7 @@ tag_enforcement_test!(MaintenanceUpdate<InMemoryDB>);
 
 #[derive(Serializable)]
 #[phantom(D)]
-#[tag = "contract-maintenance-update-signing-envelope[v2]"]
+#[tag = "contract-maintenance-update-signing-envelope[v3]"]
 struct MaintenanceUpdateSigningEnvelope<D: DB> {
     address: ContractAddress,
     updates: storage::storage::Array<SingleUpdate, D>,
