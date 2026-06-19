@@ -497,6 +497,27 @@ pub enum Instruction {
         /// The output variable name
         output: Identifier,
     },
+    /// Constructs an element of the given type from its 32-byte representation.
+    ///
+    /// Supported on types:
+    /// * Native
+    /// * Secp256k1Base
+    /// * Secp256k1Scalar
+    ///
+    /// In all the above prime fields, the 32-byte representation is the little-endian
+    /// byte encoding of the underlying (canonical) integer.
+    ///
+    /// This operation also accepts non-canonical 32-byte representation in prime fields
+    /// by applying the relevant modular reduction.
+    FromBytes32 {
+        /// The input bytes
+        bytes: Operand,
+        /// The type to be converted into
+        #[serde(rename = "type")]
+        val_t: IrType,
+        /// The output variable name
+        output: Identifier,
+    },
     /// Divides with remainder by a power of two (number of bits).
     ///
     /// Two outputs, `val >> bits`, and `val & ((1 << bits) - 1)`

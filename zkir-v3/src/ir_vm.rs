@@ -20,6 +20,7 @@ use crate::ir_instructions::encode::{
     native_to_jubjub_scalar,
 };
 use crate::ir_instructions::eq::{test_eq_incircuit, test_eq_offcircuit};
+use crate::ir_instructions::from_bytes32::{from_bytes32_incircuit, from_bytes32_offcircuit};
 use crate::ir_instructions::from_coordinates::{
     from_coordinates_incircuit, from_coordinates_offcircuit,
 };
@@ -611,6 +612,16 @@ impl IrSource {
                     let bytes = into_bytes32_offcircuit(&x)?;
                     memory.insert(output.clone(), bytes);
                 }
+                I::FromBytes32 {
+                    val_t,
+                    bytes,
+                    output,
+                } => {
+                    let bytes = resolve_operand(&memory, bytes)?;
+                    let bytes: [u8; 32] = bytes.try_into()?;
+                    let x = from_bytes32_offcircuit(val_t, &bytes)?;
+                    memory.insert(output.clone(), x);
+                }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
                         bail!(
@@ -1110,6 +1121,16 @@ impl Relation for IrSource {
                     let x = resolve_operand(std, layouter, &memory, input)?;
                     let bytes = into_bytes32_incircuit(std, layouter, &x)?;
                     mem_insert(output.clone(), bytes, &mut memory)?;
+                }
+                I::FromBytes32 {
+                    val_t,
+                    bytes,
+                    output,
+                } => {
+                    let bytes = resolve_operand(std, layouter, &memory, bytes)?;
+                    let bytes: [AssignedByte<outer::Scalar>; 32] = bytes.try_into()?;
+                    let x = from_bytes32_incircuit(std, layouter, val_t, &bytes)?;
+                    memory.insert(output.clone(), x);
                 }
                 I::Output { vals } => {
                     if vals.len() != self.outputs.len() {
