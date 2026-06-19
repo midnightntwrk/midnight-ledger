@@ -156,10 +156,40 @@ impl<
             preimage.binding_input = binding_input;
         }
 
-        let (proof, _) = preimage
-            .prove::<IrSource>(self.rng, self.params, self.resolver)
-            .await?;
-        Ok(proof)
+        // Resolve to determine the IR version.
+        let proving_data = self
+            .resolver
+            .resolve_key(preimage.key_location.clone())
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "attempted to prove '{}' without circuit data!",
+                    preimage.key_location.0
+                )
+            })?;
+        let ir = IrSource::load_from_tagged(std::io::Cursor::new(
+            &proving_data.ir_source[..],
+        ))?;
+
+        match ir.version {
+            IrMinorVersion::V0 | IrMinorVersion::V1 => {
+                // V0/V1: convert to old types and use old Zkir pipeline.
+                let old_preimage = ir_v1::preimage_to_v1(&preimage);
+                let v1_params = ir_v1::V1Params(self.params);
+                let pk: transient_crypto_old::proofs::ProverKey<IrSource> =
+                    serialize::tagged_deserialize(&mut &proving_data.prover_key[..])?;
+                use transient_crypto_old::proofs::Zkir as V1Zkir;
+                let (proof, _, _) =
+                    ir.prove(self.rng, &v1_params, pk, &old_preimage).await?;
+                Ok(Proof(proof.0))
+            }
+            _ => {
+                let (proof, _) = preimage
+                    .prove::<IrSource>(self.rng, self.params, self.resolver)
+                    .await?;
+                Ok(proof)
+            }
+        }
     }
 
     fn split(&mut self) -> Self {
