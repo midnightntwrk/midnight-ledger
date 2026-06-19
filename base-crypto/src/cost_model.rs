@@ -132,6 +132,22 @@ impl Mul<CostDuration> for f64 {
     }
 }
 
+impl Mul<FixedPoint> for CostDuration {
+    type Output = CostDuration;
+    fn mul(self, rhs: FixedPoint) -> Self::Output {
+        let lhs = FixedPoint::from_u64_div(self.0, 1);
+        CostDuration((lhs * rhs).into_atomic_units(1).min(u64::MAX as u128) as u64)
+    }
+}
+
+impl Mul<CostDuration> for FixedPoint {
+    type Output = CostDuration;
+    fn mul(self, rhs: CostDuration) -> Self::Output {
+        let rhs = FixedPoint::from_u64_div(rhs.0, 1);
+        CostDuration((self * rhs).into_atomic_units(1).min(u64::MAX as u128) as u64)
+    }
+}
+
 impl Div for CostDuration {
     type Output = FixedPoint;
     fn div(self, rhs: Self) -> Self::Output {

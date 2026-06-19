@@ -22,7 +22,6 @@ use midnight_ledger::construct::{ContractCallPrototype, PreTranscript, partition
 use midnight_ledger::error::MalformedTransaction;
 use midnight_ledger::error::TransactionApplicationError;
 use midnight_ledger::prove::Resolver;
-use midnight_ledger::structure::ContractAction;
 use midnight_ledger::structure::ReplayProtectionState;
 use midnight_ledger::structure::{
     ContractDeploy, INITIAL_PARAMETERS, Intent, LedgerState, Signature, SigningKey, Transaction,
@@ -254,7 +253,7 @@ async fn well_formed_signature_verification_failure_all() {
     intent_bc.binding_commitment = PureGeneratorPedersen::new_from(
         &mut rng.clone(),
         &rng.r#gen(),
-        &ContractAction::challenge_pre_for(&Vec::from(&intent_bc.actions)),
+        &intent_bc.challenge_pre_for(segment_id),
     );
 
     let strictness = WellFormedStrictness::default();
