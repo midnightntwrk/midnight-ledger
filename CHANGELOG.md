@@ -21,6 +21,9 @@ with `zswap` being tracked in [Changelog Zswap](./CHANGELOG_zswap.md).
 - feat: `ContractOperationVersion::V4` / `ContractOperationVersionedVerifierKey::V4`
   for the new v3 verifier key field
 - feat: zswap verification uses `v1_verify` for backwards-compatible v1 proofs
+- feat: maintenance updates can insert and remove the IR of a contract operation
+  via the `SingleUpdate::IrInsert` / `SingleUpdate::IrRemove` variants (exposed in
+  ledger-wasm as `IrInsert` / `IrRemove`)
 
 ## Unreleased (8.2)
 
