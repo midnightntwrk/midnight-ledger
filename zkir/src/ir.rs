@@ -35,8 +35,6 @@ use transient_crypto::proofs::{
     VerifierKey, Zkir,
 };
 
-type V1MidnightPK = midnight_zk_stdlib_v1::MidnightPK<IrSource>;
-
 const PK_COMPRESSION_LEVEL: u32 = 6;
 
 /// A low-level IR allowing the prover to populate circuit witnesses.

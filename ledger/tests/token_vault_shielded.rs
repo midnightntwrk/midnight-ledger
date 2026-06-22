@@ -77,18 +77,12 @@ async fn test_shielded_full_lifecycle() {
     let owner_pk = derive_public_key(owner_sk);
 
     // Load contract operations
-    let deposit_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await, None);
-    let withdraw_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawShielded").await, None);
-    let deposit_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositUnshielded").await, None);
-    let withdraw_unshielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "withdrawUnshielded").await, None);
-    let get_shielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getShieldedBalance").await, None);
-    let get_unshielded_balance_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "getUnshieldedBalance").await, None);
+    let deposit_shielded_op = contract_operation(&RESOLVER, "depositShielded").await;
+    let withdraw_shielded_op = contract_operation(&RESOLVER, "withdrawShielded").await;
+    let deposit_unshielded_op = contract_operation(&RESOLVER, "depositUnshielded").await;
+    let withdraw_unshielded_op = contract_operation(&RESOLVER, "withdrawUnshielded").await;
+    let get_shielded_balance_op = contract_operation(&RESOLVER, "getShieldedBalance").await;
+    let get_unshielded_balance_op = contract_operation(&RESOLVER, "getUnshieldedBalance").await;
 
     println!(":: Shielded Token Vault Test Suite");
     println!("   Owner PK: {:?}", hex::encode(&owner_pk.0[..8]));
@@ -581,8 +575,7 @@ async fn test_deploy_only() {
     let owner_sk: HashOutput = rng.r#gen();
     let owner_pk = derive_public_key(owner_sk);
 
-    let deposit_shielded_op =
-        ContractOperation::new(verifier_key(&RESOLVER, "depositShielded").await, None);
+    let deposit_shielded_op = contract_operation(&RESOLVER, "depositShielded").await;
 
     let contract: ContractState<InMemoryDB> = ContractState::new(
         stval!([

@@ -900,11 +900,11 @@ pub struct ContractOperation {
 tag_enforcement_test!(ContractOperation);
 
 impl ContractOperation {
-    pub fn new(vk: Option<transient_crypto_old::proofs::VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
-        ContractOperation { v2: vk, ir, v3: None }
+    pub fn new(vk: Option<VerifierKey>, ir: Option<Sp<IrBuf>>) -> Self {
+        ContractOperation { v2: None, ir, v3: vk }
     }
 
-    /// Returns the latest (v2) verifier key.
+    /// Returns the latest (v3) verifier key.
     pub fn latest(&self) -> Option<&VerifierKey> {
         self.v3.as_ref()
     }
@@ -913,13 +913,13 @@ impl ContractOperation {
         &mut self.v3
     }
 
-    /// Returns the v1 verifier key.
-    pub fn v1_vk(&self) -> Option<&transient_crypto_old::proofs::VerifierKey> {
+    /// Returns the v2 verifier key.
+    pub fn v2_vk(&self) -> Option<&transient_crypto_old::proofs::VerifierKey> {
         self.v2.as_ref()
     }
 
-    /// Returns the v2 verifier key.
-    pub fn v2_vk(&self) -> Option<&VerifierKey> {
+    /// Returns the v3 verifier key.
+    pub fn v3_vk(&self) -> Option<&VerifierKey> {
         self.v3.as_ref()
     }
 }

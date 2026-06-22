@@ -44,6 +44,7 @@ use lazy_static::lazy_static;
 use onchain_runtime::context::BlockContext;
 #[cfg(feature = "proving")]
 use onchain_runtime::cost_model::INITIAL_COST_MODEL;
+use onchain_runtime::state::ContractOperation;
 use rand::{CryptoRng, Rng, seq::SliceRandom};
 #[cfg(feature = "proving")]
 use reqwest::Client;
@@ -639,16 +640,28 @@ impl<D: DB> TestState<D> {
     }
 }
 
-pub async fn verifier_key(
-    resolver: &Resolver,
-    name: &'static str,
-) -> Option<transient_crypto_old::proofs::VerifierKey> {
+/// Resolves the key material for `name` and builds the corresponding
+/// [`ContractOperation`], deserializing the verifier key into the v1 (`v2`) or
+/// v2 (`v3`) field depending on its tag.
+pub async fn contract_operation(resolver: &Resolver, name: &'static str) -> ContractOperation {
     use transient_crypto::proofs::Resolver;
     let proof_data = resolver
         .resolve_key(KeyLocation(std::borrow::Cow::Borrowed(name)))
         .await
-        .ok()??;
-    serialize::tagged_deserialize(&mut &proof_data.verifier_key[..]).ok()
+        .expect("resolving verifier key should not error")
+        .expect("verifier key should be present");
+    let mut op = ContractOperation::new(None, None);
+    if let Ok(vk) = serialize::tagged_deserialize::<transient_crypto::proofs::VerifierKey>(
+        &mut &proof_data.verifier_key[..],
+    ) {
+        op.v3 = Some(vk);
+    } else {
+        op.v2 = Some(
+            serialize::tagged_deserialize(&mut &proof_data.verifier_key[..])
+                .expect("verifier key should deserialize as a v1 or v2 verifier key"),
+        );
+    }
+    op
 }
 
 pub fn test_resolver(test_name: &'static str) -> Resolver {
@@ -903,6 +916,9 @@ impl ProvingProvider for ProofServerProvider<'_> {
     }
     fn split(&mut self) -> Self {
         self.clone()
+    }
+    fn resolver(&self) -> &impl ResolverT {
+        self.resolver
     }
 }
 

@@ -1223,6 +1223,13 @@ export type ProvingProvider = {
     keyLocation: string,
     overwriteBindingInput?: bigint,
   ): Promise<Uint8Array>;
+  lookupKey(keyLocation: string): Promise<ProvingKeyMaterial | undefined>;
+};
+
+export type ProvingKeyMaterial = {
+  proverKey: Uint8Array,
+  verifierKey: Uint8Array,
+  ir: Uint8Array,
 };
 
 /**

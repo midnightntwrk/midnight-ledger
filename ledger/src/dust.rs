@@ -635,8 +635,8 @@ impl<P: ProofKind<D>, D: DB> DustSpend<P, D> {
                     op.field_repr(&mut pis);
                 }
                 debug_assert_eq!(pis.len(), DUST_SPEND_PIS);
-                let dust_op =
-                    onchain_runtime::state::ContractOperation::new(Some(SPEND_VK.clone()), None);
+                let mut dust_op = onchain_runtime::state::ContractOperation::new(None, None);
+                dust_op.v2 = Some(SPEND_VK.clone());
                 let dust_call = crate::structure::ContractCall {
                     address: coin_structure::contract::ContractAddress::default(),
                     entry_point: onchain_runtime::state::EntryPointBuf(vec![]),

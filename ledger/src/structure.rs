@@ -458,7 +458,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
 
         match proof {
             ProofVersioned::V2(_) => {
-                let vk = op.v1_vk().ok_or_else(|| {
+                eprintln!("V2");
+                let vk = op.v2_vk().ok_or_else(|| {
                     warn!("missing v1 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
                         address: call.address,
@@ -466,10 +467,10 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                     }
                 })?;
                 let old_proof = transient_crypto_old::proofs::Proof(inner_proof.0.clone());
-                let old_pis = pis.into_iter().map(|f|
+                let old_pis = pis.into_iter().map(|f| {
                     transient_crypto_old::curve::Fr::from_le_bytes(&f.as_le_bytes())
                         .expect("Fr round-trip")
-                );
+                });
                 match mode {
                     #[cfg(feature = "mock-verify")]
                     ProofVerificationMode::CalibratedMock => vk
@@ -487,7 +488,8 @@ impl<D: DB> ProofKind<D> for ProofMarker {
                 }
             }
             ProofVersioned::V3(_) => {
-                let vk = op.v2_vk().ok_or_else(|| {
+                eprintln!("V3");
+                let vk = op.v3_vk().ok_or_else(|| {
                     warn!("missing v2 verifier key");
                     MalformedTransaction::<D>::VerifierKeyNotPresent {
                         address: call.address,
@@ -2911,7 +2913,11 @@ impl Tagged for ContractOperationVersionedVerifierKey {
         "contract-operation-versioned-verifier-key".into()
     }
     fn tag_unique_factor() -> String {
-        format!("[[],[],{}]", transient_crypto::proofs::VerifierKey::tag())
+        format!(
+            "[[],[],{},{}]",
+            transient_crypto_old::proofs::VerifierKey::tag(),
+            transient_crypto::proofs::VerifierKey::tag()
+        )
     }
 }
 tag_enforcement_test!(ContractOperationVersionedVerifierKey);
