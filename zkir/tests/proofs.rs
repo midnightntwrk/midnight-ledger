@@ -86,9 +86,19 @@ mod proof_tests {
             .await
             .unwrap();
         let old_proof = transient_crypto_old::proofs::Proof(proof.0);
-        vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof, pis.into_iter()).unwrap();
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            pis.into_iter(),
+        )
+        .unwrap();
         assert!(
-            vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof, [43.into()].into_iter()).is_err()
+            vk.verify(
+                &transient_crypto_old::proofs::PARAMS_VERIFIER,
+                &old_proof,
+                [43.into()].into_iter()
+            )
+            .is_err()
         );
     }
 
@@ -124,7 +134,12 @@ mod proof_tests {
             .await
             .unwrap();
         let old_proof = transient_crypto_old::proofs::Proof(proof.0);
-        vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof,[42.into()].into_iter()).unwrap();
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
@@ -162,7 +177,12 @@ mod proof_tests {
             .await
             .unwrap();
         let old_proof = transient_crypto_old::proofs::Proof(proof.0);
-        vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof,[42.into(), to_old(x)].into_iter()).unwrap();
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into(), to_old(x)].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
@@ -205,7 +225,12 @@ mod proof_tests {
             .await
             .unwrap();
         let old_proof = transient_crypto_old::proofs::Proof(proof.0);
-        vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof,[42.into()].into_iter()).unwrap();
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
@@ -246,7 +271,12 @@ mod proof_tests {
             .await
             .unwrap();
         let old_proof = transient_crypto_old::proofs::Proof(proof.0);
-        vk.verify(&transient_crypto_old::proofs::PARAMS_VERIFIER, &old_proof,[42.into()].into_iter()).unwrap();
+        vk.verify(
+            &transient_crypto_old::proofs::PARAMS_VERIFIER,
+            &old_proof,
+            [42.into()].into_iter(),
+        )
+        .unwrap();
     }
 
     #[actix_rt::test]
